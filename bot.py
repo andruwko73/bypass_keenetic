@@ -80,6 +80,20 @@ def update_proxy(proxy_type):
             if key in os.environ:
                 del os.environ[key]
 
+
+def check_telegram_api():
+    url = f'https://api.telegram.org/bot{token}/getMe'
+    proxies = telebot.apihelper.proxy if getattr(telebot.apihelper, 'proxy', None) else None
+    try:
+        response = requests.get(url, timeout=(5, 10), proxies=proxies)
+        response.raise_for_status()
+        data = response.json()
+        if data.get('ok'):
+            return '✅ Доступ к api.telegram.org подтверждён.'
+        return f'⚠️ Telegram API ответил: {data.get("description", "Не удалось определить причину")}'
+    except requests.exceptions.RequestException as exc:
+        return f'❌ Не удалось подключиться к Telegram API: {exc}'
+
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
 @bot.message_handler(commands=['start'])
@@ -733,19 +747,27 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             if key_type == 'shadowsocks':
                 shadowsocks(key_value)
                 os.system('/opt/etc/init.d/S22shadowsocks restart')
-                result = '✅ Shadowsocks успешно обновлен.'
+                time.sleep(2)
+                update_proxy('shadowsocks')
+                result = '✅ Shadowsocks успешно обновлен. Бот будет использовать Shadowsocks.'
             elif key_type == 'vmess':
                 vmess(key_value)
                 os.system('/opt/etc/init.d/S24v2ray restart')
-                result = '✅ Vmess успешно обновлен.'
+                time.sleep(2)
+                update_proxy('vmess')
+                result = '✅ Vmess успешно обновлен. Бот будет использовать Vmess.'
             elif key_type == 'vless':
                 vless(key_value)
                 os.system('/opt/etc/init.d/S24v2ray restart')
-                result = '✅ Vless успешно обновлен.'
+                time.sleep(2)
+                update_proxy('vless')
+                result = '✅ Vless успешно обновлен. Бот будет использовать Vless.'
             elif key_type == 'trojan':
                 trojan(key_value)
                 os.system('/opt/etc/init.d/S22trojan restart')
-                result = '✅ Trojan успешно обновлен.'
+                time.sleep(2)
+                update_proxy('trojan')
+                result = '✅ Trojan успешно обновлен. Бот будет использовать Trojan.'
             elif key_type == 'tor':
                 tormanually(key_value)
                 os.system('/opt/etc/init.d/S35tor restart')
@@ -754,6 +776,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 result = 'Тип ключа не распознан.'
         except Exception as exc:
             result = f'Ошибка: {exc}'
+        else:
+            if result.startswith('✅'):
+                result = f'{result} {check_telegram_api()}'
+
         html = f'''<!DOCTYPE html>
 <html lang="ru">
 <head><meta charset="UTF-8"><title>Результат установки</title></head>
