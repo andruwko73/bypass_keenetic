@@ -119,6 +119,37 @@ def _ensure_service_port(port, restart_cmd=None, retries=1, sleep_after_restart=
     return False
 
 
+def _read_tail(file_path, lines=12):
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
+            content = file.readlines()
+        if not content:
+            return ''
+        return ''.join(content[-lines:]).strip()
+    except Exception as exc:
+        return f'Не удалось прочитать {file_path}: {exc}'
+
+
+def _v2ray_diagnostics():
+    config_path = '/opt/etc/v2ray/config.json'
+    error_path = '/opt/etc/v2ray/error.log'
+    diagnostics = []
+    if not os.path.exists(config_path):
+        diagnostics.append(f'Конфигурация v2ray не найдена: {config_path}')
+    else:
+        try:
+            with open(config_path, 'r', encoding='utf-8') as file:
+                config_data = json.load(file)
+            ports = [str(inbound.get('port', '?')) for inbound in config_data.get('inbounds', [])]
+            diagnostics.append(f'Конфиг v2ray валиден. inbounds: {", ".join(ports)}')
+        except Exception as exc:
+            diagnostics.append(f'Ошибка парсинга конфига v2ray: {exc}')
+    error_tail = _read_tail(error_path, lines=12)
+    if error_tail:
+        diagnostics.append(f'Последние строки лога v2ray ({error_path}):\n{error_tail}')
+    return ' '.join(diagnostics)
+
+
 def update_proxy(proxy_type):
     global proxy_mode
     proxy_url = proxy_settings.get(proxy_type)
@@ -822,9 +853,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                         if api_status.startswith('✅'):
                             result = '✅ Shadowsocks успешно обновлен. Бот будет использовать Shadowsocks.'
                         else:
-                            update_proxy('none')
-                            result = ('⚠️ Shadowsocks обновлен, но Telegram API недоступен через SOCKS. '
-                                      'Бот переключён в режим none. ' + api_status)
+                            diagnostics = _v2ray_diagnostics()
+                            result = ('⚠️ Shadowsocks обновлен, локальный SOCKS-порт 127.0.0.1:'
+                                      + str(localportsh) + ' доступен, но Telegram API не прошёл через SOCKS. '
+                                      + api_status + ' ' + diagnostics)
                 else:
                     result = f'⚠️ Shadowsocks обновлен, но прокси не применён: {error}'
             elif key_type == 'vmess':
@@ -842,9 +874,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                         if api_status.startswith('✅'):
                             result = '✅ Vmess успешно обновлен. Бот будет использовать Vmess.'
                         else:
-                            update_proxy('none')
-                            result = ('⚠️ Vmess обновлен, но Telegram API недоступен через SOCKS. '
-                                      'Бот переключён в режим none. ' + api_status)
+                            diagnostics = _v2ray_diagnostics()
+                            result = ('⚠️ Vmess обновлен, локальный SOCKS-порт 127.0.0.1:'
+                                      + str(localportvmess) + ' доступен, но Telegram API не прошёл через SOCKS. '
+                                      + api_status + ' ' + diagnostics)
                 else:
                     result = f'⚠️ Vmess обновлен, но прокси не применён: {error}'
             elif key_type == 'vless':
@@ -862,9 +895,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                         if api_status.startswith('✅'):
                             result = '✅ Vless успешно обновлен. Бот будет использовать Vless.'
                         else:
-                            update_proxy('none')
-                            result = ('⚠️ Vless обновлен, но Telegram API недоступен через SOCKS. '
-                                      'Бот переключён в режим none. ' + api_status)
+                            diagnostics = _v2ray_diagnostics()
+                            result = ('⚠️ Vless обновлен, локальный SOCKS-порт 127.0.0.1:'
+                                      + str(localportvless) + ' доступен, но Telegram API не прошёл через SOCKS. '
+                                      + api_status + ' ' + diagnostics)
                 else:
                     result = f'⚠️ Vless обновлен, но прокси не применён: {error}'
             elif key_type == 'trojan':
