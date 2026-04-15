@@ -153,7 +153,7 @@ def _v2ray_diagnostics():
 def _format_proxy_key_summary(key_type, key_value):
     if key_type == 'vless':
         data = _parse_vless_key(key_value)
-        return ('Параметры VLESS: host={address}, port={port}, uuid={id}, network={type}, '
+        return ('Параметры VLESS: address={address}, host={host}, port={port}, uuid={id}, network={type}, '
                 'serviceName={serviceName}, sni={sni}, security={security}, flow={flow}').format(**data)
     if key_type == 'vmess':
         data = _parse_vmess_key(key_value)
@@ -1034,6 +1034,8 @@ def _parse_vless_key(key):
     encryption = params.get('encryption', ['none'])[0]
     flow = params.get('flow', [''])[0]
     host = params.get('host', [''])[0]
+    if not address and host:
+        address = host
     network = params.get('type', params.get('network', ['tcp']))[0]
     path = params.get('path', ['/'])[0]
     if path == '':
@@ -1180,7 +1182,7 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
             stream_settings['realitySettings'] = {
                 'show': False,
                 'serverNames': [vless_data.get('serviceName', '')],
-                'dest': f"{vless_data.get('address', '')}:{vless_data.get('port', 443)}",
+                'dest': f"{vless_data.get('address', vless_data.get('host', ''))}:{vless_data.get('port', 443)}",
                 'xver': 0
             }
         config_data['outbounds'].append({
@@ -1189,7 +1191,7 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
             'protocol': 'vless',
             'settings': {
                 'vnext': [{
-                    'address': vless_data['address'],
+                    'address': vless_data.get('address', vless_data.get('host', '')),
                     'port': int(vless_data['port']),
                     'users': [{
                         'id': vless_data['id'],
