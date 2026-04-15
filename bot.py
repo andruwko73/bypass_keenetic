@@ -609,7 +609,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 <head>
   <meta charset="UTF-8">
   <title>Установка ключей VPN</title>
-  <style>body{font-family:Arial,Helvetica,sans-serif;padding:20px;background:#f5f5f5;}h1{color:#333;}form{background:#fff;padding:16px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:20px;}textarea,input{width:100%;padding:10px;margin:8px 0;border:1px solid #ccc;border-radius:4px;}button{background:#007bff;color:#fff;padding:10px 16px;border:none;border-radius:4px;cursor:pointer;}button:hover{background:#0056b3;}section{margin-bottom:24px;}</style>
+  <style>body{{font-family:Arial,Helvetica,sans-serif;padding:20px;background:#f5f5f5;}}h1{{color:#333;}}form{{background:#fff;padding:16px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:20px;}}textarea,input{{width:100%;padding:10px;margin:8px 0;border:1px solid #ccc;border-radius:4px;}}button{{background:#007bff;color:#fff;padding:10px 16px;border:none;border-radius:4px;cursor:pointer;}}button:hover{{background:#0056b3;}}section{{margin-bottom:24px;}}</style>
 </head>
 <body>
   <h1>Установка ключей VPN через браузер</h1>
