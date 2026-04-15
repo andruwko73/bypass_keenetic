@@ -1,16 +1,25 @@
-# bypass_keenetic - 💯% free
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/znetworkx/bypass_keenetic)
-![GitHub Release Date - Published_At](https://img.shields.io/github/release-date/znetworkx/bypass_keenetic)
-![GitHub repo size](https://img.shields.io/github/repo-size/znetworkx/bypass_keenetic)
-![GitHub last commit](https://img.shields.io/github/last-commit/znetworkx/bypass_keenetic)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/y/znetworkx/bypass_keenetic)
-![GitHub top language](https://img.shields.io/github/languages/top/znetworkx/bypass_keenetic)
+# bypass_keenetic — форк `ragejetix/bypass_keenetic`
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/ragejetix/bypass_keenetic)
+![GitHub Release Date - Published_At](https://img.shields.io/github/release-date/ragejetix/bypass_keenetic)
+![GitHub repo size](https://img.shields.io/github/repo-size/ragejetix/bypass_keenetic)
+![GitHub last commit](https://img.shields.io/github/last-commit/ragejetix/bypass_keenetic)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/y/ragejetix/bypass_keenetic)
+![GitHub top language](https://img.shields.io/github/languages/top/ragejetix/bypass_keenetic)
 <a href="https://t.me/bypass_keenetic">![Telegram](https://img.shields.io/badge/bypass_keenetic--black?style=social&logo=telegram&logoColor=blue)</a>
 
-## Установка обхода блокировок на роутерах Keenetic с установленной средой Entware, управление через телеграм бот. Обхода блокировок много не бывает! 
+## Об этом форке
+Это форк проекта `keenetic-dev/bypass_keenetic` в репозитории `ragejetix/bypass_keenetic`.
+
+В текущем форке добавлены:
+- веб-интерфейс установки ключей и мостов
+- выбор маршрутизации Telegram через локальный VPN/прокси
+- поддержка VLESS вместе с Shadowsocks, Trojan и Tor
+- обновления управления через Telegram-бота
+
+## Установка обхода блокировок на роутерах Keenetic с установленной средой Entware, управление через телеграм бот.
 
 ## Что это и зачем
-- [Полное описание читайте в вики](https://github.com/znetworkx/bypass_keenetic/wiki)
+- [Полное описание читайте в оригинальной вики](https://github.com/znetworkx/bypass_keenetic/wiki)
 
 ## Возможности и преимущества
 - открытые исходники, полностью **бесплатно**
