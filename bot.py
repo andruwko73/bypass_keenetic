@@ -150,6 +150,19 @@ def _v2ray_diagnostics():
     return ' '.join(diagnostics)
 
 
+def _format_proxy_key_summary(key_type, key_value):
+    if key_type == 'vless':
+        data = _parse_vless_key(key_value)
+        return ('Параметры VLESS: host={address}, port={port}, uuid={id}, network={type}, '
+                'serviceName={serviceName}, sni={sni}, security={security}, flow={flow}').format(**data)
+    if key_type == 'vmess':
+        data = _parse_vmess_key(key_value)
+        service_name = data.get('serviceName') or data.get('grpcSettings', {}).get('serviceName', '')
+        return ('Параметры VMESS: host={add}, port={port}, id={id}, network={net}, tls={tls}, '
+                'serviceName={service_name}').format(service_name=service_name, **data)
+    return ''
+
+
 def update_proxy(proxy_type):
     global proxy_mode
     proxy_url = proxy_settings.get(proxy_type)
@@ -871,13 +884,14 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                                   + str(localportvmess) + ' недоступен. Бот переключён в режим none.')
                     else:
                         api_status = check_telegram_api()
+                        key_summary = _format_proxy_key_summary('vmess', key_value)
                         if api_status.startswith('✅'):
-                            result = '✅ Vmess успешно обновлен. Бот будет использовать Vmess.'
+                            result = ('✅ Vmess успешно обновлен. Бот будет использовать Vmess. ' + key_summary)
                         else:
                             diagnostics = _v2ray_diagnostics()
                             result = ('⚠️ Vmess обновлен, локальный SOCKS-порт 127.0.0.1:'
                                       + str(localportvmess) + ' доступен, но Telegram API не прошёл через SOCKS. '
-                                      + api_status + ' ' + diagnostics)
+                                      + api_status + ' ' + diagnostics + ' ' + key_summary)
                 else:
                     result = f'⚠️ Vmess обновлен, но прокси не применён: {error}'
             elif key_type == 'vless':
@@ -892,13 +906,14 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                                   + str(localportvless) + ' недоступен. Бот переключён в режим none.')
                     else:
                         api_status = check_telegram_api()
+                        key_summary = _format_proxy_key_summary('vless', key_value)
                         if api_status.startswith('✅'):
-                            result = '✅ Vless успешно обновлен. Бот будет использовать Vless.'
+                            result = ('✅ Vless успешно обновлен. Бот будет использовать Vless. ' + key_summary)
                         else:
                             diagnostics = _v2ray_diagnostics()
                             result = ('⚠️ Vless обновлен, локальный SOCKS-порт 127.0.0.1:'
                                       + str(localportvless) + ' доступен, но Telegram API не прошёл через SOCKS. '
-                                      + api_status + ' ' + diagnostics)
+                                      + api_status + ' ' + diagnostics + ' ' + key_summary)
                 else:
                     result = f'⚠️ Vless обновлен, но прокси не применён: {error}'
             elif key_type == 'trojan':
@@ -970,6 +985,8 @@ def _parse_vmess_key(key):
         raise ValueError(f'Неверный JSON в vmess-ключе: {exc}')
     if not data.get('add') or not data.get('port') or not data.get('id'):
         raise ValueError('В vmess-ключе нет server/port/id')
+    if data.get('net') == 'grpc' and not data.get('serviceName') and not data.get('grpcSettings', {}).get('serviceName'):
+        raise ValueError('В vmess-ключе grpc требует serviceName')
     return data
 
 
@@ -994,6 +1011,9 @@ def _parse_vless_key(key):
     if path == '':
         path = '/'
     sni = params.get('sni', [''])[0] or host
+    service_name = params.get('serviceName', [''])[0]
+    if network == 'grpc' and not service_name:
+        raise ValueError('В vless-ключе grpc требует serviceName')
     return {
         'address': address,
         'port': port,
@@ -1004,7 +1024,8 @@ def _parse_vless_key(key):
         'host': host,
         'path': path,
         'sni': sni,
-        'type': network
+        'type': network,
+        'serviceName': service_name
     }
 
 
@@ -1051,6 +1072,12 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
             stream_settings['wsSettings'] = {
                 'path': vmess_data.get('path', '/'),
                 'headers': {'Host': vmess_data.get('host', '')}
+            }
+        elif stream_settings['network'] == 'grpc':
+            grpc_service = vmess_data.get('serviceName', '') or vmess_data.get('grpcSettings', {}).get('serviceName', '')
+            stream_settings['grpcSettings'] = {
+                'serviceName': grpc_service,
+                'multiMode': False
             }
         config_data['outbounds'].append({
             'tag': 'proxy-vmess',
@@ -1114,6 +1141,11 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
             stream_settings['wsSettings'] = {
                 'path': vless_data.get('path', '/'),
                 'headers': {'Host': vless_data.get('host', '')}
+            }
+        elif network == 'grpc':
+            stream_settings['grpcSettings'] = {
+                'serviceName': vless_data.get('serviceName', ''),
+                'multiMode': False
             }
         config_data['outbounds'].append({
             'tag': 'proxy-vless',
