@@ -963,8 +963,12 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
         config_data['inbounds'].append({
             'port': int(localportvmess),
             'listen': '::',
-            'protocol': 'dokodemo-door',
-            'settings': {'network': 'tcp', 'followRedirect': True},
+            'protocol': 'socks',
+            'settings': {
+                'auth': 'noauth',
+                'udp': True,
+                'ip': '127.0.0.1'
+            },
             'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
             'tag': 'in-vmess'
         })
@@ -1019,8 +1023,12 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
         config_data['inbounds'].append({
             'port': int(localportvless),
             'listen': '::',
-            'protocol': 'dokodemo-door',
-            'settings': {'network': 'tcp', 'followRedirect': True},
+            'protocol': 'socks',
+            'settings': {
+                'auth': 'noauth',
+                'udp': True,
+                'ip': '127.0.0.1'
+            },
             'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
             'tag': 'in-vless'
         })
