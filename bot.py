@@ -905,17 +905,30 @@ def _save_v2ray_key(file_path, key):
 
 
 def _parse_vmess_key(key):
+    if not key.startswith('vmess://'):
+        raise ValueError('Неверный протокол, ожидается vmess://')
     encodedkey = key[8:]
-    s = base64.b64decode(encodedkey).decode('utf8').replace("'", '"')
-    return json.loads(s)
+    try:
+        decoded = base64.b64decode(encodedkey).decode('utf-8')
+    except Exception as exc:
+        raise ValueError(f'Не удалось декодировать vmess-ключ: {exc}')
+    try:
+        data = json.loads(decoded.replace("'", '"'))
+    except Exception as exc:
+        raise ValueError(f'Неверный JSON в vmess-ключе: {exc}')
+    if not data.get('add') or not data.get('port') or not data.get('id'):
+        raise ValueError('В vmess-ключе нет server/port/id')
+    return data
 
 
 def _parse_vless_key(key):
     parsed = urlparse(key)
     if parsed.scheme != 'vless':
         raise ValueError('Неверный протокол, ожидается vless://')
-    if not parsed.hostname or not parsed.username:
-        raise ValueError('Отсутствует адрес сервера или UUID')
+    if not parsed.hostname:
+        raise ValueError('В vless-ключе отсутствует адрес сервера')
+    if not parsed.username:
+        raise ValueError('В vless-ключе отсутствует UUID')
     params = parse_qs(parsed.query)
     address = parsed.hostname
     port = parsed.port or 443
@@ -1094,12 +1107,14 @@ def _write_v2ray_config(vmess_key=None, vless_key=None):
 
 
 def vless(key):
+    _parse_vless_key(key)
     _save_v2ray_key('/opt/etc/v2ray/vless.key', key)
     current_vmess = _read_v2ray_key('/opt/etc/v2ray/vmess.key')
     _write_v2ray_config(current_vmess, key)
 
 
 def vmess(key):
+    _parse_vmess_key(key)
     _save_v2ray_key('/opt/etc/v2ray/vmess.key', key)
     current_vless = _read_v2ray_key('/opt/etc/v2ray/vless.key')
     _write_v2ray_config(key, current_vless)
