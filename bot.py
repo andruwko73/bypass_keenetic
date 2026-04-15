@@ -59,6 +59,7 @@ sid = "0"
 PROXY_MODE_FILE = '/opt/etc/bot_proxy_mode'
 
 bot_ready = False
+bot_polling = False
 proxy_mode = config.default_proxy_mode
 proxy_settings = {
     'none': None,
@@ -81,19 +82,7 @@ def _daemonize_process():
     if os.name != 'posix':
         return
     try:
-        if os.fork() > 0:
-            os._exit(0)
-        os.setsid()
-        if os.fork() > 0:
-            os._exit(0)
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
-        sys.stdin.flush()
-        sys.stdout.flush()
-        sys.stderr.flush()
-        with open('/dev/null', 'rb', 0) as stdin, open('/dev/null', 'ab', 0) as stdout, open('/dev/null', 'ab', 0) as stderr:
-            os.dup2(stdin.fileno(), sys.stdin.fileno())
-            os.dup2(stdout.fileno(), sys.stdout.fileno())
-            os.dup2(stderr.fileno(), sys.stderr.fileno())
     except Exception:
         pass
 
@@ -118,26 +107,37 @@ def _load_proxy_mode():
     return config.default_proxy_mode
 
 
-def _wait_for_port(host, port, timeout=8):
+def _wait_for_port(hosts, port, timeout=12):
     import socket
+    if isinstance(hosts, str):
+        hosts = [hosts]
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            with socket.create_connection((host, int(port)), timeout=2):
-                return True
-        except OSError:
-            time.sleep(1)
+        for host in hosts:
+            try:
+                addrs = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
+            except OSError:
+                continue
+            for family, socktype, proto, canonname, sockaddr in addrs:
+                try:
+                    with socket.socket(family, socktype, proto) as sock:
+                        sock.settimeout(2)
+                        sock.connect(sockaddr)
+                        return True
+                except OSError:
+                    continue
+        time.sleep(1)
     return False
 
 
 def _ensure_service_port(port, restart_cmd=None, retries=1, sleep_after_restart=3):
-    if _wait_for_port('127.0.0.1', port, timeout=10):
+    if _wait_for_port(['127.0.0.1', '::1'], port, timeout=10):
         return True
     if restart_cmd:
         for _ in range(retries):
             os.system(restart_cmd)
             time.sleep(sleep_after_restart)
-            if _wait_for_port('127.0.0.1', port, timeout=10):
+            if _wait_for_port(['127.0.0.1', '::1'], port, timeout=10):
                 return True
     return False
 
@@ -249,6 +249,9 @@ def check_telegram_api():
         if 'Missing dependencies for SOCKS support' in error_text:
             return ('❌ Не удалось подключиться к Telegram API: отсутствует поддержка SOCKS (PySocks). '
                     'Установите python3-pysocks или используйте режим без SOCKS.')
+        if proxy_mode == 'trojan':
+            return ('❌ Не удалось подключиться к Telegram API через Trojan: текущая локальная конфигурация не поддерживает HTTPS/HTTP proxy '
+                    'в этом режиме. Используйте Shadowsocks, Vmess или Vless для прокси Telegram API.')
         if 'Connection refused' in error_text or 'SOCKSHTTPSConnection' in error_text:
             return ('❌ Не удалось подключиться к Telegram API: соединение через SOCKS-прокси отказано. '
                     'Проверьте, что локальный прокси-сервис запущен и порт доступен.')
@@ -785,6 +788,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
   <strong>Результат:</strong>
   <p>{safe_message}</p>
 </div>'''
+        status_block = f'<p>Статус бота: <strong>{"polling" if bot_polling else "остановлен"}</strong></p>'
         return f'''<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -842,6 +846,13 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
       <input type="text" name="key" placeholder="trojan://..." required>
       <button type="submit">Установить Trojan</button>
     </form>
+  </section>
+  <section>
+    <h2>Статус бота</h2>
+    <div style="background:#eef2ff;border:1px solid #99a9ff;padding:12px;border-radius:8px;margin-bottom:18px;">
+      {status_block}
+      <p>После нажатия кнопки «Запустить бота» он будет начинать polling Telegram API.</p>
+    </div>
   </section>
   <section>
     <h2>Tor вручную</h2>
@@ -1101,7 +1112,7 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
         vmess_data = _parse_vmess_key(vmess_key)
         config_data['inbounds'].append({
             'port': int(localportvmess),
-            'listen': '::',
+            'listen': '127.0.0.1',
             'protocol': 'socks',
             'settings': {
                 'auth': 'noauth',
@@ -1167,7 +1178,7 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
         vless_data = _parse_vless_key(vless_key)
         config_data['inbounds'].append({
             'port': int(localportvless),
-            'listen': '::',
+            'listen': '127.0.0.1',
             'protocol': 'socks',
             'settings': {
                 'auth': 'noauth',
@@ -1359,8 +1370,10 @@ if not ok:
 start_http_server()
 wait_for_bot_start()
 try:
+    bot_polling = True
     bot.infinity_polling()
 except Exception as err:
+    bot_polling = False
     fl = open("/opt/etc/error.log", "w")
     fl.write(str(err))
     fl.close()
