@@ -18,6 +18,9 @@ import subprocess
 import os
 import stat
 import time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import telebot
 from telebot import types
@@ -35,10 +38,12 @@ appapiid = config.appapiid
 appapihash = config.appapihash
 usernames = config.usernames
 routerip = config.routerip
+browser_port = config.browser_port
 localportsh = config.localportsh
 localporttor = config.localporttor
 localporttrojan = config.localporttrojan
 localportvmess = config.localportvmess
+localportvless = config.localportvless
 dnsporttor = config.dnsporttor
 dnsovertlsport = config.dnsovertlsport
 dnsoverhttpsport = config.dnsoverhttpsport
@@ -48,6 +53,31 @@ bot = telebot.TeleBot(token)
 level = 0
 bypass = -1
 sid = "0"
+proxy_mode = config.default_proxy_mode
+proxy_settings = {
+    'none': None,
+    'shadowsocks': f'socks5://127.0.0.1:{localportsh}',
+    'vmess': f'socks5://127.0.0.1:{localportvmess}',
+    'vless': f'socks5://127.0.0.1:{localportvless}',
+    'trojan': f'http://127.0.0.1:{localporttrojan}',
+}
+
+
+def update_proxy(proxy_type):
+    global proxy_mode
+    proxy_mode = proxy_type
+    proxy_url = proxy_settings.get(proxy_type)
+    if proxy_url:
+        telebot.apihelper.proxy = {'https': proxy_url, 'http': proxy_url}
+        os.environ['HTTPS_PROXY'] = proxy_url
+        os.environ['HTTP_PROXY'] = proxy_url
+        os.environ['https_proxy'] = proxy_url
+        os.environ['http_proxy'] = proxy_url
+    else:
+        telebot.apihelper.proxy = {}
+        for key in ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']:
+            if key in os.environ:
+                del os.environ[key]
 
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
@@ -399,6 +429,15 @@ def bot_message(message):
                     bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
                     return
 
+                if message.text == 'Vless':
+                    #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
+                    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                    back = types.KeyboardButton("🔙 Назад")
+                    markup.add(back)
+                    level = 11
+                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
+                    return
+
                 if message.text == 'Trojan':
                     #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
                     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -420,6 +459,12 @@ def bot_message(message):
                 level = 0
                 bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
 
+            if level == 11:
+                vless(message.text)
+                os.system('/opt/etc/init.d/S24v2ray restart')
+                level = 0
+                bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
+
             if message.text == 'Tor вручную':
                 #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -427,6 +472,12 @@ def bot_message(message):
                 markup.add(back)
                 level = 6
                 bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
+                return
+
+            if message.text == '🌐 Через браузер':
+                bot.send_message(message.chat.id,
+                                 f'Откройте в браузере: http://{routerip}:{browser_port}/\n'
+                                 'Введите мосты Tor или другие ключи на странице.', reply_markup=main)
                 return
 
             if message.text == 'Tor через telegram':
@@ -524,11 +575,15 @@ def bot_message(message):
                 item1 = types.KeyboardButton("Shadowsocks")
                 item2 = types.KeyboardButton("Tor")
                 item3 = types.KeyboardButton("Vmess")
-                item4 = types.KeyboardButton("Trojan")
-                item5 = types.KeyboardButton("Где брать ключи❔")
+                item4 = types.KeyboardButton("Vless")
+                item5 = types.KeyboardButton("Trojan")
+                item6 = types.KeyboardButton("Где брать ключи❔")
+                item7 = types.KeyboardButton("🌐 Через браузер")
                 markup.add(item1, item2)
                 markup.add(item3, item4)
                 markup.add(item5)
+                markup.add(item6)
+                markup.add(item7)
                 back = types.KeyboardButton("🔙 Назад")
                 markup.add(back)
                 bot.send_message(message.chat.id, "🔑 Ключи и мосты", reply_markup=markup)
@@ -540,27 +595,369 @@ def bot_message(message):
         file.close()
         os.chmod(r"/opt/etc/error.log", 0o0755)
 
-def vmess(key):
-    # global appapiid, appapihash, password, localportvmess
+class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
+    def _send_html(self, html, status=200):
+        self.send_response(status)
+        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(html.encode('utf-8'))
+
+    def _build_form(self):
+        return f'''<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Установка ключей VPN</title>
+  <style>body{font-family:Arial,Helvetica,sans-serif;padding:20px;background:#f5f5f5;}h1{color:#333;}form{background:#fff;padding:16px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:20px;}textarea,input{width:100%;padding:10px;margin:8px 0;border:1px solid #ccc;border-radius:4px;}button{background:#007bff;color:#fff;padding:10px 16px;border:none;border-radius:4px;cursor:pointer;}button:hover{background:#0056b3;}section{margin-bottom:24px;}</style>
+</head>
+<body>
+  <h1>Установка ключей VPN через браузер</h1>
+  <p>Выберите тип ключа и вставьте содержимое в форму ниже.</p>
+  <p><strong>Вставляйте ключ полной строкой, как в Telegram.</strong></p>
+  <section>
+    <h2>Протокол бота</h2>
+    <form method="post" action="/set_proxy">
+      <select name="proxy_type">
+        <option value="none">Без VPN (по умолчанию)</option>
+        <option value="shadowsocks">Shadowsocks</option>
+        <option value="vmess">Vmess</option>
+        <option value="vless">Vless</option>
+        <option value="trojan">Trojan</option>
+      </select>
+      <button type="submit">Использовать для бота</button>
+    </form>
+    <p>Текущий режим: <strong>{proxy_mode}</strong></p>
+  </section>
+  <section>
+    <h2>Shadowsocks</h2>
+    <form method="post" action="/install">
+      <input type="hidden" name="type" value="shadowsocks">
+      <input type="text" name="key" placeholder="shadowsocks://..." required>
+      <button type="submit">Установить Shadowsocks</button>
+    </form>
+  </section>
+  <section>
+    <h2>Vmess</h2>
+    <form method="post" action="/install">
+      <input type="hidden" name="type" value="vmess">
+      <input type="text" name="key" placeholder="vmess://..." required>
+      <button type="submit">Установить Vmess</button>
+    </form>
+  </section>
+  <section>
+    <h2>Vless</h2>
+    <form method="post" action="/install">
+      <input type="hidden" name="type" value="vless">
+      <input type="text" name="key" placeholder="vless://..." required>
+      <button type="submit">Установить Vless</button>
+    </form>
+  </section>
+  <section>
+    <h2>Trojan</h2>
+    <form method="post" action="/install">
+      <input type="hidden" name="type" value="trojan">
+      <input type="text" name="key" placeholder="trojan://..." required>
+      <button type="submit">Установить Trojan</button>
+    </form>
+  </section>
+  <section>
+    <h2>Tor вручную</h2>
+    <form method="post" action="/install">
+      <input type="hidden" name="type" value="tor">
+      <textarea name="key" rows="6" placeholder="Bridge obfs4 ..." required></textarea>
+      <button type="submit">Установить Tor</button>
+    </form>
+  </section>
+</body>
+</html>'''
+
+    def do_GET(self):
+        if self.path in ['/', '/index.html']:
+            self._send_html(self._build_form())
+        else:
+            self._send_html('<h1>404 Not Found</h1>', status=404)
+
+    def do_POST(self):
+        if self.path == '/set_proxy':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            proxy_type = data.get('proxy_type', ['none'])[0]
+            update_proxy(proxy_type)
+            result = f'Режим бота установлен: {proxy_type}'
+            html = f'''<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"><title>Результат установки</title></head>
+<body style="font-family:Arial,Helvetica,sans-serif;padding:20px;background:#f5f5f5;">
+  <h1>Результат</h1>
+  <p>{result}</p>
+  <p><a href="/">Вернуться назад</a></p>
+</body>
+</html>'''
+            self._send_html(html)
+            return
+
+        if self.path != '/install':
+            self._send_html('<h1>404 Not Found</h1>', status=404)
+            return
+        length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(length).decode('utf-8')
+        data = parse_qs(body)
+        key_type = data.get('type', [''])[0]
+        key_value = data.get('key', [''])[0]
+        result = 'Ключ установлен.'
+        try:
+            if key_type == 'shadowsocks':
+                shadowsocks(key_value)
+                os.system('/opt/etc/init.d/S22shadowsocks restart')
+                result = '✅ Shadowsocks успешно обновлен.'
+            elif key_type == 'vmess':
+                vmess(key_value)
+                os.system('/opt/etc/init.d/S24v2ray restart')
+                result = '✅ Vmess успешно обновлен.'
+            elif key_type == 'vless':
+                vless(key_value)
+                os.system('/opt/etc/init.d/S24v2ray restart')
+                result = '✅ Vless успешно обновлен.'
+            elif key_type == 'trojan':
+                trojan(key_value)
+                os.system('/opt/etc/init.d/S22trojan restart')
+                result = '✅ Trojan успешно обновлен.'
+            elif key_type == 'tor':
+                tormanually(key_value)
+                os.system('/opt/etc/init.d/S35tor restart')
+                result = '✅ Tor успешно обновлен.'
+            else:
+                result = 'Тип ключа не распознан.'
+        except Exception as exc:
+            result = f'Ошибка: {exc}'
+        html = f'''<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"><title>Результат установки</title></head>
+<body style="font-family:Arial,Helvetica,sans-serif;padding:20px;background:#f5f5f5;">
+  <h1>Результат</h1>
+  <p>{result}</p>
+  <p><a href="/">Вернуться назад</a></p>
+</body>
+</html>'''
+        self._send_html(html)
+
+
+def start_http_server():
+    try:
+        server_address = ('', int(browser_port))
+        httpd = HTTPServer(server_address, KeyInstallHTTPRequestHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+    except Exception as err:
+        with open('/opt/etc/error.log', 'w') as errfile:
+            errfile.write(str(err))
+
+def _read_v2ray_key(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return None
+
+
+def _save_v2ray_key(file_path, key):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(key.strip())
+
+
+def _parse_vmess_key(key):
     encodedkey = key[8:]
     s = base64.b64decode(encodedkey).decode('utf8').replace("'", '"')
-    jsondata = json.loads(s)
-    f = open('/opt/etc/v2ray/config.json', 'w')
-    sh = '{"log":{"access":"/opt/etc/v2ray/access.log","error":"/opt/etc/v2ray/error.log","loglevel":"info"},' \
-         '"inbounds":[{"port":' + str(localportvmess) + ',"listen":"::","protocol":"dokodemo-door",' \
-         '"settings":{"network":"tcp","followRedirect":true},'\
-         '"sniffing":{"enabled":true,"destOverride":["http","tls"]}}],' \
-         '"outbounds":[{"tag":"proxy","domainStrategy":"UseIPv4","protocol":"vmess",' \
-         '"settings":{"vnext":[{"address":"' + str(jsondata["add"]) + '","port":' + str(jsondata["port"]) + ',' \
-         '"users":[{"id":"' + str(jsondata["id"]) + '","alterId":' + str(jsondata["aid"]) + ',' \
-         '"email":"t@t.tt","security":"auto"}]}]},"streamSettings":{"network":"' + str(jsondata["net"]) + '",' \
-         '"security":"tls","tlsSettings":{"allowInsecure":true,"serverName":"' + str(jsondata["add"]) + '"},' \
-         '"wsSettings":{"path":"' + str(jsondata["path"]) + '","headers":{"Host":"' + str(jsondata["host"]) + '"}},' \
-         '"tls":"' + str(jsondata["tls"]) + '"},"mux":{"enabled":true,"concurrency":-1,"xudpConcurrency": 16,"xudpProxyUDP443":"reject"}}],' \
-         '"routing":{"domainStrategy":"IPIfNonMatch",' \
-         '"rules":[{"type":"field","port":"0-65535","outboundTag":"proxy","enabled":true}]}}'
-    f.write(sh)
-    f.close()
+    return json.loads(s)
+
+
+def _parse_vless_key(key):
+    parsed = urlparse(key)
+    if parsed.scheme != 'vless':
+        raise ValueError('Неверный протокол, ожидается vless://')
+    if not parsed.hostname or not parsed.username:
+        raise ValueError('Отсутствует адрес сервера или UUID')
+    params = parse_qs(parsed.query)
+    address = parsed.hostname
+    port = parsed.port or 443
+    user_id = parsed.username
+    security = params.get('security', ['none'])[0]
+    encryption = params.get('encryption', ['none'])[0]
+    flow = params.get('flow', [''])[0]
+    host = params.get('host', [''])[0]
+    network = params.get('type', params.get('network', ['tcp']))[0]
+    path = params.get('path', ['/'])[0]
+    if path == '':
+        path = '/'
+    sni = params.get('sni', [''])[0] or host
+    return {
+        'address': address,
+        'port': port,
+        'id': user_id,
+        'security': security,
+        'encryption': encryption,
+        'flow': flow,
+        'host': host,
+        'path': path,
+        'sni': sni,
+        'type': network
+    }
+
+
+def _build_v2ray_config(vmess_key=None, vless_key=None):
+    config_data = {
+        'log': {
+            'access': '/opt/etc/v2ray/access.log',
+            'error': '/opt/etc/v2ray/error.log',
+            'loglevel': 'info'
+        },
+        'inbounds': [],
+        'outbounds': [],
+        'routing': {
+            'domainStrategy': 'IPIfNonMatch',
+            'rules': []
+        }
+    }
+
+    if vmess_key:
+        vmess_data = _parse_vmess_key(vmess_key)
+        config_data['inbounds'].append({
+            'port': int(localportvmess),
+            'listen': '::',
+            'protocol': 'dokodemo-door',
+            'settings': {'network': 'tcp', 'followRedirect': True},
+            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
+            'tag': 'in-vmess'
+        })
+        stream_settings = {'network': vmess_data.get('net', 'tcp')}
+        tls_mode = vmess_data.get('tls', 'tls')
+        if tls_mode in ['tls', 'xtls']:
+            stream_settings['security'] = tls_mode
+            stream_settings[f'{tls_mode}Settings'] = {
+                'allowInsecure': True,
+                'serverName': vmess_data.get('add', '')
+            }
+        else:
+            stream_settings['security'] = 'none'
+        if stream_settings['network'] == 'ws':
+            stream_settings['wsSettings'] = {
+                'path': vmess_data.get('path', '/'),
+                'headers': {'Host': vmess_data.get('host', '')}
+            }
+        config_data['outbounds'].append({
+            'tag': 'proxy-vmess',
+            'domainStrategy': 'UseIPv4',
+            'protocol': 'vmess',
+            'settings': {
+                'vnext': [{
+                    'address': vmess_data['add'],
+                    'port': int(vmess_data['port']),
+                    'users': [{
+                        'id': vmess_data['id'],
+                        'alterId': int(vmess_data.get('aid', 0)),
+                        'email': 't@t.tt',
+                        'security': 'auto'
+                    }]
+                }]
+            },
+            'streamSettings': stream_settings,
+            'mux': {
+                'enabled': True,
+                'concurrency': -1,
+                'xudpConcurrency': 16,
+                'xudpProxyUDP443': 'reject'
+            }
+        })
+        config_data['routing']['rules'].append({
+            'type': 'field',
+            'inboundTag': ['in-vmess'],
+            'outboundTag': 'proxy-vmess',
+            'enabled': True
+        })
+
+    if vless_key:
+        vless_data = _parse_vless_key(vless_key)
+        config_data['inbounds'].append({
+            'port': int(localportvless),
+            'listen': '::',
+            'protocol': 'dokodemo-door',
+            'settings': {'network': 'tcp', 'followRedirect': True},
+            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
+            'tag': 'in-vless'
+        })
+        network = vless_data.get('type', 'tcp')
+        if network == '':
+            network = 'tcp'
+        stream_settings = {'network': network}
+        security = vless_data.get('security', 'none')
+        if security in ['tls', 'xtls']:
+            stream_settings['security'] = security
+            stream_settings[f'{security}Settings'] = {
+                'allowInsecure': True,
+                'serverName': vless_data.get('sni', '')
+            }
+        else:
+            stream_settings['security'] = 'none'
+        if network == 'ws':
+            stream_settings['wsSettings'] = {
+                'path': vless_data.get('path', '/'),
+                'headers': {'Host': vless_data.get('host', '')}
+            }
+        config_data['outbounds'].append({
+            'tag': 'proxy-vless',
+            'domainStrategy': 'UseIPv4',
+            'protocol': 'vless',
+            'settings': {
+                'vnext': [{
+                    'address': vless_data['address'],
+                    'port': int(vless_data['port']),
+                    'users': [{
+                        'id': vless_data['id'],
+                        'encryption': vless_data.get('encryption', 'none'),
+                        'flow': vless_data.get('flow', ''),
+                        'level': 0
+                    }]
+                }]
+            },
+            'streamSettings': stream_settings
+        })
+        config_data['routing']['rules'].append({
+            'type': 'field',
+            'inboundTag': ['in-vless'],
+            'outboundTag': 'proxy-vless',
+            'enabled': True
+        })
+
+    if config_data['outbounds']:
+        config_data['outbounds'].append({'protocol': 'freedom', 'tag': 'direct'})
+        config_data['routing']['rules'].append({
+            'type': 'field',
+            'port': '0-65535',
+            'outboundTag': 'direct',
+            'enabled': True
+        })
+
+    return config_data
+
+
+def _write_v2ray_config(vmess_key=None, vless_key=None):
+    config_json = _build_v2ray_config(vmess_key, vless_key)
+    with open('/opt/etc/v2ray/config.json', 'w', encoding='utf-8') as f:
+        json.dump(config_json, f, ensure_ascii=False, indent=2)
+
+
+def vless(key):
+    _save_v2ray_key('/opt/etc/v2ray/vless.key', key)
+    current_vmess = _read_v2ray_key('/opt/etc/v2ray/vmess.key')
+    _write_v2ray_config(current_vmess, key)
+
+
+def vmess(key):
+    _save_v2ray_key('/opt/etc/v2ray/vmess.key', key)
+    current_vless = _read_v2ray_key('/opt/etc/v2ray/vless.key')
+    _write_v2ray_config(key, current_vless)
 
 def trojan(key):
     # global appapiid, appapihash, password, localporttrojan
@@ -646,6 +1043,8 @@ ClientTransportPlugin obfs4 exec /opt/sbin/obfs4proxy managed\n'
 
 
 # bot.polling(none_stop=True)
+update_proxy(config.default_proxy_mode)
+start_http_server()
 try:
     bot.infinity_polling()
 except Exception as err:
