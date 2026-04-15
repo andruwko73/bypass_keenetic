@@ -94,6 +94,30 @@ def _load_proxy_mode():
     return config.default_proxy_mode
 
 
+def _wait_for_port(host, port, timeout=8):
+    import socket
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, int(port)), timeout=2):
+                return True
+        except OSError:
+            time.sleep(1)
+    return False
+
+
+def _ensure_service_port(port, restart_cmd=None, retries=1, sleep_after_restart=3):
+    if _wait_for_port('127.0.0.1', port, timeout=10):
+        return True
+    if restart_cmd:
+        for _ in range(retries):
+            os.system(restart_cmd)
+            time.sleep(sleep_after_restart)
+            if _wait_for_port('127.0.0.1', port, timeout=10):
+                return True
+    return False
+
+
 def update_proxy(proxy_type):
     global proxy_mode
     proxy_url = proxy_settings.get(proxy_type)
@@ -129,9 +153,13 @@ def check_telegram_api():
             return '✅ Доступ к api.telegram.org подтверждён.'
         return f'⚠️ Telegram API ответил: {data.get("description", "Не удалось определить причину")} '
     except requests.exceptions.RequestException as exc:
-        if 'Missing dependencies for SOCKS support' in str(exc):
+        error_text = str(exc)
+        if 'Missing dependencies for SOCKS support' in error_text:
             return ('❌ Не удалось подключиться к Telegram API: отсутствует поддержка SOCKS (PySocks). '
                     'Установите python3-pysocks или используйте режим без SOCKS.')
+        if 'Connection refused' in error_text or 'SOCKSHTTPSConnection' in error_text:
+            return ('❌ Не удалось подключиться к Telegram API: соединение через SOCKS-прокси отказано. '
+                    'Проверьте, что локальный прокси-сервис запущен и порт доступен.')
         return f'❌ Не удалось подключиться к Telegram API: {exc}'
 
 # список смайлов для меню
@@ -790,28 +818,43 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             if key_type == 'shadowsocks':
                 shadowsocks(key_value)
                 os.system('/opt/etc/init.d/S22shadowsocks restart')
-                time.sleep(2)
+                time.sleep(3)
                 ok, error = update_proxy('shadowsocks')
                 if ok:
-                    result = '✅ Shadowsocks успешно обновлен. Бот будет использовать Shadowsocks.'
+                    if not _ensure_service_port(localportsh, '/opt/etc/init.d/S22shadowsocks restart', retries=1, sleep_after_restart=3):
+                        update_proxy('none')
+                        result = ('⚠️ Shadowsocks обновлен, но локальный SOCKS-порт 127.0.0.1:'
+                                  + str(localportsh) + ' недоступен. Бот переключён в режим none.')
+                    else:
+                        result = '✅ Shadowsocks успешно обновлен. Бот будет использовать Shadowsocks.'
                 else:
                     result = f'⚠️ Shadowsocks обновлен, но прокси не применён: {error}'
             elif key_type == 'vmess':
                 vmess(key_value)
                 os.system('/opt/etc/init.d/S24v2ray restart')
-                time.sleep(2)
+                time.sleep(3)
                 ok, error = update_proxy('vmess')
                 if ok:
-                    result = '✅ Vmess успешно обновлен. Бот будет использовать Vmess.'
+                    if not _ensure_service_port(localportvmess, '/opt/etc/init.d/S24v2ray restart', retries=1, sleep_after_restart=3):
+                        update_proxy('none')
+                        result = ('⚠️ Vmess обновлен, но локальный SOCKS-порт 127.0.0.1:'
+                                  + str(localportvmess) + ' недоступен. Бот переключён в режим none.')
+                    else:
+                        result = '✅ Vmess успешно обновлен. Бот будет использовать Vmess.'
                 else:
                     result = f'⚠️ Vmess обновлен, но прокси не применён: {error}'
             elif key_type == 'vless':
                 vless(key_value)
                 os.system('/opt/etc/init.d/S24v2ray restart')
-                time.sleep(2)
+                time.sleep(3)
                 ok, error = update_proxy('vless')
                 if ok:
-                    result = '✅ Vless успешно обновлен. Бот будет использовать Vless.'
+                    if not _ensure_service_port(localportvless, '/opt/etc/init.d/S24v2ray restart', retries=1, sleep_after_restart=3):
+                        update_proxy('none')
+                        result = ('⚠️ Vless обновлен, но локальный SOCKS-порт 127.0.0.1:'
+                                  + str(localportvless) + ' недоступен. Бот переключён в режим none.')
+                    else:
+                        result = '✅ Vless успешно обновлен. Бот будет использовать Vless.'
                 else:
                     result = f'⚠️ Vless обновлен, но прокси не применён: {error}'
             elif key_type == 'trojan':
