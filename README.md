@@ -40,6 +40,14 @@
 ## Как обновиться:
 - [Обновление на новую версию](https://github.com/znetworkx/bypass_keenetic/wiki/Update-bot-and-scripts)
 
+## Автоматическое обновление форка
+Если вы хотите синхронизировать локальный `main` с `origin/main` и сразу отправить изменения в `userfork`, используйте:
+
+- `./update_fork.sh` — для Bash/WSL
+- `./update_fork.ps1` — для PowerShell (запустите через `./update_fork.ps1` или `powershell -File ./update_fork.ps1`)
+
+Команда по умолчанию обновит ветку `main`.
+
 ## Если у вас версия 2.0
 * `opkg update`
 * `mv /opt/etc/bot.py /opt/etc/bot_old.py`
