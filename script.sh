@@ -85,11 +85,11 @@ if [ "$1" = "-install" ]; then
     echo "Ваша версия KeenOS" "${keen_os_full}"
     opkg update
     # opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
-    opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip v2ray trojan
+    opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip python3-pysocks v2ray trojan
     curl -O https://bootstrap.pypa.io/get-pip.py
     sleep 3
     python get-pip.py
-    pip install pyTelegramBotAPI telethon
+    pip install pyTelegramBotAPI telethon pysocks
     #pip install telethon
     #pip install pathlib
     #pip install --upgrade pip
