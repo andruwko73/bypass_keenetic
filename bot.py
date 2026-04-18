@@ -63,6 +63,18 @@ sid = "0"
 PROXY_MODE_FILE = '/opt/etc/bot_proxy_mode'
 BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
 WEB_STATUS_CACHE_TTL = 20
+BOT_SOURCE_PATH = os.path.abspath(__file__)
+XRAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24xray'
+V2RAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24v2ray'
+XRAY_CONFIG_DIR = '/opt/etc/xray'
+V2RAY_CONFIG_DIR = '/opt/etc/v2ray'
+CORE_PROXY_CONFIG_DIR = XRAY_CONFIG_DIR if os.path.exists(XRAY_SERVICE_SCRIPT) else V2RAY_CONFIG_DIR
+CORE_PROXY_SERVICE_SCRIPT = XRAY_SERVICE_SCRIPT if os.path.exists(XRAY_SERVICE_SCRIPT) else V2RAY_SERVICE_SCRIPT
+CORE_PROXY_CONFIG_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'config.json')
+CORE_PROXY_ERROR_LOG = os.path.join(CORE_PROXY_CONFIG_DIR, 'error.log')
+CORE_PROXY_ACCESS_LOG = os.path.join(CORE_PROXY_CONFIG_DIR, 'access.log')
+VMESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vmess.key')
+VLESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless.key')
 
 bot_ready = False
 bot_polling = False
@@ -242,8 +254,8 @@ def _read_tail(file_path, lines=12):
 
 
 def _v2ray_diagnostics():
-    config_path = '/opt/etc/v2ray/config.json'
-    error_path = '/opt/etc/v2ray/error.log'
+    config_path = CORE_PROXY_CONFIG_PATH
+    error_path = CORE_PROXY_ERROR_LOG
     diagnostics = []
     if not os.path.exists(config_path):
         diagnostics.append(f'Конфигурация v2ray не найдена: {config_path}')
@@ -371,7 +383,7 @@ def _build_proxy_diagnostics(key_type, key_value):
     key_summary = _format_proxy_key_summary(key_type, key_value)
     if key_type not in ['vmess', 'vless']:
         return key_summary
-    error_tail = _read_tail('/opt/etc/v2ray/error.log', lines=25)
+    error_tail = _read_tail(CORE_PROXY_ERROR_LOG, lines=25)
     lines = [line.strip() for line in error_tail.splitlines() if line.strip()]
     last_issue = ''
     for line in reversed(lines):
@@ -386,15 +398,15 @@ def _build_proxy_diagnostics(key_type, key_value):
         lookup_match = re.search(r'lookup\s+([^\s]+)', last_issue)
         dial_match = re.search(r'dial tcp\s+([^:]+:\d+)', last_issue)
         if 'server misbehaving' in last_issue and lookup_match:
-            issue_summary = f'Причина: v2ray не смог разрешить адрес {lookup_match.group(1)} через локальный DNS.'
+            issue_summary = f'Причина: прокси-ядро не смогло разрешить адрес {lookup_match.group(1)} через локальный DNS.'
         elif 'operation was canceled' in last_issue and dial_match:
-            issue_summary = f'Причина: сервер {dial_match.group(1)} не установил соединение через v2ray.'
+            issue_summary = f'Причина: сервер {dial_match.group(1)} не установил соединение через прокси-ядро.'
         elif 'connection refused' in last_issue and dial_match:
             issue_summary = f'Причина: сервер {dial_match.group(1)} отклонил соединение.'
         elif 'timed out' in last_issue or 'i/o timeout' in last_issue:
             issue_summary = 'Причина: соединение через прокси завершилось по таймауту.'
         elif 'failed to find an available destination' in last_issue:
-            issue_summary = 'Причина: v2ray не смог построить рабочее исходящее соединение.'
+            issue_summary = 'Причина: прокси-ядро не смогло построить рабочее исходящее соединение.'
     parts = []
     if issue_summary:
         parts.append(issue_summary)
@@ -428,13 +440,13 @@ def _apply_installed_proxy(key_type, key_value):
         'vmess': {
             'label': 'Vmess',
             'port': localportvmess,
-            'restart_cmd': '/opt/etc/init.d/S24v2ray restart',
+            'restart_cmd': CORE_PROXY_SERVICE_SCRIPT + ' restart',
             'startup_wait': 18,
         },
         'vless': {
             'label': 'Vless',
             'port': localportvless,
-            'restart_cmd': '/opt/etc/init.d/S24v2ray restart',
+            'restart_cmd': CORE_PROXY_SERVICE_SCRIPT + ' restart',
             'startup_wait': 18,
         },
         'trojan': {
@@ -620,7 +632,7 @@ def bot_message(message):
                 bot.send_message(message.chat.id, '🔄 Выполняется перезагрузка сервисов!', reply_markup=service)
                 os.system('/opt/etc/init.d/S22shadowsocks restart')
                 os.system('/opt/etc/init.d/S22trojan restart')
-                os.system('/opt/etc/init.d/S24v2ray restart')
+                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
                 os.system('/opt/etc/init.d/S35tor restart')
                 bot.send_message(message.chat.id, '✅ Сервисы перезагружены!', reply_markup=service)
                 return
@@ -683,7 +695,7 @@ def bot_message(message):
                 url = _raw_github_url('version.md')
                 bot_new_version = requests.get(url).text
 
-                with open('/opt/etc/bot.py', encoding='utf-8') as file:
+                with open(BOT_SOURCE_PATH, encoding='utf-8') as file:
                     for line in file.readlines():
                         if line.startswith('# ВЕРСИЯ СКРИПТА'):
                             s = line.replace('# ', '')
@@ -939,7 +951,7 @@ def bot_message(message):
 
             if level == 9:
                 vmess(message.text)
-                os.system('/opt/etc/init.d/S24v2ray restart')
+                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
                 level = 0
                 bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
 
@@ -951,7 +963,7 @@ def bot_message(message):
 
             if level == 11:
                 vless(message.text)
-                os.system('/opt/etc/init.d/S24v2ray restart')
+                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
                 level = 0
                 bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
 
@@ -1440,8 +1452,8 @@ def _parse_vless_key(key):
 def _build_v2ray_config(vmess_key=None, vless_key=None):
     config_data = {
         'log': {
-            'access': '/opt/etc/v2ray/access.log',
-            'error': '/opt/etc/v2ray/error.log',
+            'access': CORE_PROXY_ACCESS_LOG,
+            'error': CORE_PROXY_ERROR_LOG,
             'loglevel': 'info'
         },
         'inbounds': [],
@@ -1614,21 +1626,22 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
 
 def _write_v2ray_config(vmess_key=None, vless_key=None):
     config_json = _build_v2ray_config(vmess_key, vless_key)
-    with open('/opt/etc/v2ray/config.json', 'w', encoding='utf-8') as f:
+    os.makedirs(CORE_PROXY_CONFIG_DIR, exist_ok=True)
+    with open(CORE_PROXY_CONFIG_PATH, 'w', encoding='utf-8') as f:
         json.dump(config_json, f, ensure_ascii=False, indent=2)
 
 
 def vless(key):
     _parse_vless_key(key)
-    _save_v2ray_key('/opt/etc/v2ray/vless.key', key)
-    current_vmess = _read_v2ray_key('/opt/etc/v2ray/vmess.key')
+    _save_v2ray_key(VLESS_KEY_PATH, key)
+    current_vmess = _read_v2ray_key(VMESS_KEY_PATH)
     _write_v2ray_config(current_vmess, key)
 
 
 def vmess(key):
     _parse_vmess_key(key)
-    _save_v2ray_key('/opt/etc/v2ray/vmess.key', key)
-    current_vless = _read_v2ray_key('/opt/etc/v2ray/vless.key')
+    _save_v2ray_key(VMESS_KEY_PATH, key)
+    current_vless = _read_v2ray_key(VLESS_KEY_PATH)
     _write_v2ray_config(key, current_vless)
 
 def trojan(key):
