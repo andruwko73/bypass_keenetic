@@ -1,14 +1,14 @@
-# bypass_keenetic — форк `ragejetix/bypass_keenetic`
-![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/ragejetix/bypass_keenetic)
-![GitHub Release Date - Published_At](https://img.shields.io/github/release-date/ragejetix/bypass_keenetic)
-![GitHub repo size](https://img.shields.io/github/repo-size/ragejetix/bypass_keenetic)
-![GitHub last commit](https://img.shields.io/github/last-commit/ragejetix/bypass_keenetic)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/y/ragejetix/bypass_keenetic)
-![GitHub top language](https://img.shields.io/github/languages/top/ragejetix/bypass_keenetic)
+# bypass_keenetic — форк `keenetic-dev/bypass_keenetic_dev`
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/keenetic-dev/bypass_keenetic_dev)
+![GitHub Release Date - Published_At](https://img.shields.io/github/release-date/keenetic-dev/bypass_keenetic_dev)
+![GitHub repo size](https://img.shields.io/github/repo-size/keenetic-dev/bypass_keenetic_dev)
+![GitHub last commit](https://img.shields.io/github/last-commit/keenetic-dev/bypass_keenetic_dev)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/y/keenetic-dev/bypass_keenetic_dev)
+![GitHub top language](https://img.shields.io/github/languages/top/keenetic-dev/bypass_keenetic_dev)
 <a href="https://t.me/bypass_keenetic">![Telegram](https://img.shields.io/badge/bypass_keenetic--black?style=social&logo=telegram&logoColor=blue)</a>
 
 ## Об этом форке
-Это форк проекта `keenetic-dev/bypass_keenetic` в репозитории `ragejetix/bypass_keenetic`.
+Это форк проекта `keenetic-dev/bypass_keenetic_dev`.
 
 В текущем форке добавлены:
 - веб-интерфейс установки ключей и мостов
