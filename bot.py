@@ -21,7 +21,7 @@ import sys
 import time
 import threading
 import signal
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 import telebot
@@ -926,10 +926,14 @@ def bot_message(message):
 
 class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     def _send_html(self, html, status=200):
+        body = html.encode('utf-8')
         self.send_response(status)
         self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Connection', 'close')
         self.end_headers()
-        self.wfile.write(html.encode('utf-8'))
+        self.wfile.write(body)
+        self.close_connection = True
 
     def _build_form(self, message=''):
         status = _web_status_snapshot()
@@ -1248,7 +1252,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 def start_http_server():
     try:
         server_address = ('', int(browser_port))
-        httpd = HTTPServer(server_address, KeyInstallHTTPRequestHandler)
+        httpd = ThreadingHTTPServer(server_address, KeyInstallHTTPRequestHandler)
+        httpd.daemon_threads = True
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
     except Exception as err:
