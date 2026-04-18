@@ -30,7 +30,7 @@ from telebot import types
 from telethon.sync import TelegramClient
 import base64
 # from pathlib import Path
-# import shutil
+import shutil
 # import datetime
 import requests
 import json
@@ -100,7 +100,7 @@ web_status_cache = {
 
 
 def _raw_github_url(path):
-    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/main/{path}'
+    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/main/{path}?ts={int(time.time())}'
 
 
 def _has_socks_support():
@@ -181,6 +181,35 @@ def _prepare_entware_dns():
         notes.append('не удалось обновить /etc/resolv.conf')
 
     return 'Подготовка Entware DNS: ' + ', '.join(notes)
+
+
+def _ensure_legacy_bot_paths():
+    mappings = [
+        ('/opt/etc/bot/bot_config.py', '/opt/etc/bot_config.py'),
+        ('/opt/etc/bot/main.py', '/opt/etc/bot.py'),
+    ]
+    notes = []
+    for source_path, legacy_path in mappings:
+        try:
+            if not os.path.exists(source_path):
+                continue
+            if os.path.islink(legacy_path):
+                if os.path.realpath(legacy_path) == os.path.realpath(source_path):
+                    continue
+                os.remove(legacy_path)
+            elif os.path.exists(legacy_path):
+                continue
+            os.symlink(source_path, legacy_path)
+            notes.append(f'{legacy_path} -> {source_path}')
+        except Exception:
+            try:
+                shutil.copyfile(source_path, legacy_path)
+                notes.append(f'{legacy_path} скопирован из {source_path}')
+            except Exception:
+                notes.append(f'не удалось подготовить {legacy_path}')
+    if not notes:
+        return 'Legacy-пути бота уже доступны.'
+    return 'Подготовка legacy-путей: ' + ', '.join(notes)
 
 
 def _load_bot_autostart():
@@ -757,6 +786,7 @@ def bot_message(message):
             if message.text == '/update':
                 bot.send_message(message.chat.id, 'Устанавливаются обновления, подождите!', reply_markup=service)
                 bot.send_message(message.chat.id, _prepare_entware_dns(), reply_markup=service)
+                bot.send_message(message.chat.id, _ensure_legacy_bot_paths(), reply_markup=service)
                 os.system("curl -s -o /opt/root/script.sh " + _raw_github_url('script.sh'))
                 os.chmod(r"/opt/root/script.sh", 0o0755)
                 os.chmod('/opt/root/script.sh', stat.S_IRWXU)
@@ -1060,7 +1090,8 @@ def bot_message(message):
                     repo = fork_repo_owner
 
                 bot.send_message(message.chat.id, _prepare_entware_dns(), reply_markup=main)
-                url = "https://raw.githubusercontent.com/{0}/{1}/main/script.sh".format(repo, fork_repo_name)
+                bot.send_message(message.chat.id, _ensure_legacy_bot_paths(), reply_markup=main)
+                url = "https://raw.githubusercontent.com/{0}/{1}/main/script.sh?ts={2}".format(repo, fork_repo_name, int(time.time()))
                 os.system("curl -s -o /opt/root/script.sh " + url + "")
                 os.chmod(r"/opt/root/script.sh", 0o0755)
                 os.chmod('/opt/root/script.sh', stat.S_IRWXU)
