@@ -60,6 +60,8 @@ level = 0
 bypass = -1
 sid = "0"
 PROXY_MODE_FILE = '/opt/etc/bot_proxy_mode'
+BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
+WEB_STATUS_CACHE_TTL = 20
 
 bot_ready = False
 bot_polling = False
@@ -77,6 +79,10 @@ proxy_supports_http = {
     'vmess': True,
     'vless': True,
     'trojan': False,
+}
+web_status_cache = {
+    'timestamp': 0,
+    'data': None,
 }
 
 
@@ -108,6 +114,30 @@ def _save_proxy_mode(proxy_type):
             file.write(proxy_type)
     except Exception:
         pass
+
+
+def _save_bot_autostart(enabled):
+    try:
+        if enabled:
+            with open(BOT_AUTOSTART_FILE, 'w', encoding='utf-8') as file:
+                file.write('1')
+        elif os.path.exists(BOT_AUTOSTART_FILE):
+            os.remove(BOT_AUTOSTART_FILE)
+    except Exception:
+        pass
+
+
+def _load_bot_autostart():
+    try:
+        with open(BOT_AUTOSTART_FILE, 'r', encoding='utf-8') as file:
+            return file.read().strip() == '1'
+    except Exception:
+        return False
+
+
+def _invalidate_web_status_cache():
+    web_status_cache['timestamp'] = 0
+    web_status_cache['data'] = None
 
 
 def _load_proxy_mode():
@@ -309,6 +339,7 @@ def update_proxy(proxy_type):
                 del os.environ[key]
 
     _save_proxy_mode(proxy_type)
+    _invalidate_web_status_cache()
     return True, None
 
 
@@ -351,7 +382,11 @@ def check_telegram_api(retries=2, retry_delay=7, connect_timeout=30, read_timeou
     return last_result
 
 
-def _web_status_snapshot():
+def _web_status_snapshot(force_refresh=False):
+    now = time.time()
+    if (not force_refresh and web_status_cache['data'] is not None and
+            now - web_status_cache['timestamp'] < WEB_STATUS_CACHE_TTL):
+        return web_status_cache['data']
     state_label = 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
     socks_details = ''
     if proxy_mode in ['shadowsocks', 'vmess', 'vless']:
@@ -363,13 +398,16 @@ def _web_status_snapshot():
         if port:
             socks_ok = _check_socks5_handshake(port)
             socks_details = f'Локальный SOCKS {proxy_mode} 127.0.0.1:{port}: {"доступен" if socks_ok else "не отвечает как SOCKS5"}'
-    api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=4, read_timeout=8)
-    return {
+    api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=2, read_timeout=3)
+    snapshot = {
         'state_label': state_label,
         'proxy_mode': proxy_mode,
         'api_status': api_status,
         'socks_details': socks_details
     }
+    web_status_cache['timestamp'] = now
+    web_status_cache['data'] = snapshot
+    return snapshot
 
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
@@ -1082,12 +1120,15 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 result = f'Режим бота установлен: {proxy_type}'
             else:
                 result = f'⚠️ {error}'
+            _invalidate_web_status_cache()
             self._send_html(self._build_form(result))
             return
 
         if self.path == '/start':
             global bot_ready
             bot_ready = True
+            _save_bot_autostart(True)
+            _invalidate_web_status_cache()
             result = 'Бот запущен. Теперь бот начал polling Telegram API.'
             self._send_html(self._build_form(result))
             return
@@ -1195,6 +1236,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             result = f'Ошибка установки: {exc}'
         else:
+            _invalidate_web_status_cache()
             if result.startswith('✅') and proxy_supports_http.get(proxy_mode, False):
                 result = f'{result} {check_telegram_api()}'
             elif result.startswith('✅') and proxy_mode == 'trojan':
@@ -1621,6 +1663,8 @@ ClientTransportPlugin obfs4 exec /opt/sbin/obfs4proxy managed\n'
 def main():
     global proxy_mode, bot_polling
     _daemonize_process()
+    if _load_bot_autostart():
+        globals()['bot_ready'] = True
     proxy_mode = _load_proxy_mode()
     ok, error = update_proxy(proxy_mode)
     if not ok:
