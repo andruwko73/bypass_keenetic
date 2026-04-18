@@ -364,6 +364,137 @@ def _run_web_command(command):
     return 'Команда не распознана.'
 
 
+def _read_text_file(file_path):
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
+            return file.read()
+    except Exception:
+        return ''
+
+
+def _normalize_unblock_list(text):
+    items = []
+    seen = set()
+    for raw_line in text.replace('\r', '\n').split('\n'):
+        line = raw_line.strip()
+        if not line or line in seen:
+            continue
+        seen.add(line)
+        items.append(line)
+    items.sort()
+    return '\n'.join(items)
+
+
+def _save_unblock_list(list_name, text):
+    safe_name = os.path.basename(list_name)
+    target_path = os.path.join('/opt/etc/unblock', safe_name)
+    if not target_path.endswith('.txt'):
+        raise ValueError('Список должен быть .txt файлом')
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    normalized = _normalize_unblock_list(text)
+    with open(target_path, 'w', encoding='utf-8') as file:
+        if normalized:
+            file.write(normalized + '\n')
+    subprocess.call(['/opt/bin/unblock_update.sh'])
+    return f'✅ Список {safe_name} сохранён и применён.'
+
+
+def _append_socialnet_list(list_name):
+    safe_name = os.path.basename(list_name)
+    target_path = os.path.join('/opt/etc/unblock', safe_name)
+    current = _read_text_file(target_path)
+    social_text = requests.get('https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt', timeout=20).text
+    return _save_unblock_list(safe_name, current + '\n' + social_text)
+
+
+def _list_label(file_name):
+    base = file_name[:-4] if file_name.endswith('.txt') else file_name
+    labels = {
+        'shadowsocks': 'Shadowsocks',
+        'tor': 'Tor',
+        'vmess': 'Vmess',
+        'vless': 'Vless',
+        'trojan': 'Trojan',
+        'vpn': 'VPN (общий список)',
+    }
+    if base.startswith('vpn-'):
+        return f'VPN: {base[4:]}'
+    return labels.get(base, base)
+
+
+def _load_unblock_lists():
+    unblock_dir = '/opt/etc/unblock'
+    try:
+        file_names = sorted(name for name in os.listdir(unblock_dir) if name.endswith('.txt'))
+    except Exception:
+        file_names = []
+    preferred_order = ['shadowsocks.txt', 'tor.txt', 'vmess.txt', 'vless.txt', 'trojan.txt', 'vpn.txt']
+    ordered = []
+    for item in preferred_order:
+        if item in file_names:
+            ordered.append(item)
+    for item in file_names:
+        if item not in ordered:
+            ordered.append(item)
+    result = []
+    for file_name in ordered:
+        result.append({
+            'name': file_name,
+            'label': _list_label(file_name),
+            'content': _read_text_file(os.path.join(unblock_dir, file_name)).strip(),
+        })
+    return result
+
+
+def _load_shadowsocks_key():
+    try:
+        with open('/opt/etc/shadowsocks.json', 'r', encoding='utf-8') as file:
+            data = json.load(file)
+        server = (data.get('server') or [''])[0]
+        port = data.get('server_port', '')
+        method = data.get('method', '')
+        password = data.get('password', '')
+        if not server or not port or not method:
+            return ''
+        encoded = base64.urlsafe_b64encode(f'{method}:{password}'.encode('utf-8')).decode('utf-8').rstrip('=')
+        return f'ss://{encoded}@{server}:{port}'
+    except Exception:
+        return ''
+
+
+def _load_trojan_key():
+    try:
+        with open('/opt/etc/trojan/config.json', 'r', encoding='utf-8') as file:
+            data = json.load(file)
+        password = (data.get('password') or [''])[0]
+        address = data.get('remote_addr', '')
+        port = data.get('remote_port', '')
+        if not password or not address or not port:
+            return ''
+        return f'trojan://{password}@{address}:{port}'
+    except Exception:
+        return ''
+
+
+def _load_tor_bridges():
+    lines = []
+    for line in _read_text_file('/opt/etc/tor/torrc').splitlines():
+        stripped = line.strip()
+        if stripped.startswith('Bridge '):
+            lines.append(stripped)
+    return '\n'.join(lines)
+
+
+def _load_current_keys():
+    return {
+        'shadowsocks': _load_shadowsocks_key(),
+        'vmess': _read_v2ray_key(VMESS_KEY_PATH) or '',
+        'vless': _read_v2ray_key(VLESS_KEY_PATH) or '',
+        'trojan': _load_trojan_key(),
+        'tor': _load_tor_bridges(),
+    }
+
+
 def _web_command_label(command):
     labels = {
         'install_fork': 'Установить из форка',
@@ -1383,6 +1514,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     def _build_form(self, message=''):
         status = _web_status_snapshot()
         command_state = _get_web_command_state()
+        current_keys = _load_current_keys()
+        unblock_lists = _load_unblock_lists()
         message_block = ''
         if message:
             safe_message = html.escape(message)
@@ -1401,6 +1534,24 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         socks_block = ''
         if status['socks_details']:
             socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}' + '</p>'
+                unblock_cards = []
+                for entry in unblock_lists:
+                        safe_name = html.escape(entry['name'])
+                        safe_label = html.escape(entry['label'])
+                        safe_content = html.escape(entry['content'])
+                        unblock_cards.append(f'''<section>
+        <h2>{safe_label}</h2>
+        <form method="post" action="/save_unblock_list">
+            <input type="hidden" name="list_name" value="{safe_name}">
+            <textarea name="content" rows="8" placeholder="example.org\napi.telegram.org">{safe_content}</textarea>
+            <button type="submit">Сохранить список</button>
+        </form>
+        <form method="post" action="/append_socialnet">
+            <input type="hidden" name="list_name" value="{safe_name}">
+            <button type="submit">Добавить соцсети</button>
+        </form>
+    </section>''')
+                unblock_lists_block = ''.join(unblock_cards)
         status_block = f'''<div class="status-grid">
     <div class="status-card">
         <span class="status-label">Процесс бота</span>
@@ -1511,32 +1662,32 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     <h2>Shadowsocks</h2>
     <form method="post" action="/install">
       <input type="hidden" name="type" value="shadowsocks">
-      <input type="text" name="key" placeholder="shadowsocks://..." required>
-      <button type="submit">Установить Shadowsocks</button>
+            <textarea name="key" rows="5" placeholder="shadowsocks://..." required>{html.escape(current_keys['shadowsocks'])}</textarea>
+            <button type="submit">Сохранить ключ Shadowsocks</button>
     </form>
   </section>
   <section>
     <h2>Vmess</h2>
     <form method="post" action="/install">
       <input type="hidden" name="type" value="vmess">
-      <input type="text" name="key" placeholder="vmess://..." required>
-      <button type="submit">Установить Vmess</button>
+            <textarea name="key" rows="6" placeholder="vmess://..." required>{html.escape(current_keys['vmess'])}</textarea>
+            <button type="submit">Сохранить ключ Vmess</button>
     </form>
   </section>
   <section>
     <h2>Vless</h2>
     <form method="post" action="/install">
       <input type="hidden" name="type" value="vless">
-      <input type="text" name="key" placeholder="vless://..." required>
-      <button type="submit">Установить Vless</button>
+            <textarea name="key" rows="6" placeholder="vless://..." required>{html.escape(current_keys['vless'])}</textarea>
+            <button type="submit">Сохранить ключ Vless</button>
     </form>
   </section>
   <section>
     <h2>Trojan</h2>
     <form method="post" action="/install">
       <input type="hidden" name="type" value="trojan">
-      <input type="text" name="key" placeholder="trojan://..." required>
-      <button type="submit">Установить Trojan</button>
+            <textarea name="key" rows="5" placeholder="trojan://..." required>{html.escape(current_keys['trojan'])}</textarea>
+            <button type="submit">Сохранить ключ Trojan</button>
     </form>
   </section>
     <section class="wide">
@@ -1548,8 +1699,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     <h2>Tor вручную</h2>
     <form method="post" action="/install">
       <input type="hidden" name="type" value="tor">
-      <textarea name="key" rows="6" placeholder="Bridge obfs4 ..." required></textarea>
-      <button type="submit">Установить Tor</button>
+            <textarea name="key" rows="8" placeholder="Bridge obfs4 ..." required>{html.escape(current_keys['tor'])}</textarea>
+            <button type="submit">Сохранить мосты Tor</button>
     </form>
   </section>
   <section>
@@ -1594,6 +1745,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             <button type="submit">Перезагрузить роутер</button>
         </form>
     </section>
+    <section class="wide">
+        <h2>Списки обхода по протоколам и VPN</h2>
+        <p>Здесь редактируются адреса и домены, которые будут отправляться через соответствующий протокол или VPN-правило.</p>
+    </section>
+    {unblock_lists_block}
     </div>
     </div>
 </body>
@@ -1637,6 +1793,31 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             data = parse_qs(body)
             command = data.get('command', [''])[0]
             _, result = _start_web_command(command)
+            self._send_html(self._build_form(result))
+            return
+
+        if path == '/save_unblock_list':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            list_name = data.get('list_name', [''])[0]
+            content = data.get('content', [''])[0]
+            try:
+                result = _save_unblock_list(list_name, content)
+            except Exception as exc:
+                result = f'Ошибка сохранения списка: {exc}'
+            self._send_html(self._build_form(result))
+            return
+
+        if path == '/append_socialnet':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            list_name = data.get('list_name', [''])[0]
+            try:
+                result = _append_socialnet_list(list_name)
+            except Exception as exc:
+                result = f'Ошибка добавления соцсетей: {exc}'
             self._send_html(self._build_form(result))
             return
 
