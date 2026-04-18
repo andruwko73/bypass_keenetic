@@ -97,6 +97,15 @@ web_status_cache = {
     'timestamp': 0,
     'data': None,
 }
+web_command_lock = threading.Lock()
+web_command_state = {
+    'running': False,
+    'command': '',
+    'label': '',
+    'result': '',
+    'started_at': 0,
+    'finished_at': 0,
+}
 
 
 def _raw_github_url(path):
@@ -353,6 +362,59 @@ def _run_web_command(command):
         os.system('ndmc -c system reboot')
         return '🔄 Роутер перезагружается. Это займёт около 2 минут.'
     return 'Команда не распознана.'
+
+
+def _web_command_label(command):
+    labels = {
+        'install_fork': 'Установить из форка',
+        'install_original': 'Установить оригинальную версию',
+        'update': 'Обновить через форк',
+        'remove': 'Удалить компоненты',
+        'restart_services': 'Перезапустить сервисы',
+        'dns_on': 'DNS Override ВКЛ',
+        'dns_off': 'DNS Override ВЫКЛ',
+        'reboot': 'Перезагрузить роутер',
+    }
+    return labels.get(command, command)
+
+
+def _get_web_command_state():
+    with web_command_lock:
+        return dict(web_command_state)
+
+
+def _finish_web_command(command, result):
+    with web_command_lock:
+        web_command_state['running'] = False
+        web_command_state['command'] = command
+        web_command_state['label'] = _web_command_label(command)
+        web_command_state['result'] = result
+        web_command_state['finished_at'] = time.time()
+
+
+def _execute_web_command(command):
+    try:
+        result = _run_web_command(command)
+    except Exception as exc:
+        result = f'Ошибка выполнения команды: {exc}'
+    _finish_web_command(command, result)
+
+
+def _start_web_command(command):
+    label = _web_command_label(command)
+    with web_command_lock:
+        if web_command_state['running']:
+            current_label = web_command_state['label'] or web_command_state['command']
+            return False, f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
+        web_command_state['running'] = True
+        web_command_state['command'] = command
+        web_command_state['label'] = label
+        web_command_state['result'] = ''
+        web_command_state['started_at'] = time.time()
+        web_command_state['finished_at'] = 0
+    thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
+    thread.start()
+    return True, f'⏳ Команда "{label}" запущена. Страница обновится автоматически.'
 
 
 def _load_bot_autostart():
@@ -1320,12 +1382,21 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def _build_form(self, message=''):
         status = _web_status_snapshot()
+        command_state = _get_web_command_state()
         message_block = ''
         if message:
             safe_message = html.escape(message)
             message_block = f'''<div class="notice notice-result">
   <strong>Результат</strong>
   <pre class="log-output">{safe_message}</pre>
+</div>'''
+        command_block = ''
+        if command_state['label']:
+            command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
+            command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Обновление страницы происходит автоматически.'
+            command_block = f'''<div class="notice notice-status">
+  <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
+  <pre class="log-output">{html.escape(command_text)}</pre>
 </div>'''
         socks_block = ''
         if status['socks_details']:
@@ -1350,6 +1421,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 <head>
   <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    {'<meta http-equiv="refresh" content="4">' if command_state['running'] else ''}
   <title>Установка ключей VPN</title>
     <style>
         :root{{
@@ -1419,6 +1491,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         <p><strong>Вставляйте ключ полной строкой, как в Telegram.</strong></p>
     </div>
     {message_block}
+    {command_block}
     <div class="layout">
     <section class="wide">
     <h2>Протокол бота</h2>
@@ -1561,12 +1634,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode('utf-8')
             data = parse_qs(body)
             command = data.get('command', [''])[0]
-            try:
-                result = _run_web_command(command)
-            except Exception as exc:
-                result = f'Ошибка выполнения команды: {exc}'
-            else:
-                _invalidate_web_status_cache()
+            _, result = _start_web_command(command)
             self._send_html(self._build_form(result))
             return
 
