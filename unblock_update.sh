@@ -4,7 +4,7 @@ ipset flush unblocksh
 ipset flush unblockvmess
 ipset flush unblockvless
 ipset flush unblocktroj
-#ipset flush unblockvpn
+ipset flush unblockvpn
 
 if ls -d /opt/etc/unblock/vpn-*.txt >/dev/null 2>&1; then
 for vpn_file_names in /opt/etc/unblock/vpn-*; do

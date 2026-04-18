@@ -146,6 +146,77 @@ fi
 
 TAG="100-redirect.sh"
 
+get_default_vpn_interface() {
+local config_path="/opt/etc/bot_config.py"
+if [ -f "/opt/etc/bot/bot_config.py" ]; then
+config_path="/opt/etc/bot/bot_config.py"
+fi
+
+check_allow_vpn_in_config=$(grep "vpn_allowed" "$config_path" 2>/dev/null | head -1 | sed 's/=/ /g' | tr -d '"' | awk '{print $2}')
+if [ -z "${check_allow_vpn_in_config}" ]; then
+    vpn_services="IKE|SSTP|OpenVPN|Wireguard|L2TP"
+else
+    vpn_services=$(echo "$check_allow_vpn_in_config")
+fi
+
+curl -s localhost:79/rci/show/interface | grep -E "$vpn_services" | grep id | awk '{print $2}' | tr -d '",' | uniq -u | while read -r vpn; do
+    [ -z "$vpn" ] && continue
+    vpn_link_up=$(curl -s localhost:79/rci/show/interface/"$vpn"/link | tr -d '"')
+    if [ "$vpn_link_up" = "up" ]; then
+        printf '%s\n' "$vpn"
+        break
+    fi
+done
+}
+
+add_vpn_mark_rules() {
+unblockvpn="$1"
+vpn_type="$2"
+
+[ -z "$unblockvpn" ] && return 0
+[ -z "$vpn_type" ] && return 0
+
+vpn_type_lower=$(echo "$vpn_type" | tr [:upper:] [:lower:])
+get_vpn_fwmark_id=$(grep "$vpn_type_lower" /opt/etc/iproute2/rt_tables | awk '{print $1}')
+
+if [ -z "${get_vpn_fwmark_id}" ]; then
+    return 0
+fi
+
+vpn_mark_id=$(echo 0xd"$get_vpn_fwmark_id")
+
+if iptables-save 2>/dev/null | grep -q "$unblockvpn"; then
+    vpn_rule_ok=$(echo Правила для "$unblockvpn" уже есть.)
+    echo "$vpn_rule_ok"
+    return 0
+fi
+
+info_vpn_rule=$(echo ipset: "$unblockvpn", mark_id: "$vpn_mark_id")
+logger -t "$TAG" "$info_vpn_rule"
+
+ipset create "$unblockvpn" hash:net -exist 2>/dev/null
+
+fastnat=$(curl -s localhost:79/rci/show/version | grep ppe)
+software=$(curl -s localhost:79/rci/show/rc/ppe | grep software -C1  | head -1 | awk '{print $2}' | tr -d ",")
+hardware=$(curl -s localhost:79/rci/show/rc/ppe | grep hardware -C1  | head -1 | awk '{print $2}' | tr -d ",")
+if [ -z "$fastnat" ] && [ "$software" = "false" ] && [ "$hardware" = "false" ]; then
+    info=$(echo "VPN: fastnat, swnat и hwnat ВЫКЛЮЧЕНЫ, правила добавлены")
+    logger -t "$TAG" "$info"
+    iptables -A PREROUTING -w -t mangle -p tcp -m set --match-set "$unblockvpn" dst -j MARK --set-mark "$vpn_mark_id"
+    iptables -A PREROUTING -w -t mangle -p udp -m set --match-set "$unblockvpn" dst -j MARK --set-mark "$vpn_mark_id"
+else
+    info=$(echo "VPN: fastnat, swnat и hwnat ВКЛЮЧЕНЫ, правила добавлены")
+    logger -t "$TAG" "$info"
+    iptables -A PREROUTING -w -t mangle -m conntrack --ctstate NEW -m set --match-set "$unblockvpn" dst -j CONNMARK --set-mark "$vpn_mark_id"
+    iptables -A PREROUTING -w -t mangle -j CONNMARK --restore-mark
+fi
+}
+
+default_vpn_interface=$(get_default_vpn_interface)
+if [ -f /opt/etc/unblock/vpn.txt ]; then
+add_vpn_mark_rules unblockvpn "$default_vpn_interface"
+fi
+
 if ls -d /opt/etc/unblock/vpn-*.txt >/dev/null 2>&1; then
 for vpn_file_name in /opt/etc/unblock/vpn*; do
 # выполняется цикл поиска файлов для vpn
@@ -157,55 +228,7 @@ unblockvpn=$(echo unblock"$vpn_unblock_name");
 vpn_type=$(echo "$unblockvpn" | sed 's/-/ /g' | awk '{print $NF}')
 vpn_link_up=$(curl -s localhost:79/rci/show/interface/"$vpn_type"/link | tr -d '"')
 if [ "$vpn_link_up" = "up" ]; then
-
-vpn_type_lower=$(echo "$vpn_type" | tr [:upper:] [:lower:])
-get_vpn_fwmark_id=$(grep "$vpn_type_lower" /opt/etc/iproute2/rt_tables | awk '{print $1}')
-
-# проверка на особый случай, когда файл vpn с сайтами есть, подключение есть, а таблицы с fwmark под него нет
-#vpn_table_id=$((1000 + 1));
-if [ -n "${get_vpn_fwmark_id}" ]; then vpn_table_id=$get_vpn_fwmark_id; else break; fi
-vpn_mark_id=$(echo 0xd"$vpn_table_id")
-
-#не работает должным образом
-#if [ -z '$(iptables-save 2>/dev/null | grep "$unblockvpn")' ]; then
-
-# проверяем есть ли правила vpn для множества
-if iptables-save 2>/dev/null | grep -q "$unblockvpn"; then
-	vpn_rule_ok=$(echo Правила для "$unblockvpn" уже есть.)
-	echo "$vpn_rule_ok"
-	#logger -t "$TAG" "$vpn_rule_ok"
-
-	else
-	info_vpn_rule=$(echo ipset: "$unblockvpn", mark_id: "$vpn_mark_id")
-	logger -t "$TAG" "$info_vpn_rule"
-
-	ipset create "$unblockvpn" hash:net -exist 2>/dev/null
-
-	# проверяем fastnat и ускорители
-	fastnat=$(curl -s localhost:79/rci/show/version | grep ppe)
-	software=$(curl -s localhost:79/rci/show/rc/ppe | grep software -C1  | head -1 | awk '{print $2}' | tr -d ",")
-	hardware=$(curl -s localhost:79/rci/show/rc/ppe | grep hardware -C1  | head -1 | awk '{print $2}' | tr -d ",")
-	if [ -z "$fastnat" ] && [ "$software" = "false" ] && [ "$hardware" = "false" ]; then
-	    info=$(echo "VPN: fastnat, swnat и hwnat ВЫКЛЮЧЕНЫ, правила добавлены")
-		  logger -t "$TAG" "$info"
-	    # С отключеными fastnat и ускорителями
-	    iptables -A PREROUTING -w -t mangle -p tcp -m set --match-set "$unblockvpn" dst -j MARK --set-mark "$vpn_mark_id"
-	    iptables -A PREROUTING -w -t mangle -p udp -m set --match-set "$unblockvpn" dst -j MARK --set-mark "$vpn_mark_id"
-
-	    # закоментируйте правила выше и раскоментируйте эти, если хотите перенаправлять трафик только с интерфейса br0
-	    #iptables -I PREROUTING -w -t mangle -i br0 -p tcp -m set --match-set "$unblockvpn" dst -j MARK --set-mark "$vpn_mark_id"
-	    #iptables -I PREROUTING -w -t mangle -i br0 -p udp -m set --match-set "$unblockvpn" dst -j MARK --set-mark "$vpn_mark_id"
-
-		  # не включайте, возможны проблемы: следующее исходящее правило дает возможность использовать сайты из списка в системе entware.
-	    #iptables -A OUTPUT -t mangle -p tcp -m set --match-set "$unblockvpn" dst -j MARK --set-mark "$vpn_mark_id"
-	else
-		  info=$(echo "VPN: fastnat, swnat и hwnat ВКЛЮЧЕНЫ, правила добавлены")
-		  logger -t "$TAG" "$info"
-	    # Без отключения
-	    iptables -A PREROUTING -w -t mangle -m conntrack --ctstate NEW -m set --match-set "$unblockvpn" dst -j CONNMARK --set-mark "$vpn_mark_id"
-	    iptables -A PREROUTING -w -t mangle -j CONNMARK --restore-mark
-	fi
-fi # iptables
+add_vpn_mark_rules "$unblockvpn" "$vpn_type"
 fi # link
 
 done
