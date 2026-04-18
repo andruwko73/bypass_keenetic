@@ -894,18 +894,18 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode('utf-8'))
 
     def _build_form(self, message=''):
-                status = _web_status_snapshot()
+        status = _web_status_snapshot()
         message_block = ''
         if message:
             safe_message = html.escape(message)
-                        message_block = f'''<div class="notice notice-result">
-    <strong>Результат</strong>
-    <p>{safe_message}</p>
+            message_block = f'''<div class="notice notice-result">
+  <strong>Результат</strong>
+  <p>{safe_message}</p>
 </div>'''
-                socks_block = ''
-                if status['socks_details']:
-                        socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}</p>'
-                status_block = f'''<div class="status-grid">
+        socks_block = ''
+        if status['socks_details']:
+            socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}' + '</p>'
+        status_block = f'''<div class="status-grid">
     <div class="status-card">
         <span class="status-label">Процесс бота</span>
         <strong class="status-value">{html.escape(status['state_label'])}</strong>
