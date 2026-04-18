@@ -51,6 +51,7 @@ localporttor = config.localporttor
 localporttrojan = config.localporttrojan
 localportvmess = config.localportvmess
 localportvless = config.localportvless
+localportvless_transparent = str(int(localportvless) + 1)
 dnsporttor = config.dnsporttor
 dnsovertlsport = config.dnsovertlsport
 dnsoverhttpsport = config.dnsoverhttpsport
@@ -2068,6 +2069,17 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
             'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
             'tag': 'in-vless'
         })
+        config_data['inbounds'].append({
+            'port': int(localportvless_transparent),
+            'listen': '0.0.0.0',
+            'protocol': 'dokodemo-door',
+            'settings': {
+                'network': 'tcp',
+                'followRedirect': True
+            },
+            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
+            'tag': 'in-vless-transparent'
+        })
         network = vless_data.get('type', 'tcp')
         if network == '':
             network = 'tcp'
@@ -2122,7 +2134,7 @@ def _build_v2ray_config(vmess_key=None, vless_key=None):
         })
         config_data['routing']['rules'].append({
             'type': 'field',
-            'inboundTag': ['in-vless'],
+            'inboundTag': ['in-vless', 'in-vless-transparent'],
             'outboundTag': 'proxy-vless',
             'enabled': True
         })

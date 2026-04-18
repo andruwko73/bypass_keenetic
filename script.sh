@@ -29,6 +29,8 @@ localportsh=$(grep "localportsh" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
 #dnsporttor=$(grep "dnsporttor" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
 localporttor=$(grep "localporttor" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
 localportvmess=$(grep "localportvmess" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
+localportvless=$(grep "localportvless" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
+localportvless_transparent=$((localportvless + 1))
 localporttrojan=$(grep "localporttrojan" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
 dnsovertlsport=$(grep "dnsovertlsport" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
 dnsoverhttpsport=$(grep "dnsoverhttpsport" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
@@ -232,6 +234,7 @@ if [ "$1" = "-install" ]; then
     sed -i "s/9141/${localporttor}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10810/${localportvmess}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10811/${localportvless}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
+    sed -i "s/10812/${localportvless_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10829/${localporttrojan}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     echo "Установлено перенаправление пакетов с адресатами из unblock в: Tor, Shadowsocks, VPN, Trojan, v2ray"
 
@@ -337,6 +340,7 @@ if [ "$1" = "-update" ]; then
     sed -i "s/9141/${localporttor}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10810/${localportvmess}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10811/${localportvless}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
+    sed -i "s/10812/${localportvless_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10829/${localporttrojan}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1
 

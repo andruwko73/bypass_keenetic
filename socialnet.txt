@@ -55,3 +55,11 @@ tv.youtube.com
 s.youtube.com
 youtube-nocookie.com
 youtube-ui.l.google.com
+connectivitycheck.gstatic.com
+connectivitycheck.android.com
+clients3.google.com
+android.clients.google.com
+www.google.com
+www.gstatic.com
+gvt1.com
+gvt2.com
