@@ -49,6 +49,18 @@ ensure_entware_dns() {
   } > "$tmp_resolv"
   cat "$tmp_resolv" > /etc/resolv.conf
   rm -f "$tmp_resolv"
+
+  entware_ip=$(nslookup bin.entware.net 8.8.8.8 2>/dev/null | awk '/^Address [0-9]+: / {print $3}' | tail -n1)
+  if [ -n "$entware_ip" ]; then
+    tmp_hosts="/tmp/hosts.entware.$$"
+    {
+      grep -v '[[:space:]]bin\.entware\.net$' /etc/hosts 2>/dev/null || true
+      printf '%s bin.entware.net\n' "$entware_ip"
+    } > "$tmp_hosts"
+    cat "$tmp_hosts" > /etc/hosts
+    rm -f "$tmp_hosts"
+    echo "bin.entware.net закреплён в /etc/hosts как $entware_ip"
+  fi
 }
 
 if [ "$1" = "-remove" ]; then

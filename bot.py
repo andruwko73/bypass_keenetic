@@ -180,6 +180,28 @@ def _prepare_entware_dns():
     except Exception:
         notes.append('не удалось обновить /etc/resolv.conf')
 
+    try:
+        lookup_output = subprocess.check_output(
+            ['nslookup', 'bin.entware.net', '8.8.8.8'],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        host_matches = re.findall(r'Address\s+\d+:\s+((?:\d{1,3}\.){3}\d{1,3})', lookup_output)
+        entware_ip = host_matches[-1] if host_matches else ''
+        if entware_ip:
+            hosts_path = '/etc/hosts'
+            preserved_lines = []
+            if os.path.exists(hosts_path):
+                with open(hosts_path, 'r', encoding='utf-8', errors='ignore') as file:
+                    preserved_lines = [line.rstrip('\n') for line in file if 'bin.entware.net' not in line]
+            with open(hosts_path, 'w', encoding='utf-8') as file:
+                if preserved_lines:
+                    file.write('\n'.join(preserved_lines) + '\n')
+                file.write(f'{entware_ip} bin.entware.net\n')
+            notes.append(f'bin.entware.net закреплён в /etc/hosts как {entware_ip}')
+    except Exception:
+        notes.append('не удалось закрепить bin.entware.net в /etc/hosts')
+
     return 'Подготовка Entware DNS: ' + ', '.join(notes)
 
 
