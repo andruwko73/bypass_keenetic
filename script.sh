@@ -25,6 +25,20 @@ dnsoverhttpsport=$(grep "dnsoverhttpsport" /opt/etc/bot_config.py | grep -Eo "[0
 keen_os_full=$(curl -s localhost:79/rci/show/version/title | tr -d \",)
 keen_os_short=$(curl -s localhost:79/rci/show/version/title | tr -d \", | cut -b 1)
 
+ensure_entware_dns() {
+  if nslookup bin.entware.net 192.168.1.1 >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Локальный DNS не резолвит bin.entware.net, добавляем внешние DNS для Entware"
+  if ! grep -q '^nameserver 8.8.8.8$' /etc/resolv.conf 2>/dev/null; then
+    printf 'nameserver 8.8.8.8\n' >> /etc/resolv.conf
+  fi
+  if ! grep -q '^nameserver 1.1.1.1$' /etc/resolv.conf 2>/dev/null; then
+    printf 'nameserver 1.1.1.1\n' >> /etc/resolv.conf
+  fi
+}
+
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     # opkg remove curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
@@ -83,6 +97,7 @@ fi
 if [ "$1" = "-install" ]; then
     echo "Начинаем установку"
     echo "Ваша версия KeenOS" "${keen_os_full}"
+  ensure_entware_dns
     opkg update
     # opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
     opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip python3-pysocks v2ray trojan
@@ -256,6 +271,7 @@ fi
 
 if [ "$1" = "-update" ]; then
     echo "Начинаем обновление."
+  ensure_entware_dns
     opkg update > /dev/null 2>&1
     # opkg update
     echo "Ваша версия KeenOS" "${keen_os_full}."
