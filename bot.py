@@ -305,37 +305,43 @@ def update_proxy(proxy_type):
     return True, None
 
 
-def check_telegram_api():
+def check_telegram_api(retries=2, retry_delay=7):
     url = f'https://api.telegram.org/bot{token}/getMe'
     proxies = telebot.apihelper.proxy if getattr(telebot.apihelper, 'proxy', None) else None
-    try:
-        response = requests.get(url, timeout=(30, 45), proxies=proxies)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('ok'):
-            return '✅ Доступ к api.telegram.org подтверждён.'
-        return f'⚠️ Telegram API ответил: {data.get("description", "Не удалось определить причину")} '
-    except requests.exceptions.RequestException as exc:
-        error_text = str(exc)
-        if 'Missing dependencies for SOCKS support' in error_text:
-            return ('❌ Не удалось подключиться к Telegram API: отсутствует поддержка SOCKS (PySocks). '
-                    'Установите python3-pysocks или используйте режим без SOCKS.')
-        if proxy_mode == 'trojan':
-            return ('❌ Не удалось подключиться к Telegram API через Trojan: текущая локальная конфигурация не поддерживает HTTPS/HTTP proxy '
-                    'в этом режиме. Используйте Shadowsocks, Vmess или Vless для прокси Telegram API.')
-        if 'Connection refused' in error_text or 'SOCKSHTTPSConnection' in error_text:
-            if proxy_mode in ['shadowsocks', 'vmess', 'vless']:
-                port = {
-                    'shadowsocks': localportsh,
-                    'vmess': localportvmess,
-                    'vless': localportvless
-                }.get(proxy_mode)
-                if port and not _check_socks5_handshake(port):
-                    return ('❌ Не удалось подключиться к Telegram API: соединение через SOCKS-прокси отказано. '
-                            'Локальный порт отвечает, но не как SOCKS5. Проверьте конфигурацию прокси-сервиса и логи.')
-            return ('❌ Не удалось подключиться к Telegram API: соединение через SOCKS-прокси отказано. '
-                    'Проверьте, что локальный прокси-сервис запущен и порт доступен.')
-        return f'❌ Не удалось подключиться к Telegram API: {exc}'
+    last_result = None
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(url, timeout=(30, 45), proxies=proxies)
+            response.raise_for_status()
+            data = response.json()
+            if data.get('ok'):
+                return '✅ Доступ к api.telegram.org подтверждён.'
+            return f'⚠️ Telegram API ответил: {data.get("description", "Не удалось определить причину")} '
+        except requests.exceptions.RequestException as exc:
+            error_text = str(exc)
+            if 'Missing dependencies for SOCKS support' in error_text:
+                return ('❌ Не удалось подключиться к Telegram API: отсутствует поддержка SOCKS (PySocks). '
+                        'Установите python3-pysocks или используйте режим без SOCKS.')
+            if proxy_mode == 'trojan':
+                return ('❌ Не удалось подключиться к Telegram API через Trojan: текущая локальная конфигурация не поддерживает HTTPS/HTTP proxy '
+                        'в этом режиме. Используйте Shadowsocks, Vmess или Vless для прокси Telegram API.')
+            if 'Connection refused' in error_text or 'SOCKSHTTPSConnection' in error_text:
+                if proxy_mode in ['shadowsocks', 'vmess', 'vless']:
+                    port = {
+                        'shadowsocks': localportsh,
+                        'vmess': localportvmess,
+                        'vless': localportvless
+                    }.get(proxy_mode)
+                    if port and not _check_socks5_handshake(port):
+                        return ('❌ Не удалось подключиться к Telegram API: соединение через SOCKS-прокси отказано. '
+                                'Локальный порт отвечает, но не как SOCKS5. Проверьте конфигурацию прокси-сервиса и логи.')
+                last_result = ('❌ Не удалось подключиться к Telegram API: соединение через SOCKS-прокси отказано. '
+                               'Проверьте, что локальный прокси-сервис запущен и порт доступен.')
+            else:
+                last_result = f'❌ Не удалось подключиться к Telegram API: {exc}'
+            if attempt < retries:
+                time.sleep(retry_delay)
+    return last_result
 
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
@@ -1015,7 +1021,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             elif key_type == 'vmess':
                 vmess(key_value)
                 os.system('/opt/etc/init.d/S24v2ray restart')
-                time.sleep(3)
+                time.sleep(8)
                 ok, error = update_proxy('vmess')
                 if ok:
                     if not _ensure_service_port(localportvmess, '/opt/etc/init.d/S24v2ray restart', retries=2, sleep_after_restart=5):
@@ -1039,7 +1045,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             elif key_type == 'vless':
                 vless(key_value)
                 os.system('/opt/etc/init.d/S24v2ray restart')
-                time.sleep(3)
+                time.sleep(8)
                 ok, error = update_proxy('vless')
                 if ok:
                     if not _ensure_service_port(localportvless, '/opt/etc/init.d/S24v2ray restart', retries=2, sleep_after_restart=5):
