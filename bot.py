@@ -270,6 +270,36 @@ def _send_telegram_chunks(chat_id, text, reply_markup=None):
         bot.send_message(chat_id, chunk, reply_markup=reply_markup)
 
 
+def _install_proxy_from_message(message, key_type, key_value, reply_markup):
+    installers = {
+        'shadowsocks': shadowsocks,
+        'vmess': vmess,
+        'vless': vless,
+        'trojan': trojan,
+    }
+    try:
+        installers[key_type](key_value)
+        result = _apply_installed_proxy(key_type, key_value)
+    except Exception as exc:
+        update_proxy('none')
+        result = f'Ошибка установки: {exc}'
+
+    level_reset_markup = reply_markup
+    try:
+        bot.send_message(message.chat.id, result, reply_markup=level_reset_markup)
+    except Exception:
+        update_proxy('none')
+        fallback_result = (
+            f'{result}\n\n'
+            'Бот переключён в режим none, потому что подтверждение через новый прокси отправить не удалось.'
+        )
+        try:
+            bot.send_message(message.chat.id, fallback_result, reply_markup=level_reset_markup)
+        except Exception:
+            pass
+    return result
+
+
 def _download_repo_script(repo_owner, repo_name):
     url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/main/script.sh'
     response = requests.get(
@@ -1288,12 +1318,9 @@ def bot_message(message):
                 return
 
             if level == 5:
-                shadowsocks(message.text)
-                time.sleep(2)
-                os.system('/opt/etc/init.d/S22shadowsocks restart')
                 level = 0
-                bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
-                # return
+                _install_proxy_from_message(message, 'shadowsocks', message.text, main)
+                return
 
             if level == 6:
                 tormanually(message.text)
@@ -1356,22 +1383,19 @@ def bot_message(message):
                     return
 
             if level == 9:
-                vmess(message.text)
-                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
                 level = 0
-                bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
+                _install_proxy_from_message(message, 'vmess', message.text, main)
+                return
 
             if level == 10:
-                trojan(message.text)
-                os.system('/opt/etc/init.d/S22trojan restart')
                 level = 0
-                bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
+                _install_proxy_from_message(message, 'trojan', message.text, main)
+                return
 
             if level == 11:
-                vless(message.text)
-                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
                 level = 0
-                bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
+                _install_proxy_from_message(message, 'vless', message.text, main)
+                return
 
             if message.text == 'Tor вручную':
                 #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
@@ -1516,6 +1540,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         command_state = _get_web_command_state()
         current_keys = _load_current_keys()
         unblock_lists = _load_unblock_lists()
+
         message_block = ''
         if message:
             safe_message = html.escape(message)
@@ -1523,6 +1548,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
   <strong>Результат</strong>
   <pre class="log-output">{safe_message}</pre>
 </div>'''
+
         command_block = ''
         if command_state['label']:
             command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
@@ -1531,28 +1557,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
   <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
   <pre class="log-output">{html.escape(command_text)}</pre>
 </div>'''
-                socks_block = ''
-                if status['socks_details']:
-                        socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}' + '</p>'
 
-                unblock_cards = []
-                for entry in unblock_lists:
-                        safe_name = html.escape(entry['name'])
-                        safe_label = html.escape(entry['label'])
-                        safe_content = html.escape(entry['content'])
-                        unblock_cards.append(f'''<section>
-        <h2>{safe_label}</h2>
-        <form method="post" action="/save_unblock_list">
-            <input type="hidden" name="list_name" value="{safe_name}">
-            <textarea name="content" rows="8" placeholder="example.org\napi.telegram.org">{safe_content}</textarea>
-            <button type="submit">Сохранить список</button>
-        </form>
-        <form method="post" action="/append_socialnet">
-            <input type="hidden" name="list_name" value="{safe_name}">
-            <button type="submit">Добавить соцсети</button>
-        </form>
-    </section>''')
-                unblock_lists_block = ''.join(unblock_cards)
+        socks_block = ''
+        if status['socks_details']:
+            socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}' + '</p>'
+
         status_block = f'''<div class="status-grid">
     <div class="status-card">
         <span class="status-label">Процесс бота</span>
@@ -1568,6 +1577,47 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     <p>{html.escape(status['api_status'])}</p>
     {socks_block}
 </div>'''
+
+        protocol_sections = [
+            ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
+            ('vmess', 'Vmess', 6, 'vmess://...'),
+            ('vless', 'Vless', 6, 'vless://...'),
+            ('trojan', 'Trojan', 5, 'trojan://...'),
+            ('tor', 'Tor вручную', 8, 'Bridge obfs4 ...'),
+        ]
+        protocol_cards = []
+        for key_name, title, rows, placeholder in protocol_sections:
+            safe_value = html.escape(current_keys.get(key_name, ''))
+            safe_title = html.escape(title)
+            protocol_cards.append(f'''<section>
+    <h2>{safe_title}</h2>
+    <form method="post" action="/install">
+      <input type="hidden" name="type" value="{key_name}">
+      <textarea name="key" rows="{rows}" placeholder="{html.escape(placeholder)}" required>{safe_value}</textarea>
+      <button type="submit">Сохранить {safe_title}</button>
+    </form>
+  </section>''')
+        protocol_cards_html = ''.join(protocol_cards)
+
+        unblock_cards = []
+        for entry in unblock_lists:
+            safe_name = html.escape(entry['name'])
+            safe_label = html.escape(entry['label'])
+            safe_content = html.escape(entry['content'])
+            unblock_cards.append(f'''<section>
+    <h2>{safe_label}</h2>
+    <form method="post" action="/save_unblock_list">
+      <input type="hidden" name="list_name" value="{safe_name}">
+      <textarea name="content" rows="8" placeholder="example.org&#10;api.telegram.org">{safe_content}</textarea>
+      <button type="submit">Сохранить список</button>
+    </form>
+    <form method="post" action="/append_socialnet">
+      <input type="hidden" name="list_name" value="{safe_name}">
+      <button type="submit">Добавить соцсети</button>
+    </form>
+  </section>''')
+        unblock_lists_block = ''.join(unblock_cards)
+
         return f'''<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -1659,50 +1709,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     </form>
         <p>Смените режим и затем проверьте блок статуса ниже. Он покажет реальную доступность Telegram API, а не только запуск процесса.</p>
   </section>
-    <section>
-    <h2>Shadowsocks</h2>
-    <form method="post" action="/install">
-      <input type="hidden" name="type" value="shadowsocks">
-            <textarea name="key" rows="5" placeholder="shadowsocks://..." required>{html.escape(current_keys['shadowsocks'])}</textarea>
-            <button type="submit">Сохранить ключ Shadowsocks</button>
-    </form>
-  </section>
-  <section>
-    <h2>Vmess</h2>
-    <form method="post" action="/install">
-      <input type="hidden" name="type" value="vmess">
-            <textarea name="key" rows="6" placeholder="vmess://..." required>{html.escape(current_keys['vmess'])}</textarea>
-            <button type="submit">Сохранить ключ Vmess</button>
-    </form>
-  </section>
-  <section>
-    <h2>Vless</h2>
-    <form method="post" action="/install">
-      <input type="hidden" name="type" value="vless">
-            <textarea name="key" rows="6" placeholder="vless://..." required>{html.escape(current_keys['vless'])}</textarea>
-            <button type="submit">Сохранить ключ Vless</button>
-    </form>
-  </section>
-  <section>
-    <h2>Trojan</h2>
-    <form method="post" action="/install">
-      <input type="hidden" name="type" value="trojan">
-            <textarea name="key" rows="5" placeholder="trojan://..." required>{html.escape(current_keys['trojan'])}</textarea>
-            <button type="submit">Сохранить ключ Trojan</button>
-    </form>
-  </section>
+        {protocol_cards_html}
     <section class="wide">
     <h2>Статус бота</h2>
         {status_block}
         <p>Если процесс поднят, но Telegram API недоступен, бот не сможет отвечать в чате. Проверяйте этот блок после смены ключа или режима.</p>
-  </section>
-  <section>
-    <h2>Tor вручную</h2>
-    <form method="post" action="/install">
-      <input type="hidden" name="type" value="tor">
-            <textarea name="key" rows="8" placeholder="Bridge obfs4 ..." required>{html.escape(current_keys['tor'])}</textarea>
-            <button type="submit">Сохранить мосты Tor</button>
-    </form>
   </section>
   <section>
     <h2>Запустить бот</h2>
@@ -2276,6 +2287,26 @@ def main():
     if not ok:
         proxy_mode = config.default_proxy_mode
         update_proxy(proxy_mode)
+    elif proxy_mode in ['shadowsocks', 'vmess', 'vless']:
+        startup_settings = {
+            'shadowsocks': localportsh,
+            'vmess': localportvmess,
+            'vless': localportvless,
+        }
+        startup_port = startup_settings.get(proxy_mode)
+        endpoint_ok, endpoint_message = _check_local_proxy_endpoint(proxy_mode, startup_port)
+        if not endpoint_ok:
+            with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
+                fl.write(f'Прокси-режим {proxy_mode} отключён при старте: {endpoint_message}\n')
+            proxy_mode = 'none'
+            update_proxy('none')
+        else:
+            api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=8, read_timeout=10)
+            if not api_status.startswith('✅'):
+                with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
+                    fl.write(f'Прокси-режим {proxy_mode} отключён при старте: {api_status}\n')
+                proxy_mode = 'none'
+                update_proxy('none')
     start_http_server()
     wait_for_bot_start()
     while True:
