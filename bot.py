@@ -16,6 +16,7 @@
 import asyncio
 import subprocess
 import os
+import re
 import stat
 import sys
 import time
@@ -204,6 +205,15 @@ def _check_socks5_handshake(port, timeout=3):
         return False
 
 
+def _wait_for_socks5_handshake(port, timeout=20):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _check_socks5_handshake(port):
+            return True
+        time.sleep(1)
+    return False
+
+
 def _ensure_service_port(port, restart_cmd=None, retries=2, sleep_after_restart=5, timeout=20):
     if _wait_for_port(None, port, timeout=timeout):
         return True
@@ -358,22 +368,44 @@ def _parse_trojan_key(key):
 
 
 def _build_proxy_diagnostics(key_type, key_value):
-    parts = []
     key_summary = _format_proxy_key_summary(key_type, key_value)
-    if key_summary:
+    if key_type not in ['vmess', 'vless']:
+        return key_summary
+    error_tail = _read_tail('/opt/etc/v2ray/error.log', lines=25)
+    lines = [line.strip() for line in error_tail.splitlines() if line.strip()]
+    last_issue = ''
+    for line in reversed(lines):
+        if ('failed to process outbound traffic' in line or
+                'failed to find an available destination' in line or
+                'dial tcp' in line or
+                'lookup ' in line):
+            last_issue = line
+            break
+    issue_summary = ''
+    if last_issue:
+        lookup_match = re.search(r'lookup\s+([^\s]+)', last_issue)
+        dial_match = re.search(r'dial tcp\s+([^:]+:\d+)', last_issue)
+        if 'server misbehaving' in last_issue and lookup_match:
+            issue_summary = f'Причина: v2ray не смог разрешить адрес {lookup_match.group(1)} через локальный DNS.'
+        elif 'operation was canceled' in last_issue and dial_match:
+            issue_summary = f'Причина: сервер {dial_match.group(1)} не установил соединение через v2ray.'
+        elif 'connection refused' in last_issue and dial_match:
+            issue_summary = f'Причина: сервер {dial_match.group(1)} отклонил соединение.'
+        elif 'timed out' in last_issue or 'i/o timeout' in last_issue:
+            issue_summary = 'Причина: соединение через прокси завершилось по таймауту.'
+        elif 'failed to find an available destination' in last_issue:
+            issue_summary = 'Причина: v2ray не смог построить рабочее исходящее соединение.'
+    parts = []
+    if issue_summary:
+        parts.append(issue_summary)
+    elif key_summary:
         parts.append(key_summary)
-    if key_type == 'vmess':
-        parts.append(_v2ray_diagnostics())
-        parts.append('Сводка outbound: ' + _v2ray_outbound_summary(vmess_key=key_value))
-    elif key_type == 'vless':
-        parts.append(_v2ray_diagnostics())
-        parts.append('Сводка outbound: ' + _v2ray_outbound_summary(vless_key=key_value))
-    return ' '.join(part for part in parts if part)
+    return ' '.join(parts)
 
 
 def _check_local_proxy_endpoint(key_type, port):
     if key_type in ['shadowsocks', 'vmess', 'vless']:
-        if _check_socks5_handshake(port):
+        if _wait_for_socks5_handshake(port, timeout=12):
             return True, f'Локальный SOCKS-порт 127.0.0.1:{port} отвечает как SOCKS5.'
         if _port_is_listening(port):
             return False, f'Локальный порт 127.0.0.1:{port} открыт, но не отвечает как SOCKS5.'
@@ -436,7 +468,7 @@ def _apply_installed_proxy(key_type, key_value):
         api_status = check_telegram_api(retries=1, retry_delay=2, connect_timeout=10, read_timeout=15)
         if api_status.startswith('✅'):
             return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
-                    f'Бот переведён в режим {current["label"]}. {api_status} {diagnostics}').strip()
+                    f'Бот переведён в режим {current["label"]}. {api_status}').strip()
         return (f'⚠️ {current["label"]} ключ сохранён. {endpoint_message} '
                 f'Бот переведён в режим {current["label"]}, но Telegram API не проходит через этот прокси. '
                 f'{api_status} {diagnostics}').strip()
@@ -1729,14 +1761,18 @@ def main():
         update_proxy(proxy_mode)
     start_http_server()
     wait_for_bot_start()
-    try:
-        bot_polling = True
-        bot.infinity_polling(timeout=60, long_polling_timeout=50)
-    except Exception as err:
-        bot_polling = False
-        fl = open("/opt/etc/error.log", "w")
-        fl.write(str(err))
-        fl.close()
+    while True:
+        try:
+            bot_polling = True
+            bot.infinity_polling(timeout=60, long_polling_timeout=50)
+        except Exception as err:
+            bot_polling = False
+            with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
+                fl.write(str(err) + '\n')
+            time.sleep(5)
+        else:
+            bot_polling = False
+            time.sleep(2)
 
 
 if __name__ == '__main__':
