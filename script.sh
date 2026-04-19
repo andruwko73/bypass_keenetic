@@ -11,6 +11,7 @@
 # оригинальный репозиторий (tas-unn), пользовательский форк
 
 repo="andruwko73"
+REPO_REF="${REPO_REF:-main}"
 
 config_get() {
   key="$1"
@@ -395,24 +396,24 @@ if [ "$1" = "-update" ]; then
 
     if [ "${keen_os_short}" = "4" ]; then
       echo "KeenOS 4+";
-      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/100-unblock-vpn-v4.sh"
+      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn-v4.sh"
     elif [ "${keen_os_short}" = "3" ]; then
       echo "KeenOS 3+";
-      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/100-unblock-vpn.sh"
+      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh"
     else
       echo "Your really KeenOS ???";
-      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/100-unblock-vpn.sh"
+      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh"
     fi
 
     echo "Скачиваем обновления во временную папку и проверяем файлы."
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/100-ipset.sh" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/100-redirect.sh" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-ipset.sh" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-redirect.sh" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
     download_update_file "$vpn_script_url" "$stage_dir/100-unblock-vpn.sh" "#!/bin/sh" "100-unblock-vpn.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/unblock_ipset.sh" "$stage_dir/unblock_ipset.sh" "#!/bin/sh" "unblock_ipset.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/unblock.dnsmasq" "$stage_dir/unblock_dnsmasq.sh" "#!/bin/sh" "unblock.dnsmasq" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_ipset.sh" "$stage_dir/unblock_ipset.sh" "#!/bin/sh" "unblock_ipset.sh" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock.dnsmasq" "$stage_dir/unblock_dnsmasq.sh" "#!/bin/sh" "unblock.dnsmasq" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
 
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/100-redirect.sh"

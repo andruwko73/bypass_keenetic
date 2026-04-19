@@ -349,12 +349,22 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
 
 
 def _download_repo_script(repo_owner, repo_name):
-    url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/main/script.sh'
     session = requests.Session()
     session.trust_env = False
+    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/main'
+    api_response = session.get(
+        api_url,
+        headers={'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+        timeout=30,
+    )
+    api_response.raise_for_status()
+    repo_ref = str(api_response.json().get('sha', '')).strip()
+    if not repo_ref:
+        raise ValueError('GitHub не вернул commit SHA для script.sh')
+
+    url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/script.sh'
     response = session.get(
         url,
-        params={'ts': str(int(time.time()))},
         headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
         timeout=30,
     )
@@ -365,7 +375,7 @@ def _download_repo_script(repo_owner, repo_name):
     with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
         file.write(script_text)
     os.chmod('/opt/root/script.sh', stat.S_IRWXU)
-    return url, script_text
+    return url, script_text, repo_ref
 
 
 def _build_direct_fetch_env():
@@ -381,8 +391,10 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
     if progress_command:
         _set_web_command_progress(progress_command, '\n'.join(logs))
     if repo_owner and repo_name:
-        url, script_text = _download_repo_script(repo_owner, repo_name)
+        url, script_text, repo_ref = _download_repo_script(repo_owner, repo_name)
+        direct_env['REPO_REF'] = repo_ref
         logs.append(f'Скрипт загружен из {url}')
+        logs.append(f'Коммит обновления: {repo_ref[:12]}')
         if repo_owner == fork_repo_owner and 'BOT_CONFIG_PATH' not in script_text:
             logs.append('⚠️ GitHub отдал старую версию script.sh, но legacy-пути уже подготовлены на роутере.')
         if progress_command:
