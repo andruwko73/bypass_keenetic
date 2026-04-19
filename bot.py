@@ -65,8 +65,10 @@ TELEGRAM_RESULT_RETRY_INTERVAL = 30
 
 WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
+STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 BOT_SOURCE_PATH = os.path.abspath(__file__)
+README_PATH = os.path.join(os.path.dirname(BOT_SOURCE_PATH), 'README.md')
 XRAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24xray'
 V2RAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24v2ray'
 XRAY_CONFIG_DIR = '/opt/etc/xray'
@@ -101,11 +103,7 @@ proxy_supports_http = {
     'vless2': True,
     'trojan': True,
 }
-web_status_cache = {
-    'timestamp': 0,
-    'data': None,
-}
-key_status_cache = {
+status_snapshot_cache = {
     'timestamp': 0,
     'data': None,
     'signature': None,
@@ -183,6 +181,81 @@ AUTHORIZED_USER_IDS.update(EXTRA_NUMERIC_USER_IDS)
 
 def _raw_github_url(path):
     return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/main/{path}?ts={int(time.time())}'
+
+
+def _telegram_info_text_from_readme():
+    readme_text = _read_text_file(README_PATH)
+    if not readme_text.strip():
+        return (
+            'Информация временно недоступна: README.md не найден.\n\n'
+            'Откройте страницу роутера 192.168.1.1:8080 или README в репозитории форка.'
+        )
+
+    lines = readme_text.splitlines()
+    sections = []
+    current_title = ''
+    current_lines = []
+
+    def flush_section():
+        if current_title and current_lines:
+            sections.append((current_title, current_lines[:]))
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        if line.startswith('## '):
+            flush_section()
+            current_title = line[3:].strip()
+            current_lines = []
+            continue
+        if current_title:
+            current_lines.append(line)
+    flush_section()
+
+    wanted_titles = ['Об этом форке', 'Как работает бот на странице 192.168.1.1:8080']
+    selected = []
+    for wanted in wanted_titles:
+        for title, section_lines in sections:
+            if title == wanted:
+                selected.append((title, section_lines))
+                break
+
+    if not selected:
+        selected = sections[:2]
+
+    text_lines = []
+    for title, section_lines in selected:
+        if text_lines:
+            text_lines.append('')
+        text_lines.append(title)
+        for line in section_lines:
+            stripped = line.strip()
+            if not stripped:
+                if text_lines and text_lines[-1] != '':
+                    text_lines.append('')
+                continue
+            if stripped.startswith('<') or stripped.startswith('```'):
+                continue
+            if stripped.startswith('!['):
+                continue
+            cleaned = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', stripped)
+            cleaned = cleaned.replace('`', '')
+            text_lines.append(cleaned)
+
+    cleaned_lines = []
+    previous_blank = False
+    for line in text_lines:
+        if not line:
+            if not previous_blank:
+                cleaned_lines.append('')
+            previous_blank = True
+            continue
+        cleaned_lines.append(line)
+        previous_blank = False
+
+    result = '\n'.join(cleaned_lines).strip()
+    if not result:
+        return 'Информация временно недоступна: README.md не содержит подходящего текста.'
+    return result[:3900]
 
 
 def _write_runtime_log(message, mode='a'):
@@ -1011,10 +1084,14 @@ def _load_current_keys():
     }
 
 
+def _invalidate_status_snapshot_cache():
+    status_snapshot_cache['timestamp'] = 0
+    status_snapshot_cache['data'] = None
+    status_snapshot_cache['signature'] = None
+
+
 def _invalidate_key_status_cache():
-    key_status_cache['timestamp'] = 0
-    key_status_cache['data'] = None
-    key_status_cache['signature'] = None
+    _invalidate_status_snapshot_cache()
 
 
 def _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=2, read_timeout=3):
@@ -1128,46 +1205,6 @@ def _protocol_status_for_key(key_name, key_value):
         'label': 'Работает' if api_ok else 'Прокси поднят, но трафик TG не проходит',
         'details': f'{endpoint_message} {api_message}'.strip(),
     }
-
-
-def _protocol_status_snapshot(current_keys, force_refresh=False):
-    signature = tuple((name, current_keys.get(name, '')) for name in sorted(current_keys))
-    now = time.time()
-    if (
-        not force_refresh and
-        key_status_cache['data'] is not None and
-        key_status_cache['signature'] == signature and
-        now - key_status_cache['timestamp'] < KEY_STATUS_CACHE_TTL
-    ):
-        return key_status_cache['data']
-
-    data = {}
-    for key_name, key_value in current_keys.items():
-        try:
-            data[key_name] = _protocol_status_for_key(key_name, key_value)
-        except Exception as exc:
-            _write_runtime_log(f'Ошибка проверки ключа {key_name}: {exc}')
-            data[key_name] = {
-                'tone': 'warn',
-                'label': 'Ошибка проверки',
-                'details': f'Не удалось завершить проверку ключа: {exc}',
-            }
-    key_status_cache['timestamp'] = now
-    key_status_cache['data'] = data
-    key_status_cache['signature'] = signature
-    return data
-
-
-def _cached_protocol_status_snapshot(current_keys):
-    signature = tuple((name, current_keys.get(name, '')) for name in sorted(current_keys))
-    now = time.time()
-    if (
-        key_status_cache['data'] is not None and
-        key_status_cache['signature'] == signature and
-        now - key_status_cache['timestamp'] < KEY_STATUS_CACHE_TTL
-    ):
-        return key_status_cache['data']
-    return None
 
 
 def _placeholder_protocol_statuses(current_keys):
@@ -1303,8 +1340,7 @@ def _load_bot_autostart():
 
 
 def _invalidate_web_status_cache():
-    web_status_cache['timestamp'] = 0
-    web_status_cache['data'] = None
+    _invalidate_status_snapshot_cache()
 
 
 def _last_proxy_disable_reason():
@@ -1733,13 +1769,11 @@ def _is_transient_telegram_api_failure(status_text):
     return any(marker in text for marker in markers)
 
 
-def _web_status_snapshot(force_refresh=False):
+def _build_web_status(current_keys):
     now = time.time()
-    if (not force_refresh and web_status_cache['data'] is not None and
-            now - web_status_cache['timestamp'] < WEB_STATUS_CACHE_TTL):
-        return web_status_cache['data']
     state_label = 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
     socks_details = ''
+    socks_ok = False
     if proxy_mode in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
         port = {
             'shadowsocks': localportsh_bot,
@@ -1764,15 +1798,56 @@ def _web_status_snapshot(force_refresh=False):
         'socks_details': socks_details,
         'fallback_reason': _last_proxy_disable_reason(),
     }
-    web_status_cache['timestamp'] = now
-    web_status_cache['data'] = snapshot
     return snapshot
 
 
-def _cached_web_status_snapshot():
+def _build_status_snapshot(current_keys, force_refresh=False):
+    signature = tuple((name, current_keys.get(name, '')) for name in sorted(current_keys))
     now = time.time()
-    if web_status_cache['data'] is not None and now - web_status_cache['timestamp'] < WEB_STATUS_CACHE_TTL:
-        return web_status_cache['data']
+    if (
+        not force_refresh and
+        status_snapshot_cache['data'] is not None and
+        status_snapshot_cache['signature'] == signature and
+        now - status_snapshot_cache['timestamp'] < STATUS_CACHE_TTL
+    ):
+        return status_snapshot_cache['data']
+
+    protocols = {}
+    for key_name, key_value in current_keys.items():
+        try:
+            protocols[key_name] = _protocol_status_for_key(key_name, key_value)
+        except Exception as exc:
+            _write_runtime_log(f'Ошибка проверки ключа {key_name}: {exc}')
+            protocols[key_name] = {
+                'tone': 'warn',
+                'label': 'Ошибка проверки',
+                'details': f'Не удалось завершить проверку ключа: {exc}',
+            }
+
+    snapshot = {
+        'web': _build_web_status(current_keys),
+        'protocols': protocols,
+    }
+    status_snapshot_cache['timestamp'] = now
+    status_snapshot_cache['data'] = snapshot
+    status_snapshot_cache['signature'] = signature
+    return snapshot
+
+
+def _web_status_snapshot(force_refresh=False):
+    current_keys = _load_current_keys()
+    return _build_status_snapshot(current_keys, force_refresh=force_refresh)['web']
+
+
+def _cached_status_snapshot(current_keys):
+    now = time.time()
+    signature = tuple((name, current_keys.get(name, '')) for name in sorted(current_keys))
+    if (
+        status_snapshot_cache['data'] is not None and
+        status_snapshot_cache['signature'] == signature and
+        now - status_snapshot_cache['timestamp'] < STATUS_CACHE_TTL
+    ):
+        return status_snapshot_cache['data']
     return None
 
 
@@ -1786,6 +1861,17 @@ def _placeholder_web_status_snapshot():
     }
 
 
+def _protocol_status_snapshot(current_keys, force_refresh=False):
+    return _build_status_snapshot(current_keys, force_refresh=force_refresh)['protocols']
+
+
+def _cached_protocol_status_snapshot(current_keys):
+    snapshot = _cached_status_snapshot(current_keys)
+    if snapshot is not None:
+        return snapshot['protocols']
+    return None
+
+
 def _refresh_status_caches_async(current_keys):
     global status_refresh_running
     with status_refresh_lock:
@@ -1796,8 +1882,7 @@ def _refresh_status_caches_async(current_keys):
     def worker():
         global status_refresh_running
         try:
-            _web_status_snapshot(force_refresh=True)
-            _protocol_status_snapshot(current_keys, force_refresh=True)
+            _build_status_snapshot(current_keys, force_refresh=True)
         except Exception as exc:
             _write_runtime_log(f'Ошибка фонового обновления статусов: {exc}')
         finally:
@@ -1903,10 +1988,13 @@ def bot_message(message):
                 return
 
             if message.text == '📄 Информация':
-                url = _raw_github_url('info.md')
-                info_bot = requests.get(url).text
-                bot.send_message(message.chat.id, info_bot, parse_mode='Markdown', disable_web_page_preview=True,
-                                 reply_markup=main)
+                info_bot = _telegram_info_text_from_readme()
+                bot.send_message(
+                    message.chat.id,
+                    info_bot,
+                    disable_web_page_preview=True,
+                    reply_markup=main,
+                )
                 return
 
             if message.text == '/keys_free':
@@ -2333,8 +2421,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     def _build_form(self, message=''):
         command_state = _get_web_command_state()
         current_keys = _load_current_keys()
-        status = _cached_web_status_snapshot() or _placeholder_web_status_snapshot()
-        protocol_statuses = _cached_protocol_status_snapshot(current_keys) or _placeholder_protocol_statuses(current_keys)
+        snapshot = _cached_status_snapshot(current_keys)
+        status = snapshot['web'] if snapshot is not None else _placeholder_web_status_snapshot()
+        protocol_statuses = snapshot['protocols'] if snapshot is not None else _placeholder_protocol_statuses(current_keys)
         _refresh_status_caches_async(current_keys)
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = (
