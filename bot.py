@@ -117,6 +117,8 @@ web_command_state = {
     'command': '',
     'label': '',
     'result': '',
+    'progress': 0,
+    'progress_label': '',
     'started_at': 0,
     'finished_at': 0,
 }
@@ -362,14 +364,18 @@ def _build_direct_fetch_env():
     return env
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None):
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _build_direct_fetch_env()
+    if progress_command:
+        _set_web_command_progress(progress_command, '\n'.join(logs))
     if repo_owner and repo_name:
         url, script_text = _download_repo_script(repo_owner, repo_name)
         logs.append(f'Скрипт загружен из {url}')
         if repo_owner == fork_repo_owner and 'BOT_CONFIG_PATH' not in script_text:
             logs.append('⚠️ GitHub отдал старую версию script.sh, но legacy-пути уже подготовлены на роутере.')
+        if progress_command:
+            _set_web_command_progress(progress_command, '\n'.join(logs))
 
     process = subprocess.Popen(
         ['/bin/sh', '/opt/root/script.sh', action],
@@ -383,6 +389,8 @@ def _run_script_action(action, repo_owner=None, repo_name=None):
         clean_line = line.strip()
         if clean_line:
             logs.append(clean_line)
+            if progress_command:
+                _set_web_command_progress(progress_command, '\n'.join(logs))
     return_code = process.wait()
     if return_code != 0:
         logs.append(f'Команда завершилась с кодом {return_code}.')
@@ -420,7 +428,7 @@ def _run_web_command(command):
         _, output = _run_script_action('-install', 'tas-unn', 'bypass_keenetic')
         return output
     if command == 'update':
-        _, output = _run_script_action('-update', fork_repo_owner, fork_repo_name)
+        _, output = _run_script_action('-update', fork_repo_owner, fork_repo_name, progress_command='update')
         return output
     if command == 'remove':
         _, output = _run_script_action('-remove', fork_repo_owner, fork_repo_name)
@@ -713,6 +721,42 @@ def _get_web_command_state():
         return dict(web_command_state)
 
 
+def _estimate_web_command_progress(command, result_text):
+    if command != 'update':
+        return 0, ''
+    if not result_text:
+        return 5, 'Подготовка запуска обновления'
+
+    progress_steps = [
+        ('Бот запущен.', 100, 'Бот перезапущен, обновление завершено'),
+        ('Обновление выполнено. Сервисы перезапущены.', 96, 'Сервисы обновлены, идёт перезапуск бота'),
+        ('Версия бота', 90, 'Проверка версии и завершение обновления'),
+        ('Обновления скачены, права настроены.', 82, 'Новые файлы установлены'),
+        ('Бэкап создан.', 70, 'Резервная копия готова, идёт замена файлов'),
+        ('Сервисы остановлены.', 60, 'Сервисы остановлены перед заменой файлов'),
+        ('Файлы успешно скачаны и подготовлены.', 45, 'Файлы загружены, подготавливается установка'),
+        ('Скачиваем обновления во временную папку и проверяем файлы.', 30, 'Идёт загрузка файлов из GitHub'),
+        ('Пакеты обновлены.', 20, 'Пакеты Entware обновлены'),
+        ('Начинаем обновление.', 12, 'Запущен сценарий обновления'),
+        ('Скрипт загружен из', 8, 'Сценарий обновления получен с GitHub'),
+        ('Legacy-пути бота уже доступны.', 6, 'Проверка путей запуска бота'),
+        ('Подготовка legacy-путей:', 6, 'Подготовка путей запуска бота'),
+        ('Подготовка Entware DNS:', 4, 'Проверка доступа Entware и GitHub'),
+    ]
+    for marker, percent, label in progress_steps:
+        if marker in result_text:
+            return percent, label
+    return 8, 'Обновление запущено'
+
+
+def _set_web_command_progress(command, result_text):
+    progress, progress_label = _estimate_web_command_progress(command, result_text)
+    with web_command_lock:
+        web_command_state['result'] = result_text
+        web_command_state['progress'] = progress
+        web_command_state['progress_label'] = progress_label
+
+
 def _set_web_flash_message(message):
     global web_flash_message
     with web_flash_lock:
@@ -733,6 +777,8 @@ def _finish_web_command(command, result):
         web_command_state['command'] = command
         web_command_state['label'] = _web_command_label(command)
         web_command_state['result'] = result
+        web_command_state['progress'] = 100 if command == 'update' else web_command_state.get('progress', 0)
+        web_command_state['progress_label'] = 'Завершено' if command == 'update' else ''
         web_command_state['finished_at'] = time.time()
 
 
@@ -754,6 +800,8 @@ def _start_web_command(command):
         web_command_state['command'] = command
         web_command_state['label'] = label
         web_command_state['result'] = ''
+        web_command_state['progress'] = 5 if command == 'update' else 0
+        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command == 'update' else ''
         web_command_state['started_at'] = time.time()
         web_command_state['finished_at'] = 0
     thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
@@ -1768,13 +1816,25 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
   <pre class="log-output">{safe_message}</pre>
 </div>'''
 
-        command_block = ''
-        if command_state['label']:
-            command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
-            command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Обновление страницы происходит автоматически.'
-            command_block = f'''<div class="notice notice-status">
-  <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
-  <pre class="log-output">{html.escape(command_text)}</pre>
+                command_block = ''
+                if command_state['label']:
+                        command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
+                        command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Обновление страницы происходит автоматически.'
+                        progress_block = ''
+                        if command_state['command'] == 'update' and command_state['progress']:
+                                progress_value = max(0, min(100, int(command_state['progress'])))
+                                progress_label = command_state.get('progress_label') or 'Обновление выполняется'
+                                progress_block = f'''<div class="command-progress-block">
+    <div class="command-progress-header">
+        <span>{html.escape(progress_label)}</span>
+        <span>{progress_value}%</span>
+    </div>
+    <div class="command-progress-track"><div class="command-progress-fill" style="width:{progress_value}%"></div></div>
+</div>'''
+                        command_block = f'''<div class="notice notice-status">
+    <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
+    {progress_block}
+    <pre class="log-output">{html.escape(command_text)}</pre>
 </div>'''
 
         socks_block = ''
@@ -1997,6 +2057,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .traffic-chip-label{{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
             .traffic-chip-value{{font-size:13px;font-weight:700;color:var(--text);}}
                 .status-note{{margin-top:6px;color:var(--text);font-size:14px;line-height:1.4;}}
+                .command-progress-block{{margin:14px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.03);}}
+                .command-progress-header{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:var(--text);font-size:13px;font-weight:700;}}
+                .command-progress-track{{width:100%;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;}}
+                .command-progress-fill{{height:100%;border-radius:999px;background:linear-gradient(90deg, var(--secondary), var(--primary));transition:width .35s ease;}}
                 .log-output{{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.45 Consolas,Monaco,monospace;color:var(--text);}}
                 .eyebrow{{display:inline-block;margin-bottom:10px;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#8b6f4a;}}
                 .section-title{{margin:0 0 6px;font-size:24px;color:var(--text);}}
