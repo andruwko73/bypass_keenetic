@@ -1525,11 +1525,16 @@ def bot_message(message):
                 return
 
             if message.text == '/update':
-                bot.send_message(message.chat.id, 'Устанавливаются обновления, подождите!', reply_markup=service)
+                bot.send_message(
+                    message.chat.id,
+                    f'Запускаю обновление из форка {fork_repo_owner}/{fork_repo_name}. Обычно это занимает 1-3 минуты. '
+                    'После завершения бот пришлет лог и отдельное сообщение об успехе или ошибке.',
+                    reply_markup=service,
+                )
                 return_code, output = _run_script_action('-update', fork_repo_owner, fork_repo_name)
                 _send_telegram_chunks(message.chat.id, output, reply_markup=service)
                 if return_code == 0:
-                    bot.send_message(message.chat.id, '✅ Обновление завершено.', reply_markup=service)
+                    bot.send_message(message.chat.id, '✅ Обновление завершено. Бот уже отправил лог выше.', reply_markup=service)
                 else:
                     bot.send_message(message.chat.id, '⚠️ Обновление завершилось с ошибкой. Полный лог отправлен выше.', reply_markup=service)
                 return
@@ -1819,9 +1824,12 @@ def bot_message(message):
                 return
 
             if message.text == '♻️ Установка и переустановка' or message.text == '♻️ Установка & переустановка':
-                bot.send_message(message.chat.id,
-                                 f'Запускаю переустановку из форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков, подождите.',
-                                 reply_markup=main)
+                bot.send_message(
+                    message.chat.id,
+                    f'Запускаю переустановку из форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
+                    'Обычно это занимает 1-3 минуты. После завершения бот пришлет лог и отдельное сообщение об успехе или ошибке.',
+                    reply_markup=main,
+                )
                 return_code, output = _run_script_action('-update', fork_repo_owner, fork_repo_name)
                 _send_telegram_chunks(message.chat.id, output, reply_markup=main)
 
@@ -1832,7 +1840,7 @@ def bot_message(message):
                     return
 
                 bot.send_message(message.chat.id,
-                                 '✅ Переустановка из форка без сброса завершена.',
+                                 '✅ Переустановка из форка без сброса завершена. Бот уже отправил лог выше.',
                                  reply_markup=main)
 
                 subprocess.call(["/opt/bin/unblock_update.sh"])
