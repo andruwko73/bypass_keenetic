@@ -62,8 +62,12 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 
 Общий вид страницы с блоком статуса, запуском и карточками ключей:
 
-![Общий вид веб-интерфейса](docs/screenshots/web-ui-overview.png)
+<a href="docs/screenshots/web-ui-overview.png">
+	<img src="docs/screenshots/web-ui-overview.png" alt="Общий вид веб-интерфейса" width="420">
+</a>
 
 Нижняя часть страницы со списками обхода и сервисными командами:
 
-![Списки обхода и команды обслуживания](docs/screenshots/web-ui-lists.png)
+<a href="docs/screenshots/web-ui-lists.png">
+	<img src="docs/screenshots/web-ui-lists.png" alt="Списки обхода и команды обслуживания" width="420">
+</a>
