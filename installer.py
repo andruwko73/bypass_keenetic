@@ -17,6 +17,8 @@ LEGACY_MAIN_PATH = '/opt/etc/bot.py'
 BOT_SERVICE_PATH = '/opt/etc/init.d/S99telegram_bot'
 INSTALLER_SERVICE_PATH = '/opt/etc/init.d/S98telegram_bot_installer'
 DEFAULT_BROWSER_PORT = int(os.environ.get('BYPASS_INSTALLER_PORT', '8080'))
+DEFAULT_FORK_REPO_OWNER = 'andruwko73'
+DEFAULT_FORK_REPO_NAME = 'bypass_keenetic'
 HOST = '0.0.0.0'
 
 
@@ -57,9 +59,9 @@ def escape_python(value):
 def build_config(form):
     router_ip = form.get('routerip', detect_router_ip()).strip() or detect_router_ip()
     browser_port = form.get('browser_port', str(DEFAULT_BROWSER_PORT)).strip() or str(DEFAULT_BROWSER_PORT)
-    fork_repo_owner = form.get('fork_repo_owner', 'andruwko73').strip() or 'andruwko73'
-    fork_repo_name = form.get('fork_repo_name', 'bypass_keenetic').strip() or 'bypass_keenetic'
-    fork_button_label = form.get('fork_button_label', f'Fork by {fork_repo_owner}').strip() or f'Fork by {fork_repo_owner}'
+    fork_repo_owner = DEFAULT_FORK_REPO_OWNER
+    fork_repo_name = DEFAULT_FORK_REPO_NAME
+    fork_button_label = f'Fork by {fork_repo_owner}'
     default_proxy_mode = form.get('default_proxy_mode', 'none').strip() or 'none'
 
     return f"""# ВЕРСИЯ СКРИПТА 2.2.0
@@ -126,17 +128,29 @@ def switch_to_main_bot():
     )
 
 
-def page_html(message=''):
+def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
     router_ip = detect_router_ip()
     notice = ''
+    redirect_head = ''
+    redirect_script = ''
     if message:
         notice = f'<div class="notice">{html.escape(message)}</div>'
+    if redirect_url:
+        escaped_redirect_url = html.escape(redirect_url, quote=True)
+        redirect_head = f'<meta http-equiv="refresh" content="{redirect_delay_seconds};url={escaped_redirect_url}">'
+        redirect_script = f"""
+    <script>
+        setTimeout(function () {{
+            window.location.replace({redirect_url!r});
+        }}, {redirect_delay_seconds * 1000});
+    </script>"""
     return f"""<!doctype html>
 <html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Первичная настройка бота</title>
+    {redirect_head}
   <style>
     :root {{ color-scheme: dark; --bg:#101418; --card:#182028; --text:#f4f7fb; --muted:#9fb0c3; --accent:#63e6be; --line:#2a3846; --warn:#ffd166; }}
     * {{ box-sizing:border-box; }}
@@ -156,6 +170,7 @@ def page_html(message=''):
   </style>
 </head>
 <body>
+{redirect_script}
   <div class="wrap">
     <div class="card">
       <h1>Первичная настройка бота</h1>
@@ -196,14 +211,6 @@ def page_html(message=''):
               <option value="vless">vless</option>
               <option value="trojan">trojan</option>
             </select>
-          </div>
-          <div>
-            <label for="fork_repo_owner">GitHub owner</label>
-            <input id="fork_repo_owner" name="fork_repo_owner" value="andruwko73">
-          </div>
-          <div class="full">
-            <label for="fork_repo_name">GitHub repo</label>
-            <input id="fork_repo_name" name="fork_repo_name" value="bypass_keenetic">
           </div>
         </div>
         <button type="submit">Сохранить и запустить основной бот</button>
@@ -252,7 +259,13 @@ class InstallerHandler(BaseHTTPRequestHandler):
 
         router_ip = parsed.get('routerip', detect_router_ip()).strip() or detect_router_ip()
         browser_port = parsed.get('browser_port', str(DEFAULT_BROWSER_PORT)).strip() or str(DEFAULT_BROWSER_PORT)
-        self._send_html(page_html(f'Конфиг сохранён. Основной бот запускается. Обновите страницу через пару секунд: http://{router_ip}:{browser_port}/'))
+        target_url = f'http://{router_ip}:{browser_port}/'
+        self._send_html(
+            page_html(
+                f'Конфиг сохранён. Основной бот запускается. Через несколько секунд откроется основная страница: {target_url}',
+                redirect_url=target_url,
+            )
+        )
 
     def log_message(self, format_text, *args):
         return
