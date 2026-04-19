@@ -112,8 +112,10 @@ restore_path /opt/etc/ndm/fs.d/100-ipset.sh
 restore_path /opt/etc/tor/torrc
 restore_path /opt/etc/shadowsocks.json
 restore_path /opt/etc/init.d/S22shadowsocks
+restore_path /opt/etc/xray/config.json
 restore_path /opt/etc/v2ray/config.json
 restore_path /opt/etc/trojan/config.json
+restore_path /opt/etc/init.d/S24xray
 restore_path /opt/etc/init.d/S24v2ray
 restore_path /opt/bin/unblock_ipset.sh
 restore_path /opt/bin/unblock_dnsmasq.sh
@@ -135,6 +137,7 @@ fi
 /opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99telegram_bot start >/dev/null 2>&1 || true
 /opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || true
+/opt/etc/init.d/S24xray restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S35tor restart >/dev/null 2>&1 || true
@@ -194,8 +197,10 @@ backup_path "/opt/etc/ndm/fs.d/100-ipset.sh"
 backup_path "/opt/etc/tor/torrc"
 backup_path "/opt/etc/shadowsocks.json"
 backup_path "/opt/etc/init.d/S22shadowsocks"
+backup_path "/opt/etc/xray/config.json"
 backup_path "/opt/etc/v2ray/config.json"
 backup_path "/opt/etc/trojan/config.json"
+backup_path "/opt/etc/init.d/S24xray"
 backup_path "/opt/etc/init.d/S24v2ray"
 backup_path "/opt/bin/unblock_ipset.sh"
 backup_path "/opt/bin/unblock_dnsmasq.sh"

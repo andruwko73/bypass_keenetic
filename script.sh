@@ -54,6 +54,35 @@ dnsoverhttpsport=$(config_get "dnsoverhttpsport" "40508")
 keen_os_full=$(curl -s localhost:79/rci/show/version/title | tr -d \",)
 keen_os_short=$(printf '%s' "$keen_os_full" | grep -Eo '[0-9]+' | head -n1)
 
+detect_core_proxy_package() {
+  for candidate in xray-core xray v2ray; do
+    if opkg list 2>/dev/null | awk '{print $1}' | grep -qx "$candidate"; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s' 'v2ray'
+}
+
+configure_core_proxy_service() {
+  core_config_source="https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/vmessconfig.json"
+
+  if [ -x /opt/etc/init.d/S24xray ]; then
+    mkdir -p /opt/etc/xray
+    curl -o /opt/etc/xray/config.json "$core_config_source"
+    chmod 755 /opt/etc/init.d/S24xray || chmod +x /opt/etc/init.d/S24xray
+    sed -i 's|ARGS="-confdir /opt/etc/xray"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
+    sed -i 's|ARGS="-config /opt/etc/xray/config.json"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
+  fi
+
+  if [ -x /opt/etc/init.d/S24v2ray ]; then
+    mkdir -p /opt/etc/v2ray
+    curl -o /opt/etc/v2ray/config.json "$core_config_source"
+    chmod 755 /opt/etc/init.d/S24v2ray || chmod +x /opt/etc/init.d/S24v2ray
+    sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1 || true
+  fi
+}
+
 ensure_entware_dns() {
   if nslookup bin.entware.net 192.168.1.1 >/dev/null 2>&1; then
     return 0
@@ -114,7 +143,7 @@ download_update_file() {
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     # opkg remove curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
-    opkg remove tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config v2ray trojan
+    opkg remove tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
     echo "Пакеты удалены, удаляем папки, файлы и настройки"
     ipset flush testset
     ipset flush unblocktor
@@ -137,6 +166,7 @@ if [ "$1" = "-remove" ]; then
     chmod 777 /opt/etc/crontab || rm -Rfv /opt/etc/crontab
     chmod 777 /opt/etc/init.d/S22shadowsocks || rm -Rfv /opt/etc/init.d/S22shadowsocks
     chmod 777 /opt/etc/init.d/S22trojan || rm -Rfv /opt/etc/init.d/S22trojan
+    chmod 777 /opt/etc/init.d/S24xray || rm -Rfv /opt/etc/init.d/S24xray
     chmod 777 /opt/etc/init.d/S24v2ray || rm -Rfv /opt/etc/init.d/S24v2ray
     chmod 777 /opt/etc/init.d/S35tor || rm -Rfv /opt/etc/init.d/S35tor
     chmod 777 /opt/etc/init.d/S56dnsmasq || rm -Rfv /opt/etc/init.d/S56dnsmasq
@@ -152,6 +182,7 @@ if [ "$1" = "-remove" ]; then
     chmod 777 /opt/tmp/tor || rm -Rfv /opt/tmp/tor
     # chmod 777 /opt/etc/unblock || rm -Rfv /opt/etc/unblock
     chmod 777 /opt/etc/tor || rm -Rfv /opt/etc/tor
+    chmod 777 /opt/etc/xray || rm -Rfv /opt/etc/xray
     chmod 777 /opt/etc/v2ray || rm -Rfv /opt/etc/v2ray
     chmod 777 /opt/etc/trojan || rm -Rfv /opt/etc/trojan
     echo "Созданные папки, файлы и настройки удалены"
@@ -174,7 +205,8 @@ if [ "$1" = "-install" ]; then
   ensure_entware_dns
     opkg update
     # opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
-    opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip v2ray trojan
+    core_proxy_pkg=$(detect_core_proxy_package)
+    opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip "$core_proxy_pkg" trojan
     curl -O https://bootstrap.pypa.io/get-pip.py
     sleep 3
     python get-pip.py
@@ -225,13 +257,9 @@ if [ "$1" = "-install" ]; then
     chmod 0755 /opt/etc/shadowsocks.json || chmod 755 /opt/etc/init.d/S22shadowsocks || chmod +x /opt/etc/init.d/S22shadowsocks
     echo "Установлен параметр ss-redir для Shadowsocks"
 
-    # chmod 777 /opt/etc/v2ray/config.json || rm -Rfv /opt/etc/v2ray/config.json
-    curl -o /opt/etc/v2ray/config.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/vmessconfig.json
-
     # chmod 777 /opt/etc/trojan/config.json || rm -Rfv /opt/etc/trojan/config.json
     curl -o /opt/etc/trojan/config.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/trojanconfig.json
-    chmod 755 /opt/etc/init.d/S24v2ray || chmod +x /opt/etc/init.d/S24v2ray
-    sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1
+    configure_core_proxy_service
 
     # unblock folder and files
     mkdir -p /opt/etc/unblock
@@ -286,7 +314,7 @@ if [ "$1" = "-install" ]; then
     sed -i "s/10813/${localportvless2}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10814/${localportvless2_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10829/${localporttrojan}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
-    echo "Установлено перенаправление пакетов с адресатами из unblock в: Tor, Shadowsocks, VPN, Trojan, v2ray"
+    echo "Установлено перенаправление пакетов с адресатами из unblock в: Tor, Shadowsocks, VPN, Trojan, xray/v2ray"
 
     # VPN script
     # chmod 777 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || rm -rfv /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
@@ -401,6 +429,7 @@ if [ "$1" = "-update" ]; then
     echo "Файлы успешно скачаны и подготовлены."
 
     /opt/etc/init.d/S22shadowsocks stop > /dev/null 2>&1
+    /opt/etc/init.d/S24xray stop > /dev/null 2>&1
     /opt/etc/init.d/S24v2ray stop > /dev/null 2>&1
     /opt/etc/init.d/S22trojan stop > /dev/null 2>&1
     /opt/etc/init.d/S35tor stop > /dev/null 2>&1
@@ -426,7 +455,11 @@ if [ "$1" = "-update" ]; then
     chmod 755 /opt/etc/ndm/fs.d/100-ipset.sh || chmod +x /opt/etc/ndm/fs.d/100-ipset.sh
     mv "$stage_dir/100-redirect.sh" /opt/etc/ndm/netfilter.d/100-redirect.sh
     chmod 755 /opt/etc/ndm/netfilter.d/100-redirect.sh || chmod +x /opt/etc/ndm/netfilter.d/100-redirect.sh
-    sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1
+    if [ -x /opt/etc/init.d/S24xray ]; then
+      sed -i 's|ARGS="-confdir /opt/etc/xray"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
+      sed -i 's|ARGS="-config /opt/etc/xray/config.json"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
+    fi
+    sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1 || true
 
     mv "$stage_dir/100-unblock-vpn.sh" /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
     chmod 755 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || chmod +x /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
@@ -447,6 +480,7 @@ if [ "$1" = "-update" ]; then
 
     /opt/etc/init.d/S56dnsmasq restart > /dev/null 2>&1
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
+    /opt/etc/init.d/S24xray start > /dev/null 2>&1
     /opt/etc/init.d/S24v2ray start > /dev/null 2>&1
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1
     /opt/etc/init.d/S35tor start > /dev/null 2>&1
