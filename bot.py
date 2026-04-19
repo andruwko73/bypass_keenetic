@@ -2316,7 +2316,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 def start_http_server():
     try:
         server_address = ('', int(browser_port))
-        httpd = ThreadingHTTPServer(server_address, KeyInstallHTTPRequestHandler)
+        class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+            allow_reuse_address = True
+
+        httpd = ReusableThreadingHTTPServer(server_address, KeyInstallHTTPRequestHandler)
         httpd.daemon_threads = True
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
