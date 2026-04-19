@@ -105,6 +105,8 @@ key_status_cache = {
     'data': None,
     'signature': None,
 }
+status_refresh_lock = threading.Lock()
+status_refresh_running = False
 web_command_lock = threading.Lock()
 web_command_state = {
     'running': False,
@@ -726,6 +728,36 @@ def _protocol_status_snapshot(current_keys, force_refresh=False):
     return data
 
 
+def _cached_protocol_status_snapshot(current_keys):
+    signature = tuple((name, current_keys.get(name, '')) for name in sorted(current_keys))
+    now = time.time()
+    if (
+        key_status_cache['data'] is not None and
+        key_status_cache['signature'] == signature and
+        now - key_status_cache['timestamp'] < KEY_STATUS_CACHE_TTL
+    ):
+        return key_status_cache['data']
+    return None
+
+
+def _placeholder_protocol_statuses(current_keys):
+    result = {}
+    for key_name, key_value in current_keys.items():
+        if key_value.strip():
+            result[key_name] = {
+                'tone': 'warn',
+                'label': 'Проверяется',
+                'details': 'Фоновая проверка ключа выполняется. Обновите страницу через несколько секунд.',
+            }
+        else:
+            result[key_name] = {
+                'tone': 'empty',
+                'label': 'Не сохранён',
+                'details': 'Ключ ещё не сохранён на роутере.',
+            }
+    return result
+
+
 def _web_command_label(command):
     labels = {
         'install_original': 'Установить оригинальную версию',
@@ -1288,6 +1320,42 @@ def _web_status_snapshot(force_refresh=False):
     web_status_cache['data'] = snapshot
     return snapshot
 
+
+def _cached_web_status_snapshot():
+    now = time.time()
+    if web_status_cache['data'] is not None and now - web_status_cache['timestamp'] < WEB_STATUS_CACHE_TTL:
+        return web_status_cache['data']
+    return None
+
+
+def _placeholder_web_status_snapshot():
+    return {
+        'state_label': 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен'),
+        'proxy_mode': proxy_mode,
+        'api_status': '⏳ Фоновая проверка связи выполняется. Обновите страницу через несколько секунд.',
+        'socks_details': '',
+        'fallback_reason': _last_proxy_disable_reason(),
+    }
+
+
+def _refresh_status_caches_async(current_keys):
+    global status_refresh_running
+    with status_refresh_lock:
+        if status_refresh_running:
+            return
+        status_refresh_running = True
+
+    def worker():
+        global status_refresh_running
+        try:
+            _web_status_snapshot(force_refresh=True)
+            _protocol_status_snapshot(current_keys, force_refresh=True)
+        finally:
+            with status_refresh_lock:
+                status_refresh_running = False
+
+    threading.Thread(target=worker, daemon=True).start()
+
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
 @bot.message_handler(commands=['start'])
@@ -1827,10 +1895,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def _build_form(self, message=''):
-        status = _web_status_snapshot(force_refresh=False)
         command_state = _get_web_command_state()
         current_keys = _load_current_keys()
-        protocol_statuses = _protocol_status_snapshot(current_keys)
+        status = _cached_web_status_snapshot() or _placeholder_web_status_snapshot()
+        protocol_statuses = _cached_protocol_status_snapshot(current_keys) or _placeholder_protocol_statuses(current_keys)
+        _refresh_status_caches_async(current_keys)
         unblock_lists = _load_unblock_lists()
 
         message_block = ''
