@@ -102,10 +102,27 @@ DIRECT_FETCH_ENV_KEYS = [
     'ALL_PROXY',
     'all_proxy',
 ]
+RUNTIME_ERROR_LOG_PATHS = [
+    '/opt/etc/error.log',
+    '/opt/etc/bot/error.log',
+]
 
 
 def _raw_github_url(path):
     return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/main/{path}?ts={int(time.time())}'
+
+
+def _write_runtime_log(message, mode='a'):
+    text = '' if message is None else str(message)
+    if text and not text.endswith('\n'):
+        text += '\n'
+    for log_path in RUNTIME_ERROR_LOG_PATHS:
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, mode, encoding='utf-8', errors='ignore') as file:
+                file.write(text)
+        except Exception:
+            continue
 
 
 def _has_socks_support():
@@ -794,16 +811,17 @@ def _invalidate_web_status_cache():
 
 def _last_proxy_disable_reason():
     try:
-        if not os.path.exists('/opt/etc/error.log'):
-            return ''
-        with open('/opt/etc/error.log', 'r', encoding='utf-8', errors='ignore') as file:
-            lines = file.readlines()
-        for line in reversed(lines[-80:]):
-            marker = 'Прокси-режим '
-            if marker not in line or ' отключён при старте: ' not in line:
+        for log_path in RUNTIME_ERROR_LOG_PATHS:
+            if not os.path.exists(log_path):
                 continue
-            tail = line.split(' отключён при старте: ', 1)[1].strip()
-            return tail
+            with open(log_path, 'r', encoding='utf-8', errors='ignore') as file:
+                lines = file.readlines()
+            for line in reversed(lines[-80:]):
+                marker = 'Прокси-режим '
+                if marker not in line or ' отключён при старте: ' not in line:
+                    continue
+                tail = line.split(' отключён при старте: ', 1)[1].strip()
+                return tail
     except Exception:
         return ''
     return ''
@@ -1747,10 +1765,11 @@ def bot_message(message):
                 return
 
     except Exception as error:
-        file = open("/opt/etc/error.log", "w")
-        file.write(str(error))
-        file.close()
-        os.chmod(r"/opt/etc/error.log", 0o0755)
+        _write_runtime_log(error, mode='w')
+        try:
+            os.chmod(r"/opt/etc/error.log", 0o0755)
+        except Exception:
+            pass
 
 class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     def _send_html(self, html, status=200):
@@ -2282,8 +2301,7 @@ def start_http_server():
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
     except Exception as err:
-        with open('/opt/etc/error.log', 'w') as errfile:
-            errfile.write(str(err))
+        _write_runtime_log(f'HTTP server start failed on port {browser_port}: {err}', mode='w')
 
 
 def wait_for_bot_start():
@@ -2827,8 +2845,7 @@ def main():
         _write_all_proxy_core_config()
         os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
     except Exception as exc:
-        with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
-            fl.write(f'Не удалось пересобрать core proxy config при старте: {exc}\n')
+        _write_runtime_log(f'Не удалось пересобрать core proxy config при старте: {exc}')
     if _load_bot_autostart():
         globals()['bot_ready'] = True
     proxy_mode = _load_proxy_mode()
@@ -2847,15 +2864,13 @@ def main():
         startup_port = startup_settings.get(proxy_mode)
         endpoint_ok, endpoint_message = _check_local_proxy_endpoint(proxy_mode, startup_port)
         if not endpoint_ok:
-            with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
-                fl.write(f'Прокси-режим {proxy_mode} отключён при старте: {endpoint_message}\n')
+            _write_runtime_log(f'Прокси-режим {proxy_mode} отключён при старте: {endpoint_message}')
             proxy_mode = 'none'
             update_proxy('none')
         else:
             api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=8, read_timeout=10)
             if not api_status.startswith('✅'):
-                with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
-                    fl.write(f'Прокси-режим {proxy_mode} не подтверждён при старте: {api_status}\n')
+                _write_runtime_log(f'Прокси-режим {proxy_mode} не подтверждён при старте: {api_status}')
     start_http_server()
     wait_for_bot_start()
     while True:
@@ -2864,8 +2879,7 @@ def main():
             bot.infinity_polling(timeout=60, long_polling_timeout=50)
         except Exception as err:
             bot_polling = False
-            with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
-                fl.write(str(err) + '\n')
+            _write_runtime_log(err)
             time.sleep(5)
         else:
             bot_polling = False
