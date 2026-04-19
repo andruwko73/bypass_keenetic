@@ -147,6 +147,17 @@ def _save_proxy_mode(proxy_type):
         pass
 
 
+def _proxy_mode_label(proxy_type):
+    labels = {
+        'none': 'None',
+        'shadowsocks': 'Shadowsocks',
+        'vmess': 'Vmess',
+        'vless': 'Vless',
+        'trojan': 'Trojan',
+    }
+    return labels.get(proxy_type, proxy_type)
+
+
 def _save_bot_autostart(enabled):
     try:
         if enabled:
@@ -290,17 +301,15 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
         installers[key_type](key_value)
         result = _apply_installed_proxy(key_type, key_value)
     except Exception as exc:
-        update_proxy('none')
         result = f'Ошибка установки: {exc}'
 
     level_reset_markup = reply_markup
     try:
         bot.send_message(message.chat.id, result, reply_markup=level_reset_markup)
     except Exception:
-        update_proxy('none')
         fallback_result = (
             f'{result}\n\n'
-            'Бот переключён в режим none, потому что подтверждение через новый прокси отправить не удалось.'
+            'Текущий режим бота сохранён, но отправить подтверждение в этот чат не удалось.'
         )
         try:
             bot.send_message(message.chat.id, fallback_result, reply_markup=level_reset_markup)
@@ -1041,34 +1050,36 @@ def _apply_installed_proxy(key_type, key_value):
         }
     }
     current = settings[key_type]
+    active_mode = _load_proxy_mode()
+    active_label = _proxy_mode_label(active_mode)
     for command in current['restart_cmds']:
         os.system(command)
     time.sleep(current['startup_wait'])
 
-    ok, error = update_proxy(key_type)
     diagnostics = _build_proxy_diagnostics(key_type, key_value)
-    if not ok:
-        return f'⚠️ {current["label"]} ключ сохранён, но режим бота не применён: {error}. {diagnostics}'.strip()
-
     restart_cmd = current['restart_cmds'][-1]
     if not _ensure_service_port(current['port'], restart_cmd, retries=2, sleep_after_restart=5):
-        update_proxy('none')
         return (f'⚠️ {current["label"]} ключ сохранён, но локальный порт 127.0.0.1:{current["port"]} '
-                f'не поднялся. Бот переключён в режим none. {diagnostics}').strip()
+                f'не поднялся. Текущий режим бота {active_label} сохранён. {diagnostics}').strip()
 
     endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_type, current['port'])
     if not endpoint_ok:
-        update_proxy('none')
         return (f'⚠️ {current["label"]} ключ сохранён, но {endpoint_message} '
-                f'Бот переключён в режим none. {diagnostics}').strip()
+                f'Текущий режим бота {active_label} сохранён. {diagnostics}').strip()
 
-    api_status = check_telegram_api(retries=1, retry_delay=2, connect_timeout=10, read_timeout=15)
-    if api_status.startswith('✅'):
+    api_ok, api_probe_message = _check_telegram_api_through_proxy(
+        proxy_settings.get(key_type),
+        connect_timeout=10,
+        read_timeout=15,
+    )
+    if api_ok:
         return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
-                f'Бот переведён в режим {current["label"]}. {api_status}').strip()
+                f'Доступ к Telegram API через этот ключ подтверждён. '
+                f'Текущий режим бота {active_label} сохранён.').strip()
     return (f'⚠️ {current["label"]} ключ сохранён. {endpoint_message} '
-            f'Бот переведён в режим {current["label"]}, но Telegram API не проходит через этот ключ. '
-            f'{api_status} {diagnostics}').strip()
+            f'Но Telegram API не проходит через этот ключ. '
+            f'Текущий режим бота {active_label} сохранён. '
+            f'❌ Не удалось подключиться к Telegram API: {api_probe_message} {diagnostics}').strip()
 
 
 def update_proxy(proxy_type):
@@ -1755,7 +1766,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 
         command_buttons = [
             ('install_fork', 'Установить из форка', ''),
-            ('install_original', 'Установить оригинальную версию', ''),
             ('update', 'Обновить через форк', ''),
             ('restart_services', 'Перезапустить сервисы', ''),
             ('dns_on', 'DNS Override ВКЛ', ''),
