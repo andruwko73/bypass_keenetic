@@ -122,6 +122,14 @@ web_command_state = {
 }
 web_flash_lock = threading.Lock()
 web_flash_message = ''
+DIRECT_FETCH_ENV_KEYS = [
+    'HTTPS_PROXY',
+    'HTTP_PROXY',
+    'https_proxy',
+    'http_proxy',
+    'ALL_PROXY',
+    'all_proxy',
+]
 
 
 def _raw_github_url(path):
@@ -347,8 +355,16 @@ def _download_repo_script(repo_owner, repo_name):
     return url, script_text
 
 
+def _build_direct_fetch_env():
+    env = os.environ.copy()
+    for key in DIRECT_FETCH_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
 def _run_script_action(action, repo_owner=None, repo_name=None):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
+    direct_env = _build_direct_fetch_env()
     if repo_owner and repo_name:
         url, script_text = _download_repo_script(repo_owner, repo_name)
         logs.append(f'Скрипт загружен из {url}')
@@ -361,6 +377,7 @@ def _run_script_action(action, repo_owner=None, repo_name=None):
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=direct_env,
     )
     for line in process.stdout:
         clean_line = line.strip()
