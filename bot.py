@@ -2185,7 +2185,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             ('update', 'Переустановить из форка без сброса', ''),
             ('restart_services', 'Перезапустить сервисы', ''),
             ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else ''),
-            ('dns_off', 'DNS Override ВЫКЛ', ''),
+            ('dns_off', 'DNS Override ВЫКЛ', 'danger'),
             ('remove', 'Удалить компоненты', 'danger'),
             ('reboot', 'Перезагрузить роутер', 'danger'),
         ]
