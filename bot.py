@@ -554,6 +554,18 @@ def _load_unblock_lists():
     return result
 
 
+def _telegram_unblock_list_options():
+    return [(entry['label'], entry['name'][:-4]) for entry in _load_unblock_lists()]
+
+
+def _resolve_unblock_list_selection(text):
+    normalized = text.strip()
+    for label, base_name in _telegram_unblock_list_options():
+        if normalized in [label, base_name]:
+            return base_name
+    return normalized
+
+
 def _transparent_list_route_label():
     config_text = _read_text_file(CORE_PROXY_CONFIG_PATH)
     has_vless_1 = 'in-vless-transparent' in config_text and 'proxy-vless' in config_text
@@ -1530,11 +1542,12 @@ def bot_message(message):
 
             if level == 1:
                 # значит это список обхода блокировок
+                selected_list = _resolve_unblock_list_selection(message.text)
                 dirname = '/opt/etc/unblock/'
                 dirfiles = os.listdir(dirname)
 
                 for fln in dirfiles:
-                    if fln == message.text + '.txt':
+                    if fln == selected_list + '.txt':
                         markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
                         item1 = types.KeyboardButton("📑 Показать список")
                         item2 = types.KeyboardButton("📝 Добавить в список")
@@ -1543,8 +1556,8 @@ def bot_message(message):
                         markup.row(item1, item2, item3)
                         markup.row(back)
                         level = 2
-                        bypass = message.text
-                        bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                        bypass = selected_list
+                        bot.send_message(message.chat.id, "Меню " + _list_label(fln), reply_markup=markup)
                         return
 
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -1860,15 +1873,11 @@ def bot_message(message):
 
             if message.text == "📝 Списки обхода":
                 level = 1
-                dirname = '/opt/etc/unblock/'
-                dirfiles = os.listdir(dirname)
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                markuplist = []
-                for fln in dirfiles:
-                    # markup.add(fln.replace(".txt", ""))
-                    btn = fln.replace(".txt", "")
-                    markuplist.append(btn)
-                markup.add(*markuplist)
+                options = _telegram_unblock_list_options()
+                buttons = [types.KeyboardButton(label) for label, _ in options]
+                for index in range(0, len(buttons), 2):
+                    markup.row(*buttons[index:index + 2])
                 back = types.KeyboardButton("🔙 Назад")
                 markup.add(back)
                 bot.send_message(message.chat.id, "📝 Списки обхода", reply_markup=markup)
