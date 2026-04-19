@@ -55,6 +55,7 @@ VLESS2_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless2.key')
 
 bot_ready = False
 bot_polling = False
+web_httpd = None
 proxy_mode = config.default_proxy_mode
 proxy_settings = {
     'none': None,
@@ -2291,6 +2292,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 
 
 def start_http_server():
+    global web_httpd
     try:
         server_address = ('', int(browser_port))
         class ReusableThreadingHTTPServer(ThreadingHTTPServer):
@@ -2298,8 +2300,10 @@ def start_http_server():
 
         httpd = ReusableThreadingHTTPServer(server_address, KeyInstallHTTPRequestHandler)
         httpd.daemon_threads = True
+        web_httpd = httpd
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
+        _write_runtime_log(f'HTTP server listening on 0.0.0.0:{browser_port}')
     except Exception as err:
         _write_runtime_log(f'HTTP server start failed on port {browser_port}: {err}', mode='w')
 
@@ -2841,6 +2845,7 @@ ClientTransportPlugin obfs4 exec /opt/sbin/obfs4proxy managed\n'
 def main():
     global proxy_mode, bot_polling
     _daemonize_process()
+    _write_runtime_log('main() entered', mode='w')
     start_http_server()
     try:
         _write_all_proxy_core_config()
