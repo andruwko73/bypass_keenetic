@@ -592,6 +592,23 @@ def _invalidate_web_status_cache():
     web_status_cache['data'] = None
 
 
+def _last_proxy_disable_reason():
+    try:
+        if not os.path.exists('/opt/etc/error.log'):
+            return ''
+        with open('/opt/etc/error.log', 'r', encoding='utf-8', errors='ignore') as file:
+            lines = file.readlines()
+        for line in reversed(lines[-80:]):
+            marker = 'Прокси-режим '
+            if marker not in line or ' отключён при старте: ' not in line:
+                continue
+            tail = line.split(' отключён при старте: ', 1)[1].strip()
+            return tail
+    except Exception:
+        return ''
+    return ''
+
+
 def _load_proxy_mode():
     try:
         with open(PROXY_MODE_FILE, 'r', encoding='utf-8') as file:
@@ -974,6 +991,18 @@ def check_telegram_api(retries=2, retry_delay=7, connect_timeout=30, read_timeou
             if proxy_mode == 'trojan':
                 return ('❌ Не удалось подключиться к Telegram API через Trojan: текущая локальная конфигурация не поддерживает HTTPS/HTTP proxy '
                         'в этом режиме. Используйте Shadowsocks, Vmess или Vless для прокси Telegram API.')
+            if isinstance(exc, requests.exceptions.ConnectTimeout):
+                if proxy_mode == 'none':
+                    return ('❌ Прямой доступ к api.telegram.org не проходит: соединение не установилось за отведённое время. '
+                            'Проверьте внешний доступ к Telegram или включите рабочий прокси-режим для бота.')
+                return (f'❌ Доступ к Telegram API через режим {proxy_mode} не проходит: прокси-соединение истекло по таймауту. '
+                        'Проверьте, что выбранный прокси действительно пропускает api.telegram.org.')
+            if isinstance(exc, requests.exceptions.ReadTimeout):
+                if proxy_mode == 'none':
+                    return ('❌ Прямой доступ к api.telegram.org не проходит: сервер Telegram не ответил вовремя. '
+                            'Проверьте внешний доступ к Telegram или включите рабочий прокси-режим для бота.')
+                return (f'❌ Доступ к Telegram API через режим {proxy_mode} не проходит: сервер не ответил вовремя через выбранный прокси. '
+                        'Проверьте работу прокси и маршрута до api.telegram.org.')
             if 'Connection refused' in error_text or 'SOCKSHTTPSConnection' in error_text:
                 if proxy_mode in ['shadowsocks', 'vmess', 'vless']:
                     port = {
@@ -1014,7 +1043,8 @@ def _web_status_snapshot(force_refresh=False):
         'state_label': state_label,
         'proxy_mode': proxy_mode,
         'api_status': api_status,
-        'socks_details': socks_details
+        'socks_details': socks_details,
+        'fallback_reason': _last_proxy_disable_reason(),
     }
     web_status_cache['timestamp'] = now
     web_status_cache['data'] = snapshot
@@ -1563,10 +1593,15 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         if status['socks_details']:
             socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}' + '</p>'
 
+        fallback_block = ''
+        if status.get('fallback_reason') and status['proxy_mode'] == 'none':
+            fallback_block = f'<p class="status-note">Последняя неудачная попытка прокси: {html.escape(status["fallback_reason"])}</p>'
+
         status_block = f'''<div class="notice notice-status hero-status">
     <strong>Связь с Telegram API</strong>
     <p>{html.escape(status['api_status'])}</p>
     {socks_block}
+    {fallback_block}
 </div>'''
 
         current_mode_label = {
@@ -2440,9 +2475,7 @@ def main():
             api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=8, read_timeout=10)
             if not api_status.startswith('✅'):
                 with open('/opt/etc/error.log', 'a', encoding='utf-8', errors='ignore') as fl:
-                    fl.write(f'Прокси-режим {proxy_mode} отключён при старте: {api_status}\n')
-                proxy_mode = 'none'
-                update_proxy('none')
+                    fl.write(f'Прокси-режим {proxy_mode} не подтверждён при старте: {api_status}\n')
     start_http_server()
     wait_for_bot_start()
     while True:
