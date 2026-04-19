@@ -65,6 +65,7 @@ TELEGRAM_RESULT_RETRY_INTERVAL = 30
 
 WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
+WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 XRAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24xray'
 V2RAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24v2ray'
@@ -111,6 +112,7 @@ key_status_cache = {
 }
 status_refresh_lock = threading.Lock()
 status_refresh_running = False
+process_started_at = time.time()
 web_command_lock = threading.Lock()
 web_command_state = {
     'running': False,
@@ -1711,6 +1713,18 @@ def check_telegram_api(retries=2, retry_delay=7, connect_timeout=30, read_timeou
     return last_result
 
 
+def _is_transient_telegram_api_failure(status_text):
+    text = str(status_text or '').casefold()
+    markers = [
+        'network is unreachable',
+        'timed out',
+        'max retries exceeded',
+        'failed to establish a new connection',
+        'connection reset',
+    ]
+    return any(marker in text for marker in markers)
+
+
 def _web_status_snapshot(force_refresh=False):
     now = time.time()
     if (not force_refresh and web_status_cache['data'] is not None and
@@ -1730,6 +1744,11 @@ def _web_status_snapshot(force_refresh=False):
             socks_ok = _check_socks5_handshake(port)
             socks_details = f'Локальный SOCKS {proxy_mode} 127.0.0.1:{port}: {"доступен" if socks_ok else "не отвечает как SOCKS5"}'
     api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=3, read_timeout=4)
+    if (proxy_mode != 'none' and socks_ok and not api_status.startswith('✅') and
+            now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
+            _is_transient_telegram_api_failure(api_status)):
+        api_status = ('⏳ Прокси-режим поднят, Telegram API ещё перепроверяется после рестарта. '
+                      'Обновите страницу через несколько секунд.')
     snapshot = {
         'state_label': state_label,
         'proxy_mode': proxy_mode,
