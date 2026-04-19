@@ -1938,12 +1938,7 @@ def start(message):
     if not authorized:
         _send_unauthorized_message(message, reason)
         return
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton("🔰 Установка и удаление")
-    item2 = types.KeyboardButton("🔑 Ключи и мосты")
-    item3 = types.KeyboardButton("📝 Списки обхода")
-    item4 = types.KeyboardButton("⚙️ Сервис")
-    markup.add(item1, item2, item3, item4)
+    markup = _build_main_menu_markup()
     bot.send_message(message.chat.id, '✅ Добро пожаловать в меню!', reply_markup=markup)
 
 @bot.message_handler(content_types=['text'])
