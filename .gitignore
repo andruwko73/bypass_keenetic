@@ -5,3 +5,5 @@ __pycache__/
 .env
 bot_2.1.9.py
 router-backup-live/
+test_proxy.py
+tmp_S24xray
