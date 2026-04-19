@@ -329,7 +329,9 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
 
 def _download_repo_script(repo_owner, repo_name):
     url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/main/script.sh'
-    response = requests.get(
+    session = requests.Session()
+    session.trust_env = False
+    response = session.get(
         url,
         params={'ts': str(int(time.time()))},
         headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
