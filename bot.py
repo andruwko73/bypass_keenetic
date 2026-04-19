@@ -2255,11 +2255,26 @@ def wait_for_bot_start():
 
 
 def _read_v2ray_key(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
-    except Exception:
-        return None
+    candidate_paths = [file_path]
+    file_name = os.path.basename(file_path)
+    current_dir = os.path.dirname(file_path)
+    alternate_dirs = []
+    if current_dir == XRAY_CONFIG_DIR:
+        alternate_dirs.append(V2RAY_CONFIG_DIR)
+    elif current_dir == V2RAY_CONFIG_DIR:
+        alternate_dirs.append(XRAY_CONFIG_DIR)
+    for directory in alternate_dirs:
+        candidate_paths.append(os.path.join(directory, file_name))
+
+    for candidate_path in candidate_paths:
+        try:
+            with open(candidate_path, 'r', encoding='utf-8') as f:
+                value = f.read().strip()
+            if value:
+                return value
+        except Exception:
+            continue
+    return None
 
 
 def _save_v2ray_key(file_path, key):

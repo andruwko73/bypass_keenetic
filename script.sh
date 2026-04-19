@@ -381,6 +381,8 @@ if [ "$1" = "-update" ]; then
     echo "Начинаем обновление."
   ensure_entware_dns
     opkg update > /dev/null 2>&1
+    core_proxy_pkg=$(detect_core_proxy_package)
+    opkg install "$core_proxy_pkg" > /dev/null 2>&1 || true
     # opkg update
     echo "Ваша версия KeenOS" "${keen_os_full}."
     echo "Пакеты обновлены."
@@ -471,6 +473,8 @@ if [ "$1" = "-update" ]; then
 
     mv "$stage_dir/dnsmasq.conf" /opt/etc/dnsmasq.conf
     chmod 755 /opt/etc/dnsmasq.conf
+
+    configure_core_proxy_service
 
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
