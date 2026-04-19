@@ -7,6 +7,22 @@
 #
 #  Файл: bot.py, Версия 2.2.1, последнее изменение: 02.10.2023, 00:55
 
+import asyncio
+import subprocess
+import os
+import re
+import stat
+import sys
+import time
+import threading
+import signal
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+from urllib.parse import parse_qs, unquote, urlparse
+
+import telebot
+from telebot import types
+from telethon.sync import TelegramClient
+import base64
 import shutil
 # import datetime
 import requests
