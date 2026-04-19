@@ -31,6 +31,37 @@
 - [Установка Entware](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
 - [Установка бота и скриптов](https://github.com/znetworkx/bypass_keenetic/wiki/Install-bot-and-scripts)
 
+## Быстрый bootstrap после Entware
+Если Entware уже установлен и `/opt` готов, можно поставить базовые компоненты и сразу поднять страницу первичной настройки без ручной загрузки файлов через PuTTY.
+
+Для публикации и переноса используйте шаблон [bot_config.example.py](bot_config.example.py). Рабочий [bot_config.py](bot_config.py) содержит секреты и не должен попадать в публичный коммит.
+
+Интерактивный запуск:
+
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh)"
+```
+
+После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Затем installer сохранит `bot_config.py` и запустит основной бот.
+
+Перед заменой live-файлов bootstrap создаёт локальный backup на роутере и генерирует rollback-скрипт в `/opt/root/bypass-last-rollback.sh`.
+
+Если `bot_config.py` отсутствует, сервис бота автоматически запускает installer вместо основного Telegram-бота. После сохранения настроек installer сам переключает роутер обратно на основной сервис.
+
+Безголовый запуск тоже остаётся доступным, если значения уже известны заранее:
+
+```sh
+export TG_BOT_TOKEN='MyBotFatherToken'
+export TG_USERNAME='MyTelegramLogin'
+export TG_APP_API_ID='myapiid'
+export TG_APP_API_HASH='myapihash'
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh)"
+```
+
+Ограничение: подготовку накопителя и установку Entware этот bootstrap не отменяет, потому что на Keenetic Entware живёт в `/opt` и обычно требует внешнее хранилище.
+
+## Как обновиться:
+- [Обновление на новую версию](https://github.com/znetworkx/bypass_keenetic/wiki/Update-bot-and-scripts)
 
 ## Шаблоны списков
 - [vless-2.txt](vless-2.txt) — готовый шаблон списка доменов для второго маршрута VLESS, собранный под GitHub Copilot, GitHub и связанную инфраструктуру VS Code/Microsoft.

@@ -12,6 +12,21 @@
 
 repo="andruwko73"
 
+config_get() {
+  key="$1"
+  default_value="$2"
+
+  if [ -f "$BOT_CONFIG_PATH" ]; then
+    value=$(grep "^${key}[[:space:]]*=" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9]{1,5}" | head -n1)
+    if [ -n "$value" ]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  fi
+
+  printf '%s' "$default_value"
+}
+
 BOT_CONFIG_PATH="/opt/etc/bot_config.py"
 BOT_MAIN_PATH="/opt/etc/bot.py"
 if [ -f "/opt/etc/bot/bot_config.py" ]; then
@@ -25,17 +40,17 @@ BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 # ip роутера
 lanip=$(ip -4 addr show br0 | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1)
 ssredir="ss-redir"
-localportsh=$(grep "localportsh" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
-#dnsporttor=$(grep "dnsporttor" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
-localporttor=$(grep "localporttor" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
-localportvmess=$(grep "localportvmess" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
-localportvless=$(grep "localportvless" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
+localportsh=$(config_get "localportsh" "1082")
+#dnsporttor=$(config_get "dnsporttor" "9053")
+localporttor=$(config_get "localporttor" "9141")
+localportvmess=$(config_get "localportvmess" "10810")
+localportvless=$(config_get "localportvless" "10811")
 localportvless_transparent=$((localportvless + 1))
 localportvless2=$((localportvless + 2))
 localportvless2_transparent=$((localportvless + 3))
-localporttrojan=$(grep "localporttrojan" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
-dnsovertlsport=$(grep "dnsovertlsport" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
-dnsoverhttpsport=$(grep "dnsoverhttpsport" "$BOT_CONFIG_PATH" | grep -Eo "[0-9]{1,5}")
+localporttrojan=$(config_get "localporttrojan" "10829")
+dnsovertlsport=$(config_get "dnsovertlsport" "40500")
+dnsoverhttpsport=$(config_get "dnsoverhttpsport" "40508")
 keen_os_full=$(curl -s localhost:79/rci/show/version/title | tr -d \",)
 keen_os_short=$(printf '%s' "$keen_os_full" | grep -Eo '[0-9]+' | head -n1)
 
