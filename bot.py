@@ -6,30 +6,7 @@
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
 #  Файл: bot.py, Версия 2.2.1, последнее изменение: 02.10.2023, 00:55
-#  Доработал: NetworK (https://github.com/znetworkx)
 
-# ВЕРСИЯ СКРИПТА 2.2.1
-# ЕСЛИ ВЫ ХОТИТЕ ПОДДЕРЖАТЬ РАЗРАБОТЧИКОВ - МОЖЕТЕ ОТПРАВИТЬ ДОНАТ НА ЛЮБУЮ СУММУ
-# znetworkx aka NetworK - 4817 7603 0990 8527 (Сбербанк VISA)
-# tas-unn aka Materland - 2204 1201 0098 8217 (КАРТА МИР)
-
-import asyncio
-import subprocess
-import os
-import re
-import stat
-import sys
-import time
-import threading
-import signal
-from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote, urlparse
-
-import telebot
-from telebot import types
-from telethon.sync import TelegramClient
-import base64
-# from pathlib import Path
 import shutil
 # import datetime
 import requests
@@ -43,30 +20,7 @@ appapihash = config.appapihash
 usernames = config.usernames
 routerip = config.routerip
 browser_port = config.browser_port
-fork_repo_owner = getattr(config, 'fork_repo_owner', 'andruwko73')
-fork_repo_name = getattr(config, 'fork_repo_name', 'bypass_keenetic')
-fork_button_label = getattr(config, 'fork_button_label', f'Fork by {fork_repo_owner}')
-localportsh = config.localportsh
-localporttor = config.localporttor
-localporttrojan = config.localporttrojan
-localportvmess = config.localportvmess
-localportvless = config.localportvless
-localportvless_transparent = str(int(localportvless) + 1)
-localportvless2 = str(int(localportvless) + 2)
-localportvless2_transparent = str(int(localportvless) + 3)
-localportsh_bot = str(getattr(config, 'localportsh_bot', 10820))
-localporttrojan_bot = str(getattr(config, 'localporttrojan_bot', 10830))
-dnsporttor = config.dnsporttor
-dnsovertlsport = config.dnsovertlsport
-dnsoverhttpsport = config.dnsoverhttpsport
 
-# Начало работы программы
-bot = telebot.TeleBot(token)
-level = 0
-bypass = -1
-sid = "0"
-PROXY_MODE_FILE = '/opt/etc/bot_proxy_mode'
-BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
 WEB_STATUS_CACHE_TTL = 20
 KEY_STATUS_CACHE_TTL = 20
 BOT_SOURCE_PATH = os.path.abspath(__file__)
@@ -1816,30 +1770,18 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
   <pre class="log-output">{safe_message}</pre>
 </div>'''
 
-                command_block = ''
-                if command_state['label']:
-                        command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
-                        command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Обновление страницы происходит автоматически.'
-                command_block = ''
-                if command_state['label']:
-                        command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
-                        command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Обновление страницы происходит автоматически.'
-                        progress_block = ''
-                        if command_state['command'] == 'update' and command_state['progress']:
-                                progress_value = max(0, min(100, int(command_state['progress'])))
-                                progress_label = command_state.get('progress_label') or 'Обновление выполняется'
-                                progress_block = f'''<div class="command-progress-block">
-    <div class="command-progress-header">
-        <span>{html.escape(progress_label)}</span>
-        <span>{progress_value}%</span>
-    </div>
-    <div class="command-progress-track"><div class="command-progress-fill" style="width:{progress_value}%"></div></div>
+        command_block = ''
+        if command_state['label']:
+            command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
+            command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Обновление страницы происходит автоматически.'
+            command_block = f'''<div class="notice notice-status">
+  <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
+  <pre class="log-output">{html.escape(command_text)}</pre>
 </div>'''
-                        command_block = f'''<div class="notice notice-status">
-    <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
-    {progress_block}
-    <pre class="log-output">{html.escape(command_text)}</pre>
-</div>'''
+
+        socks_block = ''
+        if status['socks_details']:
+            socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}' + '</p>'
         fallback_block = ''
         if status.get('fallback_reason') and status['proxy_mode'] == 'none':
             fallback_block = f'<p class="status-note">Последняя неудачная попытка прокси: {html.escape(status["fallback_reason"])}</p>'
