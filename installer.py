@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import html
+import ipaddress
 import os
 import re
 import shutil
@@ -19,7 +20,6 @@ INSTALLER_SERVICE_PATH = '/opt/etc/init.d/S98telegram_bot_installer'
 DEFAULT_BROWSER_PORT = int(os.environ.get('BYPASS_INSTALLER_PORT', '8080'))
 DEFAULT_FORK_REPO_OWNER = 'andruwko73'
 DEFAULT_FORK_REPO_NAME = 'bypass_keenetic'
-HOST = '0.0.0.0'
 
 
 def detect_router_ip():
@@ -34,6 +34,27 @@ def detect_router_ip():
     except Exception:
         pass
     return '192.168.1.1'
+
+
+def is_local_web_client(address):
+    try:
+        ip_obj = ipaddress.ip_address((address or '').strip())
+    except ValueError:
+        return False
+    return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+
+
+def resolve_bind_host():
+    candidate = detect_router_ip().strip()
+    if not candidate:
+        return ''
+    try:
+        ip_obj = ipaddress.ip_address(candidate)
+    except ValueError:
+        return ''
+    if ip_obj.is_unspecified:
+        return ''
+    return candidate
 
 
 def ensure_legacy_path(source_path, legacy_path):
@@ -224,6 +245,16 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
 
 
 class InstallerHandler(BaseHTTPRequestHandler):
+    def _request_is_allowed(self):
+        client_ip = self.client_address[0] if self.client_address else ''
+        return is_local_web_client(client_ip)
+
+    def _ensure_request_allowed(self):
+        if self._request_is_allowed():
+            return True
+        self._send_html('<h1>403 Forbidden</h1><p>Веб-интерфейс доступен только из локальной сети.</p>', status=403)
+        return False
+
     def _send_html(self, text, status=200):
         body = text.encode('utf-8')
         self.send_response(status)
@@ -234,9 +265,13 @@ class InstallerHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if not self._ensure_request_allowed():
+            return
         self._send_html(page_html())
 
     def do_POST(self):
+        if not self._ensure_request_allowed():
+            return
         if self.path != '/save':
             self._send_html(page_html('Неизвестное действие.'), status=404)
             return
@@ -272,7 +307,8 @@ class InstallerHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    server = ThreadingHTTPServer((HOST, DEFAULT_BROWSER_PORT), InstallerHandler)
+    bind_host = resolve_bind_host()
+    server = ThreadingHTTPServer((bind_host, DEFAULT_BROWSER_PORT), InstallerHandler)
     try:
         server.serve_forever()
     finally:

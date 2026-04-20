@@ -24,7 +24,7 @@
 sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh | sh'
 ```
 
-После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Затем installer сохранит `bot_config.py` и запустит основной бот.
+После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Эта страница доступна только из локальной сети роутера. Затем installer сохранит `bot_config.py` и запустит основной бот.
 
 Скриншот страницы первичной настройки:
 
@@ -58,7 +58,7 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 - служебные команды: обновление из форка без сброса, перезапуск сервисов, DNS override, удаление компонентов и перезагрузка.
 
 Типовой сценарий работы:
-1. Откройте в браузере `http://192.168.1.1:8080/`.
+1. Откройте в браузере `http://192.168.1.1:8080/` из локальной сети роутера.
 2. Вставьте ключ в карточку нужного протокола и нажмите кнопку сохранения.
 3. При необходимости отредактируйте список доменов в блоке **Списки обхода по протоколам и VPN**.
 4. Переключите режим кнопкой **Режим** в верхней части страницы.

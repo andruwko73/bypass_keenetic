@@ -10,6 +10,7 @@
 import asyncio
 import subprocess
 import os
+import ipaddress
 import re
 import stat
 import sys
@@ -138,6 +139,27 @@ RUNTIME_ERROR_LOG_PATHS = [
 MENU_STATE_UNSET = object()
 chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
+
+
+def _is_local_web_client(address):
+    try:
+        ip_obj = ipaddress.ip_address((address or '').strip())
+    except ValueError:
+        return False
+    return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+
+
+def _resolve_web_bind_host():
+    candidate = str(routerip or '').strip()
+    if not candidate:
+        return ''
+    try:
+        ip_obj = ipaddress.ip_address(candidate)
+    except ValueError:
+        return ''
+    if ip_obj.is_unspecified:
+        return ''
+    return candidate
 
 
 def _normalize_username(value):
@@ -2509,6 +2531,16 @@ def bot_message(message):
             pass
 
 class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
+    def _request_is_allowed(self):
+        client_ip = self.client_address[0] if self.client_address else ''
+        return _is_local_web_client(client_ip)
+
+    def _ensure_request_allowed(self):
+        if self._request_is_allowed():
+            return True
+        self._send_html('<h1>403 Forbidden</h1><p>Веб-интерфейс доступен только из локальной сети.</p>', status=403)
+        return False
+
     def _send_html(self, html, status=200):
         body = html.encode('utf-8')
         self.send_response(status)
@@ -2943,6 +2975,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 </html>'''
 
     def do_GET(self):
+        if not self._ensure_request_allowed():
+            return
         path = urlparse(self.path).path
         if path in ['/', '/index.html', '/command']:
             self._send_html(self._build_form(_consume_web_flash_message()))
@@ -2950,6 +2984,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             self._send_html('<h1>404 Not Found</h1>', status=404)
 
     def do_POST(self):
+        if not self._ensure_request_allowed():
+            return
         path = urlparse(self.path).path
         if path == '/set_proxy':
             length = int(self.headers.get('Content-Length', 0))
@@ -3058,16 +3094,18 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 def start_http_server():
     global web_httpd
     try:
-        server_address = ('', int(browser_port))
+        bind_host = _resolve_web_bind_host()
         class ReusableThreadingHTTPServer(ThreadingHTTPServer):
             allow_reuse_address = True
 
+        server_address = (bind_host, int(browser_port))
         httpd = ReusableThreadingHTTPServer(server_address, KeyInstallHTTPRequestHandler)
         httpd.daemon_threads = True
         web_httpd = httpd
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
-        _write_runtime_log(f'HTTP server listening on 0.0.0.0:{browser_port}')
+        listen_host = bind_host or '0.0.0.0'
+        _write_runtime_log(f'HTTP server listening on {listen_host}:{browser_port}; LAN-only access enforced')
     except Exception as err:
         _write_runtime_log(f'HTTP server start failed on port {browser_port}: {err}', mode='w')
 
