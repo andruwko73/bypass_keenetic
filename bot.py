@@ -140,9 +140,7 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 BOT_SOURCE_PATH = os.path.abspath(__file__)
-BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
-STATIC_DIR = os.path.join(BOT_DIR, 'static')
-README_PATH = os.path.join(BOT_DIR, 'README.md')
+README_PATH = os.path.join(os.path.dirname(BOT_SOURCE_PATH), 'README.md')
 XRAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24xray'
 V2RAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24v2ray'
 XRAY_CONFIG_DIR = '/opt/etc/xray'
@@ -749,11 +747,9 @@ def _build_service_menu_markup():
     item2 = types.KeyboardButton("‼️Перезагрузить роутер")
     item3 = types.KeyboardButton("‼️DNS Override")
     item4 = types.KeyboardButton("📊 Статус ключей")
-    item5 = types.KeyboardButton("🔄 Обновление")
     back = types.KeyboardButton("🔙 Назад")
     markup.add(item1, item2)
     markup.add(item3, item4)
-    markup.add(item5)
     markup.add(back)
     return markup
 
@@ -762,9 +758,9 @@ def _telegram_command_markup(menu_name):
     return _build_service_menu_markup() if menu_name == 'service' else _build_main_menu_markup()
 
 
-def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
+def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name):
     try:
-        return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
+        return_code, output = _run_script_action(action, repo_owner, repo_name)
     except Exception as exc:
         return_code = 1
         output = f'Ошибка запуска фоновой команды: {exc}'
@@ -780,7 +776,7 @@ def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_na
     _remove_file(TELEGRAM_COMMAND_JOB_FILE)
 
 
-def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
+def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name):
     state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
     started_at = float(state.get('started_at', 0) or 0)
     if state.get('running') and started_at and time.time() - started_at < 1800:
@@ -800,7 +796,7 @@ def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, m
         'import sys; '
         f"sys.path.insert(0, {module_dir!r}); "
         f'import {module_name} as bot_module; '
-        f'bot_module._run_telegram_command_worker({action!r}, {repo_owner!r}, {repo_name!r}, {int(chat_id)!r}, {menu_name!r}, branch={branch!r})'
+        f'bot_module._run_telegram_command_worker({action!r}, {repo_owner!r}, {repo_name!r}, {int(chat_id)!r}, {menu_name!r})'
     )
     subprocess.Popen(
         [sys.executable, '-c', code],
@@ -883,10 +879,10 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
     return result
 
 
-def _download_repo_script(repo_owner, repo_name, branch='main'):
+def _download_repo_script(repo_owner, repo_name):
     session = requests.Session()
     session.trust_env = False
-    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{branch}'
+    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/main'
     api_response = session.get(
         api_url,
         headers={'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
@@ -920,13 +916,13 @@ def _build_direct_fetch_env():
     return env
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main'):
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _build_direct_fetch_env()
     if progress_command:
         _set_web_command_progress(progress_command, '\n'.join(logs))
     if repo_owner and repo_name:
-        url, script_text, repo_ref = _download_repo_script(repo_owner, repo_name, branch=branch)
+        url, script_text, repo_ref = _download_repo_script(repo_owner, repo_name)
         direct_env['REPO_REF'] = repo_ref
         logs.append(f'Скрипт загружен из {url}')
         logs.append(f'Коммит обновления: {repo_ref[:12]}')
@@ -2131,13 +2127,11 @@ def bot_message(message):
         m2 = types.KeyboardButton("‼️Перезагрузить роутер")
         m3 = types.KeyboardButton("‼️DNS Override")
         m4 = types.KeyboardButton("📊 Статус ключей")
-        m5 = types.KeyboardButton("🔄 Обновление")
         back = types.KeyboardButton("🔙 Назад")
         service.add(m1, m2)
         service.add(m3, m4)
-        service.add(m5)
         service.add(back)
-        if message.text == '📊 Статус ключей':
+            if message.text == '📊 Статус ключей':
                 # Получаем текущие ключи
                 current_keys = _load_current_keys()
                 statuses = _protocol_status_snapshot(current_keys, force_refresh=True)
@@ -2221,28 +2215,7 @@ def bot_message(message):
                     )
                     return
 
-            if message.text == '� Обновление':
-                started, status_message = _start_telegram_background_command(
-                    '-update',
-                    'andruwko73',
-                    'bypass_keenetic',
-                    message.chat.id,
-                    'service',
-                    branch='feature/independent-rework',
-                )
-                if not started:
-                    bot.send_message(message.chat.id, status_message, reply_markup=service)
-                    return
-                bot.send_message(
-                    message.chat.id,
-                    'Запускаю обновление из ветки andruwko73/bypass_keenetic (feature/independent-rework).\n'
-                    'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети.\n'
-                    'После запуска бот сам пришлет лог и итоговое сообщение.',
-                    reply_markup=service,
-                )
-                return
-
-            if message.text == '�📄 Информация':
+            if message.text == '📄 Информация':
                 info_bot = _telegram_info_text_from_readme()
                 bot.send_message(
                     message.chat.id,
@@ -2691,24 +2664,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
 
-    def _send_png(self, filepath):
-        try:
-            with open(filepath, 'rb') as f:
-                body = f.read()
-            self.send_response(200)
-            self.send_header('Content-type', 'image/png')
-            self.send_header('Content-Length', str(len(body)))
-            self.send_header('Cache-Control', 'public, max-age=86400')
-            self.end_headers()
-            self.wfile.write(body)
-        except Exception:
-            self.send_response(404)
-            self.send_header('Content-type', 'text/plain')
-            self.send_header('Content-Length', '9')
-            self.end_headers()
-            self.wfile.write(b'Not Found')
-        self.close_connection = True
-
     def _build_form(self, message=''):
         command_state = _get_web_command_state()
         current_keys = _load_current_keys()
@@ -2791,33 +2746,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             ('trojan', 'Trojan', 5, 'trojan://...'),
             ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
         ]
-        key_pools = _load_key_pools()
         protocol_cards = []
         for key_name, title, rows, placeholder in protocol_sections:
             safe_value = html.escape(current_keys.get(key_name, ''))
             safe_title = html.escape(title)
             status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
-            # Проверка TG и YouTube для статуса
-            api_ok = status_info.get('api_ok', False)
-            tg_status_icon = '<img src="/static/telegram.png" width="16" height="16" alt="TG" style="vertical-align:middle;opacity:0.4">' if not api_ok else '<img src="/static/telegram.png" width="16" height="16" alt="TG" style="vertical-align:middle">'
-            # Пул ключей для этого протокола
-            pool_keys = key_pools.get(key_name, [])
-            pool_items_html = ''
-            if pool_keys:
-                for i, pk in enumerate(pool_keys):
-                    safe_pk = html.escape(pk)
-                    is_active = '(активен)' if i == 0 else ''
-                    pool_items_html += f'''<li class="pool-item">
-                        <span class="pool-key-text" title="{safe_pk}">{safe_pk[:60]}{'…' if len(safe_pk)>60 else ''}</span>
-                        <span class="pool-key-meta">{is_active}</span>
-                        <form method="post" action="/pool_delete" class="pool-item-form">
-                            <input type="hidden" name="type" value="{key_name}">
-                            <input type="hidden" name="key" value="{safe_pk}">
-                            <button type="submit" class="pool-delete-btn" title="Удалить ключ из пула">✕</button>
-                        </form>
-                    </li>'''
-            if not pool_items_html:
-                pool_items_html = '<li class="pool-item pool-empty">Пул пуст. Добавьте ключи ниже.</li>'
             protocol_cards.append(f'''<section class="panel protocol-card">
         <div class="card-topline">
             <span class="eyebrow">Ключ подключения</span>
@@ -2830,17 +2763,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
       <textarea name="key" rows="{rows}" placeholder="{html.escape(placeholder)}" required>{safe_value}</textarea>
       <button type="submit">Сохранить {safe_title}</button>
     </form>
-    <details class="pool-details">
-        <summary class="pool-summary">📦 Пул ключей ({len(pool_keys)}) {tg_status_icon} <img src="/static/youtube.png" width="16" height="16" alt="YT" style="vertical-align:middle"></summary>
-        <ul class="pool-list">{pool_items_html}</ul>
-        <form method="post" action="/pool_add" class="pool-add-form">
-            <input type="hidden" name="type" value="{key_name}">
-            <textarea name="keys" rows="3" placeholder="Вставьте ключи, каждый с новой строки"></textarea>
-            <div class="pool-add-actions">
-                <button type="submit" class="secondary-button">➕ Добавить в пул</button>
-            </div>
-        </form>
-    </details>
   </section>''')
         protocol_cards_html = ''.join(protocol_cards)
 
@@ -3024,20 +2946,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .key-status-warn{{background:rgba(201,111,50,.14);border-color:rgba(201,111,50,.28);color:#f6c892;}}
                 .key-status-empty{{background:rgba(159,176,200,.1);border-color:rgba(159,176,200,.18);color:var(--muted);}}
                 .key-status-note{{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;}}
-        .pool-details{{margin-top:12px;border-top:1px solid var(--border);padding-top:12px;cursor:pointer;}}
-        .pool-summary{{font-size:13px;font-weight:700;color:var(--text);padding:4px 0;}}
-        .pool-list{{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px;}}
-        .pool-item{{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--border);font-size:12px;}}
-        .pool-key-text{{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}}
-        .pool-key-meta{{color:var(--muted);font-size:11px;white-space:nowrap;}}
-        .pool-item-form{{margin:0;padding:0;display:inline;}}
-        .pool-delete-btn{{padding:2px 8px;border:none;border-radius:6px;background:rgba(168,68,47,.2);color:#ffbeb2;font-size:13px;cursor:pointer;line-height:1.4;box-shadow:none;min-width:0;}}
-        .pool-delete-btn:hover{{background:rgba(168,68,47,.4);filter:none;transform:none;}}
-        .pool-empty{{color:var(--muted);justify-content:center;}}
-        .pool-add-form{{margin-top:8px;display:grid;gap:8px;}}
-        .pool-add-actions{{display:flex;gap:8px;}}
-        .pool-add-actions button{{padding:8px 14px;font-size:13px;}}
-        .secondary-button{{background:linear-gradient(135deg, var(--secondary), #b85b27);box-shadow:0 10px 20px rgba(201,111,50,.18);}}
         .wide{{grid-column:1 / -1;}}
         @media (max-width: 760px){{
             body{{padding:12px;}}
@@ -3171,10 +3079,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ['/', '/index.html', '/command']:
             self._send_html(self._build_form(_consume_web_flash_message()))
-        elif path == '/static/telegram.png':
-            self._send_png(os.path.join(STATIC_DIR, 'telegram.png'))
-        elif path == '/static/youtube.png':
-            self._send_png(os.path.join(STATIC_DIR, 'youtube.png'))
         else:
             self._send_html('<h1>404 Not Found</h1>', status=404)
 
@@ -3245,54 +3149,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             self._send_redirect('/')
             return
 
-        if path == '/pool_add':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
-            proto = data.get('type', [''])[0]
-            keys_text = data.get('keys', [''])[0]
-            try:
-                pools = _load_key_pools()
-                if proto not in pools:
-                    pools[proto] = []
-                new_keys = [k.strip() for k in keys_text.split('\n') if k.strip()]
-                added = 0
-                for k in new_keys:
-                    if k not in pools[proto]:
-                        pools[proto].append(k)
-                        added += 1
-                _save_key_pools(pools)
-                result = f'Добавлено ключей в пул {proto}: {added}'
-                _invalidate_web_status_cache()
-                _invalidate_key_status_cache()
-            except Exception as exc:
-                result = f'Ошибка добавления в пул: {exc}'
-            _set_web_flash_message(result)
-            self._send_redirect('/')
-            return
-
-        if path == '/pool_delete':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
-            proto = data.get('type', [''])[0]
-            key_to_delete = data.get('key', [''])[0]
-            try:
-                pools = _load_key_pools()
-                if proto in pools and key_to_delete in pools[proto]:
-                    pools[proto].remove(key_to_delete)
-                    _save_key_pools(pools)
-                    result = f'Ключ удалён из пула {proto}'
-                    _invalidate_web_status_cache()
-                    _invalidate_key_status_cache()
-                else:
-                    result = 'Ключ не найден в пуле'
-            except Exception as exc:
-                result = f'Ошибка удаления из пула: {exc}'
-            _set_web_flash_message(result)
-            self._send_redirect('/')
-            return
-
         if path != '/install':
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
@@ -3327,8 +3183,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             result = f'Ошибка установки: {exc}'
         else:
-            if key_type in ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'):
-                _set_active_key(key_type, key_value)
             _invalidate_web_status_cache()
             _invalidate_key_status_cache()
 
