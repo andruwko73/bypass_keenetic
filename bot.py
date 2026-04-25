@@ -1,75 +1,3 @@
-import threading
-
-# --- Пул ключей и автоматическое переключение ---
-KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
-
-def _load_key_pools():
-    try:
-        with open(KEY_POOLS_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {proto: [] for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']}
-
-def _save_key_pools(pools):
-    os.makedirs(os.path.dirname(KEY_POOLS_PATH), exist_ok=True)
-    with open(KEY_POOLS_PATH, 'w', encoding='utf-8') as f:
-        json.dump(pools, f, ensure_ascii=False, indent=2)
-
-def _get_active_key(proto):
-    # Можно доработать для хранения индекса активного ключа
-    pools = _load_key_pools()
-    keys = pools.get(proto, [])
-    if keys:
-        return keys[0]
-    return ''
-
-def _set_active_key(proto, key):
-    pools = _load_key_pools()
-    keys = pools.get(proto, [])
-    if key in keys:
-        keys.remove(key)
-    keys.insert(0, key)
-    pools[proto] = keys
-    _save_key_pools(pools)
-
-def _auto_switch_keys():
-    # Проверка и переключение ключей для каждого протокола
-    pools = _load_key_pools()
-    for proto, keys in pools.items():
-        if not keys:
-            continue
-        active_key = keys[0]
-        proxy_url = proxy_settings.get(proto)
-        ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=6, read_timeout=10)
-        if ok:
-            continue
-        # Пробуем остальные ключи
-        for alt_key in keys[1:]:
-            # Здесь должна быть логика подмены ключа в конфиге и перезапуска сервиса
-            # Для примера: _apply_installed_proxy(proto, alt_key)
-            _apply_installed_proxy(proto, alt_key)
-            ok2, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=6, read_timeout=10)
-            if ok2:
-                # Переносим рабочий ключ в начало пула
-                keys.remove(alt_key)
-                keys.insert(0, alt_key)
-                pools[proto] = keys
-                _save_key_pools(pools)
-                break
-
-def _start_auto_switch_thread():
-    def worker():
-        while True:
-            try:
-                _auto_switch_keys()
-            except Exception as exc:
-                _write_runtime_log(f'Auto-switch error: {exc}')
-            time.sleep(60)
-    t = threading.Thread(target=worker, daemon=True)
-    t.start()
-
-# Запуск авто-переключения при старте бота
-_start_auto_switch_thread()
 #!/usr/bin/python3
 
 #  2023. Keenetic DNS bot /  Проект: bypass_keenetic / Автор: tas_unn
@@ -746,7 +674,7 @@ def _build_service_menu_markup():
     item1 = types.KeyboardButton("♻️ Перезагрузить сервисы")
     item2 = types.KeyboardButton("‼️Перезагрузить роутер")
     item3 = types.KeyboardButton("‼️DNS Override")
-    item4 = types.KeyboardButton("📊 Статус ключей")
+    item4 = types.KeyboardButton("🔄 Обновления")
     back = types.KeyboardButton("🔙 Назад")
     markup.add(item1, item2)
     markup.add(item3, item4)
@@ -1374,12 +1302,9 @@ def _protocol_status_for_key(key_name, key_value):
             'api_ok': False,
             'api_message': api_message,
         }
-    # Значки Telegram и YouTube (16x16)
-    TELEGRAM_ICON = '\U0001F4AC'  # 💬
-    YOUTUBE_ICON = '\U0001F4FA'   # 📺
     return {
         'tone': 'ok' if api_ok else 'warn',
-        'label': 'Работает' if api_ok else f'Прокси поднят, но трафик {TELEGRAM_ICON} не проходит',
+        'label': 'Работает' if api_ok else 'Прокси поднят, но трафик TG не проходит',
         'details': f'{endpoint_message} {api_message}'.strip(),
         'endpoint_ok': endpoint_ok,
         'endpoint_message': endpoint_message,
@@ -2126,35 +2051,11 @@ def bot_message(message):
         m1 = types.KeyboardButton("♻️ Перезагрузить сервисы")
         m2 = types.KeyboardButton("‼️Перезагрузить роутер")
         m3 = types.KeyboardButton("‼️DNS Override")
-        m4 = types.KeyboardButton("📊 Статус ключей")
+        m4 = types.KeyboardButton("🔄 Обновления")
         back = types.KeyboardButton("🔙 Назад")
         service.add(m1, m2)
         service.add(m3, m4)
         service.add(back)
-            if message.text == '📊 Статус ключей':
-                # Получаем текущие ключи
-                current_keys = _load_current_keys()
-                statuses = _protocol_status_snapshot(current_keys, force_refresh=True)
-                text_lines = ['<b>Статус доступа к Telegram по ключам:</b>']
-                emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
-                proto_labels = {
-                    'shadowsocks': 'Shadowsocks',
-                    'vmess': 'Vmess',
-                    'vless': 'Vless 1',
-                    'vless2': 'Vless 2',
-                    'trojan': 'Trojan',
-                }
-                for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    st = statuses.get(proto, {})
-                    mark = emoji.get(st.get('tone', 'empty'), '➖')
-                    label = proto_labels.get(proto, proto)
-                    status = st.get('label', 'Нет данных')
-                    details = st.get('details', '')
-                    text_lines.append(f"{mark} <b>{label}</b>: {status}")
-                    if details:
-                        text_lines.append(f"<i>{details}</i>")
-                bot.send_message(message.chat.id, '\n'.join(text_lines), parse_mode='HTML', reply_markup=service)
-                return
 
         if message.chat.type == 'private':
             state = _get_chat_menu_state(message.chat.id)
