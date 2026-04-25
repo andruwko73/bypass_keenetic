@@ -16,6 +16,9 @@
 
 ## Установка (~30-60 минут с нуля)
 - [Установка Entware](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
+- Аткуальные ссылки на Entware
+https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz
+https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz
 
 ## Быстрый bootstrap после Entware
 Если Entware уже установлен и `/opt` готов, достаточно один раз зайти на роутер по SSH любым клиентом, например PuTTY, и запустить bootstrap-команду. Дальше интерактивная первичная настройка продолжится уже через браузер на странице роутера, без ручной загрузки файлов через PuTTY.
