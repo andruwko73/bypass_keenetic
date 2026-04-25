@@ -34,6 +34,7 @@ import bot_config as config
 
 # --- Пул ключей и авто-фейловер Telegram API ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
+KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 AUTO_FAILOVER_GRACE_SECONDS = 60
 AUTO_FAILOVER_POLL_SECONDS = 10
 auto_failover_state = {
@@ -42,6 +43,56 @@ auto_failover_state = {
     'last_attempt': 0.0,
     'in_progress': False,
 }
+
+
+def _hash_key(value):
+    import hashlib
+    return hashlib.sha1((value or '').encode('utf-8', errors='ignore')).hexdigest()
+
+
+def _load_key_probe_cache():
+    try:
+        with open(KEY_PROBE_CACHE_PATH, 'r', encoding='utf-8') as f:
+            value = json.load(f)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_key_probe_cache(cache):
+    os.makedirs(os.path.dirname(KEY_PROBE_CACHE_PATH), exist_ok=True)
+    with open(KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def _record_key_probe(proto, key_value, tg_ok=None, yt_ok=None):
+    cache = _load_key_probe_cache()
+    key_id = _hash_key(key_value)
+    entry = cache.get(key_id, {})
+    if not isinstance(entry, dict):
+        entry = {}
+    entry['proto'] = proto
+    entry['ts'] = time.time()
+    if tg_ok is not None:
+        entry['tg_ok'] = bool(tg_ok)
+    if yt_ok is not None:
+        entry['yt_ok'] = bool(yt_ok)
+    cache[key_id] = entry
+    _save_key_probe_cache(cache)
+
+
+TELEGRAM_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1NiIgcj0iMjU2IiBmaWxsPSIjMzdBRUUyIi8+PHBhdGggZD0iTTExOSAyNjVsMjY1LTEwNGMxMi01IDIzIDMgMTkgMTlsLTQ1IDIxMmMtMyAxMy0xMiAxNi0yNCAxMGwtNjYtNDktMzIgMzFjLTQgNC03IDctMTUgN2w2LTg1IDE1NS0xNDBjNy02LTItMTAtMTEtNGwtMTkyIDEyMS04My0yNmMtMTgtNi0xOC0xOCA0LTI2eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg=='
+YOUTUBE_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA0NDMgMzIwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSI0NDMiIGhlaWdodD0iMzIwIiByeD0iNzAiIGZpbGw9IiNGRjAwMDAiLz48cG9seWdvbiBwb2ludHM9IjE3Nyw5NiAzNTUsMTYwIDE3NywyMjQiIGZpbGw9IiNmZmYiLz48L3N2Zz4='
+
+
+def _telegram_icon_html(opacity=1.0):
+    style = f'vertical-align:middle;opacity:{opacity:g}'
+    return f'<img src="data:image/svg+xml;base64,{TELEGRAM_SVG_B64}" width="16" height="16" alt="Telegram" style="{style}">'
+
+
+def _youtube_icon_html(opacity=1.0):
+    style = f'vertical-align:middle;opacity:{opacity:g}'
+    return f'<img src="data:image/svg+xml;base64,{YOUTUBE_SVG_B64}" width="16" height="16" alt="YouTube" style="{style}">'
 
 
 def _load_key_pools():
@@ -134,8 +185,10 @@ def _attempt_auto_failover():
             proxy_url = proxy_settings.get(proto)
             ok2, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=6, read_timeout=10)
             if ok2:
+                yt_ok, _ = _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=3, read_timeout=5)
                 update_proxy(proto)
                 _set_active_key(proto, key_value)
+                _record_key_probe(proto, key_value, tg_ok=True, yt_ok=yt_ok)
                 auto_failover_state['last_ok'] = time.time()
                 auto_failover_state['last_fail'] = 0.0
                 _write_runtime_log(f'Auto-failover: переключено на {proto}; Telegram API доступен. {result}')
@@ -1430,12 +1483,9 @@ def _protocol_status_for_key(key_name, key_value):
             'api_ok': False,
             'api_message': api_message,
         }
-    # Значки Telegram и YouTube (16x16)
-    TELEGRAM_ICON = '\U0001F4AC'  # 💬
-    YOUTUBE_ICON = '\U0001F4FA'   # 📺
     return {
         'tone': 'ok' if api_ok else 'warn',
-        'label': 'Работает' if api_ok else f'Прокси поднят, но трафик {TELEGRAM_ICON} не проходит',
+        'label': 'Работает' if api_ok else f'Прокси поднят, но трафик {_telegram_icon_html(opacity=1.0)} не проходит',
         'details': f'{endpoint_message} {api_message}'.strip(),
         'endpoint_ok': endpoint_ok,
         'endpoint_message': endpoint_message,
@@ -1939,6 +1989,8 @@ def _apply_installed_proxy(key_type, key_value):
         connect_timeout=10,
         read_timeout=15,
     )
+    yt_ok, _ = _check_http_through_proxy(proxy_settings.get(key_type), url='https://www.youtube.com', connect_timeout=3, read_timeout=5)
+    _record_key_probe(key_type, key_value, tg_ok=api_ok, yt_ok=yt_ok)
     if api_ok:
         return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
                 f'Доступ к Telegram API через этот ключ подтверждён. '
@@ -2755,7 +2807,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             with open(filepath, 'rb') as f:
                 body = f.read()
             self.send_response(200)
-            self.send_header('Content-type', 'image/png')
+            content_type = 'image/png'
+            if body.lstrip().startswith(b'<svg'):
+                content_type = 'image/svg+xml'
+            self.send_header('Content-type', content_type)
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'public, max-age=86400')
             self.end_headers()
@@ -2864,14 +2919,14 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
         ]
         key_pools = _load_key_pools()
+        key_probe_cache = _load_key_probe_cache()
         protocol_cards = []
         for key_name, title, rows, placeholder in protocol_sections:
             safe_value = html.escape(current_keys.get(key_name, ''))
             safe_title = html.escape(title)
             status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
-            # Проверка TG и YouTube для статуса
             api_ok = status_info.get('api_ok', False)
-            tg_status_icon = '<img src="/static/telegram.png" width="16" height="16" alt="TG" style="vertical-align:middle;opacity:0.4">' if not api_ok else '<img src="/static/telegram.png" width="16" height="16" alt="TG" style="vertical-align:middle">'
+            tg_status_icon = _telegram_icon_html(opacity=1.0 if api_ok else 0.4)
             # Пул ключей для этого протокола
             pool_keys = key_pools.get(key_name, [])
             pool_items_html = ''
@@ -2879,8 +2934,12 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 for i, pk in enumerate(pool_keys):
                     safe_pk = html.escape(pk)
                     is_active = '(активен)' if i == 0 else ''
+                    probe = key_probe_cache.get(_hash_key(pk), {})
+                    tg_badge = _telegram_icon_html(opacity=1.0) if probe.get('tg_ok') else ''
+                    yt_badge = _youtube_icon_html(opacity=1.0) if probe.get('yt_ok') else ''
                     pool_items_html += f'''<li class="pool-item">
                         <span class="pool-key-text" title="{safe_pk}">{safe_pk[:60]}{'…' if len(safe_pk)>60 else ''}</span>
+                        <span class="pool-key-icons">{tg_badge}{yt_badge}</span>
                         <span class="pool-key-meta">{is_active}</span>
                         <form method="post" action="/pool_delete" class="pool-item-form">
                             <input type="hidden" name="type" value="{key_name}">
@@ -2903,7 +2962,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
       <button type="submit">Сохранить {safe_title}</button>
     </form>
     <details class="pool-details">
-        <summary class="pool-summary">📦 Пул ключей ({len(pool_keys)}) {tg_status_icon} <img src="/static/youtube.png" width="16" height="16" alt="YT" style="vertical-align:middle"></summary>
+        <summary class="pool-summary">📦 Пул ключей ({len(pool_keys)}) {tg_status_icon} {_youtube_icon_html(opacity=1.0)}</summary>
         <ul class="pool-list">{pool_items_html}</ul>
         <form method="post" action="/pool_add" class="pool-add-form">
             <input type="hidden" name="type" value="{key_name}">
@@ -2912,18 +2971,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <button type="submit" class="secondary-button">➕ Добавить в пул</button>
             </div>
         </form>
-        <div class="pool-add-actions" style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-            <form method="post" action="/pool_check" class="inline-form" style="margin:0;">
-                <input type="hidden" name="type" value="{key_name}">
-                <input type="hidden" name="target" value="telegram">
-                <button type="submit" class="secondary-button">Проверить Telegram</button>
-            </form>
-            <form method="post" action="/pool_check" class="inline-form" style="margin:0;">
-                <input type="hidden" name="type" value="{key_name}">
-                <input type="hidden" name="target" value="youtube">
-                <button type="submit" class="secondary-button">Проверить YouTube</button>
-            </form>
-        </div>
     </details>
   </section>''')
         protocol_cards_html = ''.join(protocol_cards)
@@ -3113,6 +3160,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .pool-list{{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px;}}
         .pool-item{{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--border);font-size:12px;}}
         .pool-key-text{{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}}
+        .pool-key-icons{{display:inline-flex;gap:6px;align-items:center;}}
         .pool-key-meta{{color:var(--muted);font-size:11px;white-space:nowrap;}}
         .pool-item-form{{margin:0;padding:0;display:inline;}}
         .pool-delete-btn{{padding:2px 8px;border:none;border-radius:6px;background:rgba(168,68,47,.2);color:#ffbeb2;font-size:13px;cursor:pointer;line-height:1.4;box-shadow:none;min-width:0;}}
@@ -3391,28 +3439,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             self._send_redirect('/')
             return
 
-        if path == '/pool_check':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
-            proto = data.get('type', [''])[0]
-            target = data.get('target', [''])[0]
-            if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                _set_web_flash_message('Ошибка проверки: неизвестный протокол.')
-                self._send_redirect('/')
-                return
-            proxy_url = proxy_settings.get(proto)
-            if target == 'telegram':
-                ok, message = _check_telegram_api_through_proxy(proxy_url, connect_timeout=4, read_timeout=6)
-                result = f'{"✅" if ok else "❌"} Telegram через {proto}: {message}'
-            elif target == 'youtube':
-                ok, message = _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=3, read_timeout=5)
-                result = f'{"✅" if ok else "❌"} YouTube через {proto}: {message}'
-            else:
-                result = 'Ошибка проверки: неизвестная цель.'
-            _set_web_flash_message(result)
-            self._send_redirect('/')
-            return
+        # /pool_check убран: проверка выполняется автоматически и отображается значками в пуле.
 
         if path != '/install':
             self._send_html('<h1>404 Not Found</h1>', status=404)
