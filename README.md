@@ -12,6 +12,14 @@
 - поддержка двух отдельных маршрутов VLESS с разными ключами и списками сайтов
 - дальнейшее обновление одним кликом
 
+### Новые функции (ветка feature/independent-rework)
+- **Пул ключей** — возможность хранить несколько ключей для каждого протокола (Vless 1, Vless 2, Vmess, Trojan, Shadowsocks) и переключаться между ними. Ключи в пуле автоматически проверяются на доступность Telegram и YouTube.
+- **Автоматическая проверка ключей** — фоновое тестирование каждого ключа из пула: отображаются значки Telegram и YouTube напротив каждого ключа, показывающие успешность подключения.
+- **Subscription-ссылки** — поддержка загрузки ключей из subscription-URL (подписки) прямо через веб-интерфейс.
+- **API `/api/status`** — JSON-эндпоинт для получения статуса всех протоколов и пулов ключей. Используется для интеграции с внешними системами мониторинга.
+- **Статические иконки** — Telegram и YouTube иконки (PNG) отображаются в веб-интерфейсе для наглядной индикации работоспособности каждого ключа.
+- **Автоматический failover** — при обнаружении нерабочего активного ключа бот может автоматически переключиться на следующий ключ из пула.
+
 ## Установка (~30-60 минут с нуля)
 - [Установка Entware](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
 
@@ -21,7 +29,7 @@
 Интерактивный запуск:
 
 ```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh | sh'
+sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/feature/independent-rework/bootstrap/install.sh | sh'
 ```
 
 После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Эта страница доступна только из локальной сети роутера. Затем installer сохранит `bot_config.py` и запустит основной бот.
@@ -53,6 +61,8 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 Что доступно на странице:
 - проверка связи с Telegram API и отображение текущего режима бота;
 - сохранение ключей **Vless 1**, **Vless 2**, **Vmess**, **Trojan** и **Shadowsocks**;
+- **пул ключей** — добавление нескольких ключей для каждого протокола, автоматическая проверка их работоспособности (значки Telegram и YouTube);
+- **subscription-ссылки** — загрузка ключей из подписки прямо через веб-интерфейс;
 - переключение активного режима для самого Telegram-бота;
 - редактирование списков обхода по протоколам;
 - служебные команды: обновление из форка без сброса, перезапуск сервисов, DNS override, удаление компонентов и перезагрузка.
@@ -63,6 +73,7 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 3. При необходимости отредактируйте список доменов в блоке **Списки обхода по протоколам и VPN**.
 4. Переключите режим кнопкой **Режим** в верхней части страницы.
 5. Проверьте блок **Связь с Telegram API**: там видно, проходит ли трафик и каким маршрутом сейчас работает бот.
+6. Используйте **Пул ключей** для хранения нескольких ключей — напротив каждого будут отображаться значки Telegram и YouTube при успешной проверке.
 
 ### Скриншоты интерфейса
 
