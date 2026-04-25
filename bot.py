@@ -810,6 +810,22 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
 def _download_repo_script(repo_owner, repo_name, branch='main'):
     session = requests.Session()
     session.trust_env = False
+    if branch != 'main':
+        url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{branch}/script.sh'
+        response = session.get(
+            url,
+            headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+            timeout=30,
+        )
+        response.raise_for_status()
+        script_text = response.text
+        if '#!/bin/sh' not in script_text:
+            raise ValueError('GitHub вернул некорректный script.sh')
+        with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
+            file.write(script_text)
+        os.chmod('/opt/root/script.sh', stat.S_IRWXU)
+        return url, script_text, branch
+
     api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{branch}'
     api_response = session.get(
         api_url,
