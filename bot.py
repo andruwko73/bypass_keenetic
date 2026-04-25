@@ -1,75 +1,3 @@
-import threading
-
-# --- Пул ключей и автоматическое переключение ---
-KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
-
-def _load_key_pools():
-    try:
-        with open(KEY_POOLS_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {proto: [] for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']}
-
-def _save_key_pools(pools):
-    os.makedirs(os.path.dirname(KEY_POOLS_PATH), exist_ok=True)
-    with open(KEY_POOLS_PATH, 'w', encoding='utf-8') as f:
-        json.dump(pools, f, ensure_ascii=False, indent=2)
-
-def _get_active_key(proto):
-    # Можно доработать для хранения индекса активного ключа
-    pools = _load_key_pools()
-    keys = pools.get(proto, [])
-    if keys:
-        return keys[0]
-    return ''
-
-def _set_active_key(proto, key):
-    pools = _load_key_pools()
-    keys = pools.get(proto, [])
-    if key in keys:
-        keys.remove(key)
-    keys.insert(0, key)
-    pools[proto] = keys
-    _save_key_pools(pools)
-
-def _auto_switch_keys():
-    # Проверка и переключение ключей для каждого протокола
-    pools = _load_key_pools()
-    for proto, keys in pools.items():
-        if not keys:
-            continue
-        active_key = keys[0]
-        proxy_url = proxy_settings.get(proto)
-        ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=6, read_timeout=10)
-        if ok:
-            continue
-        # Пробуем остальные ключи
-        for alt_key in keys[1:]:
-            # Здесь должна быть логика подмены ключа в конфиге и перезапуска сервиса
-            # Для примера: _apply_installed_proxy(proto, alt_key)
-            _apply_installed_proxy(proto, alt_key)
-            ok2, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=6, read_timeout=10)
-            if ok2:
-                # Переносим рабочий ключ в начало пула
-                keys.remove(alt_key)
-                keys.insert(0, alt_key)
-                pools[proto] = keys
-                _save_key_pools(pools)
-                break
-
-def _start_auto_switch_thread():
-    def worker():
-        while True:
-            try:
-                _auto_switch_keys()
-            except Exception as exc:
-                _write_runtime_log(f'Auto-switch error: {exc}')
-            time.sleep(60)
-    t = threading.Thread(target=worker, daemon=True)
-    t.start()
-
-# Запуск авто-переключения при старте бота
-_start_auto_switch_thread()
 #!/usr/bin/python3
 
 #  2023. Keenetic DNS bot /  Проект: bypass_keenetic / Автор: tas_unn
@@ -103,6 +31,132 @@ import requests
 import json
 import html
 import bot_config as config
+
+# --- Пул ключей и авто-фейловер Telegram API ---
+KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
+AUTO_FAILOVER_GRACE_SECONDS = 60
+AUTO_FAILOVER_POLL_SECONDS = 10
+auto_failover_state = {
+    'last_ok': 0.0,
+    'last_fail': 0.0,
+    'last_attempt': 0.0,
+    'in_progress': False,
+}
+
+
+def _load_key_pools():
+    try:
+        with open(KEY_POOLS_PATH, 'r', encoding='utf-8') as f:
+            value = json.load(f)
+        if isinstance(value, dict):
+            return value
+    except Exception:
+        pass
+    return {proto: [] for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']}
+
+
+def _save_key_pools(pools):
+    os.makedirs(os.path.dirname(KEY_POOLS_PATH), exist_ok=True)
+    with open(KEY_POOLS_PATH, 'w', encoding='utf-8') as f:
+        json.dump(pools, f, ensure_ascii=False, indent=2)
+
+
+def _set_active_key(proto, key):
+    pools = _load_key_pools()
+    keys = list(pools.get(proto, []) or [])
+    if key in keys:
+        keys.remove(key)
+    keys.insert(0, key)
+    pools[proto] = keys
+    _save_key_pools(pools)
+
+
+def _install_key_for_protocol(proto, key_value):
+    if proto == 'shadowsocks':
+        shadowsocks(key_value)
+        return _apply_installed_proxy('shadowsocks', key_value)
+    if proto == 'vmess':
+        vmess(key_value)
+        return _apply_installed_proxy('vmess', key_value)
+    if proto == 'vless':
+        vless(key_value)
+        return _apply_installed_proxy('vless', key_value)
+    if proto == 'vless2':
+        vless2(key_value)
+        return _apply_installed_proxy('vless2', key_value)
+    if proto == 'trojan':
+        trojan(key_value)
+        return _apply_installed_proxy('trojan', key_value)
+    raise ValueError(f'Unsupported protocol: {proto}')
+
+
+def _attempt_auto_failover():
+    now = time.time()
+    if auto_failover_state['in_progress']:
+        return
+    if auto_failover_state['last_attempt'] and now - auto_failover_state['last_attempt'] < 30:
+        return
+
+    proxy_url = proxy_settings.get(proxy_mode)
+    ok, probe_message = _check_telegram_api_through_proxy(proxy_url, connect_timeout=4, read_timeout=6)
+    if ok:
+        auto_failover_state['last_ok'] = now
+        auto_failover_state['last_fail'] = 0.0
+        return
+
+    if not auto_failover_state['last_fail']:
+        auto_failover_state['last_fail'] = now
+
+    if now - auto_failover_state['last_fail'] < AUTO_FAILOVER_GRACE_SECONDS:
+        return
+
+    auto_failover_state['in_progress'] = True
+    auto_failover_state['last_attempt'] = now
+    try:
+        pools = _load_key_pools()
+        candidates = []
+        for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+            for key_value in pools.get(proto, []) or []:
+                candidates.append((proto, key_value))
+
+        if not candidates:
+            _write_runtime_log('Auto-failover: ключей в пулах нет, переключать не на что.')
+            return
+
+        _write_runtime_log(f'Auto-failover: Telegram API не отвечает >{AUTO_FAILOVER_GRACE_SECONDS}s (режим {proxy_mode}). Пробуем ключи из пулов.')
+        for proto, key_value in candidates:
+            try:
+                result = _install_key_for_protocol(proto, key_value)
+            except Exception as exc:
+                _write_runtime_log(f'Auto-failover: ошибка установки {proto} ключа: {exc}')
+                continue
+
+            proxy_url = proxy_settings.get(proto)
+            ok2, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=6, read_timeout=10)
+            if ok2:
+                update_proxy(proto)
+                _set_active_key(proto, key_value)
+                auto_failover_state['last_ok'] = time.time()
+                auto_failover_state['last_fail'] = 0.0
+                _write_runtime_log(f'Auto-failover: переключено на {proto}; Telegram API доступен. {result}')
+                return
+
+        _write_runtime_log('Auto-failover: перебор ключей из пулов не дал доступа к Telegram API.')
+    finally:
+        auto_failover_state['in_progress'] = False
+
+
+def _start_auto_failover_thread():
+    def worker():
+        while not shutdown_requested.is_set():
+            try:
+                _attempt_auto_failover()
+            except Exception as exc:
+                _write_runtime_log(f'Auto-failover error: {exc}')
+            shutdown_requested.wait(AUTO_FAILOVER_POLL_SECONDS)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
 
 token = config.token
 appapiid = config.appapiid
@@ -749,11 +803,9 @@ def _build_service_menu_markup():
     item2 = types.KeyboardButton("‼️Перезагрузить роутер")
     item3 = types.KeyboardButton("‼️DNS Override")
     item4 = types.KeyboardButton("📊 Статус ключей")
-    item5 = types.KeyboardButton("🔄 Обновление")
     back = types.KeyboardButton("🔙 Назад")
     markup.add(item1, item2)
     markup.add(item3, item4)
-    markup.add(item5)
     markup.add(back)
     return markup
 
@@ -2131,17 +2183,13 @@ def bot_message(message):
         m2 = types.KeyboardButton("‼️Перезагрузить роутер")
         m3 = types.KeyboardButton("‼️DNS Override")
         m4 = types.KeyboardButton("📊 Статус ключей")
-        m5 = types.KeyboardButton("🔄 Обновление")
         back = types.KeyboardButton("🔙 Назад")
         service.add(m1, m2)
         service.add(m3, m4)
-        service.add(m5)
         service.add(back)
         if message.text == '📊 Статус ключей':
-                # Получаем текущие ключи
-                current_keys = _load_current_keys()
-                statuses = _protocol_status_snapshot(current_keys, force_refresh=True)
-                text_lines = ['<b>Статус доступа к Telegram по ключам:</b>']
+                api_url = f'http://{routerip}:{browser_port}/api/status'
+                text_lines = ['<b>Статус доступа к Telegram по ключам (web):</b>']
                 emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
                 proto_labels = {
                     'shadowsocks': 'Shadowsocks',
@@ -2150,8 +2198,15 @@ def bot_message(message):
                     'vless2': 'Vless 2',
                     'trojan': 'Trojan',
                 }
+                try:
+                    resp = requests.get(api_url, timeout=4)
+                    data = resp.json() if resp.status_code == 200 else {}
+                    statuses = (data.get('protocols') or {}) if isinstance(data, dict) else {}
+                except Exception as exc:
+                    statuses = {}
+                    text_lines.append(f'❌ Не удалось получить статус с {html.escape(api_url)}: {html.escape(str(exc))}')
                 for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    st = statuses.get(proto, {})
+                    st = statuses.get(proto, {}) if isinstance(statuses, dict) else {}
                     mark = emoji.get(st.get('tone', 'empty'), '➖')
                     label = proto_labels.get(proto, proto)
                     status = st.get('label', 'Нет данных')
@@ -2221,26 +2276,7 @@ def bot_message(message):
                     )
                     return
 
-            if message.text == '� Обновление':
-                started, status_message = _start_telegram_background_command(
-                    '-update',
-                    'andruwko73',
-                    'bypass_keenetic',
-                    message.chat.id,
-                    'service',
-                    branch='feature/independent-rework',
-                )
-                if not started:
-                    bot.send_message(message.chat.id, status_message, reply_markup=service)
-                    return
-                bot.send_message(
-                    message.chat.id,
-                    'Запускаю обновление из ветки andruwko73/bypass_keenetic (feature/independent-rework).\n'
-                    'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети.\n'
-                    'После запуска бот сам пришлет лог и итоговое сообщение.',
-                    reply_markup=service,
-                )
-                return
+            # Кнопка "Обновление" убрана из меню "Сервис" (заменена на "Статус ключей").
 
             if message.text == '�📄 Информация':
                 info_bot = _telegram_info_text_from_readme()
@@ -2573,9 +2609,11 @@ def bot_message(message):
             if message.text == '🔰 Установка и удаление':
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
                 item1 = types.KeyboardButton("♻️ Установка и переустановка")
-                item2 = types.KeyboardButton("⚠️ Удаление")
+                item2 = types.KeyboardButton("♻️ Переустановка (ветка independent)")
+                item3 = types.KeyboardButton("⚠️ Удаление")
                 back = types.KeyboardButton("🔙 Назад")
                 markup.row(item1, item2)
+                markup.row(item3)
                 markup.row(back)
                 bot.send_message(message.chat.id, '🔰 Установка и удаление', reply_markup=markup)
                 return
@@ -2596,6 +2634,27 @@ def bot_message(message):
                                  'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
                                  'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
                                  reply_markup=main)
+                return
+
+            if message.text == '♻️ Переустановка (ветка independent)':
+                started, status_message = _start_telegram_background_command(
+                    '-update',
+                    'andruwko73',
+                    'bypass_keenetic',
+                    message.chat.id,
+                    'main',
+                    branch='feature/independent-rework',
+                )
+                if not started:
+                    bot.send_message(message.chat.id, status_message, reply_markup=main)
+                    return
+                bot.send_message(
+                    message.chat.id,
+                    'Запускаю переустановку из ветки andruwko73/bypass_keenetic (feature/independent-rework) без сброса ключей и списков.\n'
+                    'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети.\n'
+                    'После запуска бот сам пришлет лог и итоговое сообщение.',
+                    reply_markup=main,
+                )
                 return
 
             if message.text == '⚠️ Удаление':
@@ -2707,6 +2766,19 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', '9')
             self.end_headers()
             self.wfile.write(b'Not Found')
+        self.close_connection = True
+
+    def _send_json(self, payload, status=200):
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
         self.close_connection = True
 
     def _build_form(self, message=''):
@@ -2840,6 +2912,18 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <button type="submit" class="secondary-button">➕ Добавить в пул</button>
             </div>
         </form>
+        <div class="pool-add-actions" style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+            <form method="post" action="/pool_check" class="inline-form" style="margin:0;">
+                <input type="hidden" name="type" value="{key_name}">
+                <input type="hidden" name="target" value="telegram">
+                <button type="submit" class="secondary-button">Проверить Telegram</button>
+            </form>
+            <form method="post" action="/pool_check" class="inline-form" style="margin:0;">
+                <input type="hidden" name="type" value="{key_name}">
+                <input type="hidden" name="target" value="youtube">
+                <button type="submit" class="secondary-button">Проверить YouTube</button>
+            </form>
+        </div>
     </details>
   </section>''')
         protocol_cards_html = ''.join(protocol_cards)
@@ -3171,6 +3255,20 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ['/', '/index.html', '/command']:
             self._send_html(self._build_form(_consume_web_flash_message()))
+        elif path == '/api/status':
+            try:
+                current_keys = _load_current_keys()
+                snapshot = _cached_status_snapshot(current_keys)
+                if snapshot is None:
+                    snapshot = _build_status_snapshot(current_keys, force_refresh=True)
+                payload = {
+                    'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
+                    'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
+                    'timestamp': time.time(),
+                }
+                self._send_json(payload, status=200)
+            except Exception as exc:
+                self._send_json({'error': str(exc)}, status=500)
         elif path == '/static/telegram.png':
             self._send_png(os.path.join(STATIC_DIR, 'telegram.png'))
         elif path == '/static/youtube.png':
@@ -3289,6 +3387,29 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                     result = 'Ключ не найден в пуле'
             except Exception as exc:
                 result = f'Ошибка удаления из пула: {exc}'
+            _set_web_flash_message(result)
+            self._send_redirect('/')
+            return
+
+        if path == '/pool_check':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            proto = data.get('type', [''])[0]
+            target = data.get('target', [''])[0]
+            if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+                _set_web_flash_message('Ошибка проверки: неизвестный протокол.')
+                self._send_redirect('/')
+                return
+            proxy_url = proxy_settings.get(proto)
+            if target == 'telegram':
+                ok, message = _check_telegram_api_through_proxy(proxy_url, connect_timeout=4, read_timeout=6)
+                result = f'{"✅" if ok else "❌"} Telegram через {proto}: {message}'
+            elif target == 'youtube':
+                ok, message = _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=3, read_timeout=5)
+                result = f'{"✅" if ok else "❌"} YouTube через {proto}: {message}'
+            else:
+                result = 'Ошибка проверки: неизвестная цель.'
             _set_web_flash_message(result)
             self._send_redirect('/')
             return
@@ -3947,6 +4068,7 @@ def main():
                 _write_runtime_log(f'Прокси-режим {proxy_mode} не подтверждён при старте: {api_status}')
     _deliver_pending_telegram_command_result()
     _start_telegram_result_retry_worker()
+    _start_auto_failover_thread()
     wait_for_bot_start()
     while not shutdown_requested.is_set():
         try:
