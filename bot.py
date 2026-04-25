@@ -112,6 +112,37 @@ def _save_key_pools(pools):
         json.dump(pools, f, ensure_ascii=False, indent=2)
 
 
+def _fetch_keys_from_subscription(url):
+    """Загружает ключи из subscription-ссылки (base64-encoded список)."""
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        raw = resp.text.strip()
+        # Пробуем декодировать как base64
+        try:
+            decoded = base64.b64decode(raw + '=' * (-len(raw) % 4)).decode('utf-8')
+        except Exception:
+            decoded = raw
+        keys = [k.strip() for k in decoded.split('\n') if k.strip()]
+        # Фильтруем только ключи известных протоколов
+        result = {'shadowsocks': [], 'vmess': [], 'vless': [], 'vless2': [], 'trojan': []}
+        for k in keys:
+            if k.startswith('ss://'):
+                result['shadowsocks'].append(k)
+            elif k.startswith('vmess://'):
+                result['vmess'].append(k)
+            elif k.startswith('vless://'):
+                result['vless'].append(k)
+            elif k.startswith('trojan://'):
+                result['trojan'].append(k)
+        return result, None
+    except requests.RequestException as exc:
+        return None, f'Ошибка загрузки subscription: {exc}'
+    except Exception as exc:
+        return None, f'Ошибка обработки subscription: {exc}'
+        
+
+
 def _set_active_key(proto, key):
     pools = _load_key_pools()
     keys = list(pools.get(proto, []) or [])
@@ -1485,7 +1516,7 @@ def _protocol_status_for_key(key_name, key_value):
         }
     return {
         'tone': 'ok' if api_ok else 'warn',
-        'label': 'Работает' if api_ok else f'Прокси поднят, но трафик {_telegram_icon_html(opacity=1.0)} не проходит',
+        'label': 'Работает' if api_ok else f'Прокси поднят, но трафик не проходит к&nbsp;{_telegram_icon_html(opacity=1.0)}',
         'details': f'{endpoint_message} {api_message}'.strip(),
         'endpoint_ok': endpoint_ok,
         'endpoint_message': endpoint_message,
@@ -2201,6 +2232,25 @@ def _refresh_status_caches_async(current_keys):
 
     threading.Thread(target=worker, daemon=True).start()
 
+
+def _probe_all_pool_keys_async():
+    """Фоновая проверка всех ключей во всех пулах для отображения значков Telegram/YouTube."""
+    def worker():
+        try:
+            pools = _load_key_pools()
+            for proto, keys in pools.items():
+                proxy_url = proxy_settings.get(proto)
+                for k in keys:
+                    try:
+                        tg_ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=3, read_timeout=4)
+                        yt_ok, _ = _check_http_through_proxy(proxy_url, connect_timeout=2, read_timeout=3)
+                        _record_key_probe(proto, k, tg_ok=tg_ok, yt_ok=yt_ok)
+                    except Exception:
+                        pass
+        except Exception as exc:
+            _write_runtime_log(f'Ошибка фоновой проверки пула ключей: {exc}')
+    threading.Thread(target=worker, daemon=True).start()
+
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
 @bot.message_handler(commands=['start'])
@@ -2239,8 +2289,9 @@ def bot_message(message):
         service.add(m1, m2)
         service.add(m3, m4)
         service.add(back)
-        if message.text == '📊 Статус ключей':
-                api_url = f'http://{routerip}:{browser_port}/api/status'
+
+        if message.chat.type == 'private':
+            if message.text == '📊 Статус ключей':
                 text_lines = ['<b>Статус доступа к Telegram по ключам (web):</b>']
                 emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
                 proto_labels = {
@@ -2251,25 +2302,28 @@ def bot_message(message):
                     'trojan': 'Trojan',
                 }
                 try:
-                    resp = requests.get(api_url, timeout=4)
-                    data = resp.json() if resp.status_code == 200 else {}
-                    statuses = (data.get('protocols') or {}) if isinstance(data, dict) else {}
+                    current_keys = _load_current_keys()
+                    snapshot = _build_status_snapshot(current_keys, force_refresh=True)
+                    statuses = snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {}
                 except Exception as exc:
                     statuses = {}
-                    text_lines.append(f'❌ Не удалось получить статус с {html.escape(api_url)}: {html.escape(str(exc))}')
+                    text_lines.append(f'❌ Ошибка получения статуса: {html.escape(str(exc))}')
                 for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
                     st = statuses.get(proto, {}) if isinstance(statuses, dict) else {}
                     mark = emoji.get(st.get('tone', 'empty'), '➖')
                     label = proto_labels.get(proto, proto)
                     status = st.get('label', 'Нет данных')
+                    # Удаляем HTML-теги из статуса (например, <img> для Telegram не поддерживается)
+                    status_clean = re.sub(r'<[^>]+>', '', status).strip()
                     details = st.get('details', '')
-                    text_lines.append(f"{mark} <b>{label}</b>: {status}")
+                    text_lines.append(f"{mark} <b>{label}</b>: {status_clean}")
                     if details:
                         text_lines.append(f"<i>{details}</i>")
                 bot.send_message(message.chat.id, '\n'.join(text_lines), parse_mode='HTML', reply_markup=service)
                 return
 
         if message.chat.type == 'private':
+
             state = _get_chat_menu_state(message.chat.id)
             level = state['level']
             bypass = state['bypass']
@@ -2330,7 +2384,7 @@ def bot_message(message):
 
             # Кнопка "Обновление" убрана из меню "Сервис" (заменена на "Статус ключей").
 
-            if message.text == '�📄 Информация':
+            if message.text == '📄 Информация':
                 info_bot = _telegram_info_text_from_readme()
                 bot.send_message(
                     message.chat.id,
@@ -2789,7 +2843,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Connection', 'close')
         self.end_headers()
         self.wfile.write(body)
-        self.close_connection = True
+        self.close_connection = False
 
     def _send_redirect(self, location='/'):
         self.send_response(303)
@@ -2798,9 +2852,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
-        self.send_header('Connection', 'close')
+        self.send_header('Connection', 'keep-alive')
         self.end_headers()
-        self.close_connection = True
+        self.close_connection = False
 
     def _send_png(self, filepath):
         try:
@@ -2821,7 +2875,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', '9')
             self.end_headers()
             self.wfile.write(b'Not Found')
-        self.close_connection = True
+        self.close_connection = False
 
     def _send_json(self, payload, status=200):
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
@@ -2831,10 +2885,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
-        self.send_header('Connection', 'close')
+        self.send_header('Connection', 'keep-alive')
         self.end_headers()
         self.wfile.write(body)
-        self.close_connection = True
+        self.close_connection = False
 
     def _build_form(self, message=''):
         command_state = _get_web_command_state()
@@ -2843,6 +2897,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         status = snapshot['web'] if snapshot is not None else _placeholder_web_status_snapshot()
         protocol_statuses = snapshot['protocols'] if snapshot is not None else _placeholder_protocol_statuses(current_keys)
         _refresh_status_caches_async(current_keys)
+        _probe_all_pool_keys_async()
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = (
             'Фоновая проверка связи выполняется' in status.get('api_status', '') or
@@ -2929,6 +2984,17 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             tg_status_icon = _telegram_icon_html(opacity=1.0 if api_ok else 0.4)
             # Пул ключей для этого протокола
             pool_keys = key_pools.get(key_name, [])
+            # Агрегированные значки для всего пула
+            pool_tg_ok = False
+            pool_yt_ok = False
+            for pk in pool_keys:
+                probe = key_probe_cache.get(_hash_key(pk), {})
+                if probe.get('tg_ok'):
+                    pool_tg_ok = True
+                if probe.get('yt_ok'):
+                    pool_yt_ok = True
+            pool_tg_icon = _telegram_icon_html(opacity=1.0) if pool_tg_ok else ''
+            pool_yt_icon = _youtube_icon_html(opacity=1.0) if pool_yt_ok else ''
             pool_items_html = ''
             if pool_keys:
                 for i, pk in enumerate(pool_keys):
@@ -2952,7 +3018,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             protocol_cards.append(f'''<section class="panel protocol-card">
         <div class="card-topline">
             <span class="eyebrow">Ключ подключения</span>
-            <span class="key-status-badge key-status-{status_info['tone']}">{html.escape(status_info['label'])}</span>
+            <span class="key-status-badge key-status-{status_info['tone']}">{status_info['label']}</span>
         </div>
         <h2>{safe_title}</h2>
         <p class="key-status-note">{html.escape(status_info['details'])}</p>
@@ -2962,13 +3028,20 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
       <button type="submit">Сохранить {safe_title}</button>
     </form>
     <details class="pool-details">
-        <summary class="pool-summary">📦 Пул ключей ({len(pool_keys)}) {tg_status_icon} {_youtube_icon_html(opacity=1.0)}</summary>
+        <summary class="pool-summary">📦 Пул ключей ({len(pool_keys)}) {pool_tg_icon} {pool_yt_icon}</summary>
         <ul class="pool-list">{pool_items_html}</ul>
         <form method="post" action="/pool_add" class="pool-add-form">
             <input type="hidden" name="type" value="{key_name}">
             <textarea name="keys" rows="3" placeholder="Вставьте ключи, каждый с новой строки"></textarea>
             <div class="pool-add-actions">
                 <button type="submit" class="secondary-button">➕ Добавить в пул</button>
+            </div>
+        </form>
+        <form method="post" action="/pool_subscribe" class="pool-add-form" style="margin-top:4px;">
+            <input type="hidden" name="type" value="{key_name}">
+            <input type="url" name="url" placeholder="https://sub.example.com/... (subscription-ссылка)" style="font-size:13px;padding:10px 12px;">
+            <div class="pool-add-actions">
+                <button type="submit" class="secondary-button">📥 Загрузить из subscription</button>
             </div>
         </form>
     </details>
@@ -3317,6 +3390,24 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(payload, status=200)
             except Exception as exc:
                 self._send_json({'error': str(exc)}, status=500)
+        elif path == '/api/pool_probe':
+            # Запустить фоновую проверку всех ключей в пулах
+            try:
+                pools = _load_key_pools()
+                count = 0
+                for proto, keys in pools.items():
+                    proxy_url = proxy_settings.get(proto)
+                    for k in keys:
+                        try:
+                            tg_ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=3, read_timeout=4)
+                            yt_ok, _ = _check_http_through_proxy(proxy_url, connect_timeout=2, read_timeout=3)
+                            _record_key_probe(proto, k, tg_ok=tg_ok, yt_ok=yt_ok)
+                            count += 1
+                        except Exception:
+                            pass
+                self._send_json({'status': 'ok', 'probed': count}, status=200)
+            except Exception as exc:
+                self._send_json({'error': str(exc)}, status=500)
         elif path == '/static/telegram.png':
             self._send_png(os.path.join(STATIC_DIR, 'telegram.png'))
         elif path == '/static/youtube.png':
@@ -3403,14 +3494,28 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                     pools[proto] = []
                 new_keys = [k.strip() for k in keys_text.split('\n') if k.strip()]
                 added = 0
+                added_keys = []
                 for k in new_keys:
                     if k not in pools[proto]:
                         pools[proto].append(k)
                         added += 1
+                        added_keys.append(k)
                 _save_key_pools(pools)
                 result = f'Добавлено ключей в пул {proto}: {added}'
                 _invalidate_web_status_cache()
                 _invalidate_key_status_cache()
+                # Запускаем фоновую проверку для добавленных ключей
+                if added_keys:
+                    def _probe_added_keys(proto, keys):
+                        proxy_url = proxy_settings.get(proto)
+                        for k in keys:
+                            try:
+                                tg_ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=3, read_timeout=4)
+                                yt_ok, _ = _check_http_through_proxy(proxy_url, connect_timeout=2, read_timeout=3)
+                                _record_key_probe(proto, k, tg_ok=tg_ok, yt_ok=yt_ok)
+                            except Exception:
+                                pass
+                    threading.Thread(target=_probe_added_keys, args=(proto, added_keys), daemon=True).start()
             except Exception as exc:
                 result = f'Ошибка добавления в пул: {exc}'
             _set_web_flash_message(result)
@@ -3438,6 +3543,55 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             _set_web_flash_message(result)
             self._send_redirect('/')
             return
+
+        if path == '/pool_subscribe':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            proto = data.get('type', [''])[0]
+            sub_url = data.get('url', [''])[0]
+            try:
+                if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+                    raise ValueError('Неизвестный протокол')
+                fetched, error = _fetch_keys_from_subscription(sub_url)
+                if error:
+                    raise ValueError(error)
+                pools = _load_key_pools()
+                if proto not in pools:
+                    pools[proto] = []
+                added = 0
+                added_keys = []
+                # Если выбран vless2, добавляем vless:// ключи в пул vless2
+                source_proto = proto
+                if proto == 'vless2':
+                    source_proto = 'vless'
+                for k in fetched.get(source_proto, []):
+                    if k not in pools[proto]:
+                        pools[proto].append(k)
+                        added += 1
+                        added_keys.append(k)
+                _save_key_pools(pools)
+                # Запускаем фоновую проверку для добавленных ключей
+                if added_keys:
+                    def _probe_added_keys(proto, keys):
+                        proxy_url = proxy_settings.get(proto)
+                        for k in keys:
+                            try:
+                                tg_ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=3, read_timeout=4)
+                                yt_ok, _ = _check_http_through_proxy(proxy_url, connect_timeout=2, read_timeout=3)
+                                _record_key_probe(proto, k, tg_ok=tg_ok, yt_ok=yt_ok)
+                            except Exception:
+                                pass
+                    threading.Thread(target=_probe_added_keys, args=(proto, added_keys), daemon=True).start()
+                result = f'Загружено из subscription и добавлено в пул {proto}: {added} ключей'
+                _invalidate_web_status_cache()
+                _invalidate_key_status_cache()
+            except Exception as exc:
+                result = f'Ошибка загрузки subscription: {exc}'
+            _set_web_flash_message(result)
+            self._send_redirect('/')
+            return
+        
 
         # /pool_check убран: проверка выполняется автоматически и отображается значками в пуле.
 
@@ -4096,6 +4250,7 @@ def main():
     _deliver_pending_telegram_command_result()
     _start_telegram_result_retry_worker()
     _start_auto_failover_thread()
+    _probe_all_pool_keys_async()
     wait_for_bot_start()
     while not shutdown_requested.is_set():
         try:
