@@ -2447,11 +2447,9 @@ def bot_message(message):
             if message.text == '🔰 Установка и удаление':
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
                 item1 = types.KeyboardButton("♻️ Установка и переустановка")
-                item2 = types.KeyboardButton("🔄 Переустановка (ветка independent)")
-                item3 = types.KeyboardButton("⚠️ Удаление")
+                item2 = types.KeyboardButton("⚠️ Удаление")
                 back = types.KeyboardButton("🔙 Назад")
                 markup.row(item1, item2)
-                markup.row(item3)
                 markup.row(back)
                 bot.send_message(message.chat.id, '🔰 Установка и удаление', reply_markup=markup)
                 return
@@ -2469,24 +2467,6 @@ def bot_message(message):
                     return
                 bot.send_message(message.chat.id,
                                  f'Запускаю переустановку из форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
-                                 'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
-                                 'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
-                                 reply_markup=main)
-                return
-
-            if message.text == '🔄 Переустановка (ветка independent)':
-                started, status_message = _start_telegram_background_command(
-                    '-update',
-                    'andruwko73',
-                    'bypass_keenetic',
-                    message.chat.id,
-                    'main',
-                )
-                if not started:
-                    bot.send_message(message.chat.id, status_message, reply_markup=main)
-                    return
-                bot.send_message(message.chat.id,
-                                 'Запускаю переустановку из ветки feature/independent-rework форка andruwko73/bypass_keenetic без сброса ключей и списков. '
                                  'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
                                  'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
                                  reply_markup=main)
