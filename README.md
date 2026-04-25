@@ -1,79 +1,153 @@
-<a href="https://t.me/bypass_keenetic">![Telegram](https://img.shields.io/badge/bypass_keenetic--black?style=social&logo=telegram&logoColor=blue)</a>
+# g00se72/bypass_keenetic
+![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/g00se72/bypass_keenetic)
+![GitHub Release Date - Published_At](https://img.shields.io/github/release-date/g00se72/bypass_keenetic)
+![GitHub repo size](https://img.shields.io/github/repo-size/g00se72/bypass_keenetic)
+![GitHub last commit](https://img.shields.io/github/last-commit/g00se72/bypass_keenetic)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/y/g00se72/bypass_keenetic)
+![GitHub top language](https://img.shields.io/github/languages/top/g00se72/bypass_keenetic)
 
-## Об этом форке
-Это форк проекта `keenetic-dev/bypass_keenetic_dev`.
-- поддержка на [форуме](https://forum.keenetic.com/topic/14672-%D0%BE%D0%B1%D1%85%D0%BE%D0%B4%D0%B0-%D0%B1%D0%BB%D0%BE%D0%BA%D0%B8%D1%80%D0%BE%D0%B2%D0%BE%D0%BA-%D0%BC%D0%BD%D0%BE%D0%B3%D0%BE-%D0%BD%D0%B5-%D0%B1%D1%8B%D0%B2%D0%B0%D0%B5%D1%82) и [чате телеграм](https://t.me/bypass_keenetic)
-- [Полное описание читайте в оригинальной вики](https://github.com/znetworkx/bypass_keenetic/wiki)
+## Описание проекта
 
-В текущем форке добавлены:
-- веб-интерфейс установки ключей и мостов
-- выбор маршрутизации Telegram через локальный VPN/прокси
-- поддержка VLESS вместе с Shadowsocks, Trojan и Vmess
-- поддержка двух отдельных маршрутов VLESS с разными ключами и списками сайтов
-- дальнейшее обновление одним кликом
+Данный репозиторий - это моя версия на основе репозитория от уважаемого [Ziwork](https://github.com/ziwork/bypass_keenetic "https://github.com/ziwork/bypass_keenetic")
 
-## Установка (~30-60 минут с нуля)
-- [Установка Entware](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
+> [!WARNING]
+>   
+> ***Реализация сделана исключительно для себя, в научно-технических целях. Т.к. пишу и тестирую сам, то возможно мне удается проверить не все возможные сценарии использования. Если Вы решите использовать эти скрипты/бота в своей системе, Вы делаете это полностью на свой страх и риск. Я не несу никакой ответственности за любые прямые или косвенные последствия их использования. Вся ответственность за любые результаты, проблемы или ущерб, возникшие в результате использования, ложится исключительно на Вас. Перед использованием убедительно рекомендуется внимательно изучить код и адаптировать его под свои нужды и условия. При найденных проблемах создавайте Issue. Также для обсуждения открыт функционал Discussions***
 
-## Быстрый bootstrap после Entware
-Если Entware уже установлен и `/opt` готов, достаточно один раз зайти на роутер по SSH любым клиентом, например PuTTY, и запустить bootstrap-команду. Дальше интерактивная первичная настройка продолжится уже через браузер на странице роутера, без ручной загрузки файлов через PuTTY.
+## Скриншоты
+| Главное меню | Ключи и мосты | Списки обхода | Установка и удаление |
+|--------------|---------------|---------------|----------------------|
+| ![Главное меню](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/MENU_MAIN.png) | ![Ключи и мосты](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/MENU_VLESS.png) | ![Списки обхода](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/MENU_BYPASS_FILES.png) | ![Установка и удаление](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/install_remove_menu.png) |
 
-Интерактивный запуск:
+---
 
-```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh | sh'
+| Сервисное меню | Обновлений нет | Обновления | DNS Override |
+|----------------|------------|------------------------|--------------|
+| ![Сервисное меню](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/MENU_SERVICE.png) | ![Обновления](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/updates_menu.png) | ![Обновления (состояние)](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/updates_menu(need_update).png) | ![DNS Override](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/dns_override_menu.png) |
+
+---
+
+| Бекап меню | Создать бекап | Выбор диска | Удаление архива | Бекап завершен |
+|------------|---------------|-------------|-----------------|----------------|
+| ![Бекап меню](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/backup_menu.png) | ![Создать бекап](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/backup_menu(backup_state).png) | ![Выбор диска](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/drive_selection_menu.png) | ![Удаление архива](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/delete_archive_menu.png) | ![Бекап завершен](https://raw.githubusercontent.com/g00se72/bypass_keenetic/e6698361cfea854c4eb049accd524c012df2c9a6/screens/backup_done.png) |
+
+## Установка
+
+1) Подготавливаем USB-накопитель по [инструкции](https://help.keenetic.com/hc/ru/articles/360000184259-%D0%9A%D0%B0%D0%BA-%D0%BF%D0%BE%D0%B4%D0%B3%D0%BE%D1%82%D0%BE%D0%B2%D0%B8%D1%82%D1%8C-USB-%D0%BD%D0%B0%D0%BA%D0%BE%D0%BF%D0%B8%D1%82%D0%B5%D0%BB%D1%8C-%D0%B4%D0%BB%D1%8F-%D0%B8%D1%81%D0%BF%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F-%D0%B2-%D0%BA%D0%B0%D1%87%D0%B5%D1%81%D1%82%D0%B2%D0%B5-%D1%85%D1%80%D0%B0%D0%BD%D0%B8%D0%BB%D0%B8%D1%89%D0%B0-%D0%B8-%D0%BE%D0%B4%D0%BD%D0%BE%D0%B2%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%BD%D0%BE-%D1%80%D0%B0%D1%81%D1%88%D0%B8%D1%80%D0%B5%D0%BD%D0%B8%D1%8F-%D0%BE%D0%B1%D1%8A%D0%B5%D0%BC%D0%B0-%D0%BE%D0%BF%D0%B5%D1%80%D0%B0%D1%82%D0%B8%D0%B2%D0%BD%D0%BE%D0%B9-%D0%BF%D0%B0%D0%BC%D1%8F%D1%82%D0%B8-%D0%B8%D0%BD%D1%82%D0%B5%D1%80%D0%BD%D0%B5%D1%82-%D1%86%D0%B5%D0%BD%D1%82%D1%80%D0%B0). В качестве USB-накопителя рекомендую использовать жесткий диск, а не флеш-накопитель
+
+> [!IMPORTANT]
+> 
+> Во избежании проблем с нехваткой памяти рекомендую именно эту инструкцию с созданием SWAP-раздела. Если у вас "хорошее" железо и вы уверены, что создание SWAP-раздела не нужно, просто пропустите создание SWAP-раздела в инструкции
+
+2) Устанавливаем Entware по [инструкции](https://help.keenetic.com/hc/ru/articles/360021214160-%D0%A3%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0-%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BC%D1%8B-%D0%BF%D0%B0%D0%BA%D0%B5%D1%82%D0%BE%D0%B2-%D1%80%D0%B5%D0%BF%D0%BE%D0%B7%D0%B8%D1%82%D0%BE%D1%80%D0%B8%D1%8F-Entware-%D0%BD%D0%B0-USB-%D0%BD%D0%B0%D0%BA%D0%BE%D0%BF%D0%B8%D1%82%D0%B5%D0%BB%D1%8C)
+
+> [!TIP]
+> 
+> При первом подключении по ssh рекомендуется изменить дефолтный пароль командой
+> ```bash
+> passwd
+> ```
+>
+> Или настроить авторизацию по ssh ключу. Для этого нужно сгенерировать публичный и приватный ключи командой
+> ```bash
+> ssh-keygen -b 4096
+> ```
+>
+> Создать файл authorized_keys и скопировать туда публичную часть ключа
+> ```bash
+> touch /opt/etc/dropbear/authorized_keys
+> ```
+> ```bash
+> chmod 600 /opt/etc/dropbear/authorized_keys
+> ```
+>
+> После этого авторизацию по паролю можно отключить (добавить ключи -s и -g) в файле /opt/etc/init.d/S51dropbear
+> > $DROPBEAR -s -g -p $PORT -P $PIDFILE
+
+---
+
+3) Выполнить команды для установки компонентов по очереди
+```bash
+opkg update
+```
+```bash
+opkg install curl python3 python3-pip
+```
+```bash
+pip3 install --upgrade pip
+```
+```bash
+pip3 install pyTelegramBotAPI==4.27.0
 ```
 
-После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Эта страница доступна только из локальной сети роутера. Затем installer сохранит `bot_config.py` и запустит основной бот.
+4) Загрузить бота
+```bash
+mkdir -p /opt/etc/bot
+```
+```bash
+curl -o /opt/etc/bot/main.py https://raw.githubusercontent.com/g00se72/bypass_keenetic/main/bot3/main.py
+```
+```bash
+curl -o /opt/etc/bot/menu.py https://raw.githubusercontent.com/g00se72/bypass_keenetic/main/bot3/menu.py
+```
+```bash
+curl -o /opt/etc/bot/utils.py https://raw.githubusercontent.com/g00se72/bypass_keenetic/main/bot3/utils.py
+```
+```bash
+curl -o /opt/etc/bot/handlers.py https://raw.githubusercontent.com/g00se72/bypass_keenetic/main/bot3/handlers.py
+```
+```bash
+curl -o /opt/etc/bot/bot_config.py https://raw.githubusercontent.com/g00se72/bypass_keenetic/main/bot3/bot_config.py
+```
+```bash
+chmod 755 /opt/etc/bot
+```
+```bash
+chmod 644 /opt/etc/bot/*.py
+```
 
-Скриншот страницы первичной настройки:
+5) Заполнить ключ api бота и другие данные для авторизации в telegram через nano или любым другим способом, сохранить файл
+```bash
+opkg install nano
+```
+```bash
+nano /opt/etc/bot/bot_config.py
+```
 
-<a href="docs/screenshots/installer-setup.png">
-	<img src="docs/screenshots/installer-setup.png" alt="Первичная настройка бота" width="420">
-</a>
+6) Запустить бота
+```bash
+python3 /opt/etc/bot/main.py &
+```
 
-Перед заменой live-файлов bootstrap создаёт локальный backup на роутере и генерирует rollback-скрипт в `/opt/root/bypass-last-rollback.sh`.
+7) Зайти в свой телеграм-бот, нажать `/start`
+`📲 Установка и удаление` -> `📲 Установка`
 
-Если `bot_config.py` отсутствует, сервис бота автоматически запускает installer вместо основного Telegram-бота. После сохранения настроек installer сам переключает роутер обратно на основной сервис.
+Прогресс установки будет отображаться в телеграм-боте. После завершения установки добавить через бота в списки обхода необходимые вам домены и ip-адреса, в меню бота выбрать `⚙️ Сервис` -> `⁉️ DNS Override` -> `✅ ВКЛ`, после чего роутер перезагрузится
 
-Повторный запуск bootstrap в режиме первичной настройки теперь принудительно убирает старый `bot_config.py`, чтобы страница initial setup не использовала прежний token от уже установленного бота.
+---
 
-Во время такой clean install старые `bot_config.py` не попадают в bootstrap rollback и не восстанавливаются автоматически: чувствительные токены и api-ключи должны вводиться заново через installer или передаваться явно через переменные окружения bootstrap.
+> [!TIP]
+> 
+> Проверить запущен ли бот и узнать <ID_Процесса>
+> ```bash
+> /opt/etc/init.d/S99telegram_bot status
+> ```
+> Проверить статус, например, xray можно командой
+> ```bash
+> /opt/etc/init.d/S24xray status
+> ```
 
-Ограничение: подготовку накопителя и установку Entware этот bootstrap не отменяет, потому что на Keenetic Entware живёт в `/opt` и обычно требует внешнее хранилище.
 
-## Шаблоны списков
-- [vless.txt](vless.txt) — готовый шаблон списка доменов для первого маршрута VLESS: Telegram и связанная инфраструктура.
-- [vless-2.txt](vless-2.txt) — готовый шаблон списка доменов для второго маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft и расширенный набор адресов Telegram.
+>[!NOTE]
+>
+> Для восстановления настроек из бекапа:
+> 1) **Конфигурация.** Откройте веб-конфигуратор роутера, перейдите в меню `Управление` -> `Параметры системы`. В разделе `Системные файлы` загрузите бекап файла конфигурации в устройство
+> 2) **Прошивка.** Откройте веб-конфигуратор роутера, перейдите в меню `Управление` -> `Параметры системы`. В разделе `Системные файлы` загрузите бекап файла прошивки в устройство
+> 3) **Entware.** Воспользуйтесь [инструкцией](https://help.keenetic.com/hc/ru/articles/360021214160-%D0%A3%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0-%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BC%D1%8B-%D0%BF%D0%B0%D0%BA%D0%B5%D1%82%D0%BE%D0%B2-%D1%80%D0%B5%D0%BF%D0%BE%D0%B7%D0%B8%D1%82%D0%BE%D1%80%D0%B8%D1%8F-Entware-%D0%BD%D0%B0-USB-%D0%BD%D0%B0%D0%BA%D0%BE%D0%BF%D0%B8%D1%82%D0%B5%D0%BB%D1%8C). Пропустите шаг №3 и на шаге №4 инструкции используйте ваш файл бекапа Entware `mipsel-installer.tar.gz` `mips-installer.tar.gz` `aarch64-installer.tar.gz`
+> 4) **Другие файлы.** Список файлов и дерикторий для бекапа определяет пользователь в bot_config.py. Поэтому порядок восстановления будет зависеть от того, что будете бекапить. По-умолчанию бекапятся файлы бота, скриптов, настройки vless и tor
 
-## Как работает бот на странице 192.168.1.1:8080
-
-После bootstrap или обычной установки бот поднимает локальную HTTP-страницу на роутере. Эта страница нужна для повседневного управления, когда не хочется каждый раз заходить по SSH и редактировать файлы вручную.
-
-Что доступно на странице:
-- проверка связи с Telegram API и отображение текущего режима бота;
-- сохранение ключей **Vless 1**, **Vless 2**, **Vmess**, **Trojan** и **Shadowsocks**;
-- переключение активного режима для самого Telegram-бота;
-- редактирование списков обхода по протоколам;
-- служебные команды: обновление из форка без сброса, перезапуск сервисов, DNS override, удаление компонентов и перезагрузка.
-
-Типовой сценарий работы:
-1. Откройте в браузере `http://192.168.1.1:8080/` из локальной сети роутера.
-2. Вставьте ключ в карточку нужного протокола и нажмите кнопку сохранения.
-3. При необходимости отредактируйте список доменов в блоке **Списки обхода по протоколам и VPN**.
-4. Переключите режим кнопкой **Режим** в верхней части страницы.
-5. Проверьте блок **Связь с Telegram API**: там видно, проходит ли трафик и каким маршрутом сейчас работает бот.
-
-### Скриншоты интерфейса
-
-Общий вид страницы с блоком статуса, запуском и карточками ключей:
-
-<a href="docs/screenshots/web-ui-overview.png">
-	<img src="docs/screenshots/web-ui-overview.png" alt="Общий вид веб-интерфейса" width="420">
-</a>
-
-Нижняя часть страницы со списками обхода и сервисными командами:
-
-<a href="docs/screenshots/web-ui-lists.png">
-	<img src="docs/screenshots/web-ui-lists.png" alt="Списки обхода и команды обслуживания" width="420">
-</a>
+>[!NOTE]
+>
+> Ссылки на исходные репозитории\
+>[https://github.com/ziwork/bypass_keenetic](https://github.com/ziwork/bypass_keenetic "https://github.com/ziwork/bypass_keenetic")\
+>[https://github.com/tas-unn/bypass_keenetic](https://github.com/tas-unn/bypass_keenetic "https://github.com/tas-unn/bypass_keenetic")

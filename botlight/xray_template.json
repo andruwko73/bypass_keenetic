@@ -1,0 +1,59 @@
+{
+  "log": {
+    "error": "/opt/etc/xray/error.log",
+	"access": "/opt/etc/xray/access.log",
+    "loglevel": "error"
+  },
+  "inbounds": [
+    {
+      "protocol": "socks",
+      "port": {{localportvless}},
+      "tag": "socks-in-socks0",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+	  "tag": "vless-reality",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "{{address}}",
+            "port": {{port}},
+            "users": [
+              {
+                "id": "{{id}}",
+                "flow": "{{flow}}",
+                "encryption": "{{encryption}}",
+                "level": 0
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "{{security}}",
+        "realitySettings": {
+          "publicKey": "{{pbk}}",
+          "fingerprint": "{{fp}}",
+          "serverName": "{{sni}}",
+          "shortId": "{{sid}}",
+          "spiderX": "{{spx}}"
+        }
+      }
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
+    }
+  ]
+}

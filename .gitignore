@@ -1,16 +1,28 @@
-!/.env
-venv
-.idea
-__pycache__/
-.env
-bot_2.1.9.py
-router-backup-live/
-test_proxy.py
-tmp_S24xray
-bot_config.py
-.vscode/
-router_combined.txt
-router_data.txt
-router_output.html
-web_state.html
-web_state_utf8.html
+# Виртуальные окружения
+ venv/
+ .venv/
+ 
+ # IDE
+ .idea/
+ 
+ # Кеш Python и скомпилированные файлы
+ __pycache__/
+ *.py[cod]
+ *.pyo
+ *.pyd
+ 
+ # Файлы переменных окружения
+ .env
+ .env.*
+ 
+ # Версионируемые файлы бота
+ # bot_*.py
+ 
+ # Logs
+ *.log
+ logs/
+ 
+ # Документация
+ *.md
+ README.md
+ CHANGELOG.md
