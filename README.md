@@ -12,6 +12,8 @@
 - поддержка двух отдельных маршрутов VLESS с разными ключами и списками сайтов
 - дальнейшее обновление одним кликом
 
+> **Экспериментальная ветка `feature/independent-rework`** — добавлен пул ключей, автоматическая проверка ключей (значки Telegram и YouTube), subscription-ссылки, JSON API `/api/status`. Подробнее в [README ветки independent-rework](https://github.com/andruwko73/bypass_keenetic/blob/feature/independent-rework/README.md).
+
 ## Установка (~30-60 минут с нуля)
 - [Установка Entware](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
 
