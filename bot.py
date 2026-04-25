@@ -686,9 +686,9 @@ def _telegram_command_markup(menu_name):
     return _build_service_menu_markup() if menu_name == 'service' else _build_main_menu_markup()
 
 
-def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name):
+def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
     try:
-        return_code, output = _run_script_action(action, repo_owner, repo_name)
+        return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
     except Exception as exc:
         return_code = 1
         output = f'Ошибка запуска фоновой команды: {exc}'
@@ -704,7 +704,7 @@ def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_na
     _remove_file(TELEGRAM_COMMAND_JOB_FILE)
 
 
-def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name):
+def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
     state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
     started_at = float(state.get('started_at', 0) or 0)
     if state.get('running') and started_at and time.time() - started_at < 1800:
@@ -724,7 +724,7 @@ def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, m
         'import sys; '
         f"sys.path.insert(0, {module_dir!r}); "
         f'import {module_name} as bot_module; '
-        f'bot_module._run_telegram_command_worker({action!r}, {repo_owner!r}, {repo_name!r}, {int(chat_id)!r}, {menu_name!r})'
+        f'bot_module._run_telegram_command_worker({action!r}, {repo_owner!r}, {repo_name!r}, {int(chat_id)!r}, {menu_name!r}, {branch!r})'
     )
     subprocess.Popen(
         [sys.executable, '-c', code],
@@ -807,9 +807,25 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
     return result
 
 
-def _download_repo_script(repo_owner, repo_name):
+def _download_repo_script(repo_owner, repo_name, branch='main'):
     session = requests.Session()
     session.trust_env = False
+    if branch != 'main':
+        url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{branch}/script.sh'
+        response = session.get(
+            url,
+            headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+            timeout=30,
+        )
+        response.raise_for_status()
+        script_text = response.text
+        if '#!/bin/sh' not in script_text:
+            raise ValueError('GitHub вернул некорректный script.sh')
+        with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
+            file.write(script_text)
+        os.chmod('/opt/root/script.sh', stat.S_IRWXU)
+        return url, script_text, branch
+
     api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/main'
     api_response = session.get(
         api_url,
@@ -844,13 +860,13 @@ def _build_direct_fetch_env():
     return env
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None):
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main'):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _build_direct_fetch_env()
     if progress_command:
         _set_web_command_progress(progress_command, '\n'.join(logs))
     if repo_owner and repo_name:
-        url, script_text, repo_ref = _download_repo_script(repo_owner, repo_name)
+        url, script_text, repo_ref = _download_repo_script(repo_owner, repo_name, branch=branch)
         direct_env['REPO_REF'] = repo_ref
         logs.append(f'Скрипт загружен из {url}')
         logs.append(f'Коммит обновления: {repo_ref[:12]}')
@@ -2447,9 +2463,11 @@ def bot_message(message):
             if message.text == '🔰 Установка и удаление':
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
                 item1 = types.KeyboardButton("♻️ Установка и переустановка")
-                item2 = types.KeyboardButton("⚠️ Удаление")
+                item2 = types.KeyboardButton("🔄 Переустановка (ветка independent)")
+                item3 = types.KeyboardButton("⚠️ Удаление")
                 back = types.KeyboardButton("🔙 Назад")
                 markup.row(item1, item2)
+                markup.row(item3)
                 markup.row(back)
                 bot.send_message(message.chat.id, '🔰 Установка и удаление', reply_markup=markup)
                 return
@@ -2467,6 +2485,25 @@ def bot_message(message):
                     return
                 bot.send_message(message.chat.id,
                                  f'Запускаю переустановку из форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
+                                 'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
+                                 'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
+                                 reply_markup=main)
+                return
+
+            if message.text == '🔄 Переустановка (ветка independent)':
+                started, status_message = _start_telegram_background_command(
+                    '-update',
+                    fork_repo_owner,
+                    fork_repo_name,
+                    message.chat.id,
+                    'main',
+                    branch='feature/independent-rework',
+                )
+                if not started:
+                    bot.send_message(message.chat.id, status_message, reply_markup=main)
+                    return
+                bot.send_message(message.chat.id,
+                                 f'Запускаю переустановку из ветки feature/independent-rework форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
                                  'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
                                  'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
                                  reply_markup=main)
