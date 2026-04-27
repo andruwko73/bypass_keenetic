@@ -333,6 +333,7 @@ web_command_state = {
     'progress_label': '',
     'started_at': 0,
     'finished_at': 0,
+    'shown_after_finish': False,
 }
 web_flash_lock = threading.Lock()
 web_flash_message = ''
@@ -1571,6 +1572,29 @@ def _get_web_command_state():
         return dict(web_command_state)
 
 
+def _consume_web_command_state_for_render():
+    with web_command_lock:
+        snapshot = dict(web_command_state)
+        if (snapshot.get('label') and not snapshot.get('running') and
+                snapshot.get('finished_at') and snapshot.get('shown_after_finish')):
+            cleared = {
+                'running': False,
+                'command': '',
+                'label': '',
+                'result': '',
+                'progress': 0,
+                'progress_label': '',
+                'started_at': 0,
+                'finished_at': 0,
+                'shown_after_finish': False,
+            }
+            web_command_state.update(cleared)
+            return cleared
+        elif snapshot.get('label') and not snapshot.get('running') and snapshot.get('finished_at'):
+            web_command_state['shown_after_finish'] = True
+        return snapshot
+
+
 def _estimate_web_command_progress(command, result_text):
     if command not in ('update', 'update_independent'):
         return 0, ''
@@ -1605,6 +1629,7 @@ def _set_web_command_progress(command, result_text):
         web_command_state['result'] = result_text
         web_command_state['progress'] = progress
         web_command_state['progress_label'] = progress_label
+        web_command_state['shown_after_finish'] = False
 
 
 def _set_web_flash_message(message):
@@ -1630,6 +1655,7 @@ def _finish_web_command(command, result):
         web_command_state['progress'] = 100 if command in ('update', 'update_independent') else web_command_state.get('progress', 0)
         web_command_state['progress_label'] = 'Завершено' if command in ('update', 'update_independent') else ''
         web_command_state['finished_at'] = time.time()
+        web_command_state['shown_after_finish'] = False
 
 
 def _execute_web_command(command):
@@ -1654,6 +1680,7 @@ def _start_web_command(command):
         web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent') else ''
         web_command_state['started_at'] = time.time()
         web_command_state['finished_at'] = 0
+        web_command_state['shown_after_finish'] = False
     thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
     thread.start()
     return True, f'⏳ Команда "{label}" запущена. Страница обновится автоматически.'
@@ -2342,8 +2369,12 @@ def bot_message(message):
                     mark = emoji.get(st.get('tone', 'empty'), '➖')
                     label = proto_labels.get(proto, proto)
                     status = st.get('label', 'Нет данных')
-                    # Удаляем HTML-теги из статуса (например, <img> для Telegram не поддерживается)
-                    status_clean = re.sub(r'<[^>]+>', '', status).strip()
+                    status_text = html.unescape(status).replace('\xa0', ' ')
+                    has_telegram_icon = '<img' in status or 'Telegram' in status_text
+                    # Удаляем HTML-теги из статуса: Telegram-сообщение не поддерживает <img>.
+                    status_clean = re.sub(r'<[^>]+>', '', status_text).strip()
+                    if has_telegram_icon and 'Telegram' not in status_clean:
+                        status_clean = f'{status_clean} 📱 Telegram'
                     details = st.get('details', '')
                     text_lines.append(f"{mark} <b>{label}</b>: {status_clean}")
                     if details:
@@ -2920,7 +2951,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = False
 
     def _build_form(self, message=''):
-        command_state = _get_web_command_state()
+        command_state = _consume_web_command_state_for_render()
         current_keys = _load_current_keys()
         snapshot = _cached_status_snapshot(current_keys)
         status = snapshot['web'] if snapshot is not None else _placeholder_web_status_snapshot()
