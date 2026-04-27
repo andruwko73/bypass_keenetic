@@ -1571,6 +1571,25 @@ def _load_current_keys():
     }
 
 
+def _ensure_current_keys_in_pools(current_keys=None):
+    current_keys = current_keys if current_keys is not None else _load_current_keys()
+    pools = _load_key_pools()
+    changed = False
+    for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+        key_value = (current_keys.get(proto) or '').strip()
+        if not key_value:
+            continue
+        keys = list(pools.get(proto, []) or [])
+        if key_value in keys:
+            continue
+        keys.insert(0, key_value)
+        pools[proto] = keys
+        changed = True
+    if changed:
+        _save_key_pools(pools)
+    return pools
+
+
 def _invalidate_status_snapshot_cache():
     status_snapshot_cache['timestamp'] = 0
     status_snapshot_cache['data'] = None
@@ -3235,7 +3254,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             ('trojan', 'Trojan', 5, 'trojan://...'),
             ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
         ]
-        key_pools = _load_key_pools()
+        key_pools = _ensure_current_keys_in_pools(current_keys)
         key_probe_cache = _load_key_probe_cache()
         protocol_cards = []
         for key_name, title, rows, placeholder in protocol_sections:
@@ -4607,6 +4626,7 @@ def main():
     _deliver_pending_telegram_command_result()
     _start_telegram_result_retry_worker()
     _start_auto_failover_thread()
+    _ensure_current_keys_in_pools()
     _probe_all_pool_keys_async()
     wait_for_bot_start()
     while not shutdown_requested.is_set():
