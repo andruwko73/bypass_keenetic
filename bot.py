@@ -1955,6 +1955,25 @@ def _build_proxy_diagnostics(key_type, key_value):
     return ' '.join(parts)
 
 
+def _pool_key_display_name(key_value):
+    raw_key = (key_value or '').strip()
+    label = ''
+    try:
+        if raw_key.startswith('vmess://'):
+            data = _parse_vmess_key(raw_key)
+            label = data.get('ps') or data.get('add') or ''
+        else:
+            parsed = urlparse(raw_key)
+            label = unquote(parsed.fragment or '').strip()
+            if not label and parsed.hostname:
+                label = parsed.hostname
+    except Exception:
+        label = ''
+
+    label = re.sub(r'\s+', ' ', label).strip()
+    return label or 'Ключ VPN'
+
+
 def _check_local_proxy_endpoint(key_type, port):
     if key_type in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
         if _wait_for_socks5_handshake(port, timeout=3):
@@ -3009,12 +3028,17 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             if pool_keys:
                 for i, pk in enumerate(pool_keys):
                     safe_pk = html.escape(pk)
-                    is_active = '(активен)' if i == 0 else ''
+                    display_name = html.escape(_pool_key_display_name(pk))
+                    is_active = 'активен' if i == 0 else ''
                     probe = key_probe_cache.get(_hash_key(pk), {})
                     tg_badge = _telegram_icon_html(opacity=1.0) if probe.get('tg_ok') else ''
                     yt_badge = _youtube_icon_html(opacity=1.0) if probe.get('yt_ok') else ''
                     pool_items_html += f'''<li class="pool-item">
-                        <span class="pool-key-text" title="{safe_pk}">{safe_pk[:60]}{'…' if len(safe_pk)>60 else ''}</span>
+                        <form method="post" action="/pool_apply" class="pool-apply-form">
+                            <input type="hidden" name="type" value="{key_name}">
+                            <input type="hidden" name="key" value="{safe_pk}">
+                            <button type="submit" class="pool-apply-btn" title="Применить этот ключ">{display_name}</button>
+                        </form>
                         <span class="pool-key-icons">{tg_badge}{yt_badge}</span>
                         <span class="pool-key-meta">{is_active}</span>
                         <form method="post" action="/pool_delete" class="pool-item-form">
@@ -3204,8 +3228,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         h2{{margin:0 0 14px;font-size:20px;color:var(--text);}}
             p{{margin:0 0 8px;line-height:1.5;color:var(--muted);}}
         .hero strong{{color:var(--text);}}
-                .layout{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}}
-        .panel{{padding:18px;border:1px solid var(--border);border-radius:22px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}}
+                .layout{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;}}
+        .panel{{min-width:0;padding:18px;border:1px solid var(--border);border-radius:22px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}}
         [data-theme="light"] .panel{{background:linear-gradient(180deg, rgba(255,253,248,.96), rgba(245,237,224,.94));}}
         form{{display:grid;gap:12px;}}
                 input,textarea,select{{width:100%;padding:13px 14px;border-radius:14px;border:1px solid var(--border);background:var(--surface-soft);color:var(--text);font-size:16px;outline:none;}}
@@ -3245,19 +3269,22 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
                 .command-update-stack{{display:grid;gap:12px;}}
                 .command-update-stack form{{display:grid;}}
-                .card-topline{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}}
+                .card-topline{{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}}
                 .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
-                .key-status-badge{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:nowrap;}}
+                .key-status-badge{{display:inline-flex;align-items:center;max-width:58%;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:normal;line-height:1.25;text-align:right;}}
                 .key-status-ok{{background:rgba(31,122,106,.14);border-color:rgba(31,122,106,.3);color:#9be4d3;}}
                 .key-status-fail{{background:rgba(168,68,47,.14);border-color:rgba(168,68,47,.28);color:#ffbeb2;}}
                 .key-status-warn{{background:rgba(201,111,50,.14);border-color:rgba(201,111,50,.28);color:#f6c892;}}
                 .key-status-empty{{background:rgba(159,176,200,.1);border-color:rgba(159,176,200,.18);color:var(--muted);}}
-                .key-status-note{{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;}}
+                .key-status-note{{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;overflow-wrap:anywhere;}}
+        .protocol-card{{min-width:0;}}
         .pool-details{{margin-top:12px;border-top:1px solid var(--border);padding-top:12px;cursor:pointer;}}
         .pool-summary{{font-size:13px;font-weight:700;color:var(--text);padding:4px 0;}}
         .pool-list{{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px;}}
         .pool-item{{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--border);font-size:12px;}}
-        .pool-key-text{{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}}
+        .pool-apply-form{{flex:1;min-width:0;margin:0;display:block;}}
+        .pool-apply-btn{{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+        .pool-apply-btn:hover{{background:transparent;filter:none;transform:none;color:var(--primary-hover);}}
         .pool-key-icons{{display:inline-flex;gap:6px;align-items:center;}}
         .pool-key-meta{{color:var(--muted);font-size:11px;white-space:nowrap;}}
         .pool-item-form{{margin:0;padding:0;display:inline;}}
@@ -3287,8 +3314,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                         .command-grid{{grid-template-columns:1fr;}}
             .status-grid{{grid-template-columns:1fr;}}
                         .panel{{padding:16px;border-radius:18px;}}
-            .pool-subscribe-row{{display:grid;align-items:stretch;}}
-            .pool-subscribe-form{{grid-template-columns:1fr;}}
+            .pool-subscribe-row{{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;}}
+            .pool-subscribe-form{{display:contents;}}
+            .pool-subscribe-form input{{grid-column:1 / -1;}}
             button,input,textarea,select{{font-size:16px;}}
         }}
     </style>
@@ -3573,6 +3601,28 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                     result = 'Ключ не найден в пуле'
             except Exception as exc:
                 result = f'Ошибка удаления из пула: {exc}'
+            _set_web_flash_message(result)
+            self._send_redirect('/')
+            return
+
+        if path == '/pool_apply':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            proto = data.get('type', [''])[0]
+            key_to_apply = data.get('key', [''])[0]
+            try:
+                pools = _load_key_pools()
+                if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+                    raise ValueError('Неизвестный протокол')
+                if key_to_apply not in (pools.get(proto, []) or []):
+                    raise ValueError('Ключ не найден в пуле')
+                result = _install_key_for_protocol(proto, key_to_apply)
+                _set_active_key(proto, key_to_apply)
+                _invalidate_web_status_cache()
+                _invalidate_key_status_cache()
+            except Exception as exc:
+                result = f'Ошибка применения ключа из пула: {exc}'
             _set_web_flash_message(result)
             self._send_redirect('/')
             return
