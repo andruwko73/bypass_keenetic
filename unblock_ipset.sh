@@ -1,291 +1,153 @@
 #!/bin/sh
 
-# 2023. Keenetic DNS bot /  Проект: bypass_keenetic / Автор: tas_unn
-# GitHub: https://github.com/tas-unn/bypass_keenetic
-# Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
-# Демо-бот: https://t.me/keenetic_dns_bot
-#
-# Файл: unblock_ipset.sh, Версия 2.1.9, последнее изменение: 03.05.2023, 22:03
-# Доработал: NetworK (https://github.com/znetworkx)
+DNS_HOST="${DNS_HOST:-localhost}"
+DNS_PORT="${DNS_PORT:-40500}"
+PARALLEL_JOBS="${PARALLEL_JOBS:-20}"
+UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
+TAG="${TAG:-unblock_ipset}"
+
+IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
+LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
+
+tmp_dir="$(mktemp -d /tmp/unblock-ipset.XXXXXX 2>/dev/null || echo "/tmp/unblock-ipset.$$")"
+mkdir -p "$tmp_dir" || exit 1
+restore_file="$tmp_dir/restore"
+: > "$restore_file"
+
+cleanup() {
+	rm -rf "$tmp_dir"
+}
+trap cleanup EXIT INT TERM
 
 cut_local() {
-	grep -vE 'localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
+	grep -vE "$LOCAL_RE"
 }
 
-until ADDRS=$(dig +short google.com @localhost -p 40500) && [ -n "$ADDRS" ] > /dev/null 2>&1; do sleep 5; done
-
-while read -r line || [ -n "$line" ]; do
-
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-
-  if [ -n "$cidr" ]; then
-    ipset -exist add unblocksh "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$range" ]; then
-    ipset -exist add unblocksh "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$addr" ]; then
-    ipset -exist add unblocksh "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocksh "$1)}'
-
-done < /opt/etc/unblock/shadowsocks.txt
-
-
-while read -r line || [ -n "$line" ]; do
-
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-
-  if [ -n "$cidr" ]; then
-    ipset -exist add unblocktor "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$range" ]; then
-    ipset -exist add unblocktor "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$addr" ]; then
-    ipset -exist add unblocktor "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocktor "$1)}'
-
-done < /opt/etc/unblock/tor.txt
-
-
-while read -r line || [ -n "$line" ]; do
-
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-
-  if [ -n "$cidr" ]; then
-    ipset -exist add unblockvmess "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$range" ]; then
-    ipset -exist add unblockvmess "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$addr" ]; then
-    ipset -exist add unblockvmess "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvmess "$1)}'
-
-done < /opt/etc/unblock/vmess.txt
-
-
-while read -r line || [ -n "$line" ]; do
-
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-
-  if [ -n "$cidr" ]; then
-    ipset -exist add unblockvless "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$range" ]; then
-    ipset -exist add unblockvless "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$addr" ]; then
-    ipset -exist add unblockvless "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvless "$1)}'
-
-done < /opt/etc/unblock/vless.txt
-
-
-while read -r line || [ -n "$line" ]; do
-
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-
-  if [ -n "$cidr" ]; then
-    ipset -exist add unblockvless2 "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$range" ]; then
-    ipset -exist add unblockvless2 "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$addr" ]; then
-    ipset -exist add unblockvless2 "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvless2 "$1)}'
-
-done < /opt/etc/unblock/vless-2.txt
-
-
-while read -r line || [ -n "$line" ]; do
-
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-
-  if [ -n "$cidr" ]; then
-    ipset -exist add unblocktroj "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$range" ]; then
-    ipset -exist add unblocktroj "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$addr" ]; then
-    ipset -exist add unblocktroj "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocktroj "$1)}'
-
-done < /opt/etc/unblock/trojan.txt
-
-
-while read -r line || [ -n "$line" ]; do
-
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-
-  if [ -n "$cidr" ]; then
-    ipset -exist add unblockvpn "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$range" ]; then
-    ipset -exist add unblockvpn "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-
-  if [ -n "$addr" ]; then
-    ipset -exist add unblockvpn "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvpn "$1)}'
-
-done < /opt/etc/unblock/vpn.txt
-
-if ls -d /opt/etc/unblock/vpn-*.txt >/dev/null 2>&1; then
-for vpn_file_names in /opt/etc/unblock/vpn-*; do
-vpn_file_name=$(echo "$vpn_file_names" | awk -F '/' '{print $5}' | sed 's/.txt//')
-unblockvpn=$(echo unblock"$vpn_file_name")
-if [ -n '$(ipset list | grep "unblockvpn-")' ] ; then  ipset create "$unblockvpn" hash:net -exist; fi
-cat "$vpn_file_names" | while read -r line || [ -n "$line" ]; do
-  [ -z "$line" ] && continue
-  [ "${line#?}" = "#" ] && continue
-
-  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-  if [ -n "$cidr" ]; then
-    ipset -exist add "$unblockvpn" "$cidr"
-    continue
-  fi
-
-  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-  if [ -n "$range" ]; then
-    ipset -exist add "$unblockvpn" "$range"
-    continue
-  fi
-
-  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-  if [ -n "$addr" ]; then
-    ipset -exist add "$unblockvpn" "$addr"
-    continue
-  fi
-
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk -v unblockvpn="$unblockvpn" '{system("ipset -exist add " unblockvpn " " $1)}'
-done
-done
+trim_line() {
+	sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+append_restore() {
+	set_name="$1"
+	value="$2"
+	[ -n "$set_name" ] && [ -n "$value" ] && printf 'add %s %s\n' "$set_name" "$value" >> "$restore_file"
+}
+
+extract_direct_entry() {
+	line="$1"
+	cidr="$(printf '%s\n' "$line" | grep -Eo "$IPV4_RE/[0-9]{1,2}" | cut_local | head -n 1)"
+	if [ -n "$cidr" ]; then
+		printf '%s\n' "$cidr"
+		return 0
+	fi
+
+	range="$(printf '%s\n' "$line" | grep -Eo "$IPV4_RE-$IPV4_RE" | cut_local | head -n 1)"
+	if [ -n "$range" ]; then
+		printf '%s\n' "$range"
+		return 0
+	fi
+
+	addr="$(printf '%s\n' "$line" | grep -Eo "$IPV4_RE" | cut_local | head -n 1)"
+	if [ -n "$addr" ]; then
+		printf '%s\n' "$addr"
+		return 0
+	fi
+
+	return 1
+}
+
+normalize_domain() {
+	printf '%s\n' "$1" \
+		| sed 's/\r//g;s/^DOMAIN-SUFFIX,//;s/^DOMAIN,//;s/^HOST-SUFFIX,//;s/^+\.//;s/^\*\.//;s/[[:space:]].*$//;s/,.*$//;s#^/##;s#/$##' \
+		| trim_line
+}
+
+wait_for_dns() {
+	while :; do
+		if dig +short google.com @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null | grep -Eq "$IPV4_RE"; then
+			return 0
+		fi
+		sleep 5
+	done
+}
+
+xargs_parallel_flag() {
+	if printf 'test\n' | xargs -n 1 -P 1 echo >/dev/null 2>&1; then
+		printf '%s\n' "-P $PARALLEL_JOBS"
+	fi
+}
+
+resolve_domains() {
+	set_name="$1"
+	domain_file="$2"
+	[ -s "$domain_file" ] || return 0
+
+	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE set_name
+	parallel_flag="$(xargs_parallel_flag)"
+
+	# shellcheck disable=SC2086
+	sort -u "$domain_file" | xargs -n 1 $parallel_flag sh -c '
+		for domain do
+			dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
+				| grep -Eo "$IPV4_RE" \
+				| grep -vE "$LOCAL_RE" \
+				| awk -v set_name="$set_name" "{print \"add \" set_name \" \" \$1}"
+		done
+	' sh >> "$restore_file"
+}
+
+load_file_to_set() {
+	list_path="$1"
+	set_name="$2"
+	[ -f "$list_path" ] || return 0
+
+	ipset create "$set_name" hash:net -exist >/dev/null 2>&1
+	domain_file="$tmp_dir/${set_name}.domains"
+	: > "$domain_file"
+
+	while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+		line="$(printf '%s\n' "$raw_line" | trim_line)"
+		case "$line" in
+			''|\#*) continue ;;
+		esac
+
+		if direct_entry="$(extract_direct_entry "$line")"; then
+			append_restore "$set_name" "$direct_entry"
+			continue
+		fi
+
+		domain="$(normalize_domain "$line")"
+		[ -n "$domain" ] && printf '%s\n' "$domain" >> "$domain_file"
+	done < "$list_path"
+
+	resolve_domains "$set_name" "$domain_file"
+}
+
+wait_for_dns
+
+load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh
+load_file_to_set "$UNBLOCK_DIR/tor.txt" unblocktor
+load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess
+load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless
+load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2
+load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj
+load_file_to_set "$UNBLOCK_DIR/vpn.txt" unblockvpn
+
+if ls "$UNBLOCK_DIR"/vpn-*.txt >/dev/null 2>&1; then
+	for vpn_file in "$UNBLOCK_DIR"/vpn-*.txt; do
+		vpn_name="$(basename "$vpn_file" .txt)"
+		load_file_to_set "$vpn_file" "unblock$vpn_name"
+	done
 fi
 
-# unblockvpn - множество
-# vpn1.txt - название файла со списком обхода
+if [ -s "$restore_file" ]; then
+	sort -u "$restore_file" > "$restore_file.sorted"
+	if ! ipset restore -exist < "$restore_file.sorted" >/dev/null 2>&1; then
+		logger -t "$TAG" "ipset restore failed, falling back to sequential add"
+		while read -r action set_name value; do
+			[ "$action" = "add" ] && ipset -exist add "$set_name" "$value" >/dev/null 2>&1
+		done < "$restore_file.sorted"
+	fi
+fi
 
-#while read -r line || [ -n "$line" ]; do
-#  [ -z "$line" ] && continue
-#  [ "${line#?}" = "#" ] && continue
-#
-#  cidr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}' | cut_local)
-#  if [ -n "$cidr" ]; then
-#    ipset -exist add unblockvpn "$cidr"
-#    continue
-#  fi
-#
-#  range=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}-[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-#  if [ -n "$range" ]; then
-#    ipset -exist add unblockvpn "$range"
-#    continue
-#  fi
-#
-#  addr=$(echo "$line" | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut_local)
-#  if [ -n "$addr" ]; then
-#    ipset -exist add unblockvpn "$addr"
-#    continue
-#  fi
-#
-#  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvpn "$1)}'
-#done < /opt/etc/unblock/vpn.txt
+exit 0

@@ -259,6 +259,7 @@ localportvless = config.localportvless
 localportvless_transparent = str(int(localportvless) + 1)
 localportvless2 = str(int(localportvless) + 2)
 localportvless2_transparent = str(int(localportvless) + 3)
+localportvmess_transparent = str(int(localportvless) + 4)
 localportsh_bot = str(getattr(config, 'localportsh_bot', 10820))
 localporttrojan_bot = str(getattr(config, 'localporttrojan_bot', 10830))
 dnsporttor = config.dnsporttor
@@ -424,6 +425,50 @@ def _fetch_remote_text(url, timeout=20):
     response = requests.get(url, timeout=timeout)
     response.raise_for_status()
     return response.text
+
+
+SERVICE_LIST_SOURCES = {
+    'youtube': {
+        'label': 'YouTube',
+        'aliases': ['youtube', 'yt', 'ютуб'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/youtube.lst',
+    },
+    'telegram': {
+        'label': 'Telegram',
+        'aliases': ['telegram', 'tg', 'телеграм', 'телега'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst',
+    },
+    'meta': {
+        'label': 'Instagram / Meta',
+        'aliases': ['meta', 'instagram', 'insta', 'facebook', 'whatsapp', 'threads', 'инстаграм'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/meta.lst',
+    },
+    'discord': {
+        'label': 'Discord',
+        'aliases': ['discord', 'дискорд'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst',
+    },
+    'tiktok': {
+        'label': 'TikTok',
+        'aliases': ['tiktok', 'tik-tok', 'тик ток', 'тикток'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/tiktok.lst',
+    },
+    'twitter': {
+        'label': 'X / Twitter',
+        'aliases': ['twitter', 'x', 'твиттер'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/twitter.lst',
+    },
+}
+
+
+def _service_list_alias_map():
+    aliases = {}
+    for key, source in SERVICE_LIST_SOURCES.items():
+        aliases[key] = key
+        aliases[source.get('label', key).lower()] = key
+        for alias in source.get('aliases', []):
+            aliases[alias.lower()] = key
+    return aliases
 
 
 def _get_chat_menu_state(chat_id):
@@ -868,6 +913,92 @@ def _write_unblock_list_entries(list_name, entries):
         for line in sorted(set(entries)):
             if line:
                 file.write(line + '\n')
+
+
+def _service_list_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    buttons = [types.KeyboardButton(source['label']) for source in SERVICE_LIST_SOURCES.values()]
+    for index in range(0, len(buttons), 2):
+        markup.row(*buttons[index:index + 2])
+    markup.add(types.KeyboardButton("🔙 Назад"))
+    return markup
+
+
+def _resolve_service_list_name(value):
+    normalized = (value or '').strip().lower()
+    return _service_list_alias_map().get(normalized)
+
+
+def _parse_service_domains(text):
+    domains = []
+    seen = set()
+    for raw_line in text.replace('\r', '\n').split('\n'):
+        line = raw_line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        for token in re.split(r'[\s,]+', line):
+            item = token.strip().strip('"\'')
+            item = re.sub(r'^(DOMAIN-SUFFIX|DOMAIN|HOST-SUFFIX),', '', item, flags=re.IGNORECASE)
+            item = re.sub(r'^\+\.', '', item)
+            item = re.sub(r'^\*\.', '', item)
+            item = item.strip('/').lower()
+            if not item or '/' in item or ':' in item:
+                continue
+            if not re.match(r'^[a-z0-9*_.-]+\.[a-z0-9_.-]+$', item):
+                continue
+            if item not in seen:
+                seen.add(item)
+                domains.append(item)
+    return domains
+
+
+def _append_entries_to_unblock_list(list_name, entries):
+    existing = set(_read_unblock_list_entries(list_name)) if os.path.exists(_unblock_list_path(list_name)) else set()
+    before = len(existing)
+    existing.update(entries)
+    _write_unblock_list_entries(list_name, existing)
+    subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
+    return len(existing) - before, len(existing)
+
+
+def _handle_getlist_request(message, service_name, route_name=None, reply_markup=None):
+    service_key = _resolve_service_list_name(service_name)
+    if not service_key:
+        names = ', '.join(source['label'] for source in SERVICE_LIST_SOURCES.values())
+        bot.send_message(message.chat.id, f'⚠️ Не знаю такой сервис. Доступно: {names}', reply_markup=reply_markup)
+        return
+
+    route = _resolve_unblock_list_selection(route_name) if route_name else None
+    if route and route.endswith('.txt'):
+        route = route[:-4]
+    if not route:
+        state = _get_chat_menu_state(message.chat.id)
+        route = state.get('bypass') or 'vless'
+    if not re.match(r'^[A-Za-z0-9_-]+$', route or ''):
+        bot.send_message(message.chat.id, '⚠️ Некорректное имя маршрута.', reply_markup=reply_markup)
+        return
+
+    source = SERVICE_LIST_SOURCES[service_key]
+    try:
+        raw_text = _fetch_remote_text(source['url'], timeout=25)
+        entries = _parse_service_domains(raw_text)
+        if not entries:
+            bot.send_message(message.chat.id, f'⚠️ Список {source["label"]} загружен, но домены не найдены.', reply_markup=reply_markup)
+            return
+        added, total = _append_entries_to_unblock_list(route, entries)
+    except requests.RequestException as exc:
+        bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить список {source["label"]}: {exc}', reply_markup=reply_markup)
+        return
+    except Exception as exc:
+        bot.send_message(message.chat.id, f'⚠️ Не удалось применить список {source["label"]}: {exc}', reply_markup=reply_markup)
+        return
+
+    label = _list_label(f'{route}.txt')
+    bot.send_message(
+        message.chat.id,
+        f'✅ {source["label"]}: добавлено {added} новых записей, всего в маршруте {label}: {total}. Списки применяются.',
+        reply_markup=reply_markup,
+    )
 
 
 def _build_main_menu_markup():
@@ -1472,15 +1603,13 @@ def _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_
 
 
 def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_timeout=10):
-    url = f'https://api.telegram.org/bot{token}/getMe'
+    url = 'https://api.telegram.org/'
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
     try:
         response = requests.get(url, timeout=(connect_timeout, read_timeout), proxies=proxies)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('ok'):
+        if response.status_code < 500:
             return True, 'Доступ к api.telegram.org подтверждён.'
-        return False, f'Telegram API ответил: {data.get("description", "Не удалось определить причину")}.'
+        return False, f'Telegram API вернул HTTP {response.status_code}.'
     except requests.exceptions.ConnectTimeout:
         return False, 'Прокси не установил соединение с api.telegram.org за отведённое время.'
     except requests.exceptions.ReadTimeout:
@@ -1489,7 +1618,13 @@ def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_ti
         error_text = str(exc)
         if 'Missing dependencies for SOCKS support' in error_text:
             return False, 'Отсутствует поддержка SOCKS (PySocks) для проверки Telegram API.'
-        return False, f'Проверка Telegram API завершилась ошибкой: {exc}'
+        if 'SSLEOFError' in error_text or 'UNEXPECTED_EOF' in error_text:
+            return False, 'Прокси-сервер разорвал TLS-соединение с api.telegram.org. Обычно это означает нерабочий ключ или проблему на удалённом сервере.'
+        if 'Connection refused' in error_text:
+            return False, 'Локальный SOCKS-порт отклонил соединение.'
+        if 'RemoteDisconnected' in error_text:
+            return False, 'Удалённая сторона закрыла соединение без ответа.'
+        return False, f'Проверка Telegram API завершилась ошибкой: {error_text.splitlines()[0][:240]}'
 
 
 def _key_requires_xray(key_name, key_value):
@@ -2383,6 +2518,17 @@ def bot_message(message):
         service.add(back)
 
         if message.chat.type == 'private':
+            command = message.text.split(maxsplit=1)[0].split('@', 1)[0]
+            if command == '/getlist':
+                parts = message.text.split()
+                if len(parts) < 2:
+                    names = ', '.join(source['label'] for source in SERVICE_LIST_SOURCES.values())
+                    bot.send_message(message.chat.id, f'Использование: /getlist название [маршрут]\nДоступно: {names}', reply_markup=main)
+                    return
+                route_name = parts[2] if len(parts) > 2 else None
+                _handle_getlist_request(message, parts[1], route_name=route_name, reply_markup=main)
+                return
+
             if message.text == '📊 Статус ключей':
                 text_lines = ['<b>Статус доступа к Telegram по ключам (web):</b>']
                 emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
@@ -2536,6 +2682,11 @@ def bot_message(message):
                 )
                 return
 
+            if message.text == "📥 Сервисы по запросу":
+                set_menu_state(10, 'vless')
+                bot.send_message(message.chat.id, 'Выберите сервис. По умолчанию список будет добавлен в маршрут Vless 1.', reply_markup=_service_list_markup())
+                return
+
             if message.text == '🔙 Назад' or message.text == "Назад":
                 bot.send_message(message.chat.id, '✅ Добро пожаловать в меню!', reply_markup=main)
                 set_menu_state(0, None)
@@ -2553,8 +2704,10 @@ def bot_message(message):
                         item1 = types.KeyboardButton("📑 Показать список")
                         item2 = types.KeyboardButton("📝 Добавить в список")
                         item3 = types.KeyboardButton("🗑 Удалить из списка")
+                        item4 = types.KeyboardButton("📥 Сервисы по запросу")
                         back = types.KeyboardButton("🔙 Назад")
                         markup.row(item1, item2, item3)
+                        markup.row(item4)
                         markup.row(back)
                         set_menu_state(2, selected_list)
                         bot.send_message(message.chat.id, "Меню " + _list_label(fln), reply_markup=markup)
@@ -2586,10 +2739,17 @@ def bot_message(message):
                 item1 = types.KeyboardButton("📑 Показать список")
                 item2 = types.KeyboardButton("📝 Добавить в список")
                 item3 = types.KeyboardButton("🗑 Удалить из списка")
+                item4 = types.KeyboardButton("📥 Сервисы по запросу")
                 back = types.KeyboardButton("🔙 Назад")
                 markup.row(item1, item2, item3)
+                markup.row(item4)
                 markup.row(back)
                 bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                return
+
+            if level == 2 and message.text == "📥 Сервисы по запросу":
+                set_menu_state(10)
+                bot.send_message(message.chat.id, f'Выберите сервис для маршрута {_list_label(bypass + ".txt")}', reply_markup=_service_list_markup())
                 return
 
             if level == 2 and message.text == "📝 Добавить в список":
@@ -2650,8 +2810,10 @@ def bot_message(message):
                 item1 = types.KeyboardButton("📑 Показать список")
                 item2 = types.KeyboardButton("📝 Добавить в список")
                 item3 = types.KeyboardButton("🗑 Удалить из списка")
+                item4 = types.KeyboardButton("📥 Сервисы по запросу")
                 back = types.KeyboardButton("🔙 Назад")
                 markup.row(item1, item2, item3)
+                markup.row(item4)
                 markup.row(back)
                 subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
                 set_menu_state(2)
@@ -2678,12 +2840,18 @@ def bot_message(message):
                 item1 = types.KeyboardButton("📑 Показать список")
                 item2 = types.KeyboardButton("📝 Добавить в список")
                 item3 = types.KeyboardButton("🗑 Удалить из списка")
+                item4 = types.KeyboardButton("📥 Сервисы по запросу")
                 back = types.KeyboardButton("🔙 Назад")
                 markup.row(item1, item2, item3)
+                markup.row(item4)
                 markup.row(back)
                 set_menu_state(2)
                 subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
                 bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                return
+
+            if level == 10:
+                _handle_getlist_request(message, message.text, route_name=bypass, reply_markup=_service_list_markup())
                 return
 
             if level == 5:
@@ -2872,6 +3040,7 @@ def bot_message(message):
                 buttons = [types.KeyboardButton(label) for label, _ in options]
                 for index in range(0, len(buttons), 2):
                     markup.row(*buttons[index:index + 2])
+                markup.add(types.KeyboardButton("📥 Сервисы по запросу"))
                 back = types.KeyboardButton("🔙 Назад")
                 markup.add(back)
                 bot.send_message(message.chat.id, "📝 Списки обхода", reply_markup=markup)
@@ -3506,7 +3675,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 current_keys = _load_current_keys()
                 snapshot = _cached_status_snapshot(current_keys)
                 if snapshot is None:
-                    snapshot = _build_status_snapshot(current_keys, force_refresh=True)
+                    snapshot = {
+                        'web': _placeholder_web_status_snapshot(),
+                        'protocols': _placeholder_protocol_statuses(current_keys),
+                    }
+                    _refresh_status_caches_async(current_keys)
                 payload = {
                     'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
                     'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
@@ -3973,6 +4146,17 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
             'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
             'tag': 'in-vmess'
         })
+        config_data['inbounds'].append({
+            'port': int(localportvmess_transparent),
+            'listen': '0.0.0.0',
+            'protocol': 'dokodemo-door',
+            'settings': {
+                'network': 'tcp',
+                'followRedirect': True
+            },
+            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
+            'tag': 'in-vmess-transparent'
+        })
         stream_settings = {'network': vmess_data.get('net', 'tcp')}
         tls_mode = vmess_data.get('tls', 'tls')
         if tls_mode in ['tls', 'xtls']:
@@ -4020,7 +4204,7 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
         })
         config_data['routing']['rules'].append({
             'type': 'field',
-            'inboundTag': ['in-vmess'],
+            'inboundTag': ['in-vmess', 'in-vmess-transparent'],
             'outboundTag': 'proxy-vmess',
             'enabled': True
         })

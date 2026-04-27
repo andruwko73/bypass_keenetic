@@ -204,7 +204,99 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
             window.location.replace({redirect_url!r});
         }}, {redirect_delay_seconds * 1000});
     </script>"""
-        return f"""<!doctype html>
+    key_pool_script = """
+    <script>
+        const protoSelect = document.getElementById('proto-select');
+        const keyListDiv = document.getElementById('key-list');
+        const newKeyInput = document.getElementById('new-key-input');
+
+        async function fetchKeys() {
+            const proto = protoSelect.value;
+            keyListDiv.innerHTML = 'Загрузка...';
+            try {
+                const resp = await fetch('/api/keys?proto=' + encodeURIComponent(proto));
+                const data = await resp.json();
+                if (data.keys && Array.isArray(data.keys)) {
+                    if (data.keys.length === 0) {
+                        keyListDiv.innerHTML = '<em>Нет ключей для выбранного протокола.</em>';
+                    } else {
+                        const list = document.createElement('ul');
+                        list.style.paddingLeft = '18px';
+                        data.keys.forEach(function(key) {
+                            const item = document.createElement('li');
+                            item.style.marginBottom = '6px';
+                            const text = document.createElement('span');
+                            text.style.wordBreak = 'break-all';
+                            text.textContent = key;
+                            const button = document.createElement('button');
+                            button.type = 'button';
+                            button.textContent = 'Удалить';
+                            button.style.marginLeft = '8px';
+                            button.style.color = '#e66';
+                            button.style.background = 'none';
+                            button.style.border = 'none';
+                            button.style.cursor = 'pointer';
+                            button.onclick = function() { removeKey(proto, key); };
+                            item.appendChild(text);
+                            item.appendChild(button);
+                            list.appendChild(item);
+                        });
+                        keyListDiv.replaceChildren(list);
+                    }
+                } else {
+                    keyListDiv.innerHTML = '<span style="color:#e66">Ошибка загрузки ключей</span>';
+                }
+            } catch (e) {
+                keyListDiv.innerHTML = '<span style="color:#e66">Ошибка запроса</span>';
+            }
+        }
+
+        async function addKey() {
+            const proto = protoSelect.value;
+            const key = newKeyInput.value.trim();
+            if (!key) return alert('Введите ключ!');
+            try {
+                const resp = await fetch('/api/keys/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ proto: proto, key: key })
+                });
+                const data = await resp.json();
+                if (data.result) {
+                    newKeyInput.value = '';
+                    fetchKeys();
+                } else {
+                    alert('Ключ уже есть или ошибка добавления');
+                }
+            } catch (e) {
+                alert('Ошибка запроса');
+            }
+        }
+
+        async function removeKey(proto, key) {
+            if (!confirm('Удалить этот ключ?')) return;
+            try {
+                const resp = await fetch('/api/keys/remove', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ proto: proto, key: key })
+                });
+                const data = await resp.json();
+                if (data.result) {
+                    fetchKeys();
+                } else {
+                    alert('Ошибка удаления');
+                }
+            } catch (e) {
+                alert('Ошибка запроса');
+            }
+        }
+
+        protoSelect.addEventListener('change', fetchKeys);
+        window.addEventListener('DOMContentLoaded', fetchKeys);
+    </script>
+"""
+    return f"""<!doctype html>
 <html lang=\"ru\">
 <head>
     <meta charset=\"utf-8\">
@@ -309,143 +401,36 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
             <div class="hint">РџРѕСЃР»Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ СЌС‚Р° СЃС‚СЂР°РЅРёС†Р° Р±СѓРґРµС‚ Р·Р°РјРµРЅРµРЅР° РѕСЃРЅРѕРІРЅС‹Рј РёРЅС‚РµСЂС„РµР№СЃРѕРј Р±РѕС‚Р° РЅР° С‚РѕРј Р¶Рµ Р°РґСЂРµСЃРµ.</div>
         </div>
     </div>
-    <script>
-        const protoSelect = document.getElementById('proto-select');
-        const keyListDiv = document.getElementById('key-list');
-        const newKeyInput = document.getElementById('new-key-input');
-
-        async function fetchKeys() {
-            const proto = protoSelect.value;
-            keyListDiv.innerHTML = 'Р—Р°РіСЂСѓР·РєР°...';
-            try {
-                const resp = await fetch(`/api/keys?proto=${encodeURIComponent(proto)}`);
-                const data = await resp.json();
-                if (data.keys && Array.isArray(data.keys)) {
-                    if (data.keys.length === 0) {
-                        keyListDiv.innerHTML = '<em>РќРµС‚ РєР»СЋС‡РµР№ РґР»СЏ РІС‹Р±СЂР°РЅРЅРѕРіРѕ РїСЂРѕС‚РѕРєРѕР»Р°.</em>';
-                    } else {
-                        keyListDiv.innerHTML = '<ul style="padding-left:18px;">' +
-                            data.keys.map(k => `<li style='margin-bottom:6px;'><span style='word-break:break-all;'>${'${k}'}</span> <button onclick=\"removeKey('${'${proto}'}','${'${k}'.replace(/'/g, "\\'")}')\" style='margin-left:8px; color:#e66; background:none; border:none; cursor:pointer;'>РЈРґР°Р»РёС‚СЊ</button></li>`).join('') + '</ul>';
-                    }
-                } else {
-                    keyListDiv.innerHTML = '<span style="color:#e66">РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєР»СЋС‡РµР№</span>';
-                }
-            } catch (e) {
-                keyListDiv.innerHTML = '<span style="color:#e66">РћС€РёР±РєР° Р·Р°РїСЂРѕСЃР°</span>';
-            }
-        }
-
-        async function addKey() {
-            const proto = protoSelect.value;
-            const key = newKeyInput.value.trim();
-            if (!key) return alert('Р’РІРµРґРёС‚Рµ РєР»СЋС‡!');
-            try {
-                const resp = await fetch('/api/keys/add', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proto, key })
-                });
-                const data = await resp.json();
-                if (data.result) {
-                    newKeyInput.value = '';
-                    fetchKeys();
-                } else {
-                    alert('РљР»СЋС‡ СѓР¶Рµ РµСЃС‚СЊ РёР»Рё РѕС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ');
-                }
-            } catch (e) {
-                alert('РћС€РёР±РєР° Р·Р°РїСЂРѕСЃР°');
-            }
-        }
-
-        async function removeKey(proto, key) {
-            if (!confirm('РЈРґР°Р»РёС‚СЊ СЌС‚РѕС‚ РєР»СЋС‡?')) return;
-            try {
-                const resp = await fetch('/api/keys/remove', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proto, key })
-                });
-                const data = await resp.json();
-                if (data.result) {
-                    fetchKeys();
-                } else {
-                    alert('РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ');
-                }
-            } catch (e) {
-                alert('РћС€РёР±РєР° Р·Р°РїСЂРѕСЃР°');
-            }
-        }
-
-        protoSelect.addEventListener('change', fetchKeys);
-        window.addEventListener('DOMContentLoaded', fetchKeys);
-    </script>
+{key_pool_script}
 </body>
 </html>
 """
 
 
 class InstallerHandler(BaseHTTPRequestHandler):
-            def _send_file(self, file_path, content_type='image/png'):
-                try:
-                    with open(file_path, 'rb') as f:
-                        data = f.read()
-                    self.send_response(200)
-                    self.send_header('Content-Type', content_type)
-                    self.send_header('Content-Length', str(len(data)))
-                    self.end_headers()
-                    self.wfile.write(data)
-                except Exception:
-                    self.send_response(404)
-                    self.end_headers()
+    def _send_file(self, file_path, content_type='image/png'):
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception:
+            self.send_response(404)
+            self.end_headers()
 
-        def do_GET(self):
-            if self.path.startswith('/static/telegram.png'):
-                self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'telegram.png'))
-                return
-            if self.path.startswith('/static/youtube.png'):
-                self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'youtube.png'))
-                return
-            if not self._ensure_request_allowed():
-                return
-            # API: /api/keys?proto=xxx
-            if self.path.startswith('/api/keys'):
-                from urllib.parse import urlparse, parse_qs
-                query = parse_qs(urlparse(self.path).query)
-                proto = query.get('proto', [''])[0]
-                if proto:
-                    keys = get_keys_for_proto(proto)
-                    self._send_html(json.dumps({'proto': proto, 'keys': keys}), status=200)
-                    return
-                self._send_html(json.dumps({'error': 'no proto'}), status=400)
-                return
-            self._send_html(page_html())
+    def _send_json(self, payload, status=200):
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
 
-        def do_POST(self):
-            if not self._ensure_request_allowed():
-                return
-            # API: /api/keys/add, /api/keys/remove
-            if self.path.startswith('/api/keys/add') or self.path.startswith('/api/keys/remove'):
-                content_length = int(self.headers.get('Content-Length', '0'))
-                raw_body = self.rfile.read(content_length).decode('utf-8', errors='ignore')
-                try:
-                    data = json.loads(raw_body)
-                except Exception:
-                    self._send_html(json.dumps({'error': 'bad json'}), status=400)
-                    return
-                proto = data.get('proto')
-                key = data.get('key')
-                if not proto or not key:
-                    self._send_html(json.dumps({'error': 'missing proto or key'}), status=400)
-                    return
-                if self.path.startswith('/api/keys/add'):
-                    ok = add_key_to_pool(proto, key)
-                    self._send_html(json.dumps({'result': ok}), status=200)
-                    return
-                if self.path.startswith('/api/keys/remove'):
-                    ok = remove_key_from_pool(proto, key)
-                    self._send_html(json.dumps({'result': ok}), status=200)
-                    return
-            # ...existing code...
     def _request_is_allowed(self):
         client_ip = self.client_address[0] if self.client_address else ''
         return is_local_web_client(client_ip)
@@ -468,10 +453,42 @@ class InstallerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._ensure_request_allowed():
             return
+        if self.path.startswith('/static/telegram.png'):
+            self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'telegram.png'))
+            return
+        if self.path.startswith('/static/youtube.png'):
+            self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'youtube.png'))
+            return
+        if self.path.startswith('/api/keys'):
+            query = parse_qs(urlparse(self.path).query)
+            proto = query.get('proto', [''])[0]
+            if not proto:
+                self._send_json({'error': 'no proto'}, status=400)
+                return
+            self._send_json({'proto': proto, 'keys': get_keys_for_proto(proto)})
+            return
         self._send_html(page_html())
 
     def do_POST(self):
         if not self._ensure_request_allowed():
+            return
+        if self.path.startswith('/api/keys/add') or self.path.startswith('/api/keys/remove'):
+            content_length = int(self.headers.get('Content-Length', '0'))
+            raw_body = self.rfile.read(content_length).decode('utf-8', errors='ignore')
+            try:
+                data = json.loads(raw_body)
+            except Exception:
+                self._send_json({'error': 'bad json'}, status=400)
+                return
+            proto = data.get('proto')
+            key = data.get('key')
+            if not proto or not key:
+                self._send_json({'error': 'missing proto or key'}, status=400)
+                return
+            if self.path.startswith('/api/keys/add'):
+                self._send_json({'result': add_key_to_pool(proto, key)})
+                return
+            self._send_json({'result': remove_key_from_pool(proto, key)})
             return
         if self.path != '/save':
             self._send_html(page_html('РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ.'), status=404)

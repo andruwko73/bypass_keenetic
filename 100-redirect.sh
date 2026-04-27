@@ -93,19 +93,27 @@ if [ -z "$(iptables-save 2>/dev/null | grep unblocktor)" ]; then
 fi
 
 
-if [ -z "$(iptables-save 2>/dev/null | grep unblockvmess)" ]; then
-  ipset create unblockvmess hash:net -exist 2>/dev/null
-	iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
-	iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
-
-	#iptables -I PREROUTING -w -t nat -i br0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
-	#iptables -I PREROUTING -w -t nat -i br0 -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
-	#iptables -A PREROUTING -w -t nat -i br0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810 #в целом не имеет смысла
-
-	#iptables -I PREROUTING -w -t nat -i sstp0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
-	#iptables -I PREROUTING -w -t nat -i sstp0 -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
-	#iptables -A PREROUTING -w -t nat -i sstp0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810 #в целом не имеет смысла
+ipset create unblockvmess hash:net -exist 2>/dev/null
+while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810 2>/dev/null; do
+	iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
+done
+while iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810 2>/dev/null; do
+	iptables -t nat -D PREROUTING -w -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10810
+done
+if ! iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815 2>/dev/null; then
+	iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815
 fi
+if ! iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815 2>/dev/null; then
+	iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815
+fi
+
+	#iptables -I PREROUTING -w -t nat -i br0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815
+	#iptables -I PREROUTING -w -t nat -i br0 -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815
+	#iptables -A PREROUTING -w -t nat -i br0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815 #в целом не имеет смысла
+
+	#iptables -I PREROUTING -w -t nat -i sstp0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815
+	#iptables -I PREROUTING -w -t nat -i sstp0 -p udp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815
+	#iptables -A PREROUTING -w -t nat -i sstp0 -p tcp -m set --match-set unblockvmess dst -j REDIRECT --to-port 10815 #в целом не имеет смысла
 
 
 ipset create unblockvless hash:net -exist 2>/dev/null
