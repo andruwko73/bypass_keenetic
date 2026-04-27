@@ -1106,6 +1106,42 @@ def _restart_router_services():
     return '✅ Сервисы перезагружены.'
 
 
+def _send_message_after_service_restart(chat_id, text, reply_markup=None):
+    active_mode = _load_proxy_mode()
+    if active_mode in proxy_settings:
+        update_proxy(active_mode)
+    proxy_url = proxy_settings.get(active_mode)
+    port = None
+    if proxy_url:
+        match = re.search(r':(\d+)$', proxy_url)
+        if match:
+            port = match.group(1)
+    if port:
+        for _ in range(12):
+            if _check_socks5_handshake(port):
+                break
+            time.sleep(1)
+    for _ in range(3):
+        try:
+            bot.send_message(chat_id, text, reply_markup=reply_markup)
+            return True
+        except Exception as exc:
+            _write_runtime_log(f'Не удалось отправить Telegram-сообщение после перезапуска сервисов: {exc}')
+            time.sleep(2)
+    try:
+        previous_mode = proxy_mode
+        update_proxy('none')
+        bot.send_message(chat_id, text, reply_markup=reply_markup)
+        if previous_mode in proxy_settings:
+            update_proxy(previous_mode)
+        return True
+    except Exception as exc:
+        _write_runtime_log(f'Не удалось отправить Telegram-сообщение после перезапуска сервисов напрямую: {exc}')
+        if active_mode in proxy_settings:
+            update_proxy(active_mode)
+        return False
+
+
 def _schedule_router_reboot(delay_seconds=5):
     delay = max(1, int(delay_seconds))
     subprocess.Popen(
@@ -2402,11 +2438,8 @@ def bot_message(message):
 
             if message.text == '♻️ Перезагрузить сервисы' or message.text == 'Перезагрузить сервисы':
                 bot.send_message(message.chat.id, '🔄 Выполняется перезагрузка сервисов!', reply_markup=service)
-                os.system('/opt/etc/init.d/S22shadowsocks restart')
-                os.system('/opt/etc/init.d/S22trojan restart')
-                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
-                os.system('/opt/etc/init.d/S35tor restart')
-                bot.send_message(message.chat.id, '✅ Сервисы перезагружены!', reply_markup=service)
+                _restart_router_services()
+                _send_message_after_service_restart(message.chat.id, '✅ Сервисы перезагружены!', reply_markup=service)
                 return
 
             if message.text == '‼️Перезагрузить роутер' or message.text == 'Перезагрузить роутер':
