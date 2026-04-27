@@ -7,7 +7,6 @@
 #
 #  Файл: bot.py, Версия 2.2.1, последнее изменение: 19.04.2026, 15:10
 
-import asyncio
 import subprocess
 import os
 import ipaddress
@@ -23,7 +22,6 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 import telebot
 from telebot import types
-from telethon.sync import TelegramClient
 import base64
 import shutil
 # import datetime
@@ -79,6 +77,16 @@ def _record_key_probe(proto, key_value, tg_ok=None, yt_ok=None):
         entry['yt_ok'] = bool(yt_ok)
     cache[key_id] = entry
     _save_key_probe_cache(cache)
+
+
+def _key_probe_is_fresh(entry, now=None):
+    if not entry:
+        return False
+    try:
+        ts = float(entry.get('ts', 0))
+    except (TypeError, ValueError):
+        return False
+    return (now or time.time()) - ts < KEY_PROBE_CACHE_TTL
 
 
 TELEGRAM_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1NiIgcj0iMjU2IiBmaWxsPSIjMzdBRUUyIi8+PHBhdGggZD0iTTExOSAyNjVsMjY1LTEwNGMxMi01IDIzIDMgMTkgMTlsLTQ1IDIxMmMtMyAxMy0xMiAxNi0yNCAxMGwtNjYtNDktMzIgMzFjLTQgNC03IDctMTUgN2w2LTg1IDE1NS0xNDBjNy02LTItMTAtMTEtNGwtMTkyIDEyMS04My0yNmMtMTgtNi0xOC0xOCA0LTI2eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg=='
@@ -243,8 +251,6 @@ def _start_auto_failover_thread():
     thread.start()
 
 token = config.token
-appapiid = config.appapiid
-appapihash = config.appapihash
 usernames = config.usernames
 routerip = config.routerip
 browser_port = config.browser_port
@@ -252,7 +258,6 @@ fork_repo_owner = getattr(config, 'fork_repo_owner', 'andruwko73')
 fork_repo_name = getattr(config, 'fork_repo_name', 'bypass_keenetic')
 fork_button_label = getattr(config, 'fork_button_label', f'Fork by {fork_repo_owner}')
 localportsh = config.localportsh
-localporttor = config.localporttor
 localporttrojan = config.localporttrojan
 localportvmess = config.localportvmess
 localportvless = config.localportvless
@@ -262,7 +267,6 @@ localportvless2_transparent = str(int(localportvless) + 3)
 localportvmess_transparent = str(int(localportvless) + 4)
 localportsh_bot = str(getattr(config, 'localportsh_bot', 10820))
 localporttrojan_bot = str(getattr(config, 'localporttrojan_bot', 10830))
-dnsporttor = config.dnsporttor
 dnsovertlsport = config.dnsovertlsport
 dnsoverhttpsport = config.dnsoverhttpsport
 
@@ -278,6 +282,8 @@ WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
+KEY_PROBE_CACHE_TTL = 3600
+KEY_PROBE_MAX_PER_RUN = 8
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
 STATIC_DIR = os.path.join(BOT_DIR, 'static')
@@ -323,6 +329,7 @@ status_snapshot_cache = {
 }
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
+pool_probe_lock = threading.Lock()
 process_started_at = time.time()
 web_command_lock = threading.Lock()
 web_command_state = {
@@ -1229,7 +1236,6 @@ def _restart_router_services():
         '/opt/etc/init.d/S22shadowsocks restart',
         CORE_PROXY_SERVICE_SCRIPT + ' restart',
         '/opt/etc/init.d/S22trojan restart',
-        '/opt/etc/init.d/S35tor restart',
     ]
     for command in commands:
         os.system(command)
@@ -1406,15 +1412,11 @@ def _list_label(file_name):
     base = file_name[:-4] if file_name.endswith('.txt') else file_name
     labels = {
         'shadowsocks': 'Shadowsocks',
-        'tor': 'Tor',
         'vmess': 'Vmess',
         'vless': 'Vless 1',
         'vless-2': 'Vless 2',
         'trojan': 'Trojan',
-        'vpn': 'VPN (общий список)',
     }
-    if base.startswith('vpn-'):
-        return f'VPN: {base[4:]}'
     return labels.get(base, base)
 
 
@@ -1424,8 +1426,8 @@ def _load_unblock_lists(with_content=True):
         file_names = sorted(name for name in os.listdir(unblock_dir) if name.endswith('.txt'))
     except Exception:
         file_names = []
-    file_names = [name for name in file_names if name not in ['vpn.txt', 'tor.txt']]
-    preferred_order = ['vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt', 'vpn.txt', 'tor.txt']
+    file_names = [name for name in file_names if name not in ['vpn.txt', 'tor.txt'] and not name.startswith('vpn-')]
+    preferred_order = ['vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt']
     ordered = []
     for item in preferred_order:
         if item in file_names:
@@ -1550,15 +1552,6 @@ def _load_trojan_key():
         return f'trojan://{password}@{address}:{port}{query_suffix}{fragment_suffix}'
     except Exception:
         return ''
-
-
-def _load_tor_bridges():
-    lines = []
-    for line in _read_text_file('/opt/etc/tor/torrc').splitlines():
-        stripped = line.strip()
-        if stripped.startswith('Bridge '):
-            lines.append(stripped)
-    return '\n'.join(lines)
 
 
 def _load_current_keys():
@@ -1702,6 +1695,13 @@ def _protocol_status_for_key(key_name, key_value):
         connect_timeout=3,
         read_timeout=4,
     )
+    yt_ok, yt_message = _check_http_through_proxy(
+        proxy_url,
+        url='https://www.youtube.com',
+        connect_timeout=2,
+        read_timeout=3,
+    )
+    _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok)
     if (endpoint_ok and not api_ok and now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
             _is_transient_telegram_api_failure(api_message)):
         return {
@@ -1713,6 +1713,8 @@ def _protocol_status_for_key(key_name, key_value):
             'endpoint_message': endpoint_message,
             'api_ok': False,
             'api_message': api_message,
+            'yt_ok': yt_ok,
+            'yt_message': yt_message,
         }
     return {
         'tone': 'ok' if api_ok else 'warn',
@@ -1722,6 +1724,8 @@ def _protocol_status_for_key(key_name, key_value):
         'endpoint_message': endpoint_message,
         'api_ok': api_ok,
         'api_message': api_message,
+        'yt_ok': yt_ok,
+        'yt_message': yt_message,
     }
 
 
@@ -2188,7 +2192,7 @@ def _pool_key_display_name(key_value):
         label = ''
 
     label = re.sub(r'\s+', ' ', label).strip()
-    return label or 'Ключ VPN'
+    return label or 'Ключ прокси'
 
 
 def _check_local_proxy_endpoint(key_type, port):
@@ -2481,20 +2485,33 @@ def _refresh_status_caches_async(current_keys):
 
 def _probe_all_pool_keys_async():
     """Фоновая проверка всех ключей во всех пулах для отображения значков Telegram/YouTube."""
+    if not pool_probe_lock.acquire(blocking=False):
+        return
+
     def worker():
         try:
             pools = _load_key_pools()
+            cache = _load_key_probe_cache()
+            now = time.time()
+            checked = 0
             for proto, keys in pools.items():
                 proxy_url = proxy_settings.get(proto)
                 for k in keys:
+                    if checked >= KEY_PROBE_MAX_PER_RUN:
+                        return
+                    if _key_probe_is_fresh(cache.get(_hash_key(k)), now=now):
+                        continue
                     try:
                         tg_ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=3, read_timeout=4)
                         yt_ok, _ = _check_http_through_proxy(proxy_url, connect_timeout=2, read_timeout=3)
                         _record_key_probe(proto, k, tg_ok=tg_ok, yt_ok=yt_ok)
+                        checked += 1
                     except Exception:
                         pass
         except Exception as exc:
             _write_runtime_log(f'Ошибка фоновой проверки пула ключей: {exc}')
+        finally:
+            pool_probe_lock.release()
     threading.Thread(target=worker, daemon=True).start()
 
 # список смайлов для меню
@@ -2878,13 +2895,6 @@ def bot_message(message):
                 _install_proxy_from_message(message, 'shadowsocks', message.text, main)
                 return
 
-            if level == 6:
-                tormanually(message.text)
-                os.system('/opt/etc/init.d/S35tor restart')
-                set_menu_state(0)
-                bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
-                # return
-
             if level == 8:
                 # значит это ключи и мосты
                 if message.text == 'Где брать ключи❔':
@@ -2896,15 +2906,6 @@ def bot_message(message):
                         return
                     bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
                     set_menu_state(8)
-
-                if message.text == 'Tor':
-                    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                    item1 = types.KeyboardButton("Tor вручную")
-                    item2 = types.KeyboardButton("Tor через telegram")
-                    markup.add(item1, item2)
-                    back = types.KeyboardButton("🔙 Назад")
-                    markup.add(back)
-                    bot.send_message(message.chat.id, '✅ Добро пожаловать в меню Tor!', reply_markup=markup)
 
                 if message.text == 'Shadowsocks':
                     #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
@@ -2970,26 +2971,10 @@ def bot_message(message):
                 _install_proxy_from_message(message, 'vless2', message.text, main)
                 return
 
-            if message.text == 'Tor вручную':
-                #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                back = types.KeyboardButton("🔙 Назад")
-                markup.add(back)
-                set_menu_state(6)
-                bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
-                return
-
             if message.text == '🌐 Через браузер':
                 bot.send_message(message.chat.id,
                                  f'Откройте в браузере: http://{routerip}:{browser_port}/\n'
                                  'Введите ключ Shadowsocks, Vmess, Vless 1, Vless 2 или Trojan на странице.', reply_markup=main)
-                return
-
-            if message.text == 'Tor через telegram':
-                tor()
-                os.system('/opt/etc/init.d/S35tor restart')
-                set_menu_state(0)
-                bot.send_message(message.chat.id, '✅ Успешно обновлено', reply_markup=main)
                 return
 
             if message.text == '🔰 Установка и удаление':
@@ -3210,7 +3195,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             fallback_block = f'<p class="status-note">Последняя неудачная попытка прокси: {html.escape(status["fallback_reason"])}</p>'
 
         current_mode_label = {
-            'none': 'Без VPN',
+            'none': 'Без прокси',
             'shadowsocks': 'Shadowsocks',
             'vmess': 'Vmess',
             'vless': 'Vless 1',
@@ -3236,7 +3221,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     <form method="post" action="/set_proxy" class="mode-picker-form">
         <label class="mode-picker-label" for="hero-proxy-type">Активный протокол</label>
         <select id="hero-proxy-type" name="proxy_type">
-            <option value="none"{' selected' if proxy_mode == 'none' else ''}>Без VPN (по умолчанию)</option>
+            <option value="none"{' selected' if proxy_mode == 'none' else ''}>Без прокси (по умолчанию)</option>
             <option value="shadowsocks"{' selected' if proxy_mode == 'shadowsocks' else ''}>Shadowsocks</option>
             <option value="vmess"{' selected' if proxy_mode == 'vmess' else ''}>Vmess</option>
             <option value="vless"{' selected' if proxy_mode == 'vless' else ''}>Vless 1</option>
@@ -3262,20 +3247,15 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             safe_title = html.escape(title)
             status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
             api_ok = status_info.get('api_ok', False)
-            tg_status_icon = _telegram_icon_html(opacity=1.0 if api_ok else 0.4)
+            current_probe = key_probe_cache.get(_hash_key(current_keys.get(key_name, '')), {})
+            current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
+            current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
+            active_status_icons = ''.join([
+                _telegram_icon_html(opacity=1.0) if current_tg_ok else '',
+                _youtube_icon_html(opacity=1.0) if current_yt_ok else '',
+            ])
             # Пул ключей для этого протокола
             pool_keys = key_pools.get(key_name, [])
-            # Агрегированные значки для всего пула
-            pool_tg_ok = False
-            pool_yt_ok = False
-            for pk in pool_keys:
-                probe = key_probe_cache.get(_hash_key(pk), {})
-                if probe.get('tg_ok'):
-                    pool_tg_ok = True
-                if probe.get('yt_ok'):
-                    pool_yt_ok = True
-            pool_tg_icon = _telegram_icon_html(opacity=1.0) if pool_tg_ok else ''
-            pool_yt_icon = _youtube_icon_html(opacity=1.0) if pool_yt_ok else ''
             pool_items_html = ''
             if pool_keys:
                 for i, pk in enumerate(pool_keys):
@@ -3304,7 +3284,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             protocol_cards.append(f'''<section class="panel protocol-card">
         <div class="card-topline">
             <span class="eyebrow">Ключ подключения</span>
-            <span class="key-status-badge key-status-{status_info['tone']}">{status_info['label']}</span>
+            <span class="key-status-wrap"><span class="key-status-icons">{active_status_icons}</span><span class="key-status-badge key-status-{status_info['tone']}">{status_info['label']}</span></span>
         </div>
         <h2>{safe_title}</h2>
         <p class="key-status-note">{html.escape(status_info['details'])}</p>
@@ -3314,7 +3294,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
       <button type="submit">Сохранить {safe_title}</button>
     </form>
     <details class="pool-details">
-        <summary class="pool-summary">📦 Пул ключей ({len(pool_keys)}) {pool_tg_icon} {pool_yt_icon}</summary>
+        <summary class="pool-summary">📦 Пул ключей ({len(pool_keys)})</summary>
         <ul class="pool-list">{pool_items_html}</ul>
         <form method="post" action="/pool_add" class="pool-add-form">
             <input type="hidden" name="type" value="{key_name}">
@@ -3402,7 +3382,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
   <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     {'<meta http-equiv="refresh" content="4">' if command_state['running'] else ''}
-  <title>Установка ключей VPN</title>
+  <title>Установка ключей прокси</title>
     <style>
         :root{{
             --bg:#12161d;
@@ -3523,7 +3503,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .command-update-stack form{{display:grid;}}
                 .card-topline{{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}}
                 .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
-                .key-status-badge{{display:inline-flex;align-items:center;max-width:58%;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:normal;line-height:1.25;text-align:right;}}
+                .key-status-wrap{{display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;max-width:62%;}}
+                .key-status-icons{{display:inline-flex;gap:6px;align-items:center;flex:none;}}
+                .key-status-badge{{display:inline-flex;align-items:center;max-width:100%;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:normal;line-height:1.25;text-align:right;}}
                 .key-status-ok{{background:rgba(31,122,106,.14);border-color:rgba(31,122,106,.3);color:#9be4d3;}}
                 .key-status-fail{{background:rgba(168,68,47,.14);border-color:rgba(168,68,47,.28);color:#ffbeb2;}}
                 .key-status-warn{{background:rgba(201,111,50,.14);border-color:rgba(201,111,50,.28);color:#f6c892;}}
@@ -3626,7 +3608,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
     <div class="hero">
         <div class="hero-row">
                 <div class="hero-copy">
-                        <h1>Установка ключей VPN</h1>
+                        <h1>Установка ключей прокси</h1>
                         <p>Страница показывает не только состояние процесса, но и реальный статус связи с Telegram API.</p>
                         <p><strong>Вставляйте ключ полной строкой, как в Telegram.</strong></p>
                 </div>
@@ -3674,8 +3656,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         </section>
         <section class="panel wide">
                 <span class="eyebrow">Маршрутизация</span>
-                <h2 class="section-title">Списки обхода по протоколам и VPN</h2>
-                <p class="section-subtitle">Здесь редактируются адреса и домены, которые будут отправляться через соответствующий протокол или VPN-правило.</p>
+                <h2 class="section-title">Списки обхода по протоколам</h2>
+                <p class="section-subtitle">Здесь редактируются адреса и домены, которые будут отправляться через соответствующий протокол. Эти правила применяются и к клиентам, подключённым к роутеру извне по VPN.</p>
     </section>
     {unblock_lists_block}
     </div>
@@ -3985,10 +3967,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             elif key_type == 'trojan':
                 trojan(key_value)
                 result = _apply_installed_proxy('trojan', key_value)
-            elif key_type == 'tor':
-                tormanually(key_value)
-                os.system('/opt/etc/init.d/S35tor restart')
-                result = '✅ Tor успешно обновлен.'
             else:
                 result = 'Тип ключа не распознан.'
         except Exception as exc:
@@ -4534,58 +4512,6 @@ def shadowsocks(key=None):
     with open('/opt/etc/shadowsocks.json', 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     _write_all_proxy_core_config()
-
-def tormanually(bridges):
-    # global localporttor, dnsporttor
-    f = open('/opt/etc/tor/torrc', 'w')
-    f.write('User root\n\
-PidFile /opt/var/run/tor.pid\n\
-ExcludeExitNodes {RU},{UA},{AM},{KG},{BY}\n\
-StrictNodes 1\n\
-TransPort 0.0.0.0:' + localporttor + '\n\
-ExitRelay 0\n\
-ExitPolicy reject *:*\n\
-ExitPolicy reject6 *:*\n\
-GeoIPFile /opt/share/tor/geoip\n\
-GeoIPv6File /opt/share/tor/geoip6\n\
-DataDirectory /opt/tmp/tor\n\
-VirtualAddrNetwork 10.254.0.0/16\n\
-DNSPort 127.0.0.1:' + dnsporttor + '\n\
-AutomapHostsOnResolve 1\n\
-UseBridges 1\n\
-ClientTransportPlugin obfs4 exec /opt/sbin/obfs4proxy managed\n' + bridges.replace("obfs4", "Bridge obfs4"))
-    f.close()
-
-def tor():
-    # global appapiid, appapihash
-    # global localporttor, dnsporttor
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    f = open('/opt/etc/tor/torrc', 'w')
-    with TelegramClient('GetBridgesBot', appapiid, appapihash) as client:
-        client.send_message('GetBridgesBot', '/bridges')
-    with TelegramClient('GetBridgesBot', appapiid, appapihash) as client:
-        for message1 in client.iter_messages('GetBridgesBot'):
-            f.write('User root\n\
-PidFile /opt/var/run/tor.pid\n\
-ExcludeExitNodes {RU},{UA},{AM},{KG},{BY}\n\
-StrictNodes 1\n\
-TransPort 0.0.0.0:' + localporttor + '\n\
-ExitRelay 0\n\
-ExitPolicy reject *:*\n\
-ExitPolicy reject6 *:*\n\
-GeoIPFile /opt/share/tor/geoip\n\
-GeoIPv6File /opt/share/tor/geoip6\n\
-DataDirectory /opt/tmp/tor\n\
-VirtualAddrNetwork 10.254.0.0/16\n\
-DNSPort 127.0.0.1:' + dnsporttor + '\n\
-AutomapHostsOnResolve 1\n\
-UseBridges 1\n\
-ClientTransportPlugin obfs4 exec /opt/sbin/obfs4proxy managed\n'
-                    + message1.text.replace("Your bridges:\n", "").replace("obfs4", "Bridge obfs4"))
-            f.close()
-            break
-
 
 def main():
     global proxy_mode, bot_polling

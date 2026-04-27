@@ -129,19 +129,13 @@ def build_config(form):
 token = '{escape_python(form['token'])}'
 usernames = ['{escape_python(form['username'])}']
 
-appapiid = '{escape_python(form['appapiid'])}'
-appapihash = '{escape_python(form['appapihash'])}'
 routerip = '{escape_python(router_ip)}'
 browser_port = '{escape_python(browser_port)}'
 fork_repo_owner = '{escape_python(fork_repo_owner)}'
 fork_repo_name = '{escape_python(fork_repo_name)}'
 fork_button_label = '{escape_python(fork_button_label)}'
 
-vpn_allowed=\"IKE|SSTP|OpenVPN|Wireguard|L2TP\"
-
 localportsh = '1082'
-dnsporttor = '9053'
-localporttor = '9141'
 localportvmess = '10810'
 localportvless = '10811'
 localporttrojan = '10829'
@@ -152,13 +146,10 @@ dnsoverhttpsport = '40508'
 
 
 def validate_form(form):
-    required = ['token', 'username', 'appapiid', 'appapihash']
+    required = ['token', 'username']
     missing = [key for key in required if not form.get(key, '').strip()]
     if missing:
         return False, 'РќРµ Р·Р°РїРѕР»РЅРµРЅС‹ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РїРѕР»СЏ: ' + ', '.join(missing)
-
-    if not re.fullmatch(r'\d{5,}', form.get('appapiid', '').strip()):
-        return False, 'РџРѕР»Рµ appapiid РґРѕР»Р¶РЅРѕ СЃРѕРґРµСЂР¶Р°С‚СЊ С‚РѕР»СЊРєРѕ С†РёС„СЂС‹.'
 
     browser_port = form.get('browser_port', '').strip()
     if browser_port and not re.fullmatch(r'\d{2,5}', browser_port):
@@ -345,14 +336,6 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                     <div>
                         <label for="browser_port">РџРѕСЂС‚ РІРµР±-РёРЅС‚РµСЂС„РµР№СЃР°</label>
                         <input id="browser_port" name="browser_port" value="8080">
-                    </div>
-                    <div>
-                        <label for="appapiid">app api id</label>
-                        <input id="appapiid" name="appapiid" placeholder="123456" required>
-                    </div>
-                    <div>
-                        <label for="appapihash">app api hash</label>
-                        <input id="appapihash" name="appapihash" placeholder="32 hex chars" required>
                     </div>
                     <div>
                         <label for="routerip">IP СЂРѕСѓС‚РµСЂР°</label>

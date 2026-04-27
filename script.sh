@@ -43,8 +43,6 @@ BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 lanip=$(ip -4 addr show br0 | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1)
 ssredir="ss-redir"
 localportsh=$(config_get "localportsh" "1082")
-#dnsporttor=$(config_get "dnsporttor" "9053")
-localporttor=$(config_get "localporttor" "9141")
 localportvmess=$(config_get "localportvmess" "10810")
 localportvless=$(config_get "localportvless" "10811")
 localportvless_transparent=$((localportvless + 1))
@@ -185,26 +183,14 @@ download_update_file() {
 
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
-    # opkg remove curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
-    opkg remove tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
+    opkg remove bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
     echo "Пакеты удалены, удаляем папки, файлы и настройки"
     ipset flush testset
-    ipset flush unblocktor
     ipset flush unblocksh
     ipset flush unblockvmess
     ipset flush unblockvless
     ipset flush unblockvless2
     ipset flush unblocktroj
-    #ipset flush unblockvpn
-    if ls -d /opt/etc/unblock/vpn-*.txt >/dev/null 2>&1; then
-     for vpn_file_names in /opt/etc/unblock/vpn-*; do
-     vpn_file_name=$(echo "$vpn_file_names" | awk -F '/' '{print $5}' | sed 's/.txt//')
-     # shellcheck disable=SC2116
-     unblockvpn=$(echo unblock"$vpn_file_name")
-     ipset flush "$unblockvpn"
-     done
-    fi
-
     chmod 777 /opt/root/get-pip.py || rm -Rfv /opt/root/get-pip.py
     chmod 777 /opt/etc/crontab || rm -Rfv /opt/etc/crontab
     chmod 777 /opt/etc/init.d/S22shadowsocks || rm -Rfv /opt/etc/init.d/S22shadowsocks
@@ -247,26 +233,22 @@ if [ "$1" = "-install" ]; then
     echo "Ваша версия KeenOS" "${keen_os_full}"
   ensure_entware_dns
     opkg update
-    # opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
     core_proxy_pkg=$(detect_core_proxy_package)
-    opkg install curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip "$core_proxy_pkg" trojan
+    opkg install curl mc bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip "$core_proxy_pkg" trojan
     curl -O https://bootstrap.pypa.io/get-pip.py
     sleep 3
     python get-pip.py
-    pip install pyTelegramBotAPI telethon pysocks
-    #pip install telethon
+    pip install pyTelegramBotAPI pysocks
     #pip install pathlib
     #pip install --upgrade pip
     #pip install pytelegrambotapi
     #pip install paramiko
     echo "Установка пакетов завершена. Продолжаем установку"
 
-    #ipset flush unblocktor
     #ipset flush unblocksh
     #ipset flush unblockvmess
     #ipset flush unblocktroj
     #ipset flush testset
-    #ipset flush unblockvpn
 
     # есть поддержка множества hash:net или нет, если нет, то при этом вы потеряете возможность разблокировки по диапазону и CIDR
     set_type="hash:net"
@@ -285,13 +267,6 @@ if [ "$1" = "-install" ]; then
     sed -i "s/hash:net/${set_type}/g" /opt/etc/ndm/fs.d/100-ipset.sh
     echo "Созданы файлы под множества"
 
-    # chmod 777 /opt/tmp/tor || rm -Rfv /opt/tmp/tor
-    # chmod 777 /opt/etc/tor/torrc || rm -Rfv /opt/etc/tor/torrc
-    mkdir -p /opt/tmp/tor
-    curl -o /opt/etc/tor/torrc https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/torrc
-    sed -i "s/hash:net/${set_type}/g" /opt/etc/tor/torrc
-    echo "Установлены настройки Tor"
-
     # chmod 777 /opt/etc/shadowsocks.json || rm -Rfv /opt/etc/shadowsocks.json
     # chmod 777 /opt/etc/init.d/S22shadowsocks
     curl -o /opt/etc/shadowsocks.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/shadowsocks.json
@@ -308,13 +283,11 @@ if [ "$1" = "-install" ]; then
     mkdir -p /opt/etc/unblock
     touch /opt/etc/hosts || chmod 0755 /opt/etc/hosts
     touch /opt/etc/unblock/shadowsocks.txt || chmod 0755 /opt/etc/unblock/shadowsocks.txt
-    touch /opt/etc/unblock/tor.txt || chmod 0755 /opt/etc/unblock/tor.txt
     touch /opt/etc/unblock/trojan.txt || chmod 0755 /opt/etc/unblock/trojan.txt
     touch /opt/etc/unblock/vmess.txt || chmod 0755 /opt/etc/unblock/vmess.txt
     touch /opt/etc/unblock/vless.txt || chmod 0755 /opt/etc/unblock/vless.txt
     touch /opt/etc/unblock/vless-2.txt || chmod 0755 /opt/etc/unblock/vless-2.txt
-    touch /opt/etc/unblock/vpn.txt || chmod 0755 /opt/etc/unblock/vpn.txt
-    echo "Созданы файлы под сайты и ip-адреса для обхода блокировок для SS, Tor, Trojan, Vmess, Vless и VPN"
+    echo "Созданы файлы под сайты и ip-адреса для обхода блокировок для SS, Trojan, Vmess и Vless"
 
     # unblock_ipset.sh
     # chmod 777 /opt/bin/unblock_ipset.sh || rm -rfv /opt/bin/unblock_ipset.sh
@@ -350,30 +323,13 @@ if [ "$1" = "-install" ]; then
     sed -i "s/hash:net/${set_type}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/192.168.1.1/${lanip}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/1082/${localportsh}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
-    sed -i "s/9141/${localporttor}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10810/${localportvmess}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10811/${localportvless}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10812/${localportvless_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10813/${localportvless2}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10814/${localportvless2_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10829/${localporttrojan}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
-    echo "Установлено перенаправление пакетов с адресатами из unblock в: Tor, Shadowsocks, VPN, Trojan, xray/v2ray"
-
-    # VPN script
-    # chmod 777 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || rm -rfv /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
-    if [ "${keen_os_short}" = "4" ]; then
-      echo "VPN для KeenOS 4+";
-      curl -s -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn-v4.sh
-    elif [ "${keen_os_short}" = "3" ]; then
-      echo "VPN для KeenOS 3+";
-      curl -s -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh
-    else
-      echo "Your really KeenOS ???";
-      curl -s -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh
-    fi
-    #curl -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/100-unblock-vpn.sh
-    chmod 755 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || chmod +x /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
-    echo "Установлен скрипт проверки подключения и остановки VPN"
+    echo "Установлено перенаправление пакетов с адресатами из unblock в: Shadowsocks, Trojan, xray/v2ray. Правила работают на всех интерфейсах, включая клиентов, подключённых к роутеру по VPN."
 
     # dnsmasq.conf
     #rm -rf /opt/etc/dnsmasq.conf
@@ -435,21 +391,9 @@ if [ "$1" = "-update" ]; then
     backup_dir="/opt/root/backup-${now}"
     mkdir -p "$stage_dir"
 
-    if [ "${keen_os_short}" = "4" ]; then
-      echo "KeenOS 4+";
-      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn-v4.sh"
-    elif [ "${keen_os_short}" = "3" ]; then
-      echo "KeenOS 3+";
-      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh"
-    else
-      echo "Your really KeenOS ???";
-      vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh"
-    fi
-
     echo "Скачиваем обновления во временную папку и проверяем файлы."
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-ipset.sh" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-redirect.sh" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
-    download_update_file "$vpn_script_url" "$stage_dir/100-unblock-vpn.sh" "#!/bin/sh" "100-unblock-vpn.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_ipset.sh" "$stage_dir/unblock_ipset.sh" "#!/bin/sh" "unblock_ipset.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock.dnsmasq" "$stage_dir/unblock_dnsmasq.sh" "#!/bin/sh" "unblock.dnsmasq" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
@@ -459,7 +403,6 @@ if [ "$1" = "-update" ]; then
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/1082/${localportsh}/g" "$stage_dir/100-redirect.sh"
-    sed -i "s/9141/${localporttor}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/10810/${localportvmess}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/10811/${localportvless}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/10812/${localportvless_transparent}/g" "$stage_dir/100-redirect.sh"
@@ -477,7 +420,6 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S24xray stop > /dev/null 2>&1
     /opt/etc/init.d/S24v2ray stop > /dev/null 2>&1
     /opt/etc/init.d/S22trojan stop > /dev/null 2>&1
-    /opt/etc/init.d/S35tor stop > /dev/null 2>&1
     echo "Сервисы остановлены."
 
     mkdir "$backup_dir"
@@ -486,12 +428,12 @@ if [ "$1" = "-update" ]; then
     [ -f /opt/bin/unblock_update.sh ] && mv /opt/bin/unblock_update.sh "$backup_dir"/unblock_update.sh
     [ -f /opt/etc/dnsmasq.conf ] && mv /opt/etc/dnsmasq.conf "$backup_dir"/dnsmasq.conf
     [ -f /opt/etc/ndm/fs.d/100-ipset.sh ] && mv /opt/etc/ndm/fs.d/100-ipset.sh "$backup_dir"/100-ipset.sh
-    [ -f /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh ] && mv /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh "$backup_dir"/100-unblock-vpn.sh
     [ -f /opt/etc/ndm/netfilter.d/100-redirect.sh ] && mv /opt/etc/ndm/netfilter.d/100-redirect.sh "$backup_dir"/100-redirect.sh
     if [ -f "$BOT_MAIN_PATH" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
-    rm -R /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn > /dev/null 2>&1
+    rm -f /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh > /dev/null 2>&1
+    rm -f /opt/etc/init.d/S35tor > /dev/null 2>&1
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
 
@@ -505,9 +447,6 @@ if [ "$1" = "-update" ]; then
       sed -i 's|ARGS="-config /opt/etc/xray/config.json"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
     fi
     sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1 || true
-
-    mv "$stage_dir/100-unblock-vpn.sh" /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
-    chmod 755 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || chmod +x /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
 
     mv "$stage_dir/unblock_ipset.sh" /opt/bin/unblock_ipset.sh
     mv "$stage_dir/unblock_dnsmasq.sh" /opt/bin/unblock_dnsmasq.sh
@@ -529,7 +468,6 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
     start_preferred_core_service
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1
-    /opt/etc/init.d/S35tor start > /dev/null 2>&1
 
     bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
     bot_new_version=$(grep -m1 "ВЕРСИЯ" "$BOT_MAIN_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)

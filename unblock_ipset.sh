@@ -126,19 +126,10 @@ load_file_to_set() {
 wait_for_dns
 
 load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh
-load_file_to_set "$UNBLOCK_DIR/tor.txt" unblocktor
 load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess
 load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless
 load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2
 load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj
-load_file_to_set "$UNBLOCK_DIR/vpn.txt" unblockvpn
-
-if ls "$UNBLOCK_DIR"/vpn-*.txt >/dev/null 2>&1; then
-	for vpn_file in "$UNBLOCK_DIR"/vpn-*.txt; do
-		vpn_name="$(basename "$vpn_file" .txt)"
-		load_file_to_set "$vpn_file" "unblock$vpn_name"
-	done
-fi
 
 if [ -s "$restore_file" ]; then
 	sort -u "$restore_file" > "$restore_file.sorted"

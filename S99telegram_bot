@@ -8,7 +8,19 @@ LEGACY_CONFIG_PATH="/opt/etc/bot_config.py"
 INSTALLER_SERVICE_PATH="/opt/etc/init.d/S98telegram_bot_installer"
 
 check_process() {
-    pgrep -f "python3 $MAIN_SCRIPT"
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/cmdline" ] || continue
+        exe=$(readlink "$proc/exe" 2>/dev/null || true)
+        case "$exe" in
+            *python3*)
+                if grep -qa "$MAIN_SCRIPT" "$proc/cmdline"; then
+                    echo "${proc##*/}"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+    return 1
 }
 
 has_running_process() {
