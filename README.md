@@ -47,7 +47,7 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 Ограничение: подготовку накопителя и установку Entware этот bootstrap не отменяет, потому что на Keenetic Entware живёт в `/opt` и обычно требует внешнее хранилище.
 
 ## Шаблоны списков
-- [vless.txt](vless.txt) — готовый шаблон списка доменов для первого маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft и расширенный набор адресов Telegram и связанная инфраструктура.
+- [vless.txt](vless.txt) — готовый шаблон списка доменов для первого маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft, расширенный набор адресов Telegram и связанная инфраструктура.
 - [vless-2.txt](vless-2.txt) — готовый шаблон списка доменов для второго маршрута VLESS: YouTube.
 
 ## Как работает бот на странице 192.168.1.1:8080
