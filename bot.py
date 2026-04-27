@@ -2887,8 +2887,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         h2{{margin:0 0 14px;font-size:20px;color:var(--text);}}
             p{{margin:0 0 8px;line-height:1.5;color:var(--muted);}}
         .hero strong{{color:var(--text);}}
-                .layout{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}}
-        .panel{{padding:18px;border:1px solid var(--border);border-radius:22px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}}
+                .layout{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;}}
+        .panel{{min-width:0;padding:18px;border:1px solid var(--border);border-radius:22px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}}
         [data-theme="light"] .panel{{background:linear-gradient(180deg, rgba(255,253,248,.96), rgba(245,237,224,.94));}}
         form{{display:grid;gap:12px;}}
                 input,textarea,select{{width:100%;padding:13px 14px;border-radius:14px;border:1px solid var(--border);background:var(--surface-soft);color:var(--text);font-size:16px;outline:none;}}
@@ -2926,14 +2926,15 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .section-subtitle{{margin:0;color:var(--muted);}}
                 .start-card{{display:flex;flex-direction:column;justify-content:space-between;}}
                 .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
-                .card-topline{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}}
+                .card-topline{{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}}
                 .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
-                .key-status-badge{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:nowrap;}}
+                .key-status-badge{{display:inline-flex;align-items:center;max-width:62%;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:normal;line-height:1.25;text-align:right;}}
                 .key-status-ok{{background:rgba(31,122,106,.14);border-color:rgba(31,122,106,.3);color:#9be4d3;}}
                 .key-status-fail{{background:rgba(168,68,47,.14);border-color:rgba(168,68,47,.28);color:#ffbeb2;}}
                 .key-status-warn{{background:rgba(201,111,50,.14);border-color:rgba(201,111,50,.28);color:#f6c892;}}
                 .key-status-empty{{background:rgba(159,176,200,.1);border-color:rgba(159,176,200,.18);color:var(--muted);}}
-                .key-status-note{{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;}}
+                .key-status-note{{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;overflow-wrap:anywhere;}}
+        .protocol-card{{min-width:0;}}
         .wide{{grid-column:1 / -1;}}
         @media (max-width: 760px){{
             body{{padding:12px;}}
