@@ -1153,6 +1153,15 @@ def _run_web_command(command):
     if command == 'update':
         _, output = _run_script_action('-update', fork_repo_owner, fork_repo_name, progress_command='update')
         return output
+    if command == 'update_independent':
+        _, output = _run_script_action(
+            '-update',
+            'andruwko73',
+            'bypass_keenetic',
+            progress_command='update_independent',
+            branch='feature/independent-rework',
+        )
+        return output
     if command == 'remove':
         _, output = _run_script_action('-remove', fork_repo_owner, fork_repo_name)
         return output
@@ -1547,6 +1556,7 @@ def _web_command_label(command):
     labels = {
         'install_original': 'Установить оригинальную версию',
         'update': 'Переустановить из форка без сброса',
+        'update_independent': 'Переустановка (ветка independent)',
         'remove': 'Удалить компоненты',
         'restart_services': 'Перезапустить сервисы',
         'dns_on': 'DNS Override ВКЛ',
@@ -1562,7 +1572,7 @@ def _get_web_command_state():
 
 
 def _estimate_web_command_progress(command, result_text):
-    if command != 'update':
+    if command not in ('update', 'update_independent'):
         return 0, ''
     if not result_text:
         return 5, 'Подготовка запуска обновления'
@@ -1617,8 +1627,8 @@ def _finish_web_command(command, result):
         web_command_state['command'] = command
         web_command_state['label'] = _web_command_label(command)
         web_command_state['result'] = result
-        web_command_state['progress'] = 100 if command == 'update' else web_command_state.get('progress', 0)
-        web_command_state['progress_label'] = 'Завершено' if command == 'update' else ''
+        web_command_state['progress'] = 100 if command in ('update', 'update_independent') else web_command_state.get('progress', 0)
+        web_command_state['progress_label'] = 'Завершено' if command in ('update', 'update_independent') else ''
         web_command_state['finished_at'] = time.time()
 
 
@@ -1640,8 +1650,8 @@ def _start_web_command(command):
         web_command_state['command'] = command
         web_command_state['label'] = label
         web_command_state['result'] = ''
-        web_command_state['progress'] = 5 if command == 'update' else 0
-        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command == 'update' else ''
+        web_command_state['progress'] = 5 if command in ('update', 'update_independent') else 0
+        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent') else ''
         web_command_state['started_at'] = time.time()
         web_command_state['finished_at'] = 0
     thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
@@ -3037,20 +3047,33 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <button type="submit" class="secondary-button">➕ Добавить в пул</button>
             </div>
         </form>
-        <form method="post" action="/pool_subscribe" class="pool-add-form" style="margin-top:4px;">
-            <input type="hidden" name="type" value="{key_name}">
-            <input type="url" name="url" placeholder="https://sub.example.com/... (subscription-ссылка)" style="font-size:13px;padding:10px 12px;">
-            <div class="pool-add-actions">
+        <div class="pool-subscribe-row">
+            <form method="post" action="/pool_subscribe" class="pool-subscribe-form">
+                <input type="hidden" name="type" value="{key_name}">
+                <input type="url" name="url" placeholder="https://sub.example.com/... (subscription-ссылка)" style="font-size:13px;padding:10px 12px;">
                 <button type="submit" class="secondary-button">📥 Загрузить из subscription</button>
-            </div>
-        </form>
+            </form>
+            <form method="post" action="/pool_clear" class="pool-clear-form" onsubmit="return confirm('Очистить весь пул ключей для {safe_title}?');">
+                <input type="hidden" name="type" value="{key_name}">
+                <button type="submit" class="danger pool-clear-btn">Очистить пул</button>
+            </form>
+        </div>
     </details>
   </section>''')
         protocol_cards_html = ''.join(protocol_cards)
 
         dns_override_active = _dns_override_enabled()
+        update_buttons_html = f'''<div class="command-update-stack">
+            <form method="post" action="/command">
+                <input type="hidden" name="command" value="update">
+                <button type="submit">Переустановить из форка без сброса</button>
+            </form>
+            <form method="post" action="/command">
+                <input type="hidden" name="command" value="update_independent">
+                <button type="submit">Переустановка (ветка independent)</button>
+            </form>
+        </div>'''
         command_buttons = [
-            ('update', 'Переустановить из форка без сброса', ''),
             ('restart_services', 'Перезапустить сервисы', ''),
             ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else ''),
             ('dns_off', 'DNS Override ВЫКЛ', 'danger'),
@@ -3220,6 +3243,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .section-subtitle{{margin:0;color:var(--muted);}}
                 .start-card{{display:flex;flex-direction:column;justify-content:space-between;}}
                 .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
+                .command-update-stack{{display:grid;gap:12px;}}
+                .command-update-stack form{{display:grid;}}
                 .card-topline{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}}
                 .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
                 .key-status-badge{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:nowrap;}}
@@ -3242,6 +3267,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .pool-add-form{{margin-top:8px;display:grid;gap:8px;}}
         .pool-add-actions{{display:flex;gap:8px;}}
         .pool-add-actions button{{padding:8px 14px;font-size:13px;}}
+        .pool-subscribe-row{{margin-top:8px;display:flex;align-items:stretch;gap:8px;}}
+        .pool-subscribe-form{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;flex:1;}}
+        .pool-subscribe-form button,.pool-clear-btn{{padding:8px 14px;font-size:13px;line-height:1.2;min-height:40px;white-space:nowrap;}}
+        .pool-clear-form{{margin:0;display:flex;}}
+        .pool-clear-btn{{height:100%;}}
         .secondary-button{{background:linear-gradient(135deg, var(--secondary), #b85b27);box-shadow:0 10px 20px rgba(201,111,50,.18);}}
         .wide{{grid-column:1 / -1;}}
         @media (max-width: 760px){{
@@ -3257,6 +3287,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                         .command-grid{{grid-template-columns:1fr;}}
             .status-grid{{grid-template-columns:1fr;}}
                         .panel{{padding:16px;border-radius:18px;}}
+            .pool-subscribe-row{{display:grid;align-items:stretch;}}
+            .pool-subscribe-form{{grid-template-columns:1fr;}}
             button,input,textarea,select{{font-size:16px;}}
         }}
     </style>
@@ -3356,6 +3388,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <h2 class="section-title">Команды установки и обслуживания</h2>
             <p class="section-subtitle">Переустановка из форка обновляет код и служебные файлы поверх текущей установки, не затирая сохранённые ключи и списки обхода. Обычные действия и потенциально опасные команды разделены по цвету, чтобы ими было труднее ошибиться.</p>
                 <div class="command-grid">
+                        {update_buttons_html}
                         {command_buttons_html}
                 </div>
         </section>
@@ -3540,6 +3573,32 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                     result = 'Ключ не найден в пуле'
             except Exception as exc:
                 result = f'Ошибка удаления из пула: {exc}'
+            _set_web_flash_message(result)
+            self._send_redirect('/')
+            return
+
+        if path == '/pool_clear':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            proto = data.get('type', [''])[0]
+            try:
+                if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+                    raise ValueError('Неизвестный протокол')
+                pools = _load_key_pools()
+                removed_keys = list(pools.get(proto, []) or [])
+                pools[proto] = []
+                _save_key_pools(pools)
+                if removed_keys:
+                    cache = _load_key_probe_cache()
+                    for key_value in removed_keys:
+                        cache.pop(_hash_key(key_value), None)
+                    _save_key_probe_cache(cache)
+                result = f'Пул {proto} очищен. Удалено ключей: {len(removed_keys)}'
+                _invalidate_web_status_cache()
+                _invalidate_key_status_cache()
+            except Exception as exc:
+                result = f'Ошибка очистки пула: {exc}'
             _set_web_flash_message(result)
             self._send_redirect('/')
             return
