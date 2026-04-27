@@ -116,6 +116,11 @@ static.ads-twitter.com
 statsig.com
 t.me
 tcr9i.chat.openai.com
+ws.chatgpt.com
+104.18.32.0/20
+172.64.144.0/20
+162.159.140.0/24
+172.66.0.0/24
 tdesktop.com
 teleg.xyz
 telega.one
