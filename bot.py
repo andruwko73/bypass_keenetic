@@ -993,6 +993,15 @@ def _run_web_command(command):
     if command == 'update':
         _, output = _run_script_action('-update', fork_repo_owner, fork_repo_name, progress_command='update')
         return output
+    if command == 'update_independent':
+        _, output = _run_script_action(
+            '-update',
+            'andruwko73',
+            'bypass_keenetic',
+            progress_command='update_independent',
+            branch='feature/independent-rework',
+        )
+        return output
     if command == 'remove':
         _, output = _run_script_action('-remove', fork_repo_owner, fork_repo_name)
         return output
@@ -1387,6 +1396,7 @@ def _web_command_label(command):
     labels = {
         'install_original': 'Установить оригинальную версию',
         'update': 'Переустановить из форка без сброса',
+        'update_independent': 'Переустановка (ветка Independent)',
         'remove': 'Удалить компоненты',
         'restart_services': 'Перезапустить сервисы',
         'dns_on': 'DNS Override ВКЛ',
@@ -1402,7 +1412,7 @@ def _get_web_command_state():
 
 
 def _estimate_web_command_progress(command, result_text):
-    if command != 'update':
+    if command not in ('update', 'update_independent'):
         return 0, ''
     if not result_text:
         return 5, 'Подготовка запуска обновления'
@@ -1457,8 +1467,8 @@ def _finish_web_command(command, result):
         web_command_state['command'] = command
         web_command_state['label'] = _web_command_label(command)
         web_command_state['result'] = result
-        web_command_state['progress'] = 100 if command == 'update' else web_command_state.get('progress', 0)
-        web_command_state['progress_label'] = 'Завершено' if command == 'update' else ''
+        web_command_state['progress'] = 100 if command in ('update', 'update_independent') else web_command_state.get('progress', 0)
+        web_command_state['progress_label'] = 'Завершено' if command in ('update', 'update_independent') else ''
         web_command_state['finished_at'] = time.time()
 
 
@@ -1480,8 +1490,8 @@ def _start_web_command(command):
         web_command_state['command'] = command
         web_command_state['label'] = label
         web_command_state['result'] = ''
-        web_command_state['progress'] = 5 if command == 'update' else 0
-        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command == 'update' else ''
+        web_command_state['progress'] = 5 if command in ('update', 'update_independent') else 0
+        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent') else ''
         web_command_state['started_at'] = time.time()
         web_command_state['finished_at'] = 0
     thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
@@ -2738,8 +2748,17 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         protocol_cards_html = ''.join(protocol_cards)
 
         dns_override_active = _dns_override_enabled()
+        update_buttons_html = f'''<div class="command-update-stack">
+            <form method="post" action="/command">
+                <input type="hidden" name="command" value="update">
+                <button type="submit">Переустановить из форка без сброса</button>
+            </form>
+            <form method="post" action="/command">
+                <input type="hidden" name="command" value="update_independent">
+                <button type="submit">Переустановка (ветка Independent)</button>
+            </form>
+        </div>'''
         command_buttons = [
-            ('update', 'Переустановить из форка без сброса', ''),
             ('restart_services', 'Перезапустить сервисы', ''),
             ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else ''),
             ('dns_off', 'DNS Override ВЫКЛ', 'danger'),
@@ -2909,6 +2928,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .section-subtitle{{margin:0;color:var(--muted);}}
                 .start-card{{display:flex;flex-direction:column;justify-content:space-between;}}
                 .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
+                .command-update-stack{{display:grid;gap:12px;}}
+                .command-update-stack form{{display:grid;}}
                 .card-topline{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}}
                 .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
                 .key-status-badge{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:nowrap;}}
@@ -3030,6 +3051,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <h2 class="section-title">Команды установки и обслуживания</h2>
             <p class="section-subtitle">Переустановка из форка обновляет код и служебные файлы поверх текущей установки, не затирая сохранённые ключи и списки обхода. Обычные действия и потенциально опасные команды разделены по цвету, чтобы ими было труднее ошибиться.</p>
                 <div class="command-grid">
+                        {update_buttons_html}
                         {command_buttons_html}
                 </div>
         </section>
