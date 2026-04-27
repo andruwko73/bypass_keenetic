@@ -2748,16 +2748,14 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         protocol_cards_html = ''.join(protocol_cards)
 
         dns_override_active = _dns_override_enabled()
-        update_buttons_html = f'''<div class="command-update-stack">
-            <form method="post" action="/command">
+        update_buttons_html = f'''<form method="post" action="/command">
                 <input type="hidden" name="command" value="update">
                 <button type="submit">Переустановить из форка без сброса</button>
             </form>
             <form method="post" action="/command">
                 <input type="hidden" name="command" value="update_independent">
                 <button type="submit">Переустановка (ветка Independent)</button>
-            </form>
-        </div>'''
+            </form>'''
         command_buttons = [
             ('restart_services', 'Перезапустить сервисы', ''),
             ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else ''),
@@ -2928,8 +2926,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .section-subtitle{{margin:0;color:var(--muted);}}
                 .start-card{{display:flex;flex-direction:column;justify-content:space-between;}}
                 .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
-                .command-update-stack{{display:grid;gap:12px;}}
-                .command-update-stack form{{display:grid;}}
                 .card-topline{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}}
                 .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
                 .key-status-badge{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:nowrap;}}
