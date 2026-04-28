@@ -29,13 +29,10 @@ config_get() {
 }
 
 BOT_CONFIG_PATH="/opt/etc/bot_config.py"
-BOT_MAIN_PATH="/opt/etc/bot.py"
-BOT_SERVICE_PATH="/opt/etc/init.d/S99telegram_bot"
+BOT_MAIN_PATH="/opt/etc/web_bot.py"
+BOT_SERVICE_PATH="/opt/etc/init.d/S99web_bot"
 if [ -f "/opt/etc/bot/bot_config.py" ]; then
   BOT_CONFIG_PATH="/opt/etc/bot/bot_config.py"
-fi
-if [ -d "/opt/etc/bot" ] || grep -q '/opt/etc/bot/main.py' /opt/etc/init.d/S99telegram_bot 2>/dev/null; then
-  BOT_MAIN_PATH="/opt/etc/bot/main.py"
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 
@@ -253,7 +250,7 @@ if [ "$1" = "-install" ]; then
     curl -O https://bootstrap.pypa.io/get-pip.py
     sleep 3
     python get-pip.py
-    pip install pyTelegramBotAPI telethon pysocks
+    pip install pysocks
     #pip install telethon
     #pip install pathlib
     #pip install --upgrade pip
@@ -454,7 +451,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock.dnsmasq" "$stage_dir/unblock_dnsmasq.sh" "#!/bin/sh" "unblock.dnsmasq" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_bot.py" "$stage_dir/web_bot.py" "KeyInstallHTTPRequestHandler" "web_bot.py" || exit 1
 
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/100-redirect.sh"
@@ -489,7 +486,7 @@ if [ "$1" = "-update" ]; then
     [ -f /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh ] && mv /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh "$backup_dir"/100-unblock-vpn.sh
     [ -f /opt/etc/ndm/netfilter.d/100-redirect.sh ] && mv /opt/etc/ndm/netfilter.d/100-redirect.sh "$backup_dir"/100-redirect.sh
     if [ -f "$BOT_MAIN_PATH" ]; then
-      mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
+      mv "$BOT_MAIN_PATH" "$backup_dir"/web_bot.py
     fi
     rm -R /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn > /dev/null 2>&1
     chmod 755 "$backup_dir"/* 2>/dev/null
@@ -520,7 +517,7 @@ if [ "$1" = "-update" ]; then
     configure_core_proxy_service
 
     mkdir -p "$BOT_RUNTIME_DIR"
-    mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
+    mv "$stage_dir/web_bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
     rmdir "$stage_dir" 2>/dev/null || true
     echo "Обновления скачены, права настроены."
@@ -531,42 +528,32 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1
     /opt/etc/init.d/S35tor start > /dev/null 2>&1
 
-    bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
-    bot_new_version=$(grep -m1 "ВЕРСИЯ" "$BOT_MAIN_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
+    web_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
+    web_new_version=$(grep -m1 "ВЕРСИЯ" "$BOT_MAIN_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
 
-    if [ -n "$bot_old_version" ] && [ -n "$bot_new_version" ]; then
-      echo "Версия бота ${bot_old_version} обновлена до ${bot_new_version}."
-      escaped_old_version=$(printf '%s\n' "$bot_old_version" | sed 's/[\\/&]/\\\\&/g')
-      escaped_new_version=$(printf '%s\n' "$bot_new_version" | sed 's/[\\/&]/\\\\&/g')
+    if [ -n "$web_old_version" ] && [ -n "$web_new_version" ]; then
+      echo "Версия обновлена с ${web_old_version} до ${web_new_version}."
+      escaped_old_version=$(printf '%s\n' "$web_old_version" | sed 's/[\\/&]/\\\\&/g')
+      escaped_new_version=$(printf '%s\n' "$web_new_version" | sed 's/[\\/&]/\\\\&/g')
       sed -i "s/${escaped_old_version}/${escaped_new_version}/g" "$BOT_CONFIG_PATH" || true
-    elif [ -n "$bot_new_version" ]; then
-      echo "Версия бота обновлена до ${bot_new_version}."
+    elif [ -n "$web_new_version" ]; then
+      echo "Версия обновлена до ${web_new_version}."
     else
-      echo "Версия бота обновлена."
+      echo "Версия обновлена."
     fi
     sleep 2
-    echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен бот (~15-30 сек)."
+    echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен web-сервер (~10 сек)."
     sleep 7
-    if [ -x "$BOT_SERVICE_PATH" ]; then
-      "$BOT_SERVICE_PATH" restart
-      sleep 3
-      if "$BOT_SERVICE_PATH" status | grep -q "Bot is running"; then
-        echo "Бот запущен. Нажмите сюда: /start"
-      else
-        echo "⚠️ Не удалось подтвердить перезапуск бота через сервис $BOT_SERVICE_PATH"
-      fi
+    bot_pid=$(pgrep -f "python3.*web_bot.py")
+    for pid in ${bot_pid}; do kill "${pid}" >/dev/null 2>&1 || true; done
+    sleep 3
+    python3 "$BOT_MAIN_PATH" &
+    sleep 3
+    check_running=$(pgrep -f "python3.*web_bot.py")
+    if [ -n "${check_running}" ]; then
+      echo "Веб-сервер запущен на порту $(config_get 'browser_port' '8080')."
     else
-      bot_pid=$(pgrep -f "python3 $BOT_MAIN_PATH")
-      for bot in ${bot_pid}; do kill "${bot}" >/dev/null 2>&1 || true; done
-      sleep 5
-      python3 "$BOT_MAIN_PATH" &
-      sleep 3
-      check_running=$(pgrep -f "python3 $BOT_MAIN_PATH")
-      if [ -n "${check_running}" ]; then
-        echo "Бот запущен. Нажмите сюда: /start"
-      else
-        echo "⚠️ Не удалось подтвердить перезапуск бота"
-      fi
+      echo "⚠️ Не удалось подтвердить запуск web-сервера"
     fi
 
     exit 0
