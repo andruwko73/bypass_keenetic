@@ -622,6 +622,39 @@ def _prepare_entware_dns():
     return 'Подготовка Entware DNS: ' + ', '.join(notes)
 
 
+def _cleanup_after_foreign_update():
+    """После обновления из веток main/independent-rework удаляем bot.py
+    и Telegram-сервисы, оставляя только web-only версию."""
+    notes = []
+    try:
+        if os.path.exists('/opt/etc/bot.py'):
+            os.remove('/opt/etc/bot.py')
+            notes.append('bot.py удалён')
+        if os.path.exists('/opt/etc/init.d/S99telegram_bot'):
+            os.remove('/opt/etc/init.d/S99telegram_bot')
+            notes.append('S99telegram_bot удалён')
+        if os.path.exists('/opt/etc/init.d/S98telegram_bot_installer'):
+            os.remove('/opt/etc/init.d/S98telegram_bot_installer')
+            notes.append('S98telegram_bot_installer удалён')
+        bot_pids_str = subprocess.check_output(
+            ['pgrep', '-f', '/opt/etc/bot.py'],
+            text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        if bot_pids_str:
+            for pid_str in bot_pids_str.splitlines():
+                pid = pid_str.strip()
+                if pid and pid != str(os.getpid()):
+                    os.kill(int(pid), signal.SIGTERM)
+                    notes.append(f'Процесс bot.py (PID {pid}) остановлен')
+    except subprocess.CalledProcessError:
+        pass
+    except Exception as exc:
+        notes.append(f'Ошибка очистки: {exc}')
+    if notes:
+        return 'Очистка после чужого обновления: ' + ', '.join(notes)
+    return ''
+
+
 def _ensure_legacy_bot_paths():
     mappings = [
         ('/opt/etc/bot/bot_config.py', '/opt/etc/bot_config.py'),
@@ -791,6 +824,10 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
     return_code = process.wait()
     if return_code != 0:
         logs.append(f'Команда завершилась с кодом {return_code}.')
+    if action == '-update':
+        cleanup_note = _cleanup_after_foreign_update()
+        if cleanup_note:
+            logs.append(cleanup_note)
     return return_code, '\n'.join(logs)
 
 
