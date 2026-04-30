@@ -59,7 +59,7 @@ INSTALLER_SERVICE_PATH = '/opt/etc/init.d/S98telegram_bot_installer'
 DEFAULT_BROWSER_PORT = int(os.environ.get('BYPASS_INSTALLER_PORT', '8080'))
 DEFAULT_FORK_REPO_OWNER = 'andruwko73'
 DEFAULT_FORK_REPO_NAME = 'bypass_keenetic'
-WEB_ONLY_BRANCH = 'feature/without-telegram-bot'
+WEB_ONLY_BRANCH = 'feature/web-only'
 WEB_ONLY_SCRIPT_URL = (
     f'https://raw.githubusercontent.com/{DEFAULT_FORK_REPO_OWNER}/'
     f'{DEFAULT_FORK_REPO_NAME}/{WEB_ONLY_BRANCH}/script.sh'
@@ -188,7 +188,7 @@ def install_web_only():
     command = (
         f'curl -fsSL {WEB_ONLY_SCRIPT_URL!r} -o /tmp/bypass_web_only_install.sh && '
         'chmod 755 /tmp/bypass_web_only_install.sh && '
-        'REPO_REF=feature/without-telegram-bot /bin/sh /tmp/bypass_web_only_install.sh -install && '
+        'REPO_REF=feature/web-only /bin/sh /tmp/bypass_web_only_install.sh -install && '
         f'sleep 1; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true'
     )
     subprocess.Popen(
