@@ -1209,6 +1209,9 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
             logs.append('⚠️ GitHub отдал старую версию script.sh, но legacy-пути уже подготовлены на роутере.')
         if progress_command:
             _set_web_command_progress(progress_command, '\n'.join(logs))
+        with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
+            file.write(script_text)
+        os.chmod('/opt/root/script.sh', stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 
     process = subprocess.Popen(
         ['/bin/sh', '/opt/root/script.sh', action],
@@ -1334,6 +1337,15 @@ def _run_web_command(command):
             'bypass_keenetic',
             progress_command='update_independent',
             branch='feature/independent-rework',
+        )
+        return output
+    if command == 'update_no_bot':
+        _, output = _run_script_action(
+            '-update',
+            'andruwko73',
+            'bypass_keenetic',
+            progress_command='update_no_bot',
+            branch='feature/without-telegram-bot',
         )
         return output
     if command == 'remove':
@@ -1752,6 +1764,7 @@ def _web_command_label(command):
         'install_original': 'Установить оригинальную версию',
         'update': 'Переустановить из форка без сброса',
         'update_independent': 'Переустановка (ветка independent)',
+        'update_no_bot': 'Переустановка (без Telegram бота)',
         'remove': 'Удалить компоненты',
         'restart_services': 'Перезапустить сервисы',
         'dns_on': 'DNS Override ВКЛ',
@@ -1790,7 +1803,7 @@ def _consume_web_command_state_for_render():
 
 
 def _estimate_web_command_progress(command, result_text):
-    if command not in ('update', 'update_independent'):
+    if command not in ('update', 'update_independent', 'update_no_bot'):
         return 0, ''
     if not result_text:
         return 5, 'Подготовка запуска обновления'
@@ -1846,8 +1859,8 @@ def _finish_web_command(command, result):
         web_command_state['command'] = command
         web_command_state['label'] = _web_command_label(command)
         web_command_state['result'] = result
-        web_command_state['progress'] = 100 if command in ('update', 'update_independent') else web_command_state.get('progress', 0)
-        web_command_state['progress_label'] = 'Завершено' if command in ('update', 'update_independent') else ''
+        web_command_state['progress'] = 100 if command in ('update', 'update_independent', 'update_no_bot') else web_command_state.get('progress', 0)
+        web_command_state['progress_label'] = 'Завершено' if command in ('update', 'update_independent', 'update_no_bot') else ''
         web_command_state['finished_at'] = time.time()
         web_command_state['shown_after_finish'] = False
 
@@ -1870,8 +1883,8 @@ def _start_web_command(command):
         web_command_state['command'] = command
         web_command_state['label'] = label
         web_command_state['result'] = ''
-        web_command_state['progress'] = 5 if command in ('update', 'update_independent') else 0
-        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent') else ''
+        web_command_state['progress'] = 5 if command in ('update', 'update_independent', 'update_no_bot') else 0
+        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent', 'update_no_bot') else ''
         web_command_state['started_at'] = time.time()
         web_command_state['finished_at'] = 0
         web_command_state['shown_after_finish'] = False
@@ -3326,6 +3339,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             <form method="post" action="/command">
                 <input type="hidden" name="command" value="update_independent">
                 <button type="submit">Переустановка (ветка independent)</button>
+            </form>
+            <form method="post" action="/command">
+                <input type="hidden" name="command" value="update_no_bot">
+                <button type="submit">Переустановка (без Telegram бота)</button>
             </form>'''
         command_buttons = [
             ('restart_services', 'Перезапустить сервисы', ''),

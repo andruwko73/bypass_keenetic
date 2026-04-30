@@ -59,6 +59,11 @@ INSTALLER_SERVICE_PATH = '/opt/etc/init.d/S98telegram_bot_installer'
 DEFAULT_BROWSER_PORT = int(os.environ.get('BYPASS_INSTALLER_PORT', '8080'))
 DEFAULT_FORK_REPO_OWNER = 'andruwko73'
 DEFAULT_FORK_REPO_NAME = 'bypass_keenetic'
+WEB_ONLY_BRANCH = 'feature/without-telegram-bot'
+WEB_ONLY_SCRIPT_URL = (
+    f'https://raw.githubusercontent.com/{DEFAULT_FORK_REPO_OWNER}/'
+    f'{DEFAULT_FORK_REPO_NAME}/{WEB_ONLY_BRANCH}/script.sh'
+)
 
 
 def detect_router_ip():
@@ -174,6 +179,20 @@ def switch_to_main_bot():
         subprocess.run([BOT_SERVICE_PATH, 'restart'], check=False)
     subprocess.Popen(
         ['sh', '-c', f'sleep 1; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def install_web_only():
+    command = (
+        f'curl -fsSL {WEB_ONLY_SCRIPT_URL!r} -o /tmp/bypass_web_only_install.sh && '
+        'chmod 755 /tmp/bypass_web_only_install.sh && '
+        'REPO_REF=feature/without-telegram-bot /bin/sh /tmp/bypass_web_only_install.sh -install && '
+        f'sleep 1; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true'
+    )
+    subprocess.Popen(
+        ['sh', '-c', command],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -307,6 +326,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
         input, select {{ width:100%; padding:12px 14px; border-radius:12px; border:1px solid var(--line); background:#0d141b; color:var(--text); }}
         .full {{ grid-column:1 / -1; }}
         button {{ margin-top:20px; width:100%; padding:14px 18px; border:0; border-radius:12px; background:var(--accent); color:#06281e; font-weight:700; cursor:pointer; }}
+        .secondary-button {{ background:#2f4050; color:var(--text); border:1px solid var(--line); }}
         .notice {{ margin:0 0 18px; padding:12px 14px; border-radius:12px; background:rgba(255,209,102,.12); color:var(--warn); border:1px solid rgba(255,209,102,.25); }}
         .hint {{ margin-top:18px; font-size:14px; color:var(--muted); }}
         .icon-btn {{ display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:rgba(99,230,190,0.08); color:var(--text); font-size:15px; cursor:pointer; margin-right:10px; }}
@@ -353,6 +373,9 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                     </div>
                 </div>
                 <button type="submit">РЎРѕС…СЂР°РЅРёС‚СЊ Рё Р·Р°РїСѓСЃС‚РёС‚СЊ РѕСЃРЅРѕРІРЅРѕР№ Р±РѕС‚</button>
+            </form>
+            <form method="post" action="/install-web-only">
+                <button class="secondary-button" type="submit">Установить без бота Telegram</button>
             </form>
             <div class="check-btns">
                 <button class="icon-btn" onclick="alert('РџСЂРѕРІРµСЂРєР° Telegram...')" type="button">
@@ -454,6 +477,18 @@ class InstallerHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self._ensure_request_allowed():
+            return
+        if self.path == '/install-web-only':
+            install_web_only()
+            router_ip = detect_router_ip()
+            target_url = f'http://{router_ip}:{DEFAULT_BROWSER_PORT}/'
+            self._send_html(
+                page_html(
+                    f'Запущена установка web-only версии без Telegram бота. Через несколько секунд откроется основной web-интерфейс: {target_url}',
+                    redirect_url=target_url,
+                    redirect_delay_seconds=8,
+                )
+            )
             return
         if self.path.startswith('/api/keys/add') or self.path.startswith('/api/keys/remove'):
             content_length = int(self.headers.get('Content-Length', '0'))

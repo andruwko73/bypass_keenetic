@@ -28,6 +28,18 @@ config_get() {
   printf '%s' "$default_value"
 }
 
+cleanup_update_artifacts() {
+  keep_count="${1:-3}"
+  for pattern in /opt/root/update-* /opt/root/backup-*; do
+    # shellcheck disable=SC2086
+    ls -dt $pattern 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
+      case "$old_dir" in
+        /opt/root/update-*|/opt/root/backup-*) rm -rf "$old_dir" ;;
+      esac
+    done
+  done
+}
+
 BOT_CONFIG_PATH="/opt/etc/bot_config.py"
 BOT_MAIN_PATH="/opt/etc/bot.py"
 BOT_SERVICE_PATH="/opt/etc/init.d/S99telegram_bot"
@@ -386,7 +398,7 @@ if [ "$1" = "-update" ]; then
     echo "Ваша версия KeenOS" "${keen_os_full}."
     echo "Пакеты обновлены."
 
-    now=$(date +"%Y.%m.%d.%H-%M")
+    now=$(date +"%Y.%m.%d.%H-%M-%S")
     stage_dir="/opt/root/update-${now}"
     backup_dir="/opt/root/backup-${now}"
     mkdir -p "$stage_dir"
@@ -422,7 +434,7 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S22trojan stop > /dev/null 2>&1
     echo "Сервисы остановлены."
 
-    mkdir "$backup_dir"
+    mkdir -p "$backup_dir"
     [ -f /opt/bin/unblock_ipset.sh ] && mv /opt/bin/unblock_ipset.sh "$backup_dir"/unblock_ipset.sh
     [ -f /opt/bin/unblock_dnsmasq.sh ] && mv /opt/bin/unblock_dnsmasq.sh "$backup_dir"/unblock_dnsmasq.sh
     [ -f /opt/bin/unblock_update.sh ] && mv /opt/bin/unblock_update.sh "$backup_dir"/unblock_update.sh
@@ -462,6 +474,7 @@ if [ "$1" = "-update" ]; then
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
     rmdir "$stage_dir" 2>/dev/null || true
+    cleanup_update_artifacts 3
     echo "Обновления скачены, права настроены."
 
     /opt/etc/init.d/S56dnsmasq restart > /dev/null 2>&1
@@ -485,6 +498,9 @@ if [ "$1" = "-update" ]; then
     sleep 2
     echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен бот (~15-30 сек)."
     sleep 7
+    [ -x /opt/etc/init.d/S99web_bot ] && /opt/etc/init.d/S99web_bot stop >/dev/null 2>&1 || true
+    web_bot_pid=$(pgrep -f "python3.*web_bot.py")
+    for web_pid in ${web_bot_pid}; do kill "${web_pid}" >/dev/null 2>&1 || true; done
     if [ -x "$BOT_SERVICE_PATH" ]; then
       "$BOT_SERVICE_PATH" restart
       sleep 3
