@@ -30,13 +30,11 @@ config_get() {
 
 cleanup_update_artifacts() {
   keep_count="${1:-3}"
-  for pattern in /opt/root/update-* /opt/root/backup-*; do
-    # shellcheck disable=SC2086
-    ls -dt $pattern 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
-      case "$old_dir" in
-        /opt/root/update-*|/opt/root/backup-*) rm -rf "$old_dir" ;;
-      esac
-    done
+  ls -dt /opt/root/update-* 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
+    case "$old_dir" in /opt/root/update-*) rm -rf "$old_dir" ;; esac
+  done
+  ls -dt /opt/root/backup-* 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
+    case "$old_dir" in /opt/root/backup-*) rm -rf "$old_dir" ;; esac
   done
 }
 
