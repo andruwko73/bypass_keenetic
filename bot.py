@@ -1011,7 +1011,7 @@ def _run_web_command(command):
             'andruwko73',
             'bypass_keenetic',
             progress_command='update_no_bot',
-            branch='feature/without-telegram-bot',
+            branch='feature/web-only',
         )
         return output
     if command == 'remove':
