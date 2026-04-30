@@ -28,6 +28,102 @@ config_get() {
   printf '%s' "$default_value"
 }
 
+cleanup_update_artifacts() {
+  keep_count="${1:-3}"
+  for pattern in /opt/root/update-* /opt/root/backup-*; do
+    # shellcheck disable=SC2086
+    ls -dt $pattern 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
+      case "$old_dir" in
+        /opt/root/update-*|/opt/root/backup-*) rm -rf "$old_dir" ;;
+      esac
+    done
+  done
+}
+
+stop_telegram_bot_runtime() {
+  [ -x /opt/etc/init.d/S99telegram_bot ] && /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
+  [ -x /opt/etc/init.d/S98telegram_bot_installer ] && /opt/etc/init.d/S98telegram_bot_installer stop >/dev/null 2>&1 || true
+  for pid in $(pgrep -f "python3 /opt/etc/bot/main.py") $(pgrep -f "python3 /opt/etc/bot.py"); do
+    kill "$pid" >/dev/null 2>&1 || true
+  done
+}
+
+install_web_only_service() {
+  cat > "$BOT_SERVICE_PATH" <<'EOF'
+#!/bin/sh
+
+MAIN_SCRIPT="/opt/etc/web_bot.py"
+LOG_FILE="/opt/etc/web_bot.log"
+
+check_process() {
+    pgrep -f "python3.*${MAIN_SCRIPT}"
+}
+
+has_running_process() {
+    check_process >/dev/null 2>&1
+}
+
+stop_process() {
+    pids=$(check_process)
+    for pid in $pids; do
+        kill "$pid" >/dev/null 2>&1 || true
+    done
+    attempts=0
+    while has_running_process && [ "$attempts" -lt 15 ]; do
+        sleep 1
+        attempts=$((attempts + 1))
+    done
+    if has_running_process; then
+        pids=$(check_process)
+        for pid in $pids; do
+            kill -9 "$pid" >/dev/null 2>&1 || true
+        done
+    fi
+}
+
+case "$1" in
+    start)
+        if has_running_process; then
+            echo "Web-only interface is already running"
+            exit 0
+        fi
+        python3 "$MAIN_SCRIPT" >> "$LOG_FILE" 2>&1 &
+        sleep 2
+        if has_running_process; then
+            echo "Web-only interface started successfully"
+            exit 0
+        fi
+        echo "Error: web-only interface failed to start"
+        exit 1
+        ;;
+    stop)
+        stop_process
+        echo "Web-only interface stopped"
+        exit 0
+        ;;
+    restart)
+        "$0" stop >/dev/null 2>&1 || true
+        sleep 1
+        "$0" start
+        ;;
+    status)
+        pid=$(check_process)
+        if [ -n "$pid" ]; then
+            echo "Web-only interface is running (PID: $pid)"
+        else
+            echo "Web-only interface is stopped"
+        fi
+        exit 0
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+EOF
+  chmod 755 "$BOT_SERVICE_PATH" || chmod +x "$BOT_SERVICE_PATH"
+}
+
 BOT_CONFIG_PATH="/opt/etc/bot_config.py"
 BOT_MAIN_PATH="/opt/etc/web_bot.py"
 BOT_SERVICE_PATH="/opt/etc/init.d/S99web_bot"
@@ -35,6 +131,33 @@ if [ -f "/opt/etc/bot/bot_config.py" ]; then
   BOT_CONFIG_PATH="/opt/etc/bot/bot_config.py"
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
+
+ensure_web_only_config() {
+  if [ -f "$BOT_CONFIG_PATH" ]; then
+    return 0
+  fi
+
+  router_ip="${lanip:-192.168.1.1}"
+  mkdir -p "$(dirname "$BOT_CONFIG_PATH")"
+  cat > "$BOT_CONFIG_PATH" <<EOF
+# ВЕРСИЯ СКРИПТА 2.2.1 web-only
+
+routerip = '${router_ip}'
+browser_port = '8080'
+fork_repo_owner = 'andruwko73'
+fork_repo_name = 'bypass_keenetic'
+fork_button_label = 'Fork by andruwko73'
+
+localportsh = '1082'
+localportvmess = '10810'
+localportvless = '10811'
+localporttrojan = '10829'
+default_proxy_mode = 'none'
+dnsovertlsport = '40500'
+dnsoverhttpsport = '40508'
+EOF
+  chmod 600 "$BOT_CONFIG_PATH" 2>/dev/null || true
+}
 
 # ip роутера
 lanip=$(ip -4 addr show br0 | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1)
@@ -388,8 +511,18 @@ if [ "$1" = "-install" ]; then
     curl -o /opt/etc/crontab https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab
     chmod 755 /opt/etc/crontab
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
+
+    mkdir -p "$BOT_RUNTIME_DIR"
+    curl -o "$BOT_MAIN_PATH" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_bot.py"
+    chmod 755 "$BOT_MAIN_PATH"
+    ensure_web_only_config
+    install_web_only_service
+    stop_telegram_bot_runtime
+    "$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
+    echo "Установлен и запущен web-only интерфейс"
+
     /opt/bin/unblock_update.sh
-    echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
+    echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка web-only версии"
 
     #ndmc -c 'opkg dns-override'
     #sleep 3
@@ -427,7 +560,7 @@ if [ "$1" = "-update" ]; then
     echo "Ваша версия KeenOS" "${keen_os_full}."
     echo "Пакеты обновлены."
 
-    now=$(date +"%Y.%m.%d.%H-%M")
+    now=$(date +"%Y.%m.%d.%H-%M-%S")
     stage_dir="/opt/root/update-${now}"
     backup_dir="/opt/root/backup-${now}"
     mkdir -p "$stage_dir"
@@ -477,7 +610,7 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S35tor stop > /dev/null 2>&1
     echo "Сервисы остановлены."
 
-    mkdir "$backup_dir"
+    mkdir -p "$backup_dir"
     [ -f /opt/bin/unblock_ipset.sh ] && mv /opt/bin/unblock_ipset.sh "$backup_dir"/unblock_ipset.sh
     [ -f /opt/bin/unblock_dnsmasq.sh ] && mv /opt/bin/unblock_dnsmasq.sh "$backup_dir"/unblock_dnsmasq.sh
     [ -f /opt/bin/unblock_update.sh ] && mv /opt/bin/unblock_update.sh "$backup_dir"/unblock_update.sh
@@ -519,7 +652,10 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/web_bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
+    ensure_web_only_config
+    install_web_only_service
     rmdir "$stage_dir" 2>/dev/null || true
+    cleanup_update_artifacts 3
     echo "Обновления скачены, права настроены."
 
     /opt/etc/init.d/S56dnsmasq restart > /dev/null 2>&1
@@ -544,14 +680,13 @@ if [ "$1" = "-update" ]; then
     sleep 2
     echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен web-сервер (~10 сек)."
     sleep 7
-    bot_pid=$(pgrep -f "python3.*web_bot.py")
-    for pid in ${bot_pid}; do kill "${pid}" >/dev/null 2>&1 || true; done
-    sleep 3
-    python3 "$BOT_MAIN_PATH" &
+    stop_telegram_bot_runtime
+    "$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
     sleep 3
     check_running=$(pgrep -f "python3.*web_bot.py")
     if [ -n "${check_running}" ]; then
       echo "Веб-сервер запущен на порту $(config_get 'browser_port' '8080')."
+      stop_telegram_bot_runtime
     else
       echo "⚠️ Не удалось подтвердить запуск web-сервера"
     fi

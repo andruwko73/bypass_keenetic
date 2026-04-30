@@ -806,6 +806,9 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
             logs.append('⚠️ GitHub отдал старую версию script.sh, но legacy-пути уже подготовлены на роутере.')
         if progress_command:
             _set_web_command_progress(progress_command, '\n'.join(logs))
+        with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
+            file.write(script_text)
+        os.chmod('/opt/root/script.sh', stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 
     process = subprocess.Popen(
         ['/bin/sh', '/opt/root/script.sh', action],
@@ -1436,8 +1439,8 @@ def _start_web_command(command):
         web_command_state['command'] = command
         web_command_state['label'] = label
         web_command_state['result'] = ''
-        web_command_state['progress'] = 5 if command in ('update', 'update_independent') else 0
-        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent') else ''
+        web_command_state['progress'] = 5 if command in ('update', 'update_independent', 'update_no_bot') else 0
+        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent', 'update_no_bot') else ''
         web_command_state['started_at'] = time.time()
         web_command_state['finished_at'] = 0
         web_command_state['shown_after_finish'] = False
