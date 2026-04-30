@@ -799,7 +799,7 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
         _set_web_command_progress(progress_command, '\n'.join(logs))
     if repo_owner and repo_name:
         url, script_text, repo_ref = _download_repo_script(repo_owner, repo_name, branch=branch)
-        direct_env['REPO_REF'] = repo_ref
+        direct_env['REPO_REF'] = branch
         logs.append(f'Скрипт загружен из {url}')
         logs.append(f'Коммит обновления: {repo_ref[:12]}')
         if repo_owner == fork_repo_owner and 'BOT_CONFIG_PATH' not in script_text:
