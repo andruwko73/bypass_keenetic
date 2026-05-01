@@ -2292,11 +2292,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         protocol_cards_html = ''.join(protocol_cards)
 
         dns_override_active = _dns_override_enabled()
-        update_buttons_html = f'''<form method="post" action="/command">
+        update_buttons_html = f'''<form method="get" action="/confirm-switch">
                 <input type="hidden" name="command" value="update">
                 <button type="submit">Переустановить из форка без сброса</button>
             </form>
-            <form method="post" action="/command">
+            <form method="get" action="/confirm-switch">
                 <input type="hidden" name="command" value="update_independent">
                 <button type="submit">Переустановка (ветка independent)</button>
             </form>
@@ -2637,12 +2637,63 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 </body>
 </html>'''
 
+    def _build_switch_confirmation(self, command):
+        labels = {
+            'update': 'main',
+            'update_independent': 'independent',
+        }
+        target_label = labels.get(command)
+        if not target_label:
+            return self._build_form('Неизвестная версия для перехода.')
+
+        safe_command = html.escape(command, quote=True)
+        safe_target = html.escape(target_label)
+        return f'''<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Подтверждение перехода</title>
+  <style>
+    :root {{ color-scheme: dark; --bg:#101418; --panel:#182028; --text:#f4f7fb; --muted:#9fb0c3; --line:#2a3846; --danger:#ff6b6b; }}
+    * {{ box-sizing:border-box; }}
+    body {{ margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; font-family:Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--text); }}
+    .panel {{ width:min(680px, 100%); background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:24px; }}
+    h1 {{ margin:0 0 12px; font-size:28px; }}
+    p {{ color:var(--muted); line-height:1.5; }}
+    .actions {{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px; }}
+    button, a {{ display:block; width:100%; text-align:center; padding:14px 16px; border-radius:10px; border:1px solid var(--line); font-weight:700; text-decoration:none; cursor:pointer; }}
+    button {{ background:var(--danger); color:#fff; }}
+    a {{ background:#243241; color:var(--text); }}
+    @media (max-width: 560px) {{ .actions {{ grid-template-columns:1fr; }} }}
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <h1>Перейти на версию {safe_target}?</h1>
+    <p>Сейчас установлена web-only версия без Telegram-бота. Если перейти на {safe_target}, после переустановки может открыться форма заполнения Telegram-настроек. Можно остаться на web-only и ничего не менять.</p>
+    <div class="actions">
+      <form method="post" action="/command">
+        <input type="hidden" name="command" value="{safe_command}">
+        <input type="hidden" name="confirm_switch" value="yes">
+        <button type="submit">Да, перейти</button>
+      </form>
+      <a href="/">Остаться на web-only</a>
+    </div>
+  </section>
+</body>
+</html>'''
+
     def do_GET(self):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
         if path in ['/', '/index.html', '/command']:
             self._send_html(self._build_form(_consume_web_flash_message()))
+        elif path == '/confirm-switch':
+            query = parse_qs(urlparse(self.path).query)
+            command = query.get('command', [''])[0]
+            self._send_html(self._build_switch_confirmation(command))
         elif path == '/api/status':
             try:
                 current_keys = _load_current_keys()
@@ -2721,6 +2772,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode('utf-8')
             data = parse_qs(body)
             command = data.get('command', [''])[0]
+            if command in ('update', 'update_independent') and data.get('confirm_switch', [''])[0] != 'yes':
+                self._send_redirect('/confirm-switch?' + urlencode({'command': command}))
+                return
             _, result = _start_web_command(command)
             _set_web_flash_message(result)
             self._send_redirect('/')
