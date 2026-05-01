@@ -10,6 +10,8 @@
 - выбор маршрутизации Telegram через локальный VPN/прокси
 - поддержка VLESS вместе с Shadowsocks, Trojan и Vmess
 - поддержка двух отдельных маршрутов VLESS с разными ключами и списками сайтов
+- готовый список для Telegram API и дата-центров Telegram через первый VLESS-маршрут
+- рабочая DNS-схема через `dnsmasq` без зависимости от неустановленных локальных DoT/DoH-портов `40500/40508`
 - дальнейшее обновление одним кликом
 
 > **Экспериментальная ветка `feature/independent-rework`** — добавлен пул ключей, автоматическая проверка ключей (значки Telegram и YouTube), subscription-ссылки, JSON API `/api/status`. Подробнее в [README ветки independent-rework](https://github.com/andruwko73/bypass_keenetic/blob/feature/independent-rework/README.md).
@@ -28,7 +30,7 @@
 sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh | sh'
 ```
 
-После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Эта страница доступна только из локальной сети роутера. Затем installer сохранит `bot_config.py` и запустит основной бот.
+После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Эта страница доступна только из локальной сети роутера. Если Telegram-бот не нужен, на странице есть кнопка **Установить без бота Telegram**: она переключает установку на ветку `feature/web-only` и запускает только веб-интерфейс. Затем installer сохранит `bot_config.py` и запустит выбранную версию.
 
 Скриншот страницы первичной настройки:
 
@@ -47,7 +49,7 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 Ограничение: подготовку накопителя и установку Entware этот bootstrap не отменяет, потому что на Keenetic Entware живёт в `/opt` и обычно требует внешнее хранилище.
 
 ## Шаблоны списков
-- [vless.txt](vless.txt) — готовый шаблон списка доменов для первого маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft, расширенный набор адресов Telegram и связанная инфраструктура.
+- [vless.txt](vless.txt) — готовый шаблон списка доменов и IPv4-подсетей для первого маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft, Telegram API, официальные IPv4-подсети дата-центров Telegram и связанная инфраструктура.
 - [vless-2.txt](vless-2.txt) — готовый шаблон списка доменов для второго маршрута VLESS: YouTube.
 
 ## Как работает бот на странице 192.168.1.1:8080
