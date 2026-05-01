@@ -145,10 +145,13 @@ def write_config(form):
 
 
 def switch_to_main_bot():
-    if os.path.exists(BOT_SERVICE_PATH):
-        subprocess.run([BOT_SERVICE_PATH, 'restart'], check=False)
+    command = (
+        f'sleep 2; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true; '
+        'sleep 1; '
+        f'if [ -x {BOT_SERVICE_PATH} ]; then {BOT_SERVICE_PATH} restart >/dev/null 2>&1 || {BOT_SERVICE_PATH} start >/dev/null 2>&1 || true; fi'
+    )
     subprocess.Popen(
-        ['sh', '-c', f'sleep 1; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true'],
+        ['sh', '-c', command],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -156,10 +159,11 @@ def switch_to_main_bot():
 
 def install_web_only():
     command = (
+        f'sleep 2; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true; '
         f'curl -fsSL {WEB_ONLY_SCRIPT_URL!r} -o /tmp/bypass_web_only_install.sh && '
         'chmod 755 /tmp/bypass_web_only_install.sh && '
-        'REPO_REF=feature/web-only /bin/sh /tmp/bypass_web_only_install.sh -install && '
-        f'sleep 1; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true'
+        'install_action=-install; [ -x /opt/bin/unblock_update.sh ] && install_action=-update; '
+        'REPO_REF=feature/web-only /bin/sh /tmp/bypass_web_only_install.sh "$install_action"'
     )
     subprocess.Popen(
         ['sh', '-c', command],
