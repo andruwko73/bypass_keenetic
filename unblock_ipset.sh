@@ -12,7 +12,7 @@ cut_local() {
 	grep -vE 'localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
 }
 
-until ADDRS=$(dig +short google.com @localhost -p 40500) && [ -n "$ADDRS" ] > /dev/null 2>&1; do sleep 5; done
+until ADDRS=$(dig +short google.com @127.0.0.1 -p 53) && [ -n "$ADDRS" ] > /dev/null 2>&1; do sleep 5; done
 
 while read -r line || [ -n "$line" ]; do
 
@@ -40,7 +40,7 @@ while read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocksh "$1)}'
+  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocksh "$1)}'
 
 done < /opt/etc/unblock/shadowsocks.txt
 
@@ -71,7 +71,7 @@ while read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocktor "$1)}'
+  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocktor "$1)}'
 
 done < /opt/etc/unblock/tor.txt
 
@@ -102,7 +102,7 @@ while read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvmess "$1)}'
+  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvmess "$1)}'
 
 done < /opt/etc/unblock/vmess.txt
 
@@ -133,7 +133,7 @@ while read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvless "$1)}'
+  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvless "$1)}'
 
 done < /opt/etc/unblock/vless.txt
 
@@ -164,7 +164,7 @@ while read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocktroj "$1)}'
+  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblocktroj "$1)}'
 
 done < /opt/etc/unblock/trojan.txt
 
@@ -195,7 +195,7 @@ while read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvpn "$1)}'
+  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvpn "$1)}'
 
 done < /opt/etc/unblock/vpn.txt
 
@@ -226,7 +226,7 @@ cat "$vpn_file_names" | while read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk -v unblockvpn="$unblockvpn" '{system("ipset -exist add " unblockvpn " " $1)}'
+  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk -v unblockvpn="$unblockvpn" '{system("ipset -exist add " unblockvpn " " $1)}'
 done
 done
 fi
@@ -256,5 +256,5 @@ fi
 #    continue
 #  fi
 #
-#  dig +short "$line" @localhost -p 40500 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvpn "$1)}'
+#  dig +short "$line" @127.0.0.1 -p 53 | grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | awk '{system("ipset -exist add unblockvpn "$1)}'
 #done < /opt/etc/unblock/vpn.txt
