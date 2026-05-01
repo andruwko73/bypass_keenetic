@@ -41,6 +41,8 @@ cleanup_update_artifacts() {
 BOT_CONFIG_PATH="/opt/etc/bot_config.py"
 BOT_MAIN_PATH="/opt/etc/bot.py"
 BOT_SERVICE_PATH="/opt/etc/init.d/S99telegram_bot"
+INSTALLER_MAIN_PATH="/opt/etc/bot/installer.py"
+INSTALLER_SERVICE_PATH="/opt/etc/init.d/S98telegram_bot_installer"
 if [ -f "/opt/etc/bot/bot_config.py" ]; then
   BOT_CONFIG_PATH="/opt/etc/bot/bot_config.py"
 fi
@@ -48,6 +50,22 @@ if [ -d "/opt/etc/bot" ] || grep -q '/opt/etc/bot/main.py' /opt/etc/init.d/S99te
   BOT_MAIN_PATH="/opt/etc/bot/main.py"
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
+
+telegram_config_complete() {
+  [ -f "$BOT_CONFIG_PATH" ] || return 1
+  grep -q "^token[[:space:]]*=" "$BOT_CONFIG_PATH" || return 1
+  grep -q "^usernames[[:space:]]*=" "$BOT_CONFIG_PATH" || return 1
+}
+
+start_telegram_installer() {
+  [ -x "$BOT_SERVICE_PATH" ] && "$BOT_SERVICE_PATH" stop >/dev/null 2>&1 || true
+  if [ -x "$INSTALLER_SERVICE_PATH" ]; then
+    "$INSTALLER_SERVICE_PATH" restart >/dev/null 2>&1 || "$INSTALLER_SERVICE_PATH" start >/dev/null 2>&1 || true
+    echo "Telegram-настройки не заполнены. Откройте web-интерфейс на порту $(config_get 'browser_port' '8080') и заполните token и username."
+  else
+    echo "⚠️ Telegram-настройки не заполнены, но installer service не найден."
+  fi
+}
 
 # ip роутера
 lanip=$(ip -4 addr show br0 | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1)
@@ -409,6 +427,9 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/installer.py" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S98telegram_bot_installer" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99telegram_bot" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
 
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/100-redirect.sh"
@@ -471,6 +492,12 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
+    mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
+    mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
+    chmod 755 "$INSTALLER_MAIN_PATH"
+    mv "$stage_dir/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
+    mv "$stage_dir/S99telegram_bot" "$BOT_SERVICE_PATH"
+    chmod 755 "$INSTALLER_SERVICE_PATH" "$BOT_SERVICE_PATH"
     rmdir "$stage_dir" 2>/dev/null || true
     cleanup_update_artifacts 3
     echo "Обновления скачены, права настроены."
@@ -499,6 +526,10 @@ if [ "$1" = "-update" ]; then
     [ -x /opt/etc/init.d/S99web_bot ] && /opt/etc/init.d/S99web_bot stop >/dev/null 2>&1 || true
     web_bot_pid=$(pgrep -f "python3.*web_bot.py")
     for web_pid in ${web_bot_pid}; do kill "${web_pid}" >/dev/null 2>&1 || true; done
+    if ! telegram_config_complete; then
+      start_telegram_installer
+      exit 0
+    fi
     if [ -x "$BOT_SERVICE_PATH" ]; then
       "$BOT_SERVICE_PATH" restart
       sleep 3

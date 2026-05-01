@@ -28,7 +28,12 @@ has_running_process() {
 }
 
 has_config() {
-    [ -f "$BOT_CONFIG_PATH" ] || [ -f "$LEGACY_CONFIG_PATH" ]
+    config_path=""
+    [ -f "$BOT_CONFIG_PATH" ] && config_path="$BOT_CONFIG_PATH"
+    [ -z "$config_path" ] && [ -f "$LEGACY_CONFIG_PATH" ] && config_path="$LEGACY_CONFIG_PATH"
+    [ -n "$config_path" ] || return 1
+    grep -q "^token[[:space:]]*=" "$config_path" || return 1
+    grep -q "^usernames[[:space:]]*=" "$config_path" || return 1
 }
 
 stop_main_process() {
