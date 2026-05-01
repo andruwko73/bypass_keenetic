@@ -15,6 +15,8 @@
 - subscription-ссылки для массового импорта ключей
 - JSON API `/api/status` для мониторинга
 - редактирование списков обхода по протоколам
+- готовая маршрутизация Telegram API и дата-центров Telegram через первый VLESS-маршрут
+- рабочая DNS-схема через `dnsmasq`: upstream DNS указывают на публичные DNS, без зависимости от неустановленных локальных DoT/DoH-портов `40500/40508`
 - обновление одной кнопкой из трёх веток GitHub
 
 ## Установка (~30-60 минут с нуля)
@@ -27,17 +29,17 @@
 Если Entware уже установлен и `/opt` готов, запустите на роутере по SSH:
 
 ```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/feature/without-telegram-bot/script.sh | sh -s -- -install'
+sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/feature/web-only/script.sh | sh -s -- -install'
 ```
 
-После завершения установки откройте в браузере `http://192.168.1.1:8080/` — веб-интерфейс будет готов к работе. Для первоначальной настройки потребуется отредактировать `bot_config.py` через SSH или веб-интерфейс.
+После завершения установки откройте в браузере `http://192.168.1.1:8080/` — веб-интерфейс будет готов к работе. Telegram-бот не устанавливается, а настройки, ключи и списки обхода сохраняются при переходе на другие ветки и обратно.
 
 Перед заменой live-файлов `script.sh` создаёт локальный backup на роутере в `/opt/root/backup-*`.
 
 Ограничение: подготовку накопителя и установку Entware этот скрипт не отменяет.
 
 ## Шаблоны списков
-- [vless.txt](vless.txt) — готовый шаблон списка доменов для первого маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft, расширенный набор адресов Telegram и связанная инфраструктура.
+- [vless.txt](vless.txt) — готовый шаблон списка доменов и IPv4-подсетей для первого маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft, Telegram API, официальные IPv4-подсети дата-центров Telegram и связанная инфраструктура.
 - [vless-2.txt](vless-2.txt) — готовый шаблон списка доменов для второго маршрута VLESS: YouTube.
 
 ## Как работает веб-интерфейс на 192.168.1.1:8080
@@ -53,7 +55,7 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 - **Обновление** — три кнопки:
   - *Переустановить из форка без сброса* — обновление из ветки `main`
   - *Переустановка (ветка independent)* — обновление из `feature/independent-rework`
-  - *Переустановка (без Telegram бота)* — обновление из этой же ветки `feature/without-telegram-bot`
+  - *Переустановка (без Telegram бота)* — обновление из этой же ветки `feature/web-only`
 - **Перезапуск сервисов**, **удаление компонентов**, **перезагрузка роутера**
 
 Типовой сценарий работы:
