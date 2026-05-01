@@ -1,7 +1,7 @@
 #!/bin/sh
 
-DNS_HOST="${DNS_HOST:-localhost}"
-DNS_PORT="${DNS_PORT:-40500}"
+DNS_HOST="${DNS_HOST:-127.0.0.1}"
+DNS_PORT="${DNS_PORT:-53}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-20}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
