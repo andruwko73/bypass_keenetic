@@ -2181,30 +2181,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
   <pre class="log-output">{html.escape(command_text)}</pre>
 </div>'''
 
-        current_mode_label = {
-            'none': 'Без прокси',
-            'shadowsocks': 'Shadowsocks',
-            'vmess': 'Vmess',
-            'vless': 'Vless 1',
-            'vless2': 'Vless 2',
-            'trojan': 'Trojan',
-        }.get(status['proxy_mode'], status['proxy_mode'])
-
-        mode_picker_block = f'''<div id="mode-picker" class="hero-popover mode-picker hidden">
-    <form method="post" action="/set_proxy" class="mode-picker-form">
-        <label class="mode-picker-label" for="hero-proxy-type">Активный протокол</label>
-        <select id="hero-proxy-type" name="proxy_type">
-            <option value="none"{' selected' if proxy_mode == 'none' else ''}>Без прокси (по умолчанию)</option>
-            <option value="shadowsocks"{' selected' if proxy_mode == 'shadowsocks' else ''}>Shadowsocks</option>
-            <option value="vmess"{' selected' if proxy_mode == 'vmess' else ''}>Vmess</option>
-            <option value="vless"{' selected' if proxy_mode == 'vless' else ''}>Vless 1</option>
-            <option value="vless2"{' selected' if proxy_mode == 'vless2' else ''}>Vless 2</option>
-            <option value="trojan"{' selected' if proxy_mode == 'trojan' else ''}>Trojan</option>
-        </select>
-        <button type="submit">Применить режим</button>
-    </form>
-</div>'''
-
         protocol_sections = [
             ('vless', 'Vless 1', 6, 'vless://...'),
             ('vless2', 'Vless 2', 6, 'vless://...'),
@@ -2586,15 +2562,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                         <p><strong>Вставляйте ключ полной строкой, как в Telegram.</strong></p>
                 </div>
         <div class="hero-actions">
-            <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
-                <span>Режим</span>
-                <span>{html.escape(current_mode_label)}</span>
-            </button>
             <button type="button" class="theme-toggle" onclick="toggleTheme()">
                 <span>Тема</span>
                 <span id="theme-toggle-label">Темная тема</span>
             </button>
-            {mode_picker_block}
         </div>
         </div>
     </div>
