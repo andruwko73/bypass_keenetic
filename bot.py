@@ -330,6 +330,7 @@ status_snapshot_cache = {
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 pool_probe_lock = threading.Lock()
+pool_apply_lock = threading.Lock()
 process_started_at = time.time()
 web_command_lock = threading.Lock()
 web_command_state = {
@@ -2451,11 +2452,15 @@ def _send_pool_page(chat_id, proto, page=0, prefix=None):
 
 
 def _edit_pool_message(call, proto, page=0, prefix=None):
+    _edit_pool_message_by_ids(call.message.chat.id, call.message.message_id, proto, page=page, prefix=prefix)
+
+
+def _edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None):
     text, info = _format_pool_page(proto, page, prefix=prefix)
     bot.edit_message_text(
         text,
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
+        chat_id=chat_id,
+        message_id=message_id,
         reply_markup=_pool_inline_markup(proto, info['page']),
     )
 
@@ -2487,6 +2492,29 @@ def _apply_pool_key(proto, key_value):
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     return result
+
+
+def _apply_pool_key_background(chat_id, message_id, proto, key_value, index):
+    def worker():
+        if not pool_apply_lock.acquire(blocking=False):
+            _safe_edit_pool_message_by_ids(
+                chat_id,
+                message_id,
+                proto,
+                page=0,
+                prefix='Уже выполняется применение ключа. Дождитесь результата и попробуйте снова.',
+            )
+            return
+        try:
+            result = _apply_pool_key(proto, key_value)
+            prefix = f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{result}'
+        except Exception as exc:
+            prefix = f'Ошибка применения ключа #{index} из пула {_pool_proto_label(proto)}: {exc}'
+        finally:
+            pool_apply_lock.release()
+        _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=prefix)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _delete_pool_key(proto, key_value):
@@ -2884,13 +2912,17 @@ def _authorize_callback(call, handler_name):
 
 
 def _safe_edit_pool_message(call, proto, page=0, prefix=None):
+    _safe_edit_pool_message_by_ids(call.message.chat.id, call.message.message_id, proto, page=page, prefix=prefix)
+
+
+def _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None):
     try:
-        _edit_pool_message(call, proto, page=page, prefix=prefix)
+        _edit_pool_message_by_ids(chat_id, message_id, proto, page=page, prefix=prefix)
     except Exception as exc:
         if 'message is not modified' in str(exc).lower():
             return
         _write_runtime_log(f'Ошибка обновления сообщения пула в Telegram: {exc}')
-        _send_pool_page(call.message.chat.id, proto, page=page, prefix=prefix)
+        _send_pool_page(chat_id, proto, page=page, prefix=prefix)
 
 
 # список смайлов для меню
@@ -3022,9 +3054,14 @@ def pool_callback(call):
             page = data[4]
             index, key_value = _pool_key_by_callback_id(proto, key_id)
             if action == 'apply':
-                result = _apply_pool_key(proto, key_value)
-                bot.answer_callback_query(call.id, f'Ключ #{index} применён')
-                _safe_edit_pool_message(call, proto, page=0, prefix=f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{result}')
+                bot.answer_callback_query(call.id, f'Применяю ключ #{index}...')
+                _safe_edit_pool_message(
+                    call,
+                    proto,
+                    page=page,
+                    prefix=f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
+                )
+                _apply_pool_key_background(chat_id, call.message.message_id, proto, key_value, index)
             else:
                 _delete_pool_key(proto, key_value)
                 bot.answer_callback_query(call.id, f'Ключ #{index} удалён')
