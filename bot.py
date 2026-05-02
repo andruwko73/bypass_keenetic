@@ -896,10 +896,10 @@ def _chunk_text(text, limit=3500):
 
 
 def _send_telegram_chunks(chat_id, text, reply_markup=None):
-    for chunk in _chunk_text(text):
-        if not chunk.strip():
-            continue
-        bot.send_message(chat_id, chunk, reply_markup=reply_markup)
+    chunks = [chunk for chunk in _chunk_text(text) if chunk.strip()]
+    for index, chunk in enumerate(chunks):
+        markup = reply_markup if index == len(chunks) - 1 else None
+        bot.send_message(chat_id, chunk, reply_markup=markup)
 
 
 def _unblock_list_path(list_name):
@@ -2208,6 +2208,168 @@ def _pool_key_display_name(key_value):
     return label or 'Ключ прокси'
 
 
+POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
+POOL_PROTOCOL_LABELS = {
+    'shadowsocks': 'Shadowsocks',
+    'vmess': 'Vmess',
+    'vless': 'Vless 1',
+    'vless2': 'Vless 2',
+    'trojan': 'Trojan',
+}
+
+
+def _pool_proto_label(proto):
+    return POOL_PROTOCOL_LABELS.get(proto, proto)
+
+
+def _resolve_pool_protocol(text):
+    value = (text or '').strip().lower()
+    aliases = {
+        'shadowsocks': 'shadowsocks',
+        'ss': 'shadowsocks',
+        'vmess': 'vmess',
+        'vless': 'vless',
+        'vless 1': 'vless',
+        'vless1': 'vless',
+        'vless 2': 'vless2',
+        'vless2': 'vless2',
+        'trojan': 'trojan',
+    }
+    for proto, label in POOL_PROTOCOL_LABELS.items():
+        aliases[label.lower()] = proto
+        aliases[f'📦 {label}'.lower()] = proto
+    return aliases.get(value)
+
+
+def _pool_protocol_menu_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    buttons = [types.KeyboardButton(f'📦 {_pool_proto_label(proto)}') for proto in POOL_PROTOCOL_ORDER]
+    markup.row(buttons[0], buttons[1])
+    markup.row(buttons[2], buttons[3])
+    markup.row(buttons[4])
+    markup.add(types.KeyboardButton('🔙 Назад'))
+    return markup
+
+
+def _pool_action_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row(types.KeyboardButton('📋 Показать пул'), types.KeyboardButton('✅ Применить ключ'))
+    markup.row(types.KeyboardButton('➕ Добавить ключи'), types.KeyboardButton('🔗 Загрузить subscription'))
+    markup.row(types.KeyboardButton('🗑 Удалить ключ'), types.KeyboardButton('🧹 Очистить пул'))
+    markup.row(types.KeyboardButton('🔍 Проверить пул'))
+    markup.row(types.KeyboardButton('🔙 К выбору протокола'), types.KeyboardButton('🔙 Назад'))
+    return markup
+
+
+def _pool_probe_text(probe):
+    if not probe:
+        return 'не проверялся'
+    badges = []
+    if probe.get('tg_ok'):
+        badges.append('TG✅')
+    elif 'tg_ok' in probe:
+        badges.append('TG❌')
+    if probe.get('yt_ok'):
+        badges.append('YT✅')
+    elif 'yt_ok' in probe:
+        badges.append('YT❌')
+    if not badges:
+        return 'не проверялся'
+    return ' '.join(badges)
+
+
+def _pool_key_line(index, key_value, probe=None, current_key=None):
+    marker = ' *' if current_key and key_value == current_key else ''
+    display_name = _pool_key_display_name(key_value)
+    key_hash = _hash_key(key_value)[:8]
+    return f'{index}. {display_name}{marker} [{key_hash}] — {_pool_probe_text(probe)}'
+
+
+def _format_pool_summary():
+    current_keys = _load_current_keys()
+    pools = _ensure_current_keys_in_pools(current_keys)
+    lines = ['📦 Пул ключей', 'Выберите протокол для управления пулом.', '']
+    for proto in POOL_PROTOCOL_ORDER:
+        keys = pools.get(proto, []) or []
+        current_key = current_keys.get(proto)
+        active = 'активный есть' if current_key else 'активный не задан'
+        lines.append(f'{_pool_proto_label(proto)}: {len(keys)} ключей, {active}')
+    return '\n'.join(lines)
+
+
+def _format_pool_details(proto):
+    current_keys = _load_current_keys()
+    pools = _ensure_current_keys_in_pools(current_keys)
+    cache = _load_key_probe_cache()
+    keys = pools.get(proto, []) or []
+    label = _pool_proto_label(proto)
+    if not keys:
+        return f'📦 {label}: пул пуст.'
+    lines = [f'📦 {label}: {len(keys)} ключей', '* — текущий активный ключ', '']
+    current_key = current_keys.get(proto)
+    for index, key_value in enumerate(keys, start=1):
+        probe = cache.get(_hash_key(key_value), {})
+        lines.append(_pool_key_line(index, key_value, probe=probe, current_key=current_key))
+    return '\n'.join(lines)
+
+
+def _send_pool_details(chat_id, proto, prefix=None, suffix=None, reply_markup=None):
+    parts = [part for part in (prefix, _format_pool_details(proto), suffix) if part]
+    _send_telegram_chunks(chat_id, '\n\n'.join(parts), reply_markup=reply_markup)
+
+
+def _pool_keys_for_proto(proto):
+    pools = _ensure_current_keys_in_pools()
+    return list(pools.get(proto, []) or [])
+
+
+def _pool_key_by_index(proto, raw_index):
+    keys = _pool_keys_for_proto(proto)
+    try:
+        index = int(str(raw_index).strip())
+    except Exception:
+        raise ValueError('Введите номер ключа из списка.')
+    if index < 1 or index > len(keys):
+        raise ValueError(f'Номер вне диапазона. В пуле {_pool_proto_label(proto)} ключей: {len(keys)}.')
+    return index, keys[index - 1]
+
+
+def _probe_pool_keys_background(proto, keys):
+    if not keys:
+        return
+
+    def worker():
+        proxy_url = proxy_settings.get(proto)
+        for key_value in keys:
+            try:
+                tg_ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=3, read_timeout=4)
+                yt_ok, _ = _check_http_through_proxy(proxy_url, connect_timeout=2, read_timeout=3)
+                _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
+            except Exception:
+                pass
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _add_keys_to_pool(proto, keys_text):
+    pools = _load_key_pools()
+    if proto not in pools:
+        pools[proto] = []
+    new_keys = [line.strip() for line in (keys_text or '').splitlines() if line.strip()]
+    added_keys = []
+    for key_value in new_keys:
+        if key_value not in pools[proto]:
+            pools[proto].append(key_value)
+            added_keys.append(key_value)
+    _save_key_pools(pools)
+    _probe_pool_keys_background(proto, added_keys)
+    _invalidate_web_status_cache()
+    _invalidate_key_status_cache()
+    return len(added_keys)
+
+
 def _check_local_proxy_endpoint(key_type, port):
     if key_type in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
         if _wait_for_socks5_handshake(port, timeout=3):
@@ -2613,6 +2775,11 @@ def bot_message(message):
                 bot.send_message(message.chat.id, '\n'.join(text_lines), parse_mode='HTML', reply_markup=service)
                 return
 
+            if message.text in ('📦 Пул ключей', '/pool'):
+                _set_chat_menu_state(message.chat.id, level=20, bypass=None)
+                bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_menu_markup())
+                return
+
         if message.chat.type == 'private':
 
             state = _get_chat_menu_state(message.chat.id)
@@ -2903,6 +3070,168 @@ def bot_message(message):
                 _handle_getlist_request(message, message.text, route_name=bypass, reply_markup=_service_list_markup())
                 return
 
+            if level == 20:
+                proto = _resolve_pool_protocol(message.text)
+                if not proto:
+                    bot.send_message(message.chat.id, 'Выберите протокол из меню.', reply_markup=_pool_protocol_menu_markup())
+                    return
+                set_menu_state(21, proto)
+                _send_pool_details(message.chat.id, proto, reply_markup=_pool_action_markup())
+                return
+
+            if level == 21:
+                proto = _resolve_pool_protocol(bypass)
+                if not proto:
+                    set_menu_state(20, None)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_menu_markup())
+                    return
+                if message.text == '🔙 К выбору протокола':
+                    set_menu_state(20, None)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_menu_markup())
+                    return
+                if message.text == '📋 Показать пул':
+                    _send_pool_details(message.chat.id, proto, reply_markup=_pool_action_markup())
+                    return
+                if message.text == '➕ Добавить ключи':
+                    set_menu_state(22)
+                    bot.send_message(
+                        message.chat.id,
+                        f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.',
+                        reply_markup=_pool_action_markup(),
+                    )
+                    return
+                if message.text == '🔗 Загрузить subscription':
+                    set_menu_state(23)
+                    bot.send_message(
+                        message.chat.id,
+                        f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.',
+                        reply_markup=_pool_action_markup(),
+                    )
+                    return
+                if message.text == '✅ Применить ключ':
+                    set_menu_state(24)
+                    _send_pool_details(
+                        message.chat.id,
+                        proto,
+                        suffix='Введите номер ключа, который нужно применить.',
+                        reply_markup=_pool_action_markup(),
+                    )
+                    return
+                if message.text == '🗑 Удалить ключ':
+                    set_menu_state(25)
+                    _send_pool_details(
+                        message.chat.id,
+                        proto,
+                        suffix='Введите номер ключа, который нужно удалить из пула.',
+                        reply_markup=_pool_action_markup(),
+                    )
+                    return
+                if message.text == '🧹 Очистить пул':
+                    pools = _load_key_pools()
+                    removed_keys = list(pools.get(proto, []) or [])
+                    pools[proto] = []
+                    _save_key_pools(pools)
+                    if removed_keys:
+                        cache = _load_key_probe_cache()
+                        for key_value in removed_keys:
+                            cache.pop(_hash_key(key_value), None)
+                        _save_key_probe_cache(cache)
+                    _invalidate_web_status_cache()
+                    _invalidate_key_status_cache()
+                    bot.send_message(
+                        message.chat.id,
+                        f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {len(removed_keys)}.',
+                        reply_markup=_pool_action_markup(),
+                    )
+                    return
+                if message.text == '🔍 Проверить пул':
+                    _probe_pool_keys_background(proto, _pool_keys_for_proto(proto))
+                    bot.send_message(
+                        message.chat.id,
+                        f'Запущена фоновая проверка пула {_pool_proto_label(proto)}. Статусы обновятся через несколько секунд.',
+                        reply_markup=_pool_action_markup(),
+                    )
+                    return
+                bot.send_message(message.chat.id, 'Выберите действие из меню пула.', reply_markup=_pool_action_markup())
+                return
+
+            if level == 22:
+                proto = _resolve_pool_protocol(bypass)
+                if not proto:
+                    set_menu_state(20, None)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_menu_markup())
+                    return
+                added = _add_keys_to_pool(proto, message.text)
+                set_menu_state(21)
+                _send_pool_details(
+                    message.chat.id,
+                    proto,
+                    prefix=f'Добавлено ключей в пул {_pool_proto_label(proto)}: {added}',
+                    reply_markup=_pool_action_markup(),
+                )
+                return
+
+            if level == 23:
+                proto = _resolve_pool_protocol(bypass)
+                if not proto:
+                    set_menu_state(20, None)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_menu_markup())
+                    return
+                try:
+                    fetched, error = _fetch_keys_from_subscription(message.text.strip())
+                    if error:
+                        raise ValueError(error)
+                    source_proto = 'vless' if proto == 'vless2' else proto
+                    added = _add_keys_to_pool(proto, '\n'.join(fetched.get(source_proto, []) or []))
+                    result = f'Загружено из subscription в пул {_pool_proto_label(proto)}: {added} новых ключей.'
+                except Exception as exc:
+                    result = f'Ошибка загрузки subscription: {exc}'
+                set_menu_state(21)
+                _send_pool_details(message.chat.id, proto, prefix=result, reply_markup=_pool_action_markup())
+                return
+
+            if level == 24:
+                proto = _resolve_pool_protocol(bypass)
+                if not proto:
+                    set_menu_state(20, None)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_menu_markup())
+                    return
+                try:
+                    index, key_value = _pool_key_by_index(proto, message.text)
+                    result = _install_key_for_protocol(proto, key_value)
+                    _set_active_key(proto, key_value)
+                    _invalidate_web_status_cache()
+                    _invalidate_key_status_cache()
+                    result = f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{result}'
+                except Exception as exc:
+                    result = f'Ошибка применения ключа из пула: {exc}'
+                set_menu_state(21)
+                bot.send_message(message.chat.id, result, reply_markup=_pool_action_markup())
+                return
+
+            if level == 25:
+                proto = _resolve_pool_protocol(bypass)
+                if not proto:
+                    set_menu_state(20, None)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_menu_markup())
+                    return
+                try:
+                    index, key_value = _pool_key_by_index(proto, message.text)
+                    pools = _load_key_pools()
+                    pools[proto].remove(key_value)
+                    _save_key_pools(pools)
+                    cache = _load_key_probe_cache()
+                    cache.pop(_hash_key(key_value), None)
+                    _save_key_probe_cache(cache)
+                    _invalidate_web_status_cache()
+                    _invalidate_key_status_cache()
+                    result = f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.'
+                except Exception as exc:
+                    result = f'Ошибка удаления ключа из пула: {exc}'
+                set_menu_state(21)
+                _send_pool_details(message.chat.id, proto, prefix=result, reply_markup=_pool_action_markup())
+                return
+
             if level == 5:
                 set_menu_state(0)
                 _install_proxy_from_message(message, 'shadowsocks', message.text, main)
@@ -3073,10 +3402,11 @@ def bot_message(message):
                 item5 = types.KeyboardButton("Trojan")
                 item6 = types.KeyboardButton("Где брать ключи❔")
                 item7 = types.KeyboardButton("🌐 Через браузер")
+                item8 = types.KeyboardButton("📦 Пул ключей")
                 markup.add(item1, item2)
                 markup.add(item3, item4)
                 markup.add(item5)
-                markup.add(item6)
+                markup.add(item6, item8)
                 markup.add(item7)
                 back = types.KeyboardButton("🔙 Назад")
                 markup.add(back)
