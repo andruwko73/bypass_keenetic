@@ -2230,6 +2230,7 @@ def _pool_key_display_name(key_value):
 
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
 POOL_PAGE_SIZE = 8
+pool_inline_messages = {}
 POOL_PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
     'vmess': 'Vmess',
@@ -2262,24 +2263,51 @@ def _resolve_pool_protocol(text):
     return aliases.get(value)
 
 
-def _pool_protocol_menu_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    buttons = [types.KeyboardButton(f'📦 {_pool_proto_label(proto)}') for proto in POOL_PROTOCOL_ORDER]
-    markup.row(buttons[0], buttons[1])
-    markup.row(buttons[2], buttons[3])
-    markup.row(buttons[4])
-    markup.add(types.KeyboardButton('🔙 Назад'))
-    return markup
+def _remember_pool_inline_message(chat_id, message_id):
+    if chat_id and message_id:
+        pool_inline_messages.setdefault(chat_id, set()).add(message_id)
 
 
-def _pool_protocol_inline_markup():
-    markup = types.InlineKeyboardMarkup()
-    buttons = [types.InlineKeyboardButton(_pool_proto_label(proto), callback_data=f'pool:select:{proto}') for proto in POOL_PROTOCOL_ORDER]
-    markup.row(buttons[0], buttons[1])
-    markup.row(buttons[2], buttons[3])
-    markup.row(buttons[4])
-    markup.row(types.InlineKeyboardButton('🔙 В меню ключей', callback_data='pool:keys-menu'))
-    return markup
+def _forget_pool_inline_message(chat_id, message_id=None):
+    current = pool_inline_messages.get(chat_id)
+    if message_id is None:
+        pool_inline_messages.pop(chat_id, None)
+        return
+    if isinstance(current, set):
+        current.discard(message_id)
+        if not current:
+            pool_inline_messages.pop(chat_id, None)
+    elif current == message_id:
+        pool_inline_messages.pop(chat_id, None)
+
+
+def _pool_inline_message_is_active(chat_id, message_id):
+    current = pool_inline_messages.get(chat_id)
+    if isinstance(current, set):
+        return message_id in current
+    return current == message_id
+
+
+def _remove_inline_keyboard(chat_id, message_id):
+    if not chat_id or not message_id:
+        return
+    try:
+        bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+    except Exception as exc:
+        if 'message is not modified' not in str(exc).lower():
+            _write_runtime_log(f'Ошибка удаления inline-клавиатуры пула: {exc}')
+
+
+def _clear_pool_inline_keyboard(chat_id, message_id=None):
+    stored_message_ids = pool_inline_messages.get(chat_id) or set()
+    if not isinstance(stored_message_ids, set):
+        stored_message_ids = {stored_message_ids}
+    target_message_ids = set(stored_message_ids)
+    if message_id:
+        target_message_ids.add(message_id)
+    for target_message_id in sorted(target_message_ids):
+        _remove_inline_keyboard(chat_id, target_message_id)
+        _forget_pool_inline_message(chat_id, target_message_id)
 
 
 def _pool_action_markup():
@@ -2448,21 +2476,27 @@ def _pool_clear_confirm_markup(proto, page=0):
 
 def _send_pool_page(chat_id, proto, page=0, prefix=None):
     text, info = _format_pool_page(proto, page, prefix=prefix)
-    bot.send_message(chat_id, text, reply_markup=_pool_inline_markup(proto, info['page']))
+    sent = bot.send_message(chat_id, text, reply_markup=_pool_inline_markup(proto, info['page']))
+    _remember_pool_inline_message(chat_id, getattr(sent, 'message_id', None))
 
 
 def _edit_pool_message(call, proto, page=0, prefix=None):
     _edit_pool_message_by_ids(call.message.chat.id, call.message.message_id, proto, page=page, prefix=prefix)
 
 
-def _edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None):
+def _edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None, include_inline=True):
     text, info = _format_pool_page(proto, page, prefix=prefix)
+    reply_markup = _pool_inline_markup(proto, info['page']) if include_inline else None
     bot.edit_message_text(
         text,
         chat_id=chat_id,
         message_id=message_id,
-        reply_markup=_pool_inline_markup(proto, info['page']),
+        reply_markup=reply_markup,
     )
+    if include_inline:
+        _remember_pool_inline_message(chat_id, message_id)
+    else:
+        _forget_pool_inline_message(chat_id, message_id)
 
 
 def _send_pool_details(chat_id, proto, prefix=None, suffix=None, reply_markup=None):
@@ -2497,12 +2531,14 @@ def _apply_pool_key(proto, key_value):
 def _apply_pool_key_background(chat_id, message_id, proto, key_value, index):
     def worker():
         if not pool_apply_lock.acquire(blocking=False):
+            include_inline = _pool_inline_message_is_active(chat_id, message_id)
             _safe_edit_pool_message_by_ids(
                 chat_id,
                 message_id,
                 proto,
                 page=0,
                 prefix='Уже выполняется применение ключа. Дождитесь результата и попробуйте снова.',
+                include_inline=include_inline,
             )
             return
         try:
@@ -2512,7 +2548,8 @@ def _apply_pool_key_background(chat_id, message_id, proto, key_value, index):
             prefix = f'Ошибка применения ключа #{index} из пула {_pool_proto_label(proto)}: {exc}'
         finally:
             pool_apply_lock.release()
-        _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=prefix)
+        include_inline = _pool_inline_message_is_active(chat_id, message_id)
+        _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=prefix, include_inline=include_inline)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -2915,14 +2952,18 @@ def _safe_edit_pool_message(call, proto, page=0, prefix=None):
     _safe_edit_pool_message_by_ids(call.message.chat.id, call.message.message_id, proto, page=page, prefix=prefix)
 
 
-def _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None):
+def _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None, include_inline=True):
     try:
-        _edit_pool_message_by_ids(chat_id, message_id, proto, page=page, prefix=prefix)
+        _edit_pool_message_by_ids(chat_id, message_id, proto, page=page, prefix=prefix, include_inline=include_inline)
     except Exception as exc:
         if 'message is not modified' in str(exc).lower():
             return
         _write_runtime_log(f'Ошибка обновления сообщения пула в Telegram: {exc}')
-        _send_pool_page(chat_id, proto, page=page, prefix=prefix)
+        if include_inline:
+            _send_pool_page(chat_id, proto, page=page, prefix=prefix)
+        else:
+            text, _ = _format_pool_page(proto, page, prefix=prefix)
+            bot.send_message(chat_id, text)
 
 
 # список смайлов для меню
@@ -2953,17 +2994,14 @@ def pool_callback(call):
         if action == 'protocols':
             _set_chat_menu_state(chat_id, level=20, bypass=None)
             bot.answer_callback_query(call.id)
-            bot.edit_message_text(
-                _format_pool_summary(),
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                reply_markup=_pool_protocol_inline_markup(),
-            )
+            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
+            bot.send_message(chat_id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
             return
 
         if action == 'keys-menu':
             _set_chat_menu_state(chat_id, level=8, bypass=None)
             bot.answer_callback_query(call.id)
+            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
             try:
                 bot.edit_message_text(
                     '🔑 Открыто меню ключей и мостов.',
@@ -3002,6 +3040,7 @@ def pool_callback(call):
         if action == 'add':
             _set_chat_menu_state(chat_id, level=22, bypass=proto)
             bot.answer_callback_query(call.id)
+            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
             bot.send_message(
                 chat_id,
                 f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.',
@@ -3012,6 +3051,7 @@ def pool_callback(call):
         if action == 'subscribe':
             _set_chat_menu_state(chat_id, level=23, bypass=proto)
             bot.answer_callback_query(call.id)
+            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
             bot.send_message(
                 chat_id,
                 f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.',
@@ -3153,7 +3193,8 @@ def bot_message(message):
 
             if message.text in ('📦 Пул ключей', '/pool'):
                 _set_chat_menu_state(message.chat.id, level=20, bypass=None)
-                bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_inline_markup())
+                _clear_pool_inline_keyboard(message.chat.id)
+                bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
                 return
 
         if message.chat.type == 'private':
@@ -3280,6 +3321,7 @@ def bot_message(message):
                 return
 
             if message.text == '🔙 Назад' or message.text == "Назад":
+                _clear_pool_inline_keyboard(message.chat.id)
                 bot.send_message(message.chat.id, '✅ Добро пожаловать в меню!', reply_markup=main)
                 set_menu_state(0, None)
                 return
@@ -3449,7 +3491,7 @@ def bot_message(message):
             if level == 20:
                 proto = _resolve_pool_protocol(message.text)
                 if not proto:
-                    bot.send_message(message.chat.id, 'Выберите протокол.', reply_markup=_pool_protocol_inline_markup())
+                    bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу.', reply_markup=_build_keys_menu_markup())
                     return
                 set_menu_state(21, proto)
                 _send_pool_page(message.chat.id, proto)
@@ -3459,11 +3501,18 @@ def bot_message(message):
                 proto = _resolve_pool_protocol(bypass)
                 if not proto:
                     set_menu_state(20, None)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_inline_markup())
+                    _clear_pool_inline_keyboard(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                    return
+                selected_proto = _resolve_pool_protocol(message.text)
+                if selected_proto:
+                    set_menu_state(21, selected_proto)
+                    _send_pool_page(message.chat.id, selected_proto)
                     return
                 if message.text == '🔙 К выбору протокола':
                     set_menu_state(20, None)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_inline_markup())
+                    _clear_pool_inline_keyboard(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
                     return
                 if message.text in ('📋 Показать пул', '🔄 Обновить пул'):
                     _send_pool_page(message.chat.id, proto)
@@ -3519,7 +3568,8 @@ def bot_message(message):
                 proto = _resolve_pool_protocol(bypass)
                 if not proto:
                     set_menu_state(20, None)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_inline_markup())
+                    _clear_pool_inline_keyboard(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
                     return
                 if message.text == '🔙 К пулу':
                     set_menu_state(21)
@@ -3538,7 +3588,8 @@ def bot_message(message):
                 proto = _resolve_pool_protocol(bypass)
                 if not proto:
                     set_menu_state(20, None)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_inline_markup())
+                    _clear_pool_inline_keyboard(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
                     return
                 if message.text == '🔙 К пулу':
                     set_menu_state(21)
@@ -3561,7 +3612,8 @@ def bot_message(message):
                 proto = _resolve_pool_protocol(bypass)
                 if not proto:
                     set_menu_state(20, None)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_inline_markup())
+                    _clear_pool_inline_keyboard(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
                     return
                 try:
                     index, key_value = _pool_key_by_index(proto, message.text)
@@ -3577,7 +3629,8 @@ def bot_message(message):
                 proto = _resolve_pool_protocol(bypass)
                 if not proto:
                     set_menu_state(20, None)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_inline_markup())
+                    _clear_pool_inline_keyboard(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
                     return
                 try:
                     index, key_value = _pool_key_by_index(proto, message.text)

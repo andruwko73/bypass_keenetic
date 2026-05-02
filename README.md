@@ -105,7 +105,7 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 
 ### Скриншоты интерфейса
 
-Пул ключей в Telegram-боте с inline-кнопками применения, удаления, проверки и навигации:
+Пул ключей в Telegram-боте в тёмной теме с inline-кнопками применения, удаления, проверки и навигации:
 
 <a href="docs/screenshots/telegram-key-pool.png">
 	<img src="docs/screenshots/telegram-key-pool.png" alt="Пул ключей в Telegram-боте" width="360">
