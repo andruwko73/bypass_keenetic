@@ -361,6 +361,7 @@ RUNTIME_ERROR_LOG_PATHS = [
 MENU_STATE_UNSET = object()
 chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
+chat_pool_pages = {}
 
 
 def _is_local_web_client(address):
@@ -498,6 +499,25 @@ def _set_chat_menu_state(chat_id, level=MENU_STATE_UNSET, bypass=MENU_STATE_UNSE
             state['level'] = level
         if bypass is not MENU_STATE_UNSET:
             state['bypass'] = bypass
+
+
+def _get_pool_page(chat_id):
+    with chat_menu_state_lock:
+        return int(chat_pool_pages.get(chat_id, 0) or 0)
+
+
+def _set_pool_page(chat_id, page):
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 0
+    with chat_menu_state_lock:
+        chat_pool_pages[chat_id] = max(0, page)
+
+
+def _clear_pool_page(chat_id):
+    with chat_menu_state_lock:
+        chat_pool_pages.pop(chat_id, None)
 
 
 def _telegram_info_text_from_readme():
@@ -2230,7 +2250,6 @@ def _pool_key_display_name(key_value):
 
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
 POOL_PAGE_SIZE = 8
-pool_inline_messages = {}
 POOL_PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
     'vmess': 'Vmess',
@@ -2242,6 +2261,16 @@ POOL_PROTOCOL_LABELS = {
 
 def _pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
+
+
+def _pool_protocol_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    buttons = [types.KeyboardButton(_pool_proto_label(proto)) for proto in POOL_PROTOCOL_ORDER]
+    markup.row(buttons[0], buttons[1])
+    markup.row(buttons[2], buttons[3])
+    markup.row(buttons[4])
+    markup.row(types.KeyboardButton('🔙 В меню ключей'), types.KeyboardButton('🔙 Назад'))
+    return markup
 
 
 def _resolve_pool_protocol(text):
@@ -2263,31 +2292,6 @@ def _resolve_pool_protocol(text):
     return aliases.get(value)
 
 
-def _remember_pool_inline_message(chat_id, message_id):
-    if chat_id and message_id:
-        pool_inline_messages.setdefault(chat_id, set()).add(message_id)
-
-
-def _forget_pool_inline_message(chat_id, message_id=None):
-    current = pool_inline_messages.get(chat_id)
-    if message_id is None:
-        pool_inline_messages.pop(chat_id, None)
-        return
-    if isinstance(current, set):
-        current.discard(message_id)
-        if not current:
-            pool_inline_messages.pop(chat_id, None)
-    elif current == message_id:
-        pool_inline_messages.pop(chat_id, None)
-
-
-def _pool_inline_message_is_active(chat_id, message_id):
-    current = pool_inline_messages.get(chat_id)
-    if isinstance(current, set):
-        return message_id in current
-    return current == message_id
-
-
 def _remove_inline_keyboard(chat_id, message_id):
     if not chat_id or not message_id:
         return
@@ -2299,23 +2303,35 @@ def _remove_inline_keyboard(chat_id, message_id):
 
 
 def _clear_pool_inline_keyboard(chat_id, message_id=None):
-    stored_message_ids = pool_inline_messages.get(chat_id) or set()
-    if not isinstance(stored_message_ids, set):
-        stored_message_ids = {stored_message_ids}
-    target_message_ids = set(stored_message_ids)
     if message_id:
-        target_message_ids.add(message_id)
-    for target_message_id in sorted(target_message_ids):
-        _remove_inline_keyboard(chat_id, target_message_id)
-        _forget_pool_inline_message(chat_id, target_message_id)
+        _remove_inline_keyboard(chat_id, message_id)
 
 
-def _pool_action_markup():
+def _pool_action_markup(proto, page=0):
+    _, info = _format_pool_page(proto, page)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton('🔄 Обновить пул'))
+    for offset in range(info['start'] + 1, info['end'] + 1):
+        markup.row(types.KeyboardButton(f'✅ {offset}'), types.KeyboardButton(f'✕ {offset}'))
+    if info['total_pages'] > 1:
+        nav = []
+        if info['page'] > 0:
+            nav.append(types.KeyboardButton('◀️ Предыдущая'))
+        if info['page'] < info['total_pages'] - 1:
+            nav.append(types.KeyboardButton('Следующая ▶️'))
+        if nav:
+            markup.row(*nav)
     markup.row(types.KeyboardButton('➕ Добавить ключи'), types.KeyboardButton('🔗 Загрузить subscription'))
     markup.row(types.KeyboardButton('🔍 Проверить пул'), types.KeyboardButton('🧹 Очистить пул'))
-    markup.row(types.KeyboardButton('🔙 К выбору протокола'), types.KeyboardButton('🔙 Назад'))
+    markup.row(types.KeyboardButton('🔄 Обновить пул'))
+    markup.row(types.KeyboardButton('🔙 К выбору протокола'), types.KeyboardButton('🔙 В меню ключей'))
+    markup.row(types.KeyboardButton('🔙 Назад'))
+    return markup
+
+
+def _pool_clear_confirm_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row(types.KeyboardButton('✅ Очистить пул'), types.KeyboardButton('Отмена'))
+    markup.row(types.KeyboardButton('🔙 К пулу'), types.KeyboardButton('🔙 Назад'))
     return markup
 
 
@@ -2423,80 +2439,10 @@ def _format_pool_page(proto, page=0, prefix=None):
     return '\n'.join(lines), info
 
 
-def _pool_key_callback_id(key_value):
-    return _hash_key(key_value)[:12]
-
-
-def _pool_key_by_callback_id(proto, key_id):
-    key_id = (key_id or '').strip()
-    for index, key_value in enumerate(_pool_keys_for_proto(proto), start=1):
-        if _pool_key_callback_id(key_value) == key_id:
-            return index, key_value
-    raise ValueError('Ключ не найден в пуле. Обновите пул и попробуйте снова.')
-
-
-def _pool_inline_markup(proto, page=0):
-    _, info = _format_pool_page(proto, page)
-    markup = types.InlineKeyboardMarkup()
-    for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
-        key_id = _pool_key_callback_id(key_value)
-        markup.row(
-            types.InlineKeyboardButton(f'✅ {offset}', callback_data=f'pool:apply:{proto}:{key_id}:{info["page"]}'),
-            types.InlineKeyboardButton(f'✕ {offset}', callback_data=f'pool:delete:{proto}:{key_id}:{info["page"]}'),
-        )
-    if info['total_pages'] > 1:
-        nav = []
-        if info['page'] > 0:
-            nav.append(types.InlineKeyboardButton('◀️ Назад', callback_data=f'pool:page:{proto}:{info["page"] - 1}'))
-        if info['page'] < info['total_pages'] - 1:
-            nav.append(types.InlineKeyboardButton('Вперед ▶️', callback_data=f'pool:page:{proto}:{info["page"] + 1}'))
-        if nav:
-            markup.row(*nav)
-    markup.row(
-        types.InlineKeyboardButton('➕ Добавить', callback_data=f'pool:add:{proto}'),
-        types.InlineKeyboardButton('🔗 Subscription', callback_data=f'pool:subscribe:{proto}'),
-    )
-    markup.row(
-        types.InlineKeyboardButton('🔍 Проверить', callback_data=f'pool:probe:{proto}:{info["page"]}'),
-        types.InlineKeyboardButton('🧹 Очистить', callback_data=f'pool:clear-confirm:{proto}:{info["page"]}'),
-    )
-    markup.row(
-        types.InlineKeyboardButton('🔙 К протоколам', callback_data='pool:protocols'),
-        types.InlineKeyboardButton('В меню ключей', callback_data='pool:keys-menu'),
-    )
-    return markup
-
-
-def _pool_clear_confirm_markup(proto, page=0):
-    markup = types.InlineKeyboardMarkup()
-    markup.row(types.InlineKeyboardButton('Да, очистить весь пул', callback_data=f'pool:clear:{proto}:{page}'))
-    markup.row(types.InlineKeyboardButton('Отмена', callback_data=f'pool:page:{proto}:{page}'))
-    return markup
-
-
 def _send_pool_page(chat_id, proto, page=0, prefix=None):
     text, info = _format_pool_page(proto, page, prefix=prefix)
-    sent = bot.send_message(chat_id, text, reply_markup=_pool_inline_markup(proto, info['page']))
-    _remember_pool_inline_message(chat_id, getattr(sent, 'message_id', None))
-
-
-def _edit_pool_message(call, proto, page=0, prefix=None):
-    _edit_pool_message_by_ids(call.message.chat.id, call.message.message_id, proto, page=page, prefix=prefix)
-
-
-def _edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None, include_inline=True):
-    text, info = _format_pool_page(proto, page, prefix=prefix)
-    reply_markup = _pool_inline_markup(proto, info['page']) if include_inline else None
-    bot.edit_message_text(
-        text,
-        chat_id=chat_id,
-        message_id=message_id,
-        reply_markup=reply_markup,
-    )
-    if include_inline:
-        _remember_pool_inline_message(chat_id, message_id)
-    else:
-        _forget_pool_inline_message(chat_id, message_id)
+    _set_pool_page(chat_id, info['page'])
+    bot.send_message(chat_id, text, reply_markup=_pool_action_markup(proto, info['page']))
 
 
 def _send_pool_details(chat_id, proto, prefix=None, suffix=None, reply_markup=None):
@@ -2520,6 +2466,34 @@ def _pool_key_by_index(proto, raw_index):
     return index, keys[index - 1]
 
 
+def _pool_reply_key_action(text):
+    value = (text or '').strip()
+    apply_match = re.match(r'^(?:✅|✔️|✔|✓)\s*(\d+)$', value)
+    if apply_match:
+        return 'apply', apply_match.group(1)
+    delete_match = re.match(r'^(?:✕|×|❌|x)\s*(\d+)$', value, flags=re.IGNORECASE)
+    if delete_match:
+        return 'delete', delete_match.group(1)
+    return None, None
+
+
+def _pool_reply_page_delta(text):
+    value = (text or '').strip()
+    if value in ('◀️ Предыдущая', '◀ Предыдущая'):
+        return -1
+    if value in ('Следующая ▶️', 'Следующая ▶'):
+        return 1
+    return 0
+
+
+def _pool_key_by_callback_id(proto, key_id):
+    key_id = (key_id or '').strip()
+    for index, key_value in enumerate(_pool_keys_for_proto(proto), start=1):
+        if _hash_key(key_value)[:12] == key_id:
+            return index, key_value
+    raise ValueError('Ключ не найден в пуле. Обновите пул и попробуйте снова.')
+
+
 def _apply_pool_key(proto, key_value):
     result = _install_key_for_protocol(proto, key_value)
     _set_active_key(proto, key_value)
@@ -2528,17 +2502,13 @@ def _apply_pool_key(proto, key_value):
     return result
 
 
-def _apply_pool_key_background(chat_id, message_id, proto, key_value, index):
+def _apply_pool_key_background(chat_id, proto, key_value, index, page=0):
     def worker():
         if not pool_apply_lock.acquire(blocking=False):
-            include_inline = _pool_inline_message_is_active(chat_id, message_id)
-            _safe_edit_pool_message_by_ids(
+            bot.send_message(
                 chat_id,
-                message_id,
-                proto,
-                page=0,
-                prefix='Уже выполняется применение ключа. Дождитесь результата и попробуйте снова.',
-                include_inline=include_inline,
+                'Уже выполняется применение ключа. Дождитесь результата и попробуйте снова.',
+                reply_markup=_pool_action_markup(proto, page),
             )
             return
         try:
@@ -2548,8 +2518,7 @@ def _apply_pool_key_background(chat_id, message_id, proto, key_value, index):
             prefix = f'Ошибка применения ключа #{index} из пула {_pool_proto_label(proto)}: {exc}'
         finally:
             pool_apply_lock.release()
-        include_inline = _pool_inline_message_is_active(chat_id, message_id)
-        _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=prefix, include_inline=include_inline)
+        _send_pool_page(chat_id, proto, page=page, prefix=prefix)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -2948,24 +2917,6 @@ def _authorize_callback(call, handler_name):
     return _authorize_message(proxy, handler_name)
 
 
-def _safe_edit_pool_message(call, proto, page=0, prefix=None):
-    _safe_edit_pool_message_by_ids(call.message.chat.id, call.message.message_id, proto, page=page, prefix=prefix)
-
-
-def _safe_edit_pool_message_by_ids(chat_id, message_id, proto, page=0, prefix=None, include_inline=True):
-    try:
-        _edit_pool_message_by_ids(chat_id, message_id, proto, page=page, prefix=prefix, include_inline=include_inline)
-    except Exception as exc:
-        if 'message is not modified' in str(exc).lower():
-            return
-        _write_runtime_log(f'Ошибка обновления сообщения пула в Telegram: {exc}')
-        if include_inline:
-            _send_pool_page(chat_id, proto, page=page, prefix=prefix)
-        else:
-            text, _ = _format_pool_page(proto, page, prefix=prefix)
-            bot.send_message(chat_id, text)
-
-
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
 @bot.message_handler(commands=['start'])
@@ -2990,27 +2941,20 @@ def pool_callback(call):
         data = (call.data or '').split(':')
         action = data[1] if len(data) > 1 else ''
         chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        _clear_pool_inline_keyboard(chat_id, message_id)
 
         if action == 'protocols':
             _set_chat_menu_state(chat_id, level=20, bypass=None)
-            bot.answer_callback_query(call.id)
-            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
-            bot.send_message(chat_id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+            _clear_pool_page(chat_id)
+            bot.answer_callback_query(call.id, 'Кнопки перенесены вниз')
+            bot.send_message(chat_id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
             return
 
         if action == 'keys-menu':
             _set_chat_menu_state(chat_id, level=8, bypass=None)
-            bot.answer_callback_query(call.id)
-            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
-            try:
-                bot.edit_message_text(
-                    '🔑 Открыто меню ключей и мостов.',
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                )
-            except Exception as exc:
-                if 'message is not modified' not in str(exc).lower():
-                    _write_runtime_log(f'Ошибка закрытия inline-меню пула: {exc}')
+            _clear_pool_page(chat_id)
+            bot.answer_callback_query(call.id, 'Открыто меню ключей')
             bot.send_message(chat_id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
             return
 
@@ -3019,8 +2963,8 @@ def pool_callback(call):
             if not proto:
                 raise ValueError('Неизвестный протокол.')
             _set_chat_menu_state(chat_id, level=21, bypass=proto)
-            bot.answer_callback_query(call.id)
-            _safe_edit_pool_message(call, proto, page=0)
+            bot.answer_callback_query(call.id, f'Открыт пул {_pool_proto_label(proto)}')
+            _send_pool_page(chat_id, proto, page=0)
             return
 
         if len(data) < 3:
@@ -3034,13 +2978,12 @@ def pool_callback(call):
             page = data[3] if len(data) > 3 else 0
             _set_chat_menu_state(chat_id, level=21, bypass=proto)
             bot.answer_callback_query(call.id)
-            _safe_edit_pool_message(call, proto, page=page)
+            _send_pool_page(chat_id, proto, page=page)
             return
 
         if action == 'add':
             _set_chat_menu_state(chat_id, level=22, bypass=proto)
             bot.answer_callback_query(call.id)
-            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
             bot.send_message(
                 chat_id,
                 f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.',
@@ -3051,7 +2994,6 @@ def pool_callback(call):
         if action == 'subscribe':
             _set_chat_menu_state(chat_id, level=23, bypass=proto)
             bot.answer_callback_query(call.id)
-            _clear_pool_inline_keyboard(chat_id, call.message.message_id)
             bot.send_message(
                 chat_id,
                 f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.',
@@ -3063,22 +3005,19 @@ def pool_callback(call):
             page = data[3] if len(data) > 3 else 0
             _probe_pool_keys_background(proto, _pool_keys_for_proto(proto))
             bot.answer_callback_query(call.id, 'Проверка запущена')
-            _safe_edit_pool_message(call, proto, page=page, prefix='Запущена фоновая проверка пула. Статусы обновятся через несколько секунд.')
+            _set_chat_menu_state(chat_id, level=21, bypass=proto)
+            _send_pool_page(chat_id, proto, page=page, prefix='Запущена фоновая проверка пула. Статусы обновятся через несколько секунд.')
             return
 
         if action == 'clear-confirm':
             page = data[3] if len(data) > 3 else 0
-            text, info = _format_pool_page(
-                proto,
-                page,
-                prefix=f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.',
-            )
+            _set_chat_menu_state(chat_id, level=26, bypass=proto)
+            _set_pool_page(chat_id, page)
             bot.answer_callback_query(call.id)
-            bot.edit_message_text(
-                text,
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                reply_markup=_pool_clear_confirm_markup(proto, info['page']),
+            bot.send_message(
+                chat_id,
+                f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.',
+                reply_markup=_pool_clear_confirm_markup(),
             )
             return
 
@@ -3086,7 +3025,8 @@ def pool_callback(call):
             page = data[3] if len(data) > 3 else 0
             removed = _clear_pool(proto)
             bot.answer_callback_query(call.id, 'Пул очищен')
-            _safe_edit_pool_message(call, proto, page=page, prefix=f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {removed}.')
+            _set_chat_menu_state(chat_id, level=21, bypass=proto)
+            _send_pool_page(chat_id, proto, page=page, prefix=f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {removed}.')
             return
 
         if action in ('apply', 'delete') and len(data) >= 5:
@@ -3095,17 +3035,18 @@ def pool_callback(call):
             index, key_value = _pool_key_by_callback_id(proto, key_id)
             if action == 'apply':
                 bot.answer_callback_query(call.id, f'Применяю ключ #{index}...')
-                _safe_edit_pool_message(
-                    call,
-                    proto,
-                    page=page,
-                    prefix=f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
+                _set_chat_menu_state(chat_id, level=21, bypass=proto)
+                bot.send_message(
+                    chat_id,
+                    f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
+                    reply_markup=_pool_action_markup(proto, page),
                 )
-                _apply_pool_key_background(chat_id, call.message.message_id, proto, key_value, index)
+                _apply_pool_key_background(chat_id, proto, key_value, index, page=page)
             else:
                 _delete_pool_key(proto, key_value)
                 bot.answer_callback_query(call.id, f'Ключ #{index} удалён')
-                _safe_edit_pool_message(call, proto, page=page, prefix=f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.')
+                _set_chat_menu_state(chat_id, level=21, bypass=proto)
+                _send_pool_page(chat_id, proto, page=page, prefix=f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.')
             return
 
         raise ValueError('Неизвестная команда пула.')
@@ -3194,7 +3135,8 @@ def bot_message(message):
             if message.text in ('📦 Пул ключей', '/pool'):
                 _set_chat_menu_state(message.chat.id, level=20, bypass=None)
                 _clear_pool_inline_keyboard(message.chat.id)
-                bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                _clear_pool_page(message.chat.id)
+                bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                 return
 
         if message.chat.type == 'private':
@@ -3322,6 +3264,7 @@ def bot_message(message):
 
             if message.text == '🔙 Назад' or message.text == "Назад":
                 _clear_pool_inline_keyboard(message.chat.id)
+                _clear_pool_page(message.chat.id)
                 bot.send_message(message.chat.id, '✅ Добро пожаловать в меню!', reply_markup=main)
                 set_menu_state(0, None)
                 return
@@ -3489,12 +3432,17 @@ def bot_message(message):
                 return
 
             if level == 20:
+                if message.text == '🔙 В меню ключей':
+                    set_menu_state(8, None)
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
+                    return
                 proto = _resolve_pool_protocol(message.text)
                 if not proto:
-                    bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу.', reply_markup=_build_keys_menu_markup())
+                    bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу.', reply_markup=_pool_protocol_markup())
                     return
                 set_menu_state(21, proto)
-                _send_pool_page(message.chat.id, proto)
+                _send_pool_page(message.chat.id, proto, page=0)
                 return
 
             if level == 21:
@@ -3502,23 +3450,56 @@ def bot_message(message):
                 if not proto:
                     set_menu_state(20, None)
                     _clear_pool_inline_keyboard(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+                    return
+                page = _get_pool_page(message.chat.id)
+                if message.text == '🔙 В меню ключей':
+                    set_menu_state(8, None)
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
                     return
                 selected_proto = _resolve_pool_protocol(message.text)
                 if selected_proto:
                     set_menu_state(21, selected_proto)
-                    _send_pool_page(message.chat.id, selected_proto)
+                    _send_pool_page(message.chat.id, selected_proto, page=0)
                     return
                 if message.text == '🔙 К выбору протокола':
                     set_menu_state(20, None)
                     _clear_pool_inline_keyboard(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+                    return
+                page_delta = _pool_reply_page_delta(message.text)
+                if page_delta:
+                    _send_pool_page(message.chat.id, proto, page=page + page_delta)
+                    return
+                action, raw_index = _pool_reply_key_action(message.text)
+                if action:
+                    try:
+                        index, key_value = _pool_key_by_index(proto, raw_index)
+                    except Exception as exc:
+                        bot.send_message(message.chat.id, f'Ошибка выбора ключа: {exc}', reply_markup=_pool_action_markup(proto, page))
+                        return
+                    if action == 'apply':
+                        bot.send_message(
+                            message.chat.id,
+                            f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
+                            reply_markup=_pool_action_markup(proto, page),
+                        )
+                        _apply_pool_key_background(message.chat.id, proto, key_value, index, page=page)
+                    else:
+                        try:
+                            _delete_pool_key(proto, key_value)
+                            _send_pool_page(message.chat.id, proto, page=page, prefix=f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.')
+                        except Exception as exc:
+                            bot.send_message(message.chat.id, f'Ошибка удаления ключа из пула: {exc}', reply_markup=_pool_action_markup(proto, page))
                     return
                 if message.text in ('📋 Показать пул', '🔄 Обновить пул'):
-                    _send_pool_page(message.chat.id, proto)
+                    _send_pool_page(message.chat.id, proto, page=page)
                     return
                 if message.text == '🔙 К пулу':
-                    _send_pool_page(message.chat.id, proto)
+                    _send_pool_page(message.chat.id, proto, page=page)
                     return
                 if message.text == '➕ Добавить ключи':
                     set_menu_state(22)
@@ -3537,31 +3518,29 @@ def bot_message(message):
                     )
                     return
                 if message.text == '✅ Применить ключ':
-                    bot.send_message(message.chat.id, 'Используйте кнопки ✅ под нужным ключом.', reply_markup=_pool_action_markup())
-                    _send_pool_page(message.chat.id, proto)
+                    bot.send_message(message.chat.id, 'Используйте нижние кнопки ✅ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
                     return
                 if message.text == '🗑 Удалить ключ':
-                    bot.send_message(message.chat.id, 'Используйте кнопки ✕ под нужным ключом.', reply_markup=_pool_action_markup())
-                    _send_pool_page(message.chat.id, proto)
+                    bot.send_message(message.chat.id, 'Используйте нижние кнопки ✕ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
                     return
                 if message.text == '🧹 Очистить пул':
-                    text, info = _format_pool_page(
-                        proto,
-                        0,
-                        prefix=f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.',
+                    set_menu_state(26)
+                    bot.send_message(
+                        message.chat.id,
+                        f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.',
+                        reply_markup=_pool_clear_confirm_markup(),
                     )
-                    bot.send_message(message.chat.id, text, reply_markup=_pool_clear_confirm_markup(proto, info['page']))
                     return
                 if message.text == '🔍 Проверить пул':
                     _probe_pool_keys_background(proto, _pool_keys_for_proto(proto))
-                    bot.send_message(
+                    _send_pool_page(
                         message.chat.id,
-                        f'Запущена фоновая проверка пула {_pool_proto_label(proto)}. Статусы обновятся через несколько секунд.',
-                        reply_markup=_pool_action_markup(),
+                        proto,
+                        page=page,
+                        prefix=f'Запущена фоновая проверка пула {_pool_proto_label(proto)}. Статусы обновятся через несколько секунд.',
                     )
-                    _send_pool_page(message.chat.id, proto)
                     return
-                bot.send_message(message.chat.id, 'Выберите действие из меню пула.', reply_markup=_pool_action_markup())
+                bot.send_message(message.chat.id, 'Выберите действие кнопкой внизу.', reply_markup=_pool_action_markup(proto, page))
                 return
 
             if level == 22:
@@ -3569,17 +3548,19 @@ def bot_message(message):
                 if not proto:
                     set_menu_state(20, None)
                     _clear_pool_inline_keyboard(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 if message.text == '🔙 К пулу':
                     set_menu_state(21)
-                    _send_pool_page(message.chat.id, proto)
+                    _send_pool_page(message.chat.id, proto, page=_get_pool_page(message.chat.id))
                     return
                 added = _add_keys_to_pool(proto, message.text)
                 set_menu_state(21)
                 _send_pool_page(
                     message.chat.id,
                     proto,
+                    page=_get_pool_page(message.chat.id),
                     prefix=f'Добавлено ключей в пул {_pool_proto_label(proto)}: {added}',
                 )
                 return
@@ -3589,11 +3570,12 @@ def bot_message(message):
                 if not proto:
                     set_menu_state(20, None)
                     _clear_pool_inline_keyboard(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 if message.text == '🔙 К пулу':
                     set_menu_state(21)
-                    _send_pool_page(message.chat.id, proto)
+                    _send_pool_page(message.chat.id, proto, page=_get_pool_page(message.chat.id))
                     return
                 try:
                     fetched, error = _fetch_keys_from_subscription(message.text.strip())
@@ -3605,7 +3587,27 @@ def bot_message(message):
                 except Exception as exc:
                     result = f'Ошибка загрузки subscription: {exc}'
                 set_menu_state(21)
-                _send_pool_page(message.chat.id, proto, prefix=result)
+                _send_pool_page(message.chat.id, proto, page=_get_pool_page(message.chat.id), prefix=result)
+                return
+
+            if level == 26:
+                proto = _resolve_pool_protocol(bypass)
+                if not proto:
+                    set_menu_state(20, None)
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+                    return
+                page = _get_pool_page(message.chat.id)
+                if message.text == '✅ Очистить пул':
+                    removed = _clear_pool(proto)
+                    set_menu_state(21)
+                    _send_pool_page(message.chat.id, proto, page=page, prefix=f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {removed}.')
+                    return
+                if message.text in ('Отмена', '🔙 К пулу'):
+                    set_menu_state(21)
+                    _send_pool_page(message.chat.id, proto, page=page, prefix='Очистка пула отменена.')
+                    return
+                bot.send_message(message.chat.id, 'Подтвердите очистку или нажмите отмену.', reply_markup=_pool_clear_confirm_markup())
                 return
 
             if level == 24:
@@ -3613,7 +3615,8 @@ def bot_message(message):
                 if not proto:
                     set_menu_state(20, None)
                     _clear_pool_inline_keyboard(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 try:
                     index, key_value = _pool_key_by_index(proto, message.text)
@@ -3630,7 +3633,8 @@ def bot_message(message):
                 if not proto:
                     set_menu_state(20, None)
                     _clear_pool_inline_keyboard(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_build_keys_menu_markup())
+                    _clear_pool_page(message.chat.id)
+                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 try:
                     index, key_value = _pool_key_by_index(proto, message.text)
