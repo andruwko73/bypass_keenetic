@@ -1020,6 +1020,25 @@ def _build_main_menu_markup():
     return markup
 
 
+def _build_keys_menu_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    item1 = types.KeyboardButton("Shadowsocks")
+    item2 = types.KeyboardButton("Vmess")
+    item3 = types.KeyboardButton("Vless 1")
+    item4 = types.KeyboardButton("Vless 2")
+    item5 = types.KeyboardButton("Trojan")
+    item6 = types.KeyboardButton("Где брать ключи❔")
+    item7 = types.KeyboardButton("🌐 Через браузер")
+    item8 = types.KeyboardButton("📦 Пул ключей")
+    markup.add(item1, item2)
+    markup.add(item3, item4)
+    markup.add(item5)
+    markup.add(item6, item8)
+    markup.add(item7)
+    markup.add(types.KeyboardButton("🔙 Назад"))
+    return markup
+
+
 def _build_service_menu_markup():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     item1 = types.KeyboardButton("♻️ Перезагрузить сервисы")
@@ -2258,6 +2277,7 @@ def _pool_protocol_inline_markup():
     markup.row(buttons[0], buttons[1])
     markup.row(buttons[2], buttons[3])
     markup.row(buttons[4])
+    markup.row(types.InlineKeyboardButton('🔙 В меню ключей', callback_data='pool:keys-menu'))
     return markup
 
 
@@ -2411,7 +2431,10 @@ def _pool_inline_markup(proto, page=0):
         types.InlineKeyboardButton('🔍 Проверить', callback_data=f'pool:probe:{proto}:{info["page"]}'),
         types.InlineKeyboardButton('🧹 Очистить', callback_data=f'pool:clear-confirm:{proto}:{info["page"]}'),
     )
-    markup.row(types.InlineKeyboardButton('🔙 К протоколам', callback_data='pool:protocols'))
+    markup.row(
+        types.InlineKeyboardButton('🔙 К протоколам', callback_data='pool:protocols'),
+        types.InlineKeyboardButton('В меню ключей', callback_data='pool:keys-menu'),
+    )
     return markup
 
 
@@ -2906,6 +2929,21 @@ def pool_callback(call):
             )
             return
 
+        if action == 'keys-menu':
+            _set_chat_menu_state(chat_id, level=8, bypass=None)
+            bot.answer_callback_query(call.id)
+            try:
+                bot.edit_message_text(
+                    '🔑 Открыто меню ключей и мостов.',
+                    chat_id=chat_id,
+                    message_id=call.message.message_id,
+                )
+            except Exception as exc:
+                if 'message is not modified' not in str(exc).lower():
+                    _write_runtime_log(f'Ошибка закрытия inline-меню пула: {exc}')
+            bot.send_message(chat_id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
+            return
+
         if action == 'select' and len(data) >= 3:
             proto = _resolve_pool_protocol(data[2])
             if not proto:
@@ -2986,7 +3024,7 @@ def pool_callback(call):
             if action == 'apply':
                 result = _apply_pool_key(proto, key_value)
                 bot.answer_callback_query(call.id, f'Ключ #{index} применён')
-                _safe_edit_pool_message(call, proto, page=page, prefix=f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{result}')
+                _safe_edit_pool_message(call, proto, page=0, prefix=f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{result}')
             else:
                 _delete_pool_key(proto, key_value)
                 bot.answer_callback_query(call.id, f'Ключ #{index} удалён')
@@ -3676,23 +3714,7 @@ def bot_message(message):
 
             if message.text == "🔑 Ключи и мосты":
                 set_menu_state(8, None)
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("Shadowsocks")
-                item2 = types.KeyboardButton("Vmess")
-                item3 = types.KeyboardButton("Vless 1")
-                item4 = types.KeyboardButton("Vless 2")
-                item5 = types.KeyboardButton("Trojan")
-                item6 = types.KeyboardButton("Где брать ключи❔")
-                item7 = types.KeyboardButton("🌐 Через браузер")
-                item8 = types.KeyboardButton("📦 Пул ключей")
-                markup.add(item1, item2)
-                markup.add(item3, item4)
-                markup.add(item5)
-                markup.add(item6, item8)
-                markup.add(item7)
-                back = types.KeyboardButton("🔙 Назад")
-                markup.add(back)
-                bot.send_message(message.chat.id, "🔑 Ключи и мосты", reply_markup=markup)
+                bot.send_message(message.chat.id, "🔑 Ключи и мосты", reply_markup=_build_keys_menu_markup())
                 return
 
     except Exception as error:
