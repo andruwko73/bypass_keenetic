@@ -3833,7 +3833,7 @@ def bot_message(message):
 
             if message.text == '🔰 Установка и удаление':
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("♻️ Установка переустановка (ветка main)")
+                item1 = types.KeyboardButton("♻️ Установка / переустановка (ветка main)")
                 item2 = types.KeyboardButton("♻️ Переустановка (ветка independent)")
                 item3 = types.KeyboardButton("⚠️ Удаление")
                 back = types.KeyboardButton("🔙 Назад")
@@ -3845,6 +3845,7 @@ def bot_message(message):
                 return
 
             if message.text in (
+                '♻️ Установка / переустановка (ветка main)',
                 '♻️ Установка переустановка (ветка main)',
                 '♻️ Установка и переустановка',
                 '♻️ Установка & переустановка',
