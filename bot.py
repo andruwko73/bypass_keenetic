@@ -1036,7 +1036,8 @@ def _build_main_menu_markup():
     item3 = types.KeyboardButton("📝 Списки обхода")
     item4 = types.KeyboardButton("📄 Информация")
     item5 = types.KeyboardButton("⚙️ Сервис")
-    markup.add(item1, item2, item3)
+    markup.add(item1)
+    markup.add(item2, item3)
     markup.add(item4, item5)
     return markup
 
@@ -2260,6 +2261,8 @@ POOL_PROTOCOL_LABELS = {
     'vless2': 'Vless 2',
     'trojan': 'Trojan',
 }
+TELEGRAM_BUTTON_ICON = '🔵✈️'
+YOUTUBE_BUTTON_ICON = '🔴▶️'
 
 
 def _pool_proto_label(proto):
@@ -2380,13 +2383,13 @@ def _pool_probe_text(probe):
         return 'не проверялся'
     badges = []
     if probe.get('tg_ok'):
-        badges.append('✈️✅')
+        badges.append(f'{TELEGRAM_BUTTON_ICON}✅')
     elif 'tg_ok' in probe:
-        badges.append('✈️❌')
+        badges.append(f'{TELEGRAM_BUTTON_ICON}❌')
     if probe.get('yt_ok'):
-        badges.append('▶️✅')
+        badges.append(f'{YOUTUBE_BUTTON_ICON}✅')
     elif 'yt_ok' in probe:
-        badges.append('▶️❌')
+        badges.append(f'{YOUTUBE_BUTTON_ICON}❌')
     if not badges:
         return 'не проверялся'
     return ' '.join(badges)
@@ -2394,9 +2397,9 @@ def _pool_probe_text(probe):
 
 def _pool_probe_button_text(probe):
     if not probe:
-        return '✈️? ▶️?'
-    tg = '✈️✅' if probe.get('tg_ok') else ('✈️❌' if 'tg_ok' in probe else '✈️?')
-    yt = '▶️✅' if probe.get('yt_ok') else ('▶️❌' if 'yt_ok' in probe else '▶️?')
+        return f'{TELEGRAM_BUTTON_ICON}? {YOUTUBE_BUTTON_ICON}?'
+    tg = f'{TELEGRAM_BUTTON_ICON}✅' if probe.get('tg_ok') else (f'{TELEGRAM_BUTTON_ICON}❌' if 'tg_ok' in probe else f'{TELEGRAM_BUTTON_ICON}?')
+    yt = f'{YOUTUBE_BUTTON_ICON}✅' if probe.get('yt_ok') else (f'{YOUTUBE_BUTTON_ICON}❌' if 'yt_ok' in probe else f'{YOUTUBE_BUTTON_ICON}?')
     return f'{tg} {yt}'
 
 
@@ -2469,8 +2472,6 @@ def _pool_page_info(proto, page=0):
 
 
 def _format_pool_page(proto, page=0, prefix=None):
-    current_keys = _load_current_keys()
-    cache = _load_key_probe_cache()
     info = _pool_page_info(proto, page)
     label = _pool_proto_label(proto)
     header = f'📦 {label}: {info["total"]} ключей'
@@ -2483,13 +2484,8 @@ def _format_pool_page(proto, page=0, prefix=None):
     if not info['keys']:
         lines.append('Пул пуст. Добавьте ключи вручную или через subscription.')
     else:
-        lines.append('Нажмите кнопку с названием ключа, чтобы применить его.')
-        lines.append('Для удаления нажмите кнопку «🗑 Удаление», затем выберите ключ.')
-        lines.append('')
-        current_key = current_keys.get(proto)
-        for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
-            probe = cache.get(_hash_key(key_value), {})
-            lines.append(_pool_key_line(offset, key_value, probe=probe, current_key=current_key))
+        lines.append('Ключи выведены в нижней клавиатуре.')
+        lines.append('Нажмите кнопку с названием ключа, чтобы применить его. Для удаления нажмите «🗑 Удаление».')
     return '\n'.join(lines), info
 
 
@@ -3141,7 +3137,8 @@ def bot_message(message):
         m3 = types.KeyboardButton("📝 Списки обхода")
         m4 = types.KeyboardButton("📄 Информация")
         m5 = types.KeyboardButton("⚙️ Сервис")
-        main.add(m1, m2, m3)
+        main.add(m1)
+        main.add(m2, m3)
         main.add(m4, m5)
 
         service = types.ReplyKeyboardMarkup(resize_keyboard=True)
