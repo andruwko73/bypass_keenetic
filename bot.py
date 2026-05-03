@@ -2261,8 +2261,8 @@ POOL_PROTOCOL_LABELS = {
     'vless2': 'Vless 2',
     'trojan': 'Trojan',
 }
-TELEGRAM_BUTTON_ICON = '🔵✈️'
-YOUTUBE_BUTTON_ICON = '🔴▶️'
+TELEGRAM_BUTTON_ICON = 'TG'
+YOUTUBE_BUTTON_ICON = 'YT'
 
 
 def _pool_proto_label(proto):
