@@ -2261,12 +2261,31 @@ POOL_PROTOCOL_LABELS = {
     'vless2': 'Vless 2',
     'trojan': 'Trojan',
 }
+POOL_PROTOCOL_BUTTON_PREFIXES = {
+    'shadowsocks': 'SS',
+    'vmess': 'VM',
+    'vless': 'V1',
+    'vless2': 'V2',
+    'trojan': 'TR',
+}
 TELEGRAM_BUTTON_ICON = 'TG'
 YOUTUBE_BUTTON_ICON = 'YT'
 
 
 def _pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
+
+
+def _pool_proto_button_prefix(proto):
+    return POOL_PROTOCOL_BUTTON_PREFIXES.get(proto, str(proto or '').upper())
+
+
+def _pool_proto_from_button_prefix(prefix):
+    value = (prefix or '').strip().upper()
+    for proto, proto_prefix in POOL_PROTOCOL_BUTTON_PREFIXES.items():
+        if value == proto_prefix.upper():
+            return proto
+    return None
 
 
 def _shorten_button_text(text, limit=38):
@@ -2341,7 +2360,7 @@ def _pool_action_markup(proto, page=0):
     cache = _load_key_probe_cache()
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
-        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key)))
+        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto)))
     _pool_add_page_controls(markup, info)
     markup.row(types.KeyboardButton('➕ Добавить ключи'), types.KeyboardButton('🔗 Загрузить subscription'))
     markup.row(types.KeyboardButton('🔍 Проверить пул'), types.KeyboardButton('🧹 Очистить пул'))
@@ -2359,7 +2378,7 @@ def _pool_delete_markup(proto, page=0):
     cache = _load_key_probe_cache()
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
-        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, action='delete')))
+        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto, action='delete')))
     _pool_add_page_controls(markup, info)
     markup.row(types.KeyboardButton('🔙 К пулу'), types.KeyboardButton('🔙 Назад'))
     return markup
@@ -2403,15 +2422,16 @@ def _pool_probe_button_text(probe):
     return f'{tg} {yt}'
 
 
-def _pool_key_button_label(index, key_value, probe=None, current_key=None, action='apply'):
+def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto=None, action='apply'):
     display_name = _shorten_button_text(_pool_key_display_name(key_value), limit=24)
     status = _pool_probe_button_text(probe)
+    proto_prefix = _pool_proto_button_prefix(proto)
     if action == 'delete':
-        prefix = f'✕ {index}.'
+        prefix = f'✕ {proto_prefix} {index}.'
     elif current_key and key_value == current_key:
-        prefix = f'✅ {index}.'
+        prefix = f'✅ {proto_prefix} {index}.'
     else:
-        prefix = f'{index}.'
+        prefix = f'{proto_prefix} {index}.'
     return _shorten_button_text(f'{prefix} {display_name} {status}', limit=52)
 
 
@@ -2485,7 +2505,7 @@ def _format_pool_page(proto, page=0, prefix=None):
         lines.append('Пул пуст. Добавьте ключи вручную или через subscription.')
     else:
         lines.append('Ключи выведены в нижней клавиатуре.')
-        lines.append('Нажмите кнопку с названием ключа, чтобы применить его. Для удаления нажмите «🗑 Удаление».')
+        lines.append('Нажмите кнопку с кодом протокола V1/V2/VM/TR/SS, чтобы применить ключ. Для удаления нажмите «🗑 Удаление».')
     return '\n'.join(lines), info
 
 
@@ -2524,13 +2544,30 @@ def _pool_key_by_index(proto, raw_index):
 
 def _pool_reply_key_action(text):
     value = (text or '').strip()
-    apply_match = re.match(r'^(?:✅|✔️|✔|✓)?\s*(\d+)(?:[.)]\s|$)', value)
-    if apply_match:
-        return 'apply', apply_match.group(1)
-    delete_match = re.match(r'^(?:✕|×|❌|x|🗑)\s*(\d+)(?:[.)]\s|$)', value, flags=re.IGNORECASE)
-    if delete_match:
-        return 'delete', delete_match.group(1)
-    return None, None
+    action = 'apply'
+    lowered = value.lower()
+    for marker in ('✕', '×', '❌', '🗑', 'x'):
+        if lowered.startswith(marker.lower()):
+            action = 'delete'
+            value = value[len(marker):].strip()
+            break
+    for marker in ('✅', '✔️', '✔', '✓'):
+        if value.startswith(marker):
+            value = value[len(marker):].strip()
+            break
+
+    parts = value.split(maxsplit=1)
+    if len(parts) == 2:
+        button_proto = _pool_proto_from_button_prefix(parts[0])
+        if button_proto:
+            index_match = re.match(r'^(\d+)(?:[.)]\s|$)', parts[1])
+            if index_match:
+                return action, index_match.group(1), button_proto
+
+    legacy_match = re.match(r'^(\d+)(?:[.)]\s|$)', value)
+    if legacy_match:
+        return 'legacy', legacy_match.group(1), None
+    return None, None, None
 
 
 def _pool_reply_page_delta(text):
@@ -2578,7 +2615,8 @@ def _apply_pool_key_background(chat_id, proto, key_value, index, page=0):
             return
         try:
             result = _apply_pool_key(proto, key_value)
-            prefix = f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{result}'
+            display_name = _pool_key_display_name(key_value)
+            prefix = f'✅ Ключ #{index} «{display_name}» применён для {_pool_proto_label(proto)}.\n{result}'
         except Exception as exc:
             prefix = f'Ошибка применения ключа #{index} из пула {_pool_proto_label(proto)}: {exc}'
         finally:
@@ -3543,8 +3581,26 @@ def bot_message(message):
                 if _is_pool_page_noop(message.text):
                     _send_pool_page(message.chat.id, proto, page=page)
                     return
-                action, raw_index = _pool_reply_key_action(message.text)
+                action, raw_index, button_proto = _pool_reply_key_action(message.text)
                 if action:
+                    if action == 'legacy' or not button_proto:
+                        bot.send_message(
+                            message.chat.id,
+                            'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку вида V1/V2/VM/TR/SS.',
+                            reply_markup=_pool_action_markup(proto, page),
+                        )
+                        return
+                    if button_proto != proto:
+                        proto = button_proto
+                        page = 0
+                        set_menu_state(21, proto)
+                    if action == 'delete':
+                        bot.send_message(
+                            message.chat.id,
+                            'Удаление доступно только через кнопку «🗑 Удаление». Это защищает от случайного нажатия старой кнопки.',
+                            reply_markup=_pool_action_markup(proto, page),
+                        )
+                        return
                     try:
                         index, key_value = _pool_key_by_index(proto, raw_index)
                     except Exception as exc:
@@ -3731,9 +3787,24 @@ def bot_message(message):
                 if _is_pool_page_noop(message.text):
                     _send_pool_delete_page(message.chat.id, proto, page=page)
                     return
-                action, raw_index = _pool_reply_key_action(message.text)
+                action, raw_index, button_proto = _pool_reply_key_action(message.text)
                 if not action:
-                    action, raw_index = 'delete', message.text
+                    bot.send_message(message.chat.id, 'Выберите ключ для удаления кнопкой с кодом протокола V1/V2/VM/TR/SS.', reply_markup=_pool_delete_markup(proto, page))
+                    return
+                if action == 'legacy' or not button_proto:
+                    bot.send_message(
+                        message.chat.id,
+                        'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку удаления вида ✕ V1/V2/VM/TR/SS.',
+                        reply_markup=_pool_delete_markup(proto, page),
+                    )
+                    return
+                if button_proto != proto:
+                    proto = button_proto
+                    page = 0
+                    set_menu_state(25, proto)
+                if action != 'delete':
+                    bot.send_message(message.chat.id, 'Сейчас включен режим удаления. Нажмите кнопку ключа с префиксом ✕ или вернитесь к пулу.', reply_markup=_pool_delete_markup(proto, page))
+                    return
                 try:
                     index, key_value = _pool_key_by_index(proto, raw_index)
                     _delete_pool_key(proto, key_value)
