@@ -2249,7 +2249,7 @@ def _pool_key_display_name(key_value):
 
 
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
-POOL_PAGE_SIZE = 5
+POOL_PAGE_SIZE = 4
 POOL_PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
     'vmess': 'Vmess',
@@ -2268,6 +2268,19 @@ def _shorten_button_text(text, limit=38):
     if len(value) <= limit:
         return value
     return value[:max(1, limit - 1)].rstrip() + '…'
+
+
+def _pool_add_page_controls(markup, info):
+    if info['total_pages'] <= 1:
+        return
+    previous_button = 'Ключи ◀️' if info['page'] > 0 else '·'
+    next_button = 'Ключи ▶️' if info['page'] < info['total_pages'] - 1 else '·'
+    page_button = f'Стр. {info["page"] + 1}/{info["total_pages"]}'
+    markup.row(
+        types.KeyboardButton(previous_button),
+        types.KeyboardButton(page_button),
+        types.KeyboardButton(next_button),
+    )
 
 
 def _pool_protocol_markup():
@@ -2323,14 +2336,7 @@ def _pool_action_markup(proto, page=0):
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
         markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key)))
-    if info['total_pages'] > 1:
-        nav = []
-        if info['page'] > 0:
-            nav.append(types.KeyboardButton('◀️ Предыдущая'))
-        if info['page'] < info['total_pages'] - 1:
-            nav.append(types.KeyboardButton('Следующая ▶️'))
-        if nav:
-            markup.row(*nav)
+    _pool_add_page_controls(markup, info)
     markup.row(types.KeyboardButton('➕ Добавить ключи'), types.KeyboardButton('🔗 Загрузить subscription'))
     markup.row(types.KeyboardButton('🔍 Проверить пул'), types.KeyboardButton('🧹 Очистить пул'))
     markup.row(types.KeyboardButton('🗑 Удаление'), types.KeyboardButton('🔄 Обновить пул'))
@@ -2348,14 +2354,7 @@ def _pool_delete_markup(proto, page=0):
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
         markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, action='delete')))
-    if info['total_pages'] > 1:
-        nav = []
-        if info['page'] > 0:
-            nav.append(types.KeyboardButton('◀️ Предыдущая'))
-        if info['page'] < info['total_pages'] - 1:
-            nav.append(types.KeyboardButton('Следующая ▶️'))
-        if nav:
-            markup.row(*nav)
+    _pool_add_page_controls(markup, info)
     markup.row(types.KeyboardButton('🔙 К пулу'), types.KeyboardButton('🔙 Назад'))
     return markup
 
@@ -2544,11 +2543,20 @@ def _pool_reply_key_action(text):
 
 def _pool_reply_page_delta(text):
     value = (text or '').strip()
-    if value in ('◀️ Предыдущая', '◀ Предыдущая'):
+    if value in ('Ключи ◀️', 'Ключи ◀', '◀️ Предыдущая', '◀ Предыдущая'):
         return -1
-    if value in ('Следующая ▶️', 'Следующая ▶'):
+    if value in ('Ключи ▶️', 'Ключи ▶', 'Следующая ▶️', 'Следующая ▶'):
         return 1
     return 0
+
+
+def _is_pool_page_indicator(text):
+    return bool(re.match(r'^Стр\.\s+\d+/\d+$', (text or '').strip()))
+
+
+def _is_pool_page_noop(text):
+    value = (text or '').strip()
+    return value in ('·', '') or _is_pool_page_indicator(value)
 
 
 def _pool_key_by_callback_id(proto, key_id):
@@ -3539,6 +3547,9 @@ def bot_message(message):
                 if page_delta:
                     _send_pool_page(message.chat.id, proto, page=page + page_delta)
                     return
+                if _is_pool_page_noop(message.text):
+                    _send_pool_page(message.chat.id, proto, page=page)
+                    return
                 action, raw_index = _pool_reply_key_action(message.text)
                 if action:
                     try:
@@ -3723,6 +3734,9 @@ def bot_message(message):
                         page=page + page_delta,
                         prefix='Режим удаления: выберите ключ кнопкой ниже.',
                     )
+                    return
+                if _is_pool_page_noop(message.text):
+                    _send_pool_delete_page(message.chat.id, proto, page=page)
                     return
                 action, raw_index = _pool_reply_key_action(message.text)
                 if not action:
