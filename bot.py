@@ -3840,17 +3840,22 @@ def bot_message(message):
 
             if message.text == '🔰 Установка и удаление':
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("♻️ Установка и переустановка")
+                item1 = types.KeyboardButton("♻️ Установка переустановка (ветка main)")
                 item2 = types.KeyboardButton("♻️ Переустановка (ветка independent)")
                 item3 = types.KeyboardButton("⚠️ Удаление")
                 back = types.KeyboardButton("🔙 Назад")
-                markup.row(item1, item2)
+                markup.row(item1)
+                markup.row(item2)
                 markup.row(item3)
                 markup.row(back)
                 bot.send_message(message.chat.id, '🔰 Установка и удаление', reply_markup=markup)
                 return
 
-            if message.text == '♻️ Установка и переустановка' or message.text == '♻️ Установка & переустановка':
+            if message.text in (
+                '♻️ Установка переустановка (ветка main)',
+                '♻️ Установка и переустановка',
+                '♻️ Установка & переустановка',
+            ):
                 started, status_message = _start_telegram_background_command(
                     '-update',
                     fork_repo_owner,
@@ -3862,7 +3867,7 @@ def bot_message(message):
                     bot.send_message(message.chat.id, status_message, reply_markup=main)
                     return
                 bot.send_message(message.chat.id,
-                                 f'Запускаю переустановку из форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
+                                 f'Запускаю установку/переустановку из ветки main форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
                                  'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
                                  'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
                                  reply_markup=main)
