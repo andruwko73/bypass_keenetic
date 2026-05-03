@@ -2249,7 +2249,10 @@ def _pool_key_display_name(key_value):
 
 
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
-POOL_PAGE_SIZE = 4
+# Telegram прокручивает reply-клавиатуру целиком, без закрепления нижних строк.
+# Поэтому показываем весь пул в одной прокручиваемой клавиатуре, а служебные
+# кнопки добавляем после списка ключей.
+POOL_PAGE_SIZE = 1000
 POOL_PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
     'vmess': 'Vmess',
@@ -2377,13 +2380,13 @@ def _pool_probe_text(probe):
         return 'не проверялся'
     badges = []
     if probe.get('tg_ok'):
-        badges.append('TG✅')
+        badges.append('✈️✅')
     elif 'tg_ok' in probe:
-        badges.append('TG❌')
+        badges.append('✈️❌')
     if probe.get('yt_ok'):
-        badges.append('YT✅')
+        badges.append('▶️✅')
     elif 'yt_ok' in probe:
-        badges.append('YT❌')
+        badges.append('▶️❌')
     if not badges:
         return 'не проверялся'
     return ' '.join(badges)
@@ -2391,17 +2394,10 @@ def _pool_probe_text(probe):
 
 def _pool_probe_button_text(probe):
     if not probe:
-        return 'не проверен'
-    parts = []
-    if probe.get('tg_ok'):
-        parts.append('TG')
-    if probe.get('yt_ok'):
-        parts.append('YT')
-    if parts:
-        return '/'.join(parts)
-    if 'tg_ok' in probe or 'yt_ok' in probe:
-        return 'нет TG/YT'
-    return 'не проверен'
+        return '✈️? ▶️?'
+    tg = '✈️✅' if probe.get('tg_ok') else ('✈️❌' if 'tg_ok' in probe else '✈️?')
+    yt = '▶️✅' if probe.get('yt_ok') else ('▶️❌' if 'yt_ok' in probe else '▶️?')
+    return f'{tg} {yt}'
 
 
 def _pool_key_button_label(index, key_value, probe=None, current_key=None, action='apply'):
