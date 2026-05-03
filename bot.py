@@ -2249,7 +2249,7 @@ def _pool_key_display_name(key_value):
 
 
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
-POOL_PAGE_SIZE = 8
+POOL_PAGE_SIZE = 5
 POOL_PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
     'vmess': 'Vmess',
@@ -2261,6 +2261,13 @@ POOL_PROTOCOL_LABELS = {
 
 def _pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
+
+
+def _shorten_button_text(text, limit=38):
+    value = re.sub(r'\s+', ' ', str(text or '')).strip()
+    if len(value) <= limit:
+        return value
+    return value[:max(1, limit - 1)].rstrip() + '…'
 
 
 def _pool_protocol_markup():
@@ -2310,8 +2317,12 @@ def _clear_pool_inline_keyboard(chat_id, message_id=None):
 def _pool_action_markup(proto, page=0):
     _, info = _format_pool_page(proto, page)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    for offset in range(info['start'] + 1, info['end'] + 1):
-        markup.row(types.KeyboardButton(f'✅ {offset}'), types.KeyboardButton(f'✕ {offset}'))
+    current_keys = _load_current_keys()
+    current_key = current_keys.get(proto)
+    cache = _load_key_probe_cache()
+    for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
+        probe = cache.get(_hash_key(key_value), {})
+        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key)))
     if info['total_pages'] > 1:
         nav = []
         if info['page'] > 0:
@@ -2322,9 +2333,30 @@ def _pool_action_markup(proto, page=0):
             markup.row(*nav)
     markup.row(types.KeyboardButton('➕ Добавить ключи'), types.KeyboardButton('🔗 Загрузить subscription'))
     markup.row(types.KeyboardButton('🔍 Проверить пул'), types.KeyboardButton('🧹 Очистить пул'))
-    markup.row(types.KeyboardButton('🔄 Обновить пул'))
+    markup.row(types.KeyboardButton('🗑 Удаление'), types.KeyboardButton('🔄 Обновить пул'))
     markup.row(types.KeyboardButton('🔙 К выбору протокола'), types.KeyboardButton('🔙 В меню ключей'))
     markup.row(types.KeyboardButton('🔙 Назад'))
+    return markup
+
+
+def _pool_delete_markup(proto, page=0):
+    _, info = _format_pool_page(proto, page)
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    current_keys = _load_current_keys()
+    current_key = current_keys.get(proto)
+    cache = _load_key_probe_cache()
+    for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
+        probe = cache.get(_hash_key(key_value), {})
+        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, action='delete')))
+    if info['total_pages'] > 1:
+        nav = []
+        if info['page'] > 0:
+            nav.append(types.KeyboardButton('◀️ Предыдущая'))
+        if info['page'] < info['total_pages'] - 1:
+            nav.append(types.KeyboardButton('Следующая ▶️'))
+        if nav:
+            markup.row(*nav)
+    markup.row(types.KeyboardButton('🔙 К пулу'), types.KeyboardButton('🔙 Назад'))
     return markup
 
 
@@ -2358,8 +2390,35 @@ def _pool_probe_text(probe):
     return ' '.join(badges)
 
 
+def _pool_probe_button_text(probe):
+    if not probe:
+        return 'не проверен'
+    parts = []
+    if probe.get('tg_ok'):
+        parts.append('TG')
+    if probe.get('yt_ok'):
+        parts.append('YT')
+    if parts:
+        return '/'.join(parts)
+    if 'tg_ok' in probe or 'yt_ok' in probe:
+        return 'нет TG/YT'
+    return 'не проверен'
+
+
+def _pool_key_button_label(index, key_value, probe=None, current_key=None, action='apply'):
+    display_name = _shorten_button_text(_pool_key_display_name(key_value), limit=24)
+    status = _pool_probe_button_text(probe)
+    if action == 'delete':
+        prefix = f'✕ {index}.'
+    elif current_key and key_value == current_key:
+        prefix = f'✅ {index}.'
+    else:
+        prefix = f'{index}.'
+    return _shorten_button_text(f'{prefix} {display_name} {status}', limit=52)
+
+
 def _pool_key_line(index, key_value, probe=None, current_key=None):
-    marker = ' *' if current_key and key_value == current_key else ''
+    marker = ' — АКТИВЕН' if current_key and key_value == current_key else ''
     display_name = _pool_key_display_name(key_value)
     key_hash = _hash_key(key_value)[:8]
     return f'{index}. {display_name}{marker} [{key_hash}] — {_pool_probe_text(probe)}'
@@ -2429,8 +2488,8 @@ def _format_pool_page(proto, page=0, prefix=None):
     if not info['keys']:
         lines.append('Пул пуст. Добавьте ключи вручную или через subscription.')
     else:
-        lines.append('Нажмите ✅ у номера, чтобы применить ключ, или ✕, чтобы удалить его из пула.')
-        lines.append('* — текущий активный ключ')
+        lines.append('Нажмите кнопку с названием ключа, чтобы применить его.')
+        lines.append('Для удаления нажмите кнопку «🗑 Удаление», затем выберите ключ.')
         lines.append('')
         current_key = current_keys.get(proto)
         for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
@@ -2443,6 +2502,12 @@ def _send_pool_page(chat_id, proto, page=0, prefix=None):
     text, info = _format_pool_page(proto, page, prefix=prefix)
     _set_pool_page(chat_id, info['page'])
     bot.send_message(chat_id, text, reply_markup=_pool_action_markup(proto, info['page']))
+
+
+def _send_pool_delete_page(chat_id, proto, page=0, prefix=None):
+    text, info = _format_pool_page(proto, page, prefix=prefix)
+    _set_pool_page(chat_id, info['page'])
+    bot.send_message(chat_id, text, reply_markup=_pool_delete_markup(proto, info['page']))
 
 
 def _send_pool_details(chat_id, proto, prefix=None, suffix=None, reply_markup=None):
@@ -2468,10 +2533,10 @@ def _pool_key_by_index(proto, raw_index):
 
 def _pool_reply_key_action(text):
     value = (text or '').strip()
-    apply_match = re.match(r'^(?:✅|✔️|✔|✓)\s*(\d+)$', value)
+    apply_match = re.match(r'^(?:✅|✔️|✔|✓)?\s*(\d+)(?:[.)]\s|$)', value)
     if apply_match:
         return 'apply', apply_match.group(1)
-    delete_match = re.match(r'^(?:✕|×|❌|x)\s*(\d+)$', value, flags=re.IGNORECASE)
+    delete_match = re.match(r'^(?:✕|×|❌|x|🗑)\s*(\d+)(?:[.)]\s|$)', value, flags=re.IGNORECASE)
     if delete_match:
         return 'delete', delete_match.group(1)
     return None, None
@@ -3523,6 +3588,14 @@ def bot_message(message):
                 if message.text == '🗑 Удалить ключ':
                     bot.send_message(message.chat.id, 'Используйте нижние кнопки ✕ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
                     return
+                if message.text == '🗑 Удаление':
+                    set_menu_state(25)
+                    bot.send_message(
+                        message.chat.id,
+                        f'Выберите ключ для удаления из пула {_pool_proto_label(proto)}. Активный ключ удалить можно, но режим бота останется прежним до применения другого ключа.',
+                        reply_markup=_pool_delete_markup(proto, page),
+                    )
+                    return
                 if message.text == '🧹 Очистить пул':
                     set_menu_state(26)
                     bot.send_message(
@@ -3636,14 +3709,32 @@ def bot_message(message):
                     _clear_pool_page(message.chat.id)
                     bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
+                page = _get_pool_page(message.chat.id)
+                if message.text in ('🔙 К пулу', '🔙 Назад'):
+                    set_menu_state(21)
+                    _send_pool_page(message.chat.id, proto, page=page)
+                    return
+                page_delta = _pool_reply_page_delta(message.text)
+                if page_delta:
+                    set_menu_state(25)
+                    _send_pool_delete_page(
+                        message.chat.id,
+                        proto,
+                        page=page + page_delta,
+                        prefix='Режим удаления: выберите ключ кнопкой ниже.',
+                    )
+                    return
+                action, raw_index = _pool_reply_key_action(message.text)
+                if not action:
+                    action, raw_index = 'delete', message.text
                 try:
-                    index, key_value = _pool_key_by_index(proto, message.text)
+                    index, key_value = _pool_key_by_index(proto, raw_index)
                     _delete_pool_key(proto, key_value)
                     result = f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.'
                 except Exception as exc:
                     result = f'Ошибка удаления ключа из пула: {exc}'
                 set_menu_state(21)
-                _send_pool_page(message.chat.id, proto, prefix=result)
+                _send_pool_page(message.chat.id, proto, page=page, prefix=result)
                 return
 
             if level == 5:
