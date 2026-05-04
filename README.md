@@ -74,6 +74,12 @@ Telegram-бот использует нижнюю клавиатуру без д
 - пользовательские проверки;
 - списки обхода.
 
+## Безопасность данных
+
+Реальные ключи, токены Telegram, `api_id`, `api_hash`, пароли, локальные пулы и кеши проверок должны оставаться только на роутере. В репозиторий не добавляются `bot_config.py`, `.env`, локальные дампы роутера, временные `xray`-конфиги и файлы с живыми прокси-ключами.
+
+Скриншоты ниже сделаны с демонстрационными данными: активный ключ скрыт, идентификаторы ключей в пуле не показываются, списки обхода заменены безопасными примерами.
+
 ## Скриншоты
 
 Страница первичной настройки:
@@ -82,16 +88,34 @@ Telegram-бот использует нижнюю клавиатуру без д
   <img src="docs/screenshots/installer-setup.png" alt="Первичная настройка бота" width="420">
 </a>
 
-Пул ключей в Telegram-боте:
+Статус и сервис:
 
-<a href="docs/screenshots/telegram-key-pool.png">
-  <img src="docs/screenshots/telegram-key-pool.png" alt="Пул ключей в Telegram-боте" width="360">
+<a href="docs/screenshots/web-ui-status.png">
+  <img src="docs/screenshots/web-ui-status.png" alt="Статус и сервис independent" width="520">
 </a>
 
-Веб-интерфейс:
+Активный ключ:
 
-<a href="docs/screenshots/web-ui-overview.png">
-  <img src="docs/screenshots/web-ui-overview.png" alt="Веб-интерфейс" width="520">
+<a href="docs/screenshots/web-ui-key.png">
+  <img src="docs/screenshots/web-ui-key.png" alt="Активный ключ independent" width="520">
+</a>
+
+Пул ключей:
+
+<a href="docs/screenshots/web-ui-pool.png">
+  <img src="docs/screenshots/web-ui-pool.png" alt="Пул ключей independent" width="520">
+</a>
+
+Subscription:
+
+<a href="docs/screenshots/web-ui-subscription.png">
+  <img src="docs/screenshots/web-ui-subscription.png" alt="Subscription independent" width="520">
+</a>
+
+Проверки доступности:
+
+<a href="docs/screenshots/web-ui-check.png">
+  <img src="docs/screenshots/web-ui-check.png" alt="Проверки доступности independent" width="520">
 </a>
 
 Списки обхода:

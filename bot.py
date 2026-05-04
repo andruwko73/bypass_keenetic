@@ -571,13 +571,14 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_CACHE_TTL = 3600
-KEY_PROBE_MAX_PER_RUN = 0
+_KEY_PROBE_MAX_PER_RUN_VALUE = int(getattr(config, 'pool_probe_max_per_run', 0))
+KEY_PROBE_MAX_PER_RUN = _KEY_PROBE_MAX_PER_RUN_VALUE if _KEY_PROBE_MAX_PER_RUN_VALUE > 0 else None
 POOL_PROBE_ACTIVE_ONLY = False
 POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.3))
 POOL_PROBE_MIN_AVAILABLE_KB = 120000
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 3)))
-POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
+POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 3)), POOL_PROBE_BATCH_SIZE))
 POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 1.5))
 POOL_PROBE_TG_READ_TIMEOUT = float(getattr(config, 'pool_probe_tg_read_timeout', 2))
 POOL_PROBE_HTTP_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_http_connect_timeout', 1.5))
@@ -634,6 +635,14 @@ pool_probe_lock = threading.Lock()
 pool_probe_auto_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_last_auto_started_at = 0
+pool_probe_progress_lock = threading.Lock()
+pool_probe_progress = {
+    'running': False,
+    'checked': 0,
+    'total': 0,
+    'started_at': 0,
+    'finished_at': 0,
+}
 process_started_at = time.time()
 web_command_lock = threading.Lock()
 web_command_state = {
@@ -3186,6 +3195,16 @@ def _available_memory_kb():
     return None
 
 
+def _set_pool_probe_progress(**updates):
+    with pool_probe_progress_lock:
+        pool_probe_progress.update(updates)
+
+
+def _get_pool_probe_progress():
+    with pool_probe_progress_lock:
+        return dict(pool_probe_progress)
+
+
 def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None):
     proxy_url = proxy_url or proxy_settings.get(proto)
     tg_ok, _ = _check_telegram_api_through_proxy(
@@ -3404,16 +3423,30 @@ def _start_pool_probe_xray(config_json):
 
 
 def _stop_pool_probe_xray(process, config_path):
+    pid = None
     try:
+        pid = process.pid if process else None
         if process and process.poll() is None:
             process.terminate()
             try:
                 process.wait(timeout=3)
             except Exception:
-                process.kill()
-                process.wait(timeout=3)
+                try:
+                    process.kill()
+                    process.wait(timeout=2)
+                except Exception:
+                    if pid:
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except Exception:
+                            pass
     except Exception:
         pass
+    if pid:
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except Exception:
+            pass
     try:
         if config_path and os.path.exists(config_path):
             os.remove(config_path)
@@ -3468,16 +3501,11 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
     custom_checks = _load_custom_checks()
     cache = _load_key_probe_cache() if stale_only else {}
     now = time.time()
-    current_keys = _load_current_keys()
-    active_key = (current_keys.get(proxy_mode, '') if proxy_mode in POOL_PROTOCOL_ORDER else '').strip()
-    active_key_hash = _hash_key(active_key) if active_key else ''
     selected = []
     seen = set()
     for proto, key_value in tasks:
         key_value = (key_value or '').strip()
         if proto not in POOL_PROTOCOL_ORDER or not key_value:
-            continue
-        if active_key_hash and _hash_key(key_value) == active_key_hash:
             continue
         task_id = (proto, _hash_key(key_value))
         if task_id in seen:
@@ -3486,7 +3514,7 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
         if stale_only and _key_probe_is_fresh(cache.get(_hash_key(key_value)), now=now, custom_checks=custom_checks):
             continue
         selected.append((proto, key_value))
-        if max_keys and len(selected) >= max_keys:
+        if max_keys is not None and len(selected) >= max_keys:
             break
     return selected, custom_checks
 
@@ -3504,10 +3532,28 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False):
         return False, 0
     if not pool_probe_lock.acquire(blocking=False):
         return False, len(selected)
+    _set_pool_probe_progress(
+        running=True,
+        checked=0,
+        total=len(selected),
+        started_at=time.time(),
+        finished_at=0,
+    )
     def worker(probe_tasks, checks):
         try:
             total = len(probe_tasks)
             checked = 0
+            marked_tasks = set()
+
+            def mark_checked(proto, key_value):
+                nonlocal checked
+                task_key = (proto, _hash_key(key_value))
+                if task_key in marked_tasks:
+                    return
+                marked_tasks.add(task_key)
+                checked += 1
+                _set_pool_probe_progress(checked=checked)
+
             while probe_tasks:
                 available_kb = _available_memory_kb()
                 if available_kb is not None and available_kb < POOL_PROBE_MIN_AVAILABLE_KB:
@@ -3532,6 +3578,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False):
                             yt_ok=False,
                             custom=_failed_custom_probe_results(checks),
                         )
+                        mark_checked(proto, key_value)
                 if not valid_batch:
                     continue
                 process = None
@@ -3550,6 +3597,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False):
                                 yt_ok=False,
                                 custom=_failed_custom_probe_results(checks),
                             )
+                            mark_checked(proto, key_value)
                             continue
                         ready_batch.append((offset, proto, key_value))
                     if not ready_batch:
@@ -3582,7 +3630,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False):
                                     custom=_failed_custom_probe_results(checks),
                                 )
                             finally:
-                                checked += 1
+                                mark_checked(proto, key_value)
                                 _invalidate_web_status_cache()
                                 _invalidate_key_status_cache()
                                 gc.collect()
@@ -3596,8 +3644,10 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False):
                             yt_ok=False,
                             custom=_failed_custom_probe_results(checks),
                         )
+                        mark_checked(proto, key_value)
                 finally:
                     _stop_pool_probe_xray(process, config_path)
+                    _cleanup_pool_probe_runtime(kill_processes=True)
                     _invalidate_web_status_cache()
                     _invalidate_key_status_cache()
                     del raw_batch
@@ -3610,6 +3660,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False):
         finally:
             _invalidate_web_status_cache()
             _invalidate_key_status_cache()
+            _set_pool_probe_progress(running=False, checked=checked, total=total, finished_at=time.time())
             pool_probe_lock.release()
             gc.collect()
 
@@ -3732,8 +3783,8 @@ def _custom_check_status_icon_html(check, state):
     if state == 'ok':
         return _service_icon_html(check.get('icon'), check.get('label', 'Service'), opacity=1.0, size=18)
     if state == 'fail':
-        return '<span class="service-probe-mark service-probe-fail" title="Проверка не прошла">✕</span>'
-    return '<span class="service-probe-mark service-probe-unknown" title="Проверка ещё не выполнялась">?</span>'
+        return '✕'
+    return '?'
 
 
 def _custom_check_header_icons(custom_checks=None):
@@ -3914,7 +3965,7 @@ def _apply_installed_proxy(key_type, key_value, verify=True):
             f'❌ Не удалось подключиться к Telegram API: {api_probe_message} {diagnostics}').strip()
 
 
-def update_proxy(proxy_type):
+def update_proxy(proxy_type, persist=True):
     global proxy_mode
     proxy_url = proxy_settings.get(proxy_type)
     if proxy_url and proxy_url.startswith('socks') and not _has_socks_support():
@@ -3934,7 +3985,8 @@ def update_proxy(proxy_type):
             if key in os.environ:
                 del os.environ[key]
 
-    _save_proxy_mode(proxy_type)
+    if persist:
+        _save_proxy_mode(proxy_type)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     return True, None
@@ -4153,14 +4205,6 @@ def _probe_pool_keys_on_page_load():
     """Refresh stale pool statuses on page open, and occasionally force a full pass."""
     global pool_probe_last_auto_started_at
 
-    started, queued = _probe_all_pool_keys_async(stale_only=True)
-    if started:
-        with pool_probe_auto_lock:
-            pool_probe_last_auto_started_at = time.time()
-        return started, queued
-    if queued:
-        return started, queued
-
     if POOL_PROBE_PAGE_REFRESH_INTERVAL <= 0:
         return False, 0
 
@@ -4170,6 +4214,9 @@ def _probe_pool_keys_on_page_load():
             return False, 0
         pool_probe_last_auto_started_at = now
 
+    started, queued = _probe_all_pool_keys_async(stale_only=True)
+    if started or queued:
+        return started, queued
     return _probe_all_pool_keys_async(stale_only=False)
 
 
@@ -5295,6 +5342,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         protocol_statuses = snapshot['protocols'] if snapshot is not None else _placeholder_protocol_statuses(current_keys)
         pool_probe_started, pool_probe_queued = _probe_pool_keys_on_page_load()
         pool_probe_pending = pool_probe_started or pool_probe_queued > 0 or pool_probe_lock.locked()
+        current_pool_probe_progress = _get_pool_probe_progress()
         if snapshot is None and not pool_probe_pending:
             _refresh_status_caches_async(current_keys)
         unblock_lists = _load_unblock_lists()
@@ -5387,10 +5435,17 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         custom_presets_html = _web_custom_presets_html(custom_checks)
         custom_header_icons = _custom_check_header_icons(custom_checks)
         custom_checks_json = json.dumps(_web_custom_checks(), ensure_ascii=False)
-        topbar_status_text = (
-            '⏳ Фоновая проверка пула ключей выполняется. Статусы обновятся без перезагрузки страницы.'
-            if pool_probe_pending else status['api_status']
-        )
+        if pool_probe_pending:
+            progress_total = int(current_pool_probe_progress.get('total') or pool_probe_queued or 0)
+            progress_checked = int(current_pool_probe_progress.get('checked') or 0)
+            topbar_status_text = (
+                f'⏳ Фоновая проверка пула ключей выполняется: {progress_checked}/{progress_total}. '
+                'Статусы обновятся без перезагрузки страницы.'
+                if progress_total else
+                '⏳ Фоновая проверка пула ключей выполняется. Статусы обновятся без перезагрузки страницы.'
+            )
+        else:
+            topbar_status_text = status['api_status']
         pool_table_class = 'pool-table has-custom-checks' if custom_checks else 'pool-table'
         pool_custom_col_width = 34 * max(1, len(custom_checks)) + 10
         pool_mobile_custom_col_width = max(26, 18 * len(custom_checks) + 4)
@@ -5850,7 +5905,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .pool-row-active{{background:rgba(31,122,106,.12);}}
         .pool-active-cell{{width:72px;color:#9be4d3;font-weight:700;}}
         .pool-key-cell{{min-width:260px;}}
-        .pool-hash{{display:block;margin-top:3px;color:var(--muted);font-size:11px;font-family:Consolas,Monaco,monospace;}}
+        .pool-hash{{display:none;}}
         .pool-mobile-active{{display:none;}}
         .pool-service-cell{{width:48px;text-align:center;}}
         .pool-checked-cell{{width:92px;color:var(--muted);font-size:12px;}}
@@ -5870,6 +5925,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             --scrollbar-thumb:#415365;
             --scrollbar-thumb-hover:#53687d;
             --focus-ring:0 0 0 3px rgba(78,216,205,.16);
+            --radius-panel:10px;
+            --radius-control:8px;
         }}
         html{{scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin;}}
         body{{font-family:Arial,"Segoe UI",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:linear-gradient(145deg,#0c1118 0%,#111821 48%,#0b1016 100%);padding:14px;}}
@@ -5933,9 +5990,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .command-grid{{gap:7px;margin-top:0;}}
         .command-grid button{{min-height:34px;justify-content:center;}}
         .overview-key-panel{{margin-top:10px;}}
-        .protocol-tabs{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;}}
-        .segmented,.subtabs,.pool-table-wrap{{border-color:rgba(91,124,150,.34);border-radius:10px;background:rgba(11,17,25,.34);}}
-        .seg-tab,.subtab{{min-height:32px;color:#c7d2df;padding:6px 8px;font-size:12px;}}
+        .protocol-tabs,.list-tabs{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;}}
+        .protocol-tabs .seg-tab,.list-tabs .seg-tab{{min-width:0;}}
+        .segmented,.subtabs,.pool-table-wrap{{border-color:rgba(91,124,150,.34);border-radius:var(--radius-panel);background:rgba(11,17,25,.34);overflow:hidden;}}
+        .seg-tab,.subtab{{min-height:32px;color:#c7d2df;padding:6px 8px;font-size:12px;border-radius:0;}}
         .seg-tab.active,.subtab.active{{background:rgba(48,191,181,.14);color:#94f3ec;}}
         .key-status-wrap{{max-width:none;flex:none;gap:6px;align-items:center;}}
         .key-status-icons{{order:2;gap:5px;}}
@@ -5964,9 +6022,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .pool-custom-head{{text-align:center;}}
         .pool-icon-head img{{width:16px!important;height:16px!important;margin:0 2px;vertical-align:middle;}}
         .pool-key-cell{{min-width:220px;}}
-        .pool-key-cell .pool-apply-form{{display:inline-block;max-width:calc(100% - 86px);vertical-align:middle;}}
+        .pool-key-cell .pool-apply-form{{display:inline-block;max-width:100%;vertical-align:middle;}}
         .pool-apply-btn{{min-height:0;height:auto;padding:0;font-size:11px;font-weight:600;line-height:1.22;}}
-        .pool-hash{{display:inline-block;margin:0 0 0 8px;font-size:10px;vertical-align:middle;}}
+        .pool-hash{{display:none;}}
         .pool-service-cell{{width:36px;}}
         .pool-custom-cell{{width:104px;}}
         .pool-custom-cell,.pool-service-cell{{text-align:center;}}
@@ -5983,7 +6041,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .service-probe-fail{{color:#ffb7b1;background:rgba(168,68,47,.16);border-color:rgba(205,86,82,.34);}}
         .service-probe-unknown{{color:#9fb0c8;background:rgba(91,124,150,.12);}}
         .custom-service-ok{{background:rgba(31,122,106,.18);border-color:rgba(78,216,205,.38);color:#95f3ec;}}
-        .custom-service-fail{{background:rgba(168,68,47,.16);border-color:rgba(205,86,82,.34);color:#ffb7b1;}}
+        .custom-service-fail{{background:transparent;border-color:transparent;color:var(--muted);}}
         .custom-service-unknown,.custom-service-neutral{{background:rgba(91,124,150,.14);border-color:rgba(91,124,150,.34);color:#c7d2df;}}
         .custom-check-card{{display:grid;gap:8px;padding:9px;border-radius:9px;border:1px solid rgba(91,124,150,.34);background:rgba(11,17,25,.36);}}
         .custom-check-head{{display:flex;justify-content:space-between;gap:10px;align-items:center;}}
@@ -6115,8 +6173,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .workspace-layout{{display:block;}}
             .side-nav{{display:none;}}
             .app-main{{padding-bottom:calc(126px + env(safe-area-inset-bottom, 0px));}}
-            .mobile-nav{{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom, 0px));z-index:50;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:6px;border:1px solid rgba(91,124,150,.34);border-radius:10px;background:rgba(12,18,26,.96);box-shadow:0 14px 34px rgba(0,0,0,.34);}}
-            .mobile-nav .nav-item{{justify-content:center;flex-direction:column;gap:3px;min-height:50px;font-size:11px;padding:6px;border-radius:8px;}}
+            .mobile-nav{{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom, 0px));z-index:50;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:6px;border:1px solid rgba(91,124,150,.34);border-radius:var(--radius-panel);background:rgba(12,18,26,.96);box-shadow:0 14px 34px rgba(0,0,0,.34);}}
+            .mobile-nav .nav-item{{justify-content:center;flex-direction:column;gap:3px;min-height:50px;font-size:11px;padding:6px;border-radius:var(--radius-control);}}
             .view-head{{padding:14px;border-radius:10px;}}
             .view-head h2{{font-size:20px;}}
             .status-dashboard,.overview-service-grid{{grid-template-columns:1fr;}}
@@ -6129,10 +6187,13 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .status-card-wide .status-value{{font-size:13px;line-height:1.4;}}
             .segmented{{scroll-snap-type:x mandatory;}}
             .seg-tab{{min-width:96px;scroll-snap-align:start;}}
-            .protocol-tabs,.list-tabs{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;scroll-snap-type:none;}}
+            .protocol-tabs,.list-tabs{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;scroll-snap-type:none;border-radius:var(--radius-panel);}}
             .protocol-tabs .seg-tab,.list-tabs .seg-tab{{min-width:0;border-right:1px solid var(--border);border-bottom:1px solid var(--border);white-space:normal;}}
             .protocol-tabs .seg-tab:nth-child(2n),.list-tabs .seg-tab:nth-child(2n){{border-right:none;}}
             .protocol-tabs .seg-tab:last-child,.list-tabs .seg-tab:last-child{{grid-column:1 / -1;border-right:none;border-bottom:none;}}
+            .protocol-tabs .seg-tab:first-child,.list-tabs .seg-tab:first-child{{border-top-left-radius:calc(var(--radius-panel) - 1px);}}
+            .protocol-tabs .seg-tab:nth-child(2),.list-tabs .seg-tab:nth-child(2){{border-top-right-radius:calc(var(--radius-panel) - 1px);}}
+            .protocol-tabs .seg-tab:last-child,.list-tabs .seg-tab:last-child{{border-bottom-left-radius:calc(var(--radius-panel) - 1px);border-bottom-right-radius:calc(var(--radius-panel) - 1px);}}
             .protocol-workspace{{padding:9px;}}
             .protocol-workspace .workspace-head{{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;margin-bottom:7px;}}
             .protocol-workspace .workspace-head .eyebrow{{display:none;}}
@@ -6331,7 +6392,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         [data-theme="light"] .custom-service-ok{{background:rgba(31,122,106,.12);border-color:rgba(31,122,106,.3);color:#1f6258;}}
         [data-theme="light"] .key-status-warn{{background:#fff1d7;border-color:#deb36b;color:#875b1f;}}
         [data-theme="light"] .key-status-fail,
-        [data-theme="light"] .custom-service-fail{{background:#f7dedb;border-color:#d79891;color:#92352d;}}
+        [data-theme="light"] .custom-service-fail{{background:transparent;border-color:transparent;color:#526173;}}
         [data-theme="light"] .key-status-empty,
         [data-theme="light"] .custom-service-unknown,
         [data-theme="light"] .custom-service-neutral,
@@ -6532,9 +6593,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             if (status === 'ok' && check && check.icon) {{
                 content = serviceIcon(serviceIconSrc(check.icon), label);
             }} else if (status === 'fail') {{
-                content = '<span class="service-probe-mark service-probe-fail">✕</span>';
+                content = '✕';
             }} else {{
-                content = '<span class="service-probe-mark service-probe-unknown">?</span>';
+                content = '?';
             }}
             return '<span class="custom-service-slot custom-service-' + status + '" title="' +
                 escapeHtml(label + (url ? ': ' + url : '')) + '">' + content + '</span>';
@@ -6778,9 +6839,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             }}
             const apiPill = document.getElementById('web-api-pill');
             if (apiPill) {{
-                apiPill.textContent = snapshot.pool_probe_running
-                    ? '⏳ Фоновая проверка пула ключей выполняется. Статусы обновятся без перезагрузки страницы.'
-                    : (web.api_status || '');
+                const progress = snapshot.pool_probe_progress || {{}};
+                const progressText = progress.total
+                    ? '⏳ Фоновая проверка пула ключей выполняется: ' + (progress.checked || 0) + '/' + progress.total + '. Статусы обновятся без перезагрузки страницы.'
+                    : '⏳ Фоновая проверка пула ключей выполняется. Статусы обновятся без перезагрузки страницы.';
+                apiPill.textContent = snapshot.pool_probe_running ? progressText : (web.api_status || '');
             }}
             setOptionalText('web-socks-details', web.socks_details || '');
             const fallbackText = web.fallback_reason && web.proxy_mode === 'none'
@@ -7327,6 +7390,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                     'pools': _web_pool_snapshot(current_keys),
                     'custom_checks': _web_custom_checks(),
                     'pool_probe_running': pool_probe_lock.locked(),
+                    'pool_probe_progress': _get_pool_probe_progress(),
                     'timestamp': time.time(),
                 }
                 self._send_json(payload, status=200)
@@ -8260,11 +8324,14 @@ def main():
         _write_runtime_log(f'Не удалось пересобрать core proxy config при старте: {exc}')
     if _load_bot_autostart():
         globals()['bot_ready'] = True
-    proxy_mode = _load_proxy_mode()
+    saved_proxy_mode = _load_proxy_mode()
+    proxy_mode = saved_proxy_mode
     ok, error = update_proxy(proxy_mode)
     if not ok:
         proxy_mode = config.default_proxy_mode
-        update_proxy(proxy_mode)
+        update_proxy(proxy_mode, persist=False)
+        if saved_proxy_mode in proxy_settings:
+            _save_proxy_mode(saved_proxy_mode)
     elif proxy_mode in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
         startup_settings = {
             'shadowsocks': localportsh_bot,
@@ -8276,9 +8343,18 @@ def main():
         startup_port = startup_settings.get(proxy_mode)
         endpoint_ok, endpoint_message = _check_local_proxy_endpoint(proxy_mode, startup_port)
         if not endpoint_ok:
-            _write_runtime_log(f'Прокси-режим {proxy_mode} отключён при старте: {endpoint_message}')
-            proxy_mode = 'none'
-            update_proxy('none')
+            _write_runtime_log(f'Прокси-режим {proxy_mode} не ответил при старте: {endpoint_message}. Перезапускаю core proxy.')
+            try:
+                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
+                time.sleep(3)
+            except Exception:
+                pass
+            endpoint_ok, endpoint_message = _check_local_proxy_endpoint(proxy_mode, startup_port)
+        if not endpoint_ok:
+            fallback_mode = proxy_mode
+            _write_runtime_log(f'Прокси-режим {fallback_mode} временно отключён при старте: {endpoint_message}')
+            update_proxy('none', persist=False)
+            _save_proxy_mode(fallback_mode)
         else:
             api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=8, read_timeout=10)
             if not api_status.startswith('✅'):
