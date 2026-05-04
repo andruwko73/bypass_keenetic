@@ -38,6 +38,14 @@ cleanup_update_artifacts() {
   done
 }
 
+cleanup_web_only_runtime() {
+  [ -x /opt/etc/init.d/S99web_bot ] && /opt/etc/init.d/S99web_bot stop >/dev/null 2>&1 || true
+  for web_pid in $(pgrep -f "python3.*web_bot.py" 2>/dev/null); do
+    kill "$web_pid" >/dev/null 2>&1 || true
+  done
+  rm -f /opt/etc/init.d/S99web_bot /opt/etc/web_bot.py /opt/etc/web_bot.log 2>/dev/null || true
+}
+
 BOT_CONFIG_PATH="/opt/etc/bot_config.py"
 BOT_MAIN_PATH="/opt/etc/bot.py"
 BOT_SERVICE_PATH="/opt/etc/init.d/S99telegram_bot"
@@ -587,9 +595,7 @@ if [ "$1" = "-update" ]; then
     sleep 2
     echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен бот (~15-30 сек)."
     sleep 7
-    [ -x /opt/etc/init.d/S99web_bot ] && /opt/etc/init.d/S99web_bot stop >/dev/null 2>&1 || true
-    web_bot_pid=$(pgrep -f "python3.*web_bot.py")
-    for web_pid in ${web_bot_pid}; do kill "${web_pid}" >/dev/null 2>&1 || true; done
+    cleanup_web_only_runtime
     if ! telegram_config_complete; then
       start_telegram_installer
       exit 0
