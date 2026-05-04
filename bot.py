@@ -2254,6 +2254,18 @@ def _protocol_status_for_key(key_name, key_value):
     cached_probe = _load_key_probe_cache().get(_hash_key(key_value), {})
     custom_states = _web_custom_probe_states(cached_probe, custom_checks)
     _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok)
+    custom_ok = any(state == 'ok' for state in custom_states.values())
+    any_ok = api_ok or yt_ok or custom_ok
+    service_parts = [
+        f'Telegram: {"работает" if api_ok else "не работает"}',
+        f'YouTube: {"работает" if yt_ok else "не работает"}',
+    ]
+    for check in custom_checks:
+        check_id = check.get('id')
+        state = custom_states.get(check_id)
+        if state in ('ok', 'fail'):
+            service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
+    details = f'Показан результат проверки активного ключа. {endpoint_message} ' + ', '.join(service_parts) + '.'
     if (endpoint_ok and not api_ok and now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
             _is_transient_telegram_api_failure(api_message)):
         return {
@@ -2270,9 +2282,9 @@ def _protocol_status_for_key(key_name, key_value):
             'custom': custom_states,
         }
     return {
-        'tone': 'ok' if api_ok else 'warn',
-        'label': 'Работает' if api_ok else 'Telegram недоступен',
-        'details': f'{endpoint_message} {api_message}'.strip(),
+        'tone': 'ok' if api_ok else ('warn' if any_ok else 'fail'),
+        'label': 'Работает' if api_ok else ('Частично работает' if any_ok else 'Не работает'),
+        'details': details.strip(),
         'endpoint_ok': endpoint_ok,
         'endpoint_message': endpoint_message,
         'api_ok': api_ok,
