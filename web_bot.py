@@ -3243,7 +3243,7 @@ def _probe_all_pool_keys_async(stale_only=True):
 
 
 def _probe_pool_keys_on_page_load():
-    """Refresh stale pool statuses on page open, and occasionally force a full pass."""
+    """Refresh only stale or missing pool statuses on page open."""
     global pool_probe_last_auto_started_at
 
     if POOL_PROBE_PAGE_REFRESH_INTERVAL <= 0:
@@ -3258,7 +3258,7 @@ def _probe_pool_keys_on_page_load():
     started, queued = _probe_all_pool_keys_async(stale_only=True)
     if started or queued:
         return started, queued
-    return _probe_all_pool_keys_async(stale_only=False)
+    return False, 0
 
 
 class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
