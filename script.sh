@@ -56,6 +56,7 @@ stop_telegram_bot_runtime() {
   for pid in $(pgrep -f "python3 /opt/etc/bot/main.py") $(pgrep -f "python3 /opt/etc/bot.py"); do
     kill "$pid" >/dev/null 2>&1 || true
   done
+  rm -f /opt/etc/init.d/S99telegram_bot /opt/etc/init.d/S98telegram_bot_installer 2>/dev/null || true
 }
 
 install_web_only_service() {
