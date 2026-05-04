@@ -60,6 +60,12 @@ Bootstrap перед заменой файлов создает backup и rollba
 
 При переходах сохраняются активные ключи, пул ключей, пользовательские проверки, списки обхода и базовые настройки веб-интерфейса.
 
+## Безопасность данных
+
+Реальные ключи, IP-адреса личных серверов, пароли, токены и локальные настройки должны оставаться только на роутере. В репозиторий не добавляются `bot_config.py`, `.env`, локальные дампы роутера, временные `xray`-конфиги, пулы ключей и кеши проверок.
+
+Скриншоты ниже сделаны с демонстрационными данными: активный ключ скрыт, идентификаторы ключей в пуле не показываются, списки обхода заменены безопасными примерами.
+
 ## Списки обхода
 
 - [vless.txt](vless.txt) — шаблон для первого маршрута VLESS: Telegram API, дата-центры Telegram, OpenAI/ChatGPT/Codex, GitHub, Copilot и связанные сервисы.
@@ -67,10 +73,16 @@ Bootstrap перед заменой файлов создает backup и rollba
 
 ## Скриншоты
 
-Веб-интерфейс web-only:
+Статус и сервис:
 
 <a href="docs/screenshots/web-ui-status.png">
   <img src="docs/screenshots/web-ui-status.png" alt="Статус web-only" width="520">
+</a>
+
+Активный ключ:
+
+<a href="docs/screenshots/web-ui-key.png">
+  <img src="docs/screenshots/web-ui-key.png" alt="Активный ключ web-only" width="520">
 </a>
 
 Пул ключей:
@@ -79,8 +91,20 @@ Bootstrap перед заменой файлов создает backup и rollba
   <img src="docs/screenshots/web-ui-pool.png" alt="Пул ключей web-only" width="520">
 </a>
 
-Мобильная версия:
+Subscription:
 
-<a href="docs/screenshots/mobile-status.png">
-  <img src="docs/screenshots/mobile-status.png" alt="Мобильный web-only интерфейс" width="320">
+<a href="docs/screenshots/web-ui-subscription.png">
+  <img src="docs/screenshots/web-ui-subscription.png" alt="Subscription web-only" width="520">
+</a>
+
+Проверки доступности:
+
+<a href="docs/screenshots/web-ui-check.png">
+  <img src="docs/screenshots/web-ui-check.png" alt="Проверки доступности web-only" width="520">
+</a>
+
+Списки обхода:
+
+<a href="docs/screenshots/web-ui-lists.png">
+  <img src="docs/screenshots/web-ui-lists.png" alt="Списки обхода web-only" width="520">
 </a>
