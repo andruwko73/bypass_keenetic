@@ -12,7 +12,7 @@
 - пул ключей для каждого протокола;
 - загрузка subscription;
 - проверка Telegram API, YouTube и дополнительных сервисов через выбранный прокси;
-- пресеты проверок: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Le Chat, Meta AI, Instagram, Facebook;
+- пресеты проверок: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Meta AI, Instagram, Facebook;
 - переустановка в `main`, `feature/independent-rework` и обратно в `feature/web-only` с сохранением данных.
 
 ## Установка
