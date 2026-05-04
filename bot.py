@@ -67,6 +67,9 @@ WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
+APP_BRANCH_LABEL = 'main'
+APP_VERSION_COUNTER = 403
+APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 README_PATH = os.path.join(os.path.dirname(BOT_SOURCE_PATH), 'README.md')
 XRAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24xray'
@@ -2889,6 +2892,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .hero-copy{{max-width:700px;}}
                 .hero-row{{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}}
                 .hero-actions{{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;position:relative;justify-content:flex-end;}}
+        .version-badge{{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--muted);font-size:10px;font-weight:800;line-height:1;letter-spacing:.04em;white-space:nowrap;box-shadow:none;}}
         .hero-meta{{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 0;}}
         .hero-chip{{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(79,140,255,.08);border:1px solid rgba(96,165,250,.18);font-size:13px;font-weight:700;color:var(--text);}}
         .theme-toggle{{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;box-shadow:none;white-space:nowrap;}}
@@ -3036,6 +3040,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <span>Тема</span>
                 <span id="theme-toggle-label">Темная тема</span>
             </button>
+            <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_BRANCH_LABEL)} {html.escape(APP_VERSION_LABEL)}</span>
             {mode_picker_block}
         </div>
         </div>
