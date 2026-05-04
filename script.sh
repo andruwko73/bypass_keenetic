@@ -11,7 +11,7 @@
 # оригинальный репозиторий (tas-unn), пользовательский форк
 
 repo="andruwko73"
-REPO_REF="${REPO_REF:-main}"
+REPO_REF="${REPO_REF:-feature/independent-rework}"
 
 config_get() {
   key="$1"
@@ -38,6 +38,17 @@ cleanup_update_artifacts() {
   done
 }
 
+cleanup_pool_probe_runtime() {
+  for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+    kill "$pid" >/dev/null 2>&1 || true
+  done
+  sleep 1
+  for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  done
+  rm -f /tmp/bypass_pool_probe_*.json 2>/dev/null || true
+}
+
 BOT_CONFIG_PATH="/opt/etc/bot_config.py"
 BOT_MAIN_PATH="/opt/etc/bot.py"
 BOT_SERVICE_PATH="/opt/etc/init.d/S99telegram_bot"
@@ -50,6 +61,19 @@ if [ -d "/opt/etc/bot" ] || grep -q '/opt/etc/bot/main.py' /opt/etc/init.d/S99te
   BOT_MAIN_PATH="/opt/etc/bot/main.py"
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
+
+install_static_assets() {
+  static_dir="${BOT_RUNTIME_DIR}/static"
+  icons="chatgpt claude copilot deepseek facebook gemini grok instagram meta mistral perplexity"
+  mkdir -p "$static_dir/service-icons"
+  curl -fsSL -o "$static_dir/telegram.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/telegram.png" >/dev/null 2>&1 || true
+  curl -fsSL -o "$static_dir/youtube.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/youtube.png" >/dev/null 2>&1 || true
+  for icon in $icons; do
+    curl -fsSL -o "$static_dir/service-icons/${icon}.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/service-icons/${icon}.png" >/dev/null 2>&1 || true
+  done
+  find "$static_dir" -type d -exec chmod 755 {} \; 2>/dev/null || true
+  find "$static_dir" -type f -exec chmod 644 {} \; 2>/dev/null || true
+}
 
 telegram_config_complete() {
   [ -f "$BOT_CONFIG_PATH" ] || return 1
@@ -375,6 +399,7 @@ if [ "$1" = "-install" ]; then
     curl -o /opt/etc/crontab https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab
     chmod 755 /opt/etc/crontab
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
+    install_static_assets
     /opt/bin/unblock_update.sh
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
 
@@ -495,6 +520,7 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"
+    install_static_assets
     mv "$stage_dir/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
     mv "$stage_dir/S99telegram_bot" "$BOT_SERVICE_PATH"
     chmod 755 "$INSTALLER_SERVICE_PATH" "$BOT_SERVICE_PATH"
@@ -523,9 +549,11 @@ if [ "$1" = "-update" ]; then
     sleep 2
     echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен бот (~15-30 сек)."
     sleep 7
+    cleanup_pool_probe_runtime
     [ -x /opt/etc/init.d/S99web_bot ] && /opt/etc/init.d/S99web_bot stop >/dev/null 2>&1 || true
     web_bot_pid=$(pgrep -f "python3.*web_bot.py")
     for web_pid in ${web_bot_pid}; do kill "${web_pid}" >/dev/null 2>&1 || true; done
+    cleanup_pool_probe_runtime
     if ! telegram_config_complete; then
       start_telegram_installer
       exit 0

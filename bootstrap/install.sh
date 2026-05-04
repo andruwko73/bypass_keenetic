@@ -3,10 +3,11 @@ set -eu
 
 REPO_OWNER="${BYPASS_REPO_OWNER:-andruwko73}"
 REPO_NAME="${BYPASS_REPO_NAME:-bypass_keenetic}"
-REPO_BRANCH="${BYPASS_REPO_BRANCH:-main}"
+REPO_BRANCH="${BYPASS_REPO_BRANCH:-feature/independent-rework}"
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
 
 BOT_DIR="/opt/etc/bot"
+STATIC_DIR="$BOT_DIR/static"
 BOT_CONFIG_PATH="$BOT_DIR/bot_config.py"
 BOT_MAIN_PATH="$BOT_DIR/main.py"
 INSTALLER_PATH="$BOT_DIR/installer.py"
@@ -51,6 +52,18 @@ download_file() {
     curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$target" "$url" || fail "Не удалось скачать $url"
     [ -s "$target" ] || fail "Скачан пустой файл: $url"
     [ -z "$marker" ] || grep -q "$marker" "$target" || fail "Файл $url не прошёл проверку содержимого"
+}
+
+download_static_assets() {
+    icons="chatgpt claude copilot deepseek facebook gemini grok instagram meta mistral perplexity"
+    mkdir -p "$STATIC_DIR/service-icons"
+    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/telegram.png" "$RAW_BASE/static/telegram.png" || true
+    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/youtube.png" "$RAW_BASE/static/youtube.png" || true
+    for icon in $icons; do
+        curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/service-icons/${icon}.png" "$RAW_BASE/static/service-icons/${icon}.png" || true
+    done
+    find "$STATIC_DIR" -type d -exec chmod 755 {} \; 2>/dev/null || true
+    find "$STATIC_DIR" -type f -exec chmod 644 {} \; 2>/dev/null || true
 }
 
 ensure_symlink_or_copy() {
@@ -103,9 +116,11 @@ remove_added_path() {
 restore_path /opt/etc/bot/main.py
 restore_path /opt/etc/bot/installer.py
 restore_path /opt/etc/bot/installer.env
+restore_path /opt/etc/web_bot.py
 restore_path /opt/etc/bot.py
 restore_path /opt/etc/init.d/S99telegram_bot
 restore_path /opt/etc/init.d/S98telegram_bot_installer
+restore_path /opt/etc/init.d/S99web_bot
 restore_path /opt/etc/ndm/fs.d/100-ipset.sh
 restore_path /opt/etc/tor/torrc
 restore_path /opt/etc/shadowsocks.json
@@ -132,7 +147,12 @@ if [ -f "\$ABSENT_PATHS_FILE" ]; then
 fi
 
 /opt/etc/init.d/S98telegram_bot_installer stop >/dev/null 2>&1 || true
-/opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99telegram_bot start >/dev/null 2>&1 || true
+if [ -x /opt/etc/init.d/S99web_bot ]; then
+    /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
+    /opt/etc/init.d/S99web_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99web_bot start >/dev/null 2>&1 || true
+else
+    /opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99telegram_bot start >/dev/null 2>&1 || true
+fi
 /opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || true
@@ -186,9 +206,11 @@ FORK_BUTTON_LABEL="${BYPASS_FORK_BUTTON_LABEL:-Fork by ${REPO_OWNER}}"
 backup_path "$BOT_MAIN_PATH"
 backup_path "$INSTALLER_PATH"
 backup_path "$INSTALLER_ENV_PATH"
+backup_path "/opt/etc/web_bot.py"
 backup_path "$LEGACY_MAIN_PATH"
 backup_path "$SERVICE_PATH"
 backup_path "$INSTALLER_SERVICE_PATH"
+backup_path "/opt/etc/init.d/S99web_bot"
 backup_path "/opt/etc/ndm/fs.d/100-ipset.sh"
 backup_path "/opt/etc/tor/torrc"
 backup_path "/opt/etc/shadowsocks.json"
@@ -218,6 +240,7 @@ cp "$TMP_DIR/main.py" "$BOT_MAIN_PATH"
 cp "$TMP_DIR/installer.py" "$INSTALLER_PATH"
 cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
 cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
+download_static_assets
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"

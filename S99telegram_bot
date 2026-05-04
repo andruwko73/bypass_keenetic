@@ -27,6 +27,17 @@ has_running_process() {
     check_process >/dev/null 2>&1
 }
 
+cleanup_pool_probe_runtime() {
+    for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+        kill "$pid" >/dev/null 2>&1 || true
+    done
+    sleep 1
+    for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+        kill -9 "$pid" >/dev/null 2>&1 || true
+    done
+    rm -f /tmp/bypass_pool_probe_*.json 2>/dev/null || true
+}
+
 has_config() {
     config_path=""
     [ -f "$BOT_CONFIG_PATH" ] && config_path="$BOT_CONFIG_PATH"
@@ -37,6 +48,7 @@ has_config() {
 }
 
 stop_main_process() {
+    cleanup_pool_probe_runtime
     pids=$(check_process)
     if [ -z "$pids" ]; then
         return 0
@@ -63,6 +75,7 @@ stop_main_process() {
             exit 1
         fi
     fi
+    cleanup_pool_probe_runtime
     return 0
 }
 

@@ -1,5 +1,5 @@
 ﻿import json
-# --- РџСѓР» РєР»СЋС‡РµР№ РґР»СЏ СѓРїСЂР°РІР»РµРЅРёСЏ С‡РµСЂРµР· РІРµР±-РёРЅС‚РµСЂС„РµР№СЃ ---
+# --- Пул ключей для управления через веб-интерфейс ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
 
 def load_key_pools():
@@ -46,7 +46,7 @@ import re
 import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 
 BOT_DIR = '/opt/etc/bot'
@@ -129,7 +129,7 @@ def build_config(form):
     fork_button_label = f'Fork by {fork_repo_owner}'
     default_proxy_mode = form.get('default_proxy_mode', 'none').strip() or 'none'
 
-    return f"""# Р’Р•Р РЎРРЇ РЎРљР РРџРўРђ 2.2.1
+    return f"""# ВЕРСИЯ СКРИПТА 2.2.1
 
 token = '{escape_python(form['token'])}'
 usernames = ['{escape_python(form['username'])}']
@@ -154,11 +154,11 @@ def validate_form(form):
     required = ['token', 'username']
     missing = [key for key in required if not form.get(key, '').strip()]
     if missing:
-        return False, 'РќРµ Р·Р°РїРѕР»РЅРµРЅС‹ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РїРѕР»СЏ: ' + ', '.join(missing)
+        return False, 'Не заполнены обязательные поля: ' + ', '.join(missing)
 
     browser_port = form.get('browser_port', '').strip()
     if browser_port and not re.fullmatch(r'\d{2,5}', browser_port):
-        return False, 'РџРѕР»Рµ browser_port РґРѕР»Р¶РЅРѕ СЃРѕРґРµСЂР¶Р°С‚СЊ РЅРѕРјРµСЂ РїРѕСЂС‚Р°.'
+        return False, 'Поле browser_port должно содержать номер порта.'
 
     return True, ''
 
@@ -315,7 +315,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
 <head>
     <meta charset=\"utf-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-    <title>РџРµСЂРІРёС‡РЅР°СЏ РЅР°СЃС‚СЂРѕР№РєР° Р±РѕС‚Р°</title>
+    <title>Первичная настройка бота</title>
         {redirect_head}
     <style>
         :root {{ color-scheme: dark; --bg:#101418; --card:#182028; --text:#f4f7fb; --muted:#9fb0c3; --accent:#63e6be; --line:#2a3846; --warn:#ffd166; }}
@@ -333,19 +333,20 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
         .secondary-button {{ background:#2f4050; color:var(--text); border:1px solid var(--line); }}
         .notice {{ margin:0 0 18px; padding:12px 14px; border-radius:12px; background:rgba(255,209,102,.12); color:var(--warn); border:1px solid rgba(255,209,102,.25); }}
         .hint {{ margin-top:18px; font-size:14px; color:var(--muted); }}
-        .icon-btn {{ display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px; border:1px solid var(--line); background:rgba(99,230,190,0.08); color:var(--text); font-size:15px; cursor:pointer; margin-right:10px; }}
-        .icon-btn img {{ vertical-align:middle; margin-right:4px; }}
-        .icon-btn:active {{ background:rgba(99,230,190,0.18); }}
-        .check-btns {{ margin:18px 0 0; }}
-        @media (max-width: 680px) {{ .grid {{ grid-template-columns:1fr; }} h1 {{ font-size:26px; }} }}
+        .pool-row {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; margin-bottom:12px; }}
+        .pool-row input {{ min-width:0; }}
+        .pool-row button {{ margin-top:0; width:auto; white-space:nowrap; }}
+        #key-list ul {{ margin:0; padding-left:18px; }}
+        #key-list li {{ margin-bottom:6px; overflow-wrap:anywhere; }}
+        @media (max-width: 680px) {{ .wrap {{ padding:18px 12px 36px; }} .card {{ padding:18px; border-radius:14px; }} .grid,.pool-row {{ grid-template-columns:1fr; }} h1 {{ font-size:24px; }} button,.pool-row button {{ width:100%; }} }}
     </style>
 </head>
 <body>
 {redirect_script}
     <div class="wrap">
         <div class="card">
-            <h1>РџРµСЂРІРёС‡РЅР°СЏ РЅР°СЃС‚СЂРѕР№РєР° Р±РѕС‚Р°</h1>
-            <p>Р­С‚Р° СЃС‚СЂР°РЅРёС†Р° Р·Р°РїСѓСЃРєР°РµС‚СЃСЏ РґРѕ РѕСЃРЅРѕРІРЅРѕРіРѕ Telegram-Р±РѕС‚Р°. Р—Р°РїРѕР»РЅРёС‚Рµ РєР»СЋС‡Рё РґРѕСЃС‚СѓРїР°, РїРѕСЃР»Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ installer Р·Р°РїРёС€РµС‚ bot_config.py Рё Р·Р°РїСѓСЃС‚РёС‚ РѕСЃРЅРѕРІРЅРѕР№ СЃРµСЂРІРёСЃ.</p>
+            <h1>Первичная настройка бота</h1>
+            <p>Эта страница запускается до основного Telegram-бота. Заполните данные доступа, после сохранения installer запишет bot_config.py и запустит основной сервис.</p>
             {notice}
             <form method="post" action="/save">
                 <div class="grid">
@@ -358,15 +359,15 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                         <input id="username" name="username" placeholder="mylogin" required>
                     </div>
                     <div>
-                        <label for="browser_port">РџРѕСЂС‚ РІРµР±-РёРЅС‚РµСЂС„РµР№СЃР°</label>
+                        <label for="browser_port">Порт веб-интерфейса</label>
                         <input id="browser_port" name="browser_port" value="8080">
                     </div>
                     <div>
-                        <label for="routerip">IP СЂРѕСѓС‚РµСЂР°</label>
+                        <label for="routerip">IP роутера</label>
                         <input id="routerip" name="routerip" value="{html.escape(router_ip)}">
                     </div>
                     <div>
-                        <label for="default_proxy_mode">Р РµР¶РёРј Telegram API РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ</label>
+                        <label for="default_proxy_mode">Режим Telegram API по умолчанию</label>
                         <select id="default_proxy_mode" name="default_proxy_mode">
                             <option value="none">none</option>
                             <option value="shadowsocks">shadowsocks</option>
@@ -376,24 +377,16 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                         </select>
                     </div>
                 </div>
-                <button type="submit">РЎРѕС…СЂР°РЅРёС‚СЊ Рё Р·Р°РїСѓСЃС‚РёС‚СЊ РѕСЃРЅРѕРІРЅРѕР№ Р±РѕС‚</button>
+                <button type="submit">Сохранить и запустить основной бот</button>
             </form>
             <form method="post" action="/install-web-only">
                 <button class="secondary-button" type="submit">Установить без бота Telegram</button>
             </form>
-            <div class="check-btns">
-                <button class="icon-btn" onclick="alert('РџСЂРѕРІРµСЂРєР° Telegram...')" type="button">
-                    <img src='/static/telegram.png' width='16' height='16' alt='Telegram'>РџСЂРѕРІРµСЂРёС‚СЊ Telegram
-                </button>
-                <button class="icon-btn" onclick="alert('РџСЂРѕРІРµСЂРєР° YouTube...')" type="button">
-                    <img src='/static/youtube.png' width='16' height='16' alt='YouTube'>РџСЂРѕРІРµСЂРёС‚СЊ YouTube
-                </button>
-            </div>
             <hr style="margin:32px 0 18px; border:0; border-top:1px solid var(--line);">
-            <h2 style="margin:0 0 12px; font-size:22px;">РџСѓР» РєР»СЋС‡РµР№</h2>
+            <h2 style="margin:0 0 12px; font-size:22px;">Пул ключей</h2>
             <div id="key-pool-ui">
                 <div style="margin-bottom:12px;">
-                    <label for="proto-select">РџСЂРѕС‚РѕРєРѕР»:</label>
+                    <label for="proto-select">Протокол:</label>
                     <select id="proto-select">
                         <option value="shadowsocks">shadowsocks</option>
                         <option value="vmess">vmess</option>
@@ -402,13 +395,13 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                         <option value="trojan">trojan</option>
                     </select>
                 </div>
-                <div style="margin-bottom:12px;">
-                    <input id="new-key-input" type="text" placeholder="РќРѕРІС‹Р№ РєР»СЋС‡..." style="width:60%; padding:8px; border-radius:8px; border:1px solid var(--line);">
-                    <button onclick="addKey()" class="icon-btn" style="padding:8px 16px;">Р”РѕР±Р°РІРёС‚СЊ</button>
+                <div class="pool-row">
+                    <input id="new-key-input" type="text" placeholder="Новый ключ...">
+                    <button onclick="addKey()" type="button">Добавить</button>
                 </div>
                 <div id="key-list"></div>
             </div>
-            <div class="hint">РџРѕСЃР»Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ СЌС‚Р° СЃС‚СЂР°РЅРёС†Р° Р±СѓРґРµС‚ Р·Р°РјРµРЅРµРЅР° РѕСЃРЅРѕРІРЅС‹Рј РёРЅС‚РµСЂС„РµР№СЃРѕРј Р±РѕС‚Р° РЅР° С‚РѕРј Р¶Рµ Р°РґСЂРµСЃРµ.</div>
+            <div class="hint">После сохранения эта страница будет заменена основным интерфейсом бота на том же адресе.</div>
         </div>
     </div>
 {key_pool_script}
@@ -448,7 +441,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
     def _ensure_request_allowed(self):
         if self._request_is_allowed():
             return True
-        self._send_html('<h1>403 Forbidden</h1><p>Р’РµР±-РёРЅС‚РµСЂС„РµР№СЃ РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ РёР· Р»РѕРєР°Р»СЊРЅРѕР№ СЃРµС‚Рё.</p>', status=403)
+        self._send_html('<h1>403 Forbidden</h1><p>Веб-интерфейс доступен только из локальной сети.</p>', status=403)
         return False
 
     def _send_html(self, text, status=200):
@@ -513,7 +506,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
             self._send_json({'result': remove_key_from_pool(proto, key)})
             return
         if self.path != '/save':
-            self._send_html(page_html('РќРµРёР·РІРµСЃС‚РЅРѕРµ РґРµР№СЃС‚РІРёРµ.'), status=404)
+            self._send_html(page_html('Неизвестное действие.'), status=404)
             return
 
         content_length = int(self.headers.get('Content-Length', '0'))
@@ -529,7 +522,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
             write_config(parsed)
             switch_to_main_bot()
         except Exception as exc:
-            self._send_html(page_html(f'РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РєРѕРЅС„РёРі: {exc}'), status=500)
+            self._send_html(page_html(f'Не удалось сохранить конфиг: {exc}'), status=500)
             return
 
         router_ip = parsed.get('routerip', detect_router_ip()).strip() or detect_router_ip()
@@ -537,7 +530,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
         target_url = f'http://{router_ip}:{browser_port}/'
         self._send_html(
             page_html(
-                f'РљРѕРЅС„РёРі СЃРѕС…СЂР°РЅС‘РЅ. РћСЃРЅРѕРІРЅРѕР№ Р±РѕС‚ Р·Р°РїСѓСЃРєР°РµС‚СЃСЏ. Р§РµСЂРµР· РЅРµСЃРєРѕР»СЊРєРѕ СЃРµРєСѓРЅРґ РѕС‚РєСЂРѕРµС‚СЃСЏ РѕСЃРЅРѕРІРЅР°СЏ СЃС‚СЂР°РЅРёС†Р°: {target_url}',
+                f'Конфиг сохранён. Основной бот запускается. Через несколько секунд откроется основная страница: {target_url}',
                 redirect_url=target_url,
             )
         )
