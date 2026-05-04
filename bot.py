@@ -2293,13 +2293,33 @@ def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None):
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     probe = _load_key_probe_cache().get(_hash_key(key_value), {})
     custom_states = _web_custom_probe_states(probe, custom_checks)
-    if 'tg_ok' in probe:
-        api_ok = bool(probe.get('tg_ok'))
+    has_probe_result = (
+        'tg_ok' in probe or
+        'yt_ok' in probe or
+        any(state in ('ok', 'fail') for state in custom_states.values())
+    )
+    if has_probe_result:
+        api_ok = bool(probe.get('tg_ok')) if 'tg_ok' in probe else False
         yt_ok = bool(probe.get('yt_ok')) if 'yt_ok' in probe else False
+        custom_ok = any(state == 'ok' for state in custom_states.values())
+        any_ok = api_ok or yt_ok or custom_ok
+        service_parts = []
+        if 'tg_ok' in probe:
+            service_parts.append(f'Telegram: {"работает" if api_ok else "не работает"}')
+        if 'yt_ok' in probe:
+            service_parts.append(f'YouTube: {"работает" if yt_ok else "не работает"}')
+        for check in custom_checks:
+            check_id = check.get('id')
+            state = custom_states.get(check_id)
+            if state in ('ok', 'fail'):
+                service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
+        details = 'Показан последний результат проверки пула.'
+        if service_parts:
+            details += ' ' + ', '.join(service_parts) + '.'
         return {
-            'tone': 'ok' if api_ok else 'warn',
-            'label': 'Работает' if api_ok else 'Не проверен',
-            'details': 'Показан последний сохранённый результат. Пул проверяется по одному ключу в фоновом режиме.',
+            'tone': 'ok' if api_ok else ('warn' if any_ok else 'fail'),
+            'label': 'Работает' if api_ok else ('Частично работает' if any_ok else 'Не работает'),
+            'details': details,
             'endpoint_ok': None,
             'endpoint_message': '',
             'api_ok': api_ok,
@@ -6445,6 +6465,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .traffic-inline{{justify-content:flex-start;}}
             .theme-toggle,.mode-toggle{{justify-content:center;}}
             .hero-popover{{position:static;min-width:0;width:100%;}}
+            .mode-picker-form{{gap:8px;}}
+            .mode-choice-grid{{gap:6px;}}
+            .mode-choice{{min-height:34px;padding:7px 5px;font-size:12px;line-height:1.12;white-space:normal;overflow-wrap:anywhere;word-break:normal;}}
+            .mode-choice span{{display:block;min-width:0;max-width:100%;overflow-wrap:anywhere;}}
             .layout{{grid-template-columns:1fr;gap:12px;}}
                         .command-grid{{grid-template-columns:1fr;}}
             .status-grid{{grid-template-columns:1fr;}}
@@ -6462,6 +6486,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .command-grid{{grid-template-columns:1fr;}}
             .status-card-top{{align-items:flex-start;}}
             .api-pill{{font-size:12px;}}
+            .mode-choice{{font-size:11px;padding:7px 4px;}}
         }}
         /* Light theme final pass. Keep it after compact/mobile rules so no dark surfaces leak through. */
         [data-theme="light"]{{
