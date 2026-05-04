@@ -1105,7 +1105,8 @@ def _build_direct_fetch_env():
     return env
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main'):
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main',
+                       cleanup_web_only=False):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _build_direct_fetch_env()
     if progress_command:
@@ -1140,7 +1141,7 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
     return_code = process.wait()
     if return_code != 0:
         logs.append(f'Команда завершилась с кодом {return_code}.')
-    if action == '-update':
+    if action == '-update' and cleanup_web_only:
         cleanup_note = _cleanup_after_foreign_update()
         if cleanup_note:
             logs.append(cleanup_note)
@@ -1225,6 +1226,7 @@ def _run_web_command(command):
             'bypass_keenetic',
             progress_command='update_no_bot',
             branch='feature/web-only',
+            cleanup_web_only=True,
         )
         return output
     if command == 'remove':
