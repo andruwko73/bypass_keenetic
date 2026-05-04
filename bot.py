@@ -605,6 +605,8 @@ POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'feature/independent-rework'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
+APP_VERSION_COUNTER = 422
+APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
 STATIC_DIR = os.path.join(BOT_DIR, 'static')
@@ -6153,10 +6155,12 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         h1{{font-size:18px;font-weight:700;}}
         h2{{font-size:19px;font-weight:700;line-height:1.22;}}
         .brand p,.section-subtitle,.status-note,.key-status-note{{color:#b9c6d3;}}
-        .topbar-actions{{width:100%;display:grid;grid-template-columns:minmax(340px,.9fr) minmax(320px,1.2fr) auto auto;align-items:center;justify-content:stretch;gap:8px;}}
+        .topbar-actions{{width:100%;display:grid;grid-template-columns:minmax(340px,.9fr) minmax(320px,1.2fr) auto auto auto;align-items:center;justify-content:stretch;gap:8px;}}
         .app-caption{{display:block;min-width:0;color:#eef7ff;white-space:normal;}}
         .app-caption strong{{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;}}
         .app-branch{{display:block;margin-top:3px;font-size:11px;font-weight:700;line-height:1.2;color:var(--muted);}}
+        .version-badge{{justify-self:end;align-self:start;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:3px 7px;border-radius:7px;border:1px solid rgba(91,124,150,.42);background:rgba(17,25,35,.7);color:var(--muted);font-size:10px;font-weight:800;line-height:1;letter-spacing:.04em;white-space:nowrap;box-shadow:none;}}
+        [data-theme="light"] .version-badge{{background:rgba(255,253,248,.82);}}
         .api-pill,.mode-toggle,.theme-toggle{{min-height:36px;border-radius:8px;border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);box-shadow:none;font-size:12px;}}
         .mode-toggle,.theme-toggle{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;}}
         .api-pill{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;max-width:none;font-size:12px;line-height:1.25;color:#d9e6ef;}}
@@ -6384,7 +6388,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .app-caption strong{{max-width:none;font-size:14px;overflow-wrap:anywhere;}}
             .section-subtitle,.status-note,.status-value{{overflow-wrap:anywhere;}}
             .app-caption,.api-pill{{grid-column:1 / -1;}}
-            .api-pill,.theme-toggle,.mode-toggle{{width:100%;justify-content:center;max-width:none;text-align:center;}}
+            .api-pill,.theme-toggle,.mode-toggle,.version-badge{{width:100%;justify-content:center;max-width:none;text-align:center;}}
+            .version-badge{{align-self:stretch;min-height:34px;font-size:10px;}}
             .api-pill{{justify-content:start;text-align:left;}}
             .workspace-layout{{display:block;}}
             .side-nav{{display:none;}}
@@ -7456,6 +7461,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Переключить тему">
                     <span id="theme-toggle-label">Темная тема</span>
                 </button>
+                <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_VERSION_LABEL)}</span>
                 {mode_picker_block}
             </div>
         </header>
