@@ -1,68 +1,86 @@
 <a href="https://forum.keenetic.com/topic/14672-%D0%BE%D0%B1%D1%85%D0%BE%D0%B4%D0%B0-%D0%B1%D0%BB%D0%BE%D0%BA%D0%B8%D1%80%D0%BE%D0%B2%D0%BE%D0%BA-%D0%BC%D0%BD%D0%BE%D0%B3%D0%BE-%D0%BD%D0%B5-%D0%B1%D1%8B%D0%B2%D0%B0%D0%B5%D1%82">![Forum](https://img.shields.io/badge/forum-keenetic-blue?style=social&logo=discourse)</a>
 
-## Об этой ветке
+## О ветке
 
-**Web-only версия** — управление обходом блокировок на роутерах Keenetic **через веб-интерфейс**, без Telegram-бота.
+`feature/web-only` — версия `bypass_keenetic` без Telegram-бота. Управление выполняется только через локальный веб-интерфейс роутера на `http://192.168.1.1:8080/`.
 
-Основана на форке [andruwko73/bypass_keenetic](https://github.com/andruwko73/bypass_keenetic), который является форком проекта `keenetic-dev/bypass_keenetic_dev`.
-- Обсуждение на [форуме Keenetic](https://forum.keenetic.com/topic/14672-%D0%BE%D0%B1%D1%85%D0%BE%D0%B4%D0%B0-%D0%B1%D0%BB%D0%BE%D0%BA%D0%B8%D1%80%D0%BE%D0%B2%D0%BE%D0%BA-%D0%BC%D0%BD%D0%BE%D0%B3%D0%BE-%D0%BD%D0%B5-%D0%B1%D1%8B%D0%B2%D0%B0%D0%B5%D1%82)
-- [Оригинальная вики](https://github.com/znetworkx/bypass_keenetic/wiki)
+Ветка использует те же локальные настройки, ключи, пулы и списки обхода, что и версии `main` и `feature/independent-rework`, поэтому между версиями можно переходить без очистки пользовательских данных.
 
 Возможности:
-- веб-интерфейс для управления прокси и ключами (`http://192.168.1.1:8080/`)
-- поддержка VLESS (2 маршрута), Vmess, Shadowsocks, Trojan
-- пул ключей с автоматической проверкой и авто-фейловером (по доступности YouTube)
-- subscription-ссылки для массового импорта ключей
-- JSON API `/api/status` для мониторинга
-- редактирование списков обхода по протоколам
-- готовая маршрутизация Telegram API и дата-центров Telegram через первый VLESS-маршрут
-- рабочая DNS-схема через `dnsmasq`: upstream DNS указывают на публичные DNS, без зависимости от неустановленных локальных DoT/DoH-портов `40500/40508`
-- обновление одной кнопкой из трёх веток GitHub
+- веб-интерфейс с разделами **Статус**, **Ключи**, **Списки**;
+- Vless 1, Vless 2, Vmess, Trojan и Shadowsocks;
+- пул ключей для каждого протокола;
+- загрузка subscription;
+- проверка Telegram API, YouTube и дополнительных сервисов через выбранный прокси;
+- пресеты проверок: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Le Chat, Meta AI, Instagram, Facebook;
+- переустановка в `main`, `feature/independent-rework` и обратно в `feature/web-only` с сохранением данных.
 
-## Установка (~30-60 минут с нуля)
-- [Установка Entware](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
-- Актуальный архив Entware для Keenetic на `aarch64`: [aarch64-installer.tar.gz](https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz)
-- Актуальный архив Entware для Keenetic на `mipsel`: [mipsel-installer.tar.gz](https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz)
+## Установка
 
-## Быстрый bootstrap после Entware
+Сначала установите Entware:
+- [инструкция Entware для Keenetic](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
+- `aarch64`: [aarch64-installer.tar.gz](https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz)
+- `mipsel`: [mipsel-installer.tar.gz](https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz)
 
-Если Entware уже установлен и `/opt` готов, запустите на роутере по SSH:
+После Entware подключитесь к роутеру по SSH и выполните:
 
 ```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/feature/web-only/script.sh | sh -s -- -install'
+sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/feature/web-only/bootstrap/install.sh | sh'
 ```
 
-После завершения установки откройте в браузере `http://192.168.1.1:8080/` — веб-интерфейс будет готов к работе. Telegram-бот не устанавливается, а настройки, ключи и списки обхода сохраняются при переходе на другие ветки и обратно.
+После установки откройте `http://192.168.1.1:8080/`. Telegram-бот и installer первичной настройки Telegram в этой ветке не запускаются.
 
-Перед заменой live-файлов `script.sh` создаёт локальный backup на роутере в `/opt/root/backup-*`.
+Bootstrap перед заменой файлов создает backup и rollback-скрипт в `/opt/root/bypass-last-rollback.sh`.
 
-Ограничение: подготовку накопителя и установку Entware этот скрипт не отменяет.
+## Веб-интерфейс
 
-## Шаблоны списков
-- [vless.txt](vless.txt) — готовый шаблон списка доменов и IPv4-подсетей для первого маршрута VLESS: GitHub Copilot, GitHub, инфраструктура VS Code/Microsoft, Telegram API, официальные IPv4-подсети дата-центров Telegram и связанная инфраструктура.
-- [vless-2.txt](vless-2.txt) — готовый шаблон списка доменов для второго маршрута VLESS: YouTube.
+Разделы:
+- **Статус** — состояние связи, активный режим, быстрый старт, переустановка и сервисные команды;
+- **Ключи** — активный ключ, пул ключей, subscription и проверки;
+- **Списки** — редактирование списков обхода по каждому протоколу.
 
-## Как работает веб-интерфейс на 192.168.1.1:8080
+Интерфейс адаптирован под ПК и телефон. На телефоне нижнее меню остается доступным, а длинная прокрутка ограничена таблицей пула ключей.
 
-После установки `web_bot.py` поднимает HTTP-сервер на роутере. Вся настройка и управление — через браузер.
+Опасные действия требуют подтверждения: удаление компонентов, перезагрузка роутера, DNS Override, очистка пула и удаление пользовательских проверок.
 
-Что доступно на странице:
-- **Статус** — индикаторы доступности YouTube через каждый протокол, состояние процессов (Shadowsocks, Xray/V2Ray, Trojan, DNS-сервисы)
-- **Ключи** — сохранение ключей Vless 1, Vless 2, Vmess, Trojan и Shadowsocks с автоматической проверкой
-- **Пул ключей** — subscription-ссылки для массового импорта, авто-фейловер при недоступности YouTube
-- **Списки обхода** — редактирование списков доменов по протоколам
-- **DNS Override** — включение/выключение принудительного DNS через Keenetic
-- **Обновление** — три кнопки:
-  - *Переустановить из форка без сброса* — обновление из ветки `main`
-  - *Переустановка (ветка independent)* — обновление из `feature/independent-rework`
-  - *Переустановка (без Telegram бота)* — обновление из этой же ветки `feature/web-only`
-- **Перезапуск сервисов**, **удаление компонентов**, **перезагрузка роутера**
+## Пул ключей и проверки
 
-Типовой сценарий работы:
-1. Откройте `http://192.168.1.1:8080/` в браузере из локальной сети.
-2. Добавьте ключи через subscription-ссылку или вручную в карточки протоколов.
-3. Выберите активный режим кнопкой **Режим**.
-4. При необходимости отредактируйте списки обхода.
-5. Убедитесь, что в блоке статуса горят зелёные индикаторы YouTube.
+Пул ключей хранится в `/opt/etc/bot/key_pools.json`, кеш проверок — в `/opt/etc/bot/key_probe_cache.json`, пользовательские проверки — в `/opt/etc/bot/custom_checks.json`.
 
-> **Примечание:** При обновлении из веток `main` или `feature/independent-rework` их `script.sh` может скачать Telegram-версию (`bot.py`). `web_bot.py` автоматически удаляет `bot.py` и Telegram-сервисы после завершения обновления, сохраняя web-only режим.
+Проверка пула не переключает основной активный ключ и не разрывает текущее подключение. Активный ключ текущего режима пропускается в фоновой проверке пула, его состояние берется из живого подключения. Для остальных ключей используется временный `xray` с отдельными SOCKS-портами. Результат каждого ключа сохраняется сразу, а временные процессы и конфиги удаляются после пачки проверок.
+
+Если свободной памяти на роутере становится мало, фоновая проверка останавливается, чтобы не подвесить устройство.
+
+## Переустановка
+
+Из веб-интерфейса доступны переходы:
+- **Переустановить из форка без сброса** — `main`;
+- **Переустановка (ветка independent)** — `feature/independent-rework` с Telegram-ботом;
+- **Переустановка (без Telegram бота)** — текущая web-only ветка.
+
+При переходах сохраняются активные ключи, пул ключей, пользовательские проверки, списки обхода и базовые настройки веб-интерфейса.
+
+## Списки обхода
+
+- [vless.txt](vless.txt) — шаблон для первого маршрута VLESS: Telegram API, дата-центры Telegram, OpenAI/ChatGPT/Codex, GitHub, Copilot и связанные сервисы.
+- [vless-2.txt](vless-2.txt) — шаблон для второго маршрута VLESS: YouTube.
+
+## Скриншоты
+
+Веб-интерфейс web-only:
+
+<a href="docs/screenshots/web-ui-status.png">
+  <img src="docs/screenshots/web-ui-status.png" alt="Статус web-only" width="520">
+</a>
+
+Пул ключей:
+
+<a href="docs/screenshots/web-ui-pool.png">
+  <img src="docs/screenshots/web-ui-pool.png" alt="Пул ключей web-only" width="520">
+</a>
+
+Мобильная версия:
+
+<a href="docs/screenshots/mobile-status.png">
+  <img src="docs/screenshots/mobile-status.png" alt="Мобильный web-only интерфейс" width="320">
+</a>

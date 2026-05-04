@@ -11,7 +11,7 @@
 # оригинальный репозиторий (tas-unn), пользовательский форк
 
 repo="andruwko73"
-REPO_REF="${REPO_REF:-main}"
+REPO_REF="${REPO_REF:-feature/web-only}"
 
 config_get() {
   key="$1"
@@ -38,7 +38,19 @@ cleanup_update_artifacts() {
   done
 }
 
+cleanup_pool_probe_runtime() {
+  for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+    kill "$pid" >/dev/null 2>&1 || true
+  done
+  sleep 1
+  for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  done
+  rm -f /tmp/bypass_pool_probe_*.json 2>/dev/null || true
+}
+
 stop_telegram_bot_runtime() {
+  cleanup_pool_probe_runtime
   [ -x /opt/etc/init.d/S99telegram_bot ] && /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
   [ -x /opt/etc/init.d/S98telegram_bot_installer ] && /opt/etc/init.d/S98telegram_bot_installer stop >/dev/null 2>&1 || true
   for pid in $(pgrep -f "python3 /opt/etc/bot/main.py") $(pgrep -f "python3 /opt/etc/bot.py"); do
@@ -61,6 +73,17 @@ has_running_process() {
     check_process >/dev/null 2>&1
 }
 
+cleanup_pool_probe_runtime() {
+    for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+        kill "$pid" >/dev/null 2>&1 || true
+    done
+    sleep 1
+    for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
+        kill -9 "$pid" >/dev/null 2>&1 || true
+    done
+    rm -f /tmp/bypass_pool_probe_*.json 2>/dev/null || true
+}
+
 stop_process() {
     pids=$(check_process)
     for pid in $pids; do
@@ -77,6 +100,7 @@ stop_process() {
             kill -9 "$pid" >/dev/null 2>&1 || true
         done
     fi
+    cleanup_pool_probe_runtime
 }
 
 case "$1" in
@@ -129,6 +153,19 @@ if [ -f "/opt/etc/bot/bot_config.py" ]; then
   BOT_CONFIG_PATH="/opt/etc/bot/bot_config.py"
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
+
+install_static_assets() {
+  static_dir="${BOT_RUNTIME_DIR}/static"
+  icons="chatgpt claude copilot deepseek facebook gemini grok instagram meta mistral perplexity"
+  mkdir -p "$static_dir/service-icons"
+  curl -fsSL -o "$static_dir/telegram.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/telegram.png" >/dev/null 2>&1 || true
+  curl -fsSL -o "$static_dir/youtube.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/youtube.png" >/dev/null 2>&1 || true
+  for icon in $icons; do
+    curl -fsSL -o "$static_dir/service-icons/${icon}.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/service-icons/${icon}.png" >/dev/null 2>&1 || true
+  done
+  find "$static_dir" -type d -exec chmod 755 {} \; 2>/dev/null || true
+  find "$static_dir" -type f -exec chmod 644 {} \; 2>/dev/null || true
+}
 
 ensure_web_only_config() {
   if [ -f "$BOT_CONFIG_PATH" ]; then
@@ -513,6 +550,7 @@ if [ "$1" = "-install" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     curl -o "$BOT_MAIN_PATH" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_bot.py"
     chmod 755 "$BOT_MAIN_PATH"
+    install_static_assets
     ensure_web_only_config
     install_web_only_service
     stop_telegram_bot_runtime
@@ -650,6 +688,7 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/web_bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
+    install_static_assets
     ensure_web_only_config
     install_web_only_service
     rmdir "$stage_dir" 2>/dev/null || true
