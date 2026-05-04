@@ -7798,7 +7798,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             self._send_action_result(
                 result,
                 success=success,
-                extra={'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True)},
+                extra={'pool_probe_started': success},
             )
             return
 
