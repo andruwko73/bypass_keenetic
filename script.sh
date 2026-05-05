@@ -228,7 +228,8 @@ request = urllib.request.Request(
     headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'bypass-keenetic-updater'},
 )
 try:
-    with urllib.request.urlopen(request, timeout=35) as response:
+    timeout = int(os.environ.get('GITHUB_API_TIMEOUT', '35'))
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode('utf-8'))
     if payload.get('encoding') != 'base64' or 'content' not in payload:
         raise ValueError('unexpected GitHub contents API payload')
