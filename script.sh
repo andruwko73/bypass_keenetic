@@ -519,6 +519,17 @@ download_update_file() {
   tmp="${target}.tmp.$$"
 
   rm -f "$tmp"
+  if [ "${RAW_GITHUB_USE_SOCKS:-0}" = "1" ]; then
+    if download_raw_file_via_socks "$url" "$tmp"; then
+      validate_update_file "$tmp" "$marker" "$description" || return 1
+      mv "$tmp" "$target"
+      return 0
+    fi
+    rm -f "$tmp"
+    RAW_GITHUB_BYPASS=1
+    export RAW_GITHUB_BYPASS
+  fi
+
   if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
     echo "Using GitHub archive/API fallback for ${description}."
     if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
@@ -529,13 +540,15 @@ download_update_file() {
     return 1
   fi
 
-  if curl -fsSL --connect-timeout 8 --max-time 25 --retry 1 --retry-delay 1 -o "$tmp" "$url" >/dev/null 2>&1; then
+  if curl -fsSL --connect-timeout 5 --max-time 8 -o "$tmp" "$url" >/dev/null 2>&1; then
     validate_update_file "$tmp" "$marker" "$description" || return 1
     mv "$tmp" "$target"
     return 0
   fi
 
   rm -f "$tmp"
+  RAW_GITHUB_USE_SOCKS=1
+  export RAW_GITHUB_USE_SOCKS
   echo "raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS."
   if download_raw_file_via_socks "$url" "$tmp"; then
     validate_update_file "$tmp" "$marker" "$description" || return 1
