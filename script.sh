@@ -435,6 +435,127 @@ download_update_file() {
   mv "$tmp" "$target"
 }
 
+repo_path_from_raw_url() {
+  url="$1"
+  raw_prefix="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/"
+
+  case "$url" in
+    "$raw_prefix"*) printf '%s' "${url#"$raw_prefix"}" ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_update_file() {
+  target="$1"
+  marker="$2"
+  description="$3"
+
+  if [ ! -s "$target" ]; then
+    rm -f "$target"
+    echo "Error: ${description} downloaded as empty file"
+    return 1
+  fi
+  if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
+    rm -f "$target"
+    echo "Error: ${description} failed content validation"
+    return 1
+  fi
+  return 0
+}
+
+download_raw_file_via_socks() {
+  url="$1"
+  target="$2"
+
+  for port in ${GITHUB_RAW_SOCKS_PORTS:-10811 10813 10812 10814 10815}; do
+    if curl -fsSL --socks5-hostname "127.0.0.1:${port}" --connect-timeout 6 --max-time 35 --retry 1 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1; then
+      echo "Downloaded via local SOCKS port ${port}."
+      return 0
+    fi
+  done
+  return 1
+}
+
+prepare_update_archive() {
+  [ -n "${UPDATE_ARCHIVE_ROOT:-}" ] && [ -d "$UPDATE_ARCHIVE_ROOT" ] && return 0
+  [ -n "${stage_dir:-}" ] || return 1
+
+  archive_work="$stage_dir/repo-archive"
+  archive_file="$archive_work/repo.tar.gz"
+  mkdir -p "$archive_work" || return 1
+
+  archive_ref="$REPO_REF"
+  case "$archive_ref" in
+    refs/*) ;;
+    */*) archive_ref="refs/heads/$archive_ref" ;;
+  esac
+  archive_url="https://codeload.github.com/${repo}/bypass_keenetic/tar.gz/${archive_ref}"
+
+  curl -fsSL --connect-timeout 8 --max-time 90 -o "$archive_file" "$archive_url" >/dev/null 2>&1 || return 1
+  tar -xzf "$archive_file" -C "$archive_work" >/dev/null 2>&1 || return 1
+  UPDATE_ARCHIVE_ROOT=$(find "$archive_work" -mindepth 1 -maxdepth 1 -type d | head -n1)
+  [ -n "$UPDATE_ARCHIVE_ROOT" ] && [ -d "$UPDATE_ARCHIVE_ROOT" ] || return 1
+  export UPDATE_ARCHIVE_ROOT
+  echo "GitHub archive fallback is ready."
+  return 0
+}
+
+download_repo_file_from_archive() {
+  url="$1"
+  target="$2"
+  repo_path=$(repo_path_from_raw_url "$url") || return 1
+
+  prepare_update_archive || return 1
+  src="$UPDATE_ARCHIVE_ROOT/$repo_path"
+  [ -f "$src" ] || return 1
+  cp "$src" "$target"
+}
+
+download_update_file() {
+  url="$1"
+  target="$2"
+  marker="$3"
+  description="$4"
+  tmp="${target}.tmp.$$"
+
+  rm -f "$tmp"
+  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
+    echo "Using GitHub archive/API fallback for ${description}."
+    if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
+      validate_update_file "$target" "$marker" "$description" || return 1
+      return 0
+    fi
+    echo "Error: failed to download ${description}"
+    return 1
+  fi
+
+  if curl -fsSL --connect-timeout 8 --max-time 25 --retry 1 --retry-delay 1 -o "$tmp" "$url" >/dev/null 2>&1; then
+    validate_update_file "$tmp" "$marker" "$description" || return 1
+    mv "$tmp" "$target"
+    return 0
+  fi
+
+  rm -f "$tmp"
+  echo "raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS."
+  if download_raw_file_via_socks "$url" "$tmp"; then
+    validate_update_file "$tmp" "$marker" "$description" || return 1
+    mv "$tmp" "$target"
+    return 0
+  fi
+
+  rm -f "$tmp"
+  RAW_GITHUB_BYPASS=1
+  export RAW_GITHUB_BYPASS
+  echo "raw.githubusercontent.com unavailable; using GitHub archive fallback."
+  if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
+    validate_update_file "$target" "$marker" "$description" || return 1
+    return 0
+  fi
+
+  echo "Error: failed to download ${description}"
+  return 1
+}
+
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     # opkg remove curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
