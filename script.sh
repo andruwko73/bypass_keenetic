@@ -150,7 +150,9 @@ EOF
 
   if [ -x /opt/etc/init.d/S24xray ]; then
     mkdir -p /opt/etc/xray
-    curl -fsSL --connect-timeout 8 --max-time 25 -o /opt/etc/xray/config.json "$core_config_source" || true
+    if [ ! -s /opt/etc/xray/config.json ]; then
+      curl -fsSL --connect-timeout 5 --max-time 8 -o /opt/etc/xray/config.json "$core_config_source" >/dev/null 2>&1 || true
+    fi
     chmod 755 /opt/etc/init.d/S24xray || chmod +x /opt/etc/init.d/S24xray
     sed -i 's|ARGS="-confdir /opt/etc/xray"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
     sed -i 's|ARGS="-config /opt/etc/xray/config.json"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
@@ -158,7 +160,9 @@ EOF
 
   if [ -x /opt/etc/init.d/S24v2ray ]; then
     mkdir -p /opt/etc/v2ray
-    curl -fsSL --connect-timeout 8 --max-time 25 -o /opt/etc/v2ray/config.json "$core_config_source" || true
+    if [ ! -s /opt/etc/v2ray/config.json ]; then
+      curl -fsSL --connect-timeout 5 --max-time 8 -o /opt/etc/v2ray/config.json "$core_config_source" >/dev/null 2>&1 || true
+    fi
     chmod 755 /opt/etc/init.d/S24v2ray || chmod +x /opt/etc/init.d/S24v2ray
     sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1 || true
   fi
