@@ -362,6 +362,20 @@ def _key_probe_is_fresh(entry, now=None, custom_checks=None):
     return True
 
 
+def _key_probe_has_required_results(entry, custom_checks=None):
+    if not isinstance(entry, dict):
+        return False
+    if 'tg_ok' not in entry or 'yt_ok' not in entry:
+        return False
+    custom_checks = custom_checks or []
+    if custom_checks:
+        custom = entry.get('custom', {})
+        if not isinstance(custom, dict):
+            return False
+        return all(check.get('id') in custom for check in custom_checks)
+    return True
+
+
 TELEGRAM_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1NiIgcj0iMjU2IiBmaWxsPSIjMzdBRUUyIi8+PHBhdGggZD0iTTExOSAyNjVsMjY1LTEwNGMxMi01IDIzIDMgMTkgMTlsLTQ1IDIxMmMtMyAxMy0xMiAxNi0yNCAxMGwtNjYtNDktMzIgMzFjLTQgNC03IDctMTUgN2w2LTg1IDE1NS0xNDBjNy02LTItMTAtMTEtNGwtMTkyIDEyMS04My0yNmMtMTgtNi0xOC0xOCA0LTI2eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg=='
 YOUTUBE_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA0NDMgMzIwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSI0NDMiIGhlaWdodD0iMzIwIiByeD0iNzAiIGZpbGw9IiNGRjAwMDAiLz48cG9seWdvbiBwb2ludHM9IjE3Nyw5NiAzNTUsMTYwIDE3NywyMjQiIGZpbGw9IiNmZmYiLz48L3N2Zz4='
 CHATGPT_ICON_B64 = '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'
@@ -402,13 +416,33 @@ def _load_key_pools():
         with open(KEY_POOLS_PATH, 'r', encoding='utf-8') as f:
             value = json.load(f)
         if isinstance(value, dict):
-            return value
+            return _normalize_key_pools(value)
     except Exception:
         pass
     return {proto: [] for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']}
 
 
+def _dedupe_key_list(keys):
+    result = []
+    seen = set()
+    for key_value in keys or []:
+        key_value = str(key_value or '').strip()
+        if not key_value or key_value in seen:
+            continue
+        seen.add(key_value)
+        result.append(key_value)
+    return result
+
+
+def _normalize_key_pools(pools):
+    normalized = {}
+    for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+        normalized[proto] = _dedupe_key_list((pools or {}).get(proto, []))
+    return normalized
+
+
 def _save_key_pools(pools):
+    pools = _normalize_key_pools(pools)
     os.makedirs(os.path.dirname(KEY_POOLS_PATH), exist_ok=True)
     with open(KEY_POOLS_PATH, 'w', encoding='utf-8') as f:
         json.dump(pools, f, ensure_ascii=False, indent=2)
@@ -447,7 +481,7 @@ def _fetch_keys_from_subscription(url):
 
 def _set_active_key(proto, key):
     pools = _load_key_pools()
-    keys = list(pools.get(proto, []) or [])
+    keys = _dedupe_key_list(pools.get(proto, []) or [])
     if key in keys:
         keys.remove(key)
     keys.insert(0, key)
@@ -477,6 +511,8 @@ def _install_key_for_protocol(proto, key_value, verify=True):
 
 def _attempt_auto_failover():
     now = time.time()
+    if globals().get('pool_probe_lock') and pool_probe_lock.locked():
+        return
     if auto_failover_state['in_progress']:
         return
     if auto_failover_state['last_attempt'] and now - auto_failover_state['last_attempt'] < 30:
@@ -581,12 +617,13 @@ POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.3
 POOL_PROBE_MIN_AVAILABLE_KB = 120000
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 3)))
-POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 3)), POOL_PROBE_BATCH_SIZE))
+POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
+POOL_PROBE_PAGE_MAX_KEYS = max(1, int(getattr(config, 'pool_probe_page_max_keys', 12)))
 POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 1.5))
 POOL_PROBE_TG_READ_TIMEOUT = float(getattr(config, 'pool_probe_tg_read_timeout', 2))
 POOL_PROBE_HTTP_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_http_connect_timeout', 1.5))
 POOL_PROBE_HTTP_READ_TIMEOUT = float(getattr(config, 'pool_probe_http_read_timeout', 1.5))
-POOL_PROBE_PAGE_REFRESH_INTERVAL = float(getattr(config, 'pool_probe_page_refresh_interval', 120))
+POOL_PROBE_PAGE_REFRESH_INTERVAL = float(getattr(config, 'pool_probe_page_refresh_interval', 1800))
 POOL_PROBE_SINGLE_TIMEOUT_SECONDS = max(
     8.0,
     POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
@@ -598,9 +635,17 @@ POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'feature/web-only'
 APP_BRANCH_DESCRIPTION = 'без Telegram бота'
-APP_VERSION_COUNTER = 414
+APP_VERSION_COUNTER = 415
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
+CONNECTIVITY_CHECK_DOMAINS = [
+    'full:connectivitycheck.gstatic.com',
+    'full:connectivitycheck.android.com',
+    'full:clients3.google.com',
+    'full:clients4.google.com',
+    'full:www.google.com',
+    'full:www.gstatic.com',
+]
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
 STATIC_DIR = os.path.join(BOT_DIR, 'static')
 README_PATH = os.path.join(BOT_DIR, 'README.md')
@@ -718,6 +763,53 @@ def _fetch_remote_text(url, timeout=20):
     return response.text
 
 
+SOCIALNET_SOURCE_URL = 'https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt'
+SOCIALNET_LOCAL_PATHS = [
+    os.path.join(BOT_DIR, 'socialnet.txt'),
+    '/opt/etc/bot/socialnet.txt',
+    '/opt/etc/unblock/socialnet.txt',
+]
+
+TELEGRAM_UNBLOCK_ENTRIES = [
+    '91.108.56.0/22',
+    '91.108.4.0/22',
+    '91.108.8.0/22',
+    '91.108.16.0/22',
+    '91.108.12.0/22',
+    '149.154.160.0/20',
+    '91.105.192.0/23',
+    '91.108.20.0/22',
+    '185.76.151.0/24',
+    '5.28.192.0/21',
+    '95.161.64.0/20',
+    'api.telegram.org',
+    'web.telegram.org',
+    'my.telegram.org',
+    't.me',
+    'tx.me',
+    'telegra.ph',
+    'graph.org',
+    'telegram.org',
+    'telegram.me',
+    'telegram.dog',
+    'telegram-cdn.org',
+    'telegramapp.org',
+    'telegramdownload.com',
+    'cdn-telegram.org',
+    'telesco.pe',
+    'comments.app',
+    'contest.com',
+    'fragment.com',
+    'quiz.directory',
+    'tg.dev',
+    'tg.org',
+    'tgram.org',
+    'tdesktop.com',
+    'teleg.xyz',
+    'telega.one',
+]
+
+
 SERVICE_LIST_SOURCES = {
     'youtube': {
         'label': 'YouTube',
@@ -728,6 +820,7 @@ SERVICE_LIST_SOURCES = {
         'label': 'Telegram',
         'aliases': ['telegram', 'tg', 'телеграм', 'телега'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst',
+        'entries': TELEGRAM_UNBLOCK_ENTRIES,
     },
     'meta': {
         'label': 'Instagram / Meta',
@@ -749,6 +842,40 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['twitter', 'x', 'твиттер'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/twitter.lst',
     },
+}
+
+SOCIALNET_SERVICE_KEYS = ('telegram', 'meta', 'discord', 'tiktok', 'twitter')
+SOCIALNET_ALL_KEY = 'all'
+SOCIALNET_EXCLUDED_ENTRIES = {
+    'youtube.com',
+    'm.youtube.com',
+    'tv.youtube.com',
+    's.youtube.com',
+    'youtu.be',
+    'yt.be',
+    'ytimg.com',
+    'i.ytimg.com',
+    'ytimg.l.google.com',
+    'yt3.ggpht.com',
+    'yt3.googleusercontent.com',
+    'ggpht.com',
+    'googlevideo.com',
+    'youtubei.googleapis.com',
+    'youtubeembeddedplayer.googleapis.com',
+    'youtube-ui.l.google.com',
+    'wide-youtube.l.google.com',
+    'yt-video-upload.l.google.com',
+    'play-fe.googleapis.com',
+    'jnn-pa.googleapis.com',
+    'returnyoutubedislikeapi.com',
+    'youtubekids.com',
+    'youtube-nocookie.com',
+    'yting.com',
+    'gvt1.com',
+    'gvt2.com',
+    'googleapis.com',
+    'googleusercontent.com',
+    'nhacmp3youtube.com',
 }
 
 
@@ -1040,6 +1167,102 @@ def _write_unblock_list_entries(list_name, entries):
                 file.write(line + '\n')
 
 
+def _normalize_unblock_route_name(list_name):
+    safe_name = os.path.basename((list_name or '').strip())
+    if safe_name.endswith('.txt'):
+        safe_name = safe_name[:-4]
+    if not safe_name or not re.match(r'^[A-Za-z0-9_-]+$', safe_name):
+        raise ValueError('Некорректное имя списка')
+    return safe_name
+
+
+def _socialnet_entries_from_text(text):
+    entries = []
+    seen = set()
+    for raw_line in (text or '').replace('\r', '\n').split('\n'):
+        line = raw_line.split('#', 1)[0].strip()
+        if not line or line.lower() in SOCIALNET_EXCLUDED_ENTRIES or line in seen:
+            continue
+        seen.add(line)
+        entries.append(line)
+    return entries
+
+
+def _resolve_socialnet_service(value):
+    normalized = (value or '').strip().lower()
+    if normalized in ('', SOCIALNET_ALL_KEY, 'all', 'все', 'все соцсети'):
+        return SOCIALNET_ALL_KEY
+    aliases = _service_list_alias_map()
+    key = aliases.get(normalized)
+    if key in SOCIALNET_SERVICE_KEYS:
+        return key
+    return None
+
+
+def _socialnet_service_label(service_key):
+    if service_key == SOCIALNET_ALL_KEY:
+        return 'Все соцсети'
+    return SERVICE_LIST_SOURCES.get(service_key, {}).get('label', service_key)
+
+
+def _load_service_entries(service_key):
+    source = SERVICE_LIST_SOURCES.get(service_key)
+    if not source:
+        raise ValueError('Неизвестная соцсеть')
+    if source.get('entries'):
+        return _socialnet_entries_from_text('\n'.join(source['entries']))
+    raw_text = _fetch_remote_text(source['url'], timeout=25)
+    entries = _parse_service_domains(raw_text)
+    if not entries:
+        raise ValueError(f'Список {source["label"]} пуст')
+    return entries
+
+
+def _load_socialnet_entries(service_key=SOCIALNET_ALL_KEY):
+    service_key = _resolve_socialnet_service(service_key)
+    if not service_key:
+        raise ValueError('Неизвестная соцсеть')
+    if service_key != SOCIALNET_ALL_KEY:
+        return _load_service_entries(service_key)
+    for path in SOCIALNET_LOCAL_PATHS:
+        try:
+            if os.path.exists(path):
+                entries = _socialnet_entries_from_text(_read_text_file(path))
+                if entries:
+                    return entries
+        except Exception:
+            continue
+    social_text = _fetch_remote_text(SOCIALNET_SOURCE_URL, timeout=25)
+    entries = _socialnet_entries_from_text(social_text)
+    if not entries:
+        raise ValueError('Список соцсетей пуст')
+    return entries
+
+
+def _apply_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY, remove=False):
+    route_name = _normalize_unblock_route_name(list_name)
+    service_key = _resolve_socialnet_service(service_key)
+    if not service_key:
+        raise ValueError('Неизвестная соцсеть')
+    entries = set(_load_socialnet_entries(service_key))
+    list_path = _unblock_list_path(route_name)
+    current = set(_read_unblock_list_entries(route_name)) if os.path.exists(list_path) else set()
+    before = len(current)
+    if remove:
+        current.difference_update(entries)
+        changed = before - len(current)
+        action = 'удалено'
+    else:
+        current.update(entries)
+        changed = len(current) - before
+        action = 'добавлено'
+    _write_unblock_list_entries(route_name, current)
+    subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
+    label = _list_label(f'{route_name}.txt')
+    service_label = _socialnet_service_label(service_key)
+    return f'✅ {service_label}: {action} {changed} записей в {label}. Всего в списке: {len(current)}.'
+
+
 
 def _resolve_service_list_name(value):
     normalized = (value or '').strip().lower()
@@ -1314,12 +1537,12 @@ def _save_unblock_list(list_name, text):
     return f'✅ Список {safe_name} сохранён и применён.'
 
 
-def _append_socialnet_list(list_name):
-    safe_name = os.path.basename(list_name)
-    target_path = os.path.join('/opt/etc/unblock', safe_name)
-    current = _read_text_file(target_path)
-    social_text = _fetch_remote_text('https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt')
-    return _save_unblock_list(safe_name, current + '\n' + social_text)
+def _append_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
+    return _apply_socialnet_list(list_name, service_key=service_key, remove=False)
+
+
+def _remove_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
+    return _apply_socialnet_list(list_name, service_key=service_key, remove=True)
 
 
 def _list_label(file_name):
@@ -1474,13 +1697,14 @@ def _ensure_current_keys_in_pools(current_keys=None):
     changed = False
     for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
         key_value = (current_keys.get(proto) or '').strip()
-        if not key_value:
-            continue
-        keys = list(pools.get(proto, []) or [])
-        if key_value in keys:
-            continue
-        keys.insert(0, key_value)
+        keys = _dedupe_key_list(pools.get(proto, []) or [])
+        original_keys = list(keys)
+        if key_value:
+            keys = [candidate for candidate in keys if candidate != key_value]
+            keys.insert(0, key_value)
         pools[proto] = keys
+        if keys == original_keys:
+            continue
         changed = True
     if changed:
         _save_key_pools(pools)
@@ -1641,9 +1865,10 @@ def _protocol_status_for_key(key_name, key_value):
     proxy_url = proxy_settings.get(key_name)
     api_ok, api_message = _check_telegram_api_through_proxy(
         proxy_url,
-        connect_timeout=3,
-        read_timeout=4,
+        connect_timeout=5,
+        read_timeout=8,
     )
+    api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
     yt_ok, yt_message = _check_http_through_proxy(
         proxy_url,
         url='https://www.youtube.com',
@@ -1653,11 +1878,14 @@ def _protocol_status_for_key(key_name, key_value):
     custom_checks = _load_custom_checks()
     cached_probe = _load_key_probe_cache().get(_hash_key(key_value), {})
     custom_states = _web_custom_probe_states(cached_probe, custom_checks)
-    _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok)
+    if api_transient:
+        _record_key_probe(key_name, key_value, yt_ok=yt_ok)
+    else:
+        _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok)
     custom_ok = any(state == 'ok' for state in custom_states.values())
     any_ok = api_ok or yt_ok or custom_ok
     service_parts = [
-        f'Telegram: {"работает" if api_ok else "не работает"}',
+        f'Telegram: {"работает" if api_ok else ("перепроверяется" if api_transient else "не работает")}',
         f'YouTube: {"работает" if yt_ok else "не работает"}',
     ]
     for check in custom_checks:
@@ -1666,17 +1894,17 @@ def _protocol_status_for_key(key_name, key_value):
         if state in ('ok', 'fail'):
             service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
     details = f'Показан результат проверки активного ключа. {endpoint_message} ' + ', '.join(service_parts) + '.'
-    if (endpoint_ok and not api_ok and now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
-            _is_transient_telegram_api_failure(api_message)):
+    if endpoint_ok and api_transient:
         return {
             'tone': 'warn',
             'label': 'Проверяется',
-            'details': (f'{endpoint_message} Telegram API ещё перепроверяется после рестарта. '
+            'details': (f'{endpoint_message} Telegram API не ответил вовремя, идёт повторная проверка. '
                         'Статус обновится без перезагрузки страницы.').strip(),
             'endpoint_ok': endpoint_ok,
             'endpoint_message': endpoint_message,
             'api_ok': False,
             'api_message': api_message,
+            'api_pending': True,
             'yt_ok': yt_ok,
             'yt_message': yt_message,
             'custom': custom_states,
@@ -2314,12 +2542,61 @@ def _pool_keys_for_proto(proto):
     return list(pools.get(proto, []) or [])
 
 
+def _v2ray_key_file_candidates(file_path):
+    paths = [file_path]
+    file_name = os.path.basename(file_path)
+    for directory in (XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR):
+        candidate = os.path.join(directory, file_name)
+        if candidate not in paths:
+            paths.append(candidate)
+    return paths
+
+
+def _remove_file_if_exists(file_path):
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as exc:
+        _write_runtime_log(f'Не удалось удалить {file_path}: {exc}')
+
+
+def _clear_installed_key_for_protocol(proto):
+    if proto == 'vmess':
+        for file_path in _v2ray_key_file_candidates(VMESS_KEY_PATH):
+            _remove_file_if_exists(file_path)
+    elif proto == 'vless':
+        for file_path in _v2ray_key_file_candidates(VLESS_KEY_PATH):
+            _remove_file_if_exists(file_path)
+    elif proto == 'vless2':
+        for file_path in _v2ray_key_file_candidates(VLESS2_KEY_PATH):
+            _remove_file_if_exists(file_path)
+    elif proto == 'shadowsocks':
+        _remove_file_if_exists('/opt/etc/shadowsocks.json')
+    elif proto == 'trojan':
+        _remove_file_if_exists('/opt/etc/trojan/config.json')
+    else:
+        raise ValueError('Неизвестный протокол')
+    if _load_proxy_mode() == proto:
+        update_proxy('none')
+    _write_all_proxy_core_config()
+    _restart_proxy_services_for_protocols([proto])
+
+
 def _delete_pool_key(proto, key_value):
     pools = _load_key_pools()
-    keys = list(pools.get(proto, []) or [])
+    keys = _dedupe_key_list(pools.get(proto, []) or [])
     if key_value not in keys:
         raise ValueError('Ключ не найден в пуле.')
-    keys.remove(key_value)
+    current_key = (_load_current_keys().get(proto) or '').strip()
+    was_current = bool(current_key and current_key == key_value)
+    keys = [candidate for candidate in keys if candidate != key_value]
+    promoted_key = keys[0] if was_current and keys else ''
+    if promoted_key:
+        _install_key_for_protocol(proto, promoted_key, verify=False)
+        keys = [candidate for candidate in keys if candidate != promoted_key]
+        keys.insert(0, promoted_key)
+    elif was_current:
+        _clear_installed_key_for_protocol(proto)
     pools[proto] = keys
     _save_key_pools(pools)
     with key_probe_cache_lock:
@@ -2332,9 +2609,12 @@ def _delete_pool_key(proto, key_value):
 
 def _clear_pool(proto):
     pools = _load_key_pools()
-    removed_keys = list(pools.get(proto, []) or [])
+    removed_keys = _dedupe_key_list(pools.get(proto, []) or [])
     pools[proto] = []
     _save_key_pools(pools)
+    current_key = (_load_current_keys().get(proto) or '').strip()
+    if current_key and current_key in removed_keys:
+        _clear_installed_key_for_protocol(proto)
     if removed_keys:
         with key_probe_cache_lock:
             cache = _load_key_probe_cache()
@@ -2590,11 +2870,20 @@ def _start_pool_probe_xray(config_json):
     config_path = f'/tmp/bypass_pool_probe_{os.getpid()}_{threading.get_ident()}.json'
     with open(config_path, 'w', encoding='utf-8') as file:
         json.dump(config_json, file, ensure_ascii=False, separators=(',', ':'))
+    preexec_fn = None
+    if os.name == 'posix' and hasattr(os, 'nice'):
+        def lower_priority():
+            try:
+                os.nice(10)
+            except Exception:
+                pass
+        preexec_fn = lower_priority
     process = subprocess.Popen(
         [xray_binary, 'run', '-c', config_path],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         close_fds=True,
+        preexec_fn=preexec_fn,
     )
     return process, config_path
 
@@ -2674,9 +2963,9 @@ def _cleanup_pool_probe_runtime(kill_processes=False):
         pass
 
 
-def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
+def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False, missing_only=False):
     custom_checks = _load_custom_checks()
-    cache = _load_key_probe_cache() if stale_only else {}
+    cache = _load_key_probe_cache() if stale_only or missing_only else {}
     now = time.time()
     selected = []
     seen = set()
@@ -2688,6 +2977,8 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
         if task_id in seen:
             continue
         seen.add(task_id)
+        if missing_only and _key_probe_has_required_results(cache.get(_hash_key(key_value)), custom_checks=custom_checks):
+            continue
         if stale_only and _key_probe_is_fresh(cache.get(_hash_key(key_value)), now=now, custom_checks=custom_checks):
             continue
         selected.append((proto, key_value))
@@ -2696,8 +2987,13 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
     return selected, custom_checks
 
 
-def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False):
-    selected, custom_checks = _select_pool_probe_tasks(tasks, max_keys=max_keys, stale_only=stale_only)
+def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=False):
+    selected, custom_checks = _select_pool_probe_tasks(
+        tasks,
+        max_keys=max_keys,
+        stale_only=stale_only,
+        missing_only=missing_only,
+    )
     if POOL_PROBE_ACTIVE_ONLY:
         current_keys = _load_current_keys()
         selected = [
@@ -3223,6 +3519,11 @@ def _is_transient_telegram_api_failure(status_text):
     markers = [
         'network is unreachable',
         'timed out',
+        'timeout',
+        'таймаут',
+        'не ответил вовремя',
+        'за отведённое время',
+        'за отведенное время',
         'max retries exceeded',
         'failed to establish a new connection',
         'connection reset',
@@ -3243,10 +3544,10 @@ def _build_web_status(current_keys, protocols=None):
         api_message = str(current_protocol.get('api_message', '') or '')
         if api_ok:
             api_status = '✅ Доступ к api.telegram.org подтверждён.'
-        elif (socks_ok and now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
-                _is_transient_telegram_api_failure(api_message)):
-            api_status = ('⏳ Прокси-режим поднят, Telegram API ещё перепроверяется после рестарта. '
-                          'Обновите страницу через несколько секунд.')
+        elif socks_ok and _is_transient_telegram_api_failure(api_message):
+            api_status = ('⏳ Telegram API не ответил вовремя через текущий режим. '
+                          'Локальный SOCKS работает, идёт повторная проверка. '
+                          'Статус обновится без перезагрузки страницы.')
         elif proxy_mode == 'none':
             api_status = f'❌ Прямой доступ к api.telegram.org не проходит: {api_message}'
         else:
@@ -3262,14 +3563,14 @@ def _build_web_status(current_keys, protocols=None):
         if port:
             socks_ok = _check_socks5_handshake(port)
             socks_details = f'Локальный SOCKS {proxy_mode} 127.0.0.1:{port}: {"доступен" if socks_ok else "не отвечает как SOCKS5"}'
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=3, read_timeout=4)
+        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
         if (proxy_mode != 'none' and socks_ok and not api_status.startswith('✅') and
-                now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
                 _is_transient_telegram_api_failure(api_status)):
-            api_status = ('⏳ Прокси-режим поднят, Telegram API ещё перепроверяется после рестарта. '
-                          'Обновите страницу через несколько секунд.')
+            api_status = ('⏳ Telegram API не ответил вовремя через текущий режим. '
+                          'Локальный SOCKS работает, идёт повторная проверка. '
+                          'Статус обновится без перезагрузки страницы.')
     else:
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=3, read_timeout=4)
+        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
     snapshot = {
         'state_label': state_label,
         'proxy_mode': proxy_mode,
@@ -3409,7 +3710,7 @@ def _refresh_status_caches_async(current_keys):
     threading.Thread(target=worker, daemon=True).start()
 
 
-def _probe_all_pool_keys_async(stale_only=True):
+def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, missing_only=False):
     """Запускает безопасную фоновую проверку пула через временный xray."""
     if POOL_PROBE_ACTIVE_ONLY:
         active_proto = proxy_mode if proxy_mode in POOL_PROTOCOL_ORDER else ''
@@ -3422,7 +3723,7 @@ def _probe_all_pool_keys_async(stale_only=True):
         for proto in POOL_PROTOCOL_ORDER
         for key_value in (pools.get(proto, []) or [])
     ]
-    return _queue_pool_key_probe(tasks, max_keys=KEY_PROBE_MAX_PER_RUN, stale_only=stale_only)
+    return _queue_pool_key_probe(tasks, max_keys=max_keys, stale_only=stale_only, missing_only=missing_only)
 
 
 def _probe_pool_keys_on_page_load():
@@ -3433,12 +3734,21 @@ def _probe_pool_keys_on_page_load():
         return False, 0
 
     now = time.time()
+    progress = _get_pool_probe_progress()
+    recent_probe_at = max(float(progress.get('started_at') or 0), float(progress.get('finished_at') or 0))
+    if progress.get('running') or (recent_probe_at and now - recent_probe_at < POOL_PROBE_PAGE_REFRESH_INTERVAL):
+        return False, 0
+
     with pool_probe_auto_lock:
         if now - pool_probe_last_auto_started_at < POOL_PROBE_PAGE_REFRESH_INTERVAL:
             return False, 0
         pool_probe_last_auto_started_at = now
 
-    started, queued = _probe_all_pool_keys_async(stale_only=True)
+    started, queued = _probe_all_pool_keys_async(
+        stale_only=False,
+        max_keys=POOL_PROBE_PAGE_MAX_KEYS,
+        missing_only=True,
+    )
     if started or queued:
         return started, queued
     return False, 0
@@ -3866,6 +4176,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             safe_label = html.escape(entry['label'])
             safe_content = html.escape(entry['content'])
             active_class = ' active' if list_index == 0 else ''
+            social_service_buttons = ''.join(
+                f'''<button type="submit" name="service_key" value="{html.escape(key)}" formaction="/append_socialnet" class="secondary-button" data-confirm-title="Добавить {_socialnet_service_label(key)}?" data-confirm-message="Добавить {_socialnet_service_label(key)} в {safe_label}?">{html.escape(_socialnet_service_label(key))}</button>'''
+                for key in SOCIALNET_SERVICE_KEYS
+            )
             unblock_tabs.append(f'''<button type="button" class="seg-tab list-tab{active_class}" data-list-target="{safe_name}">{safe_label}</button>''')
             line_count = len([line for line in entry['content'].splitlines() if line.strip()])
             unblock_panels.append(f'''<section class="list-workspace{active_class}" data-list-panel="{safe_name}">
@@ -3881,7 +4195,12 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             <textarea name="content" rows="12" placeholder="example.org&#10;api.telegram.org">{safe_content}</textarea>
             <div class="form-actions">
                 <button type="submit">Сохранить список</button>
-                <button type="submit" formaction="/append_socialnet" class="secondary-button" data-confirm-title="Добавить соцсети?" data-confirm-message="Добавить стандартный список соцсетей в {safe_label}?">Добавить соцсети</button>
+            </div>
+            <div class="social-list-actions">
+                <span class="social-list-title">Добавить соцсети</span>
+                {social_service_buttons}
+                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/append_socialnet" class="secondary-button" data-confirm-title="Добавить все соцсети?" data-confirm-message="Добавить все соцсети в {safe_label}?">Все соцсети</button>
+                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/remove_socialnet" class="danger" data-confirm-title="Удалить все соцсети?" data-confirm-message="Удалить все соцсети из {safe_label}?">Удалить соцсети</button>
             </div>
         </form>
     </section>''')
@@ -4101,6 +4420,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .field-label{{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
         .form-actions{{display:flex;gap:10px;flex-wrap:wrap;}}
         .form-actions button{{min-width:160px;}}
+        .social-list-actions{{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;align-items:stretch;margin-top:8px;}}
+        .social-list-title{{display:flex;align-items:center;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;}}
+        .social-list-actions button{{width:100%;min-width:0;height:32px;min-height:32px;}}
         .pool-toolbar{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}}
         .pool-toolbar form{{display:block;}}
         .pool-table-wrap{{overflow:auto;border:1px solid var(--border);border-radius:8px;}}
@@ -4361,7 +4683,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .key-editor-form textarea[data-key-textarea]{{height:168px;min-height:168px;max-height:168px;}}
             .protocol-subview-import.active{{overflow:auto;}}
             .list-workspace.active{{height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;}}
-            .list-editor-form{{height:100%;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:8px;align-content:stretch;}}
+            .list-editor-form{{height:100%;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto auto;gap:8px;align-content:stretch;}}
             .list-editor-form textarea{{height:100%;min-height:0;resize:none;}}
             .list-editor-form .form-actions{{height:auto;min-height:0;align-self:end;align-items:center;align-content:center;}}
             .list-editor-form .form-actions button{{height:32px;min-height:32px;flex:0 0 auto;align-self:center;}}
@@ -4443,6 +4765,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .protocol-subview-import .pool-subscribe-form{{grid-template-columns:minmax(0,1fr) auto;}}
             .pool-toolbar{{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px;}}
             .pool-toolbar button{{width:100%;}}
+            .social-list-actions{{grid-template-columns:1fr;}}
             .pool-table-wrap{{overflow-x:hidden;}}
             .pool-table{{display:block;width:100%;min-width:0;table-layout:auto;font-size:10px;border-collapse:separate;border-spacing:0;}}
             .pool-table colgroup{{display:none;}}
@@ -5305,6 +5628,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                     event.preventDefault();
                     const button = event.submitter || form.querySelector('button[type="submit"]');
                     const formData = new FormData(form);
+                    if (button && button.name) {{
+                        formData.append(button.name, button.value || '');
+                    }}
                     const action = form.dataset.asyncAction || '';
                     const proto = formData.get('type') || '';
                     const key = formData.get('key') || '';
@@ -5797,18 +6123,41 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(length).decode('utf-8')
             data = parse_qs(body)
-            list_name = data.get('list_name', [''])[0]
+            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
+            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
             success = True
             try:
-                result = _append_socialnet_list(list_name)
+                result = _append_socialnet_list(list_name, service_key=service_key)
             except Exception as exc:
                 success = False
                 result = f'Ошибка добавления соцсетей: {exc}'
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', os.path.basename(list_name))).strip() if success else ''
+            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
+            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
             self._send_action_result(
                 result,
                 success=success,
-                extra={'list_name': os.path.basename(list_name), 'list_content': list_content},
+                extra={'list_name': safe_name, 'list_content': list_content},
+            )
+            return
+
+        if path == '/remove_socialnet':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
+            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
+            success = True
+            try:
+                result = _remove_socialnet_list(list_name, service_key=service_key)
+            except Exception as exc:
+                success = False
+                result = f'Ошибка удаления соцсетей: {exc}'
+            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
+            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
+            self._send_action_result(
+                result,
+                success=success,
+                extra={'list_name': safe_name, 'list_content': list_content},
             )
             return
 
@@ -6362,6 +6711,12 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
 
     if config_data['outbounds']:
         config_data['outbounds'].append({'protocol': 'freedom', 'tag': 'direct'})
+        config_data['routing']['rules'].insert(0, {
+            'type': 'field',
+            'domain': CONNECTIVITY_CHECK_DOMAINS,
+            'outboundTag': 'direct',
+            'enabled': True
+        })
         config_data['routing']['rules'].append({
             'type': 'field',
             'port': '0-65535',
@@ -6540,7 +6895,6 @@ def main():
                 _write_runtime_log(f'Прокси-режим {proxy_mode} не подтверждён при старте: {api_status}')
     _start_auto_failover_thread()
     _ensure_current_keys_in_pools()
-    _probe_all_pool_keys_async()
     _write_runtime_log('Web-only сервер запущен. Ожидание команд...')
     try:
         while not shutdown_requested.is_set():
