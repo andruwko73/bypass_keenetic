@@ -388,16 +388,14 @@ download_update_file() {
   target="$2"
   marker="$3"
   description="$4"
-  tmp="${target}.tmp.$$"
 
-  rm -f "$tmp"
+  rm -f "$target" "$target".tmp.*
   if [ "${RAW_GITHUB_USE_SOCKS:-0}" = "1" ]; then
-    if download_raw_file_via_socks "$url" "$tmp"; then
-      validate_update_file "$tmp" "$marker" "$description" || return 1
-      mv "$tmp" "$target"
+    if download_raw_file_via_socks "$url" "$target"; then
+      validate_update_file "$target" "$marker" "$description" || return 1
       return 0
     fi
-    rm -f "$tmp"
+    rm -f "$target"
     RAW_GITHUB_BYPASS=1
     export RAW_GITHUB_BYPASS
   fi
@@ -412,23 +410,21 @@ download_update_file() {
     return 1
   fi
 
-  if curl -fsSL --connect-timeout 5 --max-time 8 -o "$tmp" "$url" >/dev/null 2>&1; then
-    validate_update_file "$tmp" "$marker" "$description" || return 1
-    mv "$tmp" "$target"
+  if curl -fsSL --connect-timeout 5 --max-time 8 -o "$target" "$url" >/dev/null 2>&1; then
+    validate_update_file "$target" "$marker" "$description" || return 1
     return 0
   fi
 
-  rm -f "$tmp"
+  rm -f "$target"
   RAW_GITHUB_USE_SOCKS=1
   export RAW_GITHUB_USE_SOCKS
   echo "raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS."
-  if download_raw_file_via_socks "$url" "$tmp"; then
-    validate_update_file "$tmp" "$marker" "$description" || return 1
-    mv "$tmp" "$target"
+  if download_raw_file_via_socks "$url" "$target"; then
+    validate_update_file "$target" "$marker" "$description" || return 1
     return 0
   fi
 
-  rm -f "$tmp"
+  rm -f "$target"
   RAW_GITHUB_BYPASS=1
   export RAW_GITHUB_BYPASS
   echo "raw.githubusercontent.com unavailable; using GitHub archive fallback."
@@ -733,6 +729,8 @@ if [ "$1" = "-update" ]; then
     sed -i "s/40500/${dnsovertlsport}/g" "$stage_dir/dnsmasq.conf"
     sed -i "s/40508/${dnsoverhttpsport}/g" "$stage_dir/dnsmasq.conf"
     echo "Файлы успешно скачаны и подготовлены."
+    echo "Further update output is saved to $stage_dir/update.log."
+    exec >> "$stage_dir/update.log" 2>&1
 
     /opt/etc/init.d/S22shadowsocks stop > /dev/null 2>&1
     /opt/etc/init.d/S24xray stop > /dev/null 2>&1
