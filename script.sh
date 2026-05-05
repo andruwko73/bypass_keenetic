@@ -170,7 +170,7 @@ EOF
 
   if [ -x /opt/etc/init.d/S24xray ]; then
     mkdir -p /opt/etc/xray
-    curl -o /opt/etc/xray/config.json "$core_config_source"
+    curl -fsSL --connect-timeout 8 --max-time 25 -o /opt/etc/xray/config.json "$core_config_source" || true
     chmod 755 /opt/etc/init.d/S24xray || chmod +x /opt/etc/init.d/S24xray
     sed -i 's|ARGS="-confdir /opt/etc/xray"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
     sed -i 's|ARGS="-config /opt/etc/xray/config.json"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
@@ -178,7 +178,7 @@ EOF
 
   if [ -x /opt/etc/init.d/S24v2ray ]; then
     mkdir -p /opt/etc/v2ray
-    curl -o /opt/etc/v2ray/config.json "$core_config_source"
+    curl -fsSL --connect-timeout 8 --max-time 25 -o /opt/etc/v2ray/config.json "$core_config_source" || true
     chmod 755 /opt/etc/init.d/S24v2ray || chmod +x /opt/etc/init.d/S24v2ray
     sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1 || true
   fi
@@ -272,8 +272,18 @@ download_update_file() {
   if ! curl -fsSL --connect-timeout 8 --max-time 25 --retry 1 --retry-delay 1 -o "$tmp" "$url"; then
     rm -f "$tmp"
     echo "Raw download failed for ${description}; trying public GitHub API fallback."
-    if download_repo_file_via_api "$url" "$tmp"; then
-      :
+    if download_repo_file_via_api "$url" "$target"; then
+      if [ ! -s "$target" ]; then
+        rm -f "$target"
+        echo "Ошибка: ${description} скачан пустым файлом"
+        return 1
+      fi
+      if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
+        rm -f "$target"
+        echo "Ошибка: ${description} не прошёл проверку содержимого"
+        return 1
+      fi
+      return 0
     else
     echo "Ошибка: не удалось скачать ${description} из ${url}"
     return 1
