@@ -68,7 +68,7 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 APP_BRANCH_LABEL = 'main'
-APP_VERSION_COUNTER = 404
+APP_VERSION_COUNTER = 405
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
@@ -1078,44 +1078,65 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
     return result
 
 
+def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
+    headers = {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
+    raw_url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/{path}'
+    try:
+        response = session.get(raw_url, headers=headers, timeout=(10, 30))
+        response.raise_for_status()
+        return raw_url, response.text
+    except requests.RequestException:
+        pass
+
+    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{quote(path, safe="/")}'
+    response = session.get(
+        api_url,
+        params={'ref': repo_ref},
+        headers={'Accept': 'application/vnd.github+json', **headers},
+        timeout=(10, 30),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get('encoding') != 'base64' or 'content' not in payload:
+        raise ValueError('GitHub contents API returned unexpected file payload')
+    content = ''.join(str(payload.get('content', '')).split())
+    return response.url, base64.b64decode(content).decode('utf-8')
+
+
 def _download_repo_script(repo_owner, repo_name, branch='main'):
     session = requests.Session()
     session.trust_env = False
     if branch != 'main':
-        url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{branch}/script.sh'
-        response = session.get(
-            url,
-            headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
-            timeout=30,
+        api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{quote(branch, safe="")}'
+        api_response = session.get(
+            api_url,
+            headers={'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+            timeout=(10, 30),
         )
-        response.raise_for_status()
-        script_text = response.text
+        api_response.raise_for_status()
+        repo_ref = str(api_response.json().get('sha', '')).strip()
+        if not repo_ref:
+            raise ValueError('GitHub РЅРµ РІРµСЂРЅСѓР» commit SHA РґР»СЏ script.sh')
+        url, script_text = _download_repo_file_text(session, repo_owner, repo_name, repo_ref, 'script.sh')
         if '#!/bin/sh' not in script_text:
             raise ValueError('GitHub вернул некорректный script.sh')
         with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
             file.write(script_text)
         os.chmod('/opt/root/script.sh', stat.S_IRWXU)
-        return url, script_text, branch
+        return url, script_text, repo_ref
 
     api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/main'
     api_response = session.get(
         api_url,
         headers={'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
-        timeout=30,
+        timeout=(10, 30),
     )
     api_response.raise_for_status()
     repo_ref = str(api_response.json().get('sha', '')).strip()
     if not repo_ref:
         raise ValueError('GitHub не вернул commit SHA для script.sh')
 
-    url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/script.sh'
-    response = session.get(
-        url,
-        headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
-        timeout=30,
-    )
-    response.raise_for_status()
-    script_text = response.text
+    url, script_text = _download_repo_file_text(session, repo_owner, repo_name, repo_ref, 'script.sh')
     if '#!/bin/sh' not in script_text:
         raise ValueError('GitHub вернул некорректный script.sh')
     with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:

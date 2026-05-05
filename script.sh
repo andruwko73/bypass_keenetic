@@ -192,6 +192,55 @@ ensure_entware_dns() {
   fi
 }
 
+download_repo_file_via_api() {
+  url="$1"
+  target="$2"
+  raw_prefix="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/"
+
+  case "$url" in
+    "$raw_prefix"*) repo_path=${url#"$raw_prefix"} ;;
+    *) return 1 ;;
+  esac
+
+  command -v python3 >/dev/null 2>&1 || return 1
+  REPO_OWNER="$repo" REPO_REF="$REPO_REF" REPO_PATH="$repo_path" TARGET_PATH="$target" python3 - <<'PY'
+import base64
+import json
+import os
+import sys
+import urllib.parse
+import urllib.request
+
+owner = os.environ['REPO_OWNER']
+repo_ref = os.environ['REPO_REF']
+repo_path = os.environ['REPO_PATH']
+target_path = os.environ['TARGET_PATH']
+api_url = (
+    'https://api.github.com/repos/'
+    + urllib.parse.quote(owner, safe='')
+    + '/bypass_keenetic/contents/'
+    + urllib.parse.quote(repo_path, safe='/')
+    + '?ref='
+    + urllib.parse.quote(repo_ref, safe='')
+)
+request = urllib.request.Request(
+    api_url,
+    headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'bypass-keenetic-updater'},
+)
+try:
+    with urllib.request.urlopen(request, timeout=35) as response:
+        payload = json.loads(response.read().decode('utf-8'))
+    if payload.get('encoding') != 'base64' or 'content' not in payload:
+        raise ValueError('unexpected GitHub contents API payload')
+    content = ''.join(str(payload.get('content', '')).split())
+    with open(target_path, 'wb') as output:
+        output.write(base64.b64decode(content))
+except Exception as exc:
+    print('GitHub API fallback failed: %s' % exc, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 download_update_file() {
   url="$1"
   target="$2"
@@ -200,10 +249,15 @@ download_update_file() {
   tmp="${target}.tmp.$$"
 
   rm -f "$tmp"
-  if ! curl -fsSL --connect-timeout 15 --retry 2 --retry-delay 1 -o "$tmp" "$url"; then
+  if ! curl -fsSL --connect-timeout 8 --max-time 25 --retry 1 --retry-delay 1 -o "$tmp" "$url"; then
     rm -f "$tmp"
+    echo "Raw download failed for ${description}; trying public GitHub API fallback."
+    if download_repo_file_via_api "$url" "$tmp"; then
+      :
+    else
     echo "Ошибка: не удалось скачать ${description} из ${url}"
     return 1
+    fi
   fi
 
   if [ ! -s "$tmp" ]; then
@@ -399,7 +453,7 @@ if [ "$1" = "-install" ]; then
 
     # VPN script
     # chmod 777 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || rm -rfv /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
-    if [ "${keen_os_short}" = "4" ]; then
+    if [ "${keen_os_short:-0}" -ge 4 ] 2>/dev/null; then
       echo "VPN для KeenOS 4+";
       curl -s -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn-v4.sh
     elif [ "${keen_os_short}" = "3" ]; then
@@ -473,7 +527,7 @@ if [ "$1" = "-update" ]; then
     backup_dir="/opt/root/backup-${now}"
     mkdir -p "$stage_dir"
 
-    if [ "${keen_os_short}" = "4" ]; then
+    if [ "${keen_os_short:-0}" -ge 4 ] 2>/dev/null; then
       echo "KeenOS 4+";
       vpn_script_url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn-v4.sh"
     elif [ "${keen_os_short}" = "3" ]; then
