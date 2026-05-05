@@ -18,6 +18,7 @@ import time
 import threading
 import signal
 import traceback
+import tarfile
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
@@ -68,7 +69,7 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 APP_BRANCH_LABEL = 'main'
-APP_VERSION_COUNTER = 408
+APP_VERSION_COUNTER = 409
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
@@ -1143,6 +1144,64 @@ def _download_repo_script(repo_owner, repo_name, branch='main'):
         file.write(script_text)
     os.chmod('/opt/root/script.sh', stat.S_IRWXU)
     return url, script_text, repo_ref
+
+
+def _download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, path):
+    archive_ref = repo_ref if '/' not in repo_ref else f'refs/heads/{repo_ref}'
+    archive_url = f'https://codeload.github.com/{repo_owner}/{repo_name}/tar.gz/{archive_ref}'
+    suffix = '/' + path.strip('/')
+    with session.get(archive_url, stream=True, timeout=(10, 90)) as response:
+        response.raise_for_status()
+        response.raw.decode_content = True
+        with tarfile.open(fileobj=response.raw, mode='r|gz') as archive:
+            for member in archive:
+                if member.isfile() and member.name.endswith(suffix):
+                    extracted = archive.extractfile(member)
+                    if extracted is not None:
+                        return archive_url, extracted.read().decode('utf-8')
+    raise ValueError(f'GitHub archive did not contain {path}')
+
+
+def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
+    headers = {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
+    raw_url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/{path}'
+    try:
+        response = session.get(raw_url, headers=headers, timeout=(5, 8))
+        response.raise_for_status()
+        return raw_url, response.text
+    except requests.RequestException:
+        pass
+
+    try:
+        return _download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, path)
+    except Exception:
+        pass
+
+    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{quote(path, safe="/")}'
+    response = session.get(
+        api_url,
+        params={'ref': repo_ref},
+        headers={'Accept': 'application/vnd.github+json', **headers},
+        timeout=(10, 30),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get('encoding') != 'base64' or 'content' not in payload:
+        raise ValueError('GitHub contents API returned unexpected file payload')
+    content = ''.join(str(payload.get('content', '')).split())
+    return response.url, base64.b64decode(content).decode('utf-8')
+
+
+def _download_repo_script(repo_owner, repo_name, branch='main'):
+    session = requests.Session()
+    session.trust_env = False
+    url, script_text = _download_repo_file_text(session, repo_owner, repo_name, branch, 'script.sh')
+    if '#!/bin/sh' not in script_text:
+        raise ValueError('GitHub returned invalid script.sh')
+    with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
+        file.write(script_text)
+    os.chmod('/opt/root/script.sh', stat.S_IRWXU)
+    return url, script_text, branch
 
 
 def _build_direct_fetch_env():
