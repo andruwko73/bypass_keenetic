@@ -280,8 +280,29 @@ download_update_file() {
   tmp="${target}.tmp.$$"
 
   rm -f "$tmp"
+  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
+    echo "Using public GitHub API fallback for ${description}."
+    if download_repo_file_via_api "$url" "$target"; then
+      if [ ! -s "$target" ]; then
+        rm -f "$target"
+        echo "РћС€РёР±РєР°: ${description} СЃРєР°С‡Р°РЅ РїСѓСЃС‚С‹Рј С„Р°Р№Р»РѕРј"
+        return 1
+      fi
+      if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
+        rm -f "$target"
+        echo "РћС€РёР±РєР°: ${description} РЅРµ РїСЂРѕС€С‘Р» РїСЂРѕРІРµСЂРєСѓ СЃРѕРґРµСЂР¶РёРјРѕРіРѕ"
+        return 1
+      fi
+      return 0
+    fi
+    echo "РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ ${description} РёР· ${url}"
+    return 1
+  fi
+
   if ! curl -fsSL --connect-timeout 8 --max-time 25 --retry 1 --retry-delay 1 -o "$tmp" "$url"; then
     rm -f "$tmp"
+    RAW_GITHUB_BYPASS=1
+    export RAW_GITHUB_BYPASS
     echo "Raw download failed for ${description}; trying public GitHub API fallback."
     if download_repo_file_via_api "$url" "$target"; then
       if [ ! -s "$target" ]; then
