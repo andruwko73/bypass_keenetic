@@ -68,10 +68,19 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 APP_BRANCH_LABEL = 'main'
-APP_VERSION_COUNTER = 403
+APP_VERSION_COUNTER = 404
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
-README_PATH = os.path.join(os.path.dirname(BOT_SOURCE_PATH), 'README.md')
+BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
+CONNECTIVITY_CHECK_DOMAINS = [
+    'full:connectivitycheck.gstatic.com',
+    'full:connectivitycheck.android.com',
+    'full:clients3.google.com',
+    'full:clients4.google.com',
+    'full:www.google.com',
+    'full:www.gstatic.com',
+]
+README_PATH = os.path.join(BOT_DIR, 'README.md')
 XRAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24xray'
 V2RAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24v2ray'
 XRAY_CONFIG_DIR = '/opt/etc/xray'
@@ -214,6 +223,115 @@ def _fetch_remote_text(url, timeout=20):
     response = requests.get(url, timeout=timeout)
     response.raise_for_status()
     return response.text
+
+
+SOCIALNET_SOURCE_URL = 'https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt'
+SOCIALNET_LOCAL_PATHS = [
+    os.path.join(BOT_DIR, 'socialnet.txt'),
+    '/opt/etc/bot/socialnet.txt',
+    '/opt/etc/unblock/socialnet.txt',
+]
+
+TELEGRAM_UNBLOCK_ENTRIES = [
+    '91.108.56.0/22',
+    '91.108.4.0/22',
+    '91.108.8.0/22',
+    '91.108.16.0/22',
+    '91.108.12.0/22',
+    '149.154.160.0/20',
+    '91.105.192.0/23',
+    '91.108.20.0/22',
+    '185.76.151.0/24',
+    '5.28.192.0/21',
+    '95.161.64.0/20',
+    'api.telegram.org',
+    'web.telegram.org',
+    'my.telegram.org',
+    't.me',
+    'tx.me',
+    'telegra.ph',
+    'graph.org',
+    'telegram.org',
+    'telegram.me',
+    'telegram.dog',
+    'telegram-cdn.org',
+    'telegramapp.org',
+    'telegramdownload.com',
+    'cdn-telegram.org',
+    'telesco.pe',
+    'comments.app',
+    'contest.com',
+    'fragment.com',
+    'quiz.directory',
+    'tg.dev',
+    'tg.org',
+    'tgram.org',
+    'tdesktop.com',
+    'teleg.xyz',
+    'telega.one',
+]
+
+SERVICE_LIST_SOURCES = {
+    'telegram': {
+        'label': 'Telegram',
+        'aliases': ['telegram', 'tg', 'телеграм', 'телега'],
+        'entries': TELEGRAM_UNBLOCK_ENTRIES,
+    },
+    'meta': {
+        'label': 'Instagram / Meta',
+        'aliases': ['meta', 'instagram', 'insta', 'facebook', 'whatsapp', 'threads', 'инстаграм'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/meta.lst',
+    },
+    'discord': {
+        'label': 'Discord',
+        'aliases': ['discord', 'дискорд'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst',
+    },
+    'tiktok': {
+        'label': 'TikTok',
+        'aliases': ['tiktok', 'tik-tok', 'тик ток', 'тикток'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/tiktok.lst',
+    },
+    'twitter': {
+        'label': 'X / Twitter',
+        'aliases': ['twitter', 'x', 'твиттер'],
+        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/twitter.lst',
+    },
+}
+
+SOCIALNET_SERVICE_KEYS = ('telegram', 'meta', 'discord', 'tiktok', 'twitter')
+SOCIALNET_ALL_KEY = 'all'
+SOCIALNET_EXCLUDED_ENTRIES = {
+    'youtube.com',
+    'm.youtube.com',
+    'tv.youtube.com',
+    's.youtube.com',
+    'youtu.be',
+    'yt.be',
+    'ytimg.com',
+    'i.ytimg.com',
+    'ytimg.l.google.com',
+    'yt3.ggpht.com',
+    'yt3.googleusercontent.com',
+    'ggpht.com',
+    'googlevideo.com',
+    'youtubei.googleapis.com',
+    'youtubeembeddedplayer.googleapis.com',
+    'youtube-ui.l.google.com',
+    'wide-youtube.l.google.com',
+    'yt-video-upload.l.google.com',
+    'play-fe.googleapis.com',
+    'jnn-pa.googleapis.com',
+    'returnyoutubedislikeapi.com',
+    'youtubekids.com',
+    'youtube-nocookie.com',
+    'yting.com',
+    'gvt1.com',
+    'gvt2.com',
+    'googleapis.com',
+    'googleusercontent.com',
+    'nhacmp3youtube.com',
+}
 
 
 def _get_chat_menu_state(chat_id):
@@ -660,6 +778,156 @@ def _write_unblock_list_entries(list_name, entries):
                 file.write(line + '\n')
 
 
+def _service_list_alias_map():
+    aliases = {}
+    for key, source in SERVICE_LIST_SOURCES.items():
+        aliases[key] = key
+        aliases[source.get('label', key).lower()] = key
+        for alias in source.get('aliases', []):
+            aliases[alias.lower()] = key
+    return aliases
+
+
+def _normalize_unblock_route_name(list_name):
+    safe_name = os.path.basename((list_name or '').strip())
+    if safe_name.endswith('.txt'):
+        safe_name = safe_name[:-4]
+    if not safe_name or not re.match(r'^[A-Za-z0-9_-]+$', safe_name):
+        raise ValueError('Некорректное имя списка')
+    return safe_name
+
+
+def _socialnet_entries_from_text(text):
+    entries = []
+    seen = set()
+    for raw_line in (text or '').replace('\r', '\n').split('\n'):
+        line = raw_line.split('#', 1)[0].strip()
+        if not line or line.lower() in SOCIALNET_EXCLUDED_ENTRIES or line in seen:
+            continue
+        seen.add(line)
+        entries.append(line)
+    return entries
+
+
+def _parse_service_domains(text):
+    domains = []
+    seen = set()
+    for raw_line in text.replace('\r', '\n').split('\n'):
+        line = raw_line.split('#', 1)[0].strip()
+        if not line:
+            continue
+        for token in re.split(r'[\s,]+', line):
+            item = token.strip().strip('"\'')
+            item = re.sub(r'^(DOMAIN-SUFFIX|DOMAIN|HOST-SUFFIX),', '', item, flags=re.IGNORECASE)
+            item = re.sub(r'^\+\.', '', item)
+            item = re.sub(r'^\*\.', '', item)
+            item = item.strip('/').lower()
+            if not item or '/' in item or ':' in item:
+                continue
+            if not re.match(r'^[a-z0-9*_.-]+\.[a-z0-9_.-]+$', item):
+                continue
+            if item not in seen:
+                seen.add(item)
+                domains.append(item)
+    return domains
+
+
+def _resolve_socialnet_service(value):
+    normalized = (value or '').strip().lower()
+    if normalized in ('', SOCIALNET_ALL_KEY, 'all', 'все', 'все соцсети'):
+        return SOCIALNET_ALL_KEY
+    aliases = _service_list_alias_map()
+    key = aliases.get(normalized)
+    if key in SOCIALNET_SERVICE_KEYS:
+        return key
+    return None
+
+
+def _socialnet_service_label(service_key):
+    if service_key == SOCIALNET_ALL_KEY:
+        return 'Все соцсети'
+    return SERVICE_LIST_SOURCES.get(service_key, {}).get('label', service_key)
+
+
+def _load_service_entries(service_key):
+    source = SERVICE_LIST_SOURCES.get(service_key)
+    if not source:
+        raise ValueError('Неизвестная соцсеть')
+    if source.get('entries'):
+        return _socialnet_entries_from_text('\n'.join(source['entries']))
+    raw_text = _fetch_remote_text(source['url'], timeout=25)
+    entries = _parse_service_domains(raw_text)
+    if not entries:
+        raise ValueError(f'Список {source["label"]} пуст')
+    return entries
+
+
+def _load_socialnet_entries(service_key=SOCIALNET_ALL_KEY):
+    service_key = _resolve_socialnet_service(service_key)
+    if not service_key:
+        raise ValueError('Неизвестная соцсеть')
+    if service_key != SOCIALNET_ALL_KEY:
+        return _load_service_entries(service_key)
+    for path in SOCIALNET_LOCAL_PATHS:
+        try:
+            if os.path.exists(path):
+                entries = _socialnet_entries_from_text(_read_text_file(path))
+                if entries:
+                    return entries
+        except Exception:
+            continue
+    social_text = _fetch_remote_text(SOCIALNET_SOURCE_URL, timeout=25)
+    entries = _socialnet_entries_from_text(social_text)
+    if not entries:
+        raise ValueError('Список соцсетей пуст')
+    return entries
+
+
+def _apply_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY, remove=False):
+    route_name = _normalize_unblock_route_name(list_name)
+    service_key = _resolve_socialnet_service(service_key)
+    if not service_key:
+        raise ValueError('Неизвестная соцсеть')
+    entries = set(_load_socialnet_entries(service_key))
+    list_path = _unblock_list_path(route_name)
+    current = set(_read_unblock_list_entries(route_name)) if os.path.exists(list_path) else set()
+    before = len(current)
+    if remove:
+        current.difference_update(entries)
+        changed = before - len(current)
+        action = 'удалено'
+    else:
+        current.update(entries)
+        changed = len(current) - before
+        action = 'добавлено'
+    _write_unblock_list_entries(route_name, current)
+    subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
+    label = _list_label(f'{route_name}.txt')
+    service_label = _socialnet_service_label(service_key)
+    return f'✅ {service_label}: {action} {changed} записей в {label}. Всего в списке: {len(current)}.'
+
+
+def _socialnet_service_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    options = [types.KeyboardButton(_socialnet_service_label(key)) for key in SOCIALNET_SERVICE_KEYS]
+    options.append(types.KeyboardButton(_socialnet_service_label(SOCIALNET_ALL_KEY)))
+    for index in range(0, len(options), 2):
+        markup.row(*options[index:index + 2])
+    markup.add(types.KeyboardButton("🔙 Назад"))
+    return markup
+
+
+def _list_actions_markup():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    item1 = types.KeyboardButton("📑 Показать список")
+    item2 = types.KeyboardButton("📝 Добавить в список")
+    item3 = types.KeyboardButton("🗑 Удалить из списка")
+    back = types.KeyboardButton("🔙 Назад")
+    markup.row(item1, item2, item3)
+    markup.row(back)
+    return markup
+
+
 def _build_main_menu_markup():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     item1 = types.KeyboardButton("🔰 Установка и удаление")
@@ -1081,12 +1349,12 @@ def _save_unblock_list(list_name, text):
     return f'✅ Список {safe_name} сохранён и применён.'
 
 
-def _append_socialnet_list(list_name):
-    safe_name = os.path.basename(list_name)
-    target_path = os.path.join('/opt/etc/unblock', safe_name)
-    current = _read_text_file(target_path)
-    social_text = _fetch_remote_text('https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt')
-    return _save_unblock_list(safe_name, current + '\n' + social_text)
+def _append_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
+    return _apply_socialnet_list(list_name, service_key=service_key, remove=False)
+
+
+def _remove_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
+    return _apply_socialnet_list(list_name, service_key=service_key, remove=True)
 
 
 def _list_label(file_name):
@@ -1363,20 +1631,21 @@ def _protocol_status_for_key(key_name, key_value):
     proxy_url = proxy_settings.get(key_name)
     api_ok, api_message = _check_telegram_api_through_proxy(
         proxy_url,
-        connect_timeout=3,
-        read_timeout=4,
+        connect_timeout=5,
+        read_timeout=8,
     )
-    if (endpoint_ok and not api_ok and now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
-            _is_transient_telegram_api_failure(api_message)):
+    api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
+    if endpoint_ok and api_transient:
         return {
             'tone': 'warn',
             'label': 'Проверяется',
-            'details': (f'{endpoint_message} Telegram API ещё перепроверяется после рестарта. '
-                        'Обновите страницу через несколько секунд.').strip(),
+            'details': (f'{endpoint_message} Telegram API не ответил вовремя, идёт повторная проверка. '
+                        'Статус обновится без перезагрузки страницы.').strip(),
             'endpoint_ok': endpoint_ok,
             'endpoint_message': endpoint_message,
             'api_ok': False,
             'api_message': api_message,
+            'api_pending': True,
         }
     return {
         'tone': 'ok' if api_ok else 'warn',
@@ -1946,6 +2215,11 @@ def _is_transient_telegram_api_failure(status_text):
     markers = [
         'network is unreachable',
         'timed out',
+        'timeout',
+        'таймаут',
+        'не ответил вовремя',
+        'за отведённое время',
+        'за отведенное время',
         'max retries exceeded',
         'failed to establish a new connection',
         'connection reset',
@@ -1966,10 +2240,10 @@ def _build_web_status(current_keys, protocols=None):
         api_message = str(current_protocol.get('api_message', '') or '')
         if api_ok:
             api_status = '✅ Доступ к api.telegram.org подтверждён.'
-        elif (socks_ok and now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
-                _is_transient_telegram_api_failure(api_message)):
-            api_status = ('⏳ Прокси-режим поднят, Telegram API ещё перепроверяется после рестарта. '
-                          'Обновите страницу через несколько секунд.')
+        elif socks_ok and _is_transient_telegram_api_failure(api_message):
+            api_status = ('⏳ Telegram API не ответил вовремя через текущий режим. '
+                          'Локальный SOCKS работает, идёт повторная проверка. '
+                          'Статус обновится без перезагрузки страницы.')
         elif proxy_mode == 'none':
             api_status = f'❌ Прямой доступ к api.telegram.org не проходит: {api_message}'
         else:
@@ -1985,14 +2259,14 @@ def _build_web_status(current_keys, protocols=None):
         if port:
             socks_ok = _check_socks5_handshake(port)
             socks_details = f'Локальный SOCKS {proxy_mode} 127.0.0.1:{port}: {"доступен" if socks_ok else "не отвечает как SOCKS5"}'
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=3, read_timeout=4)
+        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
         if (proxy_mode != 'none' and socks_ok and not api_status.startswith('✅') and
-                now - process_started_at < WEB_STATUS_STARTUP_GRACE_PERIOD and
                 _is_transient_telegram_api_failure(api_status)):
-            api_status = ('⏳ Прокси-режим поднят, Telegram API ещё перепроверяется после рестарта. '
-                          'Обновите страницу через несколько секунд.')
+            api_status = ('⏳ Telegram API не ответил вовремя через текущий режим. '
+                          'Локальный SOCKS работает, идёт повторная проверка. '
+                          'Статус обновится без перезагрузки страницы.')
     else:
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=3, read_timeout=4)
+        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
     snapshot = {
         'state_label': state_label,
         'proxy_mode': proxy_mode,
@@ -2323,8 +2597,9 @@ def bot_message(message):
                                  "Введите имя сайта или домена для удаления из листа разблокировки,"
                                  "либо возвратитесь в главное меню")
                 markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+                item1 = types.KeyboardButton("Удалить обход блокировок соцсетей")
                 back = types.KeyboardButton("🔙 Назад")
-                markup.add(back)
+                markup.add(item1, back)
                 set_menu_state(4)
                 bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
                 return
@@ -2338,17 +2613,9 @@ def bot_message(message):
                     return
                 k = len(mylist)
                 if message.text == "Добавить обход блокировок соцсетей":
-                    url = "https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt"
-                    try:
-                        s = _fetch_remote_text(url)
-                    except requests.RequestException as exc:
-                        bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить список соцсетей: {exc}', reply_markup=main)
-                        set_menu_state(2)
-                        return
-                    lst = s.split('\n')
-                    for line in lst:
-                        if len(line) > 1:
-                            mylist.add(line.replace('\n', ''))
+                    set_menu_state(31)
+                    bot.send_message(message.chat.id, f'Выберите соцсеть для добавления в {_list_label(bypass + ".txt")}.', reply_markup=_socialnet_service_markup())
+                    return
                 else:
                     if len(message.text) > 1:
                         mas = message.text.split('\n')
@@ -2372,12 +2639,48 @@ def bot_message(message):
                 bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
                 return
 
+            if level == 31:
+                if message.text in ('🔙 Назад', 'Назад'):
+                    set_menu_state(2)
+                    bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                    return
+                service_key = _resolve_socialnet_service(message.text)
+                try:
+                    result = _append_socialnet_list(bypass, service_key=service_key)
+                except Exception as exc:
+                    bot.send_message(message.chat.id, f'⚠️ Не удалось добавить соцсети: {exc}', reply_markup=_socialnet_service_markup())
+                    return
+                set_menu_state(2)
+                bot.send_message(message.chat.id, result)
+                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                return
+
+            if level == 32:
+                if message.text in ('🔙 Назад', 'Назад'):
+                    set_menu_state(2)
+                    bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                    return
+                service_key = _resolve_socialnet_service(message.text)
+                try:
+                    result = _remove_socialnet_list(bypass, service_key=service_key)
+                except Exception as exc:
+                    bot.send_message(message.chat.id, f'⚠️ Не удалось удалить соцсети: {exc}', reply_markup=_socialnet_service_markup())
+                    return
+                set_menu_state(2)
+                bot.send_message(message.chat.id, result)
+                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                return
+
             if level == 4:
                 try:
                     mylist = set(_read_unblock_list_entries(bypass))
                 except FileNotFoundError:
                     bot.send_message(message.chat.id, '⚠️ Файл списка не найден. Откройте список заново.', reply_markup=main)
                     set_menu_state(1, None)
+                    return
+                if message.text == "Удалить обход блокировок соцсетей":
+                    set_menu_state(32)
+                    bot.send_message(message.chat.id, f'Выберите соцсеть для удаления из {_list_label(bypass + ".txt")}.', reply_markup=_socialnet_service_markup())
                     return
                 k = len(mylist)
                 mas = message.text.split('\n')
@@ -2796,6 +3099,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             safe_name = html.escape(entry['name'])
             safe_label = html.escape(entry['label'])
             safe_content = html.escape(entry['content'])
+            social_service_buttons = ''.join(
+                f'''<button type="submit" name="service_key" value="{html.escape(key)}" formaction="/append_socialnet" class="secondary-button">{html.escape(_socialnet_service_label(key))}</button>'''
+                for key in SOCIALNET_SERVICE_KEYS
+            )
             unblock_cards.append(f'''<section class="panel unblock-card">
         <div class="card-topline">
             <span class="eyebrow">Список обхода</span>
@@ -2806,6 +3113,12 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
       <input type="hidden" name="list_name" value="{safe_name}">
       <textarea name="content" rows="8" placeholder="example.org&#10;api.telegram.org">{safe_content}</textarea>
       <button type="submit">Сохранить список</button>
+      <div class="social-list-actions">
+        <span class="social-list-title">Добавить соцсети</span>
+        {social_service_buttons}
+        <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/append_socialnet" class="secondary-button">Все соцсети</button>
+        <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/remove_socialnet" class="danger">Удалить соцсети</button>
+      </div>
     </form>
   </section>''')
         unblock_lists_block = ''.join(unblock_cards)
@@ -2921,6 +3234,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 button.danger{{background:linear-gradient(135deg, var(--danger), #85311f);box-shadow:0 10px 20px rgba(168,68,47,.18);}}
                 .success-button{{background:linear-gradient(135deg, #0f5c2d, #0b4120);box-shadow:0 10px 20px rgba(15,92,45,.28);}}
                 .secondary-button{{background:linear-gradient(135deg, var(--secondary), #b85b27);box-shadow:0 10px 20px rgba(201,111,50,.18);}}
+                .social-list-actions{{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;align-items:stretch;margin-top:10px;}}
+                .social-list-title{{display:flex;align-items:center;color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;}}
+                .social-list-actions button{{width:100%;min-width:0;}}
         .status-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px;}}
                 .status-card{{padding:14px;border-radius:18px;background:rgba(79,140,255,.08);border:1px solid rgba(96,165,250,.18);}}
                 .status-label{{display:block;margin-bottom:8px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#90a5c4;}}
@@ -2969,6 +3285,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .layout{{grid-template-columns:1fr;gap:12px;}}
                         .command-grid{{grid-template-columns:1fr;}}
             .status-grid{{grid-template-columns:1fr;}}
+            .social-list-actions{{grid-template-columns:1fr;}}
                         .panel{{padding:16px;border-radius:18px;}}
             button,input,textarea,select{{font-size:16px;}}
         }}
@@ -3152,11 +3469,26 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(length).decode('utf-8')
             data = parse_qs(body)
-            list_name = data.get('list_name', [''])[0]
+            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
+            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
             try:
-                result = _append_socialnet_list(list_name)
+                result = _append_socialnet_list(list_name, service_key=service_key)
             except Exception as exc:
                 result = f'Ошибка добавления соцсетей: {exc}'
+            _set_web_flash_message(result)
+            self._send_redirect('/')
+            return
+
+        if path == '/remove_socialnet':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
+            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
+            try:
+                result = _remove_socialnet_list(list_name, service_key=service_key)
+            except Exception as exc:
+                result = f'Ошибка удаления соцсетей: {exc}'
             _set_web_flash_message(result)
             self._send_redirect('/')
             return
@@ -3596,6 +3928,12 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
 
     if config_data['outbounds']:
         config_data['outbounds'].append({'protocol': 'freedom', 'tag': 'direct'})
+        config_data['routing']['rules'].insert(0, {
+            'type': 'field',
+            'domain': CONNECTIVITY_CHECK_DOMAINS,
+            'outboundTag': 'direct',
+            'enabled': True
+        })
         config_data['routing']['rules'].append({
             'type': 'field',
             'port': '0-65535',
