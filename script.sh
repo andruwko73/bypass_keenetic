@@ -155,14 +155,24 @@ if [ -f "/opt/etc/bot/bot_config.py" ]; then
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 
+download_static_asset() {
+  repo_path="$1"
+  target="$2"
+  url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${repo_path}"
+
+  rm -f "$target"
+  GITHUB_API_TIMEOUT=8 download_repo_file_via_api "$url" "$target" >/dev/null 2>&1 || true
+  [ -s "$target" ] || rm -f "$target"
+}
+
 install_static_assets() {
   static_dir="${BOT_RUNTIME_DIR}/static"
-  icons="chatgpt claude copilot deepseek facebook gemini grok instagram meta mistral perplexity"
+  icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
   mkdir -p "$static_dir/service-icons"
-  curl -fsSL -o "$static_dir/telegram.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/telegram.png" >/dev/null 2>&1 || true
-  curl -fsSL -o "$static_dir/youtube.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/youtube.png" >/dev/null 2>&1 || true
+  download_static_asset "static/telegram.png" "$static_dir/telegram.png"
+  download_static_asset "static/youtube.png" "$static_dir/youtube.png"
   for icon in $icons; do
-    curl -fsSL -o "$static_dir/service-icons/${icon}.png" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/static/service-icons/${icon}.png" >/dev/null 2>&1 || true
+    download_static_asset "static/service-icons/${icon}.png" "$static_dir/service-icons/${icon}.png"
   done
   find "$static_dir" -type d -exec chmod 755 {} \; 2>/dev/null || true
   find "$static_dir" -type f -exec chmod 644 {} \; 2>/dev/null || true
@@ -346,7 +356,8 @@ request = urllib.request.Request(
     headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'bypass-keenetic-updater'},
 )
 try:
-    with urllib.request.urlopen(request, timeout=35) as response:
+    timeout = int(os.environ.get('GITHUB_API_TIMEOUT', '35'))
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode('utf-8'))
     if payload.get('encoding') != 'base64' or 'content' not in payload:
         raise ValueError('unexpected GitHub contents API payload')
