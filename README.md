@@ -4,7 +4,7 @@
 
 ## О ветке
 
-`feature/independent-rework` — версия `bypass_keenetic` с Telegram-ботом, локальным веб-интерфейсом и расширенным управлением пулом ключей для Keenetic.
+`codex/independent-v1` — версия `bypass_keenetic` с Telegram-ботом, локальным веб-интерфейсом и расширенным управлением пулом ключей для Keenetic.
 
 Основана на форке [andruwko73/bypass_keenetic](https://github.com/andruwko73/bypass_keenetic) проекта `keenetic-dev/bypass_keenetic_dev`.
 
@@ -16,7 +16,7 @@
 - проверка Telegram API, YouTube и дополнительных сервисов через выбранный ключ;
 - готовые пресеты проверок: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Meta AI, Instagram, Facebook;
 - кнопка **Добавить в список обхода** переносит домены выбранных дополнительных проверок в список обхода текущего протокола; кнопка **Добавить в список** добавляет готовые наборы Telegram, YouTube, Instagram/Meta, Discord, TikTok, X/Twitter или все сервисы сразу;
-- переустановка между `main`, `feature/independent-rework` и `feature/web-only` с сохранением локальных настроек, ключей, пулов и списков обхода.
+- переустановка между `codex/main-v1`, `codex/independent-v1` и `codex/web-only-v1` с сохранением локальных настроек, ключей, пулов и списков обхода.
 
 ## Установка
 
@@ -28,10 +28,10 @@
 После Entware подключитесь к роутеру по SSH и выполните:
 
 ```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/feature/independent-rework/bootstrap/install.sh | sh'
+sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/codex/independent-v1/bootstrap/install.sh | sh'
 ```
 
-При первой чистой установке откроется страница первичной настройки на `http://192.168.1.1:8080/`: BotFather token, Telegram username, app api id и app api hash. Если Telegram-бот не нужен, нажмите **Установить без бота Telegram** — установка переключится на `feature/web-only`.
+При первой чистой установке откроется страница первичной настройки на `http://192.168.1.1:8080/`: BotFather token, Telegram username, app api id и app api hash. Если Telegram-бот не нужен, нажмите **Установить без бота Telegram** — установка переключится на `codex/web-only-v1`.
 
 Bootstrap перед заменой файлов создает backup и rollback-скрипт в `/opt/root/bypass-last-rollback.sh`.
 
@@ -61,14 +61,14 @@ Telegram-бот использует нижнюю клавиатуру без д
 
 Путь к пулу: **Ключи и мосты** → **Пул ключей**. Внутри можно выбрать протокол, применить ключ из списка, удалить конкретный ключ, добавить ключи вручную, загрузить subscription, проверить пул и вернуться назад. Кнопки ключей содержат короткий код протокола, поэтому старая кнопка из другого пула не применит ключ к неверному протоколу.
 
-Опасные сервисные действия и переустановка из Telegram также требуют подтверждения: переходы между `main`, `feature/independent-rework`, `feature/web-only`, удаление компонентов, DNS Override и перезагрузка роутера.
+Опасные сервисные действия и переустановка из Telegram также требуют подтверждения: переходы между `codex/main-v1`, `codex/independent-v1`, `codex/web-only-v1`, удаление компонентов, DNS Override и перезагрузка роутера.
 
 ## Переустановка
 
 Кнопки переустановки доступны в веб-интерфейсе и Telegram-боте:
-- **Переустановить из форка без сброса** — обновление из `main`;
-- **Переустановка (ветка independent)** — обновление из `feature/independent-rework`;
-- **Переустановка (без Telegram бота)** — переход в `feature/web-only`.
+- **Переустановить из форка без сброса** — обновление из `codex/main-v1`;
+- **Переустановка (ветка independent)** — обновление из `codex/independent-v1`;
+- **Переустановка (без Telegram бота)** — переход в `codex/web-only-v1`.
 
 При переходах сохраняются:
 - `bot_config.py` с настройками Telegram и веб-интерфейса;

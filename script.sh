@@ -11,7 +11,7 @@
 # оригинальный репозиторий (tas-unn), пользовательский форк
 
 repo="andruwko73"
-REPO_REF="${REPO_REF:-feature/independent-rework}"
+REPO_REF="${REPO_REF:-codex/independent-v1}"
 
 config_get() {
   key="$1"
@@ -274,71 +274,6 @@ except Exception as exc:
     print('GitHub API fallback failed: %s' % exc, file=sys.stderr)
     sys.exit(1)
 PY
-}
-
-download_update_file() {
-  url="$1"
-  target="$2"
-  marker="$3"
-  description="$4"
-  tmp="${target}.tmp.$$"
-
-  rm -f "$tmp"
-  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
-    echo "Using public GitHub API fallback for ${description}."
-    if download_repo_file_via_api "$url" "$target"; then
-      if [ ! -s "$target" ]; then
-        rm -f "$target"
-        echo "РћС€РёР±РєР°: ${description} СЃРєР°С‡Р°РЅ РїСѓСЃС‚С‹Рј С„Р°Р№Р»РѕРј"
-        return 1
-      fi
-      if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
-        rm -f "$target"
-        echo "РћС€РёР±РєР°: ${description} РЅРµ РїСЂРѕС€С‘Р» РїСЂРѕРІРµСЂРєСѓ СЃРѕРґРµСЂР¶РёРјРѕРіРѕ"
-        return 1
-      fi
-      return 0
-    fi
-    echo "РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ ${description} РёР· ${url}"
-    return 1
-  fi
-
-  if ! curl -fsSL --connect-timeout 8 --max-time 25 --retry 1 --retry-delay 1 -o "$tmp" "$url"; then
-    rm -f "$tmp"
-    RAW_GITHUB_BYPASS=1
-    export RAW_GITHUB_BYPASS
-    echo "Raw download failed for ${description}; trying public GitHub API fallback."
-    if download_repo_file_via_api "$url" "$target"; then
-      if [ ! -s "$target" ]; then
-        rm -f "$target"
-        echo "Ошибка: ${description} скачан пустым файлом"
-        return 1
-      fi
-      if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
-        rm -f "$target"
-        echo "Ошибка: ${description} не прошёл проверку содержимого"
-        return 1
-      fi
-      return 0
-    else
-    echo "Ошибка: не удалось скачать ${description} из ${url}"
-    return 1
-    fi
-  fi
-
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    echo "Ошибка: ${description} скачан пустым файлом"
-    return 1
-  fi
-
-  if [ -n "$marker" ] && ! grep -q "$marker" "$tmp"; then
-    rm -f "$tmp"
-    echo "Ошибка: ${description} не прошёл проверку содержимого"
-    return 1
-  fi
-
-  mv "$tmp" "$target"
 }
 
 repo_path_from_raw_url() {
@@ -637,6 +572,15 @@ if [ "$1" = "-install" ]; then
     curl -o /opt/etc/crontab https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab
     chmod 755 /opt/etc/crontab
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
+    mkdir -p "$BOT_RUNTIME_DIR"
+    curl -fsSL -o "$BOT_RUNTIME_DIR/pool_probe_runner.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/pool_probe_runner.py" || exit 1
+    chmod 644 "$BOT_RUNTIME_DIR/pool_probe_runner.py"
+    curl -fsSL -o "$BOT_RUNTIME_DIR/key_pool_store.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/key_pool_store.py" || exit 1
+    chmod 644 "$BOT_RUNTIME_DIR/key_pool_store.py"
+    curl -fsSL -o "$BOT_RUNTIME_DIR/service_catalog.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/service_catalog.py" || exit 1
+    chmod 644 "$BOT_RUNTIME_DIR/service_catalog.py"
+    curl -fsSL -o "$BOT_RUNTIME_DIR/web_form_template.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_form_template.py" || exit 1
+    chmod 644 "$BOT_RUNTIME_DIR/web_form_template.py"
     install_static_assets
     /opt/bin/unblock_update.sh
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
@@ -653,7 +597,7 @@ if [ "$1" = "-install" ]; then
 fi
 
 if [ "$1" = "-reinstall" ]; then
-    curl -s -o /opt/root/script.sh https://raw.githubusercontent.com/znetworkx/bypass_keenetic/main/script.sh
+    curl -s -o /opt/root/script.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/script.sh
     chmod 755 /opt/root/script.sh || chmod +x /opt/root/script.sh
     echo "Начинаем переустановку"
     #opkg update
@@ -690,6 +634,10 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/pool_probe_runner.py" "$stage_dir/pool_probe_runner.py" "run_pool_probe_worker" "pool_probe_runner.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/key_pool_store.py" "$stage_dir/key_pool_store.py" "def normalize_key_pools" "key_pool_store.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/service_catalog.py" "$stage_dir/service_catalog.py" "CUSTOM_CHECK_PRESETS" "service_catalog.py" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_form_template.py" "$stage_dir/web_form_template.py" "render_web_form" "web_form_template.py" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/installer.py" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S98telegram_bot_installer" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99telegram_bot" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
@@ -728,6 +676,10 @@ if [ "$1" = "-update" ]; then
     if [ -f "$BOT_MAIN_PATH" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
+    [ -f "$BOT_RUNTIME_DIR/pool_probe_runner.py" ] && mv "$BOT_RUNTIME_DIR/pool_probe_runner.py" "$backup_dir"/pool_probe_runner.py
+    [ -f "$BOT_RUNTIME_DIR/key_pool_store.py" ] && mv "$BOT_RUNTIME_DIR/key_pool_store.py" "$backup_dir"/key_pool_store.py
+    [ -f "$BOT_RUNTIME_DIR/service_catalog.py" ] && mv "$BOT_RUNTIME_DIR/service_catalog.py" "$backup_dir"/service_catalog.py
+    [ -f "$BOT_RUNTIME_DIR/web_form_template.py" ] && mv "$BOT_RUNTIME_DIR/web_form_template.py" "$backup_dir"/web_form_template.py
     rm -f /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh > /dev/null 2>&1
     rm -f /opt/etc/init.d/S35tor > /dev/null 2>&1
     chmod 755 "$backup_dir"/* 2>/dev/null
@@ -757,6 +709,14 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
+    mv "$stage_dir/pool_probe_runner.py" "$BOT_RUNTIME_DIR/pool_probe_runner.py"
+    chmod 644 "$BOT_RUNTIME_DIR/pool_probe_runner.py"
+    mv "$stage_dir/key_pool_store.py" "$BOT_RUNTIME_DIR/key_pool_store.py"
+    chmod 644 "$BOT_RUNTIME_DIR/key_pool_store.py"
+    mv "$stage_dir/service_catalog.py" "$BOT_RUNTIME_DIR/service_catalog.py"
+    chmod 644 "$BOT_RUNTIME_DIR/service_catalog.py"
+    mv "$stage_dir/web_form_template.py" "$BOT_RUNTIME_DIR/web_form_template.py"
+    chmod 644 "$BOT_RUNTIME_DIR/web_form_template.py"
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"
