@@ -20,7 +20,7 @@ import traceback
 import gc
 import tarfile
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from urllib.parse import quote, unquote, urlencode, urlparse
 from proxy_key_store import (
     load_current_keys as _store_load_current_keys,
     load_shadowsocks_key as _store_load_shadowsocks_key,
@@ -39,6 +39,11 @@ from proxy_protocols import (
     parse_vless_key as _store_parse_vless_key,
     parse_vmess_key as _store_parse_vmess_key,
     proxy_outbound_from_key as _store_proxy_outbound_from_key,
+)
+from proxy_config_builder import (
+    build_proxy_core_config as _builder_build_proxy_core_config,
+    build_shadowsocks_config as _builder_build_shadowsocks_config,
+    build_trojan_config as _builder_build_trojan_config,
 )
 from proxy_status import (
     active_mode_status_signature as _status_active_mode_signature,
@@ -66,6 +71,8 @@ from custom_checks_store import (
     save_custom_checks as _save_custom_checks,
 )
 import key_pool_store
+import key_pool_web
+import telegram_pool_ui
 from probe_cache import (
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
@@ -2658,7 +2665,7 @@ POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
 # Telegram прокручивает reply-клавиатуру целиком, без закрепления нижних строк.
 # Поэтому показываем весь пул в одной прокручиваемой клавиатуре, а служебные
 # кнопки добавляем после списка ключей.
-POOL_PAGE_SIZE = 1000
+POOL_PAGE_SIZE = telegram_pool_ui.POOL_PAGE_SIZE
 POOL_PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
     'vmess': 'Vmess',
@@ -2666,63 +2673,25 @@ POOL_PROTOCOL_LABELS = {
     'vless2': 'Vless 2',
     'trojan': 'Trojan',
 }
-POOL_PROTOCOL_BUTTON_PREFIXES = {
-    'shadowsocks': 'SS',
-    'vmess': 'VM',
-    'vless': 'V1',
-    'vless2': 'V2',
-    'trojan': 'TR',
-}
-TELEGRAM_BUTTON_ICON = 'TG'
-YOUTUBE_BUTTON_ICON = 'YT'
+POOL_PROTOCOL_BUTTON_PREFIXES = telegram_pool_ui.POOL_PROTOCOL_BUTTON_PREFIXES
+TELEGRAM_BUTTON_ICON = telegram_pool_ui.TELEGRAM_BUTTON_ICON
+YOUTUBE_BUTTON_ICON = telegram_pool_ui.YOUTUBE_BUTTON_ICON
 
 
 def _pool_proto_label(proto):
-    return POOL_PROTOCOL_LABELS.get(proto, proto)
+    return key_pool_web.pool_proto_label(proto)
 
 
 def _pool_proto_button_prefix(proto):
-    return POOL_PROTOCOL_BUTTON_PREFIXES.get(proto, str(proto or '').upper())
-
-
+    return telegram_pool_ui.pool_proto_button_prefix(proto)
 def _pool_proto_from_button_prefix(prefix):
-    value = (prefix or '').strip().upper()
-    for proto, proto_prefix in POOL_PROTOCOL_BUTTON_PREFIXES.items():
-        if value == proto_prefix.upper():
-            return proto
-    return None
-
-
+    return telegram_pool_ui.pool_proto_from_button_prefix(prefix)
 def _shorten_button_text(text, limit=38):
-    value = re.sub(r'\s+', ' ', str(text or '')).strip()
-    if len(value) <= limit:
-        return value
-    return value[:max(1, limit - 1)].rstrip() + '…'
-
-
+    return telegram_pool_ui.shorten_button_text(text, limit)
 def _pool_add_page_controls(markup, info):
-    if info['total_pages'] <= 1:
-        return
-    previous_button = 'Ключи ◀️' if info['page'] > 0 else '·'
-    next_button = 'Ключи ▶️' if info['page'] < info['total_pages'] - 1 else '·'
-    page_button = f'Стр. {info["page"] + 1}/{info["total_pages"]}'
-    markup.row(
-        types.KeyboardButton(previous_button),
-        types.KeyboardButton(page_button),
-        types.KeyboardButton(next_button),
-    )
-
-
+    telegram_pool_ui.add_page_controls(types, markup, info)
 def _pool_protocol_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    buttons = [types.KeyboardButton(_pool_proto_label(proto)) for proto in POOL_PROTOCOL_ORDER]
-    markup.row(buttons[0], buttons[1])
-    markup.row(buttons[2], buttons[3])
-    markup.row(buttons[4])
-    markup.row(types.KeyboardButton('🔙 В меню ключей'), types.KeyboardButton('🔙 Назад'))
-    return markup
-
-
+    return telegram_pool_ui.pool_protocol_markup(types, [_pool_proto_label(proto) for proto in POOL_PROTOCOL_ORDER])
 def _resolve_pool_protocol(text):
     value = (text or '').strip().lower()
     aliases = {
@@ -2759,94 +2728,51 @@ def _clear_pool_inline_keyboard(chat_id, message_id=None):
 
 def _pool_action_markup(proto, page=0):
     _, info = _format_pool_page(proto, page)
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     current_keys = _load_current_keys()
     current_key = current_keys.get(proto)
     cache = _load_key_probe_cache()
+    labels = []
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
-        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto)))
-    _pool_add_page_controls(markup, info)
-    markup.row(types.KeyboardButton('➕ Добавить ключи'), types.KeyboardButton('🔗 Загрузить subscription'))
-    markup.row(types.KeyboardButton('🔍 Проверить пул'), types.KeyboardButton('🧹 Очистить пул'))
-    markup.row(types.KeyboardButton('🗑 Удаление'), types.KeyboardButton('🔄 Обновить пул'))
-    markup.row(types.KeyboardButton('🔙 К выбору протокола'), types.KeyboardButton('🔙 В меню ключей'))
-    markup.row(types.KeyboardButton('🔙 Назад'))
-    return markup
-
-
+        labels.append(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto))
+    return telegram_pool_ui.pool_action_markup(types, labels, info)
 def _pool_delete_markup(proto, page=0):
     _, info = _format_pool_page(proto, page)
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     current_keys = _load_current_keys()
     current_key = current_keys.get(proto)
     cache = _load_key_probe_cache()
+    labels = []
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
-        markup.row(types.KeyboardButton(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto, action='delete')))
-    _pool_add_page_controls(markup, info)
-    markup.row(types.KeyboardButton('🔙 К пулу'), types.KeyboardButton('🔙 Назад'))
-    return markup
-
-
+        labels.append(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto, action='delete'))
+    return telegram_pool_ui.pool_delete_markup(types, labels, info)
 def _pool_clear_confirm_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton('✅ Очистить пул'), types.KeyboardButton('Отмена'))
-    markup.row(types.KeyboardButton('🔙 К пулу'), types.KeyboardButton('🔙 Назад'))
-    return markup
-
-
+    return telegram_pool_ui.pool_clear_confirm_markup(types)
 def _pool_input_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton('🔙 К пулу'), types.KeyboardButton('🔙 Назад'))
-    return markup
-
-
+    return telegram_pool_ui.pool_input_markup(types)
 def _pool_probe_text(probe):
-    if not isinstance(probe, dict) or not probe:
-        return 'не проверялся'
-    badges = []
-    if probe.get('tg_ok') is True:
-        badges.append(f'{TELEGRAM_BUTTON_ICON}✅')
-    elif probe.get('tg_ok') is False:
-        badges.append(f'{TELEGRAM_BUTTON_ICON}❌')
-    if probe.get('yt_ok') is True:
-        badges.append(f'{YOUTUBE_BUTTON_ICON}✅')
-    elif probe.get('yt_ok') is False:
-        badges.append(f'{YOUTUBE_BUTTON_ICON}❌')
-    if not badges:
-        return 'не проверялся'
-    return ' '.join(badges)
-
-
+    return telegram_pool_ui.pool_probe_text(probe)
 def _pool_probe_button_text(probe):
-    if not isinstance(probe, dict) or not probe:
-        return f'{TELEGRAM_BUTTON_ICON}? {YOUTUBE_BUTTON_ICON}?'
-    tg = f'{TELEGRAM_BUTTON_ICON}✅' if probe.get('tg_ok') is True else (f'{TELEGRAM_BUTTON_ICON}❌' if probe.get('tg_ok') is False else f'{TELEGRAM_BUTTON_ICON}?')
-    yt = f'{YOUTUBE_BUTTON_ICON}✅' if probe.get('yt_ok') is True else (f'{YOUTUBE_BUTTON_ICON}❌' if probe.get('yt_ok') is False else f'{YOUTUBE_BUTTON_ICON}?')
-    return f'{tg} {yt}'
-
-
+    return telegram_pool_ui.pool_probe_button_text(probe)
 def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto=None, action='apply'):
-    display_name = _shorten_button_text(_pool_key_display_name(key_value), limit=24)
-    status = _pool_probe_button_text(probe)
-    proto_prefix = _pool_proto_button_prefix(proto)
-    if action == 'delete':
-        prefix = f'✕ {proto_prefix} {index}.'
-    elif current_key and key_value == current_key:
-        prefix = f'✅ {proto_prefix} {index}.'
-    else:
-        prefix = f'{proto_prefix} {index}.'
-    return _shorten_button_text(f'{prefix} {display_name} {status}', limit=52)
-
-
+    return telegram_pool_ui.pool_key_button_label(
+        index,
+        key_value,
+        probe=probe,
+        current_key=current_key,
+        proto=proto,
+        action=action,
+        display_name=_pool_key_display_name,
+    )
 def _pool_key_line(index, key_value, probe=None, current_key=None):
-    marker = ' — АКТИВЕН' if current_key and key_value == current_key else ''
-    display_name = _pool_key_display_name(key_value)
-    key_hash = _hash_key(key_value)[:8]
-    return f'{index}. {display_name}{marker} [{key_hash}] — {_pool_probe_text(probe)}'
-
-
+    return telegram_pool_ui.pool_key_line(
+        index,
+        key_value,
+        probe=probe,
+        current_key=current_key,
+        display_name=_pool_key_display_name,
+        hash_key=_hash_key,
+    )
 def _format_pool_summary():
     current_keys = _load_current_keys()
     pools = _ensure_current_keys_in_pools(current_keys)
@@ -2864,76 +2790,13 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
     key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
     key_probe_cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    services = [
-        {'label': 'Telegram', 'field': 'tg_ok', 'id': None, 'count': 0},
-        {'label': 'YouTube', 'field': 'yt_ok', 'id': None, 'count': 0},
-    ]
-    for check in custom_checks:
-        check_id = str(check.get('id') or '').strip()
-        if not check_id:
-            continue
-        label = str(check.get('label') or check_id).strip() or check_id
-        if len(label) > 18:
-            label = label[:18] + '...'
-        services.append({'label': label, 'field': None, 'id': check_id, 'count': 0})
-
-    total_count = 0
-    checked_count = 0
-    all_services_count = 0
-    any_service_count = 0
-    for proto in POOL_PROTOCOL_ORDER:
-        for pool_key in key_pools.get(proto, []) or []:
-            total_count += 1
-            probe = key_probe_cache.get(_hash_key(pool_key), {})
-            if not isinstance(probe, dict):
-                probe = {}
-            custom = probe.get('custom', {}) if isinstance(probe, dict) else {}
-            if not isinstance(custom, dict):
-                custom = {}
-            results = []
-            for service in services:
-                if service['field']:
-                    if service['field'] not in probe:
-                        continue
-                    ok = bool(probe.get(service['field']))
-                else:
-                    if service['id'] not in custom:
-                        continue
-                    ok = bool(custom.get(service['id']))
-                results.append(ok)
-                if ok:
-                    service['count'] += 1
-            if len(results) == len(services):
-                checked_count += 1
-            if results and any(results):
-                any_service_count += 1
-            if len(results) == len(services) and all(results):
-                all_services_count += 1
-
-    active_key_count = sum(1 for proto in POOL_PROTOCOL_ORDER if (current_keys.get(proto) or '').strip())
-    service_text = '. '.join(f"{service['label']}: {service['count']}" for service in services)
-    note_parts = [
-        f'В пулах: {total_count}',
-        f'Проверено: {checked_count}',
-    ]
-    if service_text:
-        note_parts.append(service_text)
-    note_parts.append(f'Все сервисы: {all_services_count}')
-    note_parts.append(f'Хотя бы один: {any_service_count}')
-    note = '. '.join(note_parts) + '.'
-    return {
-        'active_key_count': active_key_count,
-        'protocol_count': len(POOL_PROTOCOL_ORDER),
-        'active_text': f'{active_key_count} / {len(POOL_PROTOCOL_ORDER)} активных ключей',
-        'note': note,
-        'pool_total_count': total_count,
-        'checked_pool_count': checked_count,
-        'all_services_count': all_services_count,
-        'any_service_count': any_service_count,
-        'services': [{'label': service['label'], 'count': service['count']} for service in services],
-    }
-
-
+    return key_pool_web.pool_status_summary(
+        current_keys,
+        key_pools,
+        key_probe_cache,
+        custom_checks,
+        _hash_key,
+    )
 def _format_pool_details(proto):
     current_keys = _load_current_keys()
     pools = _ensure_current_keys_in_pools(current_keys)
@@ -3544,34 +3407,12 @@ def _web_probe_checked_at(probe):
 
 
 def _web_custom_probe_states(probe, custom_checks=None):
-    custom = (probe or {}).get('custom', {})
-    if not isinstance(custom, dict):
-        custom = {}
-    result = {}
-    for check in (custom_checks if custom_checks is not None else _load_custom_checks()):
-        check_id = check.get('id')
-        if not check_id:
-            continue
-        if check_id in custom:
-            result[check_id] = 'ok' if custom.get(check_id) else 'fail'
-        else:
-            result[check_id] = 'unknown'
-    return result
+    checks = custom_checks if custom_checks is not None else _load_custom_checks()
+    return key_pool_web.web_custom_probe_states(probe, checks)
 
 
 def _web_custom_checks():
-    return [
-        {
-            'id': check.get('id', ''),
-            'label': check.get('label', ''),
-            'url': check.get('url', ''),
-            'urls': check.get('urls') or [check.get('url', '')],
-            'routes': check.get('routes') or [],
-            'badge': check.get('badge', 'WEB'),
-            'icon': check.get('icon', ''),
-        }
-        for check in _load_custom_checks()
-    ]
+    return key_pool_web.web_custom_checks(_load_custom_checks())
 
 
 def _web_custom_check_badges(probe, custom_checks=None):
@@ -3678,34 +3519,17 @@ def _web_custom_presets_html(checks=None):
 
 def _web_pool_snapshot(current_keys=None, include_keys=False):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
-    pools = _ensure_current_keys_in_pools(current_keys)
-    cache = _load_key_probe_cache()
-    custom_checks = _load_custom_checks()
-    result = {}
-    for proto in POOL_PROTOCOL_ORDER:
-        current_key = current_keys.get(proto, '')
-        rows = []
-        for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
-            probe = cache.get(_hash_key(key_value), {})
-            row = {
-                'index': index,
-                'key_id': _hash_key(key_value)[:12],
-                'display_name': _pool_key_display_name(key_value),
-                'active': bool(current_key and key_value == current_key),
-                'tg': _web_probe_state(probe, 'tg_ok'),
-                'yt': _web_probe_state(probe, 'yt_ok'),
-                'custom': _web_custom_probe_states(probe, custom_checks),
-                'checked_at': _web_probe_checked_at(probe),
-            }
-            if include_keys:
-                row['key'] = key_value
-            rows.append(row)
-        result[proto] = {
-            'label': _pool_proto_label(proto),
-            'count': len(rows),
-            'rows': rows,
-        }
-    return result
+    return key_pool_web.web_pool_snapshot(
+        current_keys,
+        _ensure_current_keys_in_pools(current_keys),
+        _load_key_probe_cache(),
+        _load_custom_checks(),
+        include_keys=include_keys,
+        hash_key=_hash_key,
+        display_name=_pool_key_display_name,
+        probe_state=_web_probe_state,
+        probe_checked_at=_web_probe_checked_at,
+    )
 
 
 def _check_local_proxy_endpoint(key_type, port):
@@ -5580,13 +5404,11 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._ensure_request_allowed():
             return
-        if not self._ensure_csrf_allowed():
-            return
         path = urlparse(self.path).path
+        data = self._read_post_data()
+        if not self._ensure_csrf_allowed(data):
+            return
         if path == '/set_proxy':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proxy_type = data.get('proxy_type', ['none'])[0]
             ok, error = update_proxy(proxy_type)
             if ok:
@@ -5612,9 +5434,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/command':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             command = data.get('command', [''])[0]
             started, result = _start_web_command(command)
             self._send_action_result(
@@ -5625,9 +5444,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/save_unblock_list':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             list_name = data.get('list_name', [''])[0]
             content = data.get('content', [''])[0]
             success = True
@@ -5645,9 +5461,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/append_socialnet':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
             service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
             success = True
@@ -5666,9 +5479,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/remove_socialnet':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
             service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
             success = True
@@ -5687,9 +5497,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/custom_checks_to_list':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             list_name = data.get('target_list_name', data.get('list_name', data.get('type', [''])))[0]
             success = True
             try:
@@ -5707,9 +5514,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/custom_check_add':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             preset_id = data.get('preset', [''])[0]
             label = data.get('label', [''])[0]
             url = data.get('url', [''])[0]
@@ -5735,9 +5539,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/custom_check_delete':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             check_id = data.get('id', [''])[0]
             success = True
             try:
@@ -5757,9 +5558,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/pool_probe':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proto = data.get('type', [''])[0]
             success = True
             try:
@@ -5793,9 +5591,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/pool_add':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proto = data.get('type', [''])[0]
             keys_text = data.get('keys', [''])[0]
             success = True
@@ -5815,9 +5610,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/pool_delete':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proto = data.get('type', [''])[0]
             key_to_delete = data.get('key', [''])[0]
             success = True
@@ -5835,9 +5627,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/pool_apply':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proto = data.get('type', [''])[0]
             key_to_apply = data.get('key', [''])[0]
             success = True
@@ -5870,9 +5659,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/pool_clear':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proto = data.get('type', [''])[0]
             success = True
             try:
@@ -5891,9 +5677,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
 
         if path == '/pool_subscribe':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proto = data.get('type', [''])[0]
             sub_url = data.get('url', [''])[0]
             success = True
@@ -5940,9 +5723,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if path != '/install':
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length).decode('utf-8')
-        data = parse_qs(body)
         key_type = data.get('type', [''])[0]
         key_value = data.get('key', [''])[0]
         result = 'Ключ установлен.'
@@ -6032,158 +5812,28 @@ def _parse_vless_key(key):
 
 
 def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
-    config_data = {
-        'log': {
-            'access': '/dev/null',
-            'error': CORE_PROXY_ERROR_LOG,
-            'loglevel': 'warning'
+    return _builder_build_proxy_core_config(
+        vmess_key=vmess_key,
+        vless_key=vless_key,
+        vless2_key=vless2_key,
+        shadowsocks_key=shadowsocks_key,
+        trojan_key=trojan_key,
+        ports={
+            'vmess': localportvmess,
+            'vmess_transparent': localportvmess_transparent,
+            'vless': localportvless,
+            'vless_transparent': localportvless_transparent,
+            'vless2': localportvless2,
+            'vless2_transparent': localportvless2_transparent,
+            'shadowsocks_bot': localportsh_bot,
+            'trojan_bot': localporttrojan_bot,
         },
-        'dns': {
-            'hosts': {
-                'api.telegram.org': '149.154.167.220'
-            },
-            'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
-            'queryStrategy': 'UseIPv4'
-        },
-        'inbounds': [],
-        'outbounds': [],
-        'routing': {
-            'domainStrategy': 'IPIfNonMatch',
-            'rules': []
-        }
-    }
-
-    if vmess_key:
-        vmess_outbound = _proxy_outbound_from_key('vmess', vmess_key, 'proxy-vmess')
-        config_data['inbounds'].append({
-            'port': int(localportvmess),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': 'in-vmess'
-        })
-        config_data['inbounds'].append({
-            'port': int(localportvmess_transparent),
-            'listen': '0.0.0.0',
-            'protocol': 'dokodemo-door',
-            'settings': {
-                'network': 'tcp',
-                'followRedirect': True
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': 'in-vmess-transparent'
-        })
-        config_data['outbounds'].append(vmess_outbound)
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': ['in-vmess', 'in-vmess-transparent'],
-            'outboundTag': 'proxy-vmess',
-            'enabled': True
-        })
-
-    if shadowsocks_key:
-        shadowsocks_outbound = _proxy_outbound_from_key('shadowsocks', shadowsocks_key, 'proxy-shadowsocks')
-        config_data['inbounds'].append({
-            'port': int(localportsh_bot),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': 'in-shadowsocks'
-        })
-        config_data['outbounds'].append(shadowsocks_outbound)
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': ['in-shadowsocks'],
-            'outboundTag': 'proxy-shadowsocks',
-            'enabled': True
-        })
-
-    def add_vless_route(key_value, socks_port, transparent_port, socks_tag, transparent_tag, outbound_tag):
-        if not key_value:
-            return
-        vless_outbound = _proxy_outbound_from_key('vless', key_value, outbound_tag)
-        config_data['inbounds'].append({
-            'port': int(socks_port),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': socks_tag
-        })
-        config_data['inbounds'].append({
-            'port': int(transparent_port),
-            'listen': '0.0.0.0',
-            'protocol': 'dokodemo-door',
-            'settings': {
-                'network': 'tcp',
-                'followRedirect': True
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': transparent_tag
-        })
-        config_data['outbounds'].append(vless_outbound)
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': [socks_tag, transparent_tag],
-            'outboundTag': outbound_tag,
-            'enabled': True
-        })
-
-    add_vless_route(vless_key, localportvless, localportvless_transparent, 'in-vless', 'in-vless-transparent', 'proxy-vless')
-    add_vless_route(vless2_key, localportvless2, localportvless2_transparent, 'in-vless2', 'in-vless2-transparent', 'proxy-vless2')
-
-    if trojan_key:
-        trojan_outbound = _proxy_outbound_from_key('trojan', trojan_key, 'proxy-trojan')
-        config_data['inbounds'].append({
-            'port': int(localporttrojan_bot),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': 'in-trojan'
-        })
-        config_data['outbounds'].append(trojan_outbound)
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': ['in-trojan'],
-            'outboundTag': 'proxy-trojan',
-            'enabled': True
-        })
-
-    if config_data['outbounds']:
-        config_data['outbounds'].append({'protocol': 'freedom', 'tag': 'direct'})
-        config_data['routing']['rules'].insert(0, {
-            'type': 'field',
-            'domain': CONNECTIVITY_CHECK_DOMAINS,
-            'outboundTag': 'direct',
-            'enabled': True
-        })
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'port': '0-65535',
-            'outboundTag': 'direct',
-            'enabled': True
-        })
-
-    return config_data
+        error_log_path=CORE_PROXY_ERROR_LOG,
+        access_log_path='/dev/null',
+        loglevel='warning',
+        connectivity_check_domains=CONNECTIVITY_CHECK_DOMAINS,
+        include_vmess_transparent=True,
+    )
 
 
 def _write_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
@@ -6222,29 +5872,7 @@ def vmess(key):
 
 def trojan(key):
     raw_key = key.strip()
-    trojan_data = _parse_trojan_key(raw_key)
-    config = {
-        'run_type': 'nat',
-        'local_addr': '::',
-        'local_port': int(localporttrojan),
-        'remote_addr': trojan_data['address'],
-        'remote_port': int(trojan_data['port']),
-        'password': [trojan_data['password']],
-        'raw_uri': raw_key,
-        'type': trojan_data['type'],
-        'security': trojan_data['security'],
-        'sni': trojan_data['sni'],
-        'host': trojan_data['host'],
-        'path': trojan_data['path'],
-        'serviceName': trojan_data['serviceName'],
-        'fingerprint': trojan_data['fingerprint'],
-        'alpn': trojan_data['alpn'],
-        'fragment': trojan_data['fragment'],
-        'ssl': {
-            'verify': False,
-            'verify_hostname': False,
-        }
-    }
+    config = _builder_build_trojan_config(raw_key, localporttrojan)
     with open('/opt/etc/trojan/config.json', 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, separators=(',', ':'))
     _write_all_proxy_core_config()
@@ -6254,21 +5882,7 @@ def _decode_shadowsocks_uri(key):
 
 
 def shadowsocks(key=None):
-    raw_key = key.strip()
-    server, port, method, password = _decode_shadowsocks_uri(raw_key)
-    config = {
-        'server': [server],
-        'mode': 'tcp_and_udp',
-        'server_port': int(port),
-        'password': password,
-        'timeout': 86400,
-        'method': method,
-        'local_address': '::',
-        'local_port': int(localportsh),
-        'fast_open': False,
-        'ipv6_first': True,
-        'raw_uri': raw_key
-    }
+    config = _builder_build_shadowsocks_config(key, localportsh)
     with open('/opt/etc/shadowsocks.json', 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     _write_all_proxy_core_config()

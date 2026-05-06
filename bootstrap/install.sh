@@ -117,6 +117,8 @@ restore_path /opt/etc/bot/main.py
 restore_path /opt/etc/bot/installer.py
 restore_path /opt/etc/bot/installer.env
 restore_path /opt/etc/bot/key_pool_store.py
+restore_path /opt/etc/bot/key_pool_web.py
+restore_path /opt/etc/bot/telegram_pool_ui.py
 restore_path /opt/etc/bot/pool_probe_runner.py
 restore_path /opt/etc/bot/service_catalog.py
 restore_path /opt/etc/bot/probe_cache.py
@@ -127,6 +129,7 @@ restore_path /opt/etc/bot/web_command_state.py
 restore_path /opt/etc/bot/unblock_lists.py
 restore_path /opt/etc/bot/proxy_key_store.py
 restore_path /opt/etc/bot/proxy_protocols.py
+restore_path /opt/etc/bot/proxy_config_builder.py
 restore_path /opt/etc/bot/proxy_status.py
 restore_path /opt/etc/bot/installer_common.py
 restore_path /opt/etc/web_bot.py
@@ -220,6 +223,8 @@ backup_path "$BOT_MAIN_PATH"
 backup_path "$INSTALLER_PATH"
 backup_path "$INSTALLER_ENV_PATH"
 backup_path "$BOT_DIR/key_pool_store.py"
+backup_path "$BOT_DIR/key_pool_web.py"
+backup_path "$BOT_DIR/telegram_pool_ui.py"
 backup_path "$BOT_DIR/pool_probe_runner.py"
 backup_path "$BOT_DIR/service_catalog.py"
 backup_path "$BOT_DIR/probe_cache.py"
@@ -230,6 +235,7 @@ backup_path "$BOT_DIR/web_command_state.py"
 backup_path "$BOT_DIR/unblock_lists.py"
 backup_path "$BOT_DIR/proxy_key_store.py"
 backup_path "$BOT_DIR/proxy_protocols.py"
+backup_path "$BOT_DIR/proxy_config_builder.py"
 backup_path "$BOT_DIR/proxy_status.py"
 backup_path "$BOT_DIR/installer_common.py"
 backup_path "/opt/etc/web_bot.py"
@@ -260,6 +266,8 @@ download_file "$RAW_BASE/script.sh" "$TMP_DIR/script.sh" 'if \[ "$1" = "-install
 download_file "$RAW_BASE/bot.py" "$TMP_DIR/main.py" 'KeyInstallHTTPRequestHandler'
 download_file "$RAW_BASE/installer.py" "$TMP_DIR/installer.py" 'ThreadingHTTPServer'
 download_file "$RAW_BASE/key_pool_store.py" "$TMP_DIR/key_pool_store.py" 'def normalize_key_pools'
+download_file "$RAW_BASE/key_pool_web.py" "$TMP_DIR/key_pool_web.py" 'pool_status_summary'
+download_file "$RAW_BASE/telegram_pool_ui.py" "$TMP_DIR/telegram_pool_ui.py" 'pool_action_markup'
 download_file "$RAW_BASE/pool_probe_runner.py" "$TMP_DIR/pool_probe_runner.py" 'run_pool_probe_worker'
 download_file "$RAW_BASE/service_catalog.py" "$TMP_DIR/service_catalog.py" 'CUSTOM_CHECK_PRESETS'
 download_file "$RAW_BASE/probe_cache.py" "$TMP_DIR/probe_cache.py" 'record_key_probe'
@@ -270,6 +278,7 @@ download_file "$RAW_BASE/web_command_state.py" "$TMP_DIR/web_command_state.py" '
 download_file "$RAW_BASE/unblock_lists.py" "$TMP_DIR/unblock_lists.py" 'save_unblock_list_file'
 download_file "$RAW_BASE/proxy_key_store.py" "$TMP_DIR/proxy_key_store.py" 'load_current_keys'
 download_file "$RAW_BASE/proxy_protocols.py" "$TMP_DIR/proxy_protocols.py" 'proxy_outbound_from_key'
+download_file "$RAW_BASE/proxy_config_builder.py" "$TMP_DIR/proxy_config_builder.py" 'build_proxy_core_config'
 download_file "$RAW_BASE/proxy_status.py" "$TMP_DIR/proxy_status.py" 'status_snapshot_signature'
 download_file "$RAW_BASE/installer_common.py" "$TMP_DIR/installer_common.py" 'browser_port_is_valid'
 download_file "$RAW_BASE/S99telegram_bot" "$TMP_DIR/S99telegram_bot" 'Bot started successfully'
@@ -278,6 +287,8 @@ download_file "$RAW_BASE/S98telegram_bot_installer" "$TMP_DIR/S98telegram_bot_in
 cp "$TMP_DIR/main.py" "$BOT_MAIN_PATH"
 cp "$TMP_DIR/installer.py" "$INSTALLER_PATH"
 cp "$TMP_DIR/key_pool_store.py" "$BOT_DIR/key_pool_store.py"
+cp "$TMP_DIR/key_pool_web.py" "$BOT_DIR/key_pool_web.py"
+cp "$TMP_DIR/telegram_pool_ui.py" "$BOT_DIR/telegram_pool_ui.py"
 cp "$TMP_DIR/pool_probe_runner.py" "$BOT_DIR/pool_probe_runner.py"
 cp "$TMP_DIR/service_catalog.py" "$BOT_DIR/service_catalog.py"
 cp "$TMP_DIR/probe_cache.py" "$BOT_DIR/probe_cache.py"
@@ -288,6 +299,7 @@ cp "$TMP_DIR/web_command_state.py" "$BOT_DIR/web_command_state.py"
 cp "$TMP_DIR/unblock_lists.py" "$BOT_DIR/unblock_lists.py"
 cp "$TMP_DIR/proxy_key_store.py" "$BOT_DIR/proxy_key_store.py"
 cp "$TMP_DIR/proxy_protocols.py" "$BOT_DIR/proxy_protocols.py"
+cp "$TMP_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_config_builder.py"
 cp "$TMP_DIR/proxy_status.py" "$BOT_DIR/proxy_status.py"
 cp "$TMP_DIR/installer_common.py" "$BOT_DIR/installer_common.py"
 cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
@@ -295,7 +307,7 @@ cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 download_static_assets
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/key_pool_store.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
+chmod 644 "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 /bin/sh "$TMP_DIR/script.sh" -install

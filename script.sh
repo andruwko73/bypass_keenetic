@@ -451,7 +451,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_http_common.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_status.py installer_common.py"
+BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py key_pool_web.py telegram_pool_ui.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_http_common.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py installer_common.py"
 
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
@@ -676,6 +676,8 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
     stage_runtime_module pool_probe_runner.py run_pool_probe_worker || exit 1
     stage_runtime_module key_pool_store.py "def normalize_key_pools" || exit 1
+    stage_runtime_module key_pool_web.py pool_status_summary || exit 1
+    stage_runtime_module telegram_pool_ui.py pool_action_markup || exit 1
     stage_runtime_module probe_cache.py record_key_probe || exit 1
     stage_runtime_module custom_checks_store.py add_custom_check || exit 1
     stage_runtime_module service_catalog.py CUSTOM_CHECK_PRESETS || exit 1
@@ -685,6 +687,7 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module unblock_lists.py save_unblock_list_file || exit 1
     stage_runtime_module proxy_key_store.py load_current_keys || exit 1
     stage_runtime_module proxy_protocols.py proxy_outbound_from_key || exit 1
+    stage_runtime_module proxy_config_builder.py build_proxy_core_config || exit 1
     stage_runtime_module proxy_status.py status_snapshot_signature || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/installer.py" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
     stage_runtime_module installer_common.py browser_port_is_valid || exit 1
