@@ -59,6 +59,7 @@ from web_command_state import (
     start_command as _start_command_state,
 )
 from web_http_common import WebRequestMixin
+import web_post_actions
 from web_form_template import render_web_form
 
 import telebot
@@ -2793,6 +2794,64 @@ def bot_message(message):
         except Exception:
             pass
 
+
+def _start_web_bot_action():
+    global bot_ready
+    bot_ready = True
+    _save_bot_autostart(True)
+    _invalidate_web_status_cache()
+    return 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд.'
+
+
+def _install_key_for_protocol(proto, key_value, verify=True):
+    if proto == 'shadowsocks':
+        shadowsocks(key_value)
+        return _apply_installed_proxy('shadowsocks', key_value)
+    if proto == 'vmess':
+        vmess(key_value)
+        return _apply_installed_proxy('vmess', key_value)
+    if proto == 'vless':
+        vless(key_value)
+        return _apply_installed_proxy('vless', key_value)
+    if proto == 'vless2':
+        vless2(key_value)
+        return _apply_installed_proxy('vless2', key_value)
+    if proto == 'trojan':
+        trojan(key_value)
+        return _apply_installed_proxy('trojan', key_value)
+    raise ValueError('Тип ключа не распознан.')
+
+
+def _install_tor_from_web(key_value):
+    tormanually(key_value)
+    os.system('/opt/etc/init.d/S35tor restart')
+    return '✅ Tor успешно обновлен.'
+
+
+def _web_action_context():
+    return {
+        'app_mode_label': APP_MODE_LABEL,
+        'update_proxy': update_proxy,
+        'proxy_mode_label': _proxy_mode_label,
+        'invalidate_web_status_cache': _invalidate_web_status_cache,
+        'invalidate_key_status_cache': _invalidate_key_status_cache,
+        'start_bot': _start_web_bot_action,
+        'start_web_command': _start_web_command,
+        'get_web_command_state': _get_web_command_state,
+        'save_unblock_list': _save_unblock_list,
+        'read_text_file': _read_text_file,
+        'append_socialnet_list': _append_socialnet_list,
+        'remove_socialnet_list': _remove_socialnet_list,
+        'append_service_error': 'Ошибка добавления соцсетей',
+        'remove_service_error': 'Ошибка удаления соцсетей',
+        'socialnet_all_key': SOCIALNET_ALL_KEY,
+        'normalize_unblock_route_name': _normalize_unblock_route_name,
+        'install_key_for_protocol': _install_key_for_protocol,
+        'install_tor': _install_tor_from_web,
+        'install_verify': True,
+    }
+
+
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     local_client_checker = staticmethod(_is_local_web_client)
     web_auth_token_getter = staticmethod(_get_web_auth_token)
@@ -3068,138 +3127,15 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         data = self._read_post_data()
         if not self._ensure_csrf_allowed(data):
             return
-        if path == '/set_proxy':
-            proxy_type = data.get('proxy_type', ['none'])[0]
-            ok, error = update_proxy(proxy_type)
-            if ok:
-                result = f'{APP_MODE_LABEL} установлен: {proxy_type}'
-            else:
-                result = f'⚠️ {error}'
-            _invalidate_web_status_cache()
-            _invalidate_key_status_cache()
-            self._send_action_result(
-                result,
-                success=ok,
-                extra={'proxy_mode': proxy_type, 'proxy_label': _proxy_mode_label(proxy_type)},
-            )
-            return
-
-        if path == '/start':
-            global bot_ready
-            bot_ready = True
-            _save_bot_autostart(True)
-            _invalidate_web_status_cache()
-            result = 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд.'
-            self._send_action_result(result, success=True)
-            return
-
-        if path == '/command':
-            command = data.get('command', [''])[0]
-            started, result = _start_web_command(command)
-            self._send_action_result(
-                result,
-                success=started,
-                extra={'command_state': _get_web_command_state()},
-            )
-            return
-
-        if path == '/save_unblock_list':
-            list_name = data.get('list_name', [''])[0]
-            content = data.get('content', [''])[0]
-            success = True
-            try:
-                result = _save_unblock_list(list_name, content)
-            except Exception as exc:
-                success = False
-                result = f'Ошибка сохранения списка: {exc}'
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', os.path.basename(list_name))).strip() if success else ''
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'list_name': os.path.basename(list_name), 'list_content': list_content},
-            )
-            return
-
-        if path == '/append_socialnet':
-            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
-            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
-            success = True
-            try:
-                result = _append_socialnet_list(list_name, service_key=service_key)
-            except Exception as exc:
-                success = False
-                result = f'Ошибка добавления соцсетей: {exc}'
-            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'list_name': safe_name, 'list_content': list_content},
-            )
-            return
-
-        if path == '/remove_socialnet':
-            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
-            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
-            success = True
-            try:
-                result = _remove_socialnet_list(list_name, service_key=service_key)
-            except Exception as exc:
-                success = False
-                result = f'Ошибка удаления соцсетей: {exc}'
-            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'list_name': safe_name, 'list_content': list_content},
-            )
-            return
-
-        if path != '/install':
+        action = web_post_actions.dispatch(_web_action_context(), path, data)
+        if action is None:
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
-        key_type = data.get('type', [''])[0]
-        key_value = data.get('key', [''])[0]
-        result = 'Ключ установлен.'
-        success = True
-        try:
-            if key_type == 'shadowsocks':
-                shadowsocks(key_value)
-                result = _apply_installed_proxy('shadowsocks', key_value)
-            elif key_type == 'vmess':
-                vmess(key_value)
-                result = _apply_installed_proxy('vmess', key_value)
-            elif key_type == 'vless':
-                vless(key_value)
-                result = _apply_installed_proxy('vless', key_value)
-            elif key_type == 'vless2':
-                vless2(key_value)
-                result = _apply_installed_proxy('vless2', key_value)
-            elif key_type == 'trojan':
-                trojan(key_value)
-                result = _apply_installed_proxy('trojan', key_value)
-            elif key_type == 'tor':
-                tormanually(key_value)
-                os.system('/opt/etc/init.d/S35tor restart')
-                result = '✅ Tor успешно обновлен.'
-            else:
-                success = False
-                result = 'Тип ключа не распознан.'
-        except Exception as exc:
-            success = False
-            result = f'Ошибка установки: {exc}'
-        else:
-            if success:
-                _invalidate_web_status_cache()
-                _invalidate_key_status_cache()
-
         self._send_action_result(
-            result,
-            success=success,
-            extra={'protocol': key_type, 'key': key_value},
+            action.get('result', ''),
+            success=action.get('success', True),
+            extra=action.get('extra') or None,
         )
-
 
 def start_http_server():
     global web_httpd

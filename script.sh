@@ -421,7 +421,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="web_form_template.py web_http_common.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py installer_common.py"
+BOT_RUNTIME_MODULES="web_form_template.py web_http_common.py web_post_actions.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py installer_common.py"
 
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
@@ -699,6 +699,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
     stage_runtime_module web_form_template.py render_web_form || exit 1
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
+    stage_runtime_module web_post_actions.py dispatch || exit 1
     stage_runtime_module web_command_state.py start_command || exit 1
     stage_runtime_module unblock_lists.py save_unblock_list_file || exit 1
     stage_runtime_module proxy_key_store.py load_current_keys || exit 1

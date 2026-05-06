@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
+import web_post_actions
 
 
 SS_KEY = 'ss://YWVzLTEyOC1nY206cGFzc3dvcmQ@example.com:8388#sample'
@@ -44,8 +45,16 @@ def test_proxy_config_builder():
     assert core_config['routing']['rules'][0]['outboundTag'] == 'direct'
 
 
+def test_web_post_actions_helpers():
+    data = {'target_list_name': ['custom'], 'list_name': ['fallback']}
+    assert web_post_actions.form_value(data, 'missing', 'none') == 'none'
+    assert web_post_actions.first_form_value(data, ('target_list_name', 'list_name')) == 'custom'
+    assert web_post_actions.dispatch({}, '/pool_add', {}) is None
+
+
 def main():
     test_proxy_config_builder()
+    test_web_post_actions_helpers()
     print('smoke_modules: ok')
 
 
