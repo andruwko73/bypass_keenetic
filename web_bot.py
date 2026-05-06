@@ -902,7 +902,7 @@ POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'feature/web-only'
 APP_BRANCH_DESCRIPTION = 'без Telegram бота'
-APP_VERSION_COUNTER = 434
+APP_VERSION_COUNTER = 435
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 CONNECTIVITY_CHECK_DOMAINS = [
@@ -4800,6 +4800,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             --warn-bg:#3e2e16;
             --warn-border:#b78332;
             --shadow:0 18px 40px rgba(2, 6, 23, 0.34);
+            --control-height:36px;
         }}
         [data-theme="light"]{{
             --bg:#f3efe6;
@@ -4856,7 +4857,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .mode-picker-label{{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}}
                 .mode-choice-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}}
                 .mode-choice-grid form{{display:block;margin:0;}}
-                .mode-choice{{width:100%;min-height:34px;justify-content:center;background:rgba(34,67,73,.28);border-color:rgba(78,216,205,.5);box-shadow:none;color:#96f1eb;}}
+                .mode-choice{{width:100%;height:var(--control-height);min-height:var(--control-height);justify-content:center;background:rgba(34,67,73,.28);border-color:rgba(78,216,205,.5);box-shadow:none;color:#96f1eb;}}
                 .mode-choice.active{{background:rgba(48,191,181,.18);border-color:rgba(78,216,205,.5);color:#94f3ec;}}
                 .mode-choice:hover{{filter:none;transform:none;background:rgba(35,98,104,.42);}}
         h1{{margin:0 0 4px;font-size:22px;line-height:1.15;letter-spacing:0;color:var(--text);}}
@@ -4871,7 +4872,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 input:focus,textarea:focus,select:focus{{border-color:rgba(31,122,106,.6);box-shadow:0 0 0 4px rgba(31,122,106,.08);}}
         textarea{{min-height:138px;resize:vertical;}}
                 input::placeholder,textarea::placeholder{{color:#8b8f92;}}
-        button{{padding:13px 16px;border:1px solid rgba(78,216,205,.5);border-radius:8px;background:rgba(34,67,73,.28);color:#96f1eb;font-size:15px;font-weight:700;cursor:pointer;transition:border-color .15s ease, background-color .15s ease, color .15s ease;box-shadow:none;}}
+        button{{min-height:var(--control-height);height:var(--control-height);display:inline-flex;align-items:center;justify-content:center;text-align:center;padding:0 12px;border:1px solid rgba(78,216,205,.5);border-radius:8px;background:rgba(34,67,73,.28);color:#96f1eb;font-size:15px;font-weight:700;line-height:1.15;cursor:pointer;transition:border-color .15s ease, background-color .15s ease, color .15s ease;box-shadow:none;}}
         button:hover{{filter:none;transform:none;border-color:rgba(96,214,205,.62);background:rgba(35,98,104,.44);}}
         button:disabled{{cursor:wait;opacity:.72;filter:saturate(.7);transform:none;}}
                 button.danger{{border-color:rgba(205,86,82,.52);background:rgba(94,36,42,.34);color:#ffb7b1;box-shadow:none;}}
@@ -4904,7 +4905,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 .start-card{{display:flex;flex-direction:column;justify-content:space-between;}}
                 .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
                 .command-grid form{{min-width:0;}}
-                .command-grid button{{width:100%;height:100%;min-height:48px;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.25;padding:12px 14px;}}
+                .command-grid button{{width:100%;height:var(--control-height);min-height:var(--control-height);display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:0 12px;}}
                 .card-topline{{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}}
                 .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
                 .key-status-wrap{{display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;max-width:62%;}}
@@ -4935,7 +4936,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .pool-add-actions button{{padding:8px 14px;font-size:13px;}}
         .pool-subscribe-row{{margin-top:8px;display:flex;align-items:stretch;gap:8px;}}
         .pool-subscribe-form{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;flex:1;}}
-        .pool-subscribe-form button,.pool-clear-btn{{padding:8px 14px;font-size:13px;line-height:1.2;min-height:40px;white-space:nowrap;}}
+        .pool-subscribe-form button,.pool-clear-btn{{height:var(--control-height);min-height:var(--control-height);padding:0 12px;font-size:13px;line-height:1.15;white-space:nowrap;}}
         .pool-clear-form{{margin:0;display:flex;}}
         .pool-clear-btn{{height:100%;}}
         .secondary-button{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;box-shadow:none;}}
@@ -4984,7 +4985,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .form-actions button{{min-width:160px;}}
         .social-list-actions{{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;align-items:stretch;margin-top:8px;}}
         .social-list-title{{display:flex;align-items:center;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;}}
-        .social-list-actions button{{width:100%;min-width:0;height:32px;min-height:32px;}}
+        .social-list-actions button{{width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);}}
         .pool-toolbar{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}}
         .pool-toolbar form{{display:block;}}
         .pool-table-wrap{{overflow:auto;border:1px solid var(--border);border-radius:8px;}}
@@ -5027,7 +5028,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         *::-webkit-scrollbar-thumb{{background:var(--scrollbar-thumb);border:2px solid var(--scrollbar-track);border-radius:999px;}}
         *::-webkit-scrollbar-thumb:hover{{background:var(--scrollbar-thumb-hover);}}
         [data-theme="light"] body{{background:linear-gradient(145deg,#f7f3ea 0%,#ece3d4 100%);}}
-        button{{min-height:32px;border:1px solid rgba(78,216,205,.5);border-radius:8px;background:rgba(34,67,73,.28);box-shadow:none;color:#96f1eb;font-size:12px;font-weight:650;line-height:1.2;padding:6px 9px;}}
+        button{{min-height:var(--control-height);height:var(--control-height);display:inline-flex;align-items:center;justify-content:center;text-align:center;border:1px solid rgba(78,216,205,.5);border-radius:8px;background:rgba(34,67,73,.28);box-shadow:none;color:#96f1eb;font-size:12px;font-weight:650;line-height:1.15;padding:0 12px;}}
         button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{{outline:none;border-color:rgba(78,216,205,.62);box-shadow:var(--focus-ring);}}
         button:hover{{filter:none;transform:none;border-color:rgba(96,214,205,.62);background:rgba(35,98,104,.44);}}
         button.danger{{border-color:rgba(205,86,82,.52);background:rgba(94,36,42,.52);color:#ffb7b1;}}
@@ -5049,13 +5050,13 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .app-branch{{display:block;margin-top:3px;font-size:11px;font-weight:700;line-height:1.2;color:var(--muted);}}
         .version-badge{{justify-self:end;align-self:start;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:3px 7px;border-radius:7px;border:1px solid rgba(91,124,150,.42);background:rgba(17,25,35,.7);color:var(--muted);font-size:10px;font-weight:800;line-height:1;letter-spacing:.04em;white-space:nowrap;box-shadow:none;}}
         [data-theme="light"] .version-badge{{background:rgba(255,253,248,.82);}}
-        .api-pill,.mode-toggle,.theme-toggle{{min-height:36px;border-radius:8px;border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);box-shadow:none;font-size:12px;}}
+        .api-pill,.mode-toggle,.theme-toggle{{height:var(--control-height);min-height:var(--control-height);border-radius:8px;border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);box-shadow:none;font-size:12px;}}
         .mode-toggle,.theme-toggle{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;}}
         .api-pill{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;max-width:none;font-size:12px;line-height:1.25;color:#d9e6ef;}}
         .api-pill::before{{content:"";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:6px;background-color:rgba(48,191,181,.14);background-image:url("data:image/svg+xml;base64,{TELEGRAM_SVG_B64}");background-repeat:no-repeat;background-position:center;background-size:13px 13px;}}
         .workspace-layout{{grid-template-columns:138px minmax(0,1fr);gap:12px;}}
         .side-nav{{top:86px;padding:9px;gap:7px;}}
-        .nav-item{{min-height:40px;padding:8px 9px;color:#c7d2df;}}
+        .nav-item{{height:var(--control-height);min-height:var(--control-height);padding:0 10px;color:#c7d2df;}}
         .nav-item span{{font-size:13px;}}
         .nav-icon{{width:16px;height:16px;flex:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;fill:none;}}
         .nav-item.active{{background:rgba(48,191,181,.13);border-color:rgba(78,216,205,.32);color:#9af8f1;}}
@@ -5083,14 +5084,14 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .service-panel,.overview-key-panel{{padding:11px;border-radius:9px;background:linear-gradient(145deg,rgba(20,31,43,.94),rgba(15,23,32,.94));}}
         .service-panel h3{{font-size:14px;line-height:1.22;margin-bottom:8px;}}
         .command-grid{{gap:7px;margin-top:0;}}
-        .command-grid button{{min-height:34px;justify-content:center;}}
+        .command-grid button{{height:var(--control-height);min-height:var(--control-height);justify-content:center;}}
         .overview-key-panel{{margin-top:10px;}}
         .overview-key-panel .key-editor-form{{display:grid;gap:7px;}}
         .overview-key-panel .form-actions{{gap:8px;}}
         .protocol-tabs,.list-tabs{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;}}
         .protocol-tabs .seg-tab,.list-tabs .seg-tab{{min-width:0;}}
         .segmented,.subtabs,.pool-table-wrap{{border-color:rgba(91,124,150,.34);border-radius:var(--radius-panel);background:rgba(11,17,25,.34);overflow:hidden;}}
-        .seg-tab,.subtab{{min-height:32px;color:#c7d2df;padding:6px 8px;font-size:12px;border-radius:0;}}
+        .seg-tab,.subtab{{height:var(--control-height);min-height:var(--control-height);color:#c7d2df;padding:0 10px;font-size:12px;border-radius:0;}}
         .seg-tab.active,.subtab.active{{background:rgba(48,191,181,.14);color:#94f3ec;}}
         .key-status-wrap{{max-width:none;flex:none;gap:6px;align-items:center;}}
         .key-status-icons{{order:2;gap:5px;}}
@@ -5147,7 +5148,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .custom-check-head small{{display:block;margin-top:2px;color:#9fb0c8;font-size:11px;line-height:1.25;}}
         .service-preset-grid{{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;}}
         .service-preset-grid form{{margin:0;flex:0 0 86px;min-width:0;}}
-        .service-preset-btn{{width:86px;min-width:0;display:flex;align-items:center;justify-content:center;gap:4px;min-height:28px;padding:4px 5px;background:rgba(34,67,73,.28);}}
+        .service-preset-btn{{width:86px;min-width:0;display:flex;align-items:center;justify-content:center;gap:4px;height:var(--control-height);min-height:var(--control-height);padding:0 5px;background:rgba(34,67,73,.28);}}
         .service-preset-btn span:last-child{{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;}}
         .service-preset-btn:disabled{{opacity:.55;cursor:default;}}
         .preset-icon{{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;border-radius:6px;overflow:hidden;}}
@@ -5191,11 +5192,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .protocol-workspace .workspace-head .eyebrow{{margin-bottom:5px;}}
         .key-status-note{{margin:3px 0 0;font-size:12px;line-height:1.25;}}
         .subtabs{{margin-bottom:8px;}}
-        .subtab{{min-height:30px;padding:5px 8px;}}
+        .subtab{{height:var(--control-height);min-height:var(--control-height);padding:0 8px;}}
         .protocol-subview.active{{gap:8px;}}
         .pool-toolbar{{margin-bottom:7px;}}
         .pool-toolbar form{{margin:0;}}
-        .pool-toolbar button,.pool-clear-btn{{height:32px;min-height:32px;padding:5px 12px;line-height:1.15;}}
+        .pool-toolbar button,.pool-clear-btn{{height:var(--control-height);min-height:var(--control-height);padding:0 12px;line-height:1.15;}}
         .pool-table-wrap{{scrollbar-gutter:stable;max-height:min(58vh,500px);}}
         .pool-table th,.pool-table td{{padding:4px 5px;}}
         .pool-col-actions{{width:96px;}}
@@ -5208,11 +5209,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .protocol-subview-import .pool-add-form{{display:grid;grid-template-columns:minmax(0,1fr) 150px;grid-template-rows:auto 66px;gap:7px;align-items:stretch;align-content:start;}}
         .protocol-subview-import .pool-add-form .field-label{{grid-column:1 / -1;margin:0;}}
         .protocol-subview-import .pool-add-form textarea{{grid-column:1;min-height:66px;height:66px;resize:vertical;}}
-        .protocol-subview-import .pool-add-form button{{grid-column:2;align-self:end;justify-self:stretch;width:100%;min-width:0;height:32px;margin-top:0;}}
+        .protocol-subview-import .pool-add-form button{{grid-column:2;align-self:end;justify-self:stretch;width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);margin-top:0;}}
         .protocol-subview-import .pool-subscribe-form{{display:grid;grid-template-columns:minmax(0,1fr) 190px;grid-template-rows:auto 66px;gap:7px;align-content:start;align-items:end;}}
         .protocol-subview-import .pool-subscribe-form .field-label{{grid-column:1 / -1;margin:0;}}
-        .protocol-subview-import .pool-subscribe-form input{{height:32px;min-height:32px;align-self:end;}}
-        .protocol-subview-import .pool-subscribe-form button{{height:32px;min-height:32px;width:100%;padding:5px 10px;white-space:nowrap;align-self:end;}}
+        .protocol-subview-import .pool-subscribe-form input{{height:var(--control-height);min-height:var(--control-height);align-self:end;}}
+        .protocol-subview-import .pool-subscribe-form button{{height:var(--control-height);min-height:var(--control-height);width:100%;padding:0 10px;white-space:nowrap;align-self:end;}}
         @media (min-width: 1024px){{
             html,body{{height:100%;overflow:hidden;}}
             body{{padding:8px;}}
@@ -5236,7 +5237,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .overview-key-panel .key-editor-form .field-label{{grid-column:1 / -1;margin:0;line-height:1.1;}}
             .overview-key-panel textarea{{grid-column:1;grid-row:2;height:44px;min-height:44px;max-height:44px;resize:none;}}
             .overview-key-panel .form-actions{{grid-column:2;grid-row:2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-self:stretch;align-items:stretch;margin:0;}}
-            .overview-key-panel .form-actions button{{width:100%;min-width:0;height:44px;min-height:44px;padding:5px 10px;border-radius:8px;font-size:12px;font-weight:700;}}
+            .overview-key-panel .form-actions button{{width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);padding:0 10px;border-radius:8px;font-size:12px;font-weight:700;}}
             .protocol-panels,.list-panels{{min-height:0;overflow:hidden;}}
             .protocol-workspace.active{{height:100%;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;}}
             .protocol-subview.active{{min-height:0;overflow:hidden;}}
@@ -5248,7 +5249,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .list-editor-form{{height:100%;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto auto;gap:8px;align-content:stretch;}}
             .list-editor-form textarea{{height:100%;min-height:0;resize:none;}}
             .list-editor-form .form-actions{{height:auto;min-height:0;align-self:end;align-items:center;align-content:center;}}
-            .list-editor-form .form-actions button{{height:32px;min-height:32px;flex:0 0 auto;align-self:center;}}
+            .list-editor-form .form-actions button{{height:var(--control-height);min-height:var(--control-height);flex:0 0 auto;align-self:center;}}
         }}
         @media (min-width: 1024px){{
             .protocol-workspace.active{{height:auto;min-height:0;display:block;overflow:visible;}}
@@ -5267,6 +5268,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .confirm-card p{{margin:0 0 18px;color:var(--muted);}}
         .confirm-actions{{display:grid;grid-template-columns:1fr 1fr;gap:10px;}}
         @media (max-width: 760px){{
+            :root{{--control-height:38px;}}
             body{{padding:10px 10px calc(128px + env(safe-area-inset-bottom, 0px));scroll-padding-bottom:calc(128px + env(safe-area-inset-bottom, 0px));}}
                         .hero{{padding:16px;border-radius:20px;}}
             .topbar{{position:static;align-items:stretch;flex-direction:column;padding:10px;}}
@@ -5313,7 +5315,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .key-status-badge{{font-size:10px;padding:4px 7px;}}
             .key-status-icons .service-icon-img{{width:18px!important;height:18px!important;}}
             .subtabs{{grid-template-columns:repeat(2,minmax(0,1fr));}}
-            .subtab{{min-height:30px;padding:5px 6px;}}
+            .subtab{{height:var(--control-height);min-height:var(--control-height);padding:0 6px;}}
             .key-editor-form textarea[data-key-textarea]{{min-height:132px;max-height:34vh;resize:vertical;font-size:12px;line-height:1.32;}}
             .overview-key-panel .key-editor-form{{display:grid;gap:8px;}}
             .overview-key-panel textarea{{min-height:96px;max-height:24vh;resize:vertical;}}
@@ -5359,12 +5361,12 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .pool-actions-cell .pool-delete-btn::before{{content:"×";font-size:13px;line-height:1;}}
             .service-preset-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}}
             .service-preset-grid form{{min-width:0;}}
-            .service-preset-btn{{width:100%;min-width:0;gap:3px;padding:4px 3px;}}
+            .service-preset-btn{{width:100%;min-width:0;gap:3px;padding:0 3px;}}
             .service-preset-btn span:last-child{{font-size:10px;}}
             .custom-check-list{{grid-template-columns:1fr;}}
-            .custom-check-form{{grid-template-columns:repeat(2,minmax(0,1fr));}}
+            .custom-check-form{{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);align-items:stretch;}}
             .custom-check-form input[type="text"]{{grid-column:1 / -1;}}
-            .custom-check-form button{{width:100%;justify-self:stretch;white-space:normal;}}
+            .custom-check-form button{{width:100%;height:var(--control-height);min-height:var(--control-height);justify-self:stretch;display:flex;align-items:center;justify-content:center;white-space:normal;line-height:1.15;}}
             .service-groups{{grid-template-columns:1fr;}}
             .form-actions{{display:grid;grid-template-columns:1fr;}}
             .hero-row{{flex-direction:column;align-items:stretch;}}
@@ -5375,7 +5377,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .hero-popover{{position:static;min-width:0;width:100%;}}
             .mode-picker-form{{gap:8px;}}
             .mode-choice-grid{{gap:6px;}}
-            .mode-choice{{min-height:34px;padding:7px 5px;font-size:12px;line-height:1.12;white-space:normal;overflow-wrap:anywhere;word-break:normal;}}
+            .mode-choice{{height:var(--control-height);min-height:var(--control-height);padding:0 5px;font-size:12px;line-height:1.12;white-space:normal;overflow-wrap:anywhere;word-break:normal;}}
             .mode-choice span{{display:block;min-width:0;max-width:100%;overflow-wrap:anywhere;}}
             .layout{{grid-template-columns:1fr;gap:12px;}}
                         .command-grid{{grid-template-columns:1fr;}}
@@ -5387,14 +5389,15 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .protocol-subview-import .pool-subscribe-form{{display:grid;}}
             .protocol-subview-import .pool-subscribe-form input{{grid-column:auto;}}
             .command-grid{{grid-template-columns:1fr 1fr;gap:10px;}}
-            .command-grid button{{min-height:42px;font-size:13px;}}
+            .command-grid button{{height:var(--control-height);min-height:var(--control-height);font-size:13px;}}
             button,input,textarea,select{{font-size:13px;}}
+            .custom-check-form button:first-of-type{{white-space:nowrap;font-size:12px;padding-left:6px;padding-right:6px;}}
         }}
         @media (max-width: 430px){{
             .command-grid{{grid-template-columns:1fr;}}
             .status-card-top{{align-items:flex-start;}}
             .api-pill{{font-size:12px;}}
-            .mode-choice{{font-size:11px;padding:7px 4px;}}
+            .mode-choice{{font-size:11px;padding:0 4px;}}
         }}
         /* Light theme final pass. Keep it after compact/mobile rules so no dark surfaces leak through. */
         [data-theme="light"]{{
