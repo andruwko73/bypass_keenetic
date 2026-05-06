@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT))
 
 import key_pool_web
 import key_pool_store
+import web_get_actions
 import web_post_actions
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
@@ -115,10 +116,43 @@ def test_web_post_actions_helpers():
     assert web_post_actions.dispatch({}, '/pool_add', {}) is None
 
 
+def test_web_get_actions_helpers():
+    refreshed = []
+    current_keys = {'vless': 'key'}
+    ctx = {
+        'build_form': lambda message: 'form:' + message,
+        'consume_flash_message': lambda: 'saved',
+        'load_current_keys': lambda: current_keys,
+        'cached_status_snapshot': lambda keys: None,
+        'active_mode_status_snapshot': lambda keys: {'web': {'state': 'active'}, 'protocols': {'vless': {}}},
+        'refresh_status_caches_async': lambda keys: refreshed.append(keys),
+        'pool_probe_locked': lambda: False,
+        'get_web_command_state': lambda: {'running': False},
+        'pool_enabled': True,
+        'get_pool_probe_progress': lambda: {'running': True, 'total': 2},
+        'web_pool_snapshot': lambda keys: {'vless': {'rows': []}},
+        'pool_status_summary': lambda keys: {'active_text': '1 / 5'},
+        'web_custom_checks': lambda: [{'id': 'custom'}],
+        'time_provider': lambda: 123.0,
+        'static_dir': '/tmp/static',
+        'service_icons_enabled': True,
+    }
+    assert web_get_actions.dispatch(ctx, '/') == {'kind': 'html', 'html': 'form:saved'}
+    status = web_get_actions.dispatch(ctx, '/api/status')
+    assert status['payload']['pool_probe_running'] is True
+    assert status['payload']['timestamp'] == 123.0
+    assert refreshed == [current_keys]
+    probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
+    assert probe['payload']['status'] == 'running'
+    static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
+    assert static['path'].replace('\\', '/').endswith('/service-icons/test.png')
+
+
 def main():
     test_proxy_config_builder()
     test_key_pool_web()
     test_key_pool_subscription_helpers()
+    test_web_get_actions_helpers()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
 

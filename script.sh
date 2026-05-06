@@ -552,7 +552,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py key_pool_web.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_http_common.py web_post_actions.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py"
+BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py key_pool_web.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_http_common.py web_get_actions.py web_post_actions.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py"
 
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
@@ -846,6 +846,7 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module service_catalog.py CUSTOM_CHECK_PRESETS || exit 1
     stage_runtime_module web_form_template.py render_web_form || exit 1
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
+    stage_runtime_module web_get_actions.py dispatch || exit 1
     stage_runtime_module web_post_actions.py dispatch || exit 1
     stage_runtime_module web_command_state.py start_command || exit 1
     stage_runtime_module unblock_lists.py save_unblock_list_file || exit 1
