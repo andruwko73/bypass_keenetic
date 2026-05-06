@@ -36,6 +36,7 @@ KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
 AUTO_FAILOVER_GRACE_SECONDS = 60
 AUTO_FAILOVER_POLL_SECONDS = 10
+AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switch_cooldown_seconds', 180))
 auto_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
@@ -61,8 +62,125 @@ def _load_key_probe_cache():
 
 def _save_key_probe_cache(cache):
     os.makedirs(os.path.dirname(KEY_PROBE_CACHE_PATH), exist_ok=True)
-    with open(KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as f:
+    tmp_path = f'{KEY_PROBE_CACHE_PATH}.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump(cache, f, ensure_ascii=False, indent=2)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            pass
+    os.replace(tmp_path, KEY_PROBE_CACHE_PATH)
+
+
+YOUTUBE_UNBLOCK_ENTRIES = [
+    'youtube.com',
+    'www.youtube.com',
+    'm.youtube.com',
+    'music.youtube.com',
+    'studio.youtube.com',
+    'tv.youtube.com',
+    'kids.youtube.com',
+    'gaming.youtube.com',
+    'youtu.be',
+    'youtube-nocookie.com',
+    'www.youtube-nocookie.com',
+    'youtubeeducation.com',
+    'www.youtubeeducation.com',
+    'youtubei.googleapis.com',
+    'youtube.googleapis.com',
+    'youtubeembeddedplayer.googleapis.com',
+    'youtube-ui.l.google.com',
+    'wide-youtube.l.google.com',
+    'yt-video-upload.l.google.com',
+    'ytimg.com',
+    'i.ytimg.com',
+    's.ytimg.com',
+    'yt3.ggpht.com',
+    'yt3.googleusercontent.com',
+    'ggpht.com',
+    'googlevideo.com',
+    'video.google.com',
+    'jnn-pa.googleapis.com',
+    'play-fe.googleapis.com',
+    'gvt1.com',
+    'gvt2.com',
+]
+
+CHATGPT_ROUTE_ENTRIES = [
+    'chatgpt.com',
+    'chat.openai.com',
+    'ios.chat.openai.com',
+    'android.chat.openai.com',
+    'desktop.chat.openai.com',
+    'api.openai.com',
+    'platform.openai.com',
+    'auth.openai.com',
+    'auth0.openai.com',
+    'setup.auth.openai.com',
+    'openai.com',
+    'cdn.openai.com',
+    'cdn.openaimerge.com',
+    'ct.sendgrid.net',
+    'oaistatic.com',
+    'cdn.oaistatic.com',
+    'oaiusercontent.com',
+    'files.oaiusercontent.com',
+    'featuregates.org',
+    'featureassets.org',
+    'statsig.com',
+    'events.statsigapi.net',
+    'intercom.io',
+    'intercomcdn.com',
+    'js.intercomcdn.com',
+    'cdn.workos.com',
+    'forwarder.workos.com',
+    'images.workoscdn.com',
+    'setup.workos.com',
+    'challenges.cloudflare.com',
+    'js.stripe.com',
+    'prodregistryv2.org',
+    'rum.browser-intake-datadoghq.com',
+    'o207216.ingest.sentry.io',
+    'o33249.ingest.sentry.io',
+]
+
+CLAUDE_ROUTE_ENTRIES = [
+    'claude.ai',
+    'claude.com',
+    'platform.claude.com',
+    'api.anthropic.com',
+    'console.anthropic.com',
+    'anthropic.com',
+    'www.anthropic.com',
+    'statsig.anthropic.com',
+]
+
+GROK_ROUTE_ENTRIES = [
+    'grok.com',
+    'x.ai',
+    'x.com',
+    'api.x.com',
+    'twitter.com',
+    'api.twitter.com',
+    't.co',
+    'twimg.com',
+    'pbs.twimg.com',
+    'video.twimg.com',
+    'abs.twimg.com',
+    'ton.twimg.com',
+]
+
+DISCORD_ROUTE_ENTRIES = [
+    'discord.com',
+    'discordapp.com',
+    'discord.gg',
+    'gateway.discord.gg',
+    'cdn.discordapp.com',
+    'cdn.discordapp.net',
+    'media.discordapp.net',
+    'images-ext-1.discordapp.net',
+]
 
 
 CUSTOM_CHECK_PRESETS = [
@@ -75,6 +193,7 @@ CUSTOM_CHECK_PRESETS = [
             'https://chatgpt.com/codex',
             'https://api.openai.com',
         ],
+        'routes': CHATGPT_ROUTE_ENTRIES,
         'badge': 'GPT',
         'icon': 'chatgpt',
     },
@@ -83,6 +202,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'Claude',
         'url': 'https://claude.ai',
         'urls': ['https://claude.ai', 'https://api.anthropic.com'],
+        'routes': CLAUDE_ROUTE_ENTRIES,
         'badge': 'CL',
         'icon': 'claude',
     },
@@ -91,6 +211,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'Gemini',
         'url': 'https://gemini.google.com',
         'urls': ['https://gemini.google.com', 'https://generativelanguage.googleapis.com'],
+        'routes': ['gemini.google.com', 'generativelanguage.googleapis.com', 'ai.google.dev', 'aistudio.google.com'],
         'badge': 'GM',
         'icon': 'gemini',
     },
@@ -98,6 +219,7 @@ CUSTOM_CHECK_PRESETS = [
         'id': 'copilot',
         'label': 'Copilot',
         'url': 'https://copilot.microsoft.com',
+        'routes': ['copilot.microsoft.com', 'bing.com', 'www.bing.com', 'edgeservices.bing.com', 'sydney.bing.com'],
         'badge': 'CP',
         'icon': 'copilot',
     },
@@ -105,6 +227,7 @@ CUSTOM_CHECK_PRESETS = [
         'id': 'perplexity',
         'label': 'Perplexity',
         'url': 'https://www.perplexity.ai',
+        'routes': ['perplexity.ai', 'www.perplexity.ai', 'api.perplexity.ai'],
         'badge': 'PX',
         'icon': 'perplexity',
     },
@@ -112,7 +235,8 @@ CUSTOM_CHECK_PRESETS = [
         'id': 'grok',
         'label': 'Grok',
         'url': 'https://grok.com',
-        'urls': ['https://grok.com', 'https://x.ai'],
+        'urls': ['https://grok.com', 'https://x.ai', 'https://x.com', 'https://twitter.com'],
+        'routes': GROK_ROUTE_ENTRIES,
         'badge': 'GX',
         'icon': 'grok',
     },
@@ -121,6 +245,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'DeepSeek',
         'url': 'https://chat.deepseek.com',
         'urls': ['https://chat.deepseek.com', 'https://api.deepseek.com'],
+        'routes': ['deepseek.com', 'chat.deepseek.com', 'api.deepseek.com'],
         'badge': 'DS',
         'icon': 'deepseek',
     },
@@ -134,6 +259,7 @@ CUSTOM_CHECK_PRESETS = [
             'https://gateway.discord.gg',
             'https://cdn.discordapp.com',
         ],
+        'routes': DISCORD_ROUTE_ENTRIES,
         'badge': 'DC',
         'icon': 'discord',
     },
@@ -142,6 +268,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'Meta AI',
         'url': 'https://www.meta.ai',
         'urls': ['https://www.meta.ai', 'https://ai.meta.com'],
+        'routes': ['meta.ai', 'www.meta.ai', 'ai.meta.com', 'meta.com'],
         'badge': 'MA',
         'icon': 'meta',
     },
@@ -149,6 +276,7 @@ CUSTOM_CHECK_PRESETS = [
         'id': 'instagram',
         'label': 'Instagram',
         'url': 'https://www.instagram.com',
+        'routes': ['instagram.com', 'www.instagram.com', 'cdninstagram.com'],
         'badge': 'IG',
         'icon': 'instagram',
     },
@@ -157,6 +285,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'Facebook',
         'url': 'https://www.facebook.com',
         'urls': ['https://www.facebook.com', 'https://graph.facebook.com'],
+        'routes': ['facebook.com', 'www.facebook.com', 'graph.facebook.com', 'fbcdn.net'],
         'badge': 'FB',
         'icon': 'facebook',
     },
@@ -175,6 +304,48 @@ def _normalize_check_url(value):
     if parsed.scheme not in ['http', 'https'] or not parsed.netloc:
         raise ValueError('Адрес должен быть HTTP/HTTPS URL или доменом')
     return url
+
+
+def _route_entry_from_target(value):
+    item = (value or '').strip().split('#', 1)[0].strip()
+    if not item:
+        return ''
+    if re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', item):
+        parsed = urlparse(item)
+        return (parsed.hostname or '').strip('.').lower()
+    item = re.sub(r'^\+\.', '', item)
+    item = re.sub(r'^\*\.', '', item)
+    if '/' in item:
+        try:
+            return str(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            pass
+    if '/' in item:
+        parsed = urlparse('https://' + item)
+        item = parsed.hostname or ''
+    if ':' in item and item.count(':') == 1:
+        host, port = item.rsplit(':', 1)
+        if port.isdigit():
+            item = host
+    item = item.strip('.').lower()
+    try:
+        return str(ipaddress.ip_address(item))
+    except ValueError:
+        pass
+    if re.match(r'^[a-z0-9_.-]+\.[a-z0-9_.-]+$', item):
+        return item
+    return ''
+
+
+def _route_entries_from_values(values):
+    entries = []
+    seen = set()
+    for value in values or []:
+        entry = _route_entry_from_target(value)
+        if entry and entry not in seen:
+            seen.add(entry)
+            entries.append(entry)
+    return entries
 
 
 def _custom_check_id(label, url):
@@ -212,6 +383,9 @@ def _sanitize_custom_check(item):
     }
     if len(urls) > 1:
         result['urls'] = urls[:4]
+    routes = _route_entries_from_values(item.get('routes') or [])
+    if routes:
+        result['routes'] = routes[:80]
     if item.get('icon'):
         result['icon'] = str(item.get('icon'))[:24]
     return result
@@ -331,9 +505,15 @@ def _record_key_probe(proto, key_value, tg_ok=None, yt_ok=None, custom=None):
         entry['proto'] = proto
         entry['ts'] = time.time()
         if tg_ok is not None:
-            entry['tg_ok'] = bool(tg_ok)
+            if tg_ok == 'unknown':
+                entry['tg_ok'] = None
+            else:
+                entry['tg_ok'] = bool(tg_ok)
         if yt_ok is not None:
-            entry['yt_ok'] = bool(yt_ok)
+            if yt_ok == 'unknown':
+                entry['yt_ok'] = None
+            else:
+                entry['yt_ok'] = bool(yt_ok)
         if custom is not None:
             existing_custom = entry.get('custom', {})
             if not isinstance(existing_custom, dict):
@@ -346,7 +526,7 @@ def _record_key_probe(proto, key_value, tg_ok=None, yt_ok=None, custom=None):
 
 
 def _key_probe_is_fresh(entry, now=None, custom_checks=None):
-    if not entry:
+    if not isinstance(entry, dict):
         return False
     try:
         ts = float(entry.get('ts', 0))
@@ -516,7 +696,8 @@ def _attempt_auto_failover():
         return
     if auto_failover_state['in_progress']:
         return
-    if auto_failover_state['last_attempt'] and now - auto_failover_state['last_attempt'] < 30:
+    if (auto_failover_state['last_attempt'] and
+            now - auto_failover_state['last_attempt'] < AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS):
         return
 
     proxy_url = proxy_settings.get(proxy_mode)
@@ -535,10 +716,17 @@ def _attempt_auto_failover():
     auto_failover_state['in_progress'] = True
     auto_failover_state['last_attempt'] = now
     try:
+        current_keys = _load_current_keys()
+        active_key = (current_keys.get(proxy_mode) or '').strip()
         pools = _load_key_pools()
         candidates = []
         for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
             for key_value in pools.get(proto, []) or []:
+                key_value = (key_value or '').strip()
+                if not key_value:
+                    continue
+                if proto == proxy_mode and key_value == active_key:
+                    continue
                 candidates.append((proto, key_value))
 
         if not candidates:
@@ -566,6 +754,77 @@ def _attempt_auto_failover():
                 return
 
         _write_runtime_log('Auto-failover: перебор ключей из пулов не дал доступа к YouTube.')
+    finally:
+        auto_failover_state['in_progress'] = False
+
+
+def _attempt_auto_failover():
+    now = time.time()
+    if globals().get('pool_probe_lock') and pool_probe_lock.locked():
+        return
+    if auto_failover_state['in_progress']:
+        return
+    if (auto_failover_state['last_attempt'] and
+            now - auto_failover_state['last_attempt'] < AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS):
+        return
+
+    proxy_url = proxy_settings.get(proxy_mode)
+    yt_ok, _ = _check_http_through_proxy(
+        proxy_url,
+        url='https://www.youtube.com',
+        connect_timeout=4,
+        read_timeout=6,
+    )
+    if yt_ok:
+        auto_failover_state['last_ok'] = now
+        auto_failover_state['last_fail'] = 0.0
+        return
+
+    if not auto_failover_state['last_fail']:
+        auto_failover_state['last_fail'] = now
+    if now - auto_failover_state['last_fail'] < AUTO_FAILOVER_GRACE_SECONDS:
+        return
+
+    auto_failover_state['in_progress'] = True
+    auto_failover_state['last_attempt'] = now
+    try:
+        current_keys = _load_current_keys()
+        active_key = (current_keys.get(proxy_mode) or '').strip()
+        pools = _load_key_pools()
+        candidates = []
+        for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+            for key_value in pools.get(proto, []) or []:
+                key_value = (key_value or '').strip()
+                if not key_value:
+                    continue
+                if proto == proxy_mode and key_value == active_key:
+                    continue
+                candidates.append((proto, key_value))
+        if not candidates:
+            _write_runtime_log('Auto-failover: no pool keys available for switching.')
+            return
+
+        _write_runtime_log(
+            f'Auto-failover: YouTube unavailable for >{AUTO_FAILOVER_GRACE_SECONDS}s '
+            f'(mode {proxy_mode}). Checking candidates through temporary xray.'
+        )
+        candidate = _find_pool_failover_candidate(candidates, service='youtube')
+        if not candidate:
+            _write_runtime_log('Auto-failover: temporary xray checks found no YouTube-capable key.')
+            return
+
+        proto, key_value, tg_ok, yt_ok = candidate
+        try:
+            result = _install_key_for_protocol(proto, key_value, verify=False)
+        except Exception as exc:
+            _write_runtime_log(f'Auto-failover: failed to install {proto} key: {exc}')
+            return
+        update_proxy(proto)
+        _set_active_key(proto, key_value)
+        _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
+        auto_failover_state['last_ok'] = time.time()
+        auto_failover_state['last_fail'] = 0.0
+        _write_runtime_log(f'Auto-failover: switched to {proto}; YouTube is reachable. {result}')
     finally:
         auto_failover_state['in_progress'] = False
 
@@ -609,10 +868,10 @@ BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
 WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
+ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_CACHE_TTL = 3600
-_KEY_PROBE_MAX_PER_RUN_VALUE = int(getattr(config, 'pool_probe_max_per_run', 0))
-KEY_PROBE_MAX_PER_RUN = _KEY_PROBE_MAX_PER_RUN_VALUE if _KEY_PROBE_MAX_PER_RUN_VALUE > 0 else None
+KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
 POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.3))
 POOL_PROBE_MIN_AVAILABLE_KB = 120000
@@ -620,13 +879,20 @@ POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 3)))
 POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
 POOL_PROBE_PAGE_MAX_KEYS = max(1, int(getattr(config, 'pool_probe_page_max_keys', 12)))
-POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 1.5))
-POOL_PROBE_TG_READ_TIMEOUT = float(getattr(config, 'pool_probe_tg_read_timeout', 2))
-POOL_PROBE_HTTP_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_http_connect_timeout', 1.5))
-POOL_PROBE_HTTP_READ_TIMEOUT = float(getattr(config, 'pool_probe_http_read_timeout', 1.5))
+POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 2))
+POOL_PROBE_TG_READ_TIMEOUT = float(getattr(config, 'pool_probe_tg_read_timeout', 3))
+POOL_PROBE_HTTP_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_http_connect_timeout', 2))
+POOL_PROBE_HTTP_READ_TIMEOUT = float(getattr(config, 'pool_probe_http_read_timeout', 3))
+POOL_PROBE_CUSTOM_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_custom_connect_timeout', 1.5))
+POOL_PROBE_CUSTOM_READ_TIMEOUT = float(getattr(config, 'pool_probe_custom_read_timeout', 2.5))
+POOL_PROBE_RETRY_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_retry_connect_timeout', 6))
+POOL_PROBE_RETRY_READ_TIMEOUT = float(getattr(config, 'pool_probe_retry_read_timeout', 10))
+POOL_PROBE_RETRY_DELAY_SECONDS = float(getattr(config, 'pool_probe_retry_delay_seconds', 0.2))
 POOL_PROBE_PAGE_REFRESH_INTERVAL = float(getattr(config, 'pool_probe_page_refresh_interval', 1800))
 POOL_PROBE_SINGLE_TIMEOUT_SECONDS = max(
     8.0,
+    POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
+    POOL_PROBE_HTTP_CONNECT_TIMEOUT + POOL_PROBE_HTTP_READ_TIMEOUT +
     POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
     POOL_PROBE_HTTP_CONNECT_TIMEOUT + POOL_PROBE_HTTP_READ_TIMEOUT + 3.0,
 )
@@ -636,7 +902,7 @@ POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'feature/web-only'
 APP_BRANCH_DESCRIPTION = 'без Telegram бота'
-APP_VERSION_COUNTER = 423
+APP_VERSION_COUNTER = 434
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 CONNECTIVITY_CHECK_DOMAINS = [
@@ -688,6 +954,12 @@ status_snapshot_cache = {
     'data': None,
     'signature': None,
 }
+active_mode_status_cache = {
+    'timestamp': 0,
+    'signature': None,
+    'status': None,
+}
+active_mode_status_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 pool_probe_lock = threading.Lock()
@@ -699,6 +971,7 @@ pool_probe_progress = {
     'running': False,
     'checked': 0,
     'total': 0,
+    'scope': '',
     'started_at': 0,
     'finished_at': 0,
 }
@@ -816,6 +1089,7 @@ SERVICE_LIST_SOURCES = {
         'label': 'YouTube',
         'aliases': ['youtube', 'yt', 'ютуб'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/youtube.lst',
+        'entries': YOUTUBE_UNBLOCK_ENTRIES,
     },
     'telegram': {
         'label': 'Telegram',
@@ -845,39 +1119,9 @@ SERVICE_LIST_SOURCES = {
     },
 }
 
-SOCIALNET_SERVICE_KEYS = ('telegram', 'meta', 'discord', 'tiktok', 'twitter')
+SOCIALNET_SERVICE_KEYS = ('youtube', 'telegram', 'meta', 'discord', 'tiktok', 'twitter')
 SOCIALNET_ALL_KEY = 'all'
-SOCIALNET_EXCLUDED_ENTRIES = {
-    'youtube.com',
-    'm.youtube.com',
-    'tv.youtube.com',
-    's.youtube.com',
-    'youtu.be',
-    'yt.be',
-    'ytimg.com',
-    'i.ytimg.com',
-    'ytimg.l.google.com',
-    'yt3.ggpht.com',
-    'yt3.googleusercontent.com',
-    'ggpht.com',
-    'googlevideo.com',
-    'youtubei.googleapis.com',
-    'youtubeembeddedplayer.googleapis.com',
-    'youtube-ui.l.google.com',
-    'wide-youtube.l.google.com',
-    'yt-video-upload.l.google.com',
-    'play-fe.googleapis.com',
-    'jnn-pa.googleapis.com',
-    'returnyoutubedislikeapi.com',
-    'youtubekids.com',
-    'youtube-nocookie.com',
-    'yting.com',
-    'gvt1.com',
-    'gvt2.com',
-    'googleapis.com',
-    'googleusercontent.com',
-    'nhacmp3youtube.com',
-}
+SOCIALNET_EXCLUDED_ENTRIES = set()
 
 
 def _service_list_alias_map():
@@ -1191,7 +1435,7 @@ def _socialnet_entries_from_text(text):
 
 def _resolve_socialnet_service(value):
     normalized = (value or '').strip().lower()
-    if normalized in ('', SOCIALNET_ALL_KEY, 'all', 'все', 'все соцсети'):
+    if normalized in ('', SOCIALNET_ALL_KEY, 'all', 'все', 'все соцсети', 'все сервисы', 'все в список'):
         return SOCIALNET_ALL_KEY
     aliases = _service_list_alias_map()
     key = aliases.get(normalized)
@@ -1202,14 +1446,14 @@ def _resolve_socialnet_service(value):
 
 def _socialnet_service_label(service_key):
     if service_key == SOCIALNET_ALL_KEY:
-        return 'Все соцсети'
+        return 'Все сервисы'
     return SERVICE_LIST_SOURCES.get(service_key, {}).get('label', service_key)
 
 
 def _load_service_entries(service_key):
     source = SERVICE_LIST_SOURCES.get(service_key)
     if not source:
-        raise ValueError('Неизвестная соцсеть')
+        raise ValueError('Неизвестный сервис')
     if source.get('entries'):
         return _socialnet_entries_from_text('\n'.join(source['entries']))
     raw_text = _fetch_remote_text(source['url'], timeout=25)
@@ -1222,9 +1466,18 @@ def _load_service_entries(service_key):
 def _load_socialnet_entries(service_key=SOCIALNET_ALL_KEY):
     service_key = _resolve_socialnet_service(service_key)
     if not service_key:
-        raise ValueError('Неизвестная соцсеть')
+        raise ValueError('Неизвестный сервис')
     if service_key != SOCIALNET_ALL_KEY:
         return _load_service_entries(service_key)
+    combined = []
+    for key in SOCIALNET_SERVICE_KEYS:
+        try:
+            combined.extend(_load_service_entries(key))
+        except Exception:
+            continue
+    entries = _socialnet_entries_from_text('\n'.join(combined))
+    if entries:
+        return entries
     for path in SOCIALNET_LOCAL_PATHS:
         try:
             if os.path.exists(path):
@@ -1240,12 +1493,11 @@ def _load_socialnet_entries(service_key=SOCIALNET_ALL_KEY):
     return entries
 
 
-def _apply_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY, remove=False):
+def _apply_entries_to_unblock_list(list_name, entries, service_label, remove=False):
     route_name = _normalize_unblock_route_name(list_name)
-    service_key = _resolve_socialnet_service(service_key)
-    if not service_key:
-        raise ValueError('Неизвестная соцсеть')
-    entries = set(_load_socialnet_entries(service_key))
+    entries = {entry.strip() for entry in entries or [] if str(entry).strip()}
+    if not entries:
+        raise ValueError('Нет записей для добавления')
     list_path = _unblock_list_path(route_name)
     current = set(_read_unblock_list_entries(route_name)) if os.path.exists(list_path) else set()
     before = len(current)
@@ -1260,8 +1512,50 @@ def _apply_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY, remove=False
     _write_unblock_list_entries(route_name, current)
     subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
     label = _list_label(f'{route_name}.txt')
-    service_label = _socialnet_service_label(service_key)
     return f'✅ {service_label}: {action} {changed} записей в {label}. Всего в списке: {len(current)}.'
+
+
+def _apply_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY, remove=False):
+    service_key = _resolve_socialnet_service(service_key)
+    if not service_key:
+        raise ValueError('Неизвестный сервис')
+    entries = _load_socialnet_entries(service_key)
+    return _apply_entries_to_unblock_list(
+        list_name,
+        entries,
+        _socialnet_service_label(service_key),
+        remove=remove,
+    )
+
+
+def _unblock_route_for_key_type(key_type):
+    routes = {
+        'shadowsocks': 'shadowsocks',
+        'vmess': 'vmess',
+        'vless': 'vless',
+        'vless2': 'vless-2',
+        'trojan': 'trojan',
+    }
+    return routes.get(key_type, key_type)
+
+
+def _custom_check_route_entries(custom_checks=None):
+    checks = custom_checks if custom_checks is not None else _load_custom_checks()
+    preset_routes = {item.get('id'): item.get('routes') or [] for item in CUSTOM_CHECK_PRESETS}
+    values = []
+    for check in checks:
+        values.extend(preset_routes.get(check.get('id'), []))
+        values.extend(check.get('routes') or [])
+        values.extend(check.get('urls') or [check.get('url', '')])
+    return _route_entries_from_values(values)
+
+
+def _append_custom_checks_to_unblock_list(list_name, custom_checks=None):
+    route_name = _normalize_unblock_route_name(_unblock_route_for_key_type(list_name))
+    entries = _custom_check_route_entries(custom_checks)
+    if not entries:
+        raise ValueError('Сначала добавьте хотя бы одну дополнительную проверку')
+    return _apply_entries_to_unblock_list(route_name, entries, 'Дополнительные сервисы', remove=False)
 
 
 
@@ -1849,6 +2143,7 @@ def _probe_custom_targets(proxy_url, custom_checks=None, connect_timeout=2, read
         if not check_id:
             continue
         targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
+        targets = targets[:2]
         target_results = []
         for target in targets:
             ok, _ = _check_custom_target_through_proxy(
@@ -1858,20 +2153,52 @@ def _probe_custom_targets(proxy_url, custom_checks=None, connect_timeout=2, read
                 read_timeout=read_timeout,
             )
             target_results.append(ok)
-        results[check_id] = bool(target_results) and all(target_results)
+            if ok:
+                break
+        results[check_id] = any(target_results)
     return results
 
 
+
+
+def _probe_custom_targets_for_pool(proxy_url, custom_checks=None):
+    results = {}
+    for check in (custom_checks if custom_checks is not None else _load_custom_checks()):
+        check_id = check.get('id')
+        if not check_id:
+            continue
+        targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
+        target_results = []
+        for target in targets:
+            ok, _ = _check_custom_target_through_proxy(
+                proxy_url,
+                target,
+                connect_timeout=POOL_PROBE_CUSTOM_CONNECT_TIMEOUT,
+                read_timeout=POOL_PROBE_CUSTOM_READ_TIMEOUT,
+            )
+            target_results.append(ok)
+            if ok:
+                break
+        results[check_id] = any(target_results)
+    return results
 
 
 def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_timeout=10):
     url = 'https://api.telegram.org/'
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
     try:
-        response = requests.get(url, timeout=(connect_timeout, read_timeout), proxies=proxies)
-        if response.status_code < 500:
+        response = requests.get(
+            url,
+            timeout=(connect_timeout, read_timeout),
+            proxies=proxies,
+            allow_redirects=False,
+            stream=True,
+        )
+        status_code = response.status_code
+        response.close()
+        if status_code < 500:
             return True, 'Доступ к api.telegram.org подтверждён.'
-        return False, f'Telegram API вернул HTTP {response.status_code}.'
+        return False, f'Telegram API вернул HTTP {status_code}.'
     except requests.exceptions.ConnectTimeout:
         return False, 'Прокси не установил соединение с api.telegram.org за отведённое время.'
     except requests.exceptions.ReadTimeout:
@@ -2567,6 +2894,8 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
         for pool_key in key_pools.get(proto, []) or []:
             total_count += 1
             probe = key_probe_cache.get(_hash_key(pool_key), {})
+            if not isinstance(probe, dict):
+                probe = {}
             custom = probe.get('custom', {}) if isinstance(probe, dict) else {}
             if not isinstance(custom, dict):
                 custom = {}
@@ -2733,6 +3062,36 @@ def _get_pool_probe_progress():
         return dict(pool_probe_progress)
 
 
+def _pool_probe_progress_label(progress=None):
+    progress = progress or _get_pool_probe_progress()
+    scope = progress.get('scope')
+    if scope == 'auto_missing':
+        return 'Автопроверка непроверенных ключей'
+    if scope == 'manual_all':
+        return 'Полная проверка всех ключей'
+    if scope == 'protocol':
+        return 'Проверка выбранного пула'
+    return 'Фоновая проверка пула ключей'
+
+
+def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
+    custom_target_count = 0
+    for check in custom_checks or []:
+        targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
+        custom_target_count += len([target for target in targets[:2] if target])
+    base_per_key = (
+        POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
+        POOL_PROBE_HTTP_CONNECT_TIMEOUT + POOL_PROBE_HTTP_READ_TIMEOUT +
+        custom_target_count * (POOL_PROBE_CUSTOM_CONNECT_TIMEOUT + POOL_PROBE_CUSTOM_READ_TIMEOUT)
+    )
+    retry_per_key = POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT
+    per_key = max(POOL_PROBE_SINGLE_TIMEOUT_SECONDS, base_per_key + retry_per_key + 5.0)
+    workers = max(1, int(workers or 1))
+    task_count = max(1, int(task_count or 1))
+    waves = (task_count + workers - 1) // workers
+    return max(POOL_PROBE_BATCH_TIMEOUT_SECONDS, per_key * waves + 5.0)
+
+
 def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None):
     proxy_url = proxy_url or proxy_settings.get(proto)
     tg_ok, _ = _check_telegram_api_through_proxy(
@@ -2745,13 +3104,34 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
         read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
     )
-    _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
-    if custom_checks:
-        custom_results = _probe_custom_targets(
+    if not tg_ok and not yt_ok:
+        time.sleep(POOL_PROBE_RETRY_DELAY_SECONDS)
+        tg_ok, _ = _check_telegram_api_through_proxy(
             proxy_url,
-            custom_checks=custom_checks,
+            connect_timeout=POOL_PROBE_TG_CONNECT_TIMEOUT,
+            read_timeout=POOL_PROBE_TG_READ_TIMEOUT,
+        )
+        yt_ok, _ = _check_http_through_proxy(
+            proxy_url,
             connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
             read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
+        )
+    elif not yt_ok:
+        time.sleep(POOL_PROBE_RETRY_DELAY_SECONDS)
+        yt_ok, _ = _check_http_through_proxy(
+            proxy_url,
+            connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
+            read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
+        )
+    record_tg_ok = tg_ok if (tg_ok or not yt_ok) else 'unknown'
+    _record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok)
+    if custom_checks and not tg_ok and not yt_ok:
+        _record_key_probe(proto, key_value, custom=_failed_custom_probe_results(custom_checks))
+        return
+    if custom_checks:
+        custom_results = _probe_custom_targets_for_pool(
+            proxy_url,
+            custom_checks=custom_checks,
         )
         _record_key_probe(proto, key_value, custom=custom_results)
 
@@ -2917,6 +3297,13 @@ def _build_pool_probe_core_config_batch(probe_tasks):
             'error': '/dev/null',
             'loglevel': 'warning',
         },
+        'dns': {
+            'hosts': {
+                'api.telegram.org': '149.154.167.220',
+            },
+            'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
+            'queryStrategy': 'UseIPv4',
+        },
         'inbounds': [],
         'outbounds': [],
         'routing': {
@@ -2997,6 +3384,73 @@ def _stop_pool_probe_xray(process, config_path):
         pass
 
 
+def _find_pool_failover_candidate(candidates, service='telegram'):
+    """Find one working pool key through a temporary xray before touching the active proxy."""
+    probe_tasks = [(proto, (key_value or '').strip()) for proto, key_value in candidates if (key_value or '').strip()]
+    while probe_tasks:
+        raw_batch = probe_tasks[:POOL_PROBE_BATCH_SIZE]
+        del probe_tasks[:POOL_PROBE_BATCH_SIZE]
+        valid_batch = []
+        for proto, key_value in raw_batch:
+            try:
+                _pool_probe_outbound(proto, key_value, 'proxy-failover-validate')
+                valid_batch.append((proto, key_value))
+            except Exception as exc:
+                _write_runtime_log(f'Auto-failover: key {proto} is not probeable: {exc}')
+        if not valid_batch:
+            continue
+
+        process = None
+        config_path = None
+        try:
+            process, config_path = _start_pool_probe_xray(_build_pool_probe_core_config_batch(valid_batch))
+            for offset, (proto, key_value) in enumerate(valid_batch):
+                port = str(int(POOL_PROBE_TEST_PORT) + offset)
+                if not _wait_for_socks5_handshake(port, timeout=6):
+                    _write_runtime_log(
+                        f'Auto-failover: test SOCKS port {port} did not start for {_pool_proto_label(proto)}; '
+                        'the previous key status was left unchanged.'
+                    )
+                    continue
+                proxy_url = f'socks5h://127.0.0.1:{port}'
+                if service == 'youtube':
+                    primary_ok, _ = _check_http_through_proxy(
+                        proxy_url,
+                        url='https://www.youtube.com',
+                        connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
+                        read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
+                    )
+                    tg_ok, _ = _check_telegram_api_through_proxy(
+                        proxy_url,
+                        connect_timeout=POOL_PROBE_TG_CONNECT_TIMEOUT,
+                        read_timeout=POOL_PROBE_TG_READ_TIMEOUT,
+                    )
+                    yt_ok = primary_ok
+                else:
+                    primary_ok, _ = _check_telegram_api_through_proxy(
+                        proxy_url,
+                        connect_timeout=POOL_PROBE_TG_CONNECT_TIMEOUT,
+                        read_timeout=POOL_PROBE_TG_READ_TIMEOUT,
+                    )
+                    tg_ok = primary_ok
+                    yt_ok, _ = _check_http_through_proxy(
+                        proxy_url,
+                        url='https://www.youtube.com',
+                        connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
+                        read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
+                    )
+                _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
+                if primary_ok:
+                    return proto, key_value, tg_ok, yt_ok
+        except Exception as exc:
+            _write_runtime_log(f'Auto-failover: temporary xray candidate check failed: {exc}')
+        finally:
+            _stop_pool_probe_xray(process, config_path)
+            _cleanup_pool_probe_runtime(kill_processes=True)
+            gc.collect()
+    return None
+
+
 def _cleanup_pool_probe_runtime(kill_processes=False):
     if kill_processes:
         try:
@@ -3064,7 +3518,7 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False, missing_onl
     return selected, custom_checks
 
 
-def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=False):
+def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=False, scope='manual'):
     selected, custom_checks = _select_pool_probe_tasks(
         tasks,
         max_keys=max_keys,
@@ -3086,6 +3540,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
         running=True,
         checked=0,
         total=len(selected),
+        scope=scope,
         started_at=time.time(),
         finished_at=0,
     )
@@ -3140,13 +3595,6 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
                         port = str(int(POOL_PROBE_TEST_PORT) + offset)
                         if not _wait_for_socks5_handshake(port, timeout=6):
                             _write_runtime_log(f'Тестовый SOCKS-порт {port} не поднялся для {_pool_proto_label(proto)}.')
-                            _record_key_probe(
-                                proto,
-                                key_value,
-                                tg_ok=False,
-                                yt_ok=False,
-                                custom=_failed_custom_probe_results(checks),
-                            )
                             mark_checked(proto, key_value)
                             continue
                         ready_batch.append((offset, proto, key_value))
@@ -3167,9 +3615,14 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
                                 proxy_url,
                             )
                             future_map[future] = (proto, key_value)
+                        batch_timeout = _pool_probe_timeout_budget(
+                            checks,
+                            task_count=len(ready_batch),
+                            workers=max_workers,
+                        )
                         done, pending = concurrent.futures.wait(
                             future_map,
-                            timeout=POOL_PROBE_BATCH_TIMEOUT_SECONDS,
+                            timeout=batch_timeout,
                         )
                         for future in done:
                             proto, key_value = future_map[future]
@@ -3194,14 +3647,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
                             future.cancel()
                             _write_runtime_log(
                                 f'Проверка ключа из пула {_pool_proto_label(proto)} превысила лимит '
-                                f'{POOL_PROBE_BATCH_TIMEOUT_SECONDS:g} сек.'
-                            )
-                            _record_key_probe(
-                                proto,
-                                key_value,
-                                tg_ok=False,
-                                yt_ok=False,
-                                custom=_failed_custom_probe_results(checks),
+                                f'{batch_timeout:g} сек.; прежний статус оставлен без изменений.'
                             )
                             mark_checked(proto, key_value)
                             _invalidate_web_status_cache()
@@ -3215,13 +3661,6 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
                 except Exception as exc:
                     _write_runtime_log(f'Ошибка проверки пачки ключей из пула: {exc}')
                     for proto, key_value in valid_batch:
-                        _record_key_probe(
-                            proto,
-                            key_value,
-                            tg_ok=False,
-                            yt_ok=False,
-                            custom=_failed_custom_probe_results(checks),
-                        )
                         mark_checked(proto, key_value)
                 finally:
                     _stop_pool_probe_xray(process, config_path)
@@ -3238,7 +3677,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
         finally:
             _invalidate_web_status_cache()
             _invalidate_key_status_cache()
-            _set_pool_probe_progress(running=False, checked=checked, total=total, finished_at=time.time())
+            _set_pool_probe_progress(running=False, checked=checked, total=total, scope=scope, finished_at=time.time())
             pool_probe_lock.release()
             gc.collect()
 
@@ -3246,7 +3685,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
     return True, len(selected)
 
 
-def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, stale_only=True):
+def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, stale_only=True, scope='protocol'):
     if POOL_PROBE_ACTIVE_ONLY:
         current_key = (_load_current_keys().get(proto) or '').strip()
         keys = [current_key] if current_key and current_key in (keys or []) else []
@@ -3255,6 +3694,7 @@ def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, sta
         [(proto, key_value) for key_value in (keys or [])],
         max_keys=max_keys,
         stale_only=stale_only,
+        scope=scope,
     )
 
 
@@ -3278,7 +3718,10 @@ def _add_keys_to_pool(proto, keys_text):
 def _web_probe_state(probe, key):
     if not probe or key not in probe:
         return 'unknown'
-    return 'ok' if probe.get(key) else 'fail'
+    value = probe.get(key)
+    if value is None:
+        return 'unknown'
+    return 'ok' if value else 'fail'
 
 
 def _web_probe_checked_at(probe):
@@ -3314,6 +3757,7 @@ def _web_custom_checks():
             'label': check.get('label', ''),
             'url': check.get('url', ''),
             'urls': check.get('urls') or [check.get('url', '')],
+            'routes': check.get('routes') or [],
             'badge': check.get('badge', 'WEB'),
             'icon': check.get('icon', ''),
         }
@@ -3685,6 +4129,7 @@ def _build_status_snapshot(current_keys, force_refresh=False):
         try:
             if key_name == proxy_mode:
                 protocols[key_name] = _protocol_status_for_key(key_name, key_value)
+                _store_active_mode_protocol_status(current_keys, protocols[key_name])
             else:
                 protocols[key_name] = _cached_protocol_status_for_key(key_name, key_value, custom_checks=custom_checks)
         except Exception as exc:
@@ -3714,7 +4159,12 @@ def _active_mode_status_snapshot(current_keys):
 
     if proxy_mode in current_keys:
         try:
-            protocols[proxy_mode] = _protocol_status_for_key(proxy_mode, current_keys.get(proxy_mode, ''))
+            cached_active = _cached_active_mode_protocol_status(current_keys) if pool_probe_lock.locked() else None
+            if cached_active is not None:
+                protocols[proxy_mode] = cached_active
+            else:
+                protocols[proxy_mode] = _protocol_status_for_key(proxy_mode, current_keys.get(proxy_mode, ''))
+                _store_active_mode_protocol_status(current_keys, protocols[proxy_mode])
         except Exception as exc:
             _write_runtime_log(f'Ошибка быстрой проверки активного режима {proxy_mode}: {exc}')
             protocols[proxy_mode] = {
@@ -3743,6 +4193,33 @@ def _cached_status_snapshot(current_keys):
     ):
         return status_snapshot_cache['data']
     return None
+
+
+def _active_mode_status_signature(current_keys):
+    custom_signature = tuple((item.get('id'), tuple(item.get('urls') or [item.get('url')])) for item in _load_custom_checks())
+    return (proxy_mode, current_keys.get(proxy_mode, ''), custom_signature)
+
+
+def _cached_active_mode_protocol_status(current_keys):
+    now = time.time()
+    signature = _active_mode_status_signature(current_keys)
+    with active_mode_status_cache_lock:
+        if (
+            active_mode_status_cache['status'] is not None and
+            active_mode_status_cache['signature'] == signature and
+            now - active_mode_status_cache['timestamp'] < ACTIVE_MODE_STATUS_DURING_POOL_TTL
+        ):
+            return dict(active_mode_status_cache['status'])
+    return None
+
+
+def _store_active_mode_protocol_status(current_keys, status):
+    if not isinstance(status, dict):
+        return
+    with active_mode_status_cache_lock:
+        active_mode_status_cache['timestamp'] = time.time()
+        active_mode_status_cache['signature'] = _active_mode_status_signature(current_keys)
+        active_mode_status_cache['status'] = dict(status)
 
 
 def _placeholder_web_status_snapshot():
@@ -3787,20 +4264,20 @@ def _refresh_status_caches_async(current_keys):
     threading.Thread(target=worker, daemon=True).start()
 
 
-def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, missing_only=False):
+def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, missing_only=False, scope='manual_all'):
     """Запускает безопасную фоновую проверку пула через временный xray."""
     if POOL_PROBE_ACTIVE_ONLY:
         active_proto = proxy_mode if proxy_mode in POOL_PROTOCOL_ORDER else ''
         active_key = (_load_current_keys().get(active_proto, '') if active_proto else '').strip()
         tasks = [(active_proto, active_key)] if active_proto and active_key else []
-        return _queue_pool_key_probe(tasks, max_keys=1, stale_only=False)
-    pools = _load_key_pools()
+        return _queue_pool_key_probe(tasks, max_keys=1, stale_only=False, scope=scope)
+    pools = _ensure_current_keys_in_pools(_load_current_keys())
     tasks = [
         (proto, key_value)
         for proto in POOL_PROTOCOL_ORDER
         for key_value in (pools.get(proto, []) or [])
     ]
-    return _queue_pool_key_probe(tasks, max_keys=max_keys, stale_only=stale_only, missing_only=missing_only)
+    return _queue_pool_key_probe(tasks, max_keys=max_keys, stale_only=stale_only, missing_only=missing_only, scope=scope)
 
 
 def _probe_pool_keys_on_page_load():
@@ -3823,8 +4300,9 @@ def _probe_pool_keys_on_page_load():
 
     started, queued = _probe_all_pool_keys_async(
         stale_only=False,
-        max_keys=POOL_PROBE_PAGE_MAX_KEYS,
+        max_keys=None,
         missing_only=True,
+        scope='auto_missing',
     )
     if started or queued:
         return started, queued
@@ -4031,8 +4509,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         if pool_probe_pending:
             progress_total = int(current_pool_probe_progress.get('total') or 0)
             progress_checked = int(current_pool_probe_progress.get('checked') or 0)
+            progress_label = _pool_probe_progress_label(current_pool_probe_progress)
             topbar_status_text = (
-                f'⏳ Фоновая проверка пула ключей выполняется: {progress_checked}/{progress_total}. '
+                f'⏳ {progress_label}: {progress_checked}/{progress_total}. '
                 'Статусы обновятся без перезагрузки страницы.'
             )
         else:
@@ -4048,6 +4527,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
             api_ok = status_info.get('api_ok', False)
             current_probe = key_probe_cache.get(_hash_key(current_keys.get(key_name, '')), {})
+            if not isinstance(current_probe, dict):
+                current_probe = {}
             current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
             current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
             custom_states = status_info.get('custom') or _web_custom_probe_states(current_probe, custom_checks)
@@ -4070,6 +4551,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                     is_active = 'активен' if is_current_key else ''
                     active_class = ' pool-row-active' if is_current_key else ''
                     probe = key_probe_cache.get(_hash_key(pk), {})
+                    if not isinstance(probe, dict):
+                        probe = {}
                     tg_badge = _telegram_icon_html(opacity=1.0) if probe.get('tg_ok') else (
                         '<span class="service-probe-mark service-probe-fail">✕</span>'
                         if 'tg_ok' in probe else
@@ -4194,9 +4677,11 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <div class="service-preset-grid">{custom_presets_html}</div>
                 <div class="custom-check-list" data-custom-check-list>{custom_checks_html}</div>
                 <form method="post" action="/custom_check_add" class="custom-check-form" data-async-action="custom-check-add">
+                    <input type="hidden" name="type" value="{key_name}">
                     <input type="text" name="label" placeholder="Название, например ChatGPT">
                     <input type="text" name="url" placeholder="Домен, IP или URL: chatgpt.com">
                     <button type="submit" class="secondary-button">Добавить проверку</button>
+                    <button type="submit" class="secondary-button" formaction="/custom_checks_to_list" data-confirm-title="Добавить проверки в список обхода?" data-confirm-message="Домены выбранных дополнительных проверок будут добавлены в список {safe_title}.">Добавить в список обхода</button>
                 </form>
             </div>
             <form method="post" action="/pool_probe" data-async-action="pool-probe">
@@ -4214,7 +4699,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         pool_summary_note = pool_summary['note']
         if pool_probe_pending:
             pool_summary_note = (
-                f"Фоновая проверка: {int(current_pool_probe_progress.get('checked') or 0)}/"
+                f"{_pool_probe_progress_label(current_pool_probe_progress)}: {int(current_pool_probe_progress.get('checked') or 0)}/"
                 f"{int(current_pool_probe_progress.get('total') or 0)}. {pool_summary_note}"
             )
 
@@ -4274,10 +4759,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <button type="submit">Сохранить список</button>
             </div>
             <div class="social-list-actions">
-                <span class="social-list-title">Добавить соцсети</span>
+                <span class="social-list-title">Добавить в список</span>
                 {social_service_buttons}
-                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/append_socialnet" class="secondary-button" data-confirm-title="Добавить все соцсети?" data-confirm-message="Добавить все соцсети в {safe_label}?">Все соцсети</button>
-                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/remove_socialnet" class="danger" data-confirm-title="Удалить все соцсети?" data-confirm-message="Удалить все соцсети из {safe_label}?">Удалить соцсети</button>
+                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/append_socialnet" class="secondary-button" data-confirm-title="Добавить все сервисы?" data-confirm-message="Добавить все сервисы в {safe_label}?">{html.escape(_socialnet_service_label(SOCIALNET_ALL_KEY))}</button>
+                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/remove_socialnet" class="danger" data-confirm-title="Удалить все сервисы?" data-confirm-message="Удалить все сервисы из {safe_label}?">Удалить сервисы</button>
             </div>
         </form>
     </section>''')
@@ -4673,7 +5158,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         .custom-check-copy{{min-width:0;display:grid;gap:1px;}}
         .custom-check-copy strong{{font-size:12px;font-weight:700;color:#edf5fb;}}
         .custom-check-copy small{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fb0c8;font-size:10px;}}
-        .custom-check-form{{display:grid;grid-template-columns:minmax(120px,.65fr) minmax(180px,1fr) auto;gap:7px;align-items:center;}}
+        .custom-check-form{{display:grid;grid-template-columns:minmax(120px,.55fr) minmax(180px,1fr) auto auto;gap:7px;align-items:center;}}
         .custom-check-form button{{justify-self:start;white-space:nowrap;}}
         .pool-checked-cell{{width:74px;font-size:10px;}}
         .pool-actions-cell{{width:78px;}}
@@ -4877,7 +5362,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             .service-preset-btn{{width:100%;min-width:0;gap:3px;padding:4px 3px;}}
             .service-preset-btn span:last-child{{font-size:10px;}}
             .custom-check-list{{grid-template-columns:1fr;}}
-            .custom-check-form{{grid-template-columns:1fr;}}
+            .custom-check-form{{grid-template-columns:repeat(2,minmax(0,1fr));}}
+            .custom-check-form input[type="text"]{{grid-column:1 / -1;}}
+            .custom-check-form button{{width:100%;justify-self:stretch;white-space:normal;}}
             .service-groups{{grid-template-columns:1fr;}}
             .form-actions{{display:grid;grid-template-columns:1fr;}}
             .hero-row{{flex-direction:column;align-items:stretch;}}
@@ -5453,6 +5940,19 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             }}
         }}
 
+        function poolProbeProgressLabel(scope) {{
+            if (scope === 'auto_missing') {{
+                return 'Автопроверка непроверенных ключей';
+            }}
+            if (scope === 'manual_all') {{
+                return 'Полная проверка всех ключей';
+            }}
+            if (scope === 'protocol') {{
+                return 'Проверка выбранного пула';
+            }}
+            return 'Фоновая проверка пула ключей';
+        }}
+
         function updateWebStatus(snapshot) {{
             if (!snapshot || !snapshot.web) {{
                 return false;
@@ -5474,9 +5974,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             if (apiPill) {{
                 const progress = snapshot.pool_probe_progress || {{}};
                 const poolProbeVisible = !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
+                const progressLabel = poolProbeProgressLabel(progress.scope || '');
                 const progressText = progress.total
-                    ? '⏳ Фоновая проверка пула ключей выполняется: ' + (progress.checked || 0) + '/' + progress.total + '. Статусы обновятся без перезагрузки страницы.'
-                    : '⏳ Фоновая проверка пула ключей выполняется. Статусы обновятся без перезагрузки страницы.';
+                    ? '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + progress.total + '. Статусы обновятся без перезагрузки страницы.'
+                    : '⏳ ' + progressLabel + '. Статусы обновятся без перезагрузки страницы.';
                 apiPill.textContent = poolProbeVisible ? progressText : (web.api_status || '');
             }}
             setOptionalText('web-socks-details', web.socks_details || '');
@@ -5504,7 +6005,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 const progress = snapshot.pool_probe_progress || {{}};
                 let summaryNote = poolSummary.note || '';
                 if (!!snapshot.pool_probe_running && Number(progress.total || 0) > 0) {{
-                    summaryNote = 'Фоновая проверка: ' + (progress.checked || 0) + '/' + progress.total + '. ' + summaryNote;
+                    summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + summaryNote;
                 }}
                 setOptionalText('pool-active-summary', poolSummary.active_text || '');
                 setOptionalText('pool-summary-note', summaryNote);
@@ -6207,7 +6708,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 result = _append_socialnet_list(list_name, service_key=service_key)
             except Exception as exc:
                 success = False
-                result = f'Ошибка добавления соцсетей: {exc}'
+                result = f'Ошибка добавления сервисов: {exc}'
             safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
             list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
             self._send_action_result(
@@ -6228,8 +6729,28 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 result = _remove_socialnet_list(list_name, service_key=service_key)
             except Exception as exc:
                 success = False
-                result = f'Ошибка удаления соцсетей: {exc}'
+                result = f'Ошибка удаления сервисов: {exc}'
             safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
+            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
+            self._send_action_result(
+                result,
+                success=success,
+                extra={'list_name': safe_name, 'list_content': list_content},
+            )
+            return
+
+        if path == '/custom_checks_to_list':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            data = parse_qs(body)
+            list_name = data.get('target_list_name', data.get('list_name', data.get('type', [''])))[0]
+            success = True
+            try:
+                result = _append_custom_checks_to_unblock_list(list_name)
+            except Exception as exc:
+                success = False
+                result = f'Ошибка добавления проверок в список обхода: {exc}'
+            safe_name = _normalize_unblock_route_name(_unblock_route_for_key_type(list_name)) + '.txt' if success else os.path.basename(list_name)
             list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
             self._send_action_result(
                 result,

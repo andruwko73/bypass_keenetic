@@ -1,5 +1,7 @@
 <a href="https://forum.keenetic.com/topic/14672-%D0%BE%D0%B1%D1%85%D0%BE%D0%B4%D0%B0-%D0%B1%D0%BB%D0%BE%D0%BA%D0%B8%D1%80%D0%BE%D0%B2%D0%BE%D0%BA-%D0%BC%D0%BD%D0%BE%D0%B3%D0%BE-%D0%BD%D0%B5-%D0%B1%D1%8B%D0%B2%D0%B0%D0%B5%D1%82">![Forum](https://img.shields.io/badge/forum-keenetic-blue?style=social&logo=discourse)</a>
 
+> **Проверено и работает на роутере Keenetic Giga на последней версии KeeneticOS.**
+
 ## О ветке
 
 `feature/web-only` — версия `bypass_keenetic` без Telegram-бота. Управление выполняется только через локальный веб-интерфейс роутера на `http://192.168.1.1:8080/`.
@@ -13,6 +15,7 @@
 - загрузка subscription;
 - проверка Telegram API, YouTube и дополнительных сервисов через выбранный прокси;
 - пресеты проверок: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Meta AI, Instagram, Facebook;
+- кнопка **Добавить в список обхода** переносит домены выбранных дополнительных проверок в список обхода текущего протокола; кнопка **Добавить в список** добавляет готовые наборы Telegram, YouTube, Instagram/Meta, Discord, TikTok, X/Twitter или все сервисы сразу;
 - переустановка в `main`, `feature/independent-rework` и обратно в `feature/web-only` с сохранением данных.
 
 ## Установка
