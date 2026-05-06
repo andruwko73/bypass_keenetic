@@ -406,6 +406,33 @@ download_update_file() {
   return 1
 }
 
+runtime_module_url() {
+  printf '%s\n' "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/$1"
+}
+
+install_runtime_module() {
+  module="$1"
+  curl -fsSL -o "$BOT_RUNTIME_DIR/$module" "$(runtime_module_url "$module")" || exit 1
+  chmod 644 "$BOT_RUNTIME_DIR/$module"
+}
+
+stage_runtime_module() {
+  module="$1"
+  marker="$2"
+  download_update_file "$(runtime_module_url "$module")" "$stage_dir/$module" "$marker" "$module"
+}
+
+backup_runtime_module() {
+  module="$1"
+  [ -f "$BOT_RUNTIME_DIR/$module" ] && mv "$BOT_RUNTIME_DIR/$module" "$backup_dir/$module"
+}
+
+activate_runtime_module() {
+  module="$1"
+  mv "$stage_dir/$module" "$BOT_RUNTIME_DIR/$module"
+  chmod 644 "$BOT_RUNTIME_DIR/$module"
+}
+
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     opkg remove bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
@@ -573,14 +600,16 @@ if [ "$1" = "-install" ]; then
     chmod 755 /opt/etc/crontab
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
     mkdir -p "$BOT_RUNTIME_DIR"
-    curl -fsSL -o "$BOT_RUNTIME_DIR/pool_probe_runner.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/pool_probe_runner.py" || exit 1
-    chmod 644 "$BOT_RUNTIME_DIR/pool_probe_runner.py"
-    curl -fsSL -o "$BOT_RUNTIME_DIR/key_pool_store.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/key_pool_store.py" || exit 1
-    chmod 644 "$BOT_RUNTIME_DIR/key_pool_store.py"
-    curl -fsSL -o "$BOT_RUNTIME_DIR/service_catalog.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/service_catalog.py" || exit 1
-    chmod 644 "$BOT_RUNTIME_DIR/service_catalog.py"
-    curl -fsSL -o "$BOT_RUNTIME_DIR/web_form_template.py" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_form_template.py" || exit 1
-    chmod 644 "$BOT_RUNTIME_DIR/web_form_template.py"
+    install_runtime_module pool_probe_runner.py
+    install_runtime_module key_pool_store.py
+    install_runtime_module probe_cache.py
+    install_runtime_module custom_checks_store.py
+    install_runtime_module service_catalog.py
+    install_runtime_module web_form_template.py
+    install_runtime_module web_http_common.py
+    install_runtime_module web_command_state.py
+    install_runtime_module unblock_lists.py
+    install_runtime_module installer_common.py
     install_static_assets
     /opt/bin/unblock_update.sh
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
@@ -634,11 +663,17 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/pool_probe_runner.py" "$stage_dir/pool_probe_runner.py" "run_pool_probe_worker" "pool_probe_runner.py" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/key_pool_store.py" "$stage_dir/key_pool_store.py" "def normalize_key_pools" "key_pool_store.py" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/service_catalog.py" "$stage_dir/service_catalog.py" "CUSTOM_CHECK_PRESETS" "service_catalog.py" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_form_template.py" "$stage_dir/web_form_template.py" "render_web_form" "web_form_template.py" || exit 1
+    stage_runtime_module pool_probe_runner.py run_pool_probe_worker || exit 1
+    stage_runtime_module key_pool_store.py "def normalize_key_pools" || exit 1
+    stage_runtime_module probe_cache.py record_key_probe || exit 1
+    stage_runtime_module custom_checks_store.py add_custom_check || exit 1
+    stage_runtime_module service_catalog.py CUSTOM_CHECK_PRESETS || exit 1
+    stage_runtime_module web_form_template.py render_web_form || exit 1
+    stage_runtime_module web_http_common.py WebRequestMixin || exit 1
+    stage_runtime_module web_command_state.py start_command || exit 1
+    stage_runtime_module unblock_lists.py save_unblock_list_file || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/installer.py" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
+    stage_runtime_module installer_common.py browser_port_is_valid || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S98telegram_bot_installer" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99telegram_bot" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
 
@@ -676,10 +711,16 @@ if [ "$1" = "-update" ]; then
     if [ -f "$BOT_MAIN_PATH" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
-    [ -f "$BOT_RUNTIME_DIR/pool_probe_runner.py" ] && mv "$BOT_RUNTIME_DIR/pool_probe_runner.py" "$backup_dir"/pool_probe_runner.py
-    [ -f "$BOT_RUNTIME_DIR/key_pool_store.py" ] && mv "$BOT_RUNTIME_DIR/key_pool_store.py" "$backup_dir"/key_pool_store.py
-    [ -f "$BOT_RUNTIME_DIR/service_catalog.py" ] && mv "$BOT_RUNTIME_DIR/service_catalog.py" "$backup_dir"/service_catalog.py
-    [ -f "$BOT_RUNTIME_DIR/web_form_template.py" ] && mv "$BOT_RUNTIME_DIR/web_form_template.py" "$backup_dir"/web_form_template.py
+    backup_runtime_module pool_probe_runner.py
+    backup_runtime_module key_pool_store.py
+    backup_runtime_module probe_cache.py
+    backup_runtime_module custom_checks_store.py
+    backup_runtime_module service_catalog.py
+    backup_runtime_module web_form_template.py
+    backup_runtime_module web_http_common.py
+    backup_runtime_module web_command_state.py
+    backup_runtime_module unblock_lists.py
+    backup_runtime_module installer_common.py
     rm -f /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh > /dev/null 2>&1
     rm -f /opt/etc/init.d/S35tor > /dev/null 2>&1
     chmod 755 "$backup_dir"/* 2>/dev/null
@@ -709,14 +750,16 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
-    mv "$stage_dir/pool_probe_runner.py" "$BOT_RUNTIME_DIR/pool_probe_runner.py"
-    chmod 644 "$BOT_RUNTIME_DIR/pool_probe_runner.py"
-    mv "$stage_dir/key_pool_store.py" "$BOT_RUNTIME_DIR/key_pool_store.py"
-    chmod 644 "$BOT_RUNTIME_DIR/key_pool_store.py"
-    mv "$stage_dir/service_catalog.py" "$BOT_RUNTIME_DIR/service_catalog.py"
-    chmod 644 "$BOT_RUNTIME_DIR/service_catalog.py"
-    mv "$stage_dir/web_form_template.py" "$BOT_RUNTIME_DIR/web_form_template.py"
-    chmod 644 "$BOT_RUNTIME_DIR/web_form_template.py"
+    activate_runtime_module pool_probe_runner.py
+    activate_runtime_module key_pool_store.py
+    activate_runtime_module probe_cache.py
+    activate_runtime_module custom_checks_store.py
+    activate_runtime_module service_catalog.py
+    activate_runtime_module web_form_template.py
+    activate_runtime_module web_http_common.py
+    activate_runtime_module web_command_state.py
+    activate_runtime_module unblock_lists.py
+    activate_runtime_module installer_common.py
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"
