@@ -403,6 +403,26 @@ activate_runtime_module() {
   chmod 644 "$BOT_RUNTIME_DIR/$module"
 }
 
+install_runtime_modules() {
+  for module in "$@"; do
+    install_runtime_module "$module"
+  done
+}
+
+backup_runtime_modules() {
+  for module in "$@"; do
+    backup_runtime_module "$module"
+  done
+}
+
+activate_runtime_modules() {
+  for module in "$@"; do
+    activate_runtime_module "$module"
+  done
+}
+
+BOT_RUNTIME_MODULES="web_form_template.py web_http_common.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_status.py installer_common.py"
+
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     # opkg remove curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
@@ -612,11 +632,7 @@ if [ "$1" = "-install" ]; then
     chmod 755 /opt/etc/crontab
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
     mkdir -p "$BOT_RUNTIME_DIR"
-    install_runtime_module web_form_template.py
-    install_runtime_module web_http_common.py
-    install_runtime_module web_command_state.py
-    install_runtime_module unblock_lists.py
-    install_runtime_module installer_common.py
+    install_runtime_modules $BOT_RUNTIME_MODULES
     /opt/bin/unblock_update.sh
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
 
@@ -685,6 +701,9 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
     stage_runtime_module web_command_state.py start_command || exit 1
     stage_runtime_module unblock_lists.py save_unblock_list_file || exit 1
+    stage_runtime_module proxy_key_store.py load_current_keys || exit 1
+    stage_runtime_module proxy_protocols.py proxy_outbound_from_key || exit 1
+    stage_runtime_module proxy_status.py status_snapshot_signature || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/installer.py" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
     stage_runtime_module installer_common.py browser_port_is_valid || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S98telegram_bot_installer" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
@@ -727,11 +746,7 @@ if [ "$1" = "-update" ]; then
     if [ -f "$BOT_MAIN_PATH" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
-    backup_runtime_module web_form_template.py
-    backup_runtime_module web_http_common.py
-    backup_runtime_module web_command_state.py
-    backup_runtime_module unblock_lists.py
-    backup_runtime_module installer_common.py
+    backup_runtime_modules $BOT_RUNTIME_MODULES
     rm -R /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn > /dev/null 2>&1
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
@@ -763,11 +778,7 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
-    activate_runtime_module web_form_template.py
-    activate_runtime_module web_http_common.py
-    activate_runtime_module web_command_state.py
-    activate_runtime_module unblock_lists.py
-    activate_runtime_module installer_common.py
+    activate_runtime_modules $BOT_RUNTIME_MODULES
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"

@@ -21,6 +21,27 @@ import traceback
 import tarfile
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from proxy_key_store import (
+    load_current_keys as _store_load_current_keys,
+    load_shadowsocks_key as _store_load_shadowsocks_key,
+    load_trojan_key as _store_load_trojan_key,
+    read_v2ray_key as _store_read_v2ray_key,
+    save_v2ray_key as _store_save_v2ray_key,
+)
+from proxy_protocols import (
+    decode_shadowsocks_uri as _store_decode_shadowsocks_uri,
+    parse_trojan_key as _store_parse_trojan_key,
+    parse_vless_key as _store_parse_vless_key,
+    parse_vmess_key as _store_parse_vmess_key,
+)
+from proxy_status import (
+    cached_snapshot as _status_cached_snapshot,
+    is_transient_status_text as _status_is_transient_text,
+    placeholder_protocol_statuses as _status_placeholder_protocols,
+    protocol_error_status as _status_protocol_error,
+    status_snapshot_signature as _status_snapshot_signature_impl,
+    store_snapshot as _status_store_snapshot,
+)
 from unblock_lists import (
     list_label as _unblock_list_label,
     load_unblock_lists as _load_unblock_lists_store,
@@ -1406,85 +1427,11 @@ def _transparent_list_route_label():
 
 
 def _load_shadowsocks_key():
-    try:
-        with open('/opt/etc/shadowsocks.json', 'r', encoding='utf-8') as file:
-            data = json.load(file)
-        raw_uri = str(data.get('raw_uri', '') or '').strip()
-        if raw_uri.startswith('ss://'):
-            return raw_uri
-        server = (data.get('server') or [''])[0]
-        port = data.get('server_port', '')
-        method = data.get('method', '')
-        password = data.get('password', '')
-        if not server or not port or not method:
-            return ''
-        encoded = base64.urlsafe_b64encode(f'{method}:{password}'.encode('utf-8')).decode('utf-8').rstrip('=')
-        return f'ss://{encoded}@{server}:{port}'
-    except Exception:
-        return ''
+    return _store_load_shadowsocks_key()
 
 
 def _load_trojan_key():
-    try:
-        with open('/opt/etc/trojan/config.json', 'r', encoding='utf-8') as file:
-            data = json.load(file)
-        raw_uri = str(data.get('raw_uri', '') or '').strip()
-        if raw_uri.startswith('trojan://'):
-            return raw_uri
-        password = (data.get('password') or [''])[0]
-        address = data.get('remote_addr', '')
-        port = data.get('remote_port', '')
-        if (
-            str(address).strip().lower() == 'ownade' and
-            str(port).strip() == '65432' and
-            str(password).strip() == 'pw'
-        ):
-            return ''
-        if not password or not address or not port:
-            return ''
-        query_params = []
-        trojan_type = str(data.get('type', '') or '').strip()
-        if trojan_type and trojan_type != 'tcp':
-            query_params.append(('type', trojan_type))
-
-        security = str(data.get('security', '') or '').strip()
-        if security and security != 'tls':
-            query_params.append(('security', security))
-
-        sni = str(data.get('sni', '') or '').strip()
-        if sni:
-            query_params.append(('sni', sni))
-
-        host = str(data.get('host', '') or '').strip()
-        if host:
-            query_params.append(('host', host))
-
-        path = str(data.get('path', '') or '').strip()
-        if path and path != '/':
-            query_params.append(('path', path))
-
-        service_name = str(data.get('serviceName', '') or '').strip()
-        if service_name:
-            query_params.append(('serviceName', service_name))
-
-        fingerprint = str(data.get('fingerprint', '') or '').strip()
-        if fingerprint and fingerprint != 'chrome':
-            query_params.append(('fp', fingerprint))
-
-        alpn = str(data.get('alpn', '') or '').strip()
-        if alpn:
-            query_params.append(('alpn', alpn))
-
-        query_suffix = ''
-        if query_params:
-            query_suffix = '?' + urlencode(query_params)
-
-        fragment = str(data.get('fragment', '') or '').strip()
-        fragment_suffix = f'#{quote(fragment)}' if fragment else ''
-
-        return f'trojan://{password}@{address}:{port}{query_suffix}{fragment_suffix}'
-    except Exception:
-        return ''
+    return _store_load_trojan_key()
 
 
 def _load_tor_bridges():
@@ -1497,13 +1444,7 @@ def _load_tor_bridges():
 
 
 def _load_current_keys():
-    return {
-        'shadowsocks': _load_shadowsocks_key(),
-        'vmess': _read_v2ray_key(VMESS_KEY_PATH) or '',
-        'vless': _read_v2ray_key(VLESS_KEY_PATH) or '',
-        'vless2': _read_v2ray_key(VLESS2_KEY_PATH) or '',
-        'trojan': _load_trojan_key(),
-    }
+    return _store_load_current_keys(VMESS_KEY_PATH, VLESS_KEY_PATH, VLESS2_KEY_PATH, XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR)
 
 
 def _invalidate_status_snapshot_cache():
@@ -1639,21 +1580,7 @@ def _protocol_status_for_key(key_name, key_value):
 
 
 def _placeholder_protocol_statuses(current_keys):
-    result = {}
-    for key_name, key_value in current_keys.items():
-        if key_value.strip():
-            result[key_name] = {
-                'tone': 'warn',
-                'label': 'Проверяется',
-                'details': 'Фоновая проверка ключа выполняется. Обновите страницу через несколько секунд.',
-            }
-        else:
-            result[key_name] = {
-                'tone': 'empty',
-                'label': 'Не сохранён',
-                'details': 'Ключ ещё не сохранён на роутере.',
-            }
-    return result
+    return _status_placeholder_protocols(current_keys)
 
 
 def _web_command_label(command):
@@ -2001,28 +1928,7 @@ def _v2ray_outbound_summary(vmess_key=None, vless_key=None):
 
 
 def _parse_trojan_key(key):
-    parsed = urlparse(key)
-    if parsed.scheme != 'trojan':
-        raise ValueError('Неверный протокол, ожидается trojan://')
-    if not parsed.hostname:
-        raise ValueError('В trojan-ключе отсутствует адрес сервера')
-    if not parsed.username:
-        raise ValueError('В trojan-ключе отсутствует пароль')
-    params = parse_qs(parsed.query)
-    return {
-        'address': parsed.hostname,
-        'port': parsed.port or 443,
-        'password': parsed.username,
-        'sni': params.get('sni', [''])[0],
-        'security': params.get('security', ['tls'])[0],
-        'type': params.get('type', ['tcp'])[0],
-        'host': params.get('host', [''])[0],
-        'path': params.get('path', ['/'])[0] or '/',
-        'serviceName': params.get('serviceName', [''])[0],
-        'fingerprint': params.get('fp', params.get('fingerprint', ['chrome']))[0],
-        'alpn': params.get('alpn', [''])[0],
-        'fragment': unquote(parsed.fragment or ''),
-    }
+    return _store_parse_trojan_key(key)
 
 
 def _build_proxy_diagnostics(key_type, key_value):
@@ -2192,20 +2098,7 @@ def check_telegram_api(retries=2, retry_delay=7, connect_timeout=30, read_timeou
 
 
 def _is_transient_telegram_api_failure(status_text):
-    text = str(status_text or '').casefold()
-    markers = [
-        'network is unreachable',
-        'timed out',
-        'timeout',
-        'таймаут',
-        'не ответил вовремя',
-        'за отведённое время',
-        'за отведенное время',
-        'max retries exceeded',
-        'failed to establish a new connection',
-        'connection reset',
-    ]
-    return any(marker in text for marker in markers)
+    return _status_is_transient_text(status_text)
 
 
 def _build_web_status(current_keys, protocols=None):
@@ -2259,19 +2152,15 @@ def _build_web_status(current_keys, protocols=None):
 
 
 def _status_snapshot_signature(current_keys):
-    return tuple((name, current_keys.get(name, '')) for name in sorted(current_keys))
+    return _status_snapshot_signature_impl(current_keys)
 
 
 def _build_status_snapshot(current_keys, force_refresh=False):
     signature = _status_snapshot_signature(current_keys)
     now = time.time()
-    if (
-        not force_refresh and
-        status_snapshot_cache['data'] is not None and
-        status_snapshot_cache['signature'] == signature and
-        now - status_snapshot_cache['timestamp'] < STATUS_CACHE_TTL
-    ):
-        return status_snapshot_cache['data']
+    cached = None if force_refresh else _status_cached_snapshot(status_snapshot_cache, signature, STATUS_CACHE_TTL, now=now)
+    if cached is not None:
+        return cached
 
     protocols = {}
     for key_name, key_value in current_keys.items():
@@ -2279,20 +2168,13 @@ def _build_status_snapshot(current_keys, force_refresh=False):
             protocols[key_name] = _protocol_status_for_key(key_name, key_value)
         except Exception as exc:
             _write_runtime_log(f'Ошибка проверки ключа {key_name}: {exc}')
-            protocols[key_name] = {
-                'tone': 'warn',
-                'label': 'Ошибка проверки',
-                'details': f'Не удалось завершить проверку ключа: {exc}',
-            }
+            protocols[key_name] = _status_protocol_error(exc)
 
     snapshot = {
         'web': _build_web_status(current_keys, protocols=protocols),
         'protocols': protocols,
     }
-    status_snapshot_cache['timestamp'] = now
-    status_snapshot_cache['data'] = snapshot
-    status_snapshot_cache['signature'] = signature
-    return snapshot
+    return _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=now)
 
 
 def _web_status_snapshot(force_refresh=False):
@@ -2301,15 +2183,11 @@ def _web_status_snapshot(force_refresh=False):
 
 
 def _cached_status_snapshot(current_keys):
-    now = time.time()
-    signature = _status_snapshot_signature(current_keys)
-    if (
-        status_snapshot_cache['data'] is not None and
-        status_snapshot_cache['signature'] == signature and
-        now - status_snapshot_cache['timestamp'] < STATUS_CACHE_TTL
-    ):
-        return status_snapshot_cache['data']
-    return None
+    return _status_cached_snapshot(
+        status_snapshot_cache,
+        _status_snapshot_signature(current_keys),
+        STATUS_CACHE_TTL,
+    )
 
 
 def _placeholder_web_status_snapshot():
@@ -3142,7 +3020,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             unblock_panels_html=unblock_panels_html,
             unblock_tabs_html=unblock_tabs_html,
             update_buttons_html=update_buttons_html,
-            enable_async_forms=False,
+            enable_async_forms=True,
             enable_custom_checks=False,
             enable_key_pool=False,
             enable_live_status=True,
@@ -3191,13 +3069,16 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             proxy_type = data.get('proxy_type', ['none'])[0]
             ok, error = update_proxy(proxy_type)
             if ok:
-                result = f'Режим бота установлен: {proxy_type}'
+                result = f'{APP_MODE_LABEL} установлен: {proxy_type}'
             else:
                 result = f'⚠️ {error}'
             _invalidate_web_status_cache()
             _invalidate_key_status_cache()
-            _set_web_flash_message(result)
-            self._send_redirect('/')
+            self._send_action_result(
+                result,
+                success=ok,
+                extra={'proxy_mode': proxy_type, 'proxy_label': _proxy_mode_label(proxy_type)},
+            )
             return
 
         if path == '/start':
@@ -3206,48 +3087,70 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             _save_bot_autostart(True)
             _invalidate_web_status_cache()
             result = 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд.'
-            _set_web_flash_message(result)
-            self._send_redirect('/')
+            self._send_action_result(result, success=True)
             return
 
         if path == '/command':
             command = data.get('command', [''])[0]
-            _, result = _start_web_command(command)
-            _set_web_flash_message(result)
-            self._send_redirect('/')
+            started, result = _start_web_command(command)
+            self._send_action_result(
+                result,
+                success=started,
+                extra={'command_state': _get_web_command_state()},
+            )
             return
 
         if path == '/save_unblock_list':
             list_name = data.get('list_name', [''])[0]
             content = data.get('content', [''])[0]
+            success = True
             try:
                 result = _save_unblock_list(list_name, content)
             except Exception as exc:
+                success = False
                 result = f'Ошибка сохранения списка: {exc}'
-            _set_web_flash_message(result)
-            self._send_redirect('/')
+            list_content = _read_text_file(os.path.join('/opt/etc/unblock', os.path.basename(list_name))).strip() if success else ''
+            self._send_action_result(
+                result,
+                success=success,
+                extra={'list_name': os.path.basename(list_name), 'list_content': list_content},
+            )
             return
 
         if path == '/append_socialnet':
             list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
             service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
+            success = True
             try:
                 result = _append_socialnet_list(list_name, service_key=service_key)
             except Exception as exc:
+                success = False
                 result = f'Ошибка добавления соцсетей: {exc}'
-            _set_web_flash_message(result)
-            self._send_redirect('/')
+            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
+            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
+            self._send_action_result(
+                result,
+                success=success,
+                extra={'list_name': safe_name, 'list_content': list_content},
+            )
             return
 
         if path == '/remove_socialnet':
             list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
             service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
+            success = True
             try:
                 result = _remove_socialnet_list(list_name, service_key=service_key)
             except Exception as exc:
+                success = False
                 result = f'Ошибка удаления соцсетей: {exc}'
-            _set_web_flash_message(result)
-            self._send_redirect('/')
+            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
+            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
+            self._send_action_result(
+                result,
+                success=success,
+                extra={'list_name': safe_name, 'list_content': list_content},
+            )
             return
 
         if path != '/install':
@@ -3256,6 +3159,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         key_type = data.get('type', [''])[0]
         key_value = data.get('key', [''])[0]
         result = 'Ключ установлен.'
+        success = True
         try:
             if key_type == 'shadowsocks':
                 shadowsocks(key_value)
@@ -3277,15 +3181,21 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 os.system('/opt/etc/init.d/S35tor restart')
                 result = '✅ Tor успешно обновлен.'
             else:
+                success = False
                 result = 'Тип ключа не распознан.'
         except Exception as exc:
+            success = False
             result = f'Ошибка установки: {exc}'
         else:
-            _invalidate_web_status_cache()
-            _invalidate_key_status_cache()
+            if success:
+                _invalidate_web_status_cache()
+                _invalidate_key_status_cache()
 
-        _set_web_flash_message(result)
-        self._send_redirect('/')
+        self._send_action_result(
+            result,
+            success=success,
+            extra={'protocol': key_type, 'key': key_value},
+        )
 
 
 def start_http_server():
@@ -3314,104 +3224,19 @@ def wait_for_bot_start():
 
 
 def _read_v2ray_key(file_path):
-    candidate_paths = [file_path]
-    file_name = os.path.basename(file_path)
-    current_dir = os.path.dirname(file_path)
-    alternate_dirs = []
-    if current_dir == XRAY_CONFIG_DIR:
-        alternate_dirs.append(V2RAY_CONFIG_DIR)
-    elif current_dir == V2RAY_CONFIG_DIR:
-        alternate_dirs.append(XRAY_CONFIG_DIR)
-    for directory in alternate_dirs:
-        candidate_paths.append(os.path.join(directory, file_name))
-
-    for candidate_path in candidate_paths:
-        try:
-            with open(candidate_path, 'r', encoding='utf-8') as f:
-                value = f.read().strip()
-            if value:
-                return value
-        except Exception:
-            continue
-    return None
+    return _store_read_v2ray_key(file_path, XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR)
 
 
 def _save_v2ray_key(file_path, key):
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(key.strip())
+    _store_save_v2ray_key(file_path, key)
 
 
 def _parse_vmess_key(key):
-    if not key.startswith('vmess://'):
-        raise ValueError('Неверный протокол, ожидается vmess://')
-    encodedkey = key[8:]
-    try:
-        decoded = base64.b64decode(encodedkey + '=' * (-len(encodedkey) % 4)).decode('utf-8')
-    except Exception as exc:
-        raise ValueError(f'Не удалось декодировать vmess-ключ: {exc}')
-    try:
-        data = json.loads(decoded.replace("'", '"'))
-    except Exception as exc:
-        raise ValueError(f'Неверный JSON в vmess-ключе: {exc}')
-    if not data.get('add') or not data.get('port') or not data.get('id'):
-        raise ValueError('В vmess-ключе нет server/port/id')
-    if data.get('net') == 'grpc':
-        service_name = data.get('serviceName') or data.get('grpcSettings', {}).get('serviceName')
-        if not service_name:
-            data['serviceName'] = data.get('add')
-    return data
+    return _store_parse_vmess_key(key)
 
 
 def _parse_vless_key(key):
-    parsed = urlparse(key)
-    if parsed.scheme != 'vless':
-        raise ValueError('Неверный протокол, ожидается vless://')
-    if not parsed.hostname:
-        raise ValueError('В vless-ключе отсутствует адрес сервера')
-    if not parsed.username:
-        raise ValueError('В vless-ключе отсутствует UUID')
-    params = parse_qs(parsed.query)
-    address = parsed.hostname
-    port = parsed.port or 443
-    user_id = parsed.username
-    security = params.get('security', ['none'])[0]
-    encryption = params.get('encryption', ['none'])[0]
-    flow = params.get('flow', [''])[0]
-    host = params.get('host', [''])[0]
-    if not address and host:
-        address = host
-    network = params.get('type', params.get('network', ['tcp']))[0]
-    path = params.get('path', ['/'])[0]
-    if path == '':
-        path = '/'
-    sni = params.get('sni', [''])[0] or host or address
-    service_name = params.get('serviceName', [''])[0]
-    public_key = params.get('pbk', params.get('publicKey', ['']))[0]
-    short_id = params.get('sid', params.get('shortId', ['']))[0]
-    fingerprint = params.get('fp', params.get('fingerprint', ['']))[0]
-    spider_x = params.get('spx', params.get('spiderX', ['']))[0]
-    alpn = params.get('alpn', [''])[0]
-    if not service_name and (network == 'grpc' or security == 'reality'):
-        service_name = address
-    return {
-        'address': address,
-        'port': port,
-        'id': user_id,
-        'security': security,
-        'encryption': encryption,
-        'flow': flow,
-        'host': host,
-        'path': path,
-        'sni': sni,
-        'type': network,
-        'serviceName': service_name,
-        'publicKey': public_key,
-        'shortId': short_id,
-        'fingerprint': fingerprint,
-        'spiderX': spider_x,
-        'alpn': alpn
-    }
+    return _store_parse_vless_key(key)
 
 
 def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
@@ -3762,37 +3587,7 @@ def trojan(key):
     _write_all_proxy_core_config()
 
 def _decode_shadowsocks_uri(key):
-    if not key.startswith('ss://'):
-        raise ValueError('Неверный протокол, ожидается ss://')
-    payload = key[5:]
-    payload, _, _ = payload.partition('#')
-    payload, _, _ = payload.partition('?')
-    if '@' in payload:
-        left, right = payload.rsplit('@', 1)
-        host_part = right
-        if ':' not in host_part:
-            raise ValueError('Не удалось определить host:port в Shadowsocks-ключе')
-        server, port = host_part.split(':', 1)
-        try:
-            decoded = base64.urlsafe_b64decode(left + '=' * (-len(left) % 4)).decode('utf-8')
-            if ':' not in decoded:
-                raise ValueError('Неверный формат декодированного payload Shadowsocks')
-            method, password = decoded.split(':', 1)
-        except Exception:
-            decoded = unquote(left)
-            if ':' not in decoded:
-                raise ValueError('Неверный формат Shadowsocks credentials')
-            method, password = decoded.split(':', 1)
-    else:
-        decoded = base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)).decode('utf-8')
-        if '@' not in decoded:
-            raise ValueError('Не удалось разобрать Shadowsocks-ключ')
-        creds, host_part = decoded.rsplit('@', 1)
-        if ':' not in host_part or ':' not in creds:
-            raise ValueError('Неверный формат раскодированного Shadowsocks-URI')
-        server, port = host_part.split(':', 1)
-        method, password = creds.split(':', 1)
-    return server, port, method, password
+    return _store_decode_shadowsocks_uri(key)
 
 
 def shadowsocks(key=None):

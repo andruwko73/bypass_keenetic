@@ -107,6 +107,9 @@ restore_path /opt/etc/bot/web_form_template.py
 restore_path /opt/etc/bot/web_http_common.py
 restore_path /opt/etc/bot/web_command_state.py
 restore_path /opt/etc/bot/unblock_lists.py
+restore_path /opt/etc/bot/proxy_key_store.py
+restore_path /opt/etc/bot/proxy_protocols.py
+restore_path /opt/etc/bot/proxy_status.py
 restore_path /opt/etc/bot/installer_common.py
 restore_path /opt/etc/bot.py
 restore_path /opt/etc/init.d/S99telegram_bot
@@ -195,6 +198,9 @@ backup_path "$BOT_DIR/web_form_template.py"
 backup_path "$BOT_DIR/web_http_common.py"
 backup_path "$BOT_DIR/web_command_state.py"
 backup_path "$BOT_DIR/unblock_lists.py"
+backup_path "$BOT_DIR/proxy_key_store.py"
+backup_path "$BOT_DIR/proxy_protocols.py"
+backup_path "$BOT_DIR/proxy_status.py"
 backup_path "$BOT_DIR/installer_common.py"
 backup_path "$LEGACY_MAIN_PATH"
 backup_path "$SERVICE_PATH"
@@ -225,6 +231,9 @@ download_file "$RAW_BASE/web_form_template.py" "$TMP_DIR/web_form_template.py" '
 download_file "$RAW_BASE/web_http_common.py" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
 download_file "$RAW_BASE/web_command_state.py" "$TMP_DIR/web_command_state.py" 'start_command'
 download_file "$RAW_BASE/unblock_lists.py" "$TMP_DIR/unblock_lists.py" 'save_unblock_list_file'
+download_file "$RAW_BASE/proxy_key_store.py" "$TMP_DIR/proxy_key_store.py" 'load_current_keys'
+download_file "$RAW_BASE/proxy_protocols.py" "$TMP_DIR/proxy_protocols.py" 'proxy_outbound_from_key'
+download_file "$RAW_BASE/proxy_status.py" "$TMP_DIR/proxy_status.py" 'status_snapshot_signature'
 download_file "$RAW_BASE/installer_common.py" "$TMP_DIR/installer_common.py" 'browser_port_is_valid'
 download_file "$RAW_BASE/S99telegram_bot" "$TMP_DIR/S99telegram_bot" 'Bot started successfully'
 download_file "$RAW_BASE/S98telegram_bot_installer" "$TMP_DIR/S98telegram_bot_installer" 'Installer started successfully'
@@ -235,12 +244,15 @@ cp "$TMP_DIR/web_form_template.py" "$BOT_DIR/web_form_template.py"
 cp "$TMP_DIR/web_http_common.py" "$BOT_DIR/web_http_common.py"
 cp "$TMP_DIR/web_command_state.py" "$BOT_DIR/web_command_state.py"
 cp "$TMP_DIR/unblock_lists.py" "$BOT_DIR/unblock_lists.py"
+cp "$TMP_DIR/proxy_key_store.py" "$BOT_DIR/proxy_key_store.py"
+cp "$TMP_DIR/proxy_protocols.py" "$BOT_DIR/proxy_protocols.py"
+cp "$TMP_DIR/proxy_status.py" "$BOT_DIR/proxy_status.py"
 cp "$TMP_DIR/installer_common.py" "$BOT_DIR/installer_common.py"
 cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
 cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/installer_common.py"
+chmod 644 "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 /bin/sh "$TMP_DIR/script.sh" -install
