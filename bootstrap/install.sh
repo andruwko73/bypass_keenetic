@@ -125,6 +125,7 @@ restore_path /opt/etc/bot/probe_cache.py
 restore_path /opt/etc/bot/custom_checks_store.py
 restore_path /opt/etc/bot/web_form_template.py
 restore_path /opt/etc/bot/web_http_common.py
+restore_path /opt/etc/bot/web_get_actions.py
 restore_path /opt/etc/bot/web_post_actions.py
 restore_path /opt/etc/bot/web_command_state.py
 restore_path /opt/etc/bot/unblock_lists.py
@@ -232,6 +233,7 @@ backup_path "$BOT_DIR/probe_cache.py"
 backup_path "$BOT_DIR/custom_checks_store.py"
 backup_path "$BOT_DIR/web_form_template.py"
 backup_path "$BOT_DIR/web_http_common.py"
+backup_path "$BOT_DIR/web_get_actions.py"
 backup_path "$BOT_DIR/web_post_actions.py"
 backup_path "$BOT_DIR/web_command_state.py"
 backup_path "$BOT_DIR/unblock_lists.py"
@@ -276,6 +278,7 @@ download_file "$RAW_BASE/probe_cache.py" "$TMP_DIR/probe_cache.py" 'record_key_p
 download_file "$RAW_BASE/custom_checks_store.py" "$TMP_DIR/custom_checks_store.py" 'add_custom_check'
 download_file "$RAW_BASE/web_form_template.py" "$TMP_DIR/web_form_template.py" 'render_web_form'
 download_file "$RAW_BASE/web_http_common.py" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
+download_file "$RAW_BASE/web_get_actions.py" "$TMP_DIR/web_get_actions.py" 'dispatch'
 download_file "$RAW_BASE/web_post_actions.py" "$TMP_DIR/web_post_actions.py" 'dispatch'
 download_file "$RAW_BASE/web_command_state.py" "$TMP_DIR/web_command_state.py" 'start_command'
 download_file "$RAW_BASE/unblock_lists.py" "$TMP_DIR/unblock_lists.py" 'save_unblock_list_file'
@@ -298,6 +301,7 @@ cp "$TMP_DIR/probe_cache.py" "$BOT_DIR/probe_cache.py"
 cp "$TMP_DIR/custom_checks_store.py" "$BOT_DIR/custom_checks_store.py"
 cp "$TMP_DIR/web_form_template.py" "$BOT_DIR/web_form_template.py"
 cp "$TMP_DIR/web_http_common.py" "$BOT_DIR/web_http_common.py"
+cp "$TMP_DIR/web_get_actions.py" "$BOT_DIR/web_get_actions.py"
 cp "$TMP_DIR/web_post_actions.py" "$BOT_DIR/web_post_actions.py"
 cp "$TMP_DIR/web_command_state.py" "$BOT_DIR/web_command_state.py"
 cp "$TMP_DIR/unblock_lists.py" "$BOT_DIR/unblock_lists.py"
@@ -311,7 +315,7 @@ cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 download_static_assets
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
+chmod 644 "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 /bin/sh "$TMP_DIR/script.sh" -install

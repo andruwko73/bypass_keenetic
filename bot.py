@@ -110,6 +110,7 @@ from web_command_state import (
     start_command as _start_command_state,
 )
 from web_http_common import WebRequestMixin
+import web_get_actions
 import web_post_actions
 from web_form_template import render_web_form
 
@@ -4962,6 +4963,27 @@ def _web_action_context():
     }
 
 
+def _web_get_context(handler):
+    return {
+        'build_form': handler._build_form,
+        'consume_flash_message': _consume_web_flash_message,
+        'load_current_keys': _load_current_keys,
+        'cached_status_snapshot': _cached_status_snapshot,
+        'active_mode_status_snapshot': _active_mode_status_snapshot,
+        'refresh_status_caches_async': _refresh_status_caches_async,
+        'pool_probe_locked': pool_probe_lock.locked,
+        'get_web_command_state': _get_web_command_state,
+        'pool_enabled': True,
+        'get_pool_probe_progress': _get_pool_probe_progress,
+        'web_pool_snapshot': _web_pool_snapshot,
+        'pool_status_summary': _pool_status_summary,
+        'web_custom_checks': _web_custom_checks,
+        'time_provider': time.time,
+        'static_dir': STATIC_DIR,
+        'service_icons_enabled': True,
+    }
+
+
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
     local_client_checker = staticmethod(_is_local_web_client)
@@ -5389,53 +5411,24 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
-        if path in ['/', '/index.html', '/command']:
-            self._send_html(self._build_form(_consume_web_flash_message()))
-        elif path == '/api/status':
-            try:
-                current_keys = _load_current_keys()
-                snapshot = _cached_status_snapshot(current_keys)
-                if snapshot is None:
-                    snapshot = _active_mode_status_snapshot(current_keys)
-                    if not pool_probe_lock.locked():
-                        _refresh_status_caches_async(current_keys)
-                progress = _get_pool_probe_progress()
-                pool_probe_running = (
-                    bool(progress.get('running')) and
-                    int(progress.get('total') or 0) > 0
-                )
-                payload = {
-                    'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
-                    'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
-                    'pools': _web_pool_snapshot(current_keys),
-                    'pool_summary': _pool_status_summary(current_keys),
-                    'custom_checks': _web_custom_checks(),
-                    'pool_probe_running': pool_probe_running,
-                    'pool_probe_progress': progress,
-                    'timestamp': time.time(),
-                }
-                self._send_json(payload, status=200)
-            except Exception as exc:
+        try:
+            action = web_get_actions.dispatch(_web_get_context(self), path)
+        except Exception as exc:
+            if path.startswith('/api/'):
                 self._send_json({'error': str(exc)}, status=500)
-        elif path == '/api/command_state':
-            try:
-                self._send_json(_get_web_command_state(), status=200)
-            except Exception as exc:
-                self._send_json({'error': str(exc)}, status=500)
-        elif path == '/api/pool_probe':
-            try:
-                progress = _get_pool_probe_progress()
-                running = bool(progress.get('running')) and int(progress.get('total') or 0) > 0
-                self._send_json({'status': 'running' if running else 'idle', 'running': running, 'progress': progress}, status=200)
-            except Exception as exc:
-                self._send_json({'error': str(exc)}, status=500)
-        elif path == '/static/telegram.png':
-            self._send_png(os.path.join(STATIC_DIR, 'telegram.png'))
-        elif path == '/static/youtube.png':
-            self._send_png(os.path.join(STATIC_DIR, 'youtube.png'))
-        elif path.startswith('/static/service-icons/'):
-            icon_name = os.path.basename(path)
-            self._send_png(os.path.join(STATIC_DIR, 'service-icons', icon_name))
+            else:
+                self._send_html(f'<h1>500 Internal Server Error</h1><p>{html.escape(str(exc))}</p>', status=500)
+            return
+        if action is None:
+            self._send_html('<h1>404 Not Found</h1>', status=404)
+            return
+        kind = action.get('kind')
+        if kind == 'json':
+            self._send_json(action.get('payload', {}), status=action.get('status', 200))
+        elif kind == 'html':
+            self._send_html(action.get('html', ''))
+        elif kind == 'png':
+            self._send_png(action.get('path', ''))
         else:
             self._send_html('<h1>404 Not Found</h1>', status=404)
 
