@@ -89,6 +89,8 @@ def build_config(form):
     fork_repo_name = DEFAULT_FORK_REPO_NAME
     fork_button_label = f'Fork by {fork_repo_owner}'
     default_proxy_mode = form.get('default_proxy_mode', 'none').strip() or 'none'
+    web_auth_user = form.get('web_auth_user', 'admin').strip() or 'admin'
+    web_auth_token = form.get('web_auth_token', '').strip()
 
     return f"""# ВЕРСИЯ СКРИПТА 2.2.1
 
@@ -99,6 +101,9 @@ appapiid = '{escape_python(form['appapiid'])}'
 appapihash = '{escape_python(form['appapihash'])}'
 routerip = '{escape_python(router_ip)}'
 browser_port = '{escape_python(browser_port)}'
+web_auth_user = '{escape_python(web_auth_user)}'
+web_auth_token = '{escape_python(web_auth_token)}'
+web_auth_disabled = False
 fork_repo_owner = '{escape_python(fork_repo_owner)}'
 fork_repo_name = '{escape_python(fork_repo_name)}'
 fork_button_label = '{escape_python(fork_button_label)}'
@@ -236,6 +241,14 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
             <input id="browser_port" name="browser_port" value="8080">
           </div>
           <div>
+            <label for="web_auth_user">Логин веб-интерфейса</label>
+            <input id="web_auth_user" name="web_auth_user" value="admin">
+          </div>
+          <div>
+            <label for="web_auth_token">Пароль веб-интерфейса</label>
+            <input id="web_auth_token" name="web_auth_token" placeholder="Необязательно: пусто = вход без пароля">
+          </div>
+          <div>
             <label for="appapiid">app api id</label>
             <input id="appapiid" name="appapiid" placeholder="123456" required>
           </div>
@@ -324,6 +337,9 @@ class InstallerHandler(BaseHTTPRequestHandler):
             self._send_html(page_html(message), status=400)
             return
 
+        parsed['web_auth_user'] = parsed.get('web_auth_user', 'admin').strip() or 'admin'
+        parsed['web_auth_token'] = parsed.get('web_auth_token', '').strip()
+
         try:
             write_config(parsed)
             switch_to_main_bot()
@@ -334,10 +350,18 @@ class InstallerHandler(BaseHTTPRequestHandler):
         router_ip = parsed.get('routerip', detect_router_ip()).strip() or detect_router_ip()
         browser_port = parsed.get('browser_port', str(DEFAULT_BROWSER_PORT)).strip() or str(DEFAULT_BROWSER_PORT)
         target_url = f'http://{router_ip}:{browser_port}/'
+        web_auth_user = parsed.get('web_auth_user', 'admin')
+        web_auth_token = parsed.get('web_auth_token', '')
+        web_auth_note = (
+            f' Пароль веб-интерфейса: {web_auth_token}.'
+            if web_auth_token else
+            ' Пароль веб-интерфейса не задан; вход будет без пароля.'
+        )
         self._send_html(
             page_html(
-                f'Конфиг сохранён. Основной бот запускается. Через несколько секунд откроется основная страница: {target_url}',
+                f'Конфиг сохранён. Основной бот запускается. Основная страница: {target_url}. Логин веб-интерфейса: {web_auth_user}.{web_auth_note}',
                 redirect_url=target_url,
+                redirect_delay_seconds=12,
             )
         )
 

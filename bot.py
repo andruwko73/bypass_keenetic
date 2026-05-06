@@ -19,8 +19,11 @@ import threading
 import signal
 import traceback
 import tarfile
+import secrets
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from web_form_template import render_web_form
 
 import telebot
 from telebot import types
@@ -69,8 +72,16 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 APP_BRANCH_LABEL = 'codex/main-v1'
+APP_BRANCH_DESCRIPTION = 'Telegram бот'
 APP_VERSION_COUNTER = '1.01'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
+APP_MODE_LABEL = 'Режим бота'
+APP_START_IDLE_LABEL = 'Запустить бота'
+APP_START_REPEAT_LABEL = 'Повторить запуск бота'
+APP_QUICK_START_NOTE = 'После установки ключей можно сразу запустить или перезапустить Telegram-бота.'
+POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
+TELEGRAM_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1NiIgcj0iMjU2IiBmaWxsPSIjMzdBRUUyIi8+PHBhdGggZD0iTTExOSAyNjVsMjY1LTEwNGMxMi01IDIzIDMgMTkgMTlsLTQ1IDIxMmMtMyAxMy0xMiAxNi0yNCAxMGwtNjYtNDktMzIgMzFjLTQgNC03IDctMTUgN2w2LTg1IDE1NS0xNDBjNy02LTItMTAtMTEtNGwtMTkyIDEyMS04My0yNmMtMTgtNi0xOC0xOCA0LTI2eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg=='
+YOUTUBE_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA0NDMgMzIwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSI0NDMiIGhlaWdodD0iMzIwIiByeD0iNzAiIGZpbGw9IiNGRjAwMDAiLz48cG9seWdvbiBwb2ludHM9IjE3Nyw5NiAzNTUsMTYwIDE3NywyMjQiIGZpbGw9IiNmZmYiLz48L3N2Zz4='
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
 CONNECTIVITY_CHECK_DOMAINS = [
@@ -137,6 +148,8 @@ web_command_state = {
 }
 web_flash_lock = threading.Lock()
 web_flash_message = ''
+WEB_CSRF_COOKIE = 'bk_csrf_token'
+WEB_CSRF_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{32,256}$')
 DIRECT_FETCH_ENV_KEYS = [
     'HTTPS_PROXY',
     'HTTP_PROXY',
@@ -154,12 +167,24 @@ chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
 
 
+def _telegram_icon_html(opacity=1.0):
+    style = f'vertical-align:middle;opacity:{opacity:g}'
+    return f'<img src="data:image/svg+xml;base64,{TELEGRAM_SVG_B64}" width="16" height="16" alt="Telegram" style="{style}">'
+
+
 def _is_local_web_client(address):
     try:
         ip_obj = ipaddress.ip_address((address or '').strip())
     except ValueError:
         return False
     return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+
+
+def _get_web_auth_token():
+    if bool(getattr(config, 'web_auth_disabled', False)):
+        return ''
+
+    return str(getattr(config, 'web_auth_token', '') or '').strip()
 
 
 def _resolve_web_bind_host():
@@ -2932,15 +2957,98 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         return _is_local_web_client(client_ip)
 
     def _ensure_request_allowed(self):
-        if self._request_is_allowed():
+        if not self._request_is_allowed():
+            self._send_html('<h1>403 Forbidden</h1><p>Web UI is available only from the local network.</p>', status=403)
+            return False
+        return self._ensure_web_auth()
+
+    def _send_unauthorized(self):
+        body = (
+            'Authentication required. Use user "admin" and web_auth_token from '
+            'bot_config.py, or leave web_auth_token empty to disable the password.'
+        ).encode('utf-8')
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'Basic realm="bypass_keenetic web"')
+        self.send_header('Content-type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
+
+    def _ensure_web_auth(self):
+        expected_token = _get_web_auth_token()
+        if not expected_token:
             return True
-        self._send_html('<h1>403 Forbidden</h1><p>Веб-интерфейс доступен только из локальной сети.</p>', status=403)
+        expected_user = str(getattr(config, 'web_auth_user', 'admin') or 'admin')
+        header = self.headers.get('Authorization', '')
+        if header.lower().startswith('basic '):
+            try:
+                decoded = base64.b64decode(header.split(' ', 1)[1].strip()).decode('utf-8')
+                supplied_user, _, supplied_token = decoded.partition(':')
+                if (
+                    secrets.compare_digest(supplied_user, expected_user) and
+                    secrets.compare_digest(supplied_token, expected_token)
+                ):
+                    return True
+            except Exception:
+                pass
+        self._send_unauthorized()
+        return False
+
+    def _csrf_token_from_cookie(self):
+        cookie_header = self.headers.get('Cookie', '')
+        if not cookie_header:
+            return ''
+        try:
+            cookie = SimpleCookie()
+            cookie.load(cookie_header)
+            token_value = cookie.get(WEB_CSRF_COOKIE)
+            if token_value is None:
+                return ''
+            value = token_value.value.strip()
+            return value if WEB_CSRF_TOKEN_RE.fullmatch(value) else ''
+        except Exception:
+            return ''
+
+    def _get_or_create_csrf_token(self):
+        token_value = self._csrf_token_from_cookie()
+        if not token_value:
+            token_value = secrets.token_urlsafe(32)
+        self._csrf_cookie_token = token_value
+        return token_value
+
+    def _ensure_csrf_allowed(self, data=None):
+        supplied = self.headers.get('X-CSRF-Token', '').strip()
+        if not supplied and isinstance(data, dict):
+            supplied = data.get('csrf_token', [''])[0].strip()
+        cookie_token = self._csrf_token_from_cookie()
+        if supplied and cookie_token and secrets.compare_digest(supplied, cookie_token):
+            return True
+        self._send_html('<h1>403 Forbidden</h1><p>CSRF token is missing or invalid.</p>', status=403)
         return False
 
     def _send_html(self, html, status=200):
         body = html.encode('utf-8')
         self.send_response(status)
         self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        csrf_cookie = getattr(self, '_csrf_cookie_token', '')
+        if csrf_cookie:
+            self.send_header('Set-Cookie', f'{WEB_CSRF_COOKIE}={csrf_cookie}; Path=/; HttpOnly; SameSite=Strict')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
+
+    def _send_json(self, payload, status=200):
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self.send_response(status)
+        self.send_header('Content-type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
@@ -2973,6 +3081,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             'Фоновая проверка связи выполняется' in status.get('api_status', '') or
             any(item.get('label') == 'Проверяется' for item in protocol_statuses.values())
         )
+        csrf_token = self._get_or_create_csrf_token()
+        csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
 
         message_block = ''
         if message:
@@ -3008,21 +3118,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         }.get(status['proxy_mode'], status['proxy_mode'])
         list_route_label = _transparent_list_route_label()
 
-        status_block = f'''<div class="notice notice-status hero-status hero-status-compact">
-    <div class="hero-status-header">
-        <strong>Связь с Telegram API</strong>
-        <div class="traffic-inline">
-            <span class="traffic-chip"><span class="traffic-chip-label">Бот</span><span class="traffic-chip-value">{html.escape(current_mode_label)}</span></span>
-            <span class="traffic-chip"><span class="traffic-chip-label">Списки</span><span class="traffic-chip-value">{html.escape(list_route_label)}</span></span>
-        </div>
-    </div>
-    <p>{html.escape(status['api_status'])}</p>
-    {socks_block}
-    {fallback_block}
-</div>'''
-
         mode_picker_block = f'''<div id="mode-picker" class="hero-popover mode-picker hidden">
     <form method="post" action="/set_proxy" class="mode-picker-form">
+        {csrf_input_html}
         <label class="mode-picker-label" for="hero-proxy-type">Активный протокол</label>
         <select id="hero-proxy-type" name="proxy_type">
             <option value="none"{' selected' if proxy_mode == 'none' else ''}>Без VPN (по умолчанию)</option>
@@ -3043,36 +3141,58 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             ('trojan', 'Trojan', 5, 'trojan://...'),
             ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
         ]
-        protocol_cards = []
-        for key_name, title, rows, placeholder in protocol_sections:
+        protocol_tabs = []
+        protocol_panels = []
+        for panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
             safe_value = html.escape(current_keys.get(key_name, ''))
             safe_title = html.escape(title)
             status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
-            protocol_cards.append(f'''<section class="panel protocol-card">
-        <div class="card-topline">
-            <span class="eyebrow">Ключ подключения</span>
-            <span class="key-status-badge key-status-{status_info['tone']}">{html.escape(status_info['label'])}</span>
+            tab_active = ' active' if panel_index == 0 else ''
+            tab_count = '1' if current_keys.get(key_name, '').strip() else '0'
+            protocol_tabs.append(
+                f'''<button type="button" class="seg-tab protocol-tab{tab_active}" data-protocol-target="{key_name}">
+                    <span>{safe_title}</span>
+                    <span class="tab-count">{tab_count}</span>
+                </button>'''
+            )
+            protocol_panels.append(f'''<section class="protocol-workspace{tab_active}" data-protocol-card="{key_name}" data-protocol-panel="{key_name}">
+        <div class="workspace-head">
+            <div>
+                <span class="eyebrow">Ключи и мосты</span>
+                <h2>{safe_title}</h2>
+                <p class="key-status-note" data-protocol-status-details>{html.escape(status_info['details'])}</p>
+            </div>
+            <div class="key-status-wrap">
+                <span class="key-status-icons" data-protocol-status-icons></span>
+                <span class="key-status-badge key-status-{status_info['tone']}" data-protocol-status-label>{html.escape(status_info['label'])}</span>
+            </div>
         </div>
-        <h2>{safe_title}</h2>
-        <p class="key-status-note">{html.escape(status_info['details'])}</p>
-    <form method="post" action="/install">
-      <input type="hidden" name="type" value="{key_name}">
-      <textarea name="key" rows="{rows}" placeholder="{html.escape(placeholder)}" required>{safe_value}</textarea>
-      <button type="submit">Сохранить {safe_title}</button>
-    </form>
-  </section>''')
-        protocol_cards_html = ''.join(protocol_cards)
+        <section class="protocol-subview protocol-subview-key active" data-subview="key">
+            <form method="post" action="/install" class="key-editor-form">
+                {csrf_input_html}
+                <input type="hidden" name="type" value="{key_name}">
+                <label class="field-label">Ключ {safe_title}</label>
+                <textarea name="key" rows="{rows}" placeholder="{html.escape(placeholder)}" required data-key-textarea>{safe_value}</textarea>
+                <button type="submit">Сохранить {safe_title}</button>
+            </form>
+        </section>
+    </section>''')
+        protocol_tabs_html = ''.join(protocol_tabs)
+        protocol_panels_html = ''.join(protocol_panels)
 
         dns_override_active = _dns_override_enabled()
         update_buttons_html = f'''<form method="post" action="/command">
+                {csrf_input_html}
                 <input type="hidden" name="command" value="update">
                 <button type="submit">Переустановить из форка без сброса</button>
             </form>
             <form method="post" action="/command">
+                {csrf_input_html}
                 <input type="hidden" name="command" value="update_independent">
                 <button type="submit">Переустановка (ветка Independent)</button>
             </form>
             <form method="post" action="/command">
+                {csrf_input_html}
                 <input type="hidden" name="command" value="update_no_bot">
                 <button type="submit">Переустановка (без Telegram бота)</button>
             </form>'''
@@ -3085,28 +3205,35 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         ]
         command_buttons_html = ''.join(
             f'''<form method="post" action="/command">
+            {csrf_input_html}
             <input type="hidden" name="command" value="{command}">
             <button type="submit" class="{button_class}">{html.escape(label)}</button>
         </form>'''
             for command, label, button_class in command_buttons
         )
 
-        unblock_cards = []
-        for entry in unblock_lists:
+        unblock_tabs = []
+        unblock_panels = []
+        for list_index, entry in enumerate(unblock_lists):
             safe_name = html.escape(entry['name'])
             safe_label = html.escape(entry['label'])
             safe_content = html.escape(entry['content'])
+            active_class = ' active' if list_index == 0 else ''
             social_service_buttons = ''.join(
                 f'''<button type="submit" name="service_key" value="{html.escape(key)}" formaction="/append_socialnet" class="secondary-button">{html.escape(_socialnet_service_label(key))}</button>'''
                 for key in SOCIALNET_SERVICE_KEYS
             )
-            unblock_cards.append(f'''<section class="panel unblock-card">
-        <div class="card-topline">
+            unblock_tabs.append(f'''<button type="button" class="seg-tab list-tab{active_class}" data-list-target="{safe_name}">{safe_label}</button>''')
+            unblock_panels.append(f'''<section class="list-workspace{active_class}" data-list-panel="{safe_name}">
+        <div class="workspace-head">
+            <div>
             <span class="eyebrow">Список обхода</span>
+                <h2>{safe_label}</h2>
+            </div>
             <span class="file-chip">{safe_name}</span>
         </div>
-    <h2>{safe_label}</h2>
-    <form method="post" action="/save_unblock_list">
+    <form method="post" action="/save_unblock_list" class="list-editor-form">
+      {csrf_input_html}
       <input type="hidden" name="list_name" value="{safe_name}">
       <textarea name="content" rows="8" placeholder="example.org&#10;api.telegram.org">{safe_content}</textarea>
       <button type="submit">Сохранить список</button>
@@ -3118,291 +3245,87 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
       </div>
     </form>
   </section>''')
-        unblock_lists_block = ''.join(unblock_cards)
+        unblock_tabs_html = ''.join(unblock_tabs)
+        unblock_panels_html = ''.join(unblock_panels)
 
-        auto_refresh_script = ''
-        if status_refresh_pending or command_state['running']:
-            auto_refresh_script = '''
-    <script>
-        setTimeout(function() {
-            if (!document.hidden) {
-                window.location.reload();
-            }
-        }, 4000);
-    </script>'''
+        quick_key_proto = status['proxy_mode'] if status['proxy_mode'] in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'] else 'vless'
+        quick_key_label = current_mode_label if quick_key_proto == status['proxy_mode'] else 'Vless 1'
+        quick_key_value = html.escape(current_keys.get(quick_key_proto, ''))
+        pool_summary = {'active_text': quick_key_label, 'note': ''}
+        pool_summary_note = ''
+        initial_status_pending = 'true' if status_refresh_pending else 'false'
+        initial_command_running = 'true' if command_state['running'] else 'false'
+        start_button_label = APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL
+        mode_toggle_label = f'{APP_MODE_LABEL}:'
+        quick_start_note = APP_QUICK_START_NOTE
+        topbar_status_text = status.get('api_status', '')
 
-        start_button_label = 'Повторить запуск бота' if bot_ready else 'Запустить бота'
-
-        return f'''<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    {'<meta http-equiv="refresh" content="4">' if command_state['running'] else ''}
-  <title>Установка ключей VPN</title>
-    <style>
-        :root{{
-            --bg:#12161d;
-            --bg-accent:#1a2330;
-            --surface:#171e28;
-            --surface-soft:#202a38;
-            --surface-strong:#263243;
-            --border:#334155;
-            --text:#edf3ff;
-            --muted:#9fb0c8;
-            --primary:#4f8cff;
-            --primary-hover:#6aa0ff;
-            --secondary:#d78644;
-            --danger:#c95a47;
-            --success-bg:#163326;
-            --success-border:#2d7650;
-            --warn-bg:#3e2e16;
-            --warn-border:#b78332;
-            --shadow:0 18px 40px rgba(2, 6, 23, 0.34);
-        }}
-        [data-theme="light"]{{
-            --bg:#f3efe6;
-            --bg-accent:#e7dcc7;
-            --surface:#fffdf8;
-            --surface-soft:#f5ede0;
-            --surface-strong:#efe2cb;
-            --border:#d7c5aa;
-            --text:#1f2933;
-            --muted:#6f7a86;
-            --primary:#1f7a6a;
-            --primary-hover:#165f53;
-            --secondary:#c96f32;
-            --danger:#a8442f;
-            --success-bg:#e5f4ea;
-            --success-border:#8cb79a;
-            --warn-bg:#fff0d9;
-            --warn-border:#d6a35b;
-            --shadow:0 18px 40px rgba(76, 58, 36, 0.12);
-        }}
-        *{{box-sizing:border-box;}}
-        body{{
-            margin:0;
-                        font-family:Segoe UI,Helvetica,Arial,sans-serif;
-            color:var(--text);
-                        background:
-                radial-gradient(circle at top left, rgba(215,134,68,.16), transparent 34%),
-                radial-gradient(circle at top right, rgba(79,140,255,.16), transparent 28%),
-                linear-gradient(180deg, #0f141c 0%, var(--bg) 100%);
-                        padding:20px;
-        }}
-        [data-theme="light"] body{{
-            background:
-                radial-gradient(circle at top left, rgba(201,111,50,.18), transparent 34%),
-                radial-gradient(circle at top right, rgba(31,122,106,.16), transparent 28%),
-                linear-gradient(180deg, #f8f4ec 0%, var(--bg) 100%);
-        }}
-                .shell{{max-width:1180px;margin:0 auto;}}
-        .hero{{margin-bottom:16px;padding:22px 24px;border:1px solid var(--border);border-radius:24px;background:linear-gradient(140deg, rgba(23,30,40,.98), rgba(32,42,56,.9));box-shadow:var(--shadow);}}
-        [data-theme="light"] .hero{{background:linear-gradient(140deg, rgba(255,253,248,.98), rgba(239,226,203,.88));}}
-                .hero-copy{{max-width:700px;}}
-                .hero-row{{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}}
-                .hero-actions{{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;position:relative;justify-content:flex-end;}}
-        .version-badge{{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--muted);font-size:10px;font-weight:800;line-height:1;letter-spacing:.04em;white-space:nowrap;box-shadow:none;}}
-        .hero-meta{{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 0;}}
-        .hero-chip{{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(79,140,255,.08);border:1px solid rgba(96,165,250,.18);font-size:13px;font-weight:700;color:var(--text);}}
-        .theme-toggle{{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;box-shadow:none;white-space:nowrap;}}
-                .mode-toggle{{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;box-shadow:none;white-space:nowrap;}}
-        .theme-toggle:hover{{filter:none;transform:none;background:rgba(255,255,255,.06);}}
-                .mode-toggle:hover{{filter:none;transform:none;background:rgba(255,255,255,.06);}}
-                .hero-popover{{position:absolute;top:54px;right:0;min-width:260px;padding:14px;border:1px solid var(--border);border-radius:18px;background:linear-gradient(180deg, rgba(23,30,40,.98), rgba(32,42,56,.96));box-shadow:var(--shadow);z-index:10;}}
-                [data-theme="light"] .hero-popover{{background:linear-gradient(180deg, rgba(255,253,248,.98), rgba(245,237,224,.96));}}
-                .hidden{{display:none;}}
-                .mode-picker-form{{display:grid;gap:10px;}}
-                .mode-picker-label{{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}}
-        h1{{margin:0 0 8px;font-size:clamp(30px,5vw,48px);line-height:1.02;letter-spacing:-0.04em;color:var(--text);}}
-        h2{{margin:0 0 14px;font-size:20px;color:var(--text);}}
-            p{{margin:0 0 8px;line-height:1.5;color:var(--muted);}}
-        .hero strong{{color:var(--text);}}
-                .layout{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;}}
-        .panel{{min-width:0;padding:18px;border:1px solid var(--border);border-radius:22px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}}
-        [data-theme="light"] .panel{{background:linear-gradient(180deg, rgba(255,253,248,.96), rgba(245,237,224,.94));}}
-        form{{display:grid;gap:12px;}}
-                input,textarea,select{{width:100%;padding:13px 14px;border-radius:14px;border:1px solid var(--border);background:var(--surface-soft);color:var(--text);font-size:16px;outline:none;}}
-                input:focus,textarea:focus,select:focus{{border-color:rgba(31,122,106,.6);box-shadow:0 0 0 4px rgba(31,122,106,.08);}}
-        textarea{{min-height:138px;resize:vertical;}}
-                input::placeholder,textarea::placeholder{{color:#8b8f92;}}
-                button{{padding:13px 16px;border:none;border-radius:14px;background:linear-gradient(135deg, var(--primary), #246f61);color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:transform .15s ease, filter .15s ease, box-shadow .15s ease;box-shadow:0 10px 20px rgba(31,122,106,.18);}}
-        button:hover{{filter:brightness(1.08);transform:translateY(-1px);}}
-                button.danger{{background:linear-gradient(135deg, var(--danger), #85311f);box-shadow:0 10px 20px rgba(168,68,47,.18);}}
-                .success-button{{background:linear-gradient(135deg, #0f5c2d, #0b4120);box-shadow:0 10px 20px rgba(15,92,45,.28);}}
-                .secondary-button{{background:linear-gradient(135deg, var(--secondary), #b85b27);box-shadow:0 10px 20px rgba(201,111,50,.18);}}
-                .social-list-actions{{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;align-items:stretch;margin-top:10px;}}
-                .social-list-title{{display:flex;align-items:center;color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;}}
-                .social-list-actions button{{width:100%;min-width:0;}}
-        .status-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px;}}
-                .status-card{{padding:14px;border-radius:18px;background:rgba(79,140,255,.08);border:1px solid rgba(96,165,250,.18);}}
-                .status-label{{display:block;margin-bottom:8px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#90a5c4;}}
-                .status-value{{font-size:16px;color:var(--text);}}
-                .notice{{padding:12px 14px;border-radius:16px;margin-bottom:14px;}}
-                .notice strong{{display:block;margin-bottom:8px;color:var(--text);}}
-        .notice-result{{background:var(--warn-bg);border:1px solid var(--warn-border);}}
-        .notice-status{{background:var(--success-bg);border:1px solid var(--success-border);}}
-            .hero-status{{margin-top:12px;margin-bottom:0;}}
-            .hero-status-compact p:last-child{{margin-bottom:0;}}
-            .hero-status-header{{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;}}
-            .traffic-inline{{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;}}
-            .traffic-chip{{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);}}
-            .traffic-chip-label{{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
-            .traffic-chip-value{{font-size:13px;font-weight:700;color:var(--text);}}
-                .status-note{{margin-top:6px;color:var(--text);font-size:14px;line-height:1.4;}}
-                .command-progress-block{{margin:14px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.03);}}
-                .command-progress-header{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:var(--text);font-size:13px;font-weight:700;}}
-                .command-progress-track{{width:100%;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;}}
-                .command-progress-fill{{height:100%;border-radius:999px;background:linear-gradient(90deg, var(--secondary), var(--primary));transition:width .35s ease;}}
-                .log-output{{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.45 Consolas,Monaco,monospace;color:var(--text);}}
-                .eyebrow{{display:inline-block;margin-bottom:10px;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#8b6f4a;}}
-                .section-title{{margin:0 0 6px;font-size:24px;color:var(--text);}}
-                .section-subtitle{{margin:0;color:var(--muted);}}
-                .start-card{{display:flex;flex-direction:column;justify-content:space-between;}}
-                .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
-                .card-topline{{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}}
-                .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
-                .key-status-badge{{display:inline-flex;align-items:center;max-width:62%;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:normal;line-height:1.25;text-align:right;}}
-                .key-status-ok{{background:rgba(31,122,106,.14);border-color:rgba(31,122,106,.3);color:#9be4d3;}}
-                .key-status-fail{{background:rgba(168,68,47,.14);border-color:rgba(168,68,47,.28);color:#ffbeb2;}}
-                .key-status-warn{{background:rgba(201,111,50,.14);border-color:rgba(201,111,50,.28);color:#f6c892;}}
-                .key-status-empty{{background:rgba(159,176,200,.1);border-color:rgba(159,176,200,.18);color:var(--muted);}}
-                .key-status-note{{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;overflow-wrap:anywhere;}}
-        .protocol-card{{min-width:0;}}
-        .wide{{grid-column:1 / -1;}}
-        @media (max-width: 760px){{
-            body{{padding:12px;}}
-                        .hero{{padding:16px;border-radius:20px;}}
-            .hero-row{{flex-direction:column;align-items:stretch;}}
-            .hero-actions{{width:100%;justify-content:stretch;}}
-            .hero-status-header{{flex-direction:column;align-items:flex-start;}}
-            .traffic-inline{{justify-content:flex-start;}}
-            .theme-toggle,.mode-toggle{{justify-content:center;}}
-            .hero-popover{{position:static;min-width:0;width:100%;}}
-            .layout{{grid-template-columns:1fr;gap:12px;}}
-                        .command-grid{{grid-template-columns:1fr;}}
-            .status-grid{{grid-template-columns:1fr;}}
-            .social-list-actions{{grid-template-columns:1fr;}}
-                        .panel{{padding:16px;border-radius:18px;}}
-            button,input,textarea,select{{font-size:16px;}}
-        }}
-    </style>
-    <script>
-        (function() {{
-            const savedTheme = localStorage.getItem('router-theme');
-            const theme = savedTheme === 'light' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', theme);
-        }})();
-
-        function toggleTheme() {{
-            const root = document.documentElement;
-            const nextTheme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-            root.setAttribute('data-theme', nextTheme);
-            localStorage.setItem('router-theme', nextTheme);
-            const label = document.getElementById('theme-toggle-label');
-            if (label) {{
-                label.textContent = nextTheme === 'light' ? 'Светлая тема' : 'Темная тема';
-            }}
-        }}
-
-        function toggleModePicker() {{
-            const picker = document.getElementById('mode-picker');
-            if (!picker) {{
-                return;
-            }}
-            picker.classList.toggle('hidden');
-        }}
-
-        document.addEventListener('DOMContentLoaded', function() {{
-            const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-            const label = document.getElementById('theme-toggle-label');
-            if (label) {{
-                label.textContent = currentTheme === 'light' ? 'Светлая тема' : 'Темная тема';
-            }}
-            document.addEventListener('click', function(event) {{
-                const picker = document.getElementById('mode-picker');
-                const toggle = document.getElementById('mode-toggle-button');
-                if (!picker || !toggle) {{
-                    return;
-                }}
-                if (picker.classList.contains('hidden')) {{
-                    return;
-                }}
-                if (!picker.contains(event.target) && !toggle.contains(event.target)) {{
-                    picker.classList.add('hidden');
-                }}
-            }});
-        }});
-    </script>
-{auto_refresh_script}
-</head>
-<body>
-    <div class="shell">
-    <div class="hero">
-        <div class="hero-row">
-                <div class="hero-copy">
-                        <h1>Установка ключей VPN</h1>
-                        <p>Страница показывает не только состояние процесса, но и реальный статус связи с Telegram API.</p>
-                        <p><strong>Вставляйте ключ полной строкой, как в Telegram.</strong></p>
-                </div>
-        <div class="hero-actions">
-            <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
-                <span>Режим</span>
-                <span>{html.escape(current_mode_label)}</span>
-            </button>
-            <button type="button" class="theme-toggle" onclick="toggleTheme()">
-                <span>Тема</span>
-                <span id="theme-toggle-label">Темная тема</span>
-            </button>
-            <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_BRANCH_LABEL)} {html.escape(APP_VERSION_LABEL)}</span>
-            {mode_picker_block}
-        </div>
-        </div>
-                {status_block}
-    </div>
-    {message_block}
-    {command_block}
-        <section class="panel start-card">
-            <div>
-                <span class="eyebrow">Запуск</span>
-                <h2 class="section-title">Быстрый старт</h2>
-                    <p class="section-subtitle">После установки ключей можно сразу запустить бота.</p>
-            </div>
-            <form method="post" action="/start">
-                <button type="submit">{start_button_label}</button>
-            </form>
-        </section>
-        <div class="layout">
-        <section class="panel wide">
-            <span class="eyebrow">Ключи и мосты</span>
-            <h2 class="section-title">Подключения по протоколам</h2>
-            <p class="section-subtitle">Храните рабочий ключ в нужной карточке. Текущий режим выбирается отдельно выше.</p>
-        </section>
-        {protocol_cards_html}
-        <section class="panel wide">
-                <span class="eyebrow">Сервис роутера</span>
-                <h2 class="section-title">Команды установки и обслуживания</h2>
-            <p class="section-subtitle">Переустановка из форка обновляет код и служебные файлы поверх текущей установки, не затирая сохранённые ключи и списки обхода. Обычные действия и потенциально опасные команды разделены по цвету, чтобы ими было труднее ошибиться.</p>
-                <div class="command-grid">
-                        {update_buttons_html}
-                        {command_buttons_html}
-                </div>
-        </section>
-        <section class="panel wide">
-                <span class="eyebrow">Маршрутизация</span>
-                <h2 class="section-title">Списки обхода по протоколам и VPN</h2>
-                <p class="section-subtitle">Здесь редактируются адреса и домены, которые будут отправляться через соответствующий протокол или VPN-правило.</p>
-    </section>
-    {unblock_lists_block}
-    </div>
-    </div>
-</body>
-</html>'''
+        return render_web_form(
+            APP_BRANCH_DESCRIPTION=APP_BRANCH_DESCRIPTION,
+            APP_BRANCH_LABEL=APP_BRANCH_LABEL,
+            APP_VERSION_LABEL=APP_VERSION_LABEL,
+            POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
+            TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
+            YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
+            _telegram_icon_html=_telegram_icon_html,
+            csrf_token=csrf_token,
+            command_block=command_block,
+            command_buttons_html=command_buttons_html,
+            current_mode_label=current_mode_label,
+            custom_checks_json='[]',
+            fallback_block=fallback_block,
+            initial_command_running=initial_command_running,
+            initial_status_pending=initial_status_pending,
+            list_route_label=list_route_label,
+            message_block=message_block,
+            mode_picker_block=mode_picker_block,
+            mode_toggle_label=mode_toggle_label,
+            pool_summary=pool_summary,
+            pool_summary_note=pool_summary_note,
+            protocol_panels_html=protocol_panels_html,
+            protocol_tabs_html=protocol_tabs_html,
+            quick_key_label=quick_key_label,
+            quick_key_proto=quick_key_proto,
+            quick_key_value=quick_key_value,
+            quick_start_note=quick_start_note,
+            socks_block=socks_block,
+            start_button_label=start_button_label,
+            status=status,
+            topbar_status_text=topbar_status_text,
+            unblock_panels_html=unblock_panels_html,
+            unblock_tabs_html=unblock_tabs_html,
+            update_buttons_html=update_buttons_html,
+            enable_async_forms=False,
+            enable_custom_checks=False,
+            enable_key_pool=False,
+            enable_live_status=True,
+        )
 
     def do_GET(self):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
+        if path == '/api/status':
+            current_keys = _load_current_keys()
+            snapshot = _cached_status_snapshot(current_keys)
+            if snapshot is None:
+                snapshot = {
+                    'web': _placeholder_web_status_snapshot(),
+                    'protocols': _placeholder_protocol_statuses(current_keys),
+                }
+            _refresh_status_caches_async(current_keys)
+            self._send_json({
+                'web': snapshot.get('web', {}),
+                'protocols': snapshot.get('protocols', {}),
+                'custom_checks': [],
+                'pool_summary': {'active_text': '', 'note': ''},
+                'pool_probe_running': False,
+                'pool_probe_progress': {},
+            })
+            return
+        if path == '/api/command_state':
+            self._send_json(_get_web_command_state())
+            return
         if path in ['/', '/index.html', '/command']:
             self._send_html(self._build_form(_consume_web_flash_message()))
         else:
@@ -3412,10 +3335,12 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
+        length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(length).decode('utf-8')
+        data = parse_qs(body)
+        if not self._ensure_csrf_allowed(data):
+            return
         if path == '/set_proxy':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             proxy_type = data.get('proxy_type', ['none'])[0]
             ok, error = update_proxy(proxy_type)
             if ok:
@@ -3439,9 +3364,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/command':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             command = data.get('command', [''])[0]
             _, result = _start_web_command(command)
             _set_web_flash_message(result)
@@ -3449,9 +3371,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/save_unblock_list':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             list_name = data.get('list_name', [''])[0]
             content = data.get('content', [''])[0]
             try:
@@ -3463,9 +3382,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/append_socialnet':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
             service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
             try:
@@ -3477,9 +3393,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == '/remove_socialnet':
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length).decode('utf-8')
-            data = parse_qs(body)
             list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
             service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
             try:
@@ -3493,9 +3406,6 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         if path != '/install':
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length).decode('utf-8')
-        data = parse_qs(body)
         key_type = data.get('type', [''])[0]
         key_value = data.get('key', [''])[0]
         result = 'Ключ установлен.'
