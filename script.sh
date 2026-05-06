@@ -190,6 +190,9 @@ ensure_web_only_config() {
 
 routerip = '${router_ip}'
 browser_port = '8080'
+web_auth_user = 'admin'
+web_auth_token = ''
+web_auth_disabled = False
 fork_repo_owner = 'andruwko73'
 fork_repo_name = 'bypass_keenetic'
 fork_button_label = 'Fork by andruwko73'

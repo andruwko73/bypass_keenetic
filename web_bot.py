@@ -18,6 +18,8 @@ import signal
 import traceback
 import gc
 import tarfile
+import secrets
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 import key_pool_store
@@ -693,6 +695,8 @@ web_command_state = {
 }
 web_flash_lock = threading.Lock()
 web_flash_message = ''
+WEB_CSRF_COOKIE = 'bk_csrf_token'
+WEB_CSRF_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{32,256}$')
 DIRECT_FETCH_ENV_KEYS = [
     'HTTPS_PROXY',
     'HTTP_PROXY',
@@ -714,6 +718,13 @@ def _is_local_web_client(address):
     except ValueError:
         return False
     return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+
+
+def _get_web_auth_token():
+    if bool(getattr(config, 'web_auth_disabled', False)):
+        return ''
+
+    return str(getattr(config, 'web_auth_token', '') or '').strip()
 
 
 def _resolve_web_bind_host():
@@ -3788,9 +3799,74 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         return _is_local_web_client(client_ip)
 
     def _ensure_request_allowed(self):
-        if self._request_is_allowed():
+        if not self._request_is_allowed():
+            self._send_html('<h1>403 Forbidden</h1><p>Web UI is available only from the local network.</p>', status=403)
+            return False
+        return self._ensure_web_auth()
+
+    def _send_unauthorized(self):
+        body = (
+            'Authentication required. Use user "admin" and web_auth_token from '
+            'bot_config.py, or leave web_auth_token empty to disable the password.'
+        ).encode('utf-8')
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'Basic realm="bypass_keenetic web"')
+        self.send_header('Content-type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
+
+    def _ensure_web_auth(self):
+        expected_token = _get_web_auth_token()
+        if not expected_token:
             return True
-        self._send_html('<h1>403 Forbidden</h1><p>Веб-интерфейс доступен только из локальной сети.</p>', status=403)
+        expected_user = str(getattr(config, 'web_auth_user', 'admin') or 'admin')
+        header = self.headers.get('Authorization', '')
+        if header.lower().startswith('basic '):
+            try:
+                decoded = base64.b64decode(header.split(' ', 1)[1].strip()).decode('utf-8')
+                supplied_user, _, supplied_token = decoded.partition(':')
+                if (
+                    secrets.compare_digest(supplied_user, expected_user) and
+                    secrets.compare_digest(supplied_token, expected_token)
+                ):
+                    return True
+            except Exception:
+                pass
+        self._send_unauthorized()
+        return False
+
+    def _csrf_token_from_cookie(self):
+        cookie_header = self.headers.get('Cookie', '')
+        if not cookie_header:
+            return ''
+        try:
+            cookie = SimpleCookie()
+            cookie.load(cookie_header)
+            token_value = cookie.get(WEB_CSRF_COOKIE)
+            if token_value is None:
+                return ''
+            value = token_value.value.strip()
+            return value if WEB_CSRF_TOKEN_RE.fullmatch(value) else ''
+        except Exception:
+            return ''
+
+    def _get_or_create_csrf_token(self):
+        token_value = self._csrf_token_from_cookie()
+        if not token_value:
+            token_value = secrets.token_urlsafe(32)
+        self._csrf_cookie_token = token_value
+        return token_value
+
+    def _ensure_csrf_allowed(self):
+        supplied = self.headers.get('X-CSRF-Token', '').strip()
+        cookie_token = self._csrf_token_from_cookie()
+        if supplied and cookie_token and secrets.compare_digest(supplied, cookie_token):
+            return True
+        self._send_json({'ok': False, 'error': 'CSRF token is missing or invalid.'}, status=403)
         return False
 
     def _send_html(self, html, status=200):
@@ -3801,10 +3877,13 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
+        csrf_cookie = getattr(self, '_csrf_cookie_token', '')
+        if csrf_cookie:
+            self.send_header('Set-Cookie', f'{WEB_CSRF_COOKIE}={csrf_cookie}; Path=/; HttpOnly; SameSite=Strict')
         self.send_header('Connection', 'close')
         self.end_headers()
         self.wfile.write(body)
-        self.close_connection = False
+        self.close_connection = True
 
     def _send_redirect(self, location='/'):
         self.send_response(303)
@@ -3813,9 +3892,9 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
-        self.send_header('Connection', 'keep-alive')
+        self.send_header('Connection', 'close')
         self.end_headers()
-        self.close_connection = False
+        self.close_connection = True
 
     def _send_png(self, filepath):
         try:
@@ -3828,15 +3907,17 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_header('Content-type', content_type)
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Cache-Control', 'public, max-age=86400')
+            self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(body)
         except Exception:
             self.send_response(404)
             self.send_header('Content-type', 'text/plain')
             self.send_header('Content-Length', '9')
+            self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(b'Not Found')
-        self.close_connection = False
+        self.close_connection = True
 
     def _send_json(self, payload, status=200):
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
@@ -3846,10 +3927,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
-        self.send_header('Connection', 'keep-alive')
+        self.send_header('Connection', 'close')
         self.end_headers()
         self.wfile.write(body)
-        self.close_connection = False
+        self.close_connection = True
 
     def _wants_json(self):
         accept = self.headers.get('Accept', '')
@@ -4258,6 +4339,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             _telegram_icon_html=_telegram_icon_html,
+            csrf_token=self._get_or_create_csrf_token(),
             command_block=command_block,
             command_buttons_html=command_buttons_html,
             current_mode_label=current_mode_label,
@@ -4372,11 +4454,10 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 self._send_json({'error': str(exc)}, status=500)
         elif path == '/api/pool_probe':
-            # Запустить безопасную фоновую проверку пула без массовых рестартов xray.
             try:
-                started, queued = _probe_all_pool_keys_async(stale_only=False)
-                status = 'started' if started else ('busy' if queued else 'empty')
-                self._send_json({'status': status, 'queued': queued}, status=200)
+                progress = _get_pool_probe_progress()
+                running = bool(progress.get('running')) and int(progress.get('total') or 0) > 0
+                self._send_json({'status': 'running' if running else 'idle', 'running': running, 'progress': progress}, status=200)
             except Exception as exc:
                 self._send_json({'error': str(exc)}, status=500)
         elif path == '/static/telegram.png':
@@ -4392,6 +4473,8 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self._ensure_request_allowed():
+            return
+        if not self._ensure_csrf_allowed():
             return
         path = urlparse(self.path).path
         if path == '/set_proxy':

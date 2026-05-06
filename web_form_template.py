@@ -9,6 +9,7 @@ def render_web_form(
     TELEGRAM_SVG_B64,
     YOUTUBE_SVG_B64,
     _telegram_icon_html,
+    csrf_token,
     command_block,
     command_buttons_html,
     current_mode_label,
@@ -35,7 +36,51 @@ def render_web_form(
     unblock_panels_html,
     unblock_tabs_html,
     update_buttons_html,
+    enable_async_forms=True,
+    enable_custom_checks=True,
+    enable_key_pool=True,
+    enable_live_status=True,
 ):
+    enable_async_forms_js = 'true' if enable_async_forms else 'false'
+    enable_custom_checks_js = 'true' if enable_custom_checks else 'false'
+    enable_key_pool_js = 'true' if enable_key_pool else 'false'
+    enable_live_status_js = 'true' if enable_live_status else 'false'
+    start_form_async_attr = ' data-async-action="start"' if enable_async_forms else ''
+    quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
+    pool_probe_async_attr = ' data-async-action="pool-probe"' if enable_async_forms else ''
+    csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
+    custom_checks_json = custom_checks_json if enable_custom_checks else '[]'
+    quick_key_note = (
+        'Быстрое редактирование активного ключа. Полное управление пулом находится во вкладке "Ключи".'
+        if enable_key_pool else
+        'Быстрое редактирование активного ключа. Остальные ключи находятся во вкладке "Ключи".'
+    )
+    quick_key_secondary_label = 'Открыть пул ключей' if enable_key_pool else 'Открыть все ключи'
+    keys_view_subtitle = (
+        'Выберите протокол, сохраните активный ключ или управляйте его пулом.'
+        if enable_key_pool else
+        'Выберите протокол и сохраните активный ключ.'
+    )
+    key_pool_status_card = ''
+    if enable_key_pool:
+        key_pool_status_card = f'''
+                        <div class="status-card">
+                            <div class="status-card-top">
+                                    <span class="card-icon">⚿</span>
+                                    <div class="status-copy">
+                                        <span class="status-label">Ключи и пул</span>
+                                    <span class="status-value" id="pool-active-summary">{html.escape(pool_summary['active_text'])}</span>
+                                    <p class="status-note" id="pool-summary-note">{html.escape(pool_summary_note)}</p>
+                                    </div>
+                                </div>
+                            <div class="status-card-actions">
+                                <button type="button" class="outline-button" data-view-target="keys">Открыть ключи</button>
+                                <form method="post" action="/pool_probe"{pool_probe_async_attr}>
+                                    {csrf_input_html}
+                                    <button type="submit" class="outline-button">Проверить все ключи</button>
+                                </form>
+                            </div>
+                        </div>'''
     return f'''<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -801,11 +846,16 @@ def render_web_form(
     <script>
         const INITIAL_STATUS_PENDING = {initial_status_pending};
         const INITIAL_COMMAND_RUNNING = {initial_command_running};
+        const ENABLE_ASYNC_FORMS = {enable_async_forms_js};
+        const ENABLE_CUSTOM_CHECKS = {enable_custom_checks_js};
+        const ENABLE_KEY_POOL = {enable_key_pool_js};
+        const ENABLE_LIVE_STATUS = {enable_live_status_js};
         const POOL_PROBE_POLL_EXTENSION_MS = {POOL_PROBE_UI_POLL_EXTENSION_MS};
         const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
         const YOUTUBE_ICON_SRC = 'data:image/svg+xml;base64,{YOUTUBE_SVG_B64}';
         const SERVICE_ICON_BASE = '/static/service-icons/';
-        let customChecks = {custom_checks_json};
+        const CSRF_TOKEN = '{html.escape(csrf_token)}';
+        let customChecks = ENABLE_CUSTOM_CHECKS ? {custom_checks_json} : [];
         const PROTOCOL_LABELS = {{
             none: 'Без прокси',
             shadowsocks: 'Shadowsocks',
@@ -1053,6 +1103,9 @@ def render_web_form(
         }}
 
         function renderCustomChecks(checks) {{
+            if (!ENABLE_CUSTOM_CHECKS) {{
+                return;
+            }}
             customChecks = Array.isArray(checks) ? checks : [];
             const html = customChecks.length ? customChecks.map(function(check) {{
                 return '<div class="custom-check-item">' +
@@ -1171,6 +1224,9 @@ def render_web_form(
         }}
 
         function updatePoolStatus(pools) {{
+            if (!ENABLE_KEY_POOL) {{
+                return;
+            }}
             if (!pools) {{
                 return;
             }}
@@ -1237,8 +1293,8 @@ def render_web_form(
             }}
             const apiPill = document.getElementById('web-api-pill');
             if (apiPill) {{
-                const progress = snapshot.pool_probe_progress || {{}};
-                const poolProbeVisible = !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
+                const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
+                const poolProbeVisible = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
                 const progressLabel = poolProbeProgressLabel(progress.scope || '');
                 const progressText = progress.total
                     ? '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + progress.total + '. Статусы обновятся без перезагрузки страницы.'
@@ -1262,10 +1318,10 @@ def render_web_form(
                     pending = true;
                 }}
             }});
-            if (snapshot.custom_checks) {{
+            if (ENABLE_CUSTOM_CHECKS && snapshot.custom_checks) {{
                 renderCustomChecks(snapshot.custom_checks);
             }}
-            const poolSummary = snapshot.pool_summary || null;
+            const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || null) : null;
             if (poolSummary) {{
                 const progress = snapshot.pool_probe_progress || {{}};
                 let summaryNote = poolSummary.note || '';
@@ -1275,8 +1331,10 @@ def render_web_form(
                 setOptionalText('pool-active-summary', poolSummary.active_text || '');
                 setOptionalText('pool-summary-note', summaryNote);
             }}
-            updatePoolStatus(snapshot.pools);
-            if (!!snapshot.pool_probe_running && Number((snapshot.pool_probe_progress || {{}}).total || 0) > 0) {{
+            if (ENABLE_KEY_POOL) {{
+                updatePoolStatus(snapshot.pools);
+            }}
+            if (ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number((snapshot.pool_probe_progress || {{}}).total || 0) > 0) {{
                 pending = true;
                 statusPollUntil = Math.max(statusPollUntil, Date.now() + POOL_PROBE_POLL_EXTENSION_MS);
             }}
@@ -1305,6 +1363,9 @@ def render_web_form(
         }}
 
         function scheduleStatusPolling(durationMs) {{
+            if (!ENABLE_LIVE_STATUS) {{
+                return;
+            }}
             statusPollUntil = Math.max(statusPollUntil, Date.now() + durationMs);
             if (!statusPollTimer && !document.hidden) {{
                 pollStatus();
@@ -1351,6 +1412,9 @@ def render_web_form(
         }}
 
         function pollCommandState() {{
+            if (!ENABLE_LIVE_STATUS) {{
+                return;
+            }}
             commandPollTimer = null;
             fetch('/api/command_state', {{
                 headers: {{'Accept': 'application/json'}},
@@ -1461,8 +1525,19 @@ def render_web_form(
         }}
 
         function setupAsyncForms(root) {{
+            if (!ENABLE_ASYNC_FORMS) {{
+                return;
+            }}
             const scope = root || document;
             scope.querySelectorAll('form[data-async-action]').forEach(function(form) {{
+                let csrfInput = form.querySelector('input[name="csrf_token"]');
+                if (!csrfInput) {{
+                    csrfInput = document.createElement('input');
+                    csrfInput.type = 'hidden';
+                    csrfInput.name = 'csrf_token';
+                    form.appendChild(csrfInput);
+                }}
+                csrfInput.value = CSRF_TOKEN;
                 if (form.dataset.asyncBound === '1') {{
                     return;
                 }}
@@ -1471,6 +1546,7 @@ def render_web_form(
                     event.preventDefault();
                     const button = event.submitter || form.querySelector('button[type="submit"]');
                     const formData = new FormData(form);
+                    formData.set('csrf_token', CSRF_TOKEN);
                     if (button && button.name) {{
                         formData.append(button.name, button.value || '');
                     }}
@@ -1499,6 +1575,7 @@ def render_web_form(
                         headers: {{
                             'Accept': 'application/json',
                             'X-Requested-With': 'fetch',
+                            'X-CSRF-Token': CSRF_TOKEN,
                             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
                         }},
                         cache: 'no-store'
@@ -1685,22 +1762,7 @@ def render_web_form(
                                 </div>
                             </div>
                         </div>
-                        <div class="status-card">
-                            <div class="status-card-top">
-                                    <span class="card-icon">⚿</span>
-                                    <div class="status-copy">
-                                        <span class="status-label">Ключи и пул</span>
-                                    <span class="status-value" id="pool-active-summary">{html.escape(pool_summary['active_text'])}</span>
-                                    <p class="status-note" id="pool-summary-note">{html.escape(pool_summary_note)}</p>
-                                    </div>
-                                </div>
-                            <div class="status-card-actions">
-                                <button type="button" class="outline-button" data-view-target="keys">Открыть ключи</button>
-                                <form method="post" action="/pool_probe" data-async-action="pool-probe">
-                                    <button type="submit" class="outline-button">Проверить все ключи</button>
-                                </form>
-                            </div>
-                        </div>
+                        {key_pool_status_card}
                         <div class="status-card">
                             <div class="status-card-top">
                                 <span class="card-icon">↗</span>
@@ -1709,7 +1771,8 @@ def render_web_form(
                                     <p class="status-note">{html.escape(quick_start_note)}</p>
                                 </div>
                             </div>
-                            <form method="post" action="/start" data-async-action="start">
+                            <form method="post" action="/start"{start_form_async_attr}>
+                                {csrf_input_html}
                                 <button type="submit">{start_button_label}</button>
                             </form>
                         </div>
@@ -1729,16 +1792,17 @@ def render_web_form(
                             <div>
                                 <span class="eyebrow">Ключ текущего режима</span>
                                 <h2>{html.escape(quick_key_label)}</h2>
-                                <p class="section-subtitle">Быстрое редактирование активного ключа. Полное управление пулом находится во вкладке “Ключи”.</p>
+                                <p class="section-subtitle">{quick_key_note}</p>
                             </div>
                         </div>
-                        <form method="post" action="/install" data-async-action="install" class="key-editor-form">
+                        <form method="post" action="/install"{quick_install_async_attr} class="key-editor-form">
+                            {csrf_input_html}
                             <input type="hidden" name="type" value="{quick_key_proto}">
                             <label class="field-label">Ключ {html.escape(quick_key_label)}</label>
                             <textarea name="key" rows="4" placeholder="Вставьте ключ {html.escape(quick_key_label)}">{quick_key_value}</textarea>
                             <div class="form-actions">
                                 <button type="submit">Сохранить ключ</button>
-                                <button type="button" class="outline-button" data-view-target="keys">Открыть пул ключей</button>
+                                <button type="button" class="outline-button" data-view-target="keys">{quick_key_secondary_label}</button>
                             </div>
                         </form>
                     </section>
@@ -1748,7 +1812,7 @@ def render_web_form(
                     <div class="view-head">
                         <span class="eyebrow">Ключи и мосты</span>
                         <h2>Подключения по протоколам</h2>
-                        <p class="section-subtitle">Выберите протокол, сохраните активный ключ или управляйте его пулом.</p>
+                        <p class="section-subtitle">{keys_view_subtitle}</p>
                     </div>
                     <div class="segmented protocol-tabs">{protocol_tabs_html}</div>
                     <div class="protocol-panels">{protocol_panels_html}</div>
