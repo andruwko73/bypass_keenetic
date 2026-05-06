@@ -20,7 +20,7 @@ import signal
 import traceback
 import tarfile
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from urllib.parse import quote, unquote, urlencode, urlparse
 from proxy_key_store import (
     load_current_keys as _store_load_current_keys,
     load_shadowsocks_key as _store_load_shadowsocks_key,
@@ -33,6 +33,11 @@ from proxy_protocols import (
     parse_trojan_key as _store_parse_trojan_key,
     parse_vless_key as _store_parse_vless_key,
     parse_vmess_key as _store_parse_vmess_key,
+)
+from proxy_config_builder import (
+    build_proxy_core_config as _builder_build_proxy_core_config,
+    build_shadowsocks_config as _builder_build_shadowsocks_config,
+    build_trojan_config as _builder_build_trojan_config,
 )
 from proxy_status import (
     cached_snapshot as _status_cached_snapshot,
@@ -3060,9 +3065,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length).decode('utf-8')
-        data = parse_qs(body)
+        data = self._read_post_data()
         if not self._ensure_csrf_allowed(data):
             return
         if path == '/set_proxy':
@@ -3240,287 +3243,27 @@ def _parse_vless_key(key):
 
 
 def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
-    config_data = {
-        'log': {
-            'access': CORE_PROXY_ACCESS_LOG,
-            'error': CORE_PROXY_ERROR_LOG,
-            'loglevel': 'info'
+    return _builder_build_proxy_core_config(
+        vmess_key=vmess_key,
+        vless_key=vless_key,
+        vless2_key=vless2_key,
+        shadowsocks_key=shadowsocks_key,
+        trojan_key=trojan_key,
+        ports={
+            'vmess': localportvmess,
+            'vless': localportvless,
+            'vless_transparent': localportvless_transparent,
+            'vless2': localportvless2,
+            'vless2_transparent': localportvless2_transparent,
+            'shadowsocks_bot': localportsh_bot,
+            'trojan_bot': localporttrojan_bot,
         },
-        'dns': {
-            'hosts': {
-                'api.telegram.org': '149.154.167.220'
-            },
-            'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
-            'queryStrategy': 'UseIPv4'
-        },
-        'inbounds': [],
-        'outbounds': [],
-        'routing': {
-            'domainStrategy': 'IPIfNonMatch',
-            'rules': []
-        }
-    }
-
-    if vmess_key:
-        vmess_data = _parse_vmess_key(vmess_key)
-        config_data['inbounds'].append({
-            'port': int(localportvmess),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': 'in-vmess'
-        })
-        stream_settings = {'network': vmess_data.get('net', 'tcp')}
-        tls_mode = vmess_data.get('tls', 'tls')
-        if tls_mode in ['tls', 'xtls']:
-            stream_settings['security'] = tls_mode
-            stream_settings[f'{tls_mode}Settings'] = {
-                'allowInsecure': True,
-                'serverName': vmess_data.get('add', '')
-            }
-        else:
-            stream_settings['security'] = 'none'
-        if stream_settings['network'] == 'ws':
-            stream_settings['wsSettings'] = {
-                'path': vmess_data.get('path', '/'),
-                'headers': {'Host': vmess_data.get('host', '')}
-            }
-        elif stream_settings['network'] == 'grpc':
-            grpc_service = vmess_data.get('serviceName', '') or vmess_data.get('grpcSettings', {}).get('serviceName', '')
-            stream_settings['grpcSettings'] = {
-                'serviceName': grpc_service,
-                'multiMode': False
-            }
-        config_data['outbounds'].append({
-            'tag': 'proxy-vmess',
-            'domainStrategy': 'UseIPv4',
-            'protocol': 'vmess',
-            'settings': {
-                'vnext': [{
-                    'address': vmess_data['add'],
-                    'port': int(vmess_data['port']),
-                    'users': [{
-                        'id': vmess_data['id'],
-                        'alterId': int(vmess_data.get('aid', 0)),
-                        'email': 't@t.tt',
-                        'security': 'auto'
-                    }]
-                }]
-            },
-            'streamSettings': stream_settings,
-            'mux': {
-                'enabled': True,
-                'concurrency': -1,
-                'xudpConcurrency': 16,
-                'xudpProxyUDP443': 'reject'
-            }
-        })
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': ['in-vmess'],
-            'outboundTag': 'proxy-vmess',
-            'enabled': True
-        })
-
-    if shadowsocks_key:
-        server, port, method, password = _decode_shadowsocks_uri(shadowsocks_key)
-        config_data['inbounds'].append({
-            'port': int(localportsh_bot),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': 'in-shadowsocks'
-        })
-        config_data['outbounds'].append({
-            'tag': 'proxy-shadowsocks',
-            'protocol': 'shadowsocks',
-            'settings': {
-                'servers': [{
-                    'address': server,
-                    'port': int(port),
-                    'method': method,
-                    'password': password,
-                    'level': 0
-                }]
-            }
-        })
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': ['in-shadowsocks'],
-            'outboundTag': 'proxy-shadowsocks',
-            'enabled': True
-        })
-
-    def add_vless_route(key_value, socks_port, transparent_port, socks_tag, transparent_tag, outbound_tag):
-        if not key_value:
-            return
-        vless_data = _parse_vless_key(key_value)
-        config_data['inbounds'].append({
-            'port': int(socks_port),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': socks_tag
-        })
-        config_data['inbounds'].append({
-            'port': int(transparent_port),
-            'listen': '0.0.0.0',
-            'protocol': 'dokodemo-door',
-            'settings': {
-                'network': 'tcp',
-                'followRedirect': True
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': transparent_tag
-        })
-        network = vless_data.get('type', 'tcp') or 'tcp'
-        stream_settings = {'network': network}
-        security = vless_data.get('security', 'none')
-        if security in ['tls', 'xtls']:
-            stream_settings['security'] = security
-            stream_settings[f'{security}Settings'] = {
-                'allowInsecure': True,
-                'serverName': vless_data.get('sni', '')
-            }
-        else:
-            stream_settings['security'] = 'none'
-        if network == 'ws':
-            stream_settings['wsSettings'] = {
-                'path': vless_data.get('path', '/'),
-                'headers': {'Host': vless_data.get('host', '')}
-            }
-        elif network == 'grpc':
-            stream_settings['grpcSettings'] = {
-                'serviceName': vless_data.get('serviceName', ''),
-                'multiMode': False
-            }
-        elif security == 'reality':
-            stream_settings['security'] = 'reality'
-            stream_settings['realitySettings'] = {
-                'serverName': vless_data.get('sni', '') or vless_data.get('host', '') or vless_data.get('address', ''),
-                'publicKey': vless_data.get('publicKey', ''),
-                'shortId': vless_data.get('shortId', ''),
-                'fingerprint': vless_data.get('fingerprint', 'chrome'),
-                'spiderX': vless_data.get('spiderX', '/')
-            }
-            if vless_data.get('alpn'):
-                stream_settings['realitySettings']['alpn'] = [item.strip() for item in vless_data['alpn'].split(',') if item.strip()]
-        config_data['outbounds'].append({
-            'tag': outbound_tag,
-            'domainStrategy': 'UseIPv4',
-            'protocol': 'vless',
-            'settings': {
-                'vnext': [{
-                    'address': vless_data.get('address', vless_data.get('host', '')),
-                    'port': int(vless_data['port']),
-                    'users': [{
-                        'id': vless_data['id'],
-                        'encryption': vless_data.get('encryption', 'none'),
-                        'flow': vless_data.get('flow', ''),
-                        'level': 0
-                    }]
-                }]
-            },
-            'streamSettings': stream_settings
-        })
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': [socks_tag, transparent_tag],
-            'outboundTag': outbound_tag,
-            'enabled': True
-        })
-
-    add_vless_route(vless_key, localportvless, localportvless_transparent, 'in-vless', 'in-vless-transparent', 'proxy-vless')
-    add_vless_route(vless2_key, localportvless2, localportvless2_transparent, 'in-vless2', 'in-vless2-transparent', 'proxy-vless2')
-
-    if trojan_key:
-        trojan_data = _parse_trojan_key(trojan_key)
-        config_data['inbounds'].append({
-            'port': int(localporttrojan_bot),
-            'listen': '127.0.0.1',
-            'protocol': 'socks',
-            'settings': {
-                'auth': 'noauth',
-                'udp': True,
-                'ip': '127.0.0.1'
-            },
-            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-            'tag': 'in-trojan'
-        })
-        trojan_stream = {
-            'network': trojan_data.get('type', 'tcp') or 'tcp',
-            'security': 'none'
-        }
-        if trojan_data.get('security', 'tls') == 'tls':
-            trojan_stream['security'] = 'tls'
-            trojan_stream['tlsSettings'] = {
-                'allowInsecure': True,
-                'serverName': trojan_data.get('sni') or trojan_data.get('host') or trojan_data.get('address', ''),
-                'fingerprint': trojan_data.get('fingerprint', 'chrome')
-            }
-            if trojan_data.get('alpn'):
-                trojan_stream['tlsSettings']['alpn'] = [item.strip() for item in trojan_data['alpn'].split(',') if item.strip()]
-        if trojan_stream['network'] == 'ws':
-            trojan_stream['wsSettings'] = {
-                'path': trojan_data.get('path', '/'),
-                'headers': {'Host': trojan_data.get('host') or trojan_data.get('sni') or trojan_data.get('address', '')}
-            }
-        elif trojan_stream['network'] == 'grpc':
-            trojan_stream['grpcSettings'] = {
-                'serviceName': trojan_data.get('serviceName', ''),
-                'multiMode': False
-            }
-        config_data['outbounds'].append({
-            'tag': 'proxy-trojan',
-            'protocol': 'trojan',
-            'settings': {
-                'servers': [{
-                    'address': trojan_data['address'],
-                    'port': int(trojan_data['port']),
-                    'password': trojan_data['password'],
-                    'level': 0
-                }]
-            },
-            'streamSettings': trojan_stream
-        })
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'inboundTag': ['in-trojan'],
-            'outboundTag': 'proxy-trojan',
-            'enabled': True
-        })
-
-    if config_data['outbounds']:
-        config_data['outbounds'].append({'protocol': 'freedom', 'tag': 'direct'})
-        config_data['routing']['rules'].insert(0, {
-            'type': 'field',
-            'domain': CONNECTIVITY_CHECK_DOMAINS,
-            'outboundTag': 'direct',
-            'enabled': True
-        })
-        config_data['routing']['rules'].append({
-            'type': 'field',
-            'port': '0-65535',
-            'outboundTag': 'direct',
-            'enabled': True
-        })
-
-    return config_data
+        error_log_path=CORE_PROXY_ERROR_LOG,
+        access_log_path=CORE_PROXY_ACCESS_LOG,
+        loglevel='info',
+        connectivity_check_domains=CONNECTIVITY_CHECK_DOMAINS,
+        include_vmess_transparent=False,
+    )
 
 
 def _write_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
@@ -3559,29 +3302,7 @@ def vmess(key):
 
 def trojan(key):
     raw_key = key.strip()
-    trojan_data = _parse_trojan_key(raw_key)
-    config = {
-        'run_type': 'nat',
-        'local_addr': '::',
-        'local_port': int(localporttrojan),
-        'remote_addr': trojan_data['address'],
-        'remote_port': int(trojan_data['port']),
-        'password': [trojan_data['password']],
-        'raw_uri': raw_key,
-        'type': trojan_data['type'],
-        'security': trojan_data['security'],
-        'sni': trojan_data['sni'],
-        'host': trojan_data['host'],
-        'path': trojan_data['path'],
-        'serviceName': trojan_data['serviceName'],
-        'fingerprint': trojan_data['fingerprint'],
-        'alpn': trojan_data['alpn'],
-        'fragment': trojan_data['fragment'],
-        'ssl': {
-            'verify': False,
-            'verify_hostname': False,
-        }
-    }
+    config = _builder_build_trojan_config(raw_key, localporttrojan)
     with open('/opt/etc/trojan/config.json', 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, separators=(',', ':'))
     _write_all_proxy_core_config()
@@ -3591,76 +3312,10 @@ def _decode_shadowsocks_uri(key):
 
 
 def shadowsocks(key=None):
-    raw_key = key.strip()
-    server, port, method, password = _decode_shadowsocks_uri(raw_key)
-    config = {
-        'server': [server],
-        'mode': 'tcp_and_udp',
-        'server_port': int(port),
-        'password': password,
-        'timeout': 86400,
-        'method': method,
-        'local_address': '::',
-        'local_port': int(localportsh),
-        'fast_open': False,
-        'ipv6_first': True,
-        'raw_uri': raw_key
-    }
+    config = _builder_build_shadowsocks_config(key, localportsh)
     with open('/opt/etc/shadowsocks.json', 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     _write_all_proxy_core_config()
-
-def tormanually(bridges):
-    # global localporttor, dnsporttor
-    f = open('/opt/etc/tor/torrc', 'w')
-    f.write('User root\n\
-PidFile /opt/var/run/tor.pid\n\
-ExcludeExitNodes {RU},{UA},{AM},{KG},{BY}\n\
-StrictNodes 1\n\
-TransPort 0.0.0.0:' + localporttor + '\n\
-ExitRelay 0\n\
-ExitPolicy reject *:*\n\
-ExitPolicy reject6 *:*\n\
-GeoIPFile /opt/share/tor/geoip\n\
-GeoIPv6File /opt/share/tor/geoip6\n\
-DataDirectory /opt/tmp/tor\n\
-VirtualAddrNetwork 10.254.0.0/16\n\
-DNSPort 127.0.0.1:' + dnsporttor + '\n\
-AutomapHostsOnResolve 1\n\
-UseBridges 1\n\
-ClientTransportPlugin obfs4 exec /opt/sbin/obfs4proxy managed\n' + bridges.replace("obfs4", "Bridge obfs4"))
-    f.close()
-
-def tor():
-    # global appapiid, appapihash
-    # global localporttor, dnsporttor
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    f = open('/opt/etc/tor/torrc', 'w')
-    with TelegramClient('GetBridgesBot', appapiid, appapihash) as client:
-        client.send_message('GetBridgesBot', '/bridges')
-    with TelegramClient('GetBridgesBot', appapiid, appapihash) as client:
-        for message1 in client.iter_messages('GetBridgesBot'):
-            f.write('User root\n\
-PidFile /opt/var/run/tor.pid\n\
-ExcludeExitNodes {RU},{UA},{AM},{KG},{BY}\n\
-StrictNodes 1\n\
-TransPort 0.0.0.0:' + localporttor + '\n\
-ExitRelay 0\n\
-ExitPolicy reject *:*\n\
-ExitPolicy reject6 *:*\n\
-GeoIPFile /opt/share/tor/geoip\n\
-GeoIPv6File /opt/share/tor/geoip6\n\
-DataDirectory /opt/tmp/tor\n\
-VirtualAddrNetwork 10.254.0.0/16\n\
-DNSPort 127.0.0.1:' + dnsporttor + '\n\
-AutomapHostsOnResolve 1\n\
-UseBridges 1\n\
-ClientTransportPlugin obfs4 exec /opt/sbin/obfs4proxy managed\n'
-                    + message1.text.replace("Your bridges:\n", "").replace("obfs4", "Bridge obfs4"))
-            f.close()
-            break
-
 
 def main():
     global proxy_mode, bot_polling

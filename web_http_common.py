@@ -3,6 +3,7 @@ import json
 import re
 import secrets
 from http.cookies import SimpleCookie
+from urllib.parse import parse_qs
 
 
 class WebRequestMixin:
@@ -94,6 +95,14 @@ class WebRequestMixin:
         else:
             self._send_html('<h1>403 Forbidden</h1><p>CSRF token is missing or invalid.</p>', status=403)
         return False
+
+    def _read_post_data(self):
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except Exception:
+            length = 0
+        body = self.rfile.read(max(0, length)).decode('utf-8', errors='replace')
+        return parse_qs(body)
 
     def _send_html(self, html, status=200):
         body = html.encode('utf-8')
