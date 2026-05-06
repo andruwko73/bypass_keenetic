@@ -19,10 +19,20 @@ import threading
 import signal
 import traceback
 import tarfile
-import secrets
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from unblock_lists import (
+    list_label as _unblock_list_label,
+    load_unblock_lists as _load_unblock_lists_store,
+    save_unblock_list_file as _save_unblock_list_file,
+)
+from web_command_state import (
+    command_state_snapshot as _command_state_snapshot,
+    finish_command as _finish_command_state,
+    set_command_progress as _set_command_progress_state,
+    start_command as _start_command_state,
+)
+from web_http_common import WebRequestMixin
 from web_form_template import render_web_form
 
 import telebot
@@ -135,6 +145,7 @@ status_snapshot_cache = {
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 process_started_at = time.time()
+WEB_UPDATE_COMMANDS = ('update', 'update_independent', 'update_no_bot')
 web_command_lock = threading.Lock()
 web_command_state = {
     'running': False,
@@ -148,8 +159,6 @@ web_command_state = {
 }
 web_flash_lock = threading.Lock()
 web_flash_message = ''
-WEB_CSRF_COOKIE = 'bk_csrf_token'
-WEB_CSRF_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{32,256}$')
 DIRECT_FETCH_ENV_KEYS = [
     'HTTPS_PROXY',
     'HTTP_PROXY',
@@ -1344,30 +1353,10 @@ def _current_bot_version():
     return 'неизвестна'
 
 
-def _normalize_unblock_list(text):
-    items = []
-    seen = set()
-    for raw_line in text.replace('\r', '\n').split('\n'):
-        line = raw_line.strip()
-        if not line or line in seen:
-            continue
-        seen.add(line)
-        items.append(line)
-    items.sort()
-    return '\n'.join(items)
-
-
 def _save_unblock_list(list_name, text):
-    safe_name = os.path.basename(list_name)
-    target_path = os.path.join('/opt/etc/unblock', safe_name)
-    if not target_path.endswith('.txt'):
+    if not os.path.basename(list_name).endswith('.txt'):
         raise ValueError('Список должен быть .txt файлом')
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    normalized = _normalize_unblock_list(text)
-    with open(target_path, 'w', encoding='utf-8') as file:
-        if normalized:
-            file.write(normalized + '\n')
-    subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
+    safe_name = _save_unblock_list_file(list_name, text)
     return f'✅ Список {safe_name} сохранён и применён.'
 
 
@@ -1380,46 +1369,15 @@ def _remove_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
 
 
 def _list_label(file_name):
-    base = file_name[:-4] if file_name.endswith('.txt') else file_name
-    labels = {
-        'shadowsocks': 'Shadowsocks',
-        'tor': 'Tor',
-        'vmess': 'Vmess',
-        'vless': 'Vless 1',
-        'vless-2': 'Vless 2',
-        'trojan': 'Trojan',
-        'vpn': 'VPN (общий список)',
-    }
-    if base.startswith('vpn-'):
-        return f'VPN: {base[4:]}'
-    return labels.get(base, base)
+    return _unblock_list_label(file_name, include_vpn=True)
 
 
 def _load_unblock_lists(with_content=True):
-    unblock_dir = '/opt/etc/unblock'
-    try:
-        file_names = sorted(name for name in os.listdir(unblock_dir) if name.endswith('.txt'))
-    except Exception:
-        file_names = []
-    file_names = [name for name in file_names if name not in ['vpn.txt', 'tor.txt']]
-    preferred_order = ['vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt', 'vpn.txt', 'tor.txt']
-    ordered = []
-    for item in preferred_order:
-        if item in file_names:
-            ordered.append(item)
-    for item in file_names:
-        if item not in ordered:
-            ordered.append(item)
-    result = []
-    for file_name in ordered:
-        entry = {
-            'name': file_name,
-            'label': _list_label(file_name),
-        }
-        if with_content:
-            entry['content'] = _read_text_file(os.path.join(unblock_dir, file_name)).strip()
-        result.append(entry)
-    return result
+    return _load_unblock_lists_store(
+        with_content=with_content,
+        read_text_file=_read_text_file,
+        include_vpn=True,
+    )
 
 
 def _telegram_unblock_list_options():
@@ -1714,12 +1672,11 @@ def _web_command_label(command):
 
 
 def _get_web_command_state():
-    with web_command_lock:
-        return dict(web_command_state)
+    return _command_state_snapshot(web_command_lock, web_command_state)
 
 
 def _estimate_web_command_progress(command, result_text):
-    if command not in ('update', 'update_independent', 'update_no_bot'):
+    if command not in WEB_UPDATE_COMMANDS:
         return 0, ''
     if not result_text:
         return 5, 'Подготовка запуска обновления'
@@ -1747,11 +1704,13 @@ def _estimate_web_command_progress(command, result_text):
 
 
 def _set_web_command_progress(command, result_text):
-    progress, progress_label = _estimate_web_command_progress(command, result_text)
-    with web_command_lock:
-        web_command_state['result'] = result_text
-        web_command_state['progress'] = progress
-        web_command_state['progress_label'] = progress_label
+    _set_command_progress_state(
+        web_command_lock,
+        web_command_state,
+        command,
+        result_text,
+        _estimate_web_command_progress,
+    )
 
 
 def _set_web_flash_message(message):
@@ -1769,14 +1728,15 @@ def _consume_web_flash_message():
 
 
 def _finish_web_command(command, result):
-    with web_command_lock:
-        web_command_state['running'] = False
-        web_command_state['command'] = command
-        web_command_state['label'] = _web_command_label(command)
-        web_command_state['result'] = result
-        web_command_state['progress'] = 100 if command in ('update', 'update_independent', 'update_no_bot') else web_command_state.get('progress', 0)
-        web_command_state['progress_label'] = 'Завершено' if command in ('update', 'update_independent', 'update_no_bot') else ''
-        web_command_state['finished_at'] = time.time()
+    _finish_command_state(
+        web_command_lock,
+        web_command_state,
+        command,
+        result,
+        _web_command_label,
+        update_commands=WEB_UPDATE_COMMANDS,
+        finished_progress_label='Завершено',
+    )
 
 
 def _execute_web_command(command):
@@ -1788,22 +1748,21 @@ def _execute_web_command(command):
 
 
 def _start_web_command(command):
-    label = _web_command_label(command)
-    with web_command_lock:
-        if web_command_state['running']:
-            current_label = web_command_state['label'] or web_command_state['command']
-            return False, f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
-        web_command_state['running'] = True
-        web_command_state['command'] = command
-        web_command_state['label'] = label
-        web_command_state['result'] = ''
-        web_command_state['progress'] = 5 if command in ('update', 'update_independent', 'update_no_bot') else 0
-        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent', 'update_no_bot') else ''
-        web_command_state['started_at'] = time.time()
-        web_command_state['finished_at'] = 0
-    thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
-    thread.start()
-    return True, f'⏳ Команда "{label}" запущена. Страница обновится автоматически.'
+    return _start_command_state(
+        web_command_lock,
+        web_command_state,
+        command,
+        _web_command_label,
+        _execute_web_command,
+        update_commands=WEB_UPDATE_COMMANDS,
+        initial_progress_label='Подготовка запуска обновления',
+        already_running_message=lambda current_label: (
+            f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
+        ),
+        started_message=lambda label: (
+            f'⏳ Команда "{label}" запущена. Страница обновится автоматически.'
+        ),
+    )
 
 
 def _load_bot_autostart():
@@ -2951,123 +2910,11 @@ def bot_message(message):
         except Exception:
             pass
 
-class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
-    def _request_is_allowed(self):
-        client_ip = self.client_address[0] if self.client_address else ''
-        return _is_local_web_client(client_ip)
-
-    def _ensure_request_allowed(self):
-        if not self._request_is_allowed():
-            self._send_html('<h1>403 Forbidden</h1><p>Web UI is available only from the local network.</p>', status=403)
-            return False
-        return self._ensure_web_auth()
-
-    def _send_unauthorized(self):
-        body = (
-            'Authentication required. Use user "admin" and web_auth_token from '
-            'bot_config.py, or leave web_auth_token empty to disable the password.'
-        ).encode('utf-8')
-        self.send_response(401)
-        self.send_header('WWW-Authenticate', 'Basic realm="bypass_keenetic web"')
-        self.send_header('Content-type', 'text/plain; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(body)
-        self.close_connection = True
-
-    def _ensure_web_auth(self):
-        expected_token = _get_web_auth_token()
-        if not expected_token:
-            return True
-        expected_user = str(getattr(config, 'web_auth_user', 'admin') or 'admin')
-        header = self.headers.get('Authorization', '')
-        if header.lower().startswith('basic '):
-            try:
-                decoded = base64.b64decode(header.split(' ', 1)[1].strip()).decode('utf-8')
-                supplied_user, _, supplied_token = decoded.partition(':')
-                if (
-                    secrets.compare_digest(supplied_user, expected_user) and
-                    secrets.compare_digest(supplied_token, expected_token)
-                ):
-                    return True
-            except Exception:
-                pass
-        self._send_unauthorized()
-        return False
-
-    def _csrf_token_from_cookie(self):
-        cookie_header = self.headers.get('Cookie', '')
-        if not cookie_header:
-            return ''
-        try:
-            cookie = SimpleCookie()
-            cookie.load(cookie_header)
-            token_value = cookie.get(WEB_CSRF_COOKIE)
-            if token_value is None:
-                return ''
-            value = token_value.value.strip()
-            return value if WEB_CSRF_TOKEN_RE.fullmatch(value) else ''
-        except Exception:
-            return ''
-
-    def _get_or_create_csrf_token(self):
-        token_value = self._csrf_token_from_cookie()
-        if not token_value:
-            token_value = secrets.token_urlsafe(32)
-        self._csrf_cookie_token = token_value
-        return token_value
-
-    def _ensure_csrf_allowed(self, data=None):
-        supplied = self.headers.get('X-CSRF-Token', '').strip()
-        if not supplied and isinstance(data, dict):
-            supplied = data.get('csrf_token', [''])[0].strip()
-        cookie_token = self._csrf_token_from_cookie()
-        if supplied and cookie_token and secrets.compare_digest(supplied, cookie_token):
-            return True
-        self._send_html('<h1>403 Forbidden</h1><p>CSRF token is missing or invalid.</p>', status=403)
-        return False
-
-    def _send_html(self, html, status=200):
-        body = html.encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
-        csrf_cookie = getattr(self, '_csrf_cookie_token', '')
-        if csrf_cookie:
-            self.send_header('Set-Cookie', f'{WEB_CSRF_COOKIE}={csrf_cookie}; Path=/; HttpOnly; SameSite=Strict')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(body)
-        self.close_connection = True
-
-    def _send_json(self, payload, status=200):
-        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(body)
-        self.close_connection = True
-
-    def _send_redirect(self, location='/'):
-        self.send_response(303)
-        self.send_header('Location', location)
-        self.send_header('Content-Length', '0')
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.close_connection = True
+class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
+    local_client_checker = staticmethod(_is_local_web_client)
+    web_auth_token_getter = staticmethod(_get_web_auth_token)
+    web_auth_user_getter = staticmethod(lambda: str(getattr(config, 'web_auth_user', 'admin') or 'admin'))
+    flash_message_setter = staticmethod(_set_web_flash_message)
 
     def _build_form(self, message=''):
         command_state = _get_web_command_state()

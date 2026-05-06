@@ -104,6 +104,10 @@ restore_path /opt/etc/bot/main.py
 restore_path /opt/etc/bot/installer.py
 restore_path /opt/etc/bot/installer.env
 restore_path /opt/etc/bot/web_form_template.py
+restore_path /opt/etc/bot/web_http_common.py
+restore_path /opt/etc/bot/web_command_state.py
+restore_path /opt/etc/bot/unblock_lists.py
+restore_path /opt/etc/bot/installer_common.py
 restore_path /opt/etc/bot.py
 restore_path /opt/etc/init.d/S99telegram_bot
 restore_path /opt/etc/init.d/S98telegram_bot_installer
@@ -188,6 +192,10 @@ backup_path "$BOT_MAIN_PATH"
 backup_path "$INSTALLER_PATH"
 backup_path "$INSTALLER_ENV_PATH"
 backup_path "$BOT_DIR/web_form_template.py"
+backup_path "$BOT_DIR/web_http_common.py"
+backup_path "$BOT_DIR/web_command_state.py"
+backup_path "$BOT_DIR/unblock_lists.py"
+backup_path "$BOT_DIR/installer_common.py"
 backup_path "$LEGACY_MAIN_PATH"
 backup_path "$SERVICE_PATH"
 backup_path "$INSTALLER_SERVICE_PATH"
@@ -214,17 +222,25 @@ download_file "$RAW_BASE/script.sh" "$TMP_DIR/script.sh" 'if \[ "$1" = "-install
 download_file "$RAW_BASE/bot.py" "$TMP_DIR/main.py" 'KeyInstallHTTPRequestHandler'
 download_file "$RAW_BASE/installer.py" "$TMP_DIR/installer.py" 'ThreadingHTTPServer'
 download_file "$RAW_BASE/web_form_template.py" "$TMP_DIR/web_form_template.py" 'render_web_form'
+download_file "$RAW_BASE/web_http_common.py" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
+download_file "$RAW_BASE/web_command_state.py" "$TMP_DIR/web_command_state.py" 'start_command'
+download_file "$RAW_BASE/unblock_lists.py" "$TMP_DIR/unblock_lists.py" 'save_unblock_list_file'
+download_file "$RAW_BASE/installer_common.py" "$TMP_DIR/installer_common.py" 'browser_port_is_valid'
 download_file "$RAW_BASE/S99telegram_bot" "$TMP_DIR/S99telegram_bot" 'Bot started successfully'
 download_file "$RAW_BASE/S98telegram_bot_installer" "$TMP_DIR/S98telegram_bot_installer" 'Installer started successfully'
 
 cp "$TMP_DIR/main.py" "$BOT_MAIN_PATH"
 cp "$TMP_DIR/installer.py" "$INSTALLER_PATH"
 cp "$TMP_DIR/web_form_template.py" "$BOT_DIR/web_form_template.py"
+cp "$TMP_DIR/web_http_common.py" "$BOT_DIR/web_http_common.py"
+cp "$TMP_DIR/web_command_state.py" "$BOT_DIR/web_command_state.py"
+cp "$TMP_DIR/unblock_lists.py" "$BOT_DIR/unblock_lists.py"
+cp "$TMP_DIR/installer_common.py" "$BOT_DIR/installer_common.py"
 cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
 cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/web_form_template.py"
+chmod 644 "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/installer_common.py"
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 /bin/sh "$TMP_DIR/script.sh" -install
