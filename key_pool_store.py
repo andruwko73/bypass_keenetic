@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 
@@ -80,6 +81,43 @@ def add_keys_to_pool(pools, proto, keys_text):
     added_keys = []
     existing = set(pools.get(proto, []) or [])
     for key_value in new_keys:
+        if key_value in existing:
+            continue
+        pools[proto].append(key_value)
+        existing.add(key_value)
+        added_keys.append(key_value)
+    return pools, added_keys
+
+
+def classify_subscription_keys(raw_text):
+    try:
+        decoded = base64.b64decode(raw_text + '=' * (-len(raw_text) % 4)).decode('utf-8')
+    except Exception:
+        decoded = raw_text
+    result = {proto: [] for proto in PROTOCOLS}
+    for key_value in decoded.splitlines():
+        key_value = key_value.strip()
+        if not key_value:
+            continue
+        if key_value.startswith('ss://'):
+            result['shadowsocks'].append(key_value)
+        elif key_value.startswith('vmess://'):
+            result['vmess'].append(key_value)
+        elif key_value.startswith('vless://'):
+            result['vless'].append(key_value)
+        elif key_value.startswith('trojan://'):
+            result['trojan'].append(key_value)
+    return result
+
+
+def add_subscription_keys_to_pool(pools, proto, fetched_keys):
+    pools = normalize_key_pools(pools)
+    if proto not in pools:
+        pools[proto] = []
+    source_proto = 'vless' if proto == 'vless2' else proto
+    added_keys = []
+    existing = set(pools.get(proto, []) or [])
+    for key_value in (fetched_keys or {}).get(source_proto, []) or []:
         if key_value in existing:
             continue
         pools[proto].append(key_value)

@@ -6,7 +6,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import key_pool_web
+import key_pool_store
 import telegram_pool_ui
+import web_post_actions
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -110,6 +112,29 @@ def test_key_pool_web():
     assert row['key'] == 'vless-key'
 
 
+def test_key_pool_subscription_helpers():
+    raw = '\n'.join([
+        SS_KEY,
+        'vless://uuid@example.com:443?security=tls#sample',
+        TROJAN_KEY,
+    ])
+    classified = key_pool_store.classify_subscription_keys(raw)
+    assert classified['shadowsocks'] == [SS_KEY]
+    assert classified['vless'] == ['vless://uuid@example.com:443?security=tls#sample']
+    assert classified['trojan'] == [TROJAN_KEY]
+
+    pools, added = key_pool_store.add_subscription_keys_to_pool({'vless2': []}, 'vless2', classified)
+    assert added == ['vless://uuid@example.com:443?security=tls#sample']
+    assert pools['vless2'] == added
+
+
+def test_web_post_actions_helpers():
+    data = {'target_list_name': ['custom'], 'list_name': ['fallback']}
+    assert web_post_actions.form_value(data, 'missing', 'none') == 'none'
+    assert web_post_actions.first_form_value(data, ('target_list_name', 'list_name')) == 'custom'
+    assert web_post_actions.dispatch({}, '/pool_add', {}) is None
+
+
 def test_telegram_pool_ui():
     markup = telegram_pool_ui.pool_protocol_markup(
         _FakeTypes,
@@ -134,7 +159,9 @@ def test_telegram_pool_ui():
 def main():
     test_proxy_config_builder()
     test_key_pool_web()
+    test_key_pool_subscription_helpers()
     test_telegram_pool_ui()
+    test_web_post_actions_helpers()
     print('smoke_modules: ok')
 
 

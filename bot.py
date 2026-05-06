@@ -110,6 +110,7 @@ from web_command_state import (
     start_command as _start_command_state,
 )
 from web_http_common import WebRequestMixin
+import web_post_actions
 from web_form_template import render_web_form
 
 import telebot
@@ -204,24 +205,7 @@ def _fetch_keys_from_subscription(url):
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
         raw = resp.text.strip()
-        # Пробуем декодировать как base64
-        try:
-            decoded = base64.b64decode(raw + '=' * (-len(raw) % 4)).decode('utf-8')
-        except Exception:
-            decoded = raw
-        keys = [k.strip() for k in decoded.split('\n') if k.strip()]
-        # Фильтруем только ключи известных протоколов
-        result = {'shadowsocks': [], 'vmess': [], 'vless': [], 'vless2': [], 'trojan': []}
-        for k in keys:
-            if k.startswith('ss://'):
-                result['shadowsocks'].append(k)
-            elif k.startswith('vmess://'):
-                result['vmess'].append(k)
-            elif k.startswith('vless://'):
-                result['vless'].append(k)
-            elif k.startswith('trojan://'):
-                result['trojan'].append(k)
-        return result, None
+        return key_pool_store.classify_subscription_keys(raw), None
     except requests.RequestException as exc:
         return None, f'Ошибка загрузки subscription: {exc}'
     except Exception as exc:
@@ -4924,6 +4908,60 @@ def bot_message(message):
         except Exception:
             pass
 
+
+def _start_web_bot_action():
+    global bot_ready
+    bot_ready = True
+    _save_bot_autostart(True)
+    _invalidate_web_status_cache()
+    return APP_START_RESULT
+
+
+def _web_action_context():
+    return {
+        'app_mode_label': APP_MODE_LABEL,
+        'update_proxy': update_proxy,
+        'proxy_mode_label': _proxy_mode_label,
+        'invalidate_web_status_cache': _invalidate_web_status_cache,
+        'invalidate_key_status_cache': _invalidate_key_status_cache,
+        'start_bot': _start_web_bot_action,
+        'start_web_command': _start_web_command,
+        'get_web_command_state': _get_web_command_state,
+        'save_unblock_list': _save_unblock_list,
+        'read_text_file': _read_text_file,
+        'append_socialnet_list': _append_socialnet_list,
+        'remove_socialnet_list': _remove_socialnet_list,
+        'append_service_error': 'Ошибка добавления сервисов',
+        'remove_service_error': 'Ошибка удаления сервисов',
+        'socialnet_all_key': SOCIALNET_ALL_KEY,
+        'normalize_unblock_route_name': _normalize_unblock_route_name,
+        'custom_checks_enabled': True,
+        'append_custom_checks_to_unblock_list': _append_custom_checks_to_unblock_list,
+        'unblock_route_for_key_type': _unblock_route_for_key_type,
+        'add_custom_check': _add_custom_check,
+        'delete_custom_check': _delete_custom_check,
+        'web_custom_checks': _web_custom_checks,
+        'pool_actions_enabled': True,
+        'load_current_keys': _load_current_keys,
+        'refresh_status_caches_async': _refresh_status_caches_async,
+        'web_pool_snapshot': _web_pool_snapshot,
+        'probe_all_pool_keys_async': _probe_all_pool_keys_async,
+        'pool_keys_for_proto': _pool_keys_for_proto,
+        'probe_pool_keys_background': _probe_pool_keys_background,
+        'add_keys_to_pool': _add_keys_to_pool,
+        'delete_pool_key': _delete_pool_key,
+        'load_key_pools': _load_key_pools,
+        'install_key_for_protocol': _install_key_for_protocol,
+        'set_active_key': _set_active_key,
+        'clear_pool': _clear_pool,
+        'fetch_keys_from_subscription': _fetch_keys_from_subscription,
+        'add_subscription_keys_to_pool': key_pool_store.add_subscription_keys_to_pool,
+        'save_key_pools': _save_key_pools,
+        'pool_apply_lock': pool_apply_lock,
+        'install_verify': False,
+    }
+
+
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
     local_client_checker = staticmethod(_is_local_web_client)
@@ -5408,367 +5446,15 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         data = self._read_post_data()
         if not self._ensure_csrf_allowed(data):
             return
-        if path == '/set_proxy':
-            proxy_type = data.get('proxy_type', ['none'])[0]
-            ok, error = update_proxy(proxy_type)
-            if ok:
-                result = f'{APP_MODE_LABEL} установлен: {proxy_type}'
-            else:
-                result = f'⚠️ {error}'
-            _invalidate_web_status_cache()
-            _invalidate_key_status_cache()
-            self._send_action_result(
-                result,
-                success=ok,
-                extra={'proxy_mode': proxy_type, 'proxy_label': _proxy_mode_label(proxy_type)},
-            )
-            return
-
-        if path == '/start':
-            global bot_ready
-            bot_ready = True
-            _save_bot_autostart(True)
-            _invalidate_web_status_cache()
-            result = APP_START_RESULT
-            self._send_action_result(result, success=True)
-            return
-
-        if path == '/command':
-            command = data.get('command', [''])[0]
-            started, result = _start_web_command(command)
-            self._send_action_result(
-                result,
-                success=started,
-                extra={'command_state': _get_web_command_state()},
-            )
-            return
-
-        if path == '/save_unblock_list':
-            list_name = data.get('list_name', [''])[0]
-            content = data.get('content', [''])[0]
-            success = True
-            try:
-                result = _save_unblock_list(list_name, content)
-            except Exception as exc:
-                success = False
-                result = f'Ошибка сохранения списка: {exc}'
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', os.path.basename(list_name))).strip() if success else ''
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'list_name': os.path.basename(list_name), 'list_content': list_content},
-            )
-            return
-
-        if path == '/append_socialnet':
-            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
-            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
-            success = True
-            try:
-                result = _append_socialnet_list(list_name, service_key=service_key)
-            except Exception as exc:
-                success = False
-                result = f'Ошибка добавления сервисов: {exc}'
-            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'list_name': safe_name, 'list_content': list_content},
-            )
-            return
-
-        if path == '/remove_socialnet':
-            list_name = data.get('target_list_name', data.get('list_name', ['']))[0]
-            service_key = data.get('service_key', [SOCIALNET_ALL_KEY])[0]
-            success = True
-            try:
-                result = _remove_socialnet_list(list_name, service_key=service_key)
-            except Exception as exc:
-                success = False
-                result = f'Ошибка удаления сервисов: {exc}'
-            safe_name = _normalize_unblock_route_name(list_name) + '.txt' if success else os.path.basename(list_name)
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'list_name': safe_name, 'list_content': list_content},
-            )
-            return
-
-        if path == '/custom_checks_to_list':
-            list_name = data.get('target_list_name', data.get('list_name', data.get('type', [''])))[0]
-            success = True
-            try:
-                result = _append_custom_checks_to_unblock_list(list_name)
-            except Exception as exc:
-                success = False
-                result = f'Ошибка добавления проверок в список обхода: {exc}'
-            safe_name = _normalize_unblock_route_name(_unblock_route_for_key_type(list_name)) + '.txt' if success else os.path.basename(list_name)
-            list_content = _read_text_file(os.path.join('/opt/etc/unblock', safe_name)).strip() if success else ''
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'list_name': safe_name, 'list_content': list_content},
-            )
-            return
-
-        if path == '/custom_check_add':
-            preset_id = data.get('preset', [''])[0]
-            label = data.get('label', [''])[0]
-            url = data.get('url', [''])[0]
-            success = True
-            try:
-                checks, result = _add_custom_check(label=label, url=url, preset_id=preset_id)
-                _probe_all_pool_keys_async(stale_only=False)
-                _refresh_status_caches_async(_load_current_keys())
-                if success and 'уже есть' not in result:
-                    result += ' Фоновая проверка пула запущена.'
-            except Exception as exc:
-                success = False
-                checks = _load_custom_checks()
-                result = f'Ошибка добавления проверки: {exc}'
-            self._send_action_result(
-                result,
-                success=success,
-                extra={
-                    'custom_checks': _web_custom_checks(),
-                    'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True),
-                },
-            )
-            return
-
-        if path == '/custom_check_delete':
-            check_id = data.get('id', [''])[0]
-            success = True
-            try:
-                _delete_custom_check(check_id)
-                result = 'Проверка удалена.'
-            except Exception as exc:
-                success = False
-                result = f'Ошибка удаления проверки: {exc}'
-            self._send_action_result(
-                result,
-                success=success,
-                extra={
-                    'custom_checks': _web_custom_checks(),
-                    'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True),
-                },
-            )
-            return
-
-        if path == '/pool_probe':
-            proto = data.get('type', [''])[0]
-            success = True
-            try:
-                if not proto:
-                    started, queued = _probe_all_pool_keys_async(stale_only=False)
-                    if started:
-                        result = f'Безопасная проверка всех пулов запущена. В очереди: {queued}. Проверка идет через временный тестовый xray и не разрывает текущее подключение.'
-                    elif queued:
-                        result = 'Проверка пулов уже выполняется. Дождитесь обновления статусов.'
-                    else:
-                        result = 'В пулах нет ключей, которым нужна проверка.'
-                elif proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    raise ValueError('Неизвестный протокол')
-                else:
-                    keys = _pool_keys_for_proto(proto)
-                    started, queued = _probe_pool_keys_background(proto, keys, stale_only=False)
-                    if started:
-                        result = f'Безопасная проверка пула {proto} запущена. В очереди: {queued}. Проверка идет через временный тестовый xray и не разрывает текущее подключение.'
-                    elif queued:
-                        result = 'Проверка пула уже выполняется. Дождитесь обновления статусов.'
-                    else:
-                        result = f'В пуле {proto} нет ключей, которым нужна проверка.'
-            except Exception as exc:
-                success = False
-                result = f'Ошибка запуска проверки пула: {exc}'
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'pool_probe_started': success},
-            )
-            return
-
-        if path == '/pool_add':
-            proto = data.get('type', [''])[0]
-            keys_text = data.get('keys', [''])[0]
-            success = True
-            try:
-                if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    raise ValueError('Неизвестный протокол')
-                added = _add_keys_to_pool(proto, keys_text)
-                result = f'Добавлено ключей в пул {proto}: {added}'
-            except Exception as exc:
-                success = False
-                result = f'Ошибка добавления в пул: {exc}'
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True)},
-            )
-            return
-
-        if path == '/pool_delete':
-            proto = data.get('type', [''])[0]
-            key_to_delete = data.get('key', [''])[0]
-            success = True
-            try:
-                _delete_pool_key(proto, key_to_delete)
-                result = f'Ключ удалён из пула {proto}'
-            except Exception as exc:
-                success = False
-                result = f'Ошибка удаления из пула: {exc}'
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True)},
-            )
-            return
-
-        if path == '/pool_apply':
-            proto = data.get('type', [''])[0]
-            key_to_apply = data.get('key', [''])[0]
-            success = True
-            apply_lock_acquired = False
-            try:
-                if not pool_apply_lock.acquire(blocking=False):
-                    raise ValueError('Сейчас выполняется проверка или применение ключа. Дождитесь завершения операции.')
-                apply_lock_acquired = True
-                pools = _load_key_pools()
-                if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    raise ValueError('Неизвестный протокол')
-                if key_to_apply not in (pools.get(proto, []) or []):
-                    raise ValueError('Ключ не найден в пуле')
-                result = _install_key_for_protocol(proto, key_to_apply, verify=False)
-                _set_active_key(proto, key_to_apply)
-                _invalidate_web_status_cache()
-                _invalidate_key_status_cache()
-                _refresh_status_caches_async(_load_current_keys())
-            except Exception as exc:
-                success = False
-                result = f'Ошибка применения ключа из пула: {exc}'
-            finally:
-                if apply_lock_acquired:
-                    pool_apply_lock.release()
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'protocol': proto, 'key': key_to_apply, 'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True)},
-            )
-            return
-
-        if path == '/pool_clear':
-            proto = data.get('type', [''])[0]
-            success = True
-            try:
-                if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    raise ValueError('Неизвестный протокол')
-                removed = _clear_pool(proto)
-                result = f'Пул {proto} очищен. Удалено ключей: {removed}'
-            except Exception as exc:
-                success = False
-                result = f'Ошибка очистки пула: {exc}'
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True)},
-            )
-            return
-
-        if path == '/pool_subscribe':
-            proto = data.get('type', [''])[0]
-            sub_url = data.get('url', [''])[0]
-            success = True
-            try:
-                if proto not in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    raise ValueError('Неизвестный протокол')
-                fetched, error = _fetch_keys_from_subscription(sub_url)
-                if error:
-                    raise ValueError(error)
-                pools = _load_key_pools()
-                if proto not in pools:
-                    pools[proto] = []
-                added = 0
-                added_keys = []
-                # Если выбран vless2, добавляем vless:// ключи в пул vless2
-                source_proto = proto
-                if proto == 'vless2':
-                    source_proto = 'vless'
-                for k in fetched.get(source_proto, []):
-                    if k not in pools[proto]:
-                        pools[proto].append(k)
-                        added += 1
-                        added_keys.append(k)
-                _save_key_pools(pools)
-                # Запускаем фоновую проверку для добавленных ключей
-                if added_keys:
-                    _probe_pool_keys_background(proto, added_keys)
-                result = f'Загружено из subscription и добавлено в пул {proto}: {added} ключей'
-                _invalidate_web_status_cache()
-                _invalidate_key_status_cache()
-            except Exception as exc:
-                success = False
-                result = f'Ошибка загрузки subscription: {exc}'
-            self._send_action_result(
-                result,
-                success=success,
-                extra={'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True)},
-            )
-            return
-        
-
-        # /pool_check убран: проверка выполняется автоматически и отображается значками в пуле.
-
-        if path != '/install':
+        action = web_post_actions.dispatch(_web_action_context(), path, data)
+        if action is None:
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
-        key_type = data.get('type', [''])[0]
-        key_value = data.get('key', [''])[0]
-        result = 'Ключ установлен.'
-        success = True
-        apply_lock_acquired = False
-        try:
-            if not pool_apply_lock.acquire(blocking=False):
-                raise ValueError('Сейчас выполняется проверка или применение ключа. Дождитесь завершения операции.')
-            apply_lock_acquired = True
-            if key_type == 'shadowsocks':
-                shadowsocks(key_value)
-                result = _apply_installed_proxy('shadowsocks', key_value, verify=False)
-            elif key_type == 'vmess':
-                vmess(key_value)
-                result = _apply_installed_proxy('vmess', key_value, verify=False)
-            elif key_type == 'vless':
-                vless(key_value)
-                result = _apply_installed_proxy('vless', key_value, verify=False)
-            elif key_type == 'vless2':
-                vless2(key_value)
-                result = _apply_installed_proxy('vless2', key_value, verify=False)
-            elif key_type == 'trojan':
-                trojan(key_value)
-                result = _apply_installed_proxy('trojan', key_value, verify=False)
-            else:
-                success = False
-                result = 'Тип ключа не распознан.'
-        except Exception as exc:
-            success = False
-            result = f'Ошибка установки: {exc}'
-        else:
-            if success and key_type in ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'):
-                _set_active_key(key_type, key_value)
-                _invalidate_web_status_cache()
-                _invalidate_key_status_cache()
-                _refresh_status_caches_async(_load_current_keys())
-        finally:
-            if apply_lock_acquired:
-                pool_apply_lock.release()
-
         self._send_action_result(
-            result,
-            success=success,
-            extra={'protocol': key_type, 'key': key_value, 'pools': _web_pool_snapshot(_load_current_keys(), include_keys=True)},
+            action.get('result', ''),
+            success=action.get('success', True),
+            extra=action.get('extra') or None,
         )
-
 
 def start_http_server():
     global web_httpd
