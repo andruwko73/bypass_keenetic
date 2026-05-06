@@ -1,5 +1,7 @@
 <a href="https://t.me/bypass_keenetic">![Telegram](https://img.shields.io/badge/bypass_keenetic--black?style=social&logo=telegram&logoColor=blue)</a>
 
+> **Проверено и работает на роутере Keenetic Giga на последней версии KeeneticOS.**
+
 ## О ветке
 
 `feature/independent-rework` — версия `bypass_keenetic` с Telegram-ботом, локальным веб-интерфейсом и расширенным управлением пулом ключей для Keenetic.
@@ -13,6 +15,7 @@
 - пул ключей для каждого протокола с применением, удалением, ручным добавлением и загрузкой subscription;
 - проверка Telegram API, YouTube и дополнительных сервисов через выбранный ключ;
 - готовые пресеты проверок: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Meta AI, Instagram, Facebook;
+- кнопка **Добавить в список обхода** переносит домены выбранных дополнительных проверок в список обхода текущего протокола; кнопка **Добавить в список** добавляет готовые наборы Telegram, YouTube, Instagram/Meta, Discord, TikTok, X/Twitter или все сервисы сразу;
 - переустановка между `main`, `feature/independent-rework` и `feature/web-only` с сохранением локальных настроек, ключей, пулов и списков обхода.
 
 ## Установка
