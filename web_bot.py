@@ -18,11 +18,32 @@ import signal
 import traceback
 import gc
 import tarfile
-import secrets
-from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from unblock_lists import (
+    list_label as _unblock_list_label,
+    load_unblock_lists as _load_unblock_lists_store,
+    save_unblock_list_file as _save_unblock_list_file,
+)
+from custom_checks_store import (
+    add_custom_check as _store_add_custom_check,
+    custom_check_presets as _custom_check_presets,
+    delete_custom_check as _store_delete_custom_check,
+    load_custom_checks as _load_custom_checks,
+    normalize_check_url as _normalize_check_url,
+    route_entries_from_values as _route_entries_from_values,
+    save_custom_checks as _save_custom_checks,
+)
 import key_pool_store
+from probe_cache import (
+    forget_key_probes as _forget_key_probes,
+    hash_key as _hash_key,
+    key_probe_has_required_results as _key_probe_has_required_results,
+    key_probe_is_fresh as _key_probe_is_fresh,
+    load_key_probe_cache as _load_key_probe_cache,
+    record_key_probe as _record_key_probe,
+    save_key_probe_cache as _save_key_probe_cache,
+)
 from service_catalog import (
     CHATGPT_ROUTE_ENTRIES,
     CLAUDE_ROUTE_ENTRIES,
@@ -35,6 +56,14 @@ from service_catalog import (
     YOUTUBE_UNBLOCK_ENTRIES,
 )
 from pool_probe_runner import run_pool_probe_worker
+from web_command_state import (
+    command_state_snapshot as _command_state_snapshot,
+    consume_command_state_for_render as _consume_command_state_for_render_impl,
+    finish_command as _finish_command_state,
+    set_command_progress as _set_command_progress_state,
+    start_command as _start_command_state,
+)
+from web_http_common import WebRequestMixin
 from web_form_template import render_web_form
 
 import base64
@@ -47,8 +76,6 @@ import bot_config as config
 
 # --- Пул ключей и авто-фейловер Telegram API ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
-KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
-CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
 AUTO_FAILOVER_GRACE_SECONDS = 60
 AUTO_FAILOVER_POLL_SECONDS = 10
 AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switch_cooldown_seconds', 180))
@@ -58,308 +85,19 @@ auto_failover_state = {
     'last_attempt': 0.0,
     'in_progress': False,
 }
-key_probe_cache_lock = threading.Lock()
-
-
-def _hash_key(value):
-    import hashlib
-    return hashlib.sha1((value or '').encode('utf-8', errors='ignore')).hexdigest()
-
-
-def _load_key_probe_cache():
-    try:
-        with open(KEY_PROBE_CACHE_PATH, 'r', encoding='utf-8') as f:
-            value = json.load(f)
-        return value if isinstance(value, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save_key_probe_cache(cache):
-    os.makedirs(os.path.dirname(KEY_PROBE_CACHE_PATH), exist_ok=True)
-    tmp_path = f'{KEY_PROBE_CACHE_PATH}.tmp'
-    with open(tmp_path, 'w', encoding='utf-8') as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
-        f.flush()
-        try:
-            os.fsync(f.fileno())
-        except Exception:
-            pass
-    os.replace(tmp_path, KEY_PROBE_CACHE_PATH)
-
-
-
-
-
-
-
-
-CUSTOM_CHECK_MAX = 12
-CUSTOM_CHECK_REMOVED_IDS = {'mistral'}
-
-
-def _normalize_check_url(value):
-    url = (value or '').strip()
-    if not url:
-        raise ValueError('Укажите адрес для проверки')
-    if not re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', url):
-        url = 'https://' + url
-    parsed = urlparse(url)
-    if parsed.scheme not in ['http', 'https'] or not parsed.netloc:
-        raise ValueError('Адрес должен быть HTTP/HTTPS URL или доменом')
-    return url
-
-
-def _route_entry_from_target(value):
-    item = (value or '').strip().split('#', 1)[0].strip()
-    if not item:
-        return ''
-    if re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*://', item):
-        parsed = urlparse(item)
-        return (parsed.hostname or '').strip('.').lower()
-    item = re.sub(r'^\+\.', '', item)
-    item = re.sub(r'^\*\.', '', item)
-    if '/' in item:
-        try:
-            return str(ipaddress.ip_network(item, strict=False))
-        except ValueError:
-            pass
-    if '/' in item:
-        parsed = urlparse('https://' + item)
-        item = parsed.hostname or ''
-    if ':' in item and item.count(':') == 1:
-        host, port = item.rsplit(':', 1)
-        if port.isdigit():
-            item = host
-    item = item.strip('.').lower()
-    try:
-        return str(ipaddress.ip_address(item))
-    except ValueError:
-        pass
-    if re.match(r'^[a-z0-9_.-]+\.[a-z0-9_.-]+$', item):
-        return item
-    return ''
-
-
-def _route_entries_from_values(values):
-    entries = []
-    seen = set()
-    for value in values or []:
-        entry = _route_entry_from_target(value)
-        if entry and entry not in seen:
-            seen.add(entry)
-            entries.append(entry)
-    return entries
-
-
-def _custom_check_id(label, url):
-    base = re.sub(r'[^a-z0-9]+', '_', (label or '').lower()).strip('_')[:24]
-    return base or ('target_' + _hash_key(url)[:8])
-
-
-def _sanitize_custom_check(item):
-    if not isinstance(item, dict):
-        return None
-    try:
-        raw_urls = item.get('urls')
-        if isinstance(raw_urls, list):
-            urls = []
-            for value in raw_urls:
-                normalized = _normalize_check_url(value)
-                if normalized not in urls:
-                    urls.append(normalized)
-        else:
-            urls = [_normalize_check_url(item.get('url', ''))]
-    except ValueError:
-        return None
-    if not urls:
-        return None
-    url = urls[0]
-    label = str(item.get('label') or urlparse(url).netloc or url).strip()[:40]
-    check_id = str(item.get('id') or _custom_check_id(label, url)).strip()[:40]
-    check_id = re.sub(r'[^a-zA-Z0-9_-]+', '_', check_id).strip('_') or _custom_check_id(label, url)
-    badge = str(item.get('badge') or label[:3] or 'WEB').strip().upper()[:5]
-    result = {
-        'id': check_id,
-        'label': label,
-        'url': url,
-        'badge': badge,
-    }
-    if len(urls) > 1:
-        result['urls'] = urls[:4]
-    routes = _route_entries_from_values(item.get('routes') or [])
-    if routes:
-        result['routes'] = routes[:80]
-    if item.get('icon'):
-        result['icon'] = str(item.get('icon'))[:24]
-    return result
-
-
-def _load_custom_checks():
-    try:
-        with open(CUSTOM_CHECKS_PATH, 'r', encoding='utf-8') as f:
-            value = json.load(f)
-    except Exception:
-        return []
-    source = value.get('checks', []) if isinstance(value, dict) else value
-    if not isinstance(source, list):
-        return []
-    result = []
-    seen = set()
-    for item in source:
-        check = _sanitize_custom_check(item)
-        if not check:
-            continue
-        if check['id'] in CUSTOM_CHECK_REMOVED_IDS:
-            continue
-        unique_key = (check['id'], tuple(check.get('urls') or [check['url']]))
-        if unique_key in seen:
-            continue
-        seen.add(unique_key)
-        result.append(check)
-        if len(result) >= CUSTOM_CHECK_MAX:
-            break
-    legacy_chatgpt_ids = {'chatgpt', 'codex', 'openai_api'}
-    if any(item.get('id') in legacy_chatgpt_ids for item in result):
-        result = [item for item in result if item.get('id') not in legacy_chatgpt_ids]
-        if not any(item.get('id') == 'chatgpt_services' for item in result):
-            preset = _sanitize_custom_check(CUSTOM_CHECK_PRESETS[0])
-            if preset:
-                result.insert(0, preset)
-    return result
-
-
-def _save_custom_checks(checks):
-    result = []
-    seen_ids = set()
-    seen_urls = set()
-    for item in checks or []:
-        check = _sanitize_custom_check(item)
-        if not check:
-            continue
-        if check['id'] in CUSTOM_CHECK_REMOVED_IDS:
-            continue
-        urls_key = tuple(check.get('urls') or [check['url']])
-        if check['id'] in seen_ids or urls_key in seen_urls:
-            continue
-        seen_ids.add(check['id'])
-        seen_urls.add(urls_key)
-        result.append(check)
-        if len(result) >= CUSTOM_CHECK_MAX:
-            break
-    os.makedirs(os.path.dirname(CUSTOM_CHECKS_PATH), exist_ok=True)
-    with open(CUSTOM_CHECKS_PATH, 'w', encoding='utf-8') as f:
-        json.dump({'checks': result}, f, ensure_ascii=False, indent=2)
-    return result
-
-
-def _custom_check_presets():
-    return [dict(item) for item in CUSTOM_CHECK_PRESETS]
-
 
 def _add_custom_check(label='', url='', preset_id=''):
-    checks = _load_custom_checks()
-    if len(checks) >= CUSTOM_CHECK_MAX:
-        raise ValueError(f'Можно хранить не больше {CUSTOM_CHECK_MAX} дополнительных проверок')
-    item = None
-    if preset_id:
-        for preset in CUSTOM_CHECK_PRESETS:
-            if preset['id'] == preset_id:
-                item = dict(preset)
-                break
-        if not item:
-            raise ValueError('Неизвестный пресет проверки')
-    else:
-        item = {
-            'label': (label or '').strip(),
-            'url': (url or '').strip(),
-        }
-    check = _sanitize_custom_check(item)
-    if not check:
-        raise ValueError('Не удалось добавить проверку: проверьте название и URL')
-    for existing in checks:
-        if existing['id'] == check['id'] or tuple(existing.get('urls') or [existing['url']]) == tuple(check.get('urls') or [check['url']]):
-            return checks, f'Проверка "{check["label"]}" уже есть в списке.'
-    checks.append(check)
-    checks = _save_custom_checks(checks)
+    checks, result = _store_add_custom_check(label=label, url=url, preset_id=preset_id)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
-    return checks, f'Проверка "{check["label"]}" добавлена.'
+    return checks, result
 
 
 def _delete_custom_check(check_id):
-    check_id = (check_id or '').strip()
-    checks = _load_custom_checks()
-    next_checks = [item for item in checks if item.get('id') != check_id]
-    if len(next_checks) == len(checks):
-        raise ValueError('Проверка не найдена')
-    checks = _save_custom_checks(next_checks)
+    checks = _store_delete_custom_check(check_id)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     return checks
-
-
-def _record_key_probe(proto, key_value, tg_ok=None, yt_ok=None, custom=None):
-    with key_probe_cache_lock:
-        cache = _load_key_probe_cache()
-        key_id = _hash_key(key_value)
-        entry = cache.get(key_id, {})
-        if not isinstance(entry, dict):
-            entry = {}
-        entry['proto'] = proto
-        entry['ts'] = time.time()
-        if tg_ok is not None:
-            if tg_ok == 'unknown':
-                entry['tg_ok'] = None
-            else:
-                entry['tg_ok'] = bool(tg_ok)
-        if yt_ok is not None:
-            if yt_ok == 'unknown':
-                entry['yt_ok'] = None
-            else:
-                entry['yt_ok'] = bool(yt_ok)
-        if custom is not None:
-            existing_custom = entry.get('custom', {})
-            if not isinstance(existing_custom, dict):
-                existing_custom = {}
-            for check_id, ok in (custom or {}).items():
-                existing_custom[str(check_id)] = bool(ok)
-            entry['custom'] = existing_custom
-        cache[key_id] = entry
-        _save_key_probe_cache(cache)
-
-
-def _key_probe_is_fresh(entry, now=None, custom_checks=None):
-    if not isinstance(entry, dict):
-        return False
-    try:
-        ts = float(entry.get('ts', 0))
-    except (TypeError, ValueError):
-        return False
-    if (now or time.time()) - ts >= KEY_PROBE_CACHE_TTL:
-        return False
-    custom_checks = custom_checks or []
-    if custom_checks:
-        custom = entry.get('custom', {})
-        if not isinstance(custom, dict):
-            return False
-        return all(check.get('id') in custom for check in custom_checks)
-    return True
-
-
-def _key_probe_has_required_results(entry, custom_checks=None):
-    if not isinstance(entry, dict):
-        return False
-    if 'tg_ok' not in entry or 'yt_ok' not in entry:
-        return False
-    custom_checks = custom_checks or []
-    if custom_checks:
-        custom = entry.get('custom', {})
-        if not isinstance(custom, dict):
-            return False
-        return all(check.get('id') in custom for check in custom_checks)
-    return True
-
 
 TELEGRAM_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1NiIgcj0iMjU2IiBmaWxsPSIjMzdBRUUyIi8+PHBhdGggZD0iTTExOSAyNjVsMjY1LTEwNGMxMi01IDIzIDMgMTkgMTlsLTQ1IDIxMmMtMyAxMy0xMiAxNi0yNCAxMGwtNjYtNDktMzIgMzFjLTQgNC03IDctMTUgN2w2LTg1IDE1NS0xNDBjNy02LTItMTAtMTEtNGwtMTkyIDEyMS04My0yNmMtMTgtNi0xOC0xOCA0LTI2eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg=='
 YOUTUBE_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA0NDMgMzIwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSI0NDMiIGhlaWdodD0iMzIwIiByeD0iNzAiIGZpbGw9IiNGRjAwMDAiLz48cG9seWdvbiBwb2ludHM9IjE3Nyw5NiAzNTUsMTYwIDE3NywyMjQiIGZpbGw9IiNmZmYiLz48L3N2Zz4='
@@ -576,7 +314,6 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
-KEY_PROBE_CACHE_TTL = 3600
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
 POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.3))
@@ -681,6 +418,7 @@ pool_probe_progress = {
     'finished_at': 0,
 }
 process_started_at = time.time()
+WEB_UPDATE_COMMANDS = ('update', 'update_independent', 'update_no_bot')
 web_command_lock = threading.Lock()
 web_command_state = {
     'running': False,
@@ -695,8 +433,6 @@ web_command_state = {
 }
 web_flash_lock = threading.Lock()
 web_flash_message = ''
-WEB_CSRF_COOKIE = 'bk_csrf_token'
-WEB_CSRF_TOKEN_RE = re.compile(r'^[A-Za-z0-9_-]{32,256}$')
 DIRECT_FETCH_ENV_KEYS = [
     'HTTPS_PROXY',
     'HTTP_PROXY',
@@ -1475,30 +1211,10 @@ def _current_bot_version():
     return 'неизвестна'
 
 
-def _normalize_unblock_list(text):
-    items = []
-    seen = set()
-    for raw_line in text.replace('\r', '\n').split('\n'):
-        line = raw_line.strip()
-        if not line or line in seen:
-            continue
-        seen.add(line)
-        items.append(line)
-    items.sort()
-    return '\n'.join(items)
-
-
 def _save_unblock_list(list_name, text):
-    safe_name = os.path.basename(list_name)
-    target_path = os.path.join('/opt/etc/unblock', safe_name)
-    if not target_path.endswith('.txt'):
+    if not os.path.basename(list_name).endswith('.txt'):
         raise ValueError('Список должен быть .txt файлом')
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    normalized = _normalize_unblock_list(text)
-    with open(target_path, 'w', encoding='utf-8') as file:
-        if normalized:
-            file.write(normalized + '\n')
-    subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
+    safe_name = _save_unblock_list_file(list_name, text)
     return f'✅ Список {safe_name} сохранён и применён.'
 
 
@@ -1511,42 +1227,15 @@ def _remove_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
 
 
 def _list_label(file_name):
-    base = file_name[:-4] if file_name.endswith('.txt') else file_name
-    labels = {
-        'shadowsocks': 'Shadowsocks',
-        'vmess': 'Vmess',
-        'vless': 'Vless 1',
-        'vless-2': 'Vless 2',
-        'trojan': 'Trojan',
-    }
-    return labels.get(base, base)
+    return _unblock_list_label(file_name, include_vpn=False)
 
 
 def _load_unblock_lists(with_content=True):
-    unblock_dir = '/opt/etc/unblock'
-    try:
-        file_names = sorted(name for name in os.listdir(unblock_dir) if name.endswith('.txt'))
-    except Exception:
-        file_names = []
-    file_names = [name for name in file_names if name not in ['vpn.txt', 'tor.txt'] and not name.startswith('vpn-')]
-    preferred_order = ['vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt']
-    ordered = []
-    for item in preferred_order:
-        if item in file_names:
-            ordered.append(item)
-    for item in file_names:
-        if item not in ordered:
-            ordered.append(item)
-    result = []
-    for file_name in ordered:
-        entry = {
-            'name': file_name,
-            'label': _list_label(file_name),
-        }
-        if with_content:
-            entry['content'] = _read_text_file(os.path.join(unblock_dir, file_name)).strip()
-        result.append(entry)
-    return result
+    return _load_unblock_lists_store(
+        with_content=with_content,
+        read_text_file=_read_text_file,
+        include_vpn=False,
+    )
 
 
 
@@ -2003,35 +1692,15 @@ def _web_command_label(command):
 
 
 def _get_web_command_state():
-    with web_command_lock:
-        return dict(web_command_state)
+    return _command_state_snapshot(web_command_lock, web_command_state)
 
 
 def _consume_web_command_state_for_render():
-    with web_command_lock:
-        snapshot = dict(web_command_state)
-        if (snapshot.get('label') and not snapshot.get('running') and
-                snapshot.get('finished_at') and snapshot.get('shown_after_finish')):
-            cleared = {
-                'running': False,
-                'command': '',
-                'label': '',
-                'result': '',
-                'progress': 0,
-                'progress_label': '',
-                'started_at': 0,
-                'finished_at': 0,
-                'shown_after_finish': False,
-            }
-            web_command_state.update(cleared)
-            return cleared
-        elif snapshot.get('label') and not snapshot.get('running') and snapshot.get('finished_at'):
-            web_command_state['shown_after_finish'] = True
-        return snapshot
+    return _consume_command_state_for_render_impl(web_command_lock, web_command_state)
 
 
 def _estimate_web_command_progress(command, result_text):
-    if command not in ('update', 'update_independent', 'update_no_bot'):
+    if command not in WEB_UPDATE_COMMANDS:
         return 0, ''
     if not result_text:
         return 5, 'Подготовка запуска обновления'
@@ -2059,12 +1728,13 @@ def _estimate_web_command_progress(command, result_text):
 
 
 def _set_web_command_progress(command, result_text):
-    progress, progress_label = _estimate_web_command_progress(command, result_text)
-    with web_command_lock:
-        web_command_state['result'] = result_text
-        web_command_state['progress'] = progress
-        web_command_state['progress_label'] = progress_label
-        web_command_state['shown_after_finish'] = False
+    _set_command_progress_state(
+        web_command_lock,
+        web_command_state,
+        command,
+        result_text,
+        _estimate_web_command_progress,
+    )
 
 
 def _set_web_flash_message(message):
@@ -2082,15 +1752,15 @@ def _consume_web_flash_message():
 
 
 def _finish_web_command(command, result):
-    with web_command_lock:
-        web_command_state['running'] = False
-        web_command_state['command'] = command
-        web_command_state['label'] = _web_command_label(command)
-        web_command_state['result'] = result
-        web_command_state['progress'] = 100 if command in ('update', 'update_independent', 'update_no_bot') else web_command_state.get('progress', 0)
-        web_command_state['progress_label'] = 'Завершено' if command in ('update', 'update_independent', 'update_no_bot') else ''
-        web_command_state['finished_at'] = time.time()
-        web_command_state['shown_after_finish'] = False
+    _finish_command_state(
+        web_command_lock,
+        web_command_state,
+        command,
+        result,
+        _web_command_label,
+        update_commands=WEB_UPDATE_COMMANDS,
+        finished_progress_label='Завершено',
+    )
 
 
 def _execute_web_command(command):
@@ -2102,23 +1772,21 @@ def _execute_web_command(command):
 
 
 def _start_web_command(command):
-    label = _web_command_label(command)
-    with web_command_lock:
-        if web_command_state['running']:
-            current_label = web_command_state['label'] or web_command_state['command']
-            return False, f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
-        web_command_state['running'] = True
-        web_command_state['command'] = command
-        web_command_state['label'] = label
-        web_command_state['result'] = ''
-        web_command_state['progress'] = 5 if command in ('update', 'update_independent', 'update_no_bot') else 0
-        web_command_state['progress_label'] = 'Подготовка запуска обновления' if command in ('update', 'update_independent', 'update_no_bot') else ''
-        web_command_state['started_at'] = time.time()
-        web_command_state['finished_at'] = 0
-        web_command_state['shown_after_finish'] = False
-    thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
-    thread.start()
-    return True, f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы.'
+    return _start_command_state(
+        web_command_lock,
+        web_command_state,
+        command,
+        _web_command_label,
+        _execute_web_command,
+        update_commands=WEB_UPDATE_COMMANDS,
+        initial_progress_label='Подготовка запуска обновления',
+        already_running_message=lambda current_label: (
+            f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
+        ),
+        started_message=lambda label: (
+            f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы.'
+        ),
+    )
 
 
 def _load_bot_autostart():
@@ -2584,10 +2252,7 @@ def _delete_pool_key(proto, key_value):
     elif was_current:
         _clear_installed_key_for_protocol(proto)
     _save_key_pools(pools)
-    with key_probe_cache_lock:
-        cache = _load_key_probe_cache()
-        cache.pop(_hash_key(key_value), None)
-        _save_key_probe_cache(cache)
+    _forget_key_probes([key_value])
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
 
@@ -2599,11 +2264,7 @@ def _clear_pool(proto):
     if current_key and current_key in removed_keys:
         _clear_installed_key_for_protocol(proto)
     if removed_keys:
-        with key_probe_cache_lock:
-            cache = _load_key_probe_cache()
-            for key_value in removed_keys:
-                cache.pop(_hash_key(key_value), None)
-            _save_key_probe_cache(cache)
+        _forget_key_probes(removed_keys)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     return len(removed_keys)
@@ -3793,164 +3454,12 @@ def _probe_pool_keys_on_page_load():
     return False, 0
 
 
-class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
-    def _request_is_allowed(self):
-        client_ip = self.client_address[0] if self.client_address else ''
-        return _is_local_web_client(client_ip)
-
-    def _ensure_request_allowed(self):
-        if not self._request_is_allowed():
-            self._send_html('<h1>403 Forbidden</h1><p>Web UI is available only from the local network.</p>', status=403)
-            return False
-        return self._ensure_web_auth()
-
-    def _send_unauthorized(self):
-        body = (
-            'Authentication required. Use user "admin" and web_auth_token from '
-            'bot_config.py, or leave web_auth_token empty to disable the password.'
-        ).encode('utf-8')
-        self.send_response(401)
-        self.send_header('WWW-Authenticate', 'Basic realm="bypass_keenetic web"')
-        self.send_header('Content-type', 'text/plain; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(body)
-        self.close_connection = True
-
-    def _ensure_web_auth(self):
-        expected_token = _get_web_auth_token()
-        if not expected_token:
-            return True
-        expected_user = str(getattr(config, 'web_auth_user', 'admin') or 'admin')
-        header = self.headers.get('Authorization', '')
-        if header.lower().startswith('basic '):
-            try:
-                decoded = base64.b64decode(header.split(' ', 1)[1].strip()).decode('utf-8')
-                supplied_user, _, supplied_token = decoded.partition(':')
-                if (
-                    secrets.compare_digest(supplied_user, expected_user) and
-                    secrets.compare_digest(supplied_token, expected_token)
-                ):
-                    return True
-            except Exception:
-                pass
-        self._send_unauthorized()
-        return False
-
-    def _csrf_token_from_cookie(self):
-        cookie_header = self.headers.get('Cookie', '')
-        if not cookie_header:
-            return ''
-        try:
-            cookie = SimpleCookie()
-            cookie.load(cookie_header)
-            token_value = cookie.get(WEB_CSRF_COOKIE)
-            if token_value is None:
-                return ''
-            value = token_value.value.strip()
-            return value if WEB_CSRF_TOKEN_RE.fullmatch(value) else ''
-        except Exception:
-            return ''
-
-    def _get_or_create_csrf_token(self):
-        token_value = self._csrf_token_from_cookie()
-        if not token_value:
-            token_value = secrets.token_urlsafe(32)
-        self._csrf_cookie_token = token_value
-        return token_value
-
-    def _ensure_csrf_allowed(self):
-        supplied = self.headers.get('X-CSRF-Token', '').strip()
-        cookie_token = self._csrf_token_from_cookie()
-        if supplied and cookie_token and secrets.compare_digest(supplied, cookie_token):
-            return True
-        self._send_json({'ok': False, 'error': 'CSRF token is missing or invalid.'}, status=403)
-        return False
-
-    def _send_html(self, html, status=200):
-        body = html.encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
-        csrf_cookie = getattr(self, '_csrf_cookie_token', '')
-        if csrf_cookie:
-            self.send_header('Set-Cookie', f'{WEB_CSRF_COOKIE}={csrf_cookie}; Path=/; HttpOnly; SameSite=Strict')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(body)
-        self.close_connection = True
-
-    def _send_redirect(self, location='/'):
-        self.send_response(303)
-        self.send_header('Location', location)
-        self.send_header('Content-Length', '0')
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.close_connection = True
-
-    def _send_png(self, filepath):
-        try:
-            with open(filepath, 'rb') as f:
-                body = f.read()
-            self.send_response(200)
-            content_type = 'image/png'
-            if body.lstrip().startswith(b'<svg'):
-                content_type = 'image/svg+xml'
-            self.send_header('Content-type', content_type)
-            self.send_header('Content-Length', str(len(body)))
-            self.send_header('Cache-Control', 'public, max-age=86400')
-            self.send_header('Connection', 'close')
-            self.end_headers()
-            self.wfile.write(body)
-        except Exception:
-            self.send_response(404)
-            self.send_header('Content-type', 'text/plain')
-            self.send_header('Content-Length', '9')
-            self.send_header('Connection', 'close')
-            self.end_headers()
-            self.wfile.write(b'Not Found')
-        self.close_connection = True
-
-    def _send_json(self, payload, status=200):
-        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-        self.send_header('Pragma', 'no-cache')
-        self.send_header('Expires', '0')
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(body)
-        self.close_connection = True
-
-    def _wants_json(self):
-        accept = self.headers.get('Accept', '')
-        requested_with = self.headers.get('X-Requested-With', '')
-        return 'application/json' in accept or requested_with == 'fetch'
-
-
-    def _send_action_result(self, result, success=True, extra=None, redirect='/'):
-        if self._wants_json():
-            payload = {
-                'ok': bool(success),
-                'result': result or '',
-                'status': 'ok' if success else 'error',
-            }
-            if extra:
-                payload.update(extra)
-            self._send_json(payload, status=200 if success else 400)
-            return
-        _set_web_flash_message(result)
-        self._send_redirect(redirect)
+class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
+    csrf_error_as_json = True
+    local_client_checker = staticmethod(_is_local_web_client)
+    web_auth_token_getter = staticmethod(_get_web_auth_token)
+    web_auth_user_getter = staticmethod(lambda: str(getattr(config, 'web_auth_user', 'admin') or 'admin'))
+    flash_message_setter = staticmethod(_set_web_flash_message)
 
     def _build_form(self, message=''):
         command_state = _consume_web_command_state_for_render()
