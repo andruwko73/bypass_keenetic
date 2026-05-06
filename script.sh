@@ -534,6 +534,26 @@ activate_runtime_module() {
   chmod 644 "$BOT_RUNTIME_DIR/$module"
 }
 
+install_runtime_modules() {
+  for module in "$@"; do
+    install_runtime_module "$module"
+  done
+}
+
+backup_runtime_modules() {
+  for module in "$@"; do
+    backup_runtime_module "$module"
+  done
+}
+
+activate_runtime_modules() {
+  for module in "$@"; do
+    activate_runtime_module "$module"
+  done
+}
+
+BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_http_common.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_status.py"
+
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     # opkg remove curl mc tor tor-geoip bind-dig cron dnsmasq-full ipset iptables obfs4 shadowsocks-libev-ss-redir shadowsocks-libev-config
@@ -746,15 +766,7 @@ if [ "$1" = "-install" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     curl -o "$BOT_MAIN_PATH" "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/web_bot.py"
     chmod 755 "$BOT_MAIN_PATH"
-    install_runtime_module pool_probe_runner.py
-    install_runtime_module key_pool_store.py
-    install_runtime_module probe_cache.py
-    install_runtime_module custom_checks_store.py
-    install_runtime_module service_catalog.py
-    install_runtime_module web_form_template.py
-    install_runtime_module web_http_common.py
-    install_runtime_module web_command_state.py
-    install_runtime_module unblock_lists.py
+    install_runtime_modules $BOT_RUNTIME_MODULES
     install_static_assets
     ensure_web_only_config
     install_web_only_service
@@ -835,6 +847,9 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
     stage_runtime_module web_command_state.py start_command || exit 1
     stage_runtime_module unblock_lists.py save_unblock_list_file || exit 1
+    stage_runtime_module proxy_key_store.py load_current_keys || exit 1
+    stage_runtime_module proxy_protocols.py proxy_outbound_from_key || exit 1
+    stage_runtime_module proxy_status.py status_snapshot_signature || exit 1
 
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/100-redirect.sh"
@@ -873,15 +888,7 @@ if [ "$1" = "-update" ]; then
     if [ -f "$BOT_MAIN_PATH" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/web_bot.py
     fi
-    backup_runtime_module pool_probe_runner.py
-    backup_runtime_module key_pool_store.py
-    backup_runtime_module probe_cache.py
-    backup_runtime_module custom_checks_store.py
-    backup_runtime_module service_catalog.py
-    backup_runtime_module web_form_template.py
-    backup_runtime_module web_http_common.py
-    backup_runtime_module web_command_state.py
-    backup_runtime_module unblock_lists.py
+    backup_runtime_modules $BOT_RUNTIME_MODULES
     rm -R /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn > /dev/null 2>&1
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
@@ -913,15 +920,7 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     mv "$stage_dir/web_bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
-    activate_runtime_module pool_probe_runner.py
-    activate_runtime_module key_pool_store.py
-    activate_runtime_module probe_cache.py
-    activate_runtime_module custom_checks_store.py
-    activate_runtime_module service_catalog.py
-    activate_runtime_module web_form_template.py
-    activate_runtime_module web_http_common.py
-    activate_runtime_module web_command_state.py
-    activate_runtime_module unblock_lists.py
+    activate_runtime_modules $BOT_RUNTIME_MODULES
     install_static_assets
     ensure_web_only_config
     install_web_only_service
