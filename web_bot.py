@@ -17,10 +17,23 @@ import threading
 import signal
 import traceback
 import gc
-import concurrent.futures
 import tarfile
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+import key_pool_store
+from service_catalog import (
+    CHATGPT_ROUTE_ENTRIES,
+    CLAUDE_ROUTE_ENTRIES,
+    CONNECTIVITY_CHECK_DOMAINS,
+    CUSTOM_CHECK_PRESETS,
+    DISCORD_ROUTE_ENTRIES,
+    GROK_ROUTE_ENTRIES,
+    SERVICE_LIST_SOURCES,
+    TELEGRAM_UNBLOCK_ENTRIES,
+    YOUTUBE_UNBLOCK_ENTRIES,
+)
+from pool_probe_runner import run_pool_probe_worker
+from web_form_template import render_web_form
 
 import base64
 import shutil
@@ -73,223 +86,12 @@ def _save_key_probe_cache(cache):
     os.replace(tmp_path, KEY_PROBE_CACHE_PATH)
 
 
-YOUTUBE_UNBLOCK_ENTRIES = [
-    'youtube.com',
-    'www.youtube.com',
-    'm.youtube.com',
-    'music.youtube.com',
-    'studio.youtube.com',
-    'tv.youtube.com',
-    'kids.youtube.com',
-    'gaming.youtube.com',
-    'youtu.be',
-    'youtube-nocookie.com',
-    'www.youtube-nocookie.com',
-    'youtubeeducation.com',
-    'www.youtubeeducation.com',
-    'youtubei.googleapis.com',
-    'youtube.googleapis.com',
-    'youtubeembeddedplayer.googleapis.com',
-    'youtube-ui.l.google.com',
-    'wide-youtube.l.google.com',
-    'yt-video-upload.l.google.com',
-    'ytimg.com',
-    'i.ytimg.com',
-    's.ytimg.com',
-    'yt3.ggpht.com',
-    'yt3.googleusercontent.com',
-    'ggpht.com',
-    'googlevideo.com',
-    'video.google.com',
-    'jnn-pa.googleapis.com',
-    'play-fe.googleapis.com',
-    'gvt1.com',
-    'gvt2.com',
-]
-
-CHATGPT_ROUTE_ENTRIES = [
-    'chatgpt.com',
-    'chat.openai.com',
-    'ios.chat.openai.com',
-    'android.chat.openai.com',
-    'desktop.chat.openai.com',
-    'api.openai.com',
-    'platform.openai.com',
-    'auth.openai.com',
-    'auth0.openai.com',
-    'setup.auth.openai.com',
-    'openai.com',
-    'cdn.openai.com',
-    'cdn.openaimerge.com',
-    'ct.sendgrid.net',
-    'oaistatic.com',
-    'cdn.oaistatic.com',
-    'oaiusercontent.com',
-    'files.oaiusercontent.com',
-    'featuregates.org',
-    'featureassets.org',
-    'statsig.com',
-    'events.statsigapi.net',
-    'intercom.io',
-    'intercomcdn.com',
-    'js.intercomcdn.com',
-    'cdn.workos.com',
-    'forwarder.workos.com',
-    'images.workoscdn.com',
-    'setup.workos.com',
-    'challenges.cloudflare.com',
-    'js.stripe.com',
-    'prodregistryv2.org',
-    'rum.browser-intake-datadoghq.com',
-    'o207216.ingest.sentry.io',
-    'o33249.ingest.sentry.io',
-]
-
-CLAUDE_ROUTE_ENTRIES = [
-    'claude.ai',
-    'claude.com',
-    'platform.claude.com',
-    'api.anthropic.com',
-    'console.anthropic.com',
-    'anthropic.com',
-    'www.anthropic.com',
-    'statsig.anthropic.com',
-]
-
-GROK_ROUTE_ENTRIES = [
-    'grok.com',
-    'x.ai',
-    'x.com',
-    'api.x.com',
-    'twitter.com',
-    'api.twitter.com',
-    't.co',
-    'twimg.com',
-    'pbs.twimg.com',
-    'video.twimg.com',
-    'abs.twimg.com',
-    'ton.twimg.com',
-]
-
-DISCORD_ROUTE_ENTRIES = [
-    'discord.com',
-    'discordapp.com',
-    'discord.gg',
-    'gateway.discord.gg',
-    'cdn.discordapp.com',
-    'cdn.discordapp.net',
-    'media.discordapp.net',
-    'images-ext-1.discordapp.net',
-]
 
 
-CUSTOM_CHECK_PRESETS = [
-    {
-        'id': 'chatgpt_services',
-        'label': 'ChatGPT',
-        'url': 'https://chatgpt.com',
-        'urls': [
-            'https://chatgpt.com',
-            'https://chatgpt.com/codex',
-            'https://api.openai.com',
-        ],
-        'routes': CHATGPT_ROUTE_ENTRIES,
-        'badge': 'GPT',
-        'icon': 'chatgpt',
-    },
-    {
-        'id': 'claude',
-        'label': 'Claude',
-        'url': 'https://claude.ai',
-        'urls': ['https://claude.ai', 'https://api.anthropic.com'],
-        'routes': CLAUDE_ROUTE_ENTRIES,
-        'badge': 'CL',
-        'icon': 'claude',
-    },
-    {
-        'id': 'gemini',
-        'label': 'Gemini',
-        'url': 'https://gemini.google.com',
-        'urls': ['https://gemini.google.com', 'https://generativelanguage.googleapis.com'],
-        'routes': ['gemini.google.com', 'generativelanguage.googleapis.com', 'ai.google.dev', 'aistudio.google.com'],
-        'badge': 'GM',
-        'icon': 'gemini',
-    },
-    {
-        'id': 'copilot',
-        'label': 'Copilot',
-        'url': 'https://copilot.microsoft.com',
-        'routes': ['copilot.microsoft.com', 'bing.com', 'www.bing.com', 'edgeservices.bing.com', 'sydney.bing.com'],
-        'badge': 'CP',
-        'icon': 'copilot',
-    },
-    {
-        'id': 'perplexity',
-        'label': 'Perplexity',
-        'url': 'https://www.perplexity.ai',
-        'routes': ['perplexity.ai', 'www.perplexity.ai', 'api.perplexity.ai'],
-        'badge': 'PX',
-        'icon': 'perplexity',
-    },
-    {
-        'id': 'grok',
-        'label': 'Grok',
-        'url': 'https://grok.com',
-        'urls': ['https://grok.com', 'https://x.ai', 'https://x.com', 'https://twitter.com'],
-        'routes': GROK_ROUTE_ENTRIES,
-        'badge': 'GX',
-        'icon': 'grok',
-    },
-    {
-        'id': 'deepseek',
-        'label': 'DeepSeek',
-        'url': 'https://chat.deepseek.com',
-        'urls': ['https://chat.deepseek.com', 'https://api.deepseek.com'],
-        'routes': ['deepseek.com', 'chat.deepseek.com', 'api.deepseek.com'],
-        'badge': 'DS',
-        'icon': 'deepseek',
-    },
-    {
-        'id': 'discord',
-        'label': 'Discord',
-        'url': 'https://discord.com',
-        'urls': [
-            'https://discord.com',
-            'https://discordapp.com',
-            'https://gateway.discord.gg',
-            'https://cdn.discordapp.com',
-        ],
-        'routes': DISCORD_ROUTE_ENTRIES,
-        'badge': 'DC',
-        'icon': 'discord',
-    },
-    {
-        'id': 'meta_ai',
-        'label': 'Meta AI',
-        'url': 'https://www.meta.ai',
-        'urls': ['https://www.meta.ai', 'https://ai.meta.com'],
-        'routes': ['meta.ai', 'www.meta.ai', 'ai.meta.com', 'meta.com'],
-        'badge': 'MA',
-        'icon': 'meta',
-    },
-    {
-        'id': 'instagram',
-        'label': 'Instagram',
-        'url': 'https://www.instagram.com',
-        'routes': ['instagram.com', 'www.instagram.com', 'cdninstagram.com'],
-        'badge': 'IG',
-        'icon': 'instagram',
-    },
-    {
-        'id': 'facebook',
-        'label': 'Facebook',
-        'url': 'https://www.facebook.com',
-        'urls': ['https://www.facebook.com', 'https://graph.facebook.com'],
-        'routes': ['facebook.com', 'www.facebook.com', 'graph.facebook.com', 'fbcdn.net'],
-        'badge': 'FB',
-        'icon': 'facebook',
-    },
-]
+
+
+
+
 CUSTOM_CHECK_MAX = 12
 CUSTOM_CHECK_REMOVED_IDS = {'mistral'}
 
@@ -559,7 +361,6 @@ def _key_probe_has_required_results(entry, custom_checks=None):
 
 TELEGRAM_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjI1NiIgY3k9IjI1NiIgcj0iMjU2IiBmaWxsPSIjMzdBRUUyIi8+PHBhdGggZD0iTTExOSAyNjVsMjY1LTEwNGMxMi01IDIzIDMgMTkgMTlsLTQ1IDIxMmMtMyAxMy0xMiAxNi0yNCAxMGwtNjYtNDktMzIgMzFjLTQgNC03IDctMTUgN2w2LTg1IDE1NS0xNDBjNy02LTItMTAtMTEtNGwtMTkyIDEyMS04My0yNmMtMTgtNi0xOC0xOCA0LTI2eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg=='
 YOUTUBE_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA0NDMgMzIwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxyZWN0IHdpZHRoPSI0NDMiIGhlaWdodD0iMzIwIiByeD0iNzAiIGZpbGw9IiNGRjAwMDAiLz48cG9seWdvbiBwb2ludHM9IjE3Nyw5NiAzNTUsMTYwIDE3NywyMjQiIGZpbGw9IiNmZmYiLz48L3N2Zz4='
-CHATGPT_ICON_B64 = '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'
 
 
 def _telegram_icon_html(opacity=1.0):
@@ -593,40 +394,19 @@ def _service_icon_html(icon, alt, opacity=1.0, size=18):
     return f'<img class="service-icon-img" src="{src}" width="{size}" height="{size}" alt="{safe_alt}" style="{style}">'
 
 def _load_key_pools():
-    try:
-        with open(KEY_POOLS_PATH, 'r', encoding='utf-8') as f:
-            value = json.load(f)
-        if isinstance(value, dict):
-            return _normalize_key_pools(value)
-    except Exception:
-        pass
-    return {proto: [] for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']}
+    return key_pool_store.load_key_pools(KEY_POOLS_PATH)
 
 
 def _dedupe_key_list(keys):
-    result = []
-    seen = set()
-    for key_value in keys or []:
-        key_value = str(key_value or '').strip()
-        if not key_value or key_value in seen:
-            continue
-        seen.add(key_value)
-        result.append(key_value)
-    return result
+    return key_pool_store.dedupe_key_list(keys)
 
 
 def _normalize_key_pools(pools):
-    normalized = {}
-    for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-        normalized[proto] = _dedupe_key_list((pools or {}).get(proto, []))
-    return normalized
+    return key_pool_store.normalize_key_pools(pools)
 
 
 def _save_key_pools(pools):
-    pools = _normalize_key_pools(pools)
-    os.makedirs(os.path.dirname(KEY_POOLS_PATH), exist_ok=True)
-    with open(KEY_POOLS_PATH, 'w', encoding='utf-8') as f:
-        json.dump(pools, f, ensure_ascii=False, indent=2)
+    return key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
 
 
 def _fetch_keys_from_subscription(url):
@@ -661,12 +441,7 @@ def _fetch_keys_from_subscription(url):
 
 
 def _set_active_key(proto, key):
-    pools = _load_key_pools()
-    keys = _dedupe_key_list(pools.get(proto, []) or [])
-    if key in keys:
-        keys.remove(key)
-    keys.insert(0, key)
-    pools[proto] = keys
+    pools = key_pool_store.set_active_key(_load_key_pools(), proto, key)
     _save_key_pools(pools)
 
 
@@ -701,8 +476,8 @@ def _attempt_auto_failover():
         return
 
     proxy_url = proxy_settings.get(proxy_mode)
-    yt_ok, yt_message = _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=4, read_timeout=6)
-    if yt_ok:
+    ok, probe_message = _check_telegram_api_through_proxy(proxy_url, connect_timeout=4, read_timeout=6)
+    if ok:
         auto_failover_state['last_ok'] = now
         auto_failover_state['last_fail'] = 0.0
         return
@@ -733,98 +508,27 @@ def _attempt_auto_failover():
             _write_runtime_log('Auto-failover: ключей в пулах нет, переключать не на что.')
             return
 
-        _write_runtime_log(f'Auto-failover: YouTube недоступен через прокси >{AUTO_FAILOVER_GRACE_SECONDS}s (режим {proxy_mode}). Пробуем ключи из пулов.')
-        for proto, key_value in candidates:
+        _write_runtime_log(
+            f'Auto-failover: Telegram API не отвечает >{AUTO_FAILOVER_GRACE_SECONDS}s '
+            f'(режим {proxy_mode}). Проверяем кандидатов через временный xray.'
+        )
+        candidate = _find_pool_failover_candidate(candidates, service='telegram')
+        if candidate:
+            proto, key_value, tg_ok, yt_ok = candidate
             try:
-                result = _install_key_for_protocol(proto, key_value)
+                result = _install_key_for_protocol(proto, key_value, verify=False)
             except Exception as exc:
                 _write_runtime_log(f'Auto-failover: ошибка установки {proto} ключа: {exc}')
-                continue
-
-            proxy_url = proxy_settings.get(proto)
-            yt_ok2, _ = _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=6, read_timeout=10)
-            if yt_ok2:
-                tg_ok, _ = _check_telegram_api_through_proxy(proxy_url, connect_timeout=3, read_timeout=5)
-                update_proxy(proto)
-                _set_active_key(proto, key_value)
-                _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=True)
-                auto_failover_state['last_ok'] = time.time()
-                auto_failover_state['last_fail'] = 0.0
-                _write_runtime_log(f'Auto-failover: переключено на {proto}; YouTube доступен через прокси. {result}')
                 return
-
-        _write_runtime_log('Auto-failover: перебор ключей из пулов не дал доступа к YouTube.')
-    finally:
-        auto_failover_state['in_progress'] = False
-
-
-def _attempt_auto_failover():
-    now = time.time()
-    if globals().get('pool_probe_lock') and pool_probe_lock.locked():
-        return
-    if auto_failover_state['in_progress']:
-        return
-    if (auto_failover_state['last_attempt'] and
-            now - auto_failover_state['last_attempt'] < AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS):
-        return
-
-    proxy_url = proxy_settings.get(proxy_mode)
-    yt_ok, _ = _check_http_through_proxy(
-        proxy_url,
-        url='https://www.youtube.com',
-        connect_timeout=4,
-        read_timeout=6,
-    )
-    if yt_ok:
-        auto_failover_state['last_ok'] = now
-        auto_failover_state['last_fail'] = 0.0
-        return
-
-    if not auto_failover_state['last_fail']:
-        auto_failover_state['last_fail'] = now
-    if now - auto_failover_state['last_fail'] < AUTO_FAILOVER_GRACE_SECONDS:
-        return
-
-    auto_failover_state['in_progress'] = True
-    auto_failover_state['last_attempt'] = now
-    try:
-        current_keys = _load_current_keys()
-        active_key = (current_keys.get(proxy_mode) or '').strip()
-        pools = _load_key_pools()
-        candidates = []
-        for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-            for key_value in pools.get(proto, []) or []:
-                key_value = (key_value or '').strip()
-                if not key_value:
-                    continue
-                if proto == proxy_mode and key_value == active_key:
-                    continue
-                candidates.append((proto, key_value))
-        if not candidates:
-            _write_runtime_log('Auto-failover: no pool keys available for switching.')
+            update_proxy(proto)
+            _set_active_key(proto, key_value)
+            _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
+            auto_failover_state['last_ok'] = time.time()
+            auto_failover_state['last_fail'] = 0.0
+            _write_runtime_log(f'Auto-failover: переключено на {proto}; Telegram API доступен. {result}')
             return
 
-        _write_runtime_log(
-            f'Auto-failover: YouTube unavailable for >{AUTO_FAILOVER_GRACE_SECONDS}s '
-            f'(mode {proxy_mode}). Checking candidates through temporary xray.'
-        )
-        candidate = _find_pool_failover_candidate(candidates, service='youtube')
-        if not candidate:
-            _write_runtime_log('Auto-failover: temporary xray checks found no YouTube-capable key.')
-            return
-
-        proto, key_value, tg_ok, yt_ok = candidate
-        try:
-            result = _install_key_for_protocol(proto, key_value, verify=False)
-        except Exception as exc:
-            _write_runtime_log(f'Auto-failover: failed to install {proto} key: {exc}')
-            return
-        update_proxy(proto)
-        _set_active_key(proto, key_value)
-        _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
-        auto_failover_state['last_ok'] = time.time()
-        auto_failover_state['last_fail'] = 0.0
-        _write_runtime_log(f'Auto-failover: switched to {proto}; YouTube is reachable. {result}')
+        _write_runtime_log('Auto-failover: перебор ключей из пулов не дал доступа к Telegram API.')
     finally:
         auto_failover_state['in_progress'] = False
 
@@ -900,19 +604,18 @@ POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
     getattr(config, 'pool_probe_batch_timeout_seconds', POOL_PROBE_SINGLE_TIMEOUT_SECONDS + 5.0)
 )
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
-APP_BRANCH_LABEL = 'feature/web-only'
+APP_BRANCH_LABEL = 'codex/web-only-v1'
 APP_BRANCH_DESCRIPTION = 'без Telegram бота'
-APP_VERSION_COUNTER = 435
+APP_VERSION_COUNTER = '1.01'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
+APP_MODE_LABEL = 'Режим прокси'
+APP_MODE_NOUN = 'режим прокси'
+APP_START_IDLE_LABEL = 'Запустить прокси'
+APP_START_REPEAT_LABEL = 'Повторить запуск прокси'
+APP_START_RESULT = 'Команда запуска принята. Прокси-сервисы запущены.'
+APP_QUICK_START_NOTE = 'После установки ключей можно сразу запустить или перезапустить прокси-сервисы.'
+APP_PROXY_USER_LABEL = 'Прокси-сервис'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
-CONNECTIVITY_CHECK_DOMAINS = [
-    'full:connectivitycheck.gstatic.com',
-    'full:connectivitycheck.android.com',
-    'full:clients3.google.com',
-    'full:clients4.google.com',
-    'full:www.google.com',
-    'full:www.gstatic.com',
-]
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
 STATIC_DIR = os.path.join(BOT_DIR, 'static')
 README_PATH = os.path.join(BOT_DIR, 'README.md')
@@ -1028,7 +731,7 @@ def _resolve_web_bind_host():
 
 
 def _raw_github_url(path):
-    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/main/{path}?ts={int(time.time())}'
+    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/{APP_BRANCH_LABEL}/{path}?ts={int(time.time())}'
 
 
 def _fetch_remote_text(url, timeout=20):
@@ -1044,80 +747,8 @@ SOCIALNET_LOCAL_PATHS = [
     '/opt/etc/unblock/socialnet.txt',
 ]
 
-TELEGRAM_UNBLOCK_ENTRIES = [
-    '91.108.56.0/22',
-    '91.108.4.0/22',
-    '91.108.8.0/22',
-    '91.108.16.0/22',
-    '91.108.12.0/22',
-    '149.154.160.0/20',
-    '91.105.192.0/23',
-    '91.108.20.0/22',
-    '185.76.151.0/24',
-    '5.28.192.0/21',
-    '95.161.64.0/20',
-    'api.telegram.org',
-    'web.telegram.org',
-    'my.telegram.org',
-    't.me',
-    'tx.me',
-    'telegra.ph',
-    'graph.org',
-    'telegram.org',
-    'telegram.me',
-    'telegram.dog',
-    'telegram-cdn.org',
-    'telegramapp.org',
-    'telegramdownload.com',
-    'cdn-telegram.org',
-    'telesco.pe',
-    'comments.app',
-    'contest.com',
-    'fragment.com',
-    'quiz.directory',
-    'tg.dev',
-    'tg.org',
-    'tgram.org',
-    'tdesktop.com',
-    'teleg.xyz',
-    'telega.one',
-]
 
 
-SERVICE_LIST_SOURCES = {
-    'youtube': {
-        'label': 'YouTube',
-        'aliases': ['youtube', 'yt', 'ютуб'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/youtube.lst',
-        'entries': YOUTUBE_UNBLOCK_ENTRIES,
-    },
-    'telegram': {
-        'label': 'Telegram',
-        'aliases': ['telegram', 'tg', 'телеграм', 'телега'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst',
-        'entries': TELEGRAM_UNBLOCK_ENTRIES,
-    },
-    'meta': {
-        'label': 'Instagram / Meta',
-        'aliases': ['meta', 'instagram', 'insta', 'facebook', 'whatsapp', 'threads', 'инстаграм'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/meta.lst',
-    },
-    'discord': {
-        'label': 'Discord',
-        'aliases': ['discord', 'дискорд'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst',
-    },
-    'tiktok': {
-        'label': 'TikTok',
-        'aliases': ['tiktok', 'tik-tok', 'тик ток', 'тикток'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/tiktok.lst',
-    },
-    'twitter': {
-        'label': 'X / Twitter',
-        'aliases': ['twitter', 'x', 'твиттер'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/twitter.lst',
-    },
-}
 
 SOCIALNET_SERVICE_KEYS = ('youtube', 'telegram', 'meta', 'discord', 'tiktok', 'twitter')
 SOCIALNET_ALL_KEY = 'all'
@@ -1386,7 +1017,7 @@ def _ensure_legacy_bot_paths():
             except Exception:
                 notes.append(f'не удалось подготовить {legacy_path}')
     if not notes:
-        return 'Legacy-пути web-only уже доступны.'
+        return 'Legacy-пути уже доступны.'
     return 'Подготовка legacy-путей: ' + ', '.join(notes)
 
 
@@ -1607,54 +1238,6 @@ def _append_entries_to_unblock_list(list_name, entries):
 
 
 
-def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
-    headers = {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
-    raw_url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/{path}'
-    try:
-        response = session.get(raw_url, headers=headers, timeout=(10, 30))
-        response.raise_for_status()
-        return raw_url, response.text
-    except requests.RequestException:
-        pass
-
-    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{quote(path, safe="/")}'
-    response = session.get(
-        api_url,
-        params={'ref': repo_ref},
-        headers={'Accept': 'application/vnd.github+json', **headers},
-        timeout=(10, 30),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get('encoding') != 'base64' or 'content' not in payload:
-        raise ValueError('GitHub contents API returned unexpected file payload')
-    content = ''.join(str(payload.get('content', '')).split())
-    return response.url, base64.b64decode(content).decode('utf-8')
-
-
-def _download_repo_script(repo_owner, repo_name, branch='main'):
-    session = requests.Session()
-    session.trust_env = False
-    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{quote(branch, safe="")}'
-    api_response = session.get(
-        api_url,
-        headers={'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
-        timeout=(10, 30),
-    )
-    api_response.raise_for_status()
-    repo_ref = str(api_response.json().get('sha', '')).strip()
-    if not repo_ref:
-        raise ValueError('GitHub не вернул commit SHA для script.sh')
-
-    url, script_text = _download_repo_file_text(session, repo_owner, repo_name, repo_ref, 'script.sh')
-    if '#!/bin/sh' not in script_text:
-        raise ValueError('GitHub вернул некорректный script.sh')
-    with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
-        file.write(script_text)
-    os.chmod('/opt/root/script.sh', stat.S_IRWXU)
-    return url, script_text, repo_ref
-
-
 def _download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, path):
     archive_ref = repo_ref if '/' not in repo_ref else f'refs/heads/{repo_ref}'
     archive_url = f'https://codeload.github.com/{repo_owner}/{repo_name}/tar.gz/{archive_ref}'
@@ -1701,7 +1284,7 @@ def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
     return response.url, base64.b64decode(content).decode('utf-8')
 
 
-def _download_repo_script(repo_owner, repo_name, branch='main'):
+def _download_repo_script(repo_owner, repo_name, branch='codex/main-v1'):
     session = requests.Session()
     session.trust_env = False
     url, script_text = _download_repo_file_text(session, repo_owner, repo_name, branch, 'script.sh')
@@ -1720,7 +1303,7 @@ def _build_direct_fetch_env():
     return env
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main',
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='codex/main-v1',
                        cleanup_web_only=False):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _build_direct_fetch_env()
@@ -1831,7 +1414,7 @@ def _run_web_command(command):
             'andruwko73',
             'bypass_keenetic',
             progress_command='update_independent',
-            branch='feature/independent-rework',
+            branch='codex/independent-v1',
         )
         return output
     if command == 'update_no_bot':
@@ -1840,7 +1423,7 @@ def _run_web_command(command):
             'andruwko73',
             'bypass_keenetic',
             progress_command='update_no_bot',
-            branch='feature/web-only',
+            branch='codex/web-only-v1',
             cleanup_web_only=True,
         )
         return output
@@ -2064,19 +1647,7 @@ def _load_current_keys():
 
 def _ensure_current_keys_in_pools(current_keys=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
-    pools = _load_key_pools()
-    changed = False
-    for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-        key_value = (current_keys.get(proto) or '').strip()
-        keys = _dedupe_key_list(pools.get(proto, []) or [])
-        original_keys = list(keys)
-        if key_value:
-            keys = [candidate for candidate in keys if candidate != key_value]
-            keys.insert(0, key_value)
-        pools[proto] = keys
-        if keys == original_keys:
-            continue
-        changed = True
+    pools, changed = key_pool_store.ensure_current_keys_in_pools(_load_key_pools(), current_keys)
     if changed:
         _save_key_pools(pools)
     return pools
@@ -2255,7 +1826,7 @@ def _protocol_status_for_key(key_name, key_value):
         return {
             'tone': 'fail',
             'label': 'Не работает',
-            'details': f'{endpoint_message} Прокси-сервис не может использовать этот ключ.',
+            'details': f'{endpoint_message} {APP_PROXY_USER_LABEL} не может использовать этот ключ.',
         }
 
     if _key_requires_xray(key_name, key_value) and _core_proxy_runtime_name() != 'xray':
@@ -2536,7 +2107,7 @@ def _start_web_command(command):
         web_command_state['shown_after_finish'] = False
     thread = threading.Thread(target=_execute_web_command, args=(command,), daemon=True)
     thread.start()
-    return True, f'⏳ Команда "{label}" запущена. Страница обновится автоматически.'
+    return True, f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы.'
 
 
 def _load_bot_autostart():
@@ -2944,7 +2515,7 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
 
 
 def _pool_keys_for_proto(proto):
-    pools = _load_key_pools()
+    pools = _ensure_current_keys_in_pools()
     return list(pools.get(proto, []) or [])
 
 
@@ -2989,21 +2560,18 @@ def _clear_installed_key_for_protocol(proto):
 
 
 def _delete_pool_key(proto, key_value):
-    pools = _load_key_pools()
-    keys = _dedupe_key_list(pools.get(proto, []) or [])
-    if key_value not in keys:
-        raise ValueError('Ключ не найден в пуле.')
+    pools, removed = key_pool_store.delete_pool_key(_load_key_pools(), proto, key_value)
+    if not removed:
+        raise ValueError('\u041a\u043b\u044e\u0447 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0432 \u043f\u0443\u043b\u0435.')
     current_key = (_load_current_keys().get(proto) or '').strip()
     was_current = bool(current_key and current_key == key_value)
-    keys = [candidate for candidate in keys if candidate != key_value]
+    keys = _dedupe_key_list(pools.get(proto, []) or [])
     promoted_key = keys[0] if was_current and keys else ''
     if promoted_key:
         _install_key_for_protocol(proto, promoted_key, verify=False)
-        keys = [candidate for candidate in keys if candidate != promoted_key]
-        keys.insert(0, promoted_key)
+        pools = key_pool_store.set_active_key(pools, proto, promoted_key)
     elif was_current:
         _clear_installed_key_for_protocol(proto)
-    pools[proto] = keys
     _save_key_pools(pools)
     with key_probe_cache_lock:
         cache = _load_key_probe_cache()
@@ -3014,9 +2582,7 @@ def _delete_pool_key(proto, key_value):
 
 
 def _clear_pool(proto):
-    pools = _load_key_pools()
-    removed_keys = _dedupe_key_list(pools.get(proto, []) or [])
-    pools[proto] = []
+    pools, removed_keys = key_pool_store.clear_pool(_load_key_pools(), proto)
     _save_key_pools(pools)
     current_key = (_load_current_keys().get(proto) or '').strip()
     if current_key and current_key in removed_keys:
@@ -3396,7 +2962,7 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
                 _pool_probe_outbound(proto, key_value, 'proxy-failover-validate')
                 valid_batch.append((proto, key_value))
             except Exception as exc:
-                _write_runtime_log(f'Auto-failover: key {proto} is not probeable: {exc}')
+                _write_runtime_log(f'Auto-failover: ключ {proto} не подготовлен для проверки: {exc}')
         if not valid_batch:
             continue
 
@@ -3408,8 +2974,8 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
                 port = str(int(POOL_PROBE_TEST_PORT) + offset)
                 if not _wait_for_socks5_handshake(port, timeout=6):
                     _write_runtime_log(
-                        f'Auto-failover: test SOCKS port {port} did not start for {_pool_proto_label(proto)}; '
-                        'the previous key status was left unchanged.'
+                        f'Auto-failover: тестовый SOCKS-порт {port} не поднялся для {_pool_proto_label(proto)}; '
+                        'прежний статус ключа оставлен без изменений.'
                     )
                     continue
                 proxy_url = f'socks5h://127.0.0.1:{port}'
@@ -3443,7 +3009,7 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
                 if primary_ok:
                     return proto, key_value, tg_ok, yt_ok
         except Exception as exc:
-            _write_runtime_log(f'Auto-failover: temporary xray candidate check failed: {exc}')
+            _write_runtime_log(f'Auto-failover: ошибка проверки кандидатов через временный xray: {exc}')
         finally:
             _stop_pool_probe_xray(process, config_path)
             _cleanup_pool_probe_runtime(kill_processes=True)
@@ -3536,6 +3102,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
         return False, 0
     if not pool_probe_lock.acquire(blocking=False):
         return False, len(selected)
+
     _set_pool_probe_progress(
         running=True,
         checked=0,
@@ -3544,140 +3111,54 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
         started_at=time.time(),
         finished_at=0,
     )
+
+    def invalidate_probe_status():
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+
     def worker(probe_tasks, checks):
+        checked = 0
+        total = len(probe_tasks)
         try:
-            total = len(probe_tasks)
-            checked = 0
-            marked_tasks = set()
-
-            def mark_checked(proto, key_value):
-                nonlocal checked
-                task_key = (proto, _hash_key(key_value))
-                if task_key in marked_tasks:
-                    return
-                marked_tasks.add(task_key)
-                checked += 1
-                _set_pool_probe_progress(checked=checked)
-
-            while probe_tasks:
-                available_kb = _available_memory_kb()
-                if available_kb is not None and available_kb < POOL_PROBE_MIN_AVAILABLE_KB:
-                    _write_runtime_log(
-                        f'Проверка пула остановлена: свободной памяти {available_kb} KB, '
-                        f'порог {POOL_PROBE_MIN_AVAILABLE_KB} KB.'
-                    )
-                    break
-                raw_batch = probe_tasks[:POOL_PROBE_BATCH_SIZE]
-                del probe_tasks[:POOL_PROBE_BATCH_SIZE]
-                valid_batch = []
-                for proto, key_value in raw_batch:
-                    try:
-                        _pool_probe_outbound(proto, key_value, 'proxy-pool-probe-validate')
-                        valid_batch.append((proto, key_value))
-                    except Exception as exc:
-                        _write_runtime_log(f'Ошибка подготовки ключа из пула {_pool_proto_label(proto)}: {exc}')
-                        _record_key_probe(
-                            proto,
-                            key_value,
-                            tg_ok=False,
-                            yt_ok=False,
-                            custom=_failed_custom_probe_results(checks),
-                        )
-                        mark_checked(proto, key_value)
-                if not valid_batch:
-                    continue
-                process = None
-                config_path = None
-                try:
-                    process, config_path = _start_pool_probe_xray(_build_pool_probe_core_config_batch(valid_batch))
-                    ready_batch = []
-                    for offset, (proto, key_value) in enumerate(valid_batch):
-                        port = str(int(POOL_PROBE_TEST_PORT) + offset)
-                        if not _wait_for_socks5_handshake(port, timeout=6):
-                            _write_runtime_log(f'Тестовый SOCKS-порт {port} не поднялся для {_pool_proto_label(proto)}.')
-                            mark_checked(proto, key_value)
-                            continue
-                        ready_batch.append((offset, proto, key_value))
-                    if not ready_batch:
-                        raise RuntimeError('Тестовые SOCKS-порты не поднялись.')
-                    max_workers = min(POOL_PROBE_CONCURRENCY, len(ready_batch))
-                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-                    future_map = {}
-                    try:
-                        for offset, proto, key_value in ready_batch:
-                            port = str(int(POOL_PROBE_TEST_PORT) + offset)
-                            proxy_url = f'socks5h://127.0.0.1:{port}'
-                            future = executor.submit(
-                                _check_pool_key_through_proxy,
-                                proto,
-                                key_value,
-                                checks,
-                                proxy_url,
-                            )
-                            future_map[future] = (proto, key_value)
-                        batch_timeout = _pool_probe_timeout_budget(
-                            checks,
-                            task_count=len(ready_batch),
-                            workers=max_workers,
-                        )
-                        done, pending = concurrent.futures.wait(
-                            future_map,
-                            timeout=batch_timeout,
-                        )
-                        for future in done:
-                            proto, key_value = future_map[future]
-                            try:
-                                future.result()
-                            except Exception as exc:
-                                _write_runtime_log(f'Ошибка проверки ключа из пула {_pool_proto_label(proto)}: {exc}')
-                                _record_key_probe(
-                                    proto,
-                                    key_value,
-                                    tg_ok=False,
-                                    yt_ok=False,
-                                    custom=_failed_custom_probe_results(checks),
-                                )
-                            finally:
-                                mark_checked(proto, key_value)
-                                _invalidate_web_status_cache()
-                                _invalidate_key_status_cache()
-                                gc.collect()
-                        for future in pending:
-                            proto, key_value = future_map[future]
-                            future.cancel()
-                            _write_runtime_log(
-                                f'Проверка ключа из пула {_pool_proto_label(proto)} превысила лимит '
-                                f'{batch_timeout:g} сек.; прежний статус оставлен без изменений.'
-                            )
-                            mark_checked(proto, key_value)
-                            _invalidate_web_status_cache()
-                            _invalidate_key_status_cache()
-                            gc.collect()
-                    finally:
-                        try:
-                            executor.shutdown(wait=False, cancel_futures=True)
-                        except TypeError:
-                            executor.shutdown(wait=False)
-                except Exception as exc:
-                    _write_runtime_log(f'Ошибка проверки пачки ключей из пула: {exc}')
-                    for proto, key_value in valid_batch:
-                        mark_checked(proto, key_value)
-                finally:
-                    _stop_pool_probe_xray(process, config_path)
-                    _cleanup_pool_probe_runtime(kill_processes=True)
-                    _invalidate_web_status_cache()
-                    _invalidate_key_status_cache()
-                    del raw_batch
-                    del valid_batch
-                    gc.collect()
-                if checked < total and probe_tasks:
-                    time.sleep(POOL_PROBE_DELAY_SECONDS)
-        except Exception as exc:
-            _write_runtime_log(f'Ошибка фоновой проверки пула ключей: {exc}')
+            checked, total = run_pool_probe_worker(
+                probe_tasks,
+                checks,
+                batch_size=POOL_PROBE_BATCH_SIZE,
+                concurrency=POOL_PROBE_CONCURRENCY,
+                delay_seconds=POOL_PROBE_DELAY_SECONDS,
+                min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
+                test_port=POOL_PROBE_TEST_PORT,
+                available_memory_kb=_available_memory_kb,
+                log=_write_runtime_log,
+                proto_label=_pool_proto_label,
+                hash_key=_hash_key,
+                set_checked=lambda value: _set_pool_probe_progress(checked=value),
+                validate_outbound=lambda proto, key_value: _pool_probe_outbound(
+                    proto,
+                    key_value,
+                    'proxy-pool-probe-validate',
+                ),
+                failed_custom_results=_failed_custom_probe_results,
+                record_key_probe=_record_key_probe,
+                start_xray_for_batch=lambda valid_batch: _start_pool_probe_xray(
+                    _build_pool_probe_core_config_batch(valid_batch)
+                ),
+                wait_for_socks5=_wait_for_socks5_handshake,
+                check_pool_key=_check_pool_key_through_proxy,
+                timeout_budget=_pool_probe_timeout_budget,
+                stop_xray=_stop_pool_probe_xray,
+                cleanup_runtime=_cleanup_pool_probe_runtime,
+                invalidate_caches=invalidate_probe_status,
+            )
         finally:
-            _invalidate_web_status_cache()
-            _invalidate_key_status_cache()
-            _set_pool_probe_progress(running=False, checked=checked, total=total, scope=scope, finished_at=time.time())
+            invalidate_probe_status()
+            _set_pool_probe_progress(
+                running=False,
+                checked=checked,
+                total=total,
+                scope=scope,
+                finished_at=time.time(),
+            )
             pool_probe_lock.release()
             gc.collect()
 
@@ -3699,15 +3180,7 @@ def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, sta
 
 
 def _add_keys_to_pool(proto, keys_text):
-    pools = _load_key_pools()
-    if proto not in pools:
-        pools[proto] = []
-    new_keys = [line.strip() for line in (keys_text or '').splitlines() if line.strip()]
-    added_keys = []
-    for key_value in new_keys:
-        if key_value not in pools[proto]:
-            pools[proto].append(key_value)
-            added_keys.append(key_value)
+    pools, added_keys = key_pool_store.add_keys_to_pool(_load_key_pools(), proto, keys_text)
     _save_key_pools(pools)
     _probe_pool_keys_background(proto, added_keys)
     _invalidate_web_status_cache()
@@ -3961,17 +3434,17 @@ def _apply_installed_proxy(key_type, key_value, verify=True):
     restart_cmd = current['restart_cmds'][-1]
     if not _ensure_service_port(current['port'], restart_cmd, retries=2, sleep_after_restart=5):
         return (f'⚠️ {current["label"]} ключ сохранён, но локальный порт 127.0.0.1:{current["port"]} '
-                f'не поднялся. Текущий режим прокси {active_label} сохранён. {diagnostics}').strip()
+                f'не поднялся. Текущий {APP_MODE_NOUN} {active_label} сохранён. {diagnostics}').strip()
 
     endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_type, current['port'])
     if not endpoint_ok:
         return (f'⚠️ {current["label"]} ключ сохранён, но {endpoint_message} '
-                f'Текущий режим прокси {active_label} сохранён. {diagnostics}').strip()
+                f'Текущий {APP_MODE_NOUN} {active_label} сохранён. {diagnostics}').strip()
 
     if not verify:
         return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
                 'Проверка Telegram API и YouTube выполняется в фоне; '
-                f'статус обновится без перезагрузки страницы. Текущий режим прокси {active_label} сохранён.').strip()
+                f'статус обновится без перезагрузки страницы. Текущий {APP_MODE_NOUN} {active_label} сохранён.').strip()
 
     api_ok, api_probe_message = _check_telegram_api_through_proxy(
         proxy_settings.get(key_type),
@@ -3983,10 +3456,10 @@ def _apply_installed_proxy(key_type, key_value, verify=True):
     if api_ok:
         return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
                 f'Доступ к Telegram API через этот ключ подтверждён. '
-                f'Текущий режим прокси {active_label} сохранён.').strip()
+                f'Текущий {APP_MODE_NOUN} {active_label} сохранён.').strip()
     return (f'⚠️ {current["label"]} ключ сохранён. {endpoint_message} '
             f'Но Telegram API не проходит через этот ключ. '
-            f'Текущий режим прокси {active_label} сохранён. '
+            f'Текущий {APP_MODE_NOUN} {active_label} сохранён. '
             f'❌ Не удалось подключиться к Telegram API: {api_probe_message} {diagnostics}').strip()
 
 
@@ -4708,7 +4181,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
                 <input type="hidden" name="command" value="update">
                 <button type="submit">Переустановить из форка без сброса</button>
             </form>
-            <form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить independent?" data-confirm-message="Будет установлена ветка feature/independent-rework с сохранением локальных настроек.">
+            <form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить independent?" data-confirm-message="Будет установлена ветка codex/independent-v1 с сохранением локальных настроек.">
                 <input type="hidden" name="command" value="update_independent">
                 <button type="submit">Переустановка (ветка independent)</button>
             </form>
@@ -4772,1764 +4245,46 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
         initial_status_pending = 'true' if status_refresh_pending else 'false'
         initial_command_running = 'true' if command_state['running'] else 'false'
 
-        start_button_label = 'Повторить запуск прокси' if bot_ready else 'Запустить прокси'
+        start_button_label = APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL
+        mode_toggle_label = f'{APP_MODE_LABEL}:'
+        quick_start_note = APP_QUICK_START_NOTE
 
-        return f'''<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <link rel="icon" href="data:,">
-  <title>Установка ключей прокси</title>
-    <style>
-        :root{{
-            --bg:#12161d;
-            --bg-accent:#1a2330;
-            --surface:#171e28;
-            --surface-soft:#202a38;
-            --surface-strong:#263243;
-            --border:#334155;
-            --text:#edf3ff;
-            --muted:#9fb0c8;
-            --primary:#4f8cff;
-            --primary-hover:#6aa0ff;
-            --secondary:#d78644;
-            --danger:#c95a47;
-            --success-bg:#163326;
-            --success-border:#2d7650;
-            --warn-bg:#3e2e16;
-            --warn-border:#b78332;
-            --shadow:0 18px 40px rgba(2, 6, 23, 0.34);
-            --control-height:36px;
-        }}
-        [data-theme="light"]{{
-            --bg:#f3efe6;
-            --bg-accent:#e7dcc7;
-            --surface:#fffdf8;
-            --surface-soft:#f5ede0;
-            --surface-strong:#efe2cb;
-            --border:#d7c5aa;
-            --text:#1f2933;
-            --muted:#6f7a86;
-            --primary:#1f7a6a;
-            --primary-hover:#165f53;
-            --secondary:#c96f32;
-            --danger:#a8442f;
-            --success-bg:#e5f4ea;
-            --success-border:#8cb79a;
-            --warn-bg:#fff0d9;
-            --warn-border:#d6a35b;
-            --shadow:0 18px 40px rgba(76, 58, 36, 0.12);
-        }}
-        *{{box-sizing:border-box;}}
-        body{{
-            margin:0;
-                        font-family:Segoe UI,Helvetica,Arial,sans-serif;
-            color:var(--text);
-                        background:
-                radial-gradient(circle at top left, rgba(215,134,68,.16), transparent 34%),
-                radial-gradient(circle at top right, rgba(79,140,255,.16), transparent 28%),
-                linear-gradient(180deg, #0f141c 0%, var(--bg) 100%);
-                        padding:20px;
-        }}
-        [data-theme="light"] body{{
-            background:
-                radial-gradient(circle at top left, rgba(201,111,50,.18), transparent 34%),
-                radial-gradient(circle at top right, rgba(31,122,106,.16), transparent 28%),
-                linear-gradient(180deg, #f8f4ec 0%, var(--bg) 100%);
-        }}
-                .shell{{max-width:1180px;margin:0 auto;}}
-        .hero{{margin-bottom:16px;padding:22px 24px;border:1px solid var(--border);border-radius:24px;background:linear-gradient(140deg, rgba(23,30,40,.98), rgba(32,42,56,.9));box-shadow:var(--shadow);}}
-        [data-theme="light"] .hero{{background:linear-gradient(140deg, rgba(255,253,248,.98), rgba(239,226,203,.88));}}
-                .hero-copy{{max-width:700px;}}
-                .hero-row{{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}}
-                .hero-actions{{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;position:relative;justify-content:flex-end;}}
-        .hero-meta{{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0 0;}}
-        .hero-chip{{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(79,140,255,.08);border:1px solid rgba(96,165,250,.18);font-size:13px;font-weight:700;color:var(--text);}}
-        .theme-toggle{{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;border:1px solid rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;font-size:13px;font-weight:700;cursor:pointer;box-shadow:none;white-space:nowrap;}}
-                .mode-toggle{{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:8px;border:1px solid rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;font-size:13px;font-weight:700;cursor:pointer;box-shadow:none;white-space:nowrap;}}
-        .theme-toggle:hover{{filter:none;transform:none;background:rgba(35,98,104,.44);border-color:rgba(96,214,205,.62);}}
-                .mode-toggle:hover{{filter:none;transform:none;background:rgba(35,98,104,.44);border-color:rgba(96,214,205,.62);}}
-                .hero-popover{{position:absolute;top:54px;right:0;min-width:260px;padding:14px;border:1px solid var(--border);border-radius:18px;background:linear-gradient(180deg, rgba(23,30,40,.98), rgba(32,42,56,.96));box-shadow:var(--shadow);z-index:10;}}
-                [data-theme="light"] .hero-popover{{background:linear-gradient(180deg, rgba(255,253,248,.98), rgba(245,237,224,.96));}}
-                .hidden{{display:none;}}
-                .mode-picker-form{{display:grid;gap:10px;}}
-                .mode-picker-label{{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);}}
-                .mode-choice-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}}
-                .mode-choice-grid form{{display:block;margin:0;}}
-                .mode-choice{{width:100%;height:var(--control-height);min-height:var(--control-height);justify-content:center;background:rgba(34,67,73,.28);border-color:rgba(78,216,205,.5);box-shadow:none;color:#96f1eb;}}
-                .mode-choice.active{{background:rgba(48,191,181,.18);border-color:rgba(78,216,205,.5);color:#94f3ec;}}
-                .mode-choice:hover{{filter:none;transform:none;background:rgba(35,98,104,.42);}}
-        h1{{margin:0 0 4px;font-size:22px;line-height:1.15;letter-spacing:0;color:var(--text);}}
-        h2{{margin:0 0 14px;font-size:20px;color:var(--text);}}
-            p{{margin:0 0 8px;line-height:1.5;color:var(--muted);}}
-        .hero strong{{color:var(--text);}}
-                .layout{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:16px;}}
-        .panel{{min-width:0;padding:18px;border:1px solid var(--border);border-radius:22px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}}
-        [data-theme="light"] .panel{{background:linear-gradient(180deg, rgba(255,253,248,.96), rgba(245,237,224,.94));}}
-        form{{display:grid;gap:12px;}}
-                input,textarea,select{{width:100%;padding:13px 14px;border-radius:14px;border:1px solid var(--border);background:var(--surface-soft);color:var(--text);font-size:16px;outline:none;}}
-                input:focus,textarea:focus,select:focus{{border-color:rgba(31,122,106,.6);box-shadow:0 0 0 4px rgba(31,122,106,.08);}}
-        textarea{{min-height:138px;resize:vertical;}}
-                input::placeholder,textarea::placeholder{{color:#8b8f92;}}
-        button{{min-height:var(--control-height);height:var(--control-height);display:inline-flex;align-items:center;justify-content:center;text-align:center;padding:0 12px;border:1px solid rgba(78,216,205,.5);border-radius:8px;background:rgba(34,67,73,.28);color:#96f1eb;font-size:15px;font-weight:700;line-height:1.15;cursor:pointer;transition:border-color .15s ease, background-color .15s ease, color .15s ease;box-shadow:none;}}
-        button:hover{{filter:none;transform:none;border-color:rgba(96,214,205,.62);background:rgba(35,98,104,.44);}}
-        button:disabled{{cursor:wait;opacity:.72;filter:saturate(.7);transform:none;}}
-                button.danger{{border-color:rgba(205,86,82,.52);background:rgba(94,36,42,.34);color:#ffb7b1;box-shadow:none;}}
-                .success-button{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;box-shadow:none;}}
-                .secondary-button{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;box-shadow:none;}}
-        .status-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px;}}
-        .status-card{{min-width:0;min-height:126px;display:flex;flex-direction:column;gap:6px;padding:16px;border-radius:8px;background:rgba(79,140,255,.08);border:1px solid rgba(96,165,250,.18);}}
-        .status-label{{display:block;margin-bottom:8px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#90a5c4;}}
-                .status-value{{display:block;font-size:16px;line-height:1.4;color:var(--text);overflow-wrap:anywhere;word-break:break-word;}}
-                .notice{{padding:12px 14px;border-radius:16px;margin-bottom:14px;}}
-                .notice strong{{display:block;margin-bottom:8px;color:var(--text);}}
-        .notice-result{{background:var(--warn-bg);border:1px solid var(--warn-border);}}
-        .notice-status{{background:var(--success-bg);border:1px solid var(--success-border);}}
-            .hero-status{{margin-top:12px;margin-bottom:0;}}
-            .hero-status-compact p:last-child{{margin-bottom:0;}}
-            .hero-status-header{{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;}}
-            .traffic-inline{{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;}}
-            .traffic-chip{{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);}}
-            .traffic-chip-label{{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
-            .traffic-chip-value{{font-size:13px;font-weight:700;color:var(--text);}}
-                .status-note{{margin-top:6px;color:var(--text);font-size:14px;line-height:1.45;overflow-wrap:anywhere;word-break:break-word;}}
-                .command-progress-block{{margin:14px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.03);}}
-                .command-progress-header{{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:var(--text);font-size:13px;font-weight:700;}}
-                .command-progress-track{{width:100%;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;}}
-                .command-progress-fill{{height:100%;border-radius:999px;background:linear-gradient(90deg, var(--secondary), var(--primary));transition:width .35s ease;}}
-                .log-output{{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.45 Consolas,Monaco,monospace;color:var(--text);}}
-                .eyebrow{{display:inline-block;margin-bottom:10px;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#8b6f4a;}}
-                .section-title{{margin:0 0 6px;font-size:24px;color:var(--text);}}
-                .section-subtitle{{margin:0;color:var(--muted);overflow-wrap:anywhere;word-break:break-word;}}
-                .start-card{{display:flex;flex-direction:column;justify-content:space-between;}}
-                .command-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}}
-                .command-grid form{{min-width:0;}}
-                .command-grid button{{width:100%;height:var(--control-height);min-height:var(--control-height);display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:0 12px;}}
-                .card-topline{{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}}
-                .file-chip{{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(201,111,50,.12);border:1px solid rgba(201,111,50,.2);font-size:12px;font-weight:700;color:#7c4b21;}}
-                .key-status-wrap{{display:inline-flex;align-items:center;justify-content:flex-end;gap:8px;max-width:62%;}}
-                .key-status-icons{{display:inline-flex;gap:6px;align-items:center;flex:none;}}
-                .key-status-badge{{display:inline-flex;align-items:center;max-width:100%;padding:6px 10px;border-radius:999px;border:1px solid transparent;font-size:12px;font-weight:700;white-space:normal;line-height:1.25;text-align:right;}}
-                .key-status-ok{{background:rgba(31,122,106,.14);border-color:rgba(31,122,106,.3);color:#9be4d3;}}
-                .key-status-fail{{background:rgba(168,68,47,.14);border-color:rgba(168,68,47,.28);color:#ffbeb2;}}
-                .key-status-warn{{background:rgba(201,111,50,.14);border-color:rgba(201,111,50,.28);color:#f6c892;}}
-                .key-status-empty{{background:rgba(159,176,200,.1);border-color:rgba(159,176,200,.18);color:var(--muted);}}
-                .key-status-note{{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;overflow-wrap:anywhere;}}
-        .protocol-card{{min-width:0;}}
-        .pool-details{{margin-top:12px;border-top:1px solid var(--border);padding-top:12px;cursor:pointer;}}
-        .pool-summary{{font-size:13px;font-weight:700;color:var(--text);padding:4px 0;}}
-        .pool-list{{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px;}}
-        .pool-item{{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--border);font-size:12px;}}
-        .pool-item-active{{border-color:rgba(31,122,106,.62);background:rgba(31,122,106,.14);}}
-        .pool-apply-form{{flex:1;min-width:0;margin:0;display:block;}}
-        .pool-apply-btn{{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
-        .pool-apply-btn:hover{{background:transparent;filter:none;transform:none;color:var(--primary-hover);}}
-        .pool-key-icons{{display:inline-flex;gap:6px;align-items:center;}}
-        .pool-key-meta{{color:var(--muted);font-size:11px;white-space:nowrap;}}
-        .pool-item-form{{margin:0;padding:0;display:inline;}}
-        .pool-delete-btn{{padding:2px 8px;border:none;border-radius:6px;background:rgba(168,68,47,.2);color:#ffbeb2;font-size:13px;cursor:pointer;line-height:1.4;box-shadow:none;min-width:0;}}
-        .pool-delete-btn:hover{{background:rgba(168,68,47,.4);filter:none;transform:none;}}
-        .pool-empty{{color:var(--muted);justify-content:center;}}
-        .pool-add-form{{margin-top:8px;display:grid;gap:8px;}}
-        .pool-add-actions{{display:flex;gap:8px;}}
-        .pool-add-actions button{{padding:8px 14px;font-size:13px;}}
-        .pool-subscribe-row{{margin-top:8px;display:flex;align-items:stretch;gap:8px;}}
-        .pool-subscribe-form{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;flex:1;}}
-        .pool-subscribe-form button,.pool-clear-btn{{height:var(--control-height);min-height:var(--control-height);padding:0 12px;font-size:13px;line-height:1.15;white-space:nowrap;}}
-        .pool-clear-form{{margin:0;display:flex;}}
-        .pool-clear-btn{{height:100%;}}
-        .secondary-button{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;box-shadow:none;}}
-        .wide{{grid-column:1 / -1;}}
-        .app-shell{{max-width:1240px;margin:0 auto;}}
-        .topbar{{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background:rgba(23,30,40,.96);box-shadow:var(--shadow);position:sticky;top:10px;z-index:20;}}
-        [data-theme="light"] .topbar{{background:rgba(255,253,248,.96);}}
-        .brand{{display:flex;align-items:center;gap:12px;min-width:0;}}
-        .brand-mark{{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(31,122,106,.18);border:1px solid rgba(31,122,106,.35);color:#7ff0d8;font-size:15px;font-weight:900;text-transform:uppercase;}}
-        .brand p{{margin:0;font-size:12px;color:var(--muted);}}
-        .topbar-actions{{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;position:relative;}}
-        .api-pill{{display:inline-flex;align-items:center;max-width:min(520px,42vw);padding:8px 10px;border-radius:8px;background:rgba(31,122,106,.14);border:1px solid rgba(31,122,106,.28);color:#9be4d3;font-size:12px;font-weight:700;line-height:1.35;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;}}
-        .workspace-layout{{display:grid;grid-template-columns:128px minmax(0,1fr);gap:14px;align-items:start;}}
-        .side-nav{{position:sticky;top:96px;display:grid;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(23,30,40,.94);box-shadow:var(--shadow);}}
-        [data-theme="light"] .side-nav{{background:rgba(255,253,248,.94);}}
-        .nav-item{{display:flex;align-items:center;gap:8px;justify-content:flex-start;min-height:46px;padding:10px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);box-shadow:none;font-size:14px;line-height:1.2;}}
-        .nav-item:hover{{transform:none;filter:none;background:rgba(255,255,255,.05);}}
-        .nav-item.active{{background:rgba(31,122,106,.18);border-color:rgba(31,122,106,.36);color:var(--text);}}
-        .app-main{{min-width:0;}}
-        .app-view{{display:none;}}
-        .app-view.active{{display:block;}}
-        .view-head{{margin-bottom:12px;padding:16px 18px;border:1px solid var(--border);border-radius:8px;background:rgba(23,30,40,.92);}}
-        [data-theme="light"] .view-head{{background:rgba(255,253,248,.92);}}
-        .view-head h2{{margin:0 0 6px;font-size:24px;}}
-        .status-dashboard{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px;}}
-        .status-card-wide{{grid-column:1 / -1;min-height:0;}}
-        .segmented{{display:flex;gap:0;margin-bottom:12px;border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.03);}}
-        .seg-tab{{display:flex;align-items:center;justify-content:center;gap:8px;min-width:118px;padding:12px 14px;border-radius:0;border-right:1px solid var(--border);background:transparent;color:var(--muted);box-shadow:none;white-space:nowrap;}}
-        .seg-tab:last-child{{border-right:none;}}
-        .seg-tab:hover{{transform:none;filter:none;background:rgba(255,255,255,.05);}}
-        .seg-tab.active{{background:rgba(31,122,106,.22);color:var(--text);}}
-        .tab-count{{display:inline-flex;align-items:center;justify-content:center;min-width:24px;padding:2px 6px;border-radius:999px;background:rgba(255,255,255,.08);font-size:12px;}}
-        .protocol-workspace,.list-workspace{{display:none;padding:18px;border:1px solid var(--border);border-radius:8px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}}
-        [data-theme="light"] .protocol-workspace,[data-theme="light"] .list-workspace{{background:linear-gradient(180deg, rgba(255,253,248,.96), rgba(245,237,224,.94));}}
-        .protocol-workspace.active,.list-workspace.active{{display:block;}}
-        .workspace-head{{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px;}}
-        .subtabs{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;}}
-        .subtab{{border-radius:0;border-right:1px solid var(--border);background:transparent;color:var(--muted);box-shadow:none;}}
-        .subtab:last-child{{border-right:none;}}
-        .subtab.active{{background:rgba(31,122,106,.2);color:var(--text);}}
-        .subtab:hover{{transform:none;filter:none;background:rgba(255,255,255,.05);}}
-        .protocol-subview{{display:none;}}
-        .protocol-subview.active{{display:grid;gap:14px;}}
-        .field-label{{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
-        .form-actions{{display:flex;gap:10px;flex-wrap:wrap;}}
-        .form-actions button{{min-width:160px;}}
-        .social-list-actions{{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;align-items:stretch;margin-top:8px;}}
-        .social-list-title{{display:flex;align-items:center;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;}}
-        .social-list-actions button{{width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);}}
-        .pool-toolbar{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}}
-        .pool-toolbar form{{display:block;}}
-        .pool-table-wrap{{overflow:auto;border:1px solid var(--border);border-radius:8px;}}
-        .pool-table{{width:100%;border-collapse:collapse;font-size:13px;}}
-        .pool-table th,.pool-table td{{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle;}}
-        .pool-table th{{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);background:rgba(255,255,255,.03);}}
-        .pool-row:last-child td{{border-bottom:none;}}
-        .pool-row-active{{background:rgba(31,122,106,.12);}}
-        .pool-active-cell{{width:72px;color:#9be4d3;font-weight:700;}}
-        .pool-key-cell{{min-width:260px;}}
-        .pool-hash{{display:none;}}
-        .pool-mobile-active{{display:none;margin-left:6px;padding:1px 6px;border-radius:5px;background:rgba(48,191,181,.16);border:1px solid rgba(48,191,181,.34);color:#9ff7ef;font-size:9px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;line-height:1.2;vertical-align:middle;}}
-        .pool-row-active .pool-mobile-active{{display:inline-flex;align-items:center;}}
-        .pool-service-cell{{width:48px;text-align:center;}}
-        .pool-checked-cell{{width:92px;color:var(--muted);font-size:12px;}}
-        .pool-actions-cell{{width:110px;}}
-        .pool-actions-cell form{{display:block;}}
-        .pool-empty-row td{{text-align:center;color:var(--muted);}}
-        .pool-add-form,.pool-subscribe-form,.list-editor-form{{margin-top:0;}}
-        .overview-service-grid,.service-groups{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}}
-        .overview-service-grid{{margin-top:12px;}}
-        .service-panel{{border-radius:8px;}}
-        .service-panel h3{{margin:0 0 12px;font-size:18px;}}
-        .key-status-icons img,.pool-service-cell img,.status-value img,.api-pill img{{width:20px!important;height:20px!important;}}
-        /* Compact design pass: one visual language for cards, forms, buttons and navigation. */
-        :root{{
-            --scrollbar-size:8px;
-            --scrollbar-track:#111923;
-            --scrollbar-thumb:#415365;
-            --scrollbar-thumb-hover:#53687d;
-            --focus-ring:0 0 0 3px rgba(78,216,205,.16);
-            --radius-panel:10px;
-            --radius-control:8px;
-        }}
-        html{{scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin;}}
-        body{{font-family:Arial,"Segoe UI",system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:linear-gradient(145deg,#0c1118 0%,#111821 48%,#0b1016 100%);padding:14px;}}
-        *{{scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin;}}
-        *::-webkit-scrollbar{{width:var(--scrollbar-size);height:var(--scrollbar-size);}}
-        *::-webkit-scrollbar-track{{background:var(--scrollbar-track);border-radius:999px;}}
-        *::-webkit-scrollbar-thumb{{background:var(--scrollbar-thumb);border:2px solid var(--scrollbar-track);border-radius:999px;}}
-        *::-webkit-scrollbar-thumb:hover{{background:var(--scrollbar-thumb-hover);}}
-        [data-theme="light"] body{{background:linear-gradient(145deg,#f7f3ea 0%,#ece3d4 100%);}}
-        button{{min-height:var(--control-height);height:var(--control-height);display:inline-flex;align-items:center;justify-content:center;text-align:center;border:1px solid rgba(78,216,205,.5);border-radius:8px;background:rgba(34,67,73,.28);box-shadow:none;color:#96f1eb;font-size:12px;font-weight:650;line-height:1.15;padding:0 12px;}}
-        button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{{outline:none;border-color:rgba(78,216,205,.62);box-shadow:var(--focus-ring);}}
-        button:hover{{filter:none;transform:none;border-color:rgba(96,214,205,.62);background:rgba(35,98,104,.44);}}
-        button.danger{{border-color:rgba(205,86,82,.52);background:rgba(94,36,42,.52);color:#ffb7b1;}}
-        button.danger:hover{{background:rgba(122,45,49,.62);border-color:rgba(230,109,101,.68);}}
-        .secondary-button,.success-button,.outline-button,.service-preset-btn{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;box-shadow:none;}}
-        .secondary-button:hover,.success-button:hover,.outline-button:hover,.service-preset-btn:hover{{background:rgba(35,98,104,.44);border-color:rgba(96,214,205,.62);}}
-        input,textarea,select{{border-radius:8px;background:rgba(11,17,25,.58);border:1px solid rgba(91,124,150,.42);font-size:12px;line-height:1.34;padding:7px 9px;}}
-        input:focus,textarea:focus,select:focus{{border-color:rgba(78,216,205,.62);box-shadow:0 0 0 3px rgba(78,216,205,.1);}}
-        textarea{{min-height:78px;}}
-        .topbar,.side-nav,.view-head,.panel,.protocol-workspace,.list-workspace,.confirm-card{{border-radius:10px;background:rgba(17,25,35,.88);border-color:rgba(91,124,150,.34);box-shadow:0 14px 34px rgba(0,0,0,.22);backdrop-filter:blur(10px);}}
-        .topbar{{top:8px;padding:9px 10px;margin-bottom:10px;justify-content:stretch;}}
-        .brand-mark{{width:40px;height:40px;background:rgba(48,191,181,.14);border-color:rgba(83,232,219,.32);color:#78f5ec;}}
-        h1{{font-size:18px;font-weight:700;}}
-        h2{{font-size:19px;font-weight:700;line-height:1.22;}}
-        .brand p,.section-subtitle,.status-note,.key-status-note{{color:#b9c6d3;}}
-        .topbar-actions{{width:100%;display:grid;grid-template-columns:minmax(340px,.9fr) minmax(320px,1.2fr) auto auto auto;align-items:center;justify-content:stretch;gap:8px;}}
-        .app-caption{{display:block;min-width:0;color:#eef7ff;white-space:normal;}}
-        .app-caption strong{{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;}}
-        .app-branch{{display:block;margin-top:3px;font-size:11px;font-weight:700;line-height:1.2;color:var(--muted);}}
-        .version-badge{{justify-self:end;align-self:start;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:3px 7px;border-radius:7px;border:1px solid rgba(91,124,150,.42);background:rgba(17,25,35,.7);color:var(--muted);font-size:10px;font-weight:800;line-height:1;letter-spacing:.04em;white-space:nowrap;box-shadow:none;}}
-        [data-theme="light"] .version-badge{{background:rgba(255,253,248,.82);}}
-        .api-pill,.mode-toggle,.theme-toggle{{height:var(--control-height);min-height:var(--control-height);border-radius:8px;border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);box-shadow:none;font-size:12px;}}
-        .mode-toggle,.theme-toggle{{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;}}
-        .api-pill{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;max-width:none;font-size:12px;line-height:1.25;color:#d9e6ef;}}
-        .api-pill::before{{content:"";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:6px;background-color:rgba(48,191,181,.14);background-image:url("data:image/svg+xml;base64,{TELEGRAM_SVG_B64}");background-repeat:no-repeat;background-position:center;background-size:13px 13px;}}
-        .workspace-layout{{grid-template-columns:138px minmax(0,1fr);gap:12px;}}
-        .side-nav{{top:86px;padding:9px;gap:7px;}}
-        .nav-item{{height:var(--control-height);min-height:var(--control-height);padding:0 10px;color:#c7d2df;}}
-        .nav-item span{{font-size:13px;}}
-        .nav-icon{{width:16px;height:16px;flex:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;fill:none;}}
-        .nav-item.active{{background:rgba(48,191,181,.13);border-color:rgba(78,216,205,.32);color:#9af8f1;}}
-        .view-head{{padding:11px 13px;margin-bottom:9px;}}
-        .view-head h2{{margin-bottom:4px;font-size:19px;}}
-        .eyebrow{{color:#d3a557;font-size:11px;letter-spacing:.14em;}}
-        .section-subtitle{{font-size:13px;line-height:1.35;}}
-        .status-dashboard{{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:9px;}}
-        .status-card{{position:relative;min-height:76px;padding:10px;border-radius:9px;background:linear-gradient(145deg,rgba(20,31,43,.94),rgba(15,23,32,.94));border:1px solid rgba(91,124,150,.34);box-shadow:none;}}
-        .status-card-wide{{grid-column:auto;}}
-        .status-card-top{{display:flex;align-items:flex-start;gap:8px;width:100%;}}
-        .status-copy{{min-width:0;flex:1;}}
-        .card-icon{{display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;border-radius:7px;background:rgba(48,191,181,.14);border:1px solid rgba(78,216,205,.22);color:#76eee5;font-size:15px;line-height:1;}}
-        .card-icon img{{width:17px!important;height:17px!important;}}
-        .status-dot{{width:8px;height:8px;border-radius:50%;background:#68d36f;box-shadow:0 0 0 3px rgba(104,211,111,.12);flex:none;margin-top:5px;}}
-        .status-label{{margin:0 0 4px;color:#edf5fb;font-size:12px;font-weight:700;letter-spacing:0;text-transform:none;}}
-        .status-value{{font-size:13px;font-weight:700;color:#75eee5;}}
-        .status-card-wide .status-value{{font-size:12px;font-weight:600;line-height:1.35;color:#dce8f1;}}
-        .status-note{{font-size:12px;line-height:1.35;}}
-        .status-card .outline-button,.status-card form{{margin-top:auto;}}
-        .status-card-actions{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:auto;}}
-        .status-card-actions form{{display:block;margin:0;}}
-        .status-card-actions button{{width:100%;min-width:0;margin-top:0;}}
-        .overview-service-grid{{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px;}}
-        .service-panel,.overview-key-panel{{padding:11px;border-radius:9px;background:linear-gradient(145deg,rgba(20,31,43,.94),rgba(15,23,32,.94));}}
-        .service-panel h3{{font-size:14px;line-height:1.22;margin-bottom:8px;}}
-        .command-grid{{gap:7px;margin-top:0;}}
-        .command-grid button{{height:var(--control-height);min-height:var(--control-height);justify-content:center;}}
-        .overview-key-panel{{margin-top:10px;}}
-        .overview-key-panel .key-editor-form{{display:grid;gap:7px;}}
-        .overview-key-panel .form-actions{{gap:8px;}}
-        .protocol-tabs,.list-tabs{{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;}}
-        .protocol-tabs .seg-tab,.list-tabs .seg-tab{{min-width:0;}}
-        .segmented,.subtabs,.pool-table-wrap{{border-color:rgba(91,124,150,.34);border-radius:var(--radius-panel);background:rgba(11,17,25,.34);overflow:hidden;}}
-        .seg-tab,.subtab{{height:var(--control-height);min-height:var(--control-height);color:#c7d2df;padding:0 10px;font-size:12px;border-radius:0;}}
-        .seg-tab.active,.subtab.active{{background:rgba(48,191,181,.14);color:#94f3ec;}}
-        .key-status-wrap{{max-width:none;flex:none;gap:6px;align-items:center;}}
-        .key-status-icons{{order:2;gap:5px;}}
-        .key-status-badge{{order:1;max-width:none;padding:5px 9px;font-size:11px;line-height:1.15;white-space:nowrap;text-align:left;}}
-        .protocol-workspace,.list-workspace{{padding:10px;}}
-        .workspace-head{{margin-bottom:8px;}}
-        .field-label{{color:#9fb0c8;letter-spacing:.08em;font-size:11px;}}
-        .form-actions button{{min-width:140px;}}
-        .protocol-subview.active{{gap:10px;}}
-        .protocol-subview-import.active{{grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);align-items:start;}}
-        .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{{padding:9px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);}}
-        .protocol-subview-import .pool-add-form{{grid-template-columns:minmax(0,1fr) auto;align-items:end;}}
-        .protocol-subview-import .pool-add-form .field-label{{grid-column:1 / -1;}}
-        .protocol-subview-import .pool-add-form textarea{{min-height:68px;}}
-        .protocol-subview-import .pool-add-form button{{justify-self:start;min-width:150px;}}
-        .protocol-subview-import .pool-subscribe-form{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:end;}}
-        .protocol-subview-import .pool-subscribe-form .field-label{{grid-column:1 / -1;}}
-        .protocol-subview-import .pool-subscribe-form input{{min-width:0;}}
-        .protocol-subview-import .pool-subscribe-form button{{white-space:nowrap;}}
-        .protocol-subview-check > form{{justify-self:start;}}
-        .protocol-subview-check > form button{{min-width:180px;}}
-        .pool-table{{font-size:11px;}}
-        .pool-table th,.pool-table td{{padding:4px 6px;line-height:1.22;}}
-        .pool-table th{{font-size:10px;letter-spacing:.06em;}}
-        .pool-icon-head{{text-align:center;letter-spacing:0;}}
-        .pool-custom-head{{text-align:center;}}
-        .pool-icon-head img{{width:16px!important;height:16px!important;margin:0;vertical-align:middle;}}
-        .pool-key-cell{{min-width:220px;}}
-        .pool-key-cell .pool-apply-form{{display:inline-block;max-width:100%;vertical-align:middle;}}
-        .pool-apply-btn{{min-height:0;height:auto;padding:0;font-size:11px;font-weight:600;line-height:1.22;}}
-        .pool-hash{{display:none;}}
-        .pool-service-cell{{width:32px;}}
-        .pool-custom-cell{{width:96px;}}
-        .pool-custom-cell,.pool-service-cell{{text-align:center;}}
-        .pool-table:not(.has-custom-checks) .pool-custom-head,
-        .pool-table:not(.has-custom-checks) .pool-custom-cell{{display:none;}}
-        .pool-table:not(.has-custom-checks) .pool-col-custom{{display:none;width:0!important;}}
-        .pool-custom-empty{{color:var(--muted);font-size:10px;}}
-        .custom-service-badge{{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:18px;margin:1px 2px 1px 0;padding:0 5px;border-radius:6px;border:1px solid rgba(91,124,150,.42);background:rgba(111,127,146,.15);color:#b9c6d3;font-size:10px;font-weight:800;line-height:1;letter-spacing:0;vertical-align:middle;}}
-        .custom-service-slot{{display:inline-flex;align-items:center;justify-content:center;width:32px;min-width:32px;height:18px;margin:0;vertical-align:middle;}}
-        .service-icon-img{{width:18px!important;height:18px!important;object-fit:contain;border-radius:5px;vertical-align:middle;}}
-        .custom-service-slot .service-icon-img{{width:18px!important;height:18px!important;}}
-        .key-status-icons .service-icon-img{{width:20px!important;height:20px!important;}}
-        .service-probe-mark{{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;border:1px solid rgba(91,124,150,.34);font-size:11px;font-weight:800;line-height:1;}}
-        .service-probe-fail{{color:var(--muted);background:transparent;border-color:transparent;}}
-        .service-probe-unknown{{color:#9fb0c8;background:rgba(91,124,150,.12);}}
-        .custom-service-ok{{background:rgba(31,122,106,.18);border-color:rgba(78,216,205,.38);color:#95f3ec;}}
-        .custom-service-fail{{background:transparent;border-color:transparent;color:var(--muted);}}
-        .custom-service-unknown,.custom-service-neutral{{background:rgba(91,124,150,.14);border-color:rgba(91,124,150,.34);color:#c7d2df;}}
-        .pool-custom-cell .custom-service-slot{{background:transparent!important;border-color:transparent!important;}}
-        .custom-check-card{{display:grid;gap:8px;padding:9px;border-radius:9px;border:1px solid rgba(91,124,150,.34);background:rgba(11,17,25,.36);}}
-        .custom-check-head{{display:flex;justify-content:space-between;gap:10px;align-items:center;}}
-        .custom-check-head strong{{display:block;font-size:13px;color:#edf5fb;}}
-        .custom-check-head small{{display:block;margin-top:2px;color:#9fb0c8;font-size:11px;line-height:1.25;}}
-        .service-preset-grid{{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;}}
-        .service-preset-grid form{{margin:0;flex:0 0 86px;min-width:0;}}
-        .service-preset-btn{{width:86px;min-width:0;display:flex;align-items:center;justify-content:center;gap:4px;height:var(--control-height);min-height:var(--control-height);padding:0 5px;background:rgba(34,67,73,.28);}}
-        .service-preset-btn span:last-child{{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;}}
-        .service-preset-btn:disabled{{opacity:.55;cursor:default;}}
-        .preset-icon{{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;border-radius:6px;overflow:hidden;}}
-        .preset-icon img{{width:18px!important;height:18px!important;display:block;}}
-        .custom-check-list{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;}}
-        .custom-check-empty{{padding:8px;border:1px dashed rgba(91,124,150,.34);border-radius:8px;color:#9fb0c8;font-size:12px;text-align:center;}}
-        .custom-check-item{{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:center;min-height:34px;padding:5px 6px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(91,124,150,.28);}}
-        .custom-check-copy{{min-width:0;display:grid;gap:1px;}}
-        .custom-check-copy strong{{font-size:12px;font-weight:700;color:#edf5fb;}}
-        .custom-check-copy small{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fb0c8;font-size:10px;}}
-        .custom-check-form{{display:grid;grid-template-columns:minmax(120px,.55fr) minmax(180px,1fr) auto auto;gap:7px;align-items:center;}}
-        .custom-check-form button{{justify-self:start;white-space:nowrap;}}
-        .pool-checked-cell{{width:74px;font-size:10px;}}
-        .pool-actions-cell{{width:78px;}}
-        .pool-delete-btn{{min-height:20px;height:auto;padding:1px 6px;font-size:10px;line-height:1.15;}}
-        .pool-service-cell img{{width:16px!important;height:16px!important;}}
-        .pool-table{{width:100%;table-layout:fixed;}}
-        .pool-col-status{{width:0!important;visibility:collapse;}}
-        .pool-col-icon{{width:32px;}}
-        .pool-col-checked{{width:74px;}}
-        .pool-col-actions{{width:78px;}}
-        .pool-table th,.pool-table td{{vertical-align:middle;}}
-        .pool-status-head,.pool-active-cell{{display:none;}}
-        .pool-table .pool-icon-head,.pool-table .pool-service-cell,.pool-table .pool-custom-head,.pool-table .pool-custom-cell,.pool-table .pool-checked-head,.pool-table .pool-checked-cell,.pool-table .pool-actions-head,.pool-table .pool-actions-cell{{text-align:center;}}
-        .pool-service-cell,.pool-custom-cell{{line-height:1;}}
-        .pool-icon-head,.pool-service-cell,.pool-custom-head,.pool-custom-cell{{padding-left:0!important;padding-right:0!important;}}
-        .pool-icon-head img,.pool-service-cell img,.pool-service-cell .service-probe-mark,.pool-custom-cell .service-probe-mark,.pool-custom-cell .custom-service-slot,.pool-custom-head .custom-service-slot{{display:inline-flex;margin-left:auto;margin-right:auto;vertical-align:middle;}}
-        .pool-custom-head .service-icon-img,.pool-custom-cell .service-icon-img{{width:16px!important;height:16px!important;}}
-        .pool-service-cell .service-probe-mark,.pool-custom-cell .service-probe-mark{{width:16px;height:16px;font-size:10px;}}
-        .pool-custom-cell,.pool-custom-head{{white-space:nowrap;overflow:hidden;}}
-        .pool-key-cell{{overflow:hidden;}}
-        .pool-actions-cell form{{display:flex;justify-content:center;}}
-        .pool-table-wrap{{max-height:min(54vh,460px);overflow-y:auto;overflow-x:hidden;}}
-        .protocol-subview[data-subview="pool"].active{{min-height:0;grid-template-rows:auto minmax(0,1fr);}}
-        .protocol-subview[data-subview="pool"].active .pool-table-wrap{{min-height:0;}}
-        .pool-table-wrap,.protocol-subview-import.active,.list-editor-form textarea,.key-editor-form textarea,textarea{{scrollbar-gutter:stable;scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin;}}
-        .app-shell{{max-width:1600px;}}
-        .protocol-workspace.active{{padding:9px;}}
-        .protocol-workspace .workspace-head{{align-items:center;margin-bottom:6px;}}
-        .protocol-workspace .workspace-head h2{{margin:0;font-size:18px;}}
-        .protocol-workspace .workspace-head .eyebrow{{margin-bottom:5px;}}
-        .key-status-note{{margin:3px 0 0;font-size:12px;line-height:1.25;}}
-        .subtabs{{margin-bottom:8px;}}
-        .subtab{{height:var(--control-height);min-height:var(--control-height);padding:0 8px;}}
-        .protocol-subview.active{{gap:8px;}}
-        .pool-toolbar{{margin-bottom:7px;}}
-        .pool-toolbar form{{margin:0;}}
-        .pool-toolbar button,.pool-clear-btn{{height:var(--control-height);min-height:var(--control-height);padding:0 12px;line-height:1.15;}}
-        .pool-table-wrap{{scrollbar-gutter:stable;max-height:min(58vh,500px);}}
-        .pool-table th,.pool-table td{{padding:4px 5px;}}
-        .pool-col-actions{{width:96px;}}
-        .pool-actions-head,.pool-actions-cell{{width:96px;}}
-        .pool-actions-head{{white-space:nowrap;font-size:9px;letter-spacing:.02em;}}
-        .pool-delete-btn{{height:22px;min-height:22px;padding:2px 7px;font-size:10px;line-height:1;white-space:nowrap;}}
-        .pool-checked-cell,.pool-checked-head{{white-space:nowrap;}}
-        .protocol-subview-import.active{{grid-template-columns:minmax(0,1fr) minmax(420px,.72fr);gap:8px;align-items:stretch;}}
-        .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{{height:106px;min-height:0;padding:8px;align-self:stretch;}}
-        .protocol-subview-import .pool-add-form{{display:grid;grid-template-columns:minmax(0,1fr) 150px;grid-template-rows:auto 66px;gap:7px;align-items:stretch;align-content:start;}}
-        .protocol-subview-import .pool-add-form .field-label{{grid-column:1 / -1;margin:0;}}
-        .protocol-subview-import .pool-add-form textarea{{grid-column:1;min-height:66px;height:66px;resize:vertical;}}
-        .protocol-subview-import .pool-add-form button{{grid-column:2;align-self:end;justify-self:stretch;width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);margin-top:0;}}
-        .protocol-subview-import .pool-subscribe-form{{display:grid;grid-template-columns:minmax(0,1fr) 190px;grid-template-rows:auto 66px;gap:7px;align-content:start;align-items:end;}}
-        .protocol-subview-import .pool-subscribe-form .field-label{{grid-column:1 / -1;margin:0;}}
-        .protocol-subview-import .pool-subscribe-form input{{height:var(--control-height);min-height:var(--control-height);align-self:end;}}
-        .protocol-subview-import .pool-subscribe-form button{{height:var(--control-height);min-height:var(--control-height);width:100%;padding:0 10px;white-space:nowrap;align-self:end;}}
-        @media (min-width: 1024px){{
-            html,body{{height:100%;overflow:hidden;}}
-            body{{padding:8px;}}
-            .app-shell{{height:calc(100vh - 16px);display:flex;flex-direction:column;min-height:0;}}
-            .topbar{{position:static;flex:none;margin-bottom:8px;}}
-            .workspace-layout{{flex:1;min-height:0;align-items:stretch;}}
-            .side-nav{{position:static;align-self:start;}}
-            .app-main{{height:100%;min-height:0;overflow:hidden;}}
-            .app-view.active{{height:100%;min-height:0;overflow:hidden;}}
-            .app-view[data-view="status"].active{{display:grid;grid-template-rows:auto auto auto auto;gap:8px;align-content:start;}}
-            .app-view[data-view="keys"].active,.app-view[data-view="lists"].active{{display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:8px;}}
-            .view-head,.segmented,.status-dashboard,.overview-service-grid{{margin-bottom:0;}}
-            .view-head{{padding:9px 12px;}}
-            .status-dashboard{{gap:8px;}}
-            .status-card{{min-height:68px;padding:9px;}}
-            .overview-service-grid{{gap:8px;margin-top:0;}}
-            .service-panel,.overview-key-panel{{padding:9px;}}
-            .overview-key-panel{{min-height:0;overflow:hidden;align-self:start;}}
-            .overview-key-panel .workspace-head{{display:none;}}
-            .overview-key-panel .key-editor-form{{display:grid;grid-template-columns:minmax(0,1fr) minmax(480px,.42fr);grid-template-rows:auto 44px;gap:6px 10px;align-items:stretch;}}
-            .overview-key-panel .key-editor-form .field-label{{grid-column:1 / -1;margin:0;line-height:1.1;}}
-            .overview-key-panel textarea{{grid-column:1;grid-row:2;height:44px;min-height:44px;max-height:44px;resize:none;}}
-            .overview-key-panel .form-actions{{grid-column:2;grid-row:2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-self:stretch;align-items:stretch;margin:0;}}
-            .overview-key-panel .form-actions button{{width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);padding:0 10px;border-radius:8px;font-size:12px;font-weight:700;}}
-            .protocol-panels,.list-panels{{min-height:0;overflow:hidden;}}
-            .protocol-workspace.active{{height:100%;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;}}
-            .protocol-subview.active{{min-height:0;overflow:hidden;}}
-            .protocol-subview[data-subview="pool"].active{{display:grid;grid-template-rows:auto minmax(0,1fr);}}
-            .pool-table-wrap{{max-height:none;height:100%;min-height:0;}}
-            .key-editor-form textarea[data-key-textarea]{{height:168px;min-height:168px;max-height:168px;}}
-            .protocol-subview-import.active{{overflow:auto;}}
-            .list-workspace.active{{height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;}}
-            .list-editor-form{{height:100%;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto auto;gap:8px;align-content:stretch;}}
-            .list-editor-form textarea{{height:100%;min-height:0;resize:none;}}
-            .list-editor-form .form-actions{{height:auto;min-height:0;align-self:end;align-items:center;align-content:center;}}
-            .list-editor-form .form-actions button{{height:var(--control-height);min-height:var(--control-height);flex:0 0 auto;align-self:center;}}
-        }}
-        @media (min-width: 1024px){{
-            .protocol-workspace.active{{height:auto;min-height:0;display:block;overflow:visible;}}
-            .protocol-workspace.active:has(.protocol-subview[data-subview="pool"].active){{height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;}}
-            .protocol-workspace.active:has(.protocol-subview[data-subview="pool"].active) .protocol-subview[data-subview="pool"].active{{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;}}
-            .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active),
-            .protocol-workspace.active:has(.protocol-subview[data-subview="key"].active),
-            .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active){{align-self:start;}}
-            .protocol-subview-import.active{{overflow:visible;align-self:start;}}
-        }}
-        .mobile-nav{{display:none;}}
-        .confirm-backdrop{{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(2,6,23,.72);}}
-        .confirm-backdrop.hidden{{display:none;}}
-        .confirm-card{{width:min(420px,100%);padding:20px;border:1px solid var(--border);border-radius:8px;background:var(--surface);box-shadow:0 24px 70px rgba(0,0,0,.42);}}
-        .confirm-card h2{{margin:0 0 10px;font-size:22px;}}
-        .confirm-card p{{margin:0 0 18px;color:var(--muted);}}
-        .confirm-actions{{display:grid;grid-template-columns:1fr 1fr;gap:10px;}}
-        @media (max-width: 760px){{
-            :root{{--control-height:38px;}}
-            body{{padding:10px 10px calc(128px + env(safe-area-inset-bottom, 0px));scroll-padding-bottom:calc(128px + env(safe-area-inset-bottom, 0px));}}
-                        .hero{{padding:16px;border-radius:20px;}}
-            .topbar{{position:static;align-items:stretch;flex-direction:column;padding:10px;}}
-            .app-shell,.topbar,.app-main,.app-view,.view-head,.status-card,.service-panel,.overview-key-panel,.mobile-nav{{box-sizing:border-box;max-width:100%;}}
-            .topbar-actions{{width:100%;display:grid;grid-template-columns:1fr 1fr;justify-content:stretch;gap:8px;}}
-            .app-caption{{display:grid;gap:2px;min-width:0;white-space:normal;}}
-            .app-caption strong{{max-width:none;font-size:14px;overflow-wrap:anywhere;}}
-            .section-subtitle,.status-note,.status-value{{overflow-wrap:anywhere;}}
-            .app-caption,.api-pill{{grid-column:1 / -1;}}
-            .api-pill,.theme-toggle,.mode-toggle,.version-badge{{width:100%;justify-content:center;max-width:none;text-align:center;}}
-            .version-badge{{align-self:stretch;min-height:34px;font-size:10px;}}
-            .api-pill{{justify-content:start;text-align:left;}}
-            .workspace-layout{{display:block;}}
-            .side-nav{{display:none;}}
-            .app-main{{padding-bottom:calc(126px + env(safe-area-inset-bottom, 0px));}}
-            .mobile-nav{{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom, 0px));z-index:50;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:6px;border:1px solid rgba(91,124,150,.34);border-radius:var(--radius-panel);background:rgba(12,18,26,.96);box-shadow:0 14px 34px rgba(0,0,0,.34);}}
-            .mobile-nav .nav-item{{justify-content:center;flex-direction:column;gap:3px;min-height:50px;font-size:11px;padding:6px;border-radius:var(--radius-control);}}
-            .view-head{{padding:14px;border-radius:10px;}}
-            .view-head h2{{font-size:20px;}}
-            .status-dashboard,.overview-service-grid{{grid-template-columns:1fr;}}
-            .status-card-actions{{grid-template-columns:1fr;}}
-            .status-card-wide{{grid-column:auto;}}
-            .status-card{{min-height:0;padding:12px;}}
-            .status-card-top{{gap:10px;}}
-            .card-icon{{width:34px;height:34px;font-size:18px;}}
-            .status-label{{font-size:13px;}}
-            .status-value{{font-size:15px;}}
-            .status-card-wide .status-value{{font-size:13px;line-height:1.4;}}
-            .segmented{{scroll-snap-type:x mandatory;}}
-            .seg-tab{{min-width:96px;scroll-snap-align:start;}}
-            .protocol-tabs,.list-tabs{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:hidden;scroll-snap-type:none;border-radius:var(--radius-panel);}}
-            .protocol-tabs .seg-tab,.list-tabs .seg-tab{{min-width:0;border-right:1px solid var(--border);border-bottom:1px solid var(--border);white-space:normal;}}
-            .protocol-tabs .seg-tab:nth-child(2n),.list-tabs .seg-tab:nth-child(2n){{border-right:none;}}
-            .protocol-tabs .seg-tab:last-child,.list-tabs .seg-tab:last-child{{grid-column:1 / -1;border-right:none;border-bottom:none;}}
-            .protocol-tabs .seg-tab:first-child,.list-tabs .seg-tab:first-child{{border-top-left-radius:calc(var(--radius-panel) - 1px);}}
-            .protocol-tabs .seg-tab:nth-child(2),.list-tabs .seg-tab:nth-child(2){{border-top-right-radius:calc(var(--radius-panel) - 1px);}}
-            .protocol-tabs .seg-tab:last-child,.list-tabs .seg-tab:last-child{{border-bottom-left-radius:calc(var(--radius-panel) - 1px);border-bottom-right-radius:calc(var(--radius-panel) - 1px);}}
-            .protocol-workspace{{padding:9px;}}
-            .protocol-workspace .workspace-head{{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;margin-bottom:7px;}}
-            .protocol-workspace .workspace-head .eyebrow{{display:none;}}
-            .protocol-workspace .workspace-head h2{{font-size:18px;margin:0;}}
-            .key-status-note{{display:none;}}
-            .key-status-wrap{{max-width:100%;margin-top:0;}}
-            .key-status-badge{{font-size:10px;padding:4px 7px;}}
-            .key-status-icons .service-icon-img{{width:18px!important;height:18px!important;}}
-            .subtabs{{grid-template-columns:repeat(2,minmax(0,1fr));}}
-            .subtab{{height:var(--control-height);min-height:var(--control-height);padding:0 6px;}}
-            .key-editor-form textarea[data-key-textarea]{{min-height:132px;max-height:34vh;resize:vertical;font-size:12px;line-height:1.32;}}
-            .overview-key-panel .key-editor-form{{display:grid;gap:8px;}}
-            .overview-key-panel textarea{{min-height:96px;max-height:24vh;resize:vertical;}}
-            .overview-key-panel .form-actions{{display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:18px;}}
-            .overview-key-panel .form-actions button{{width:100%;min-width:0;}}
-            .key-editor-form .form-actions{{margin-bottom:20px;}}
-            .key-editor-form .form-actions button{{width:100%;}}
-            .protocol-subview-import.active{{grid-template-columns:1fr;}}
-            .protocol-subview-import .pool-add-form{{grid-template-columns:1fr;}}
-            .protocol-subview-import .pool-add-form .field-label{{grid-column:auto;}}
-            .protocol-subview-import .pool-subscribe-form{{grid-template-columns:minmax(0,1fr) auto;}}
-            .pool-toolbar{{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px;}}
-            .pool-toolbar button{{width:100%;}}
-            .social-list-actions{{grid-template-columns:1fr;}}
-            .pool-table-wrap{{overflow-x:hidden;}}
-            .pool-table{{display:block;width:100%;min-width:0;table-layout:auto;font-size:10px;border-collapse:separate;border-spacing:0;}}
-            .pool-table colgroup{{display:none;}}
-            .pool-table thead,.pool-table tbody{{display:block;width:100%;}}
-            .pool-table tr{{display:grid;grid-template-columns:minmax(0,1fr) 28px 28px 32px;align-items:stretch;width:100%;min-height:30px;border-bottom:1px solid var(--border);}}
-            .pool-table.has-custom-checks tr{{grid-template-columns:minmax(0,1fr) 28px 28px var(--custom-col-mobile, 28px) 32px;}}
-            .pool-table tr:last-child{{border-bottom:none;}}
-            .pool-table th,.pool-table td{{display:flex;align-items:center;min-width:0;min-height:30px;height:100%;padding:4px 3px;border-bottom:none;}}
-            .pool-table .pool-status-head,.pool-table .pool-active-cell,.pool-table .pool-checked-head,.pool-table .pool-checked-cell{{display:none;}}
-            .pool-key-head,.pool-key-cell{{width:auto!important;min-width:0;}}
-            .pool-key-head,.pool-key-cell{{justify-content:flex-start;}}
-            .pool-key-cell .pool-apply-form{{display:block;max-width:none;}}
-            .pool-row-active .pool-key-cell{{box-shadow:inset 3px 0 0 var(--accent);background:rgba(48,191,181,.12);}}
-            .pool-row-active .pool-apply-btn{{color:#92fff2;}}
-            .pool-mobile-active{{display:none;margin:2px 0 0 0;width:max-content;padding:1px 5px;border-radius:5px;background:rgba(48,191,181,.18);border:1px solid rgba(48,191,181,.35);color:#9ff7ef;font-size:8px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;line-height:1.2;}}
-            .pool-row-active .pool-mobile-active{{display:inline-flex;}}
-            .pool-apply-btn{{display:block;width:100%;font-size:10.5px;line-height:1.18;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
-            .pool-hash{{display:none;}}
-            .pool-service-cell,.pool-icon-head,.pool-custom-cell,.pool-custom-head,.pool-actions-head,.pool-actions-cell{{width:auto!important;padding-left:2px!important;padding-right:2px!important;text-align:center;}}
-            .pool-service-cell,.pool-icon-head,.pool-custom-cell,.pool-custom-head,.pool-actions-head,.pool-actions-cell{{justify-content:center;}}
-            .custom-service-slot{{width:28px;min-width:28px;height:15px;margin:0;}}
-            .custom-service-slot .service-icon-img,.pool-service-cell img,.pool-icon-head img{{width:14px!important;height:14px!important;}}
-            .pool-service-cell .service-probe-mark,.pool-custom-cell .service-probe-mark{{width:14px;height:14px;font-size:9px;}}
-            .pool-actions-head,.pool-actions-cell{{width:32px;padding-left:2px!important;padding-right:2px!important;text-align:center;}}
-            .pool-table .pool-actions-head{{font-size:0;}}
-            .pool-table .pool-actions-head::after{{content:"×";font-size:11px;}}
-            .pool-actions-cell form{{display:flex;justify-content:center;}}
-            .pool-actions-cell .pool-delete-btn{{width:22px;height:22px;min-height:22px;padding:0;font-size:0;border-radius:6px;}}
-            .pool-actions-cell .pool-delete-btn::before{{content:"×";font-size:13px;line-height:1;}}
-            .service-preset-grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}}
-            .service-preset-grid form{{min-width:0;}}
-            .service-preset-btn{{width:100%;min-width:0;gap:3px;padding:0 3px;}}
-            .service-preset-btn span:last-child{{font-size:10px;}}
-            .custom-check-list{{grid-template-columns:1fr;}}
-            .custom-check-form{{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);align-items:stretch;}}
-            .custom-check-form input[type="text"]{{grid-column:1 / -1;}}
-            .custom-check-form button{{width:100%;height:var(--control-height);min-height:var(--control-height);justify-self:stretch;display:flex;align-items:center;justify-content:center;white-space:normal;line-height:1.15;}}
-            .service-groups{{grid-template-columns:1fr;}}
-            .form-actions{{display:grid;grid-template-columns:1fr;}}
-            .hero-row{{flex-direction:column;align-items:stretch;}}
-            .hero-actions{{width:100%;justify-content:stretch;}}
-            .hero-status-header{{flex-direction:column;align-items:flex-start;}}
-            .traffic-inline{{justify-content:flex-start;}}
-            .theme-toggle,.mode-toggle{{justify-content:center;}}
-            .hero-popover{{position:static;min-width:0;width:100%;}}
-            .mode-picker-form{{gap:8px;}}
-            .mode-choice-grid{{gap:6px;}}
-            .mode-choice{{height:var(--control-height);min-height:var(--control-height);padding:0 5px;font-size:12px;line-height:1.12;white-space:normal;overflow-wrap:anywhere;word-break:normal;}}
-            .mode-choice span{{display:block;min-width:0;max-width:100%;overflow-wrap:anywhere;}}
-            .layout{{grid-template-columns:1fr;gap:12px;}}
-                        .command-grid{{grid-template-columns:1fr;}}
-            .status-grid{{grid-template-columns:1fr;}}
-                        .panel{{padding:12px;border-radius:10px;}}
-            .pool-subscribe-row{{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;}}
-            .pool-subscribe-form{{display:contents;}}
-            .pool-subscribe-form input{{grid-column:1 / -1;}}
-            .protocol-subview-import .pool-subscribe-form{{display:grid;}}
-            .protocol-subview-import .pool-subscribe-form input{{grid-column:auto;}}
-            .command-grid{{grid-template-columns:1fr 1fr;gap:10px;}}
-            .command-grid button{{height:var(--control-height);min-height:var(--control-height);font-size:13px;}}
-            button,input,textarea,select{{font-size:13px;}}
-            .custom-check-form button:first-of-type{{white-space:nowrap;font-size:12px;padding-left:6px;padding-right:6px;}}
-        }}
-        @media (max-width: 430px){{
-            .command-grid{{grid-template-columns:1fr;}}
-            .status-card-top{{align-items:flex-start;}}
-            .api-pill{{font-size:12px;}}
-            .mode-choice{{font-size:11px;padding:0 4px;}}
-        }}
-        /* Light theme final pass. Keep it after compact/mobile rules so no dark surfaces leak through. */
-        [data-theme="light"]{{
-            --bg:#f4f7fb;
-            --bg-accent:#e8eef5;
-            --surface:#ffffff;
-            --surface-soft:#eef3f8;
-            --surface-strong:#e3ebf3;
-            --border:#c8d5e1;
-            --text:#172033;
-            --muted:#536274;
-            --primary:#1f7a6a;
-            --primary-hover:#166457;
-            --secondary:#9c6a2f;
-            --danger:#b44738;
-            --success-bg:#e5f5ed;
-            --success-border:#9ac8b2;
-            --warn-bg:#fff4df;
-            --warn-border:#ddb46f;
-            --shadow:0 12px 28px rgba(46,63,86,.11);
-            --scrollbar-track:#f4f8fc;
-            --scrollbar-thumb:#9fb2c3;
-            --scrollbar-thumb-hover:#7f94a9;
-            --focus-ring:0 0 0 3px rgba(31,122,106,.14);
-        }}
-        [data-theme="light"] body{{color:var(--text);background:linear-gradient(145deg,#f8fbff 0%,#edf3f8 48%,#e7eef5 100%);}}
-        [data-theme="light"] .topbar,
-        [data-theme="light"] .side-nav,
-        [data-theme="light"] .view-head,
-        [data-theme="light"] .panel,
-        [data-theme="light"] .protocol-workspace,
-        [data-theme="light"] .list-workspace,
-        [data-theme="light"] .confirm-card,
-        [data-theme="light"] .service-panel,
-        [data-theme="light"] .overview-key-panel,
-        [data-theme="light"] .status-card{{background:rgba(255,255,255,.92);border-color:var(--border);box-shadow:var(--shadow);backdrop-filter:none;}}
-        [data-theme="light"] .service-panel,
-        [data-theme="light"] .overview-key-panel,
-        [data-theme="light"] .status-card{{background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(241,246,251,.96));}}
-        [data-theme="light"] h1,
-        [data-theme="light"] h2,
-        [data-theme="light"] h3,
-        [data-theme="light"] .app-caption,
-        [data-theme="light"] .app-caption strong,
-        [data-theme="light"] .status-label,
-        [data-theme="light"] .custom-check-head strong,
-        [data-theme="light"] .custom-check-copy strong{{color:var(--text);}}
-        [data-theme="light"] .brand p,
-        [data-theme="light"] .section-subtitle,
-        [data-theme="light"] .status-note,
-        [data-theme="light"] .key-status-note,
-        [data-theme="light"] .field-label,
-        [data-theme="light"] .custom-check-head small,
-        [data-theme="light"] .custom-check-copy small,
-        [data-theme="light"] .custom-check-empty,
-        [data-theme="light"] .pool-hash,
-        [data-theme="light"] .pool-checked-cell{{color:var(--muted);}}
-        [data-theme="light"] .status-value,
-        [data-theme="light"] .status-card-wide .status-value{{color:#1f6f62;}}
-        [data-theme="light"] .api-pill,
-        [data-theme="light"] .mode-toggle,
-        [data-theme="light"] .theme-toggle,
-        [data-theme="light"] .hero-chip,
-        [data-theme="light"] .traffic-chip{{background:rgba(255,255,255,.84);border-color:var(--border);color:var(--text);}}
-        [data-theme="light"] .api-pill{{color:#1f564f;}}
-        [data-theme="light"] .api-pill::before,
-        [data-theme="light"] .card-icon{{background-color:rgba(31,122,106,.12);border-color:rgba(31,122,106,.24);color:#1f7a6a;}}
-        [data-theme="light"] .hero-popover{{background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(241,246,251,.96));border-color:var(--border);}}
-        [data-theme="light"] .mode-choice{{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}}
-        [data-theme="light"] .mode-choice.active{{background:rgba(31,122,106,.13);border-color:rgba(31,122,106,.42);color:#174f48;}}
-        [data-theme="light"] .mode-choice:hover{{background:rgba(31,122,106,.13);border-color:rgba(31,122,106,.42);}}
-        [data-theme="light"] button{{border-color:rgba(31,122,106,.28);background:rgba(31,122,106,.08);color:#1f6258;box-shadow:none;}}
-        [data-theme="light"] button:hover{{border-color:rgba(31,122,106,.42);background:rgba(31,122,106,.13);color:#174f48;}}
-        [data-theme="light"] button[type="submit"]:not(.danger):not(.pool-apply-btn):not(.pool-delete-btn){{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}}
-        [data-theme="light"] button[type="submit"]:not(.danger):not(.pool-apply-btn):not(.pool-delete-btn):hover{{background:rgba(31,122,106,.13);border-color:rgba(31,122,106,.42);color:#174f48;}}
-        [data-theme="light"] .secondary-button,
-        [data-theme="light"] .success-button,
-        [data-theme="light"] .outline-button,
-        [data-theme="light"] .service-preset-btn{{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}}
-        [data-theme="light"] .mode-toggle,
-        [data-theme="light"] .theme-toggle{{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}}
-        [data-theme="light"] button.danger{{background:#f7dedb;border-color:#d79891;color:#8e2f28;}}
-        [data-theme="light"] button.danger:hover{{background:#f1cbc6;border-color:#c77d75;}}
-        [data-theme="light"] .success-button{{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}}
-        [data-theme="light"] input,
-        [data-theme="light"] textarea,
-        [data-theme="light"] select{{background:#fff;border-color:#c8d5e1;color:var(--text);}}
-        [data-theme="light"] input::placeholder,
-        [data-theme="light"] textarea::placeholder{{color:#7d8b9b;}}
-        [data-theme="light"] input:focus,
-        [data-theme="light"] textarea:focus,
-        [data-theme="light"] select:focus{{border-color:#1f7a6a;box-shadow:0 0 0 3px rgba(31,122,106,.12);}}
-        [data-theme="light"] .segmented,
-        [data-theme="light"] .subtabs,
-        [data-theme="light"] .pool-table-wrap,
-        [data-theme="light"] .protocol-subview-import .pool-add-form,
-        [data-theme="light"] .protocol-subview-import .pool-subscribe-form,
-        [data-theme="light"] .custom-check-card{{background:rgba(255,255,255,.78);border-color:var(--border);}}
-        [data-theme="light"] .seg-tab,
-        [data-theme="light"] .subtab,
-        [data-theme="light"] .nav-item{{color:#536274;}}
-        [data-theme="light"] .seg-tab.active,
-        [data-theme="light"] .subtab.active,
-        [data-theme="light"] .nav-item.active{{background:rgba(31,122,106,.12);border-color:rgba(31,122,106,.3);color:#1f6258;}}
-        [data-theme="light"] .seg-tab:hover,
-        [data-theme="light"] .subtab:hover,
-        [data-theme="light"] .nav-item:hover{{background:rgba(31,122,106,.06);}}
-        [data-theme="light"] .tab-count{{background:#e0e9f2;color:#233144;}}
-        [data-theme="light"] .pool-table th{{background:#eef3f8;color:#536274;}}
-        [data-theme="light"] .pool-table th,
-        [data-theme="light"] .pool-table td{{border-bottom-color:#d6e0ea;}}
-        [data-theme="light"] .pool-row-active{{background:rgba(31,122,106,.1);}}
-        [data-theme="light"] .pool-active-cell,
-        [data-theme="light"] .pool-apply-btn{{color:#172033;}}
-        [data-theme="light"] .pool-apply-btn:hover{{color:#1f7a6a;}}
-        [data-theme="light"] .pool-delete-btn{{background:#f5deda;color:#92352d;border-color:#e3aaa4;}}
-        [data-theme="light"] .pool-delete-btn:hover{{background:#edc8c2;}}
-        [data-theme="light"] .key-status-ok,
-        [data-theme="light"] .custom-service-ok{{background:rgba(31,122,106,.12);border-color:rgba(31,122,106,.3);color:#1f6258;}}
-        [data-theme="light"] .key-status-warn{{background:#fff1d7;border-color:#deb36b;color:#875b1f;}}
-        [data-theme="light"] .key-status-fail,
-        [data-theme="light"] .custom-service-fail{{background:transparent;border-color:transparent;color:#526173;}}
-        [data-theme="light"] .key-status-empty,
-        [data-theme="light"] .custom-service-unknown,
-        [data-theme="light"] .custom-service-neutral,
-        [data-theme="light"] .service-probe-unknown{{background:#edf3f8;border-color:#c8d5e1;color:#536274;}}
-        [data-theme="light"] .service-probe-fail{{background:#f7dedb;border-color:#d79891;color:#92352d;}}
-        [data-theme="light"] .custom-check-item{{background:rgba(255,255,255,.82);border-color:#d6e0ea;}}
-        [data-theme="light"] .custom-check-empty{{border-color:#c8d5e1;background:rgba(255,255,255,.55);}}
-        [data-theme="light"] .notice-result{{background:var(--warn-bg);border-color:var(--warn-border);color:#6f4b18;}}
-        [data-theme="light"] .notice-status{{background:var(--success-bg);border-color:var(--success-border);color:#174f3b;}}
-        [data-theme="light"] .notice strong,
-        [data-theme="light"] .log-output{{color:inherit;}}
-        [data-theme="light"] .command-progress-block{{background:rgba(255,255,255,.72);border-color:var(--border);}}
-        [data-theme="light"] .command-progress-track{{background:#d9e4ee;}}
-        [data-theme="light"] .confirm-backdrop{{background:rgba(31,41,55,.36);}}
-        [data-theme="light"] .mobile-nav{{background:rgba(255,255,255,.96);border-color:var(--border);box-shadow:0 14px 34px rgba(46,63,86,.18);}}
-        </style>
-    <script>
-        const INITIAL_STATUS_PENDING = {initial_status_pending};
-        const INITIAL_COMMAND_RUNNING = {initial_command_running};
-        const POOL_PROBE_POLL_EXTENSION_MS = {POOL_PROBE_UI_POLL_EXTENSION_MS};
-        const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
-        const YOUTUBE_ICON_SRC = 'data:image/svg+xml;base64,{YOUTUBE_SVG_B64}';
-        const SERVICE_ICON_BASE = '/static/service-icons/';
-        let customChecks = {custom_checks_json};
-        const PROTOCOL_LABELS = {{
-            none: 'Без прокси',
-            shadowsocks: 'Shadowsocks',
-            vmess: 'Vmess',
-            vless: 'Vless 1',
-            vless2: 'Vless 2',
-            trojan: 'Trojan'
-        }};
-        let statusPollTimer = null;
-        let statusPollUntil = 0;
-        let commandPollTimer = null;
 
-        (function() {{
-            const savedTheme = localStorage.getItem('router-theme');
-            const theme = savedTheme === 'light' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', theme);
-        }})();
-
-        function toggleTheme() {{
-            const root = document.documentElement;
-            const nextTheme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-            root.setAttribute('data-theme', nextTheme);
-            localStorage.setItem('router-theme', nextTheme);
-            const label = document.getElementById('theme-toggle-label');
-            if (label) {{
-                label.textContent = nextTheme === 'light' ? 'Светлая тема' : 'Темная тема';
-            }}
-        }}
-
-        function toggleModePicker() {{
-            const picker = document.getElementById('mode-picker');
-            if (!picker) {{
-                return;
-            }}
-            picker.classList.toggle('hidden');
-        }}
-
-        function escapeHtml(value) {{
-            return String(value || '').replace(/[&<>"']/g, function(char) {{
-                return {{
-                    '&': '&amp;',
-                    '<': '&lt;',
-                    '>': '&gt;',
-                    '"': '&quot;',
-                    "'": '&#39;'
-                }}[char];
-            }});
-        }}
-
-        function setupViewNavigation() {{
-            const targets = document.querySelectorAll('[data-view-target]');
-            function activate(view) {{
-                let selected = view || 'status';
-                if (selected === 'service' || !document.querySelector('[data-view="' + selected + '"]')) {{
-                    selected = 'status';
-                }}
-                document.querySelectorAll('[data-view]').forEach(function(panel) {{
-                    panel.classList.toggle('active', panel.dataset.view === selected);
-                }});
-                targets.forEach(function(button) {{
-                    button.classList.toggle('active', button.dataset.viewTarget === selected);
-                }});
-            }}
-            targets.forEach(function(button) {{
-                button.addEventListener('click', function() {{
-                    activate(button.dataset.viewTarget);
-                }});
-            }});
-            localStorage.removeItem('router-active-view');
-            activate('status');
-        }}
-
-        function setupSegmentedTabs(buttonSelector, panelSelector, targetAttribute, panelAttribute, storageKey) {{
-            const buttons = document.querySelectorAll(buttonSelector);
-            function activate(value) {{
-                let selected = value || localStorage.getItem(storageKey) || (buttons[0] ? buttons[0].getAttribute(targetAttribute) : '');
-                if (selected && !Array.from(buttons).some(function(button) {{ return button.getAttribute(targetAttribute) === selected; }})) {{
-                    selected = buttons[0] ? buttons[0].getAttribute(targetAttribute) : '';
-                }}
-                buttons.forEach(function(button) {{
-                    button.classList.toggle('active', button.getAttribute(targetAttribute) === selected);
-                }});
-                document.querySelectorAll(panelSelector).forEach(function(panel) {{
-                    panel.classList.toggle('active', panel.getAttribute(panelAttribute) === selected);
-                }});
-                if (selected) {{
-                    localStorage.setItem(storageKey, selected);
-                }}
-            }}
-            buttons.forEach(function(button) {{
-                button.addEventListener('click', function() {{
-                    activate(button.getAttribute(targetAttribute));
-                }});
-            }});
-            activate(localStorage.getItem(storageKey));
-        }}
-
-        function setupProtocolSubtabs() {{
-            document.querySelectorAll('[data-protocol-panel]').forEach(function(panel) {{
-                const buttons = panel.querySelectorAll('[data-subview-target]');
-                function activate(value) {{
-                    const selected = value || 'key';
-                    buttons.forEach(function(button) {{
-                        button.classList.toggle('active', button.dataset.subviewTarget === selected);
-                    }});
-                    panel.querySelectorAll('[data-subview]').forEach(function(subview) {{
-                        subview.classList.toggle('active', subview.dataset.subview === selected);
-                    }});
-                }}
-                buttons.forEach(function(button) {{
-                    button.addEventListener('click', function() {{
-                        activate(button.dataset.subviewTarget);
-                    }});
-                }});
-                activate('key');
-            }});
-        }}
-
-        function setOptionalText(id, text) {{
-            const element = document.getElementById(id);
-            if (!element) {{
-                return;
-            }}
-            const value = text || '';
-            element.textContent = value;
-            element.classList.toggle('hidden', !value);
-        }}
-
-        function serviceIcon(src, alt) {{
-            return '<img class="service-icon-img" src="' + src + '" width="16" height="16" alt="' + alt + '" style="vertical-align:middle;opacity:1">';
-        }}
-
-        function protocolIcons(status) {{
-            let html = '';
-            if (status && status.api_ok) {{
-                html += serviceIcon(TELEGRAM_ICON_SRC, 'Telegram');
-            }}
-            if (status && status.yt_ok) {{
-                html += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');
-            }}
-            if (status && status.custom) {{
-                customChecks.forEach(function(check) {{
-                    if (status.custom[check.id] === 'ok') {{
-                        html += serviceIcon(serviceIconSrc(check.icon), check.label || 'Service');
-                    }}
-                }});
-            }}
-            return html;
-        }}
-
-        function probeBadge(state, service) {{
-            if (state === 'ok') {{
-                return serviceIcon(service === 'tg' ? TELEGRAM_ICON_SRC : YOUTUBE_ICON_SRC, service === 'tg' ? 'Telegram' : 'YouTube');
-            }}
-            if (state === 'fail') {{
-                return '<span class="service-probe-mark service-probe-fail">✕</span>';
-            }}
-            return '<span class="service-probe-mark service-probe-unknown">?</span>';
-        }}
-
-        function customCheckById(id) {{
-            for (let i = 0; i < customChecks.length; i += 1) {{
-                if (customChecks[i].id === id) {{
-                    return customChecks[i];
-                }}
-            }}
-            return null;
-        }}
-
-        function customBadge(state, check) {{
-            const status = state || 'unknown';
-            const label = check ? check.label : 'Проверка';
-            const url = check ? check.url : '';
-            let content = '?';
-            if (status === 'ok' && check && check.icon) {{
-                content = serviceIcon(serviceIconSrc(check.icon), label);
-            }} else if (status === 'fail') {{
-                content = '<span class="service-probe-mark service-probe-fail">✕</span>';
-            }} else {{
-                content = '<span class="service-probe-mark service-probe-unknown">?</span>';
-            }}
-            return '<span class="custom-service-slot custom-service-' + status + '" title="' +
-                escapeHtml(label + (url ? ': ' + url : '')) + '">' + content + '</span>';
-        }}
-
-        function renderCustomBadges(states) {{
-            if (!customChecks.length) {{
-                return '';
-            }}
-            return customChecks.map(function(check) {{
-                const state = states && states[check.id] ? states[check.id] : 'unknown';
-                return customBadge(state, check);
-            }}).join('');
-        }}
-
-        function customUrlText(check) {{
-            const urls = Array.isArray(check.urls) && check.urls.length ? check.urls : [check.url || ''];
-            return urls.filter(Boolean).map(function(url) {{
-                try {{
-                    const parsed = new URL(url);
-                    return (parsed.host || url) + (parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '');
-                }} catch (error) {{
-                    return url;
-                }}
-            }}).join(', ');
-        }}
-
-        function serviceIconSrc(icon) {{
-            const safe = String(icon || '').replace(/[^a-z0-9_-]/gi, '').toLowerCase();
-            return safe ? SERVICE_ICON_BASE + safe + '.png' : '';
-        }}
-
-        function customIconHtml(check) {{
-            if (check && check.icon) {{
-                return '<span class="preset-icon"><img src="' + serviceIconSrc(check.icon) + '" width="20" height="20" alt="' + escapeHtml(check.label || 'Service') + '"></span>';
-            }}
-            return '<span class="custom-service-badge custom-service-neutral">' + escapeHtml((check && check.badge) || 'WEB') + '</span>';
-        }}
-
-        function customHeaderIcons() {{
-            if (!customChecks.length) {{
-                return '';
-            }}
-            return customChecks.map(function(check) {{
-                const label = check.label || 'Service';
-                const content = check.icon
-                    ? serviceIcon(serviceIconSrc(check.icon), label)
-                    : '<span class="custom-service-badge custom-service-neutral">' + escapeHtml(check.badge || 'WEB') + '</span>';
-                return '<span class="custom-service-slot custom-service-header" title="' + escapeHtml(label) + '">' + content + '</span>';
-            }}).join('');
-        }}
-
-        function syncCustomCheckColumns() {{
-            const hasChecks = customChecks.length > 0;
-            const mobileWidth = Math.max(28, 28 * customChecks.length) + 'px';
-            const desktopWidth = (32 * Math.max(1, customChecks.length)) + 'px';
-            document.querySelectorAll('.pool-table').forEach(function(table) {{
-                table.classList.toggle('has-custom-checks', hasChecks);
-                table.style.setProperty('--custom-col-mobile', mobileWidth);
-                const customCol = table.querySelector('.pool-col-custom');
-                if (customCol) {{
-                    customCol.style.width = desktopWidth;
-                }}
-            }});
-        }}
-
-        function renderCustomChecks(checks) {{
-            customChecks = Array.isArray(checks) ? checks : [];
-            const html = customChecks.length ? customChecks.map(function(check) {{
-                return '<div class="custom-check-item">' +
-                    customIconHtml(check) +
-                    '<span class="custom-check-copy"><strong>' + escapeHtml(check.label || 'Проверка') + '</strong><small>' + escapeHtml(customUrlText(check)) + '</small></span>' +
-                    '<form method="post" action="/custom_check_delete" data-async-action="custom-check-delete" data-confirm-title="Удалить проверку?" data-confirm-message="Удалить дополнительную проверку ' + escapeHtml(check.label || 'Проверка') + '?">' +
-                        '<input type="hidden" name="id" value="' + escapeHtml(check.id || '') + '">' +
-                        '<button type="submit" class="pool-delete-btn" title="Удалить проверку">Удалить</button>' +
-                    '</form>' +
-                '</div>';
-            }}).join('') : '<div class="custom-check-empty">Дополнительные проверки пока не добавлены.</div>';
-            document.querySelectorAll('[data-custom-check-list]').forEach(function(list) {{
-                list.innerHTML = html;
-                setupAsyncForms(list);
-            }});
-            const activeIds = customChecks.map(function(check) {{ return check.id; }});
-            document.querySelectorAll('[data-custom-preset]').forEach(function(button) {{
-                const active = activeIds.indexOf(button.dataset.customPreset) !== -1;
-                button.disabled = active;
-                button.title = active ? 'Уже добавлено' : 'Добавить проверку';
-            }});
-            document.querySelectorAll('[data-custom-check-head]').forEach(function(head) {{
-                head.innerHTML = customHeaderIcons();
-            }});
-            syncCustomCheckColumns();
-        }}
-
-        function renderPoolBody(proto, pool) {{
-            const body = document.querySelector('[data-pool-body="' + proto + '"]');
-            if (!body || !pool) {{
-                return;
-            }}
-            const rows = pool.rows || [];
-            const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');
-            if (tab) {{
-                tab.textContent = String(pool.count || rows.length);
-            }}
-            if (!rows.length) {{
-                body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите subscription.</td></tr>';
-                return;
-            }}
-            body.innerHTML = rows.map(function(row) {{
-                const activeClass = row.active ? ' pool-row-active' : '';
-                const activeText = row.active ? 'активен' : '';
-                const key = escapeHtml(row.key || '');
-                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + escapeHtml(row.key_id) + '" data-key="' + key + '">' +
-                    '<td class="pool-key-cell">' +
-                        '<form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">' +
-                            '<input type="hidden" name="type" value="' + proto + '">' +
-                            '<input type="hidden" name="key" value="' + key + '">' +
-                            '<button type="submit" class="pool-apply-btn" title="Применить этот ключ">' + escapeHtml(row.display_name) + '</button>' +
-                        '</form>' +
-                        '<span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>' + activeText + '</span>' +
-                        '<span class="pool-hash">' + escapeHtml(row.key_id) + '</span>' +
-                    '</td>' +
-                    '<td class="pool-service-cell" data-pool-tg>' + probeBadge(row.tg, 'tg') + '</td>' +
-                    '<td class="pool-service-cell" data-pool-yt>' + probeBadge(row.yt, 'yt') + '</td>' +
-                    '<td class="pool-custom-cell" data-pool-custom>' + renderCustomBadges(row.custom) + '</td>' +
-                    '<td class="pool-checked-cell" data-pool-checked>' + escapeHtml(row.checked_at) + '</td>' +
-                    '<td class="pool-actions-cell">' +
-                        '<form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула?">' +
-                            '<input type="hidden" name="type" value="' + proto + '">' +
-                            '<input type="hidden" name="key" value="' + key + '">' +
-                            '<button type="submit" class="pool-delete-btn" title="Удалить ключ из пула">Удалить</button>' +
-                        '</form>' +
-                    '</td>' +
-                '</tr>';
-            }}).join('');
-            setupAsyncForms(body);
-        }}
-
-        function updatePoolRows(proto, pool) {{
-            const body = document.querySelector('[data-pool-body="' + proto + '"]');
-            if (!body || !pool) {{
-                return;
-            }}
-            const rows = pool.rows || [];
-            const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');
-            if (tab) {{
-                tab.textContent = String(pool.count || rows.length);
-            }}
-            body.querySelectorAll('[data-pool-row]').forEach(function(item) {{
-                item.classList.remove('pool-row-active');
-                const meta = item.querySelector('[data-pool-key-meta]');
-                if (meta) {{
-                    meta.textContent = '';
-                }}
-            }});
-            rows.forEach(function(row) {{
-                const item = body.querySelector('[data-key-id="' + row.key_id + '"]');
-                if (!item) {{
-                    return;
-                }}
-                item.classList.toggle('pool-row-active', !!row.active);
-                const meta = item.querySelector('[data-pool-key-meta]');
-                if (meta) {{
-                    meta.textContent = row.active ? 'активен' : '';
-                }}
-                const tg = item.querySelector('[data-pool-tg]');
-                if (tg) {{
-                    tg.innerHTML = probeBadge(row.tg, 'tg');
-                }}
-                const yt = item.querySelector('[data-pool-yt]');
-                if (yt) {{
-                    yt.innerHTML = probeBadge(row.yt, 'yt');
-                }}
-                const custom = item.querySelector('[data-pool-custom]');
-                if (custom) {{
-                    custom.innerHTML = renderCustomBadges(row.custom);
-                }}
-                const checked = item.querySelector('[data-pool-checked]');
-                if (checked) {{
-                    checked.textContent = row.checked_at || '';
-                }}
-            }});
-        }}
-
-        function updatePoolStatus(pools) {{
-            if (!pools) {{
-                return;
-            }}
-            Object.keys(pools).forEach(function(proto) {{
-                const rows = (pools[proto] && pools[proto].rows) || [];
-                const hasFullKeys = rows.some(function(row) {{ return !!row.key; }});
-                if (hasFullKeys || rows.length === 0) {{
-                    renderPoolBody(proto, pools[proto]);
-                }} else {{
-                    updatePoolRows(proto, pools[proto]);
-                }}
-            }});
-        }}
-
-        function updateProtocolStatus(proto, status) {{
-            const card = document.querySelector('[data-protocol-card="' + proto + '"]');
-            if (!card || !status) {{
-                return;
-            }}
-            const badge = card.querySelector('[data-protocol-status-label]');
-            if (badge) {{
-                badge.className = 'key-status-badge key-status-' + (status.tone || 'warn');
-                badge.innerHTML = status.label || 'Проверяется';
-            }}
-            const details = card.querySelector('[data-protocol-status-details]');
-            if (details) {{
-                details.textContent = status.details || '';
-            }}
-            const icons = card.querySelector('[data-protocol-status-icons]');
-            if (icons) {{
-                icons.innerHTML = protocolIcons(status);
-            }}
-        }}
-
-        function poolProbeProgressLabel(scope) {{
-            if (scope === 'auto_missing') {{
-                return 'Автопроверка непроверенных ключей';
-            }}
-            if (scope === 'manual_all') {{
-                return 'Полная проверка всех ключей';
-            }}
-            if (scope === 'protocol') {{
-                return 'Проверка выбранного пула';
-            }}
-            return 'Фоновая проверка пула ключей';
-        }}
-
-        function updateWebStatus(snapshot) {{
-            if (!snapshot || !snapshot.web) {{
-                return false;
-            }}
-            const web = snapshot.web;
-            const modeLabel = document.getElementById('current-mode-label');
-            if (modeLabel) {{
-                modeLabel.textContent = PROTOCOL_LABELS[web.proxy_mode] || web.proxy_mode || 'Без прокси';
-            }}
-            const modeToggle = document.querySelector('#mode-toggle-button span:last-child');
-            if (modeToggle) {{
-                modeToggle.textContent = PROTOCOL_LABELS[web.proxy_mode] || web.proxy_mode || 'Без прокси';
-            }}
-            const apiStatus = document.getElementById('web-api-status');
-            if (apiStatus) {{
-                apiStatus.textContent = web.api_status || '';
-            }}
-            const apiPill = document.getElementById('web-api-pill');
-            if (apiPill) {{
-                const progress = snapshot.pool_probe_progress || {{}};
-                const poolProbeVisible = !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
-                const progressLabel = poolProbeProgressLabel(progress.scope || '');
-                const progressText = progress.total
-                    ? '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + progress.total + '. Статусы обновятся без перезагрузки страницы.'
-                    : '⏳ ' + progressLabel + '. Статусы обновятся без перезагрузки страницы.';
-                apiPill.textContent = poolProbeVisible ? progressText : (web.api_status || '');
-            }}
-            setOptionalText('web-socks-details', web.socks_details || '');
-            const fallbackText = web.fallback_reason && web.proxy_mode === 'none'
-                ? 'Последняя неудачная попытка прокси: ' + web.fallback_reason
-                : '';
-            setOptionalText('web-fallback-reason', fallbackText);
-
-            let pending = (web.api_status || '').indexOf('Проверяется связь текущего режима') !== -1 ||
-                (web.api_status || '').indexOf('Фоновая проверка') !== -1 ||
-                (web.api_status || '').indexOf('перепроверяется') !== -1;
-            const protocols = snapshot.protocols || {{}};
-            Object.keys(protocols).forEach(function(proto) {{
-                const status = protocols[proto];
-                updateProtocolStatus(proto, status);
-                if (status && status.label === 'Проверяется') {{
-                    pending = true;
-                }}
-            }});
-            if (snapshot.custom_checks) {{
-                renderCustomChecks(snapshot.custom_checks);
-            }}
-            const poolSummary = snapshot.pool_summary || null;
-            if (poolSummary) {{
-                const progress = snapshot.pool_probe_progress || {{}};
-                let summaryNote = poolSummary.note || '';
-                if (!!snapshot.pool_probe_running && Number(progress.total || 0) > 0) {{
-                    summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + summaryNote;
-                }}
-                setOptionalText('pool-active-summary', poolSummary.active_text || '');
-                setOptionalText('pool-summary-note', summaryNote);
-            }}
-            updatePoolStatus(snapshot.pools);
-            if (!!snapshot.pool_probe_running && Number((snapshot.pool_probe_progress || {{}}).total || 0) > 0) {{
-                pending = true;
-                statusPollUntil = Math.max(statusPollUntil, Date.now() + POOL_PROBE_POLL_EXTENSION_MS);
-            }}
-            return pending;
-        }}
-
-        function pollStatus() {{
-            statusPollTimer = null;
-            fetch('/api/status', {{
-                headers: {{'Accept': 'application/json'}},
-                cache: 'no-store'
-            }})
-                .then(function(response) {{ return response.json(); }})
-                .then(function(payload) {{
-                    const pending = updateWebStatus(payload);
-                    if (pending) {{
-                        statusPollUntil = Math.max(statusPollUntil, Date.now() + 30000);
-                    }}
-                }})
-                .catch(function() {{}})
-                .finally(function() {{
-                    if (Date.now() < statusPollUntil && !document.hidden) {{
-                        statusPollTimer = window.setTimeout(pollStatus, 4000);
-                    }}
-                }});
-        }}
-
-        function scheduleStatusPolling(durationMs) {{
-            statusPollUntil = Math.max(statusPollUntil, Date.now() + durationMs);
-            if (!statusPollTimer && !document.hidden) {{
-                pollStatus();
-            }}
-        }}
-
-        function showActionMessage(text, ok) {{
-            const block = document.getElementById('web-action-message');
-            if (!block) {{
-                return;
-            }}
-            block.classList.remove('hidden');
-            block.classList.toggle('notice-status', !!ok);
-            block.classList.toggle('notice-result', !ok);
-            const title = block.querySelector('strong');
-            if (title) {{
-                title.textContent = ok ? 'Результат' : 'Ошибка';
-            }}
-            const output = block.querySelector('.log-output');
-            if (output) {{
-                output.textContent = text || '';
-            }}
-        }}
-
-        function showCommandState(state) {{
-            const block = document.getElementById('web-command-status');
-            if (!block) {{
-                return false;
-            }}
-            if (!state || !state.label) {{
-                block.classList.add('hidden');
-                return false;
-            }}
-            block.classList.remove('hidden');
-            const title = block.querySelector('strong');
-            if (title) {{
-                title.textContent = (state.running ? 'Команда выполняется: ' : 'Последняя команда: ') + state.label;
-            }}
-            const output = block.querySelector('.log-output');
-            if (output) {{
-                output.textContent = state.result || ('⏳ ' + state.label + ' ещё выполняется. Статус обновится без перезагрузки страницы.');
-            }}
-            return !!state.running;
-        }}
-
-        function pollCommandState() {{
-            commandPollTimer = null;
-            fetch('/api/command_state', {{
-                headers: {{'Accept': 'application/json'}},
-                cache: 'no-store'
-            }})
-                .then(function(response) {{ return response.json(); }})
-                .then(function(payload) {{
-                    if (showCommandState(payload)) {{
-                        commandPollTimer = window.setTimeout(pollCommandState, 4000);
-                    }} else {{
-                        scheduleStatusPolling(30000);
-                    }}
-                }})
-                .catch(function() {{
-                    commandPollTimer = window.setTimeout(pollCommandState, 6000);
-                }});
-        }}
-
-        function markProtocolPending(proto, text) {{
-            const card = document.querySelector('[data-protocol-card="' + proto + '"]');
-            if (!card) {{
-                return;
-            }}
-            const badge = card.querySelector('[data-protocol-status-label]');
-            if (badge) {{
-                badge.className = 'key-status-badge key-status-warn';
-                badge.textContent = 'Проверяется';
-            }}
-            const details = card.querySelector('[data-protocol-status-details]');
-            if (details) {{
-                details.textContent = text || 'Проверка Telegram API, YouTube и дополнительных сервисов выполняется в фоне.';
-            }}
-            const icons = card.querySelector('[data-protocol-status-icons]');
-            if (icons) {{
-                icons.innerHTML = '';
-            }}
-        }}
-
-        function markPoolKeyActive(proto, key) {{
-            document.querySelectorAll('[data-pool-row]').forEach(function(item) {{
-                if (item.dataset.protocol !== proto) {{
-                    return;
-                }}
-                const isActive = item.dataset.key === key;
-                item.classList.toggle('pool-row-active', isActive);
-                const meta = item.querySelector('[data-pool-key-meta]');
-                if (meta) {{
-                    meta.textContent = isActive ? 'активен' : '';
-                }}
-                const mobileMeta = item.querySelector('[data-pool-mobile-active]');
-                if (mobileMeta) {{
-                    mobileMeta.textContent = meta ? meta.textContent : '';
-                }}
-            }});
-        }}
-
-        function setButtonBusy(button, busy) {{
-            if (!button) {{
-                return;
-            }}
-            if (busy) {{
-                button.dataset.originalText = button.textContent;
-                button.disabled = true;
-                button.textContent = 'Выполняется...';
-            }} else {{
-                button.disabled = false;
-                if (button.dataset.originalText) {{
-                    button.textContent = button.dataset.originalText;
-                    delete button.dataset.originalText;
-                }}
-            }}
-        }}
-
-        function confirmAction(title, message) {{
-            if (!title && !message) {{
-                return Promise.resolve(true);
-            }}
-            const modal = document.getElementById('confirm-modal');
-            const titleNode = document.getElementById('confirm-title');
-            const messageNode = document.getElementById('confirm-message');
-            const cancelButton = document.getElementById('confirm-cancel');
-            const acceptButton = document.getElementById('confirm-accept');
-            if (!modal || !cancelButton || !acceptButton) {{
-                return Promise.resolve(window.confirm(message || title || 'Подтвердить действие?'));
-            }}
-            titleNode.textContent = title || 'Подтверждение';
-            messageNode.textContent = message || 'Подтвердите действие.';
-            modal.classList.remove('hidden');
-            return new Promise(function(resolve) {{
-                function cleanup(result) {{
-                    modal.classList.add('hidden');
-                    cancelButton.removeEventListener('click', onCancel);
-                    acceptButton.removeEventListener('click', onAccept);
-                    modal.removeEventListener('click', onBackdrop);
-                    resolve(result);
-                }}
-                function onCancel() {{ cleanup(false); }}
-                function onAccept() {{ cleanup(true); }}
-                function onBackdrop(event) {{
-                    if (event.target === modal) {{
-                        cleanup(false);
-                    }}
-                }}
-                cancelButton.addEventListener('click', onCancel);
-                acceptButton.addEventListener('click', onAccept);
-                modal.addEventListener('click', onBackdrop);
-            }});
-        }}
-
-        function setupAsyncForms(root) {{
-            const scope = root || document;
-            scope.querySelectorAll('form[data-async-action]').forEach(function(form) {{
-                if (form.dataset.asyncBound === '1') {{
-                    return;
-                }}
-                form.dataset.asyncBound = '1';
-                form.addEventListener('submit', function(event) {{
-                    event.preventDefault();
-                    const button = event.submitter || form.querySelector('button[type="submit"]');
-                    const formData = new FormData(form);
-                    if (button && button.name) {{
-                        formData.append(button.name, button.value || '');
-                    }}
-                    const action = form.dataset.asyncAction || '';
-                    const proto = formData.get('type') || '';
-                    const key = formData.get('key') || '';
-                    const confirmTitle = (button && button.dataset.confirmTitle) || form.dataset.confirmTitle || '';
-                    const confirmMessage = (button && button.dataset.confirmMessage) || form.dataset.confirmMessage || '';
-                    const actionUrl = (button && button.getAttribute('formaction')) || form.getAttribute('action');
-                    confirmAction(confirmTitle, confirmMessage).then(function(confirmed) {{
-                        if (!confirmed) {{
-                            return;
-                        }}
-                        setButtonBusy(button, true);
-                        if (proto && (action === 'install' || action === 'pool-apply' || action === 'pool-probe')) {{
-                            markProtocolPending(proto);
-                        }}
-                        showActionMessage('⏳ Выполняется действие. Страница останется на месте.', true);
-                        const requestBody = new URLSearchParams();
-                        formData.forEach(function(value, name) {{
-                            requestBody.append(name, value);
-                        }});
-                        fetch(actionUrl, {{
-                        method: 'POST',
-                        body: requestBody,
-                        headers: {{
-                            'Accept': 'application/json',
-                            'X-Requested-With': 'fetch',
-                            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-                        }},
-                        cache: 'no-store'
-                    }})
-                        .then(function(response) {{
-                            return response.json().then(function(payload) {{
-                                payload._responseOk = response.ok;
-                                return payload;
-                            }});
-                        }})
-                        .then(function(payload) {{
-                            const ok = payload._responseOk && payload.ok !== false;
-                            showActionMessage(payload.result || 'Готово.', ok);
-                            if (ok && proto && action === 'install') {{
-                                const card = form.closest('[data-protocol-card]');
-                                const textarea = card ? card.querySelector('[data-key-textarea]') : null;
-                                if (textarea) {{
-                                    textarea.value = key;
-                                }}
-                            }}
-                            if (ok && proto && action === 'pool-apply') {{
-                                markPoolKeyActive(proto, key);
-                                const card = form.closest('[data-protocol-card]');
-                                const textarea = card ? card.querySelector('[data-key-textarea]') : null;
-                                if (textarea) {{
-                                    textarea.value = key;
-                                }}
-                            }}
-                            if (payload.custom_checks) {{
-                                renderCustomChecks(payload.custom_checks);
-                            }}
-                            if (payload.pools) {{
-                                updatePoolStatus(payload.pools);
-                            }}
-                            if (payload.list_name && typeof payload.list_content === 'string') {{
-                                const listPanel = document.querySelector('[data-list-panel="' + payload.list_name + '"]');
-                                const listTextarea = listPanel ? listPanel.querySelector('textarea[name="content"]') : null;
-                                if (listTextarea) {{
-                                    listTextarea.value = payload.list_content;
-                                }}
-                            }}
-                            if (action === 'set-proxy') {{
-                                const picker = document.getElementById('mode-picker');
-                                if (picker) {{
-                                    picker.classList.add('hidden');
-                                }}
-                                const selectedMode = String(formData.get('proxy_type') || '');
-                                const selectedLabel = payload.proxy_label || PROTOCOL_LABELS[selectedMode] || selectedMode || 'Без прокси';
-                                document.querySelectorAll('.mode-choice').forEach(function(choice) {{
-                                    choice.classList.toggle('active', choice.dataset.modeValue === selectedMode);
-                                }});
-                                const modeToggle = document.querySelector('#mode-toggle-button span:last-child');
-                                if (modeToggle) {{
-                                    modeToggle.textContent = selectedLabel;
-                                }}
-                                const currentMode = document.getElementById('current-mode-label');
-                                if (currentMode) {{
-                                    currentMode.textContent = selectedLabel;
-                                }}
-                            }}
-                            if (action === 'command') {{
-                                showCommandState(payload.command_state);
-                                if (!commandPollTimer) {{
-                                    pollCommandState();
-                                }}
-                                scheduleStatusPolling(120000);
-                            }} else {{
-                                scheduleStatusPolling(70000);
-                            }}
-                        }})
-                        .catch(function(error) {{
-                            showActionMessage('Ошибка запроса: ' + error, false);
-                        }})
-                        .finally(function() {{
-                            setButtonBusy(button, false);
-                        }});
-                    }});
-                }});
-            }});
-        }}
-
-        document.addEventListener('DOMContentLoaded', function() {{
-            const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-            const label = document.getElementById('theme-toggle-label');
-            if (label) {{
-                label.textContent = currentTheme === 'light' ? 'Светлая тема' : 'Темная тема';
-            }}
-            document.addEventListener('click', function(event) {{
-                const picker = document.getElementById('mode-picker');
-                const toggle = document.getElementById('mode-toggle-button');
-                if (!picker || !toggle) {{
-                    return;
-                }}
-                if (picker.classList.contains('hidden')) {{
-                    return;
-                }}
-                if (!picker.contains(event.target) && !toggle.contains(event.target)) {{
-                    picker.classList.add('hidden');
-                }}
-            }});
-            document.addEventListener('visibilitychange', function() {{
-                if (!document.hidden) {{
-                    scheduleStatusPolling(30000);
-                }}
-            }});
-            setupViewNavigation();
-            setupSegmentedTabs('.protocol-tab', '[data-protocol-panel]', 'data-protocol-target', 'data-protocol-panel', 'router-active-protocol');
-            setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
-            setupProtocolSubtabs();
-            setupAsyncForms();
-            if (INITIAL_STATUS_PENDING) {{
-                scheduleStatusPolling(POOL_PROBE_POLL_EXTENSION_MS);
-            }}
-            if (INITIAL_COMMAND_RUNNING) {{
-                pollCommandState();
-            }}
-        }});
-    </script>
-</head>
-<body>
-    <div class="app-shell">
-        <header class="topbar">
-            <div class="topbar-actions">
-                <div class="app-caption">
-                    <strong>Локальная панель управления обходом на роутере</strong>
-                    <span class="app-branch">Ветка: {html.escape(APP_BRANCH_LABEL)} · {html.escape(APP_BRANCH_DESCRIPTION)}</span>
-                </div>
-                <span class="api-pill" id="web-api-pill">{html.escape(topbar_status_text)}</span>
-                <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
-                    <span>Режим прокси:</span>
-                    <span>{html.escape(current_mode_label)}</span>
-                </button>
-                <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Переключить тему">
-                    <span id="theme-toggle-label">Темная тема</span>
-                </button>
-                <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_VERSION_LABEL)}</span>
-                {mode_picker_block}
-            </div>
-        </header>
-        {message_block}
-        {command_block}
-        <div class="workspace-layout">
-            <nav class="side-nav" aria-label="Разделы">
-                <button type="button" class="nav-item active" data-view-target="status">
-                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5"></path><path d="M6.5 10.5V20h11V10.5"></path></svg>
-                    <span>Статус</span>
-                </button>
-                <button type="button" class="nav-item" data-view-target="keys">
-                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"></circle><path d="M11 12 21 2"></path><path d="m16 7 2 2"></path><path d="m14 9 2 2"></path></svg>
-                    <span>Ключи</span>
-                </button>
-                <button type="button" class="nav-item" data-view-target="lists">
-                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>
-                    <span>Списки</span>
-                </button>
-            </nav>
-            <main class="app-main">
-                <section class="app-view active" data-view="status">
-                    <div class="view-head">
-                        <span class="eyebrow">Обзор</span>
-                        <h2>Статус и сервис</h2>
-                        <p class="section-subtitle">Связь, активный режим и сервисные действия собраны в одном месте.</p>
-                    </div>
-                    <div class="status-dashboard">
-                        <div class="status-card status-card-wide">
-                            <div class="status-card-top">
-                                <span class="card-icon">{_telegram_icon_html(opacity=1.0)}</span>
-                                <div class="status-copy">
-                                    <span class="status-label">Telegram API</span>
-                                    <span class="status-value" id="web-api-status">{html.escape(status['api_status'])}</span>
-                                    {socks_block}
-                                    {fallback_block}
-                                </div>
-                                <span class="status-dot"></span>
-                            </div>
-                        </div>
-                        <div class="status-card">
-                            <div class="status-card-top">
-                                <span class="card-icon">◇</span>
-                                <div class="status-copy">
-                                    <span class="status-label">Активный режим</span>
-                                    <span class="status-value" id="current-mode-label">{html.escape(current_mode_label)}</span>
-                                    <p class="status-note">Списки обхода: <span id="list-route-label">{html.escape(list_route_label)}</span></p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="status-card">
-                            <div class="status-card-top">
-                                    <span class="card-icon">⚿</span>
-                                    <div class="status-copy">
-                                        <span class="status-label">Ключи и пул</span>
-                                    <span class="status-value" id="pool-active-summary">{html.escape(pool_summary['active_text'])}</span>
-                                    <p class="status-note" id="pool-summary-note">{html.escape(pool_summary_note)}</p>
-                                    </div>
-                                </div>
-                            <div class="status-card-actions">
-                                <button type="button" class="outline-button" data-view-target="keys">Открыть ключи</button>
-                                <form method="post" action="/pool_probe" data-async-action="pool-probe">
-                                    <button type="submit" class="outline-button">Проверить все ключи</button>
-                                </form>
-                            </div>
-                        </div>
-                        <div class="status-card">
-                            <div class="status-card-top">
-                                <span class="card-icon">↗</span>
-                                <div class="status-copy">
-                                    <span class="status-label">Быстрый старт</span>
-                                    <p class="status-note">После установки ключей можно сразу запустить или перезапустить прокси-сервисы.</p>
-                                </div>
-                            </div>
-                            <form method="post" action="/start" data-async-action="start">
-                                <button type="submit">{start_button_label}</button>
-                            </form>
-                        </div>
-                    </div>
-                    <div class="overview-service-grid">
-                        <section class="panel service-panel">
-                            <h3>Переустановка компонентов</h3>
-                            <div class="command-grid">{update_buttons_html}</div>
-                        </section>
-                        <section class="panel service-panel">
-                            <h3>Сервисные команды</h3>
-                            <div class="command-grid">{command_buttons_html}</div>
-                        </section>
-                    </div>
-                    <section class="panel overview-key-panel">
-                        <div class="workspace-head">
-                            <div>
-                                <span class="eyebrow">Ключ текущего режима</span>
-                                <h2>{html.escape(quick_key_label)}</h2>
-                                <p class="section-subtitle">Быстрое редактирование активного ключа. Полное управление пулом находится во вкладке “Ключи”.</p>
-                            </div>
-                        </div>
-                        <form method="post" action="/install" data-async-action="install" class="key-editor-form">
-                            <input type="hidden" name="type" value="{quick_key_proto}">
-                            <label class="field-label">Ключ {html.escape(quick_key_label)}</label>
-                            <textarea name="key" rows="4" placeholder="Вставьте ключ {html.escape(quick_key_label)}">{quick_key_value}</textarea>
-                            <div class="form-actions">
-                                <button type="submit">Сохранить ключ</button>
-                                <button type="button" class="outline-button" data-view-target="keys">Открыть пул ключей</button>
-                            </div>
-                        </form>
-                    </section>
-                </section>
-
-                <section class="app-view" data-view="keys">
-                    <div class="view-head">
-                        <span class="eyebrow">Ключи и мосты</span>
-                        <h2>Подключения по протоколам</h2>
-                        <p class="section-subtitle">Выберите протокол, сохраните активный ключ или управляйте его пулом.</p>
-                    </div>
-                    <div class="segmented protocol-tabs">{protocol_tabs_html}</div>
-                    <div class="protocol-panels">{protocol_panels_html}</div>
-                </section>
-
-                <section class="app-view" data-view="lists">
-                    <div class="view-head">
-                        <span class="eyebrow">Маршрутизация</span>
-                        <h2>Списки обхода</h2>
-                        <p class="section-subtitle">Домены из выбранного списка будут отправляться через соответствующий протокол.</p>
-                    </div>
-                    <div class="segmented list-tabs">{unblock_tabs_html}</div>
-                    <div class="list-panels">{unblock_panels_html}</div>
-                </section>
-            </main>
-        </div>
-        <nav class="mobile-nav" aria-label="Разделы">
-            <button type="button" class="nav-item active" data-view-target="status">
-                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5"></path><path d="M6.5 10.5V20h11V10.5"></path></svg>
-                <span>Статус</span>
-            </button>
-            <button type="button" class="nav-item" data-view-target="keys">
-                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"></circle><path d="M11 12 21 2"></path><path d="m16 7 2 2"></path><path d="m14 9 2 2"></path></svg>
-                <span>Ключи</span>
-            </button>
-            <button type="button" class="nav-item" data-view-target="lists">
-                <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>
-                <span>Списки</span>
-            </button>
-        </nav>
-        <div id="confirm-modal" class="confirm-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-            <div class="confirm-card">
-                <h2 id="confirm-title">Подтверждение</h2>
-                <p id="confirm-message">Подтвердите действие.</p>
-                <div class="confirm-actions">
-                    <button type="button" id="confirm-cancel" class="secondary-button">Отмена</button>
-                    <button type="button" id="confirm-accept" class="danger">Подтвердить</button>
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>'''
+        return render_web_form(
+            APP_BRANCH_DESCRIPTION=APP_BRANCH_DESCRIPTION,
+            APP_BRANCH_LABEL=APP_BRANCH_LABEL,
+            APP_VERSION_LABEL=APP_VERSION_LABEL,
+            POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
+            TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
+            YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
+            _telegram_icon_html=_telegram_icon_html,
+            command_block=command_block,
+            command_buttons_html=command_buttons_html,
+            current_mode_label=current_mode_label,
+            custom_checks_json=custom_checks_json,
+            fallback_block=fallback_block,
+            initial_command_running=initial_command_running,
+            initial_status_pending=initial_status_pending,
+            list_route_label=list_route_label,
+            message_block=message_block,
+            mode_picker_block=mode_picker_block,
+            mode_toggle_label=mode_toggle_label,
+            pool_summary=pool_summary,
+            pool_summary_note=pool_summary_note,
+            protocol_panels_html=protocol_panels_html,
+            protocol_tabs_html=protocol_tabs_html,
+            quick_key_label=quick_key_label,
+            quick_key_proto=quick_key_proto,
+            quick_key_value=quick_key_value,
+            quick_start_note=quick_start_note,
+            socks_block=socks_block,
+            start_button_label=start_button_label,
+            status=status,
+            topbar_status_text=topbar_status_text,
+            unblock_panels_html=unblock_panels_html,
+            unblock_tabs_html=unblock_tabs_html,
+            update_buttons_html=update_buttons_html,
+        )
 
 
     def _build_switch_confirmation(self, command):
@@ -6646,7 +4401,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             proxy_type = data.get('proxy_type', ['none'])[0]
             ok, error = update_proxy(proxy_type)
             if ok:
-                result = f'Режим прокси установлен: {proxy_type}'
+                result = f'{APP_MODE_LABEL} установлен: {proxy_type}'
             else:
                 result = f'⚠️ {error}'
             _invalidate_web_status_cache()
@@ -6663,7 +4418,7 @@ class KeyInstallHTTPRequestHandler(BaseHTTPRequestHandler):
             bot_ready = True
             _save_bot_autostart(True)
             _invalidate_web_status_cache()
-            result = 'Команда запуска принята. Прокси-сервисы запущены.'
+            result = APP_START_RESULT
             self._send_action_result(result, success=True)
             return
 
@@ -7176,9 +4931,9 @@ def _parse_vless_key(key):
 def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
     config_data = {
         'log': {
-            'access': CORE_PROXY_ACCESS_LOG,
+            'access': '/dev/null',
             'error': CORE_PROXY_ERROR_LOG,
-            'loglevel': 'info'
+            'loglevel': 'warning'
         },
         'dns': {
             'hosts': {

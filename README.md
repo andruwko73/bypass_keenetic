@@ -4,9 +4,9 @@
 
 ## О ветке
 
-`feature/web-only` — версия `bypass_keenetic` без Telegram-бота. Управление выполняется только через локальный веб-интерфейс роутера на `http://192.168.1.1:8080/`.
+`codex/web-only-v1` — версия `bypass_keenetic` без Telegram-бота. Управление выполняется только через локальный веб-интерфейс роутера на `http://192.168.1.1:8080/`.
 
-Ветка использует те же локальные настройки, ключи, пулы и списки обхода, что и версии `main` и `feature/independent-rework`, поэтому между версиями можно переходить без очистки пользовательских данных.
+Ветка использует те же локальные настройки, ключи, пулы и списки обхода, что и версии `codex/main-v1` и `codex/independent-v1`, поэтому между версиями можно переходить без очистки пользовательских данных.
 
 Возможности:
 - веб-интерфейс с разделами **Статус**, **Ключи**, **Списки**;
@@ -16,7 +16,7 @@
 - проверка Telegram API, YouTube и дополнительных сервисов через выбранный прокси;
 - пресеты проверок: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Meta AI, Instagram, Facebook;
 - кнопка **Добавить в список обхода** переносит домены выбранных дополнительных проверок в список обхода текущего протокола; кнопка **Добавить в список** добавляет готовые наборы Telegram, YouTube, Instagram/Meta, Discord, TikTok, X/Twitter или все сервисы сразу;
-- переустановка в `main`, `feature/independent-rework` и обратно в `feature/web-only` с сохранением данных.
+- переустановка в `codex/main-v1`, `codex/independent-v1` и обратно в `codex/web-only-v1` с сохранением данных.
 
 ## Установка
 
@@ -28,7 +28,7 @@
 После Entware подключитесь к роутеру по SSH и выполните:
 
 ```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/feature/web-only/bootstrap/install.sh | sh'
+sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/codex/web-only-v1/bootstrap/install.sh | sh'
 ```
 
 После установки откройте `http://192.168.1.1:8080/`. Telegram-бот и installer первичной настройки Telegram в этой ветке не запускаются.
@@ -57,8 +57,8 @@ Bootstrap перед заменой файлов создает backup и rollba
 ## Переустановка
 
 Из веб-интерфейса доступны переходы:
-- **Переустановить из форка без сброса** — `main`;
-- **Переустановка (ветка independent)** — `feature/independent-rework` с Telegram-ботом;
+- **Переустановить из форка без сброса** — `codex/main-v1`;
+- **Переустановка (ветка independent)** — `codex/independent-v1` с Telegram-ботом;
 - **Переустановка (без Telegram бота)** — текущая web-only ветка.
 
 При переходах сохраняются активные ключи, пул ключей, пользовательские проверки, списки обхода и базовые настройки веб-интерфейса.

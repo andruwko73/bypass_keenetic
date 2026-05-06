@@ -3,7 +3,7 @@ set -eu
 
 REPO_OWNER="${BYPASS_REPO_OWNER:-andruwko73}"
 REPO_NAME="${BYPASS_REPO_NAME:-bypass_keenetic}"
-REPO_BRANCH="${BYPASS_REPO_BRANCH:-feature/web-only}"
+REPO_BRANCH="${BYPASS_REPO_BRANCH:-codex/web-only-v1}"
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
 
 BOT_DIR="/opt/etc"
