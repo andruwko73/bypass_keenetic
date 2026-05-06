@@ -68,8 +68,8 @@ WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
-APP_BRANCH_LABEL = 'main'
-APP_VERSION_COUNTER = 412
+APP_BRANCH_LABEL = 'codex/main-v1'
+APP_VERSION_COUNTER = '1.01'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
@@ -217,7 +217,7 @@ AUTHORIZED_USER_IDS.update(EXTRA_NUMERIC_USER_IDS)
 
 
 def _raw_github_url(path):
-    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/main/{path}?ts={int(time.time())}'
+    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/{APP_BRANCH_LABEL}/{path}?ts={int(time.time())}'
 
 
 def _fetch_remote_text(url, timeout=20):
@@ -958,7 +958,7 @@ def _telegram_command_markup(menu_name):
     return _build_service_menu_markup() if menu_name == 'service' else _build_main_menu_markup()
 
 
-def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
+def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main-v1'):
     try:
         return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
     except Exception as exc:
@@ -976,7 +976,7 @@ def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_na
     _remove_file(TELEGRAM_COMMAND_JOB_FILE)
 
 
-def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
+def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main-v1'):
     state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
     started_at = float(state.get('started_at', 0) or 0)
     if state.get('running') and started_at and time.time() - started_at < 1800:
@@ -1083,89 +1083,6 @@ def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
     headers = {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
     raw_url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/{path}'
     try:
-        response = session.get(raw_url, headers=headers, timeout=(10, 30))
-        response.raise_for_status()
-        return raw_url, response.text
-    except requests.RequestException:
-        pass
-
-    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{quote(path, safe="/")}'
-    response = session.get(
-        api_url,
-        params={'ref': repo_ref},
-        headers={'Accept': 'application/vnd.github+json', **headers},
-        timeout=(10, 30),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get('encoding') != 'base64' or 'content' not in payload:
-        raise ValueError('GitHub contents API returned unexpected file payload')
-    content = ''.join(str(payload.get('content', '')).split())
-    return response.url, base64.b64decode(content).decode('utf-8')
-
-
-def _download_repo_script(repo_owner, repo_name, branch='main'):
-    session = requests.Session()
-    session.trust_env = False
-    if branch != 'main':
-        api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{quote(branch, safe="")}'
-        api_response = session.get(
-            api_url,
-            headers={'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
-            timeout=(10, 30),
-        )
-        api_response.raise_for_status()
-        repo_ref = str(api_response.json().get('sha', '')).strip()
-        if not repo_ref:
-            raise ValueError('GitHub РЅРµ РІРµСЂРЅСѓР» commit SHA РґР»СЏ script.sh')
-        url, script_text = _download_repo_file_text(session, repo_owner, repo_name, repo_ref, 'script.sh')
-        if '#!/bin/sh' not in script_text:
-            raise ValueError('GitHub вернул некорректный script.sh')
-        with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
-            file.write(script_text)
-        os.chmod('/opt/root/script.sh', stat.S_IRWXU)
-        return url, script_text, repo_ref
-
-    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/main'
-    api_response = session.get(
-        api_url,
-        headers={'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
-        timeout=(10, 30),
-    )
-    api_response.raise_for_status()
-    repo_ref = str(api_response.json().get('sha', '')).strip()
-    if not repo_ref:
-        raise ValueError('GitHub не вернул commit SHA для script.sh')
-
-    url, script_text = _download_repo_file_text(session, repo_owner, repo_name, repo_ref, 'script.sh')
-    if '#!/bin/sh' not in script_text:
-        raise ValueError('GitHub вернул некорректный script.sh')
-    with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
-        file.write(script_text)
-    os.chmod('/opt/root/script.sh', stat.S_IRWXU)
-    return url, script_text, repo_ref
-
-
-def _download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, path):
-    archive_ref = repo_ref if '/' not in repo_ref else f'refs/heads/{repo_ref}'
-    archive_url = f'https://codeload.github.com/{repo_owner}/{repo_name}/tar.gz/{archive_ref}'
-    suffix = '/' + path.strip('/')
-    with session.get(archive_url, stream=True, timeout=(10, 90)) as response:
-        response.raise_for_status()
-        response.raw.decode_content = True
-        with tarfile.open(fileobj=response.raw, mode='r|gz') as archive:
-            for member in archive:
-                if member.isfile() and member.name.endswith(suffix):
-                    extracted = archive.extractfile(member)
-                    if extracted is not None:
-                        return archive_url, extracted.read().decode('utf-8')
-    raise ValueError(f'GitHub archive did not contain {path}')
-
-
-def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
-    headers = {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
-    raw_url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/{path}'
-    try:
         response = session.get(raw_url, headers=headers, timeout=(5, 8))
         response.raise_for_status()
         return raw_url, response.text
@@ -1192,7 +1109,7 @@ def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
     return response.url, base64.b64decode(content).decode('utf-8')
 
 
-def _download_repo_script(repo_owner, repo_name, branch='main'):
+def _download_repo_script(repo_owner, repo_name, branch='codex/main-v1'):
     session = requests.Session()
     session.trust_env = False
     url, script_text = _download_repo_file_text(session, repo_owner, repo_name, branch, 'script.sh')
@@ -1211,7 +1128,7 @@ def _build_direct_fetch_env():
     return env
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main'):
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='codex/main-v1'):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _build_direct_fetch_env()
     if progress_command:
@@ -1353,7 +1270,7 @@ def _run_web_command(command):
             'andruwko73',
             'bypass_keenetic',
             progress_command='update_independent',
-            branch='feature/independent-rework',
+            branch='codex/independent-v1',
         )
         return output
     if command == 'update_no_bot':
@@ -1362,7 +1279,7 @@ def _run_web_command(command):
             'andruwko73',
             'bypass_keenetic',
             progress_command='update_no_bot',
-            branch='feature/web-only',
+            branch='codex/web-only-v1',
         )
         return output
     if command == 'remove':
@@ -2939,13 +2856,13 @@ def bot_message(message):
                     fork_repo_name,
                     message.chat.id,
                     'main',
-                    branch='feature/independent-rework',
+                    branch='codex/independent-v1',
                 )
                 if not started:
                     bot.send_message(message.chat.id, status_message, reply_markup=main)
                     return
                 bot.send_message(message.chat.id,
-                                 f'Запускаю переустановку из ветки feature/independent-rework форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
+                                 f'Запускаю переустановку из ветки codex/independent-v1 форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
                                  'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
                                  'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
                                  reply_markup=main)

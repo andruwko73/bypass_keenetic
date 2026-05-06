@@ -16,7 +16,7 @@
 - рабочая DNS-схема через `dnsmasq` без зависимости от неустановленных локальных DoT/DoH-портов `40500/40508`
 - дальнейшее обновление одним кликом
 
-> **Экспериментальная ветка `feature/independent-rework`** — добавлен пул ключей, автоматическая проверка ключей (значки Telegram и YouTube), subscription-ссылки, JSON API `/api/status`. Подробнее в [README ветки independent-rework](https://github.com/andruwko73/bypass_keenetic/blob/feature/independent-rework/README.md).
+> **Экспериментальная ветка `codex/independent-v1`** — добавлен пул ключей, автоматическая проверка ключей (значки Telegram и YouTube), subscription-ссылки, JSON API `/api/status`. Подробнее в [README ветки independent-rework](https://github.com/andruwko73/bypass_keenetic/blob/codex/independent-v1/README.md).
 
 ## Установка (~30-60 минут с нуля)
 - [Установка Entware](https://github.com/znetworkx/bypass_keenetic/wiki/Install-Entware-and-Preparation)
@@ -29,10 +29,10 @@
 Интерактивный запуск:
 
 ```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh | sh'
+sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/codex/main-v1/bootstrap/install.sh | sh'
 ```
 
-После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Эта страница доступна только из локальной сети роутера. Если Telegram-бот не нужен, на странице есть кнопка **Установить без бота Telegram**: она переключает установку на ветку `feature/web-only` и запускает только веб-интерфейс. Затем installer сохранит `bot_config.py` и запустит выбранную версию.
+После этого откроется страница первичной настройки на `http://192.168.1.1:8080/`, где пользователь введёт BotFather token, username, app api id и app api hash. Эта страница доступна только из локальной сети роутера. Если Telegram-бот не нужен, на странице есть кнопка **Установить без бота Telegram**: она переключает установку на ветку `codex/web-only-v1` и запускает только веб-интерфейс. Затем installer сохранит `bot_config.py` и запустит выбранную версию.
 
 Скриншот страницы первичной настройки:
 

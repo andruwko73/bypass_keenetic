@@ -11,7 +11,7 @@
 # оригинальный репозиторий (tas-unn), пользовательский форк
 
 repo="andruwko73"
-REPO_REF="${REPO_REF:-main}"
+REPO_REF="${REPO_REF:-codex/main-v1}"
 
 config_get() {
   key="$1"
@@ -244,71 +244,6 @@ except Exception as exc:
     print('GitHub API fallback failed: %s' % exc, file=sys.stderr)
     sys.exit(1)
 PY
-}
-
-download_update_file() {
-  url="$1"
-  target="$2"
-  marker="$3"
-  description="$4"
-  tmp="${target}.tmp.$$"
-
-  rm -f "$tmp"
-  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
-    echo "Using public GitHub API fallback for ${description}."
-    if download_repo_file_via_api "$url" "$target"; then
-      if [ ! -s "$target" ]; then
-        rm -f "$target"
-        echo "РћС€РёР±РєР°: ${description} СЃРєР°С‡Р°РЅ РїСѓСЃС‚С‹Рј С„Р°Р№Р»РѕРј"
-        return 1
-      fi
-      if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
-        rm -f "$target"
-        echo "РћС€РёР±РєР°: ${description} РЅРµ РїСЂРѕС€С‘Р» РїСЂРѕРІРµСЂРєСѓ СЃРѕРґРµСЂР¶РёРјРѕРіРѕ"
-        return 1
-      fi
-      return 0
-    fi
-    echo "РћС€РёР±РєР°: РЅРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ ${description} РёР· ${url}"
-    return 1
-  fi
-
-  if ! curl -fsSL --connect-timeout 8 --max-time 25 --retry 1 --retry-delay 1 -o "$tmp" "$url"; then
-    rm -f "$tmp"
-    RAW_GITHUB_BYPASS=1
-    export RAW_GITHUB_BYPASS
-    echo "Raw download failed for ${description}; trying public GitHub API fallback."
-    if download_repo_file_via_api "$url" "$target"; then
-      if [ ! -s "$target" ]; then
-        rm -f "$target"
-        echo "Ошибка: ${description} скачан пустым файлом"
-        return 1
-      fi
-      if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
-        rm -f "$target"
-        echo "Ошибка: ${description} не прошёл проверку содержимого"
-        return 1
-      fi
-      return 0
-    else
-    echo "Ошибка: не удалось скачать ${description} из ${url}"
-    return 1
-    fi
-  fi
-
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    echo "Ошибка: ${description} скачан пустым файлом"
-    return 1
-  fi
-
-  if [ -n "$marker" ] && ! grep -q "$marker" "$tmp"; then
-    rm -f "$tmp"
-    echo "Ошибка: ${description} не прошёл проверку содержимого"
-    return 1
-  fi
-
-  mv "$tmp" "$target"
 }
 
 repo_path_from_raw_url() {
@@ -629,7 +564,7 @@ if [ "$1" = "-install" ]; then
       echo "Your really KeenOS ???";
       curl -s -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh
     fi
-    #curl -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/main/100-unblock-vpn.sh
+    #curl -o /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-unblock-vpn.sh
     chmod 755 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || chmod +x /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
     echo "Установлен скрипт проверки подключения и остановки VPN"
 
@@ -664,7 +599,7 @@ if [ "$1" = "-install" ]; then
 fi
 
 if [ "$1" = "-reinstall" ]; then
-    curl -s -o /opt/root/script.sh https://raw.githubusercontent.com/znetworkx/bypass_keenetic/main/script.sh
+    curl -s -o /opt/root/script.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/script.sh
     chmod 755 /opt/root/script.sh || chmod +x /opt/root/script.sh
     echo "Начинаем переустановку"
     #opkg update

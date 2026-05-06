@@ -2486,7 +2486,7 @@ def bot_message(message):
                     bot.send_message(message.chat.id, status_message, reply_markup=main)
                     return
                 bot.send_message(message.chat.id,
-                                 'Запускаю переустановку из ветки feature/independent-rework форка andruwko73/bypass_keenetic без сброса ключей и списков. '
+                                 'Запускаю переустановку из ветки codex/independent-v1 форка andruwko73/bypass_keenetic без сброса ключей и списков. '
                                  'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
                                  'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
                                  reply_markup=main)
