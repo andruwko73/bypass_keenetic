@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
+import web_get_actions
 import web_post_actions
 
 
@@ -52,8 +53,33 @@ def test_web_post_actions_helpers():
     assert web_post_actions.dispatch({}, '/pool_add', {}) is None
 
 
+def test_web_get_actions_helpers():
+    refreshed = []
+    current_keys = {'vmess': 'key'}
+    ctx = {
+        'build_form': lambda message: 'form:' + message,
+        'consume_flash_message': lambda: 'saved',
+        'load_current_keys': lambda: current_keys,
+        'cached_status_snapshot': lambda keys: None,
+        'placeholder_web_status_snapshot': lambda: {'state': 'pending'},
+        'placeholder_protocol_statuses': lambda keys: {'vmess': {'label': 'pending'}},
+        'refresh_status_caches_async': lambda keys: refreshed.append(keys),
+        'refresh_status_on_api': True,
+        'get_web_command_state': lambda: {'running': False},
+    }
+    page = web_get_actions.dispatch(ctx, '/')
+    assert page == {'kind': 'html', 'html': 'form:saved'}
+    status = web_get_actions.dispatch(ctx, '/api/status')
+    assert status['payload']['web'] == {'state': 'pending'}
+    assert status['payload']['pool_probe_running'] is False
+    assert refreshed == [current_keys]
+    command = web_get_actions.dispatch(ctx, '/api/command_state')
+    assert command['payload'] == {'running': False}
+
+
 def main():
     test_proxy_config_builder()
+    test_web_get_actions_helpers()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
 

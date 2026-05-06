@@ -59,6 +59,7 @@ from web_command_state import (
     start_command as _start_command_state,
 )
 from web_http_common import WebRequestMixin
+import web_get_actions
 import web_post_actions
 from web_form_template import render_web_form
 
@@ -2852,6 +2853,20 @@ def _web_action_context():
     }
 
 
+def _web_get_context(handler):
+    return {
+        'build_form': handler._build_form,
+        'consume_flash_message': _consume_web_flash_message,
+        'load_current_keys': _load_current_keys,
+        'cached_status_snapshot': _cached_status_snapshot,
+        'placeholder_web_status_snapshot': _placeholder_web_status_snapshot,
+        'placeholder_protocol_statuses': _placeholder_protocol_statuses,
+        'refresh_status_caches_async': _refresh_status_caches_async,
+        'refresh_status_on_api': True,
+        'get_web_command_state': _get_web_command_state,
+    }
+
+
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     local_client_checker = staticmethod(_is_local_web_client)
     web_auth_token_getter = staticmethod(_get_web_auth_token)
@@ -3094,29 +3109,24 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
-        if path == '/api/status':
-            current_keys = _load_current_keys()
-            snapshot = _cached_status_snapshot(current_keys)
-            if snapshot is None:
-                snapshot = {
-                    'web': _placeholder_web_status_snapshot(),
-                    'protocols': _placeholder_protocol_statuses(current_keys),
-                }
-            _refresh_status_caches_async(current_keys)
-            self._send_json({
-                'web': snapshot.get('web', {}),
-                'protocols': snapshot.get('protocols', {}),
-                'custom_checks': [],
-                'pool_summary': {'active_text': '', 'note': ''},
-                'pool_probe_running': False,
-                'pool_probe_progress': {},
-            })
+        try:
+            action = web_get_actions.dispatch(_web_get_context(self), path)
+        except Exception as exc:
+            if path.startswith('/api/'):
+                self._send_json({'error': str(exc)}, status=500)
+            else:
+                self._send_html(f'<h1>500 Internal Server Error</h1><p>{html.escape(str(exc))}</p>', status=500)
             return
-        if path == '/api/command_state':
-            self._send_json(_get_web_command_state())
+        if action is None:
+            self._send_html('<h1>404 Not Found</h1>', status=404)
             return
-        if path in ['/', '/index.html', '/command']:
-            self._send_html(self._build_form(_consume_web_flash_message()))
+        kind = action.get('kind')
+        if kind == 'json':
+            self._send_json(action.get('payload', {}), status=action.get('status', 200))
+        elif kind == 'html':
+            self._send_html(action.get('html', ''))
+        elif kind == 'png':
+            self._send_png(action.get('path', ''))
         else:
             self._send_html('<h1>404 Not Found</h1>', status=404)
 
