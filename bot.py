@@ -21,6 +21,36 @@ import gc
 import tarfile
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from proxy_key_store import (
+    load_current_keys as _store_load_current_keys,
+    load_shadowsocks_key as _store_load_shadowsocks_key,
+    load_trojan_key as _store_load_trojan_key,
+    proxy_config_snapshot_paths as _store_proxy_config_snapshot_paths,
+    read_v2ray_key as _store_read_v2ray_key,
+    remove_file_if_exists as _store_remove_file_if_exists,
+    restore_proxy_config_files as _store_restore_proxy_config_files,
+    save_v2ray_key as _store_save_v2ray_key,
+    snapshot_proxy_config_files as _store_snapshot_proxy_config_files,
+    v2ray_key_file_candidates as _store_v2ray_key_file_candidates,
+)
+from proxy_protocols import (
+    decode_shadowsocks_uri as _store_decode_shadowsocks_uri,
+    parse_trojan_key as _store_parse_trojan_key,
+    parse_vless_key as _store_parse_vless_key,
+    parse_vmess_key as _store_parse_vmess_key,
+    proxy_outbound_from_key as _store_proxy_outbound_from_key,
+)
+from proxy_status import (
+    active_mode_status_signature as _status_active_mode_signature,
+    cached_active_status as _status_cached_active_status,
+    cached_snapshot as _status_cached_snapshot,
+    is_transient_status_text as _status_is_transient_text,
+    placeholder_protocol_statuses as _status_placeholder_protocols,
+    protocol_error_status as _status_protocol_error,
+    status_snapshot_signature as _status_snapshot_signature_impl,
+    store_active_status as _status_store_active_status,
+    store_snapshot as _status_store_snapshot,
+)
 from unblock_lists import (
     list_label as _unblock_list_label,
     load_unblock_lists as _load_unblock_lists_store,
@@ -56,7 +86,15 @@ from service_catalog import (
     TELEGRAM_UNBLOCK_ENTRIES,
     YOUTUBE_UNBLOCK_ENTRIES,
 )
-from pool_probe_runner import run_pool_probe_worker
+from pool_probe_runner import (
+    build_pool_probe_core_config_batch as _runner_build_pool_probe_core_config_batch,
+    cleanup_pool_probe_runtime as _runner_cleanup_pool_probe_runtime,
+    pool_probe_outbound as _runner_pool_probe_outbound,
+    pool_probe_socks_inbound as _runner_pool_probe_socks_inbound,
+    run_pool_probe_worker,
+    start_pool_probe_xray as _runner_start_pool_probe_xray,
+    stop_pool_probe_xray as _runner_stop_pool_probe_xray,
+)
 from web_command_state import (
     command_state_snapshot as _command_state_snapshot,
     consume_command_state_for_render as _consume_command_state_for_render_impl,
@@ -1885,95 +1923,15 @@ def _transparent_list_route_label():
 
 
 def _load_shadowsocks_key():
-    try:
-        with open('/opt/etc/shadowsocks.json', 'r', encoding='utf-8') as file:
-            data = json.load(file)
-        raw_uri = str(data.get('raw_uri', '') or '').strip()
-        if raw_uri.startswith('ss://'):
-            return raw_uri
-        server = (data.get('server') or [''])[0]
-        port = data.get('server_port', '')
-        method = data.get('method', '')
-        password = data.get('password', '')
-        if not server or not port or not method:
-            return ''
-        encoded = base64.urlsafe_b64encode(f'{method}:{password}'.encode('utf-8')).decode('utf-8').rstrip('=')
-        return f'ss://{encoded}@{server}:{port}'
-    except Exception:
-        return ''
+    return _store_load_shadowsocks_key()
 
 
 def _load_trojan_key():
-    try:
-        with open('/opt/etc/trojan/config.json', 'r', encoding='utf-8') as file:
-            data = json.load(file)
-        raw_uri = str(data.get('raw_uri', '') or '').strip()
-        if raw_uri.startswith('trojan://'):
-            return raw_uri
-        password = (data.get('password') or [''])[0]
-        address = data.get('remote_addr', '')
-        port = data.get('remote_port', '')
-        if (
-            str(address).strip().lower() == 'ownade' and
-            str(port).strip() == '65432' and
-            str(password).strip() == 'pw'
-        ):
-            return ''
-        if not password or not address or not port:
-            return ''
-        query_params = []
-        trojan_type = str(data.get('type', '') or '').strip()
-        if trojan_type and trojan_type != 'tcp':
-            query_params.append(('type', trojan_type))
-
-        security = str(data.get('security', '') or '').strip()
-        if security and security != 'tls':
-            query_params.append(('security', security))
-
-        sni = str(data.get('sni', '') or '').strip()
-        if sni:
-            query_params.append(('sni', sni))
-
-        host = str(data.get('host', '') or '').strip()
-        if host:
-            query_params.append(('host', host))
-
-        path = str(data.get('path', '') or '').strip()
-        if path and path != '/':
-            query_params.append(('path', path))
-
-        service_name = str(data.get('serviceName', '') or '').strip()
-        if service_name:
-            query_params.append(('serviceName', service_name))
-
-        fingerprint = str(data.get('fingerprint', '') or '').strip()
-        if fingerprint and fingerprint != 'chrome':
-            query_params.append(('fp', fingerprint))
-
-        alpn = str(data.get('alpn', '') or '').strip()
-        if alpn:
-            query_params.append(('alpn', alpn))
-
-        query_suffix = ''
-        if query_params:
-            query_suffix = '?' + urlencode(query_params)
-
-        fragment = str(data.get('fragment', '') or '').strip()
-        fragment_suffix = f'#{quote(fragment)}' if fragment else ''
-
-        return f'trojan://{password}@{address}:{port}{query_suffix}{fragment_suffix}'
-    except Exception:
-        return ''
+    return _store_load_trojan_key()
 
 
 def _load_current_keys():
-    return {
-        'shadowsocks': _load_shadowsocks_key(),
-        'vmess': _read_v2ray_key(VMESS_KEY_PATH) or '',
-        'vless': _read_v2ray_key(VLESS_KEY_PATH) or '',
-        'vless2': _read_v2ray_key(VLESS2_KEY_PATH) or '',
-        'trojan': _load_trojan_key(),
-    }
+    return _store_load_current_keys(VMESS_KEY_PATH, VLESS_KEY_PATH, VLESS2_KEY_PATH, XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR)
 
 
 def _ensure_current_keys_in_pools(current_keys=None):
@@ -2283,21 +2241,10 @@ def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None):
 
 
 def _placeholder_protocol_statuses(current_keys):
-    result = {}
-    for key_name, key_value in current_keys.items():
-        if key_value.strip():
-            result[key_name] = {
-                'tone': 'warn',
-                'label': 'Проверяется',
-                'details': 'Фоновая проверка ключа выполняется. Статус обновится без перезагрузки страницы.',
-            }
-        else:
-            result[key_name] = {
-                'tone': 'empty',
-                'label': 'Не сохранён',
-                'details': 'Ключ ещё не сохранён на роутере.',
-            }
-    return result
+    return _status_placeholder_protocols(
+        current_keys,
+        pending_details='Фоновая проверка ключа выполняется. Статус обновится без перезагрузки страницы.',
+    )
 
 
 def _web_command_label(command):
@@ -2649,28 +2596,7 @@ def _v2ray_outbound_summary(vmess_key=None, vless_key=None):
 
 
 def _parse_trojan_key(key):
-    parsed = urlparse(key)
-    if parsed.scheme != 'trojan':
-        raise ValueError('Неверный протокол, ожидается trojan://')
-    if not parsed.hostname:
-        raise ValueError('В trojan-ключе отсутствует адрес сервера')
-    if not parsed.username:
-        raise ValueError('В trojan-ключе отсутствует пароль')
-    params = parse_qs(parsed.query)
-    return {
-        'address': parsed.hostname,
-        'port': parsed.port or 443,
-        'password': parsed.username,
-        'sni': params.get('sni', [''])[0],
-        'security': params.get('security', ['tls'])[0],
-        'type': params.get('type', ['tcp'])[0],
-        'host': params.get('host', [''])[0],
-        'path': params.get('path', ['/'])[0] or '/',
-        'serviceName': params.get('serviceName', [''])[0],
-        'fingerprint': params.get('fp', params.get('fingerprint', ['chrome']))[0],
-        'alpn': params.get('alpn', [''])[0],
-        'fragment': unquote(parsed.fragment or ''),
-    }
+    return _store_parse_trojan_key(key)
 
 
 def _build_proxy_diagnostics(key_type, key_value):
@@ -3181,21 +3107,11 @@ def _apply_pool_key_background(chat_id, proto, key_value, index, page=0):
 
 
 def _v2ray_key_file_candidates(file_path):
-    paths = [file_path]
-    file_name = os.path.basename(file_path)
-    for directory in (XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR):
-        candidate = os.path.join(directory, file_name)
-        if candidate not in paths:
-            paths.append(candidate)
-    return paths
+    return _store_v2ray_key_file_candidates(file_path, XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR)
 
 
 def _remove_file_if_exists(file_path):
-    try:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-    except Exception as exc:
-        _write_runtime_log(f'Не удалось удалить {file_path}: {exc}')
+    _store_remove_file_if_exists(file_path, logger=_write_runtime_log)
 
 
 def _clear_installed_key_for_protocol(proto):
@@ -3253,42 +3169,15 @@ def _clear_pool(proto):
 
 
 def _proxy_config_snapshot_paths():
-    return [
-        CORE_PROXY_CONFIG_PATH,
-        VMESS_KEY_PATH,
-        VLESS_KEY_PATH,
-        VLESS2_KEY_PATH,
-        '/opt/etc/shadowsocks.json',
-        '/opt/etc/trojan/config.json',
-    ]
+    return _store_proxy_config_snapshot_paths(CORE_PROXY_CONFIG_PATH, VMESS_KEY_PATH, VLESS_KEY_PATH, VLESS2_KEY_PATH)
 
 
 def _snapshot_proxy_config_files():
-    snapshot = {}
-    for file_path in _proxy_config_snapshot_paths():
-        try:
-            with open(file_path, 'rb') as file:
-                snapshot[file_path] = file.read()
-        except FileNotFoundError:
-            snapshot[file_path] = None
-        except Exception as exc:
-            _write_runtime_log(f'Не удалось сохранить snapshot {file_path}: {exc}')
-            snapshot[file_path] = None
-    return snapshot
+    return _store_snapshot_proxy_config_files(_proxy_config_snapshot_paths(), logger=_write_runtime_log)
 
 
 def _restore_proxy_config_files(snapshot):
-    for file_path, content in (snapshot or {}).items():
-        try:
-            if content is None:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                continue
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'wb') as file:
-                file.write(content)
-        except Exception as exc:
-            _write_runtime_log(f'Не удалось восстановить snapshot {file_path}: {exc}')
+    _store_restore_proxy_config_files(snapshot, logger=_write_runtime_log)
 
 
 def _restart_proxy_services_for_protocols(protocols):
@@ -3413,251 +3302,27 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
 
 
 def _pool_probe_socks_inbound(port, tag):
-    return {
-        'port': int(port),
-        'listen': '127.0.0.1',
-        'protocol': 'socks',
-        'settings': {'auth': 'noauth', 'udp': True, 'ip': '127.0.0.1'},
-        'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-        'tag': tag,
-    }
+    return _runner_pool_probe_socks_inbound(port, tag)
 
 
 def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
-    if proto == 'shadowsocks':
-        server, port, method, password = _decode_shadowsocks_uri(key_value)
-        return {
-            'tag': tag,
-            'protocol': 'shadowsocks',
-            'settings': {
-                'servers': [{
-                    'address': server,
-                    'port': int(port),
-                    'method': method,
-                    'password': password,
-                    'level': 0,
-                }]
-            },
-        }
-    if proto == 'vmess':
-        data = _parse_vmess_key(key_value)
-        stream_settings = {'network': data.get('net', 'tcp')}
-        tls_mode = data.get('tls', 'tls')
-        if tls_mode in ['tls', 'xtls']:
-            stream_settings['security'] = tls_mode
-            stream_settings[f'{tls_mode}Settings'] = {
-                'allowInsecure': True,
-                'serverName': data.get('add', ''),
-            }
-        else:
-            stream_settings['security'] = 'none'
-        if stream_settings['network'] == 'ws':
-            stream_settings['wsSettings'] = {
-                'path': data.get('path', '/'),
-                'headers': {'Host': data.get('host', '')},
-            }
-        elif stream_settings['network'] == 'grpc':
-            grpc_service = data.get('serviceName', '') or data.get('grpcSettings', {}).get('serviceName', '')
-            stream_settings['grpcSettings'] = {'serviceName': grpc_service, 'multiMode': False}
-        return {
-            'tag': tag,
-            'domainStrategy': 'UseIPv4',
-            'protocol': 'vmess',
-            'settings': {
-                'vnext': [{
-                    'address': data['add'],
-                    'port': int(data['port']),
-                    'users': [{
-                        'id': data['id'],
-                        'alterId': int(data.get('aid', 0)),
-                        'email': email,
-                        'security': 'auto',
-                    }],
-                }]
-            },
-            'streamSettings': stream_settings,
-            'mux': {'enabled': True, 'concurrency': -1, 'xudpConcurrency': 16, 'xudpProxyUDP443': 'reject'},
-        }
-    if proto in ('vless', 'vless2'):
-        data = _parse_vless_key(key_value)
-        network = data.get('type', 'tcp') or 'tcp'
-        security = data.get('security', 'none')
-        stream_settings = {'network': network}
-        if security in ['tls', 'xtls']:
-            stream_settings['security'] = security
-            stream_settings[f'{security}Settings'] = {
-                'allowInsecure': True,
-                'serverName': data.get('sni', ''),
-            }
-        elif security == 'reality':
-            stream_settings['security'] = 'reality'
-            stream_settings['realitySettings'] = {
-                'serverName': data.get('sni', '') or data.get('host', '') or data.get('address', ''),
-                'publicKey': data.get('publicKey', ''),
-                'shortId': data.get('shortId', ''),
-                'fingerprint': data.get('fingerprint', 'chrome'),
-                'spiderX': data.get('spiderX', '/'),
-            }
-            if data.get('alpn'):
-                stream_settings['realitySettings']['alpn'] = [item.strip() for item in data['alpn'].split(',') if item.strip()]
-        else:
-            stream_settings['security'] = 'none'
-        if network == 'ws':
-            stream_settings['wsSettings'] = {
-                'path': data.get('path', '/'),
-                'headers': {'Host': data.get('host', '')},
-            }
-        elif network == 'grpc':
-            stream_settings['grpcSettings'] = {'serviceName': data.get('serviceName', ''), 'multiMode': False}
-        return {
-            'tag': tag,
-            'domainStrategy': 'UseIPv4',
-            'protocol': 'vless',
-            'settings': {
-                'vnext': [{
-                    'address': data.get('address', data.get('host', '')),
-                    'port': int(data['port']),
-                    'users': [{
-                        'id': data['id'],
-                        'encryption': data.get('encryption', 'none'),
-                        'flow': data.get('flow', ''),
-                        'level': 0,
-                    }],
-                }]
-            },
-            'streamSettings': stream_settings,
-        }
-    if proto == 'trojan':
-        data = _parse_trojan_key(key_value)
-        stream_settings = {'network': data.get('type', 'tcp') or 'tcp', 'security': 'none'}
-        if data.get('security', 'tls') == 'tls':
-            stream_settings['security'] = 'tls'
-            stream_settings['tlsSettings'] = {
-                'allowInsecure': True,
-                'serverName': data.get('sni') or data.get('host') or data.get('address', ''),
-                'fingerprint': data.get('fingerprint', 'chrome'),
-            }
-            if data.get('alpn'):
-                stream_settings['tlsSettings']['alpn'] = [item.strip() for item in data['alpn'].split(',') if item.strip()]
-        if stream_settings['network'] == 'ws':
-            stream_settings['wsSettings'] = {
-                'path': data.get('path', '/'),
-                'headers': {'Host': data.get('host') or data.get('sni') or data.get('address', '')},
-            }
-        elif stream_settings['network'] == 'grpc':
-            stream_settings['grpcSettings'] = {'serviceName': data.get('serviceName', ''), 'multiMode': False}
-        return {
-            'tag': tag,
-            'protocol': 'trojan',
-            'settings': {
-                'servers': [{
-                    'address': data['address'],
-                    'port': int(data['port']),
-                    'password': data['password'],
-                    'level': 0,
-                }]
-            },
-            'streamSettings': stream_settings,
-        }
-    raise ValueError(f'Unsupported protocol: {proto}')
+    return _store_proxy_outbound_from_key(proto, key_value, tag, email=email)
 
 
 def _pool_probe_outbound(proto, key_value, tag):
-    return _proxy_outbound_from_key(proto, key_value, tag, email='pool-probe@local')
+    return _runner_pool_probe_outbound(proto, key_value, tag, _proxy_outbound_from_key)
 
 
 def _build_pool_probe_core_config_batch(probe_tasks):
-    config_json = {
-        'log': {
-            'access': '/dev/null',
-            'error': '/dev/null',
-            'loglevel': 'warning',
-        },
-        'dns': {
-            'hosts': {
-                'api.telegram.org': '149.154.167.220',
-            },
-            'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
-            'queryStrategy': 'UseIPv4',
-        },
-        'inbounds': [],
-        'outbounds': [],
-        'routing': {
-            'domainStrategy': 'IPIfNonMatch',
-            'rules': [],
-        },
-    }
-    test_routes = []
-    for offset, (proto, key_value) in enumerate(probe_tasks):
-        port = str(int(POOL_PROBE_TEST_PORT) + offset)
-        inbound_tag = f'in-pool-probe-{offset}'
-        outbound_tag = f'proxy-pool-probe-{offset}'
-        config_json.setdefault('inbounds', []).append(_pool_probe_socks_inbound(port, inbound_tag))
-        config_json.setdefault('outbounds', []).append(_pool_probe_outbound(proto, key_value, outbound_tag))
-        test_routes.append({
-            'type': 'field',
-            'inboundTag': [inbound_tag],
-            'outboundTag': outbound_tag,
-            'enabled': True,
-        })
-    config_json['outbounds'].append({'protocol': 'freedom', 'tag': 'direct'})
-    config_json['routing']['rules'] = test_routes
-    return config_json
+    return _runner_build_pool_probe_core_config_batch(probe_tasks, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
 
 
 def _start_pool_probe_xray(config_json):
-    xray_binary = shutil.which('xray') or '/opt/sbin/xray'
-    config_path = f'/tmp/bypass_pool_probe_{os.getpid()}_{threading.get_ident()}.json'
-    with open(config_path, 'w', encoding='utf-8') as file:
-        json.dump(config_json, file, ensure_ascii=False, separators=(',', ':'))
-    preexec_fn = None
-    if os.name == 'posix' and hasattr(os, 'nice'):
-        def lower_priority():
-            try:
-                os.nice(10)
-            except Exception:
-                pass
-        preexec_fn = lower_priority
-    process = subprocess.Popen(
-        [xray_binary, 'run', '-c', config_path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-        preexec_fn=preexec_fn,
-    )
-    return process, config_path
+    return _runner_start_pool_probe_xray(config_json)
 
 
 def _stop_pool_probe_xray(process, config_path):
-    pid = None
-    try:
-        pid = process.pid if process else None
-        if process and process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=3)
-            except Exception:
-                try:
-                    process.kill()
-                    process.wait(timeout=2)
-                except Exception:
-                    if pid:
-                        try:
-                            os.kill(pid, signal.SIGKILL)
-                        except Exception:
-                            pass
-    except Exception:
-        pass
-    if pid:
-        try:
-            os.waitpid(pid, os.WNOHANG)
-        except Exception:
-            pass
-    try:
-        if config_path and os.path.exists(config_path):
-            os.remove(config_path)
-    except Exception:
-        pass
+    _runner_stop_pool_probe_xray(process, config_path)
 
 
 def _find_pool_failover_candidate(candidates, service='telegram'):
@@ -3728,46 +3393,7 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
 
 
 def _cleanup_pool_probe_runtime(kill_processes=False):
-    if kill_processes:
-        try:
-            output = subprocess.check_output(
-                ['pgrep', '-f', '/tmp/bypass_pool_probe_'],
-                stderr=subprocess.DEVNULL,
-            ).decode('utf-8', errors='ignore')
-            for raw_pid in output.split():
-                try:
-                    pid = int(raw_pid)
-                except ValueError:
-                    continue
-                if pid != os.getpid():
-                    os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
-        time.sleep(0.2)
-        try:
-            output = subprocess.check_output(
-                ['pgrep', '-f', '/tmp/bypass_pool_probe_'],
-                stderr=subprocess.DEVNULL,
-            ).decode('utf-8', errors='ignore')
-            for raw_pid in output.split():
-                try:
-                    pid = int(raw_pid)
-                except ValueError:
-                    continue
-                if pid != os.getpid():
-                    os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
-
-    try:
-        for name in os.listdir('/tmp'):
-            if name.startswith('bypass_pool_probe_') and name.endswith('.json'):
-                try:
-                    os.remove(os.path.join('/tmp', name))
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    _runner_cleanup_pool_probe_runtime(kill_processes=kill_processes)
 
 
 def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False, missing_only=False):
@@ -4221,20 +3847,7 @@ def check_telegram_api(retries=2, retry_delay=7, connect_timeout=30, read_timeou
 
 
 def _is_transient_telegram_api_failure(status_text):
-    text = str(status_text or '').casefold()
-    markers = [
-        'network is unreachable',
-        'timed out',
-        'timeout',
-        'таймаут',
-        'не ответил вовремя',
-        'за отведённое время',
-        'за отведенное время',
-        'max retries exceeded',
-        'failed to establish a new connection',
-        'connection reset',
-    ]
-    return any(marker in text for marker in markers)
+    return _status_is_transient_text(status_text)
 
 
 def _build_web_status(current_keys, protocols=None):
@@ -4288,11 +3901,7 @@ def _build_web_status(current_keys, protocols=None):
 
 
 def _status_snapshot_signature(current_keys):
-    custom_signature = tuple((item.get('id'), item.get('url')) for item in _load_custom_checks())
-    return (
-        tuple((name, current_keys.get(name, '')) for name in sorted(current_keys)),
-        custom_signature,
-    )
+    return _status_snapshot_signature_impl(current_keys, _load_custom_checks())
 
 
 def _build_status_snapshot(current_keys, force_refresh=False):
@@ -4300,13 +3909,9 @@ def _build_status_snapshot(current_keys, force_refresh=False):
     now = time.time()
     if pool_probe_lock.locked():
         return _active_mode_status_snapshot(current_keys)
-    if (
-        not force_refresh and
-        status_snapshot_cache['data'] is not None and
-        status_snapshot_cache['signature'] == signature and
-        now - status_snapshot_cache['timestamp'] < STATUS_CACHE_TTL
-    ):
-        return status_snapshot_cache['data']
+    cached = None if force_refresh else _status_cached_snapshot(status_snapshot_cache, signature, STATUS_CACHE_TTL, now=now)
+    if cached is not None:
+        return cached
 
     custom_checks = _load_custom_checks()
     protocols = {}
@@ -4319,20 +3924,13 @@ def _build_status_snapshot(current_keys, force_refresh=False):
                 protocols[key_name] = _cached_protocol_status_for_key(key_name, key_value, custom_checks=custom_checks)
         except Exception as exc:
             _write_runtime_log(f'Ошибка проверки ключа {key_name}: {exc}')
-            protocols[key_name] = {
-                'tone': 'warn',
-                'label': 'Ошибка проверки',
-                'details': f'Не удалось завершить проверку ключа: {exc}',
-            }
+            protocols[key_name] = _status_protocol_error(exc)
 
     snapshot = {
         'web': _build_web_status(current_keys, protocols=protocols),
         'protocols': protocols,
     }
-    status_snapshot_cache['timestamp'] = now
-    status_snapshot_cache['data'] = snapshot
-    status_snapshot_cache['signature'] = signature
-    return snapshot
+    return _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=now)
 
 
 def _active_mode_status_snapshot(current_keys):
@@ -4369,42 +3967,33 @@ def _web_status_snapshot(force_refresh=False):
 
 
 def _cached_status_snapshot(current_keys):
-    now = time.time()
-    signature = _status_snapshot_signature(current_keys)
-    if (
-        status_snapshot_cache['data'] is not None and
-        status_snapshot_cache['signature'] == signature and
-        now - status_snapshot_cache['timestamp'] < STATUS_CACHE_TTL
-    ):
-        return status_snapshot_cache['data']
-    return None
+    return _status_cached_snapshot(
+        status_snapshot_cache,
+        _status_snapshot_signature(current_keys),
+        STATUS_CACHE_TTL,
+    )
 
 
 def _active_mode_status_signature(current_keys):
-    custom_signature = tuple((item.get('id'), tuple(item.get('urls') or [item.get('url')])) for item in _load_custom_checks())
-    return (proxy_mode, current_keys.get(proxy_mode, ''), custom_signature)
+    return _status_active_mode_signature(proxy_mode, current_keys, _load_custom_checks())
 
 
 def _cached_active_mode_protocol_status(current_keys):
-    now = time.time()
-    signature = _active_mode_status_signature(current_keys)
-    with active_mode_status_cache_lock:
-        if (
-            active_mode_status_cache['status'] is not None and
-            active_mode_status_cache['signature'] == signature and
-            now - active_mode_status_cache['timestamp'] < ACTIVE_MODE_STATUS_DURING_POOL_TTL
-        ):
-            return dict(active_mode_status_cache['status'])
-    return None
+    return _status_cached_active_status(
+        active_mode_status_cache,
+        _active_mode_status_signature(current_keys),
+        ACTIVE_MODE_STATUS_DURING_POOL_TTL,
+        active_mode_status_cache_lock,
+    )
 
 
 def _store_active_mode_protocol_status(current_keys, status):
-    if not isinstance(status, dict):
-        return
-    with active_mode_status_cache_lock:
-        active_mode_status_cache['timestamp'] = time.time()
-        active_mode_status_cache['signature'] = _active_mode_status_signature(current_keys)
-        active_mode_status_cache['status'] = dict(status)
+    _status_store_active_status(
+        active_mode_status_cache,
+        _active_mode_status_signature(current_keys),
+        status,
+        active_mode_status_cache_lock,
+    )
 
 
 def _placeholder_web_status_snapshot():
@@ -6427,104 +6016,19 @@ def wait_for_bot_start():
 
 
 def _read_v2ray_key(file_path):
-    candidate_paths = [file_path]
-    file_name = os.path.basename(file_path)
-    current_dir = os.path.dirname(file_path)
-    alternate_dirs = []
-    if current_dir == XRAY_CONFIG_DIR:
-        alternate_dirs.append(V2RAY_CONFIG_DIR)
-    elif current_dir == V2RAY_CONFIG_DIR:
-        alternate_dirs.append(XRAY_CONFIG_DIR)
-    for directory in alternate_dirs:
-        candidate_paths.append(os.path.join(directory, file_name))
-
-    for candidate_path in candidate_paths:
-        try:
-            with open(candidate_path, 'r', encoding='utf-8') as f:
-                value = f.read().strip()
-            if value:
-                return value
-        except Exception:
-            continue
-    return None
+    return _store_read_v2ray_key(file_path, XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR)
 
 
 def _save_v2ray_key(file_path, key):
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(key.strip())
+    _store_save_v2ray_key(file_path, key)
 
 
 def _parse_vmess_key(key):
-    if not key.startswith('vmess://'):
-        raise ValueError('Неверный протокол, ожидается vmess://')
-    encodedkey = key[8:]
-    try:
-        decoded = base64.b64decode(encodedkey + '=' * (-len(encodedkey) % 4)).decode('utf-8')
-    except Exception as exc:
-        raise ValueError(f'Не удалось декодировать vmess-ключ: {exc}')
-    try:
-        data = json.loads(decoded.replace("'", '"'))
-    except Exception as exc:
-        raise ValueError(f'Неверный JSON в vmess-ключе: {exc}')
-    if not data.get('add') or not data.get('port') or not data.get('id'):
-        raise ValueError('В vmess-ключе нет server/port/id')
-    if data.get('net') == 'grpc':
-        service_name = data.get('serviceName') or data.get('grpcSettings', {}).get('serviceName')
-        if not service_name:
-            data['serviceName'] = data.get('add')
-    return data
+    return _store_parse_vmess_key(key)
 
 
 def _parse_vless_key(key):
-    parsed = urlparse(key)
-    if parsed.scheme != 'vless':
-        raise ValueError('Неверный протокол, ожидается vless://')
-    if not parsed.hostname:
-        raise ValueError('В vless-ключе отсутствует адрес сервера')
-    if not parsed.username:
-        raise ValueError('В vless-ключе отсутствует UUID')
-    params = parse_qs(parsed.query)
-    address = parsed.hostname
-    port = parsed.port or 443
-    user_id = parsed.username
-    security = params.get('security', ['none'])[0]
-    encryption = params.get('encryption', ['none'])[0]
-    flow = params.get('flow', [''])[0]
-    host = params.get('host', [''])[0]
-    if not address and host:
-        address = host
-    network = params.get('type', params.get('network', ['tcp']))[0]
-    path = params.get('path', ['/'])[0]
-    if path == '':
-        path = '/'
-    sni = params.get('sni', [''])[0] or host or address
-    service_name = params.get('serviceName', [''])[0]
-    public_key = params.get('pbk', params.get('publicKey', ['']))[0]
-    short_id = params.get('sid', params.get('shortId', ['']))[0]
-    fingerprint = params.get('fp', params.get('fingerprint', ['']))[0]
-    spider_x = params.get('spx', params.get('spiderX', ['']))[0]
-    alpn = params.get('alpn', [''])[0]
-    if not service_name and (network == 'grpc' or security == 'reality'):
-        service_name = address
-    return {
-        'address': address,
-        'port': port,
-        'id': user_id,
-        'security': security,
-        'encryption': encryption,
-        'flow': flow,
-        'host': host,
-        'path': path,
-        'sni': sni,
-        'type': network,
-        'serviceName': service_name,
-        'publicKey': public_key,
-        'shortId': short_id,
-        'fingerprint': fingerprint,
-        'spiderX': spider_x,
-        'alpn': alpn
-    }
+    return _store_parse_vless_key(key)
 
 
 def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
@@ -6746,37 +6250,7 @@ def trojan(key):
     _write_all_proxy_core_config()
 
 def _decode_shadowsocks_uri(key):
-    if not key.startswith('ss://'):
-        raise ValueError('Неверный протокол, ожидается ss://')
-    payload = key[5:]
-    payload, _, _ = payload.partition('#')
-    payload, _, _ = payload.partition('?')
-    if '@' in payload:
-        left, right = payload.rsplit('@', 1)
-        host_part = right
-        if ':' not in host_part:
-            raise ValueError('Не удалось определить host:port в Shadowsocks-ключе')
-        server, port = host_part.split(':', 1)
-        try:
-            decoded = base64.urlsafe_b64decode(left + '=' * (-len(left) % 4)).decode('utf-8')
-            if ':' not in decoded:
-                raise ValueError('Неверный формат декодированного payload Shadowsocks')
-            method, password = decoded.split(':', 1)
-        except Exception:
-            decoded = unquote(left)
-            if ':' not in decoded:
-                raise ValueError('Неверный формат Shadowsocks credentials')
-            method, password = decoded.split(':', 1)
-    else:
-        decoded = base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)).decode('utf-8')
-        if '@' not in decoded:
-            raise ValueError('Не удалось разобрать Shadowsocks-ключ')
-        creds, host_part = decoded.rsplit('@', 1)
-        if ':' not in host_part or ':' not in creds:
-            raise ValueError('Неверный формат раскодированного Shadowsocks-URI')
-        server, port = host_part.split(':', 1)
-        method, password = creds.split(':', 1)
-    return server, port, method, password
+    return _store_decode_shadowsocks_uri(key)
 
 
 def shadowsocks(key=None):
