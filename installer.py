@@ -1,46 +1,7 @@
-﻿import json
-# --- Пул ключей для управления через веб-интерфейс ---
-KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
-
-def load_key_pools():
-    try:
-        with open(KEY_POOLS_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return {proto: [] for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']}
-
-def save_key_pools(pools):
-    os.makedirs(os.path.dirname(KEY_POOLS_PATH), exist_ok=True)
-    with open(KEY_POOLS_PATH, 'w', encoding='utf-8') as f:
-        json.dump(pools, f, ensure_ascii=False, indent=2)
-
-def add_key_to_pool(proto, key):
-    pools = load_key_pools()
-    keys = pools.get(proto, [])
-    if key not in keys:
-        keys.append(key)
-        pools[proto] = keys
-        save_key_pools(pools)
-        return True
-    return False
-
-def remove_key_from_pool(proto, key):
-    pools = load_key_pools()
-    keys = pools.get(proto, [])
-    if key in keys:
-        keys.remove(key)
-        pools[proto] = keys
-        save_key_pools(pools)
-        return True
-    return False
-
-def get_keys_for_proto(proto):
-    pools = load_key_pools()
-    return pools.get(proto, [])
 #!/usr/bin/python3
-
 import html
 import ipaddress
+import json
 import os
 import re
 import shutil
@@ -48,8 +9,11 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import key_pool_store
+
 
 BOT_DIR = '/opt/etc/bot'
+KEY_POOLS_PATH = os.path.join(BOT_DIR, 'key_pools.json')
 BOT_CONFIG_PATH = os.path.join(BOT_DIR, 'bot_config.py')
 LEGACY_CONFIG_PATH = '/opt/etc/bot_config.py'
 BOT_MAIN_PATH = os.path.join(BOT_DIR, 'main.py')
@@ -121,6 +85,25 @@ def escape_python(value):
     return value.replace('\\', '\\\\').replace("'", "\\'")
 
 
+def get_keys_for_proto(proto):
+    pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
+    return pools.get(proto, [])
+
+
+def add_key_to_pool(proto, key):
+    pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
+    pools, added = key_pool_store.add_keys_to_pool(pools, proto, key)
+    key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+    return bool(added)
+
+
+def remove_key_from_pool(proto, key):
+    pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
+    pools, removed = key_pool_store.delete_pool_key(pools, proto, key)
+    key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+    return bool(removed)
+
+
 def build_config(form):
     router_ip = form.get('routerip', detect_router_ip()).strip() or detect_router_ip()
     browser_port = form.get('browser_port', str(DEFAULT_BROWSER_PORT)).strip() or str(DEFAULT_BROWSER_PORT)
@@ -128,6 +111,8 @@ def build_config(form):
     fork_repo_name = DEFAULT_FORK_REPO_NAME
     fork_button_label = f'Fork by {fork_repo_owner}'
     default_proxy_mode = form.get('default_proxy_mode', 'none').strip() or 'none'
+    web_auth_user = form.get('web_auth_user', 'admin').strip() or 'admin'
+    web_auth_token = form.get('web_auth_token', '').strip()
 
     return f"""# ВЕРСИЯ СКРИПТА 2.2.1
 
@@ -136,6 +121,9 @@ usernames = ['{escape_python(form['username'])}']
 
 routerip = '{escape_python(router_ip)}'
 browser_port = '{escape_python(browser_port)}'
+web_auth_user = '{escape_python(web_auth_user)}'
+web_auth_token = '{escape_python(web_auth_token)}'
+web_auth_disabled = False
 fork_repo_owner = '{escape_python(fork_repo_owner)}'
 fork_repo_name = '{escape_python(fork_repo_name)}'
 fork_button_label = '{escape_python(fork_button_label)}'
@@ -363,6 +351,14 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                         <input id="browser_port" name="browser_port" value="8080">
                     </div>
                     <div>
+                        <label for="web_auth_user">Логин веб-интерфейса</label>
+                        <input id="web_auth_user" name="web_auth_user" value="admin">
+                    </div>
+                    <div class="full">
+                        <label for="web_auth_token">Пароль веб-интерфейса</label>
+                        <input id="web_auth_token" name="web_auth_token" placeholder="Необязательно: пусто = вход без пароля">
+                    </div>
+                    <div>
                         <label for="routerip">IP роутера</label>
                         <input id="routerip" name="routerip" value="{html.escape(router_ip)}">
                     </div>
@@ -518,6 +514,9 @@ class InstallerHandler(BaseHTTPRequestHandler):
             self._send_html(page_html(message), status=400)
             return
 
+        parsed['web_auth_user'] = parsed.get('web_auth_user', 'admin').strip() or 'admin'
+        parsed['web_auth_token'] = parsed.get('web_auth_token', '').strip()
+
         try:
             write_config(parsed)
             switch_to_main_bot()
@@ -528,10 +527,18 @@ class InstallerHandler(BaseHTTPRequestHandler):
         router_ip = parsed.get('routerip', detect_router_ip()).strip() or detect_router_ip()
         browser_port = parsed.get('browser_port', str(DEFAULT_BROWSER_PORT)).strip() or str(DEFAULT_BROWSER_PORT)
         target_url = f'http://{router_ip}:{browser_port}/'
+        web_auth_user = parsed.get('web_auth_user', 'admin')
+        web_auth_token = parsed.get('web_auth_token', '')
+        web_auth_note = (
+            f' Пароль веб-интерфейса: {web_auth_token}.'
+            if web_auth_token else
+            ' Пароль веб-интерфейса не задан; вход будет без пароля.'
+        )
         self._send_html(
             page_html(
-                f'Конфиг сохранён. Основной бот запускается. Через несколько секунд откроется основная страница: {target_url}',
+                f'Конфиг сохранён. Основной бот запускается. Основная страница: {target_url}. Логин веб-интерфейса: {web_auth_user}.{web_auth_note}',
                 redirect_url=target_url,
+                redirect_delay_seconds=12,
             )
         )
 
