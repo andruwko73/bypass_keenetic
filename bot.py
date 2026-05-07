@@ -74,6 +74,12 @@ import key_pool_store
 import key_pool_web
 import telegram_pool_ui
 import web_pool_form_blocks
+from telegram_confirm import (
+    TELEGRAM_CONFIRM_LEVEL,
+    telegram_confirm_prompt as _telegram_confirm_prompt,
+    telegram_is_cancel as _telegram_is_cancel_confirmation,
+    telegram_is_confirm as _telegram_is_confirm_confirmation,
+)
 from probe_cache import (
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
@@ -472,7 +478,6 @@ RUNTIME_ERROR_LOG_PATHS = [
     '/opt/etc/bot/error.log',
 ]
 MENU_STATE_UNSET = object()
-TELEGRAM_CONFIRM_LEVEL = 30
 TELEGRAM_KEY_INPUT_LEVELS = {'Shadowsocks': 5, 'Vmess': 9, 'Vless': 11, 'Vless 1': 11, 'Vless 2': 12, 'Trojan': 13}
 TELEGRAM_KEY_INSTALL_PROTOCOLS = {5: 'shadowsocks', 9: 'vmess', 11: 'vless', 12: 'vless2', 13: 'trojan'}
 chat_menu_state_lock = threading.Lock()
@@ -1338,45 +1343,6 @@ def _build_telegram_confirm_markup():
 def _request_telegram_confirmation(message, set_menu_state, action):
     set_menu_state(TELEGRAM_CONFIRM_LEVEL, action)
     bot.send_message(message.chat.id, _telegram_confirm_prompt(action), reply_markup=_build_telegram_confirm_markup())
-
-
-def _telegram_confirm_prompt(action):
-    prompts = {
-        'update_main': (
-            'Переустановить версию main?',
-            'Код и служебные файлы будут обновлены без сброса сохраненных ключей и списков. Во время обновления бот может временно пропасть из сети.',
-        ),
-        'update_independent': (
-            'Переустановить ветку independent?',
-            'Будет установлена ветка codex/independent-v1 с сохранением локальных ключей, настроек и списков.',
-        ),
-        'update_no_bot': (
-            'Перейти в web-only?',
-            'Будет установлена версия без Telegram-бота. Ключи, настройки и списки сохранятся локально, управление останется через web-интерфейс.',
-        ),
-        'restart_services': (
-            'Перезапустить сервисы?',
-            'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть.',
-        ),
-        'reboot': (
-            'Перезагрузить роутер?',
-            'Связь с роутером и ботом временно пропадет примерно на 1-2 минуты.',
-        ),
-        'dns_on': (
-            'Включить DNS Override?',
-            'Роутер сохранит конфигурацию и будет перезагружен.',
-        ),
-        'dns_off': (
-            'Выключить DNS Override?',
-            'Роутер сохранит конфигурацию и будет перезагружен.',
-        ),
-        'remove': (
-            'Удалить компоненты?',
-            'Будут удалены установленные компоненты программы. Кнопка защищена от случайного нажатия.',
-        ),
-    }
-    title, details = prompts.get(action, ('Подтвердить действие?', 'Действие изменит настройки роутера.'))
-    return f'{title}\n{details}'
 
 
 def _execute_confirmed_telegram_action(chat_id, action, reply_markup):
@@ -3834,12 +3800,12 @@ def bot_message(message):
                 _set_chat_menu_state(message.chat.id, level=level, bypass=bypass)
 
             if level == TELEGRAM_CONFIRM_LEVEL:
-                if message.text == '✅ Подтвердить':
+                if _telegram_is_confirm_confirmation(message.text):
                     action = bypass
                     set_menu_state(0, None)
                     _execute_confirmed_telegram_action(message.chat.id, action, service)
                     return
-                if message.text in ('Отмена', '🔙 Назад', 'Назад'):
+                if _telegram_is_cancel_confirmation(message.text):
                     set_menu_state(0, None)
                     bot.send_message(message.chat.id, 'Действие отменено.', reply_markup=service)
                     return
