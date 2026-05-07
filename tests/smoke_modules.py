@@ -186,7 +186,7 @@ def test_telegram_confirm_state_source():
     assert '_execute_confirmed_telegram_action(message.chat.id, action, reply_markup)' in source
     assert 'def _handle_install_menu_message(' in source
     assert '_telegram_install_action(message.text, include_web_only=True)' in source
-    for action in ('restart_services', 'reboot', 'dns_on', 'dns_off'):
+    for action in ('restart_services', 'reboot', 'dns_on', 'dns_off', 'update_main'):
         assert f"_request_telegram_confirmation(message, set_menu_state, '{action}')" in source
     for action in ('update_main', 'update_independent', 'update_no_bot', 'remove'):
         assert f"'{action}'" in install_source

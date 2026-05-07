@@ -1032,6 +1032,16 @@ def _send_telegram_chunks(chat_id, text, reply_markup=None):
         bot.send_message(chat_id, chunk, reply_markup=markup)
 
 
+def _send_remote_markdown_file(message, path, error_message, reply_markup=None):
+    try:
+        text = _fetch_remote_text(_raw_github_url(path))
+    except requests.RequestException as exc:
+        bot.send_message(message.chat.id, f'⚠️ {error_message}: {exc}', reply_markup=reply_markup)
+        return False
+    bot.send_message(message.chat.id, text, parse_mode='Markdown', disable_web_page_preview=True)
+    return True
+
+
 def _unblock_list_path(list_name):
     return os.path.join('/opt/etc/unblock', f'{list_name}.txt')
 
@@ -1354,13 +1364,8 @@ def _build_keys_menu_markup():
 def _handle_key_menu_message(message, level, set_menu_state, reply_markup):
     if level == 8:
         if message.text == telegram_key_ui.KEY_HELP_TEXT:
-            try:
-                keys = _fetch_remote_text(_raw_github_url('keys.md'))
-            except requests.RequestException as exc:
-                bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить справку по ключам: {exc}', reply_markup=reply_markup)
-                return True
-            bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
-            set_menu_state(8)
+            if _send_remote_markdown_file(message, 'keys.md', 'Не удалось загрузить справку по ключам', reply_markup):
+                set_menu_state(8)
             return True
         target_level = telegram_key_ui.key_input_level(message.text, trojan_level=13)
         if target_level is not None:
@@ -3883,13 +3888,7 @@ def bot_message(message):
                 return
 
             if message.text == '/keys_free':
-                url = _raw_github_url('keys.md')
-                try:
-                    keys_free = _fetch_remote_text(url)
-                except requests.RequestException as exc:
-                    bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить список ключей: {exc}', reply_markup=main)
-                    return
-                bot.send_message(message.chat.id, keys_free, parse_mode='Markdown', disable_web_page_preview=True)
+                _send_remote_markdown_file(message, 'keys.md', 'Не удалось загрузить список ключей', main)
                 return
 
             if message.text == '🔄 Обновления' or message.text == '/check_update':
@@ -3897,7 +3896,7 @@ def bot_message(message):
                 return
 
             if message.text == '/update':
-                _start_telegram_update_from_chat(message.chat.id, service)
+                _request_telegram_confirmation(message, set_menu_state, 'update_main')
                 return
 
             if message.text == "📥 Сервисы по запросу":
