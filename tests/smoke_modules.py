@@ -35,6 +35,7 @@ import proxy_status
 import unblock_lists
 import installer_common
 import repo_update
+import entware_dns_runtime
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -226,6 +227,17 @@ def test_codex_version_matches_commit_count():
     assert re.search(rf'Версия\s+v{re.escape(expected)}\b', source)
     assert version_md.startswith(f'*v{expected} ')
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in installer
+
+
+def test_entware_dns_runtime_helpers():
+    class _Result:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+    assert hasattr(entware_dns_runtime, 'prepare_entware_dns')
+    assert entware_dns_runtime.entware_dns_is_available(run_quiet=lambda args: _Result(0))
+    assert not entware_dns_runtime.entware_dns_is_available(run_quiet=lambda args: _Result(1))
+    assert entware_dns_runtime.entware_ip_from_lookup('Address 1: 1.1.1.1\nAddress 2: 2.2.2.2') == '2.2.2.2'
 
 
 def test_web_status_runtime_helpers():
@@ -981,6 +993,7 @@ def main():
     test_web_post_actions_helpers()
     test_web_action_feature_gates()
     test_codex_version_matches_commit_count()
+    test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()

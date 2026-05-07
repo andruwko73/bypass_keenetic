@@ -69,7 +69,7 @@ def build_config(form):
     web_auth_user = form.get('web_auth_user', 'admin').strip() or 'admin'
     web_auth_token = form.get('web_auth_token', '').strip()
 
-    return f"""# ВЕРСИЯ СКРИПТА v1.494
+    return f"""# ВЕРСИЯ СКРИПТА v1.495
 
 token = '{escape_python(form['token'])}'
 usernames = ['{escape_python(form['username'])}']

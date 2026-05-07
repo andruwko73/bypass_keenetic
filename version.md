@@ -1,4 +1,4 @@
-*v1.494 (07 May 2026) -* codex/independent-v1
+*v1.495 (07 May 2026) -* codex/independent-v1
 - *Версия codex считается по числу коммитов ветки с префиксом v1.*
 - *Web status snapshot вынесен в общий helper*
 - *Добавлена smoke-проверка согласованности codex-версии с числом коммитов*

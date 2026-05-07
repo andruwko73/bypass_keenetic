@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.494, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.495, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -87,6 +87,7 @@ import key_pool_web
 import telegram_pool_ui
 import web_pool_form_blocks
 import telegram_key_ui
+import entware_dns_runtime
 from telegram_auth_state import (
     MENU_STATE_UNSET,
     authorize_message as _telegram_authorize_message,
@@ -452,7 +453,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.494'
+APP_VERSION_COUNTER = '1.495'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -860,68 +861,7 @@ def _save_bot_autostart(enabled):
 
 
 def _prepare_entware_dns():
-    try:
-        result = subprocess.run(
-            ['nslookup', 'bin.entware.net', '192.168.1.1'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        if result.returncode == 0:
-            return 'Entware DNS уже доступен.'
-    except Exception:
-        pass
-
-    notes = []
-    try:
-        subprocess.run(['ndmc', '-c', 'no opkg dns-override'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        subprocess.run(['ndmc', '-c', 'system configuration save'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        notes.append('opkg dns-override отключён')
-    except Exception:
-        notes.append('не удалось отключить opkg dns-override')
-
-    try:
-        resolv_conf = '/etc/resolv.conf'
-        preserved_lines = []
-        if os.path.exists(resolv_conf):
-            with open(resolv_conf, 'r', encoding='utf-8', errors='ignore') as file:
-                preserved_lines = [
-                    line.rstrip('\n')
-                    for line in file
-                    if line.strip() and not line.lstrip().startswith('nameserver')
-                ]
-        with open(resolv_conf, 'w', encoding='utf-8') as file:
-            file.write('nameserver 8.8.8.8\n')
-            file.write('nameserver 1.1.1.1\n')
-            if preserved_lines:
-                file.write('\n'.join(preserved_lines) + '\n')
-        notes.append('внешние DNS записаны первыми в /etc/resolv.conf')
-    except Exception:
-        notes.append('не удалось обновить /etc/resolv.conf')
-
-    try:
-        lookup_output = subprocess.check_output(
-            ['nslookup', 'bin.entware.net', '8.8.8.8'],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        host_matches = re.findall(r'Address\s+\d+:\s+((?:\d{1,3}\.){3}\d{1,3})', lookup_output)
-        entware_ip = host_matches[-1] if host_matches else ''
-        if entware_ip:
-            hosts_path = '/etc/hosts'
-            preserved_lines = []
-            if os.path.exists(hosts_path):
-                with open(hosts_path, 'r', encoding='utf-8', errors='ignore') as file:
-                    preserved_lines = [line.rstrip('\n') for line in file if 'bin.entware.net' not in line]
-            with open(hosts_path, 'w', encoding='utf-8') as file:
-                if preserved_lines:
-                    file.write('\n'.join(preserved_lines) + '\n')
-                file.write(f'{entware_ip} bin.entware.net\n')
-            notes.append(f'bin.entware.net закреплён в /etc/hosts как {entware_ip}')
-    except Exception:
-        notes.append('не удалось закрепить bin.entware.net в /etc/hosts')
-
-    return 'Подготовка Entware DNS: ' + ', '.join(notes)
+    return entware_dns_runtime.prepare_entware_dns()
 
 
 def _ensure_legacy_bot_paths():
