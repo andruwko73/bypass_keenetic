@@ -136,8 +136,11 @@ from pool_probe_runner import (
 from web_command_state import (
     command_state_snapshot as _command_state_snapshot,
     consume_command_state_for_render as _consume_command_state_for_render_impl,
+    consume_flash_message as _consume_flash_message_impl,
+    estimate_update_progress as _estimate_update_progress,
     finish_command as _finish_command_state,
     set_command_progress as _set_command_progress_state,
+    set_flash_message as _set_flash_message_impl,
     start_command as _start_command_state,
 )
 from web_http_common import WebRequestMixin
@@ -487,7 +490,7 @@ web_command_state = {
     'shown_after_finish': False,
 }
 web_flash_lock = threading.Lock()
-web_flash_message = ''
+web_flash_state = {'message': ''}
 DIRECT_FETCH_ENV_KEYS = [
     'HTTPS_PROXY',
     'HTTP_PROXY',
@@ -2438,31 +2441,7 @@ def _consume_web_command_state_for_render():
 
 
 def _estimate_web_command_progress(command, result_text):
-    if command not in WEB_UPDATE_COMMANDS:
-        return 0, ''
-    if not result_text:
-        return 5, 'Подготовка запуска обновления'
-
-    progress_steps = [
-        ('Бот запущен.', 100, 'Бот перезапущен, обновление завершено'),
-        ('Обновление выполнено. Сервисы перезапущены.', 96, 'Сервисы обновлены, идёт перезапуск бота'),
-        ('Версия бота', 90, 'Проверка версии и завершение обновления'),
-        ('Обновления скачены, права настроены.', 82, 'Новые файлы установлены'),
-        ('Бэкап создан.', 70, 'Резервная копия готова, идёт замена файлов'),
-        ('Сервисы остановлены.', 60, 'Сервисы остановлены перед заменой файлов'),
-        ('Файлы успешно скачаны и подготовлены.', 45, 'Файлы загружены, подготавливается установка'),
-        ('Скачиваем обновления во временную папку и проверяем файлы.', 30, 'Идёт загрузка файлов из GitHub'),
-        ('Пакеты обновлены.', 20, 'Пакеты Entware обновлены'),
-        ('Начинаем обновление.', 12, 'Запущен сценарий обновления'),
-        ('Скрипт загружен из', 8, 'Сценарий обновления получен с GitHub'),
-        ('Legacy-пути уже доступны.', 6, 'Проверка путей запуска бота'),
-        ('Подготовка legacy-путей:', 6, 'Подготовка путей запуска бота'),
-        ('Подготовка Entware DNS:', 4, 'Проверка доступа Entware и GitHub'),
-    ]
-    for marker, percent, label in progress_steps:
-        if marker in result_text:
-            return percent, label
-    return 8, 'Обновление запущено'
+    return _estimate_update_progress(command, result_text, WEB_UPDATE_COMMANDS)
 
 
 def _set_web_command_progress(command, result_text):
@@ -2476,17 +2455,11 @@ def _set_web_command_progress(command, result_text):
 
 
 def _set_web_flash_message(message):
-    global web_flash_message
-    with web_flash_lock:
-        web_flash_message = message or ''
+    _set_flash_message_impl(web_flash_lock, web_flash_state, message)
 
 
 def _consume_web_flash_message():
-    global web_flash_message
-    with web_flash_lock:
-        message = web_flash_message
-        web_flash_message = ''
-    return message
+    return _consume_flash_message_impl(web_flash_lock, web_flash_state)
 
 
 def _finish_web_command(command, result):

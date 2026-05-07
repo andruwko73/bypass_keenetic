@@ -10,6 +10,7 @@ import key_pool_web
 import key_pool_store
 import telegram_pool_ui
 import web_get_actions
+import web_command_state
 import web_form_blocks
 import web_form_template
 import web_pool_form_blocks
@@ -307,6 +308,16 @@ def test_unblock_list_helpers():
     assert unblock_lists.entries_from_service_text('one\n#comment\ntwo # note\none', {'skip'}) == ['one', 'two']
 
 
+def test_web_command_state_helpers():
+    assert web_command_state.estimate_update_progress('noop', '', ('update',)) == (0, '')
+    assert web_command_state.estimate_update_progress('update', 'Бэкап создан.') == (70, 'Резервная копия готова, идёт замена файлов')
+    state = {}
+    lock = threading.Lock()
+    web_command_state.set_flash_message(lock, state, 'ok')
+    assert web_command_state.consume_flash_message(lock, state) == 'ok'
+    assert web_command_state.consume_flash_message(lock, state) == ''
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     current_keys = {'vless': 'key'}
@@ -557,6 +568,7 @@ def main():
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()
+    test_web_command_state_helpers()
     test_key_pool_web()
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()

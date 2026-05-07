@@ -3,6 +3,20 @@ import time
 
 
 DEFAULT_UPDATE_COMMANDS = ('update', 'update_independent', 'update_no_bot')
+COMMON_UPDATE_PROGRESS_STEPS = (
+    ('Версия бота', 90, 'Проверка версии и завершение обновления'),
+    ('Версия прокси', 90, 'Проверка версии и завершение обновления'),
+    ('Обновления скачены, права настроены.', 82, 'Новые файлы установлены'),
+    ('Бэкап создан.', 70, 'Резервная копия готова, идёт замена файлов'),
+    ('Сервисы остановлены.', 60, 'Сервисы остановлены перед заменой файлов'),
+    ('Файлы успешно скачаны и подготовлены.', 45, 'Файлы загружены, подготавливается установка'),
+    ('Скачиваем обновления во временную папку и проверяем файлы.', 30, 'Идёт загрузка файлов из GitHub'),
+    ('Пакеты обновлены.', 20, 'Пакеты Entware обновлены'),
+    ('Начинаем обновление.', 12, 'Запущен сценарий обновления'),
+    ('Запуск обновления', 12, 'Запуск installer script'),
+    ('Скрипт загружен из', 8, 'Сценарий обновления получен с GitHub'),
+    ('Подготовка Entware DNS:', 4, 'Проверка доступа Entware и GitHub'),
+)
 
 
 def command_state_snapshot(lock, state):
@@ -42,6 +56,46 @@ def set_command_progress(lock, state, command, result_text, progress_estimator):
         state['progress_label'] = progress_label
         if 'shown_after_finish' in state:
             state['shown_after_finish'] = False
+
+
+def set_flash_message(lock, state, message):
+    with lock:
+        state['message'] = message or ''
+
+
+def consume_flash_message(lock, state):
+    with lock:
+        message = state.get('message', '')
+        state['message'] = ''
+    return message
+
+
+def estimate_update_progress(
+    command,
+    result_text,
+    update_commands=DEFAULT_UPDATE_COMMANDS,
+    *,
+    initial_label='Подготовка запуска обновления',
+    complete_marker='Бот запущен.',
+    complete_label='Бот перезапущен, обновление завершено',
+    restart_label='Сервисы обновлены, идёт перезапуск бота',
+    legacy_label='Подготовка путей запуска бота',
+):
+    if command not in update_commands:
+        return 0, ''
+    if not result_text:
+        return 5, initial_label
+    progress_steps = (
+        (complete_marker, 100, complete_label),
+        ('Обновление выполнено. Сервисы перезапущены.', 96, restart_label),
+        ('Legacy-пути бота уже доступны.', 6, legacy_label),
+        ('Legacy-пути уже доступны.', 6, legacy_label),
+        ('Подготовка legacy-путей:', 6, legacy_label),
+    ) + COMMON_UPDATE_PROGRESS_STEPS
+    for marker, progress, label in progress_steps:
+        if marker in result_text:
+            return progress, label
+    return 8, 'Обновление запущено'
 
 
 def finish_command(
