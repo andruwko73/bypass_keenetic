@@ -161,6 +161,96 @@ def cleanup_pool_probe_runtime(kill_processes=False):
         pass
 
 
+def find_pool_failover_candidate(
+    candidates,
+    *,
+    service,
+    batch_size,
+    test_port,
+    proxy_outbound_from_key,
+    wait_for_socks5,
+    check_telegram_api,
+    check_http,
+    record_key_probe,
+    proto_label,
+    log,
+    telegram_timeouts,
+    http_timeouts,
+    validate_outbound=pool_probe_outbound,
+    build_config_batch=build_pool_probe_core_config_batch,
+    start_xray=start_pool_probe_xray,
+    stop_xray=stop_pool_probe_xray,
+    cleanup_runtime=cleanup_pool_probe_runtime,
+    collect_garbage=gc.collect,
+):
+    probe_tasks = [(proto, (key_value or '').strip()) for proto, key_value in candidates if (key_value or '').strip()]
+    batch_size = max(1, int(batch_size or 1))
+    tg_connect, tg_read = telegram_timeouts
+    http_connect, http_read = http_timeouts
+    while probe_tasks:
+        raw_batch = probe_tasks[:batch_size]
+        del probe_tasks[:batch_size]
+        valid_batch = []
+        for proto, key_value in raw_batch:
+            try:
+                validate_outbound(proto, key_value, 'proxy-failover-validate', proxy_outbound_from_key)
+                valid_batch.append((proto, key_value))
+            except Exception as exc:
+                log(f'Auto-failover: ключ {proto} не подготовлен для проверки: {exc}')
+        if not valid_batch:
+            continue
+
+        process = None
+        config_path = None
+        try:
+            process, config_path = start_xray(build_config_batch(valid_batch, test_port, proxy_outbound_from_key))
+            for offset, (proto, key_value) in enumerate(valid_batch):
+                port = str(int(test_port) + offset)
+                if not wait_for_socks5(port, timeout=6):
+                    log(
+                        f'Auto-failover: тестовый SOCKS-порт {port} не поднялся для {proto_label(proto)}; '
+                        'прежний статус ключа оставлен без изменений.'
+                    )
+                    continue
+                proxy_url = f'socks5h://127.0.0.1:{port}'
+                if service == 'youtube':
+                    primary_ok, _ = check_http(
+                        proxy_url,
+                        url='https://www.youtube.com',
+                        connect_timeout=http_connect,
+                        read_timeout=http_read,
+                    )
+                    tg_ok, _ = check_telegram_api(
+                        proxy_url,
+                        connect_timeout=tg_connect,
+                        read_timeout=tg_read,
+                    )
+                    yt_ok = primary_ok
+                else:
+                    primary_ok, _ = check_telegram_api(
+                        proxy_url,
+                        connect_timeout=tg_connect,
+                        read_timeout=tg_read,
+                    )
+                    tg_ok = primary_ok
+                    yt_ok, _ = check_http(
+                        proxy_url,
+                        url='https://www.youtube.com',
+                        connect_timeout=http_connect,
+                        read_timeout=http_read,
+                    )
+                record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
+                if primary_ok:
+                    return proto, key_value, tg_ok, yt_ok
+        except Exception as exc:
+            log(f'Auto-failover: ошибка проверки кандидатов через временный xray: {exc}')
+        finally:
+            stop_xray(process, config_path)
+            cleanup_runtime(kill_processes=True)
+            collect_garbage()
+    return None
+
+
 def run_pool_probe_worker(
     probe_tasks,
     checks,

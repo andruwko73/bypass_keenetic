@@ -25,6 +25,7 @@ import telegram_jobs
 import telegram_install_ui
 import telegram_key_ui
 import pool_probe_controller
+import pool_probe_runner
 import proxy_status
 import unblock_lists
 import installer_common
@@ -145,6 +146,9 @@ def test_key_pool_web():
     assert 'custom-check-item' in key_pool_web.web_custom_checks_html(check_defs, icon_html)
     assert 'service-preset-btn' in key_pool_web.web_custom_presets_html([], check_defs, icon_html)
     assert 'custom-service-ok' in key_pool_web.web_custom_check_badges({'custom': {'custom': True}}, check_defs, icon_html)
+    assert key_pool_web.web_probe_state({'tg_ok': True}, 'tg_ok') == 'ok'
+    assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
+    assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
 
 def test_key_pool_subscription_helpers():
     raw = '\n'.join([
@@ -160,6 +164,13 @@ def test_key_pool_subscription_helpers():
     pools, added = key_pool_store.add_subscription_keys_to_pool({'vless2': []}, 'vless2', classified)
     assert added == ['vless://uuid@example.com:443?security=tls#sample']
     assert pools['vless2'] == added
+    candidates = key_pool_store.failover_candidates(
+        {'vless': ['active', 'next'], 'vmess': ['vmess-key']},
+        'vless',
+        'active',
+        protocols=('vless', 'vmess'),
+    )
+    assert candidates == [('vless', 'next'), ('vmess', 'vmess-key')]
 
 
 def test_web_post_actions_helpers():
@@ -338,6 +349,67 @@ def test_pool_probe_controller_helpers():
     assert state['finished_at'] == 20.0
     assert invalidated == ['cache', 'cache']
     assert collected == ['gc']
+
+    records = []
+    tg_results = iter([(False, ''), (False, '')])
+    yt_results = iter([(False, ''), (False, '')])
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'key',
+        [{'id': 'custom'}],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: next(tg_results),
+        check_http=lambda proxy, **kwargs: next(yt_results),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {'custom': True},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        sleep=lambda seconds: None,
+    )
+    assert records == [
+        ('vless', 'key', {'tg_ok': False, 'yt_ok': False}),
+        ('vless', 'key', {'custom': {'custom': False}}),
+    ]
+
+
+def test_pool_probe_runner_failover_candidate():
+    records = []
+    logs = []
+    stopped = []
+    cleaned = []
+
+    def validate_outbound(proto, key_value, tag, proxy_outbound_from_key):
+        assert tag == 'proxy-failover-validate'
+        if key_value == 'bad':
+            raise ValueError('bad key')
+
+    result = pool_probe_runner.find_pool_failover_candidate(
+        [('vless', 'bad'), ('vless', 'ok')],
+        service='telegram',
+        batch_size=2,
+        test_port='1200',
+        proxy_outbound_from_key=lambda *args, **kwargs: {},
+        wait_for_socks5=lambda port, timeout=6: port == '1200',
+        check_telegram_api=lambda proxy, **kwargs: (True, 'ok'),
+        check_http=lambda proxy, **kwargs: (False, 'yt'),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        proto_label=lambda proto: proto,
+        log=logs.append,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        validate_outbound=validate_outbound,
+        build_config_batch=lambda valid_batch, test_port, proxy_outbound_from_key: {'valid': valid_batch},
+        start_xray=lambda config: ('process', 'config.json'),
+        stop_xray=lambda process, config_path: stopped.append((process, config_path)),
+        cleanup_runtime=lambda kill_processes=False: cleaned.append(kill_processes),
+        collect_garbage=lambda: None,
+    )
+    assert result == ('vless', 'ok', True, False)
+    assert records == [('vless', 'ok', {'tg_ok': True, 'yt_ok': False})]
+    assert stopped == [('process', 'config.json')]
+    assert cleaned == [True]
+    assert 'не подготовлен' in logs[0]
 
 
 def test_proxy_status_runtime_helpers():
@@ -783,6 +855,7 @@ def main():
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
     test_pool_probe_controller_helpers()
+    test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
 
 

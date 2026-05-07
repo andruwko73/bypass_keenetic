@@ -69,6 +69,46 @@ def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
     return max(batch_timeout, per_key * waves + 5.0)
 
 
+def check_pool_key_through_proxy(
+    proto,
+    key_value,
+    custom_checks,
+    proxy_url,
+    *,
+    check_telegram_api,
+    check_http,
+    record_key_probe,
+    probe_custom_targets,
+    retry_delay_seconds,
+    telegram_timeouts,
+    http_timeouts,
+    sleep=time.sleep,
+):
+    tg_connect, tg_read = telegram_timeouts
+    http_connect, http_read = http_timeouts
+    tg_ok, _ = check_telegram_api(proxy_url, connect_timeout=tg_connect, read_timeout=tg_read)
+    yt_ok, _ = check_http(proxy_url, connect_timeout=http_connect, read_timeout=http_read)
+    if not tg_ok and not yt_ok:
+        sleep(retry_delay_seconds)
+        tg_ok, _ = check_telegram_api(proxy_url, connect_timeout=tg_connect, read_timeout=tg_read)
+        yt_ok, _ = check_http(proxy_url, connect_timeout=http_connect, read_timeout=http_read)
+    elif not yt_ok:
+        sleep(retry_delay_seconds)
+        yt_ok, _ = check_http(proxy_url, connect_timeout=http_connect, read_timeout=http_read)
+
+    record_tg_ok = tg_ok if (tg_ok or not yt_ok) else 'unknown'
+    record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok)
+    if custom_checks and not tg_ok and not yt_ok:
+        record_key_probe(proto, key_value, custom=failed_custom_probe_results(custom_checks))
+        return
+    if custom_checks:
+        record_key_probe(
+            proto,
+            key_value,
+            custom=probe_custom_targets(proxy_url, custom_checks=custom_checks),
+        )
+
+
 def select_pool_probe_tasks(tasks, *, protocol_order, custom_checks, cache, hash_key, is_fresh, max_keys=None, stale_only=False, now=None):
     now = time.time() if now is None else now
     selected = []

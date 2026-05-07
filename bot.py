@@ -15,7 +15,6 @@ import time
 import threading
 import signal
 import traceback
-import gc
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 from proxy_key_store import (
@@ -114,6 +113,7 @@ from telegram_install_ui import (
 from pool_probe_controller import (
     PoolProbeProgress,
     available_memory_kb as _available_memory_kb,
+    check_pool_key_through_proxy as _controller_check_pool_key_through_proxy,
     failed_custom_probe_results as _failed_custom_probe_results,
     pool_probe_progress_label as _controller_pool_probe_progress_label,
     pool_probe_timeout_budget as _controller_pool_probe_timeout_budget,
@@ -143,6 +143,7 @@ from service_catalog import (
 from pool_probe_runner import (
     build_pool_probe_core_config_batch as _runner_build_pool_probe_core_config_batch,
     cleanup_pool_probe_runtime as _runner_cleanup_pool_probe_runtime,
+    find_pool_failover_candidate as _runner_find_pool_failover_candidate,
     pool_probe_outbound as _runner_pool_probe_outbound,
     run_pool_probe_worker,
     start_pool_probe_xray as _runner_start_pool_probe_xray,
@@ -325,15 +326,12 @@ def _attempt_auto_failover():
         current_keys = _load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
         pools = _load_key_pools()
-        candidates = []
-        for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-            for key_value in pools.get(proto, []) or []:
-                key_value = (key_value or '').strip()
-                if not key_value:
-                    continue
-                if proto == proxy_mode and key_value == active_key:
-                    continue
-                candidates.append((proto, key_value))
+        candidates = key_pool_store.failover_candidates(
+            pools,
+            proxy_mode,
+            active_key,
+            protocols=('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'),
+        )
 
         if not candidates:
             _write_runtime_log('Auto-failover: ключей в пулах нет, переключать не на что.')
@@ -3042,47 +3040,19 @@ def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
 
 
 def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None):
-    proxy_url = proxy_url or proxy_settings.get(proto)
-    tg_ok, _ = _check_telegram_api_through_proxy(
-        proxy_url,
-        connect_timeout=POOL_PROBE_TG_CONNECT_TIMEOUT,
-        read_timeout=POOL_PROBE_TG_READ_TIMEOUT,
+    return _controller_check_pool_key_through_proxy(
+        proto,
+        key_value,
+        custom_checks,
+        proxy_url or proxy_settings.get(proto),
+        check_telegram_api=_check_telegram_api_through_proxy,
+        check_http=_check_http_through_proxy,
+        record_key_probe=_record_key_probe,
+        probe_custom_targets=_probe_custom_targets_for_pool,
+        retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+        telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
+        http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
     )
-    yt_ok, _ = _check_http_through_proxy(
-        proxy_url,
-        connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-        read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
-    )
-    if not tg_ok and not yt_ok:
-        time.sleep(POOL_PROBE_RETRY_DELAY_SECONDS)
-        tg_ok, _ = _check_telegram_api_through_proxy(
-            proxy_url,
-            connect_timeout=POOL_PROBE_TG_CONNECT_TIMEOUT,
-            read_timeout=POOL_PROBE_TG_READ_TIMEOUT,
-        )
-        yt_ok, _ = _check_http_through_proxy(
-            proxy_url,
-            connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-            read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
-        )
-    elif not yt_ok:
-        time.sleep(POOL_PROBE_RETRY_DELAY_SECONDS)
-        yt_ok, _ = _check_http_through_proxy(
-            proxy_url,
-            connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-            read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
-        )
-    record_tg_ok = tg_ok if (tg_ok or not yt_ok) else 'unknown'
-    _record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok)
-    if custom_checks and not tg_ok and not yt_ok:
-        _record_key_probe(proto, key_value, custom=_failed_custom_probe_results(custom_checks))
-        return
-    if custom_checks:
-        custom_results = _probe_custom_targets_for_pool(
-            proxy_url,
-            custom_checks=custom_checks,
-        )
-        _record_key_probe(proto, key_value, custom=custom_results)
 
 
 def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
@@ -3091,71 +3061,21 @@ def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
 
 def _find_pool_failover_candidate(candidates, service='telegram'):
     """Find one working pool key through a temporary xray before touching the active proxy."""
-    probe_tasks = [(proto, (key_value or '').strip()) for proto, key_value in candidates if (key_value or '').strip()]
-    while probe_tasks:
-        raw_batch = probe_tasks[:POOL_PROBE_BATCH_SIZE]
-        del probe_tasks[:POOL_PROBE_BATCH_SIZE]
-        valid_batch = []
-        for proto, key_value in raw_batch:
-            try:
-                _runner_pool_probe_outbound(proto, key_value, 'proxy-failover-validate', _proxy_outbound_from_key)
-                valid_batch.append((proto, key_value))
-            except Exception as exc:
-                _write_runtime_log(f'Auto-failover: ключ {proto} не подготовлен для проверки: {exc}')
-        if not valid_batch:
-            continue
-
-        process = None
-        config_path = None
-        try:
-            process, config_path = _runner_start_pool_probe_xray(
-                _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
-            )
-            for offset, (proto, key_value) in enumerate(valid_batch):
-                port = str(int(POOL_PROBE_TEST_PORT) + offset)
-                if not _wait_for_socks5_handshake(port, timeout=6):
-                    _write_runtime_log(
-                        f'Auto-failover: тестовый SOCKS-порт {port} не поднялся для {_pool_proto_label(proto)}; '
-                        'прежний статус ключа оставлен без изменений.'
-                    )
-                    continue
-                proxy_url = f'socks5h://127.0.0.1:{port}'
-                if service == 'youtube':
-                    primary_ok, _ = _check_http_through_proxy(
-                        proxy_url,
-                        url='https://www.youtube.com',
-                        connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-                        read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
-                    )
-                    tg_ok, _ = _check_telegram_api_through_proxy(
-                        proxy_url,
-                        connect_timeout=POOL_PROBE_TG_CONNECT_TIMEOUT,
-                        read_timeout=POOL_PROBE_TG_READ_TIMEOUT,
-                    )
-                    yt_ok = primary_ok
-                else:
-                    primary_ok, _ = _check_telegram_api_through_proxy(
-                        proxy_url,
-                        connect_timeout=POOL_PROBE_TG_CONNECT_TIMEOUT,
-                        read_timeout=POOL_PROBE_TG_READ_TIMEOUT,
-                    )
-                    tg_ok = primary_ok
-                    yt_ok, _ = _check_http_through_proxy(
-                        proxy_url,
-                        url='https://www.youtube.com',
-                        connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-                        read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
-                    )
-                _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
-                if primary_ok:
-                    return proto, key_value, tg_ok, yt_ok
-        except Exception as exc:
-            _write_runtime_log(f'Auto-failover: ошибка проверки кандидатов через временный xray: {exc}')
-        finally:
-            _runner_stop_pool_probe_xray(process, config_path)
-            _runner_cleanup_pool_probe_runtime(kill_processes=True)
-            gc.collect()
-    return None
+    return _runner_find_pool_failover_candidate(
+        candidates,
+        service=service,
+        batch_size=POOL_PROBE_BATCH_SIZE,
+        test_port=POOL_PROBE_TEST_PORT,
+        proxy_outbound_from_key=_proxy_outbound_from_key,
+        wait_for_socks5=_wait_for_socks5_handshake,
+        check_telegram_api=_check_telegram_api_through_proxy,
+        check_http=_check_http_through_proxy,
+        record_key_probe=_record_key_probe,
+        proto_label=_pool_proto_label,
+        log=_write_runtime_log,
+        telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
+        http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
+    )
 
 
 def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
@@ -3255,26 +3175,6 @@ def _add_keys_to_pool(proto, keys_text):
     return len(added_keys)
 
 
-def _web_probe_state(probe, key):
-    if not probe or key not in probe:
-        return 'unknown'
-    value = probe.get(key)
-    if value is None:
-        return 'unknown'
-    return 'ok' if value else 'fail'
-
-
-def _web_probe_checked_at(probe):
-    try:
-        ts = float((probe or {}).get('ts', 0))
-    except (TypeError, ValueError):
-        ts = 0
-    if not ts:
-        return ''
-    return time.strftime('%d.%m %H:%M', time.localtime(ts))
-
-
-
 def _web_custom_checks():
     return key_pool_web.web_custom_checks(_load_custom_checks())
 
@@ -3288,8 +3188,8 @@ def _web_pool_snapshot(current_keys=None, include_keys=False):
         include_keys=include_keys,
         hash_key=_hash_key,
         display_name=_pool_key_display_name,
-        probe_state=_web_probe_state,
-        probe_checked_at=_web_probe_checked_at,
+        probe_state=key_pool_web.web_probe_state,
+        probe_checked_at=key_pool_web.web_probe_checked_at,
     )
 
 

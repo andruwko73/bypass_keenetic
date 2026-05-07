@@ -146,3 +146,21 @@ def clear_pool(pools, proto):
     removed_keys = dedupe_key_list(pools.get(proto, []) or [])
     pools[proto] = []
     return pools, removed_keys
+
+
+def failover_candidates(pools, current_proto, current_key, protocols=PROTOCOLS):
+    pools = normalize_key_pools(pools)
+    current_proto = str(current_proto or '').strip()
+    current_key = str(current_key or '').strip()
+    candidates = []
+    for proto in protocols or PROTOCOLS:
+        if proto not in pools:
+            continue
+        for key_value in pools.get(proto, []) or []:
+            key_value = str(key_value or '').strip()
+            if not key_value:
+                continue
+            if proto == current_proto and key_value == current_key:
+                continue
+            candidates.append((proto, key_value))
+    return candidates

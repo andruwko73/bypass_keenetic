@@ -1,4 +1,5 @@
 import html
+import time
 from urllib.parse import urlparse
 
 
@@ -115,6 +116,25 @@ def web_custom_probe_states(probe, custom_checks):
         else:
             result[check_id] = 'unknown'
     return result
+
+
+def web_probe_state(probe, key):
+    if not probe or key not in probe:
+        return 'unknown'
+    value = probe.get(key)
+    if value is None:
+        return 'unknown'
+    return 'ok' if value else 'fail'
+
+
+def web_probe_checked_at(probe):
+    try:
+        ts = float((probe or {}).get('ts', 0))
+    except (TypeError, ValueError):
+        ts = 0
+    if not ts:
+        return ''
+    return time.strftime('%d.%m %H:%M', time.localtime(ts))
 
 
 def web_custom_checks(custom_checks):
