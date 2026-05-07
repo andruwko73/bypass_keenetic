@@ -19,8 +19,8 @@ import signal
 import traceback
 import gc
 import tarfile
-from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
-from urllib.parse import quote, unquote, urlencode, urlparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import quote, unquote, urlparse
 from proxy_key_store import (
     load_current_keys as _store_load_current_keys,
     load_shadowsocks_key as _store_load_shadowsocks_key,
@@ -474,6 +474,7 @@ RUNTIME_ERROR_LOG_PATHS = [
 MENU_STATE_UNSET = object()
 TELEGRAM_CONFIRM_LEVEL = 30
 TELEGRAM_KEY_INPUT_LEVELS = {'Shadowsocks': 5, 'Vmess': 9, 'Vless': 11, 'Vless 1': 11, 'Vless 2': 12, 'Trojan': 13}
+TELEGRAM_KEY_INSTALL_PROTOCOLS = {5: 'shadowsocks', 9: 'vmess', 11: 'vless', 12: 'vless2', 13: 'trojan'}
 chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
 chat_pool_pages = {}
@@ -4377,7 +4378,7 @@ def bot_message(message):
                     bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=_reply_keyboard(("🔙 Назад",)))
                     return
 
-            key_install_proto = {5: 'shadowsocks', 9: 'vmess', 11: 'vless', 12: 'vless2', 13: 'trojan'}.get(level)
+            key_install_proto = TELEGRAM_KEY_INSTALL_PROTOCOLS.get(level)
             if key_install_proto:
                 set_menu_state(0)
                 _install_proxy_from_message(message, key_install_proto, message.text, main)

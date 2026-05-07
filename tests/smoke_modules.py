@@ -161,6 +161,14 @@ def test_web_action_feature_gates():
     assert calls == []
 
 
+def test_telegram_confirm_state_source():
+    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert 'if level == TELEGRAM_CONFIRM_LEVEL:' in source
+    assert '_execute_confirmed_telegram_action(message.chat.id, action, service)' in source
+    for action in ('restart_services', 'reboot', 'dns_on', 'dns_off', 'update_main', 'update_independent', 'update_no_bot', 'remove'):
+        assert f"_request_telegram_confirmation(message, set_menu_state, '{action}')" in source
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     current_keys = {'vless': 'key'}
@@ -417,6 +425,7 @@ def main():
     test_web_form_template_smoke()
     test_web_post_actions_helpers()
     test_web_action_feature_gates()
+    test_telegram_confirm_state_source()
     print('smoke_modules: ok')
 
 
