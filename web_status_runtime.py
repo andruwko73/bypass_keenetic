@@ -13,6 +13,29 @@ def telegram_api_pending_message():
     )
 
 
+def protocol_preflight_status(key_value, endpoint_ok, endpoint_message, *, proxy_user_label='Бот', xray_required=False):
+    if not str(key_value or '').strip():
+        return {
+            'tone': 'empty',
+            'label': 'Не сохранён',
+            'details': 'Ключ ещё не сохранён на роутере.',
+        }
+    if not endpoint_ok:
+        return {
+            'tone': 'fail',
+            'label': 'Не работает',
+            'details': f'{endpoint_message} {proxy_user_label} не может использовать этот ключ.',
+        }
+    if xray_required:
+        return {
+            'tone': 'warn',
+            'label': 'Требует Xray',
+            'details': (f'{endpoint_message} Этот ключ использует VLESS Reality/XTLS и должен работать через Xray, '
+                        'а сейчас активен V2Ray. Локальный SOCKS поднят, но внешний трафик через ключ может не пройти.'),
+        }
+    return None
+
+
 def api_status_from_protocol(proxy_mode, protocol_status, socks_ok, is_transient):
     api_ok = bool((protocol_status or {}).get('api_ok'))
     api_message = str((protocol_status or {}).get('api_message', '') or '')

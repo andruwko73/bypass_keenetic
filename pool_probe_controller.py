@@ -129,6 +129,14 @@ def select_pool_probe_tasks(tasks, *, protocol_order, custom_checks, cache, hash
     return selected, custom_checks
 
 
+def filter_active_probe_tasks(tasks, current_keys):
+    return [
+        (proto, key_value)
+        for proto, key_value in (tasks or [])
+        if key_value == (current_keys.get(proto) or '').strip()
+    ]
+
+
 def start_pool_probe_worker(
     probe_tasks,
     checks,

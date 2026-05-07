@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.497, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.498, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -88,6 +88,8 @@ import telegram_pool_ui
 import web_pool_form_blocks
 import telegram_key_ui
 import entware_dns_runtime
+import telegram_info_runtime
+import auto_failover_runtime
 from telegram_auth_state import (
     MENU_STATE_UNSET,
     authorize_message as _telegram_authorize_message,
@@ -125,6 +127,7 @@ from pool_probe_controller import (
     available_memory_kb as _available_memory_kb,
     check_pool_key_through_proxy as _controller_check_pool_key_through_proxy,
     failed_custom_probe_results as _failed_custom_probe_results,
+    filter_active_probe_tasks as _controller_filter_active_probe_tasks,
     pool_probe_progress_label as _controller_pool_probe_progress_label,
     pool_probe_timeout_budget as _controller_pool_probe_timeout_budget,
     select_pool_probe_tasks as _controller_select_pool_probe_tasks,
@@ -309,68 +312,24 @@ def _install_key_for_protocol(proto, key_value, verify=True):
 
 
 def _attempt_auto_failover():
-    now = time.time()
-    if globals().get('pool_probe_lock') and pool_probe_lock.locked():
-        return
-    if auto_failover_state['in_progress']:
-        return
-    if (auto_failover_state['last_attempt'] and
-            now - auto_failover_state['last_attempt'] < AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS):
-        return
-
-    proxy_url = proxy_settings.get(proxy_mode)
-    ok, probe_message = _check_telegram_api_through_proxy(proxy_url, connect_timeout=4, read_timeout=6)
-    if ok:
-        auto_failover_state['last_ok'] = now
-        auto_failover_state['last_fail'] = 0.0
-        return
-
-    if not auto_failover_state['last_fail']:
-        auto_failover_state['last_fail'] = now
-
-    if now - auto_failover_state['last_fail'] < AUTO_FAILOVER_GRACE_SECONDS:
-        return
-
-    auto_failover_state['in_progress'] = True
-    auto_failover_state['last_attempt'] = now
-    try:
-        current_keys = _load_current_keys()
-        active_key = (current_keys.get(proxy_mode) or '').strip()
-        pools = _load_key_pools()
-        candidates = key_pool_store.failover_candidates(
-            pools,
-            proxy_mode,
-            active_key,
-            protocols=('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'),
-        )
-
-        if not candidates:
-            _write_runtime_log('Auto-failover: ключей в пулах нет, переключать не на что.')
-            return
-
-        _write_runtime_log(
-            f'Auto-failover: Telegram API не отвечает >{AUTO_FAILOVER_GRACE_SECONDS}s '
-            f'(режим {proxy_mode}). Проверяем кандидатов через временный xray.'
-        )
-        candidate = _find_pool_failover_candidate(candidates, service='telegram')
-        if candidate:
-            proto, key_value, tg_ok, yt_ok = candidate
-            try:
-                result = _install_key_for_protocol(proto, key_value, verify=False)
-            except Exception as exc:
-                _write_runtime_log(f'Auto-failover: ошибка установки {proto} ключа: {exc}')
-                return
-            update_proxy(proto)
-            _set_active_key(proto, key_value)
-            _record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
-            auto_failover_state['last_ok'] = time.time()
-            auto_failover_state['last_fail'] = 0.0
-            _write_runtime_log(f'Auto-failover: переключено на {proto}; Telegram API доступен. {result}')
-            return
-
-        _write_runtime_log('Auto-failover: перебор ключей из пулов не дал доступа к Telegram API.')
-    finally:
-        auto_failover_state['in_progress'] = False
+    return auto_failover_runtime.attempt_auto_failover(
+        state=auto_failover_state,
+        pool_probe_locked=lambda: bool(globals().get('pool_probe_lock') and pool_probe_lock.locked()),
+        proxy_mode=proxy_mode,
+        proxy_url=proxy_settings.get(proxy_mode),
+        check_telegram_api=_check_telegram_api_through_proxy,
+        load_current_keys=_load_current_keys,
+        load_key_pools=_load_key_pools,
+        failover_candidates=key_pool_store.failover_candidates,
+        find_pool_failover_candidate=_find_pool_failover_candidate,
+        install_key_for_protocol=_install_key_for_protocol,
+        update_proxy=update_proxy,
+        set_active_key=_set_active_key,
+        record_key_probe=_record_key_probe,
+        log=_write_runtime_log,
+        grace_seconds=AUTO_FAILOVER_GRACE_SECONDS,
+        switch_cooldown_seconds=AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
+    )
 
 
 def _start_auto_failover_thread():
@@ -453,7 +412,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.497'
+APP_VERSION_COUNTER = '1.498'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -618,89 +577,12 @@ def _clear_pool_page(chat_id):
 
 
 def _telegram_info_text_from_readme():
-    readme_text = ''
-    try:
-        readme_text = _fetch_remote_text(_raw_github_url('README.md'))
-    except Exception:
-        readme_text = _read_text_file(README_PATH)
-
-    if not readme_text.strip():
-        return (
-            'Информация временно недоступна: README.md не найден.\n\n'
-            'Откройте страницу роутера 192.168.1.1:8080 или README в репозитории форка.'
-        )
-
-    lines = readme_text.splitlines()
-    sections = []
-    current_title = ''
-    current_lines = []
-
-    def flush_section():
-        if current_title and current_lines:
-            sections.append((current_title, current_lines[:]))
-
-    for raw_line in lines:
-        line = raw_line.rstrip()
-        if line.startswith('## '):
-            flush_section()
-            current_title = line[3:].strip()
-            current_lines = []
-            continue
-        if current_title:
-            current_lines.append(line)
-    flush_section()
-
-    wanted_titles = ['Об этом форке', 'Как работает бот на странице 192.168.1.1:8080']
-    selected = []
-    for wanted in wanted_titles:
-        for title, section_lines in sections:
-            if title == wanted:
-                selected.append((title, section_lines))
-                break
-
-    if not selected:
-        selected = sections[:2]
-
-    text_lines = []
-    for title, section_lines in selected:
-        if text_lines:
-            text_lines.append('')
-        text_lines.append(f'<b>{html.escape(title)}</b>')
-        for line in section_lines:
-            stripped = line.strip()
-            if stripped.startswith('### Скриншоты интерфейса'):
-                break
-            if not stripped:
-                if text_lines and text_lines[-1] != '':
-                    text_lines.append('')
-                continue
-            if stripped.startswith('<') or stripped.startswith('```'):
-                continue
-            if stripped.startswith('!['):
-                continue
-            cleaned = html.escape(stripped.replace('`', ''))
-            cleaned = re.sub(
-                r'\[([^\]]+)\]\(([^\)]+)\)',
-                lambda match: f'<a href="{html.escape(match.group(2), quote=True)}">{html.escape(match.group(1))}</a>',
-                cleaned,
-            )
-            text_lines.append(cleaned)
-
-    cleaned_lines = []
-    previous_blank = False
-    for line in text_lines:
-        if not line:
-            if not previous_blank:
-                cleaned_lines.append('')
-            previous_blank = True
-            continue
-        cleaned_lines.append(line)
-        previous_blank = False
-
-    result = '\n'.join(cleaned_lines).strip()
-    if not result:
-        return 'Информация временно недоступна: README.md не содержит подходящего текста.'
-    return result[:3900]
+    return telegram_info_runtime.telegram_info_text_from_readme(
+        _fetch_remote_text,
+        _raw_github_url,
+        _read_text_file,
+        README_PATH,
+    )
 
 
 def _write_runtime_log(message, mode='a'):
@@ -2077,24 +1959,17 @@ def _core_proxy_runtime_name():
 
 
 def _protocol_status_for_key(key_name, key_value):
-    if not key_value.strip():
-        return _status_empty_protocol_status()
     port = PROXY_LOCAL_PORTS.get(key_name)
     endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_name, port)
-    if not endpoint_ok:
-        return {
-            'tone': 'fail',
-            'label': 'Не работает',
-            'details': f'{endpoint_message} {APP_PROXY_USER_LABEL} не может использовать этот ключ.',
-        }
-
-    if _key_requires_xray(key_name, key_value) and _core_proxy_runtime_name() != 'xray':
-        return {
-            'tone': 'warn',
-            'label': 'Требует Xray',
-            'details': (f'{endpoint_message} Этот ключ использует VLESS Reality/XTLS и должен работать через Xray, '
-                        'а сейчас активен V2Ray. Локальный SOCKS поднят, но внешний трафик через ключ может не пройти.'),
-        }
+    preflight = web_status_runtime.protocol_preflight_status(
+        key_value,
+        endpoint_ok,
+        endpoint_message,
+        proxy_user_label=APP_PROXY_USER_LABEL,
+        xray_required=_key_requires_xray(key_name, key_value) and _core_proxy_runtime_name() != 'xray',
+    )
+    if preflight:
+        return preflight
 
     proxy_url = proxy_settings.get(key_name)
     api_ok, api_message = _check_telegram_api_through_proxy(
@@ -3049,12 +2924,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'
         stale_only=stale_only,
     )
     if POOL_PROBE_ACTIVE_ONLY:
-        current_keys = _load_current_keys()
-        selected = [
-            (proto, key_value)
-            for proto, key_value in selected
-            if key_value == (current_keys.get(proto) or '').strip()
-        ]
+        selected = _controller_filter_active_probe_tasks(selected, _load_current_keys())
     def invalidate_probe_status():
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()

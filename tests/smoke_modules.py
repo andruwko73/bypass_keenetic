@@ -28,8 +28,10 @@ import telegram_jobs
 import telegram_message_flow
 import telegram_install_ui
 import telegram_key_ui
+import telegram_info_runtime
 import pool_probe_controller
 import pool_probe_runner
+import auto_failover_runtime
 import proxy_apply_runtime
 import proxy_status
 import unblock_lists
@@ -241,6 +243,10 @@ def test_entware_dns_runtime_helpers():
 
 
 def test_web_status_runtime_helpers():
+    assert web_status_runtime.protocol_preflight_status('', True, '')['tone'] == 'empty'
+    failed = web_status_runtime.protocol_preflight_status('key', False, 'SOCKS fail', proxy_user_label='Web')
+    assert failed['tone'] == 'fail' and 'Web' in failed['details']
+    assert web_status_runtime.protocol_preflight_status('key', True, 'SOCKS ok', xray_required=True)['label'] == 'Требует Xray'
     pending = web_status_runtime.build_web_status_snapshot(
         state_label='state',
         proxy_mode='vless',
@@ -375,6 +381,55 @@ def test_telegram_key_ui_helpers():
     assert 'http://192.168.1.1:8080/' in telegram_key_ui.browser_hint('192.168.1.1', 8080)
 
 
+def test_telegram_info_runtime_helpers():
+    readme = (
+        '# Title\n'
+        '## Об этом форке\n'
+        'Текст с [ссылкой](https://example.com) и `кодом`.\n'
+        '\n'
+        '![screen](screen.png)\n'
+        '## Как работает бот на странице 192.168.1.1:8080\n'
+        'Второй раздел.\n'
+        '### Скриншоты интерфейса\n'
+        'Не показывать.\n'
+    )
+    text = telegram_info_runtime.telegram_info_html(readme)
+    assert '<b>Об этом форке</b>' in text
+    assert '<a href="https://example.com">ссылкой</a>' in text
+    assert 'screen.png' not in text
+    assert 'Не показывать' not in text
+    assert telegram_info_runtime.telegram_info_html('').startswith('Информация временно недоступна')
+
+
+def test_auto_failover_runtime_helpers():
+    state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    calls = []
+    switched = auto_failover_runtime.attempt_auto_failover(
+        state=state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'fail'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(): [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, False),
+        install_key_for_protocol=lambda proto, key, verify=True: calls.append(('install', proto, key, verify)) or 'ok',
+        update_proxy=lambda proto: calls.append(('update', proto)),
+        set_active_key=lambda proto, key: calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        time_provider=iter([20.0, 21.0]).__next__,
+    )
+    assert switched is True
+    assert state['last_ok'] == 21.0
+    assert state['last_fail'] == 0.0
+    assert ('update', 'vless') in calls
+    assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': False} for call in calls)
+
+
 def test_proxy_apply_runtime_helpers():
     settings = proxy_apply_runtime.proxy_apply_settings('/opt/etc/init.d/S24xray', {
         'shadowsocks': 10815,
@@ -456,6 +511,10 @@ def test_pool_probe_controller_helpers():
     )
     assert selected == [('vless', 'new')]
     assert checks == [{'id': 'tg'}]
+    assert pool_probe_controller.filter_active_probe_tasks(
+        [('vless', 'active'), ('vmess', 'old')],
+        {'vless': 'active', 'vmess': 'new'},
+    ) == [('vless', 'active')]
 
     state = {}
     invalidated = []
@@ -1002,6 +1061,8 @@ def main():
     test_telegram_jobs_helpers()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
+    test_telegram_info_runtime_helpers()
+    test_auto_failover_runtime_helpers()
     test_proxy_apply_runtime_helpers()
     test_pool_probe_controller_helpers()
     test_pool_probe_runner_failover_candidate()
