@@ -735,6 +735,9 @@ def render_web_scripts(
                         if (!confirmed) {{
                             return;
                         }}
+                        if (action === 'command' && (confirmTitle || confirmMessage)) {{
+                            formData.set('confirm_switch', 'yes');
+                        }}
                         setButtonBusy(button, true);
                         if (proto && (action === 'install' || action === 'pool-apply' || action === 'pool-probe')) {{
                             markProtocolPending(proto);

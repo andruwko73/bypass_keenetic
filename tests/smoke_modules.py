@@ -303,6 +303,7 @@ def test_web_template_scripts_helpers():
     assert 'const ENABLE_KEY_POOL = false;' in scripts
     assert "const CSRF_TOKEN = 'token';" in scripts
     assert 'function setupAsyncForms' in scripts
+    assert "formData.set('confirm_switch', 'yes');" in scripts
     assert '{{' not in scripts
 
 
