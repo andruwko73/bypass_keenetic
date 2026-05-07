@@ -1351,6 +1351,16 @@ def _build_keys_menu_markup():
     return _reply_keyboard(*telegram_key_ui.key_menu_rows(include_pool=True))
 
 
+def _send_key_help_message(message, reply_markup, set_menu_state):
+    try:
+        keys = _fetch_remote_text(_raw_github_url('keys.md'))
+    except requests.RequestException as exc:
+        bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить справку по ключам: {exc}', reply_markup=reply_markup)
+        return
+    bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
+    set_menu_state(8)
+
+
 def _build_service_menu_markup():
     return _reply_keyboard(
         ("♻️ Перезагрузить сервисы", "‼️Перезагрузить роутер"),
@@ -4310,16 +4320,9 @@ def bot_message(message):
                 return
 
             if level == 8:
-                # значит это ключи и мосты
                 if message.text == telegram_key_ui.KEY_HELP_TEXT:
-                    url = _raw_github_url('keys.md')
-                    try:
-                        keys = _fetch_remote_text(url)
-                    except requests.RequestException as exc:
-                        bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить справку по ключам: {exc}', reply_markup=main)
-                        return
-                    bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
-                    set_menu_state(8)
+                    _send_key_help_message(message, main, set_menu_state)
+                    return
 
                 target_level = telegram_key_ui.key_input_level(message.text, trojan_level=13)
                 if target_level is not None:
