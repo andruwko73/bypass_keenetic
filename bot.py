@@ -1629,15 +1629,8 @@ def _start_telegram_result_retry_worker():
 
 
 def _install_proxy_from_message(message, key_type, key_value, reply_markup):
-    installers = {
-        'shadowsocks': shadowsocks,
-        'vmess': vmess,
-        'vless': vless,
-        'vless2': vless2,
-        'trojan': trojan,
-    }
     try:
-        installers[key_type](key_value)
+        PROXY_KEY_INSTALLERS[key_type](key_value)
         result = _apply_installed_proxy(key_type, key_value)
     except Exception as exc:
         result = f'Ошибка установки: {exc}'
@@ -4762,6 +4755,16 @@ def shadowsocks(key=None):
     with open('/opt/etc/shadowsocks.json', 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     _write_all_proxy_core_config()
+
+
+PROXY_KEY_INSTALLERS = {
+    'shadowsocks': shadowsocks,
+    'vmess': vmess,
+    'vless': vless,
+    'vless2': vless2,
+    'trojan': trojan,
+}
+
 
 def main():
     global proxy_mode, bot_polling
