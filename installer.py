@@ -2,17 +2,22 @@
 import html
 import json
 import os
-import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from installer_common import (
-    browser_port_is_valid,
     detect_router_ip,
-    ensure_legacy_path,
     escape_python,
+    installer_page_parts,
+    installer_target_url,
     is_local_web_client,
+    normalize_web_auth_form,
+    parse_urlencoded_request,
     resolve_bind_host,
+    start_detached_shell,
+    validate_installer_form,
+    web_auth_summary,
+    write_installer_config,
 )
 import key_pool_store
 
@@ -89,27 +94,18 @@ dnsoverhttpsport = '40508'
 
 
 def validate_form(form):
-    required = ['token', 'username']
-    missing = [key for key in required if not form.get(key, '').strip()]
-    if missing:
-        return False, 'Не заполнены обязательные поля: ' + ', '.join(missing)
-
-    browser_port = form.get('browser_port', '').strip()
-    if not browser_port_is_valid(browser_port):
-        return False, 'Поле browser_port должно содержать номер порта.'
-
-    return True, ''
+    return validate_installer_form(form, ['token', 'username'])
 
 
 def write_config(form):
-    os.makedirs(BOT_DIR, exist_ok=True)
-    config_text = build_config(form)
-    with open(BOT_CONFIG_PATH, 'w', encoding='utf-8') as file:
-        file.write(config_text)
-    os.chmod(BOT_CONFIG_PATH, 0o600)
-    ensure_legacy_path(BOT_CONFIG_PATH, LEGACY_CONFIG_PATH)
-    if os.path.exists(BOT_MAIN_PATH):
-        ensure_legacy_path(BOT_MAIN_PATH, LEGACY_MAIN_PATH)
+    write_installer_config(
+        BOT_DIR,
+        BOT_CONFIG_PATH,
+        build_config(form),
+        LEGACY_CONFIG_PATH,
+        BOT_MAIN_PATH,
+        LEGACY_MAIN_PATH,
+    )
 
 
 def switch_to_main_bot():
@@ -118,11 +114,7 @@ def switch_to_main_bot():
         'sleep 1; '
         f'if [ -x {BOT_SERVICE_PATH} ]; then {BOT_SERVICE_PATH} restart >/dev/null 2>&1 || {BOT_SERVICE_PATH} start >/dev/null 2>&1 || true; fi'
     )
-    subprocess.Popen(
-        ['sh', '-c', command],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    start_detached_shell(command)
 
 
 def install_web_only():
@@ -133,29 +125,12 @@ def install_web_only():
         'install_action=-install; [ -x /opt/bin/unblock_update.sh ] && install_action=-update; '
         'REPO_REF=codex/web-only-v1 /bin/sh /tmp/bypass_web_only_install.sh "$install_action"'
     )
-    subprocess.Popen(
-        ['sh', '-c', command],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    start_detached_shell(command)
 
 
 def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
     router_ip = detect_router_ip()
-    notice = ''
-    redirect_head = ''
-    redirect_script = ''
-    if message:
-        notice = f'<div class="notice">{html.escape(message)}</div>'
-    if redirect_url:
-        escaped_redirect_url = html.escape(redirect_url, quote=True)
-        redirect_head = f'<meta http-equiv="refresh" content="{redirect_delay_seconds};url={escaped_redirect_url}">'
-        redirect_script = f"""
-    <script>
-        setTimeout(function () {{
-            window.location.replace({redirect_url!r});
-        }}, {redirect_delay_seconds * 1000});
-    </script>"""
+    notice, redirect_head, redirect_script = installer_page_parts(message, redirect_url, redirect_delay_seconds)
     key_pool_script = """
     <script>
         const protoSelect = document.getElementById('proto-select');
@@ -423,8 +398,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
             return
         if self.path == '/install-web-only':
             install_web_only()
-            router_ip = detect_router_ip()
-            target_url = f'http://{router_ip}:{DEFAULT_BROWSER_PORT}/'
+            target_url = installer_target_url({}, DEFAULT_BROWSER_PORT)
             self._send_html(
                 page_html(
                     f'Запущена установка web-only версии без Telegram бота. Через несколько секунд откроется основной web-интерфейс: {target_url}',
@@ -455,17 +429,14 @@ class InstallerHandler(BaseHTTPRequestHandler):
             self._send_html(page_html('Неизвестное действие.'), status=404)
             return
 
-        content_length = int(self.headers.get('Content-Length', '0'))
-        raw_body = self.rfile.read(content_length).decode('utf-8', errors='ignore')
-        parsed = {key: values[0] for key, values in parse_qs(raw_body).items()}
+        parsed = parse_urlencoded_request(self)
 
         ok, message = validate_form(parsed)
         if not ok:
             self._send_html(page_html(message), status=400)
             return
 
-        parsed['web_auth_user'] = parsed.get('web_auth_user', 'admin').strip() or 'admin'
-        parsed['web_auth_token'] = parsed.get('web_auth_token', '').strip()
+        normalize_web_auth_form(parsed)
 
         try:
             write_config(parsed)
@@ -474,16 +445,8 @@ class InstallerHandler(BaseHTTPRequestHandler):
             self._send_html(page_html(f'Не удалось сохранить конфиг: {exc}'), status=500)
             return
 
-        router_ip = parsed.get('routerip', detect_router_ip()).strip() or detect_router_ip()
-        browser_port = parsed.get('browser_port', str(DEFAULT_BROWSER_PORT)).strip() or str(DEFAULT_BROWSER_PORT)
-        target_url = f'http://{router_ip}:{browser_port}/'
-        web_auth_user = parsed.get('web_auth_user', 'admin')
-        web_auth_token = parsed.get('web_auth_token', '')
-        web_auth_note = (
-            f' Пароль веб-интерфейса: {web_auth_token}.'
-            if web_auth_token else
-            ' Пароль веб-интерфейса не задан; вход будет без пароля.'
-        )
+        target_url = installer_target_url(parsed, DEFAULT_BROWSER_PORT)
+        web_auth_user, web_auth_note = web_auth_summary(parsed)
         self._send_html(
             page_html(
                 f'Конфиг сохранён. Основной бот запускается. Основная страница: {target_url}. Логин веб-интерфейса: {web_auth_user}.{web_auth_note}',

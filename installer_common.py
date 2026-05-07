@@ -1,8 +1,10 @@
+import html
 import ipaddress
 import os
 import re
 import shutil
 import subprocess
+from urllib.parse import parse_qs
 
 
 def detect_router_ip():
@@ -63,3 +65,86 @@ def escape_python(value):
 def browser_port_is_valid(value):
     port = (value or '').strip()
     return not port or bool(re.fullmatch(r'\d{2,5}', port))
+
+
+def form_value(form, key, default=''):
+    return (form.get(key, default) or '').strip()
+
+
+def normalize_web_auth_form(form, default_user='admin'):
+    form['web_auth_user'] = form_value(form, 'web_auth_user', default_user) or default_user
+    form['web_auth_token'] = form_value(form, 'web_auth_token')
+    return form
+
+
+def web_auth_summary(form, default_user='admin'):
+    web_auth_user = form_value(form, 'web_auth_user', default_user) or default_user
+    web_auth_token = form_value(form, 'web_auth_token')
+    note = (
+        f' Пароль веб-интерфейса: {web_auth_token}.'
+        if web_auth_token else
+        ' Пароль веб-интерфейса не задан; вход будет без пароля.'
+    )
+    return web_auth_user, note
+
+
+def validate_installer_form(form, required_fields, require_app_api=False):
+    missing = [key for key in required_fields if not form_value(form, key)]
+    if missing:
+        return False, 'Не заполнены обязательные поля: ' + ', '.join(missing)
+
+    if require_app_api and not re.fullmatch(r'\d{5,}', form_value(form, 'appapiid')):
+        return False, 'Поле appapiid должно содержать только цифры.'
+
+    if not browser_port_is_valid(form_value(form, 'browser_port')):
+        return False, 'Поле browser_port должно содержать номер порта.'
+
+    return True, ''
+
+
+def parse_urlencoded_request(handler):
+    content_length = int(handler.headers.get('Content-Length', '0') or '0')
+    raw_body = handler.rfile.read(content_length).decode('utf-8', errors='ignore')
+    return {key: values[0] for key, values in parse_qs(raw_body).items()}
+
+
+def write_installer_config(bot_dir, config_path, config_text, legacy_config_path, bot_main_path=None, legacy_main_path=None):
+    os.makedirs(bot_dir, exist_ok=True)
+    with open(config_path, 'w', encoding='utf-8') as file:
+        file.write(config_text)
+    os.chmod(config_path, 0o600)
+    ensure_legacy_path(config_path, legacy_config_path)
+    if bot_main_path and legacy_main_path and os.path.exists(bot_main_path):
+        ensure_legacy_path(bot_main_path, legacy_main_path)
+
+
+def start_detached_shell(command):
+    subprocess.Popen(
+        ['sh', '-c', command],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def installer_target_url(form, default_browser_port):
+    router_ip = form_value(form, 'routerip', detect_router_ip()) or detect_router_ip()
+    browser_port = form_value(form, 'browser_port', str(default_browser_port)) or str(default_browser_port)
+    return f'http://{router_ip}:{browser_port}/'
+
+
+def installer_page_parts(message='', redirect_url=None, redirect_delay_seconds=3):
+    notice = ''
+    redirect_head = ''
+    redirect_script = ''
+    if message:
+        notice = f'<div class="notice">{html.escape(message)}</div>'
+    if redirect_url:
+        escaped_redirect_url = html.escape(redirect_url, quote=True)
+        redirect_head = f'<meta http-equiv="refresh" content="{redirect_delay_seconds};url={escaped_redirect_url}">'
+        redirect_script = f"""
+    <script>
+        setTimeout(function () {{
+            window.location.replace({redirect_url!r});
+        }}, {redirect_delay_seconds * 1000});
+    </script>"""
+    return notice, redirect_head, redirect_script

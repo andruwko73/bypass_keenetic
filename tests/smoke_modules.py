@@ -23,6 +23,7 @@ import telegram_key_ui
 import pool_probe_controller
 import proxy_status
 import unblock_lists
+import installer_common
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -318,6 +319,32 @@ def test_web_command_state_helpers():
     assert web_command_state.consume_flash_message(lock, state) == ''
 
 
+def test_installer_common_helpers():
+    form = {'web_auth_user': ' ', 'web_auth_token': ' secret '}
+    installer_common.normalize_web_auth_form(form)
+    assert form['web_auth_user'] == 'admin'
+    assert form['web_auth_token'] == 'secret'
+    assert installer_common.validate_installer_form(
+        {'token': 'x', 'username': 'u', 'browser_port': '8080'},
+        ['token', 'username'],
+    ) == (True, '')
+    ok, message = installer_common.validate_installer_form(
+        {'token': 'x', 'username': 'u', 'appapiid': 'abc'},
+        ['token', 'username', 'appapiid'],
+        require_app_api=True,
+    )
+    assert ok is False
+    assert 'appapiid' in message
+    assert installer_common.installer_target_url(
+        {'routerip': '192.168.1.2', 'browser_port': '9090'},
+        8080,
+    ) == 'http://192.168.1.2:9090/'
+    notice, redirect_head, redirect_script = installer_common.installer_page_parts('<ok>', 'http://192.168.1.2/', 2)
+    assert '&lt;ok&gt;' in notice
+    assert '2;url=' in redirect_head
+    assert 'window.location.replace' in redirect_script
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     current_keys = {'vless': 'key'}
@@ -569,6 +596,7 @@ def main():
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()
     test_web_command_state_helpers()
+    test_installer_common_helpers()
     test_key_pool_web()
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()
