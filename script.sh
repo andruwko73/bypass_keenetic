@@ -451,7 +451,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py key_pool_web.py telegram_pool_ui.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_http_common.py web_get_actions.py web_post_actions.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py installer_common.py"
+BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py key_pool_web.py telegram_pool_ui.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_form_blocks.py web_http_common.py web_get_actions.py web_post_actions.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py installer_common.py"
 
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
@@ -682,6 +682,7 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module custom_checks_store.py add_custom_check || exit 1
     stage_runtime_module service_catalog.py CUSTOM_CHECK_PRESETS || exit 1
     stage_runtime_module web_form_template.py render_web_form || exit 1
+    stage_runtime_module web_form_blocks.py render_message_block || exit 1
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
     stage_runtime_module web_get_actions.py dispatch || exit 1
     stage_runtime_module web_post_actions.py dispatch || exit 1

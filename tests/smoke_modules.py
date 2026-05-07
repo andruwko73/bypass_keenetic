@@ -9,6 +9,7 @@ import key_pool_web
 import key_pool_store
 import telegram_pool_ui
 import web_get_actions
+import web_form_blocks
 import web_post_actions
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
@@ -168,6 +169,17 @@ def test_web_get_actions_helpers():
     assert static['path'].replace('\\', '/').endswith('/service-icons/test.png')
 
 
+def test_web_form_blocks_helpers():
+    assert web_form_blocks.proxy_mode_label('none') == 'Без прокси'
+    assert web_form_blocks.js_bool(True) == 'true'
+    assert web_form_blocks.js_bool(False) == 'false'
+    assert 'notice-result' in web_form_blocks.render_message_block('ok')
+    assert web_form_blocks.render_message_block('', live=False) == ''
+    assert 'hidden' in web_form_blocks.render_message_block('', live=True)
+    assert 'mode-choice-grid' in web_form_blocks.render_button_mode_picker('vless')
+    assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
+
+
 def test_telegram_pool_ui():
     markup = telegram_pool_ui.pool_protocol_markup(
         _FakeTypes,
@@ -195,6 +207,7 @@ def main():
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()
     test_web_get_actions_helpers()
+    test_web_form_blocks_helpers()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
 

@@ -110,6 +110,7 @@ from web_command_state import (
     start_command as _start_command_state,
 )
 from web_http_common import WebRequestMixin
+import web_form_blocks
 import web_get_actions
 import web_post_actions
 from web_form_template import render_web_form
@@ -5010,88 +5011,18 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             if not pool_probe_pending:
                 _refresh_status_caches_async(current_keys)
         unblock_lists = _load_unblock_lists()
-        status_refresh_pending = (
-            'Фоновая проверка связи выполняется' in status.get('api_status', '') or
-            any(item.get('label') == 'Проверяется' for item in protocol_statuses.values()) or
-            pool_probe_pending
-        )
+        status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
 
-        message_block = ''
-        if message:
-            safe_message = html.escape(message)
-            message_block = f'''<div id="web-action-message" class="notice notice-result">
-  <strong>Результат</strong>
-  <pre class="log-output">{safe_message}</pre>
-</div>'''
-        else:
-            message_block = '''<div id="web-action-message" class="notice notice-result hidden">
-  <strong>Результат</strong>
-  <pre class="log-output"></pre>
-</div>'''
-
-        command_block = ''
-        if command_state['label']:
-            command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
-            command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Статус обновится без перезагрузки страницы.'
-            command_block = f'''<div id="web-command-status" class="notice notice-status">
-  <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
-  <pre class="log-output">{html.escape(command_text)}</pre>
-</div>'''
-        else:
-            command_block = '''<div id="web-command-status" class="notice notice-status hidden">
-  <strong></strong>
-  <pre class="log-output"></pre>
-</div>'''
-
-        socks_hidden = '' if status['socks_details'] else ' hidden'
-        socks_block = f'<p id="web-socks-details" class="status-note"{socks_hidden}>{html.escape(status.get("socks_details", ""))}</p>'
-        fallback_block = ''
-        if status.get('fallback_reason') and status['proxy_mode'] == 'none':
-            fallback_block = f'<p id="web-fallback-reason" class="status-note">Последняя неудачная попытка прокси: {html.escape(status["fallback_reason"])}</p>'
-        else:
-            fallback_block = '<p id="web-fallback-reason" class="status-note hidden"></p>'
-
-        current_mode_label = {
-            'none': 'Без прокси',
-            'shadowsocks': 'Shadowsocks',
-            'vmess': 'Vmess',
-            'vless': 'Vless 1',
-            'vless2': 'Vless 2',
-            'trojan': 'Trojan',
-        }.get(status['proxy_mode'], status['proxy_mode'])
+        message_block = web_form_blocks.render_message_block(message, live=True)
+        command_block = web_form_blocks.render_command_block(command_state, live=True)
+        socks_block = web_form_blocks.render_socks_block(status, live=True)
+        fallback_block = web_form_blocks.render_fallback_block(status, live=True)
+        current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
         list_route_label = _transparent_list_route_label()
 
-        mode_options = [
-            ('none', 'Без прокси'),
-            ('shadowsocks', 'Shadowsocks'),
-            ('vmess', 'Vmess'),
-            ('vless', 'Vless 1'),
-            ('vless2', 'Vless 2'),
-            ('trojan', 'Trojan'),
-        ]
-        mode_buttons_html = ''.join(
-            f'''<form method="post" action="/set_proxy" data-async-action="set-proxy">
-        <input type="hidden" name="proxy_type" value="{value}">
-        <button type="submit" class="mode-choice{' active' if proxy_mode == value else ''}" data-mode-value="{value}">
-            <span>{html.escape(label)}</span>
-        </button>
-    </form>'''
-            for value, label in mode_options
-        )
-        mode_picker_block = f'''<div id="mode-picker" class="hero-popover mode-picker hidden">
-    <div class="mode-picker-form">
-        <span class="mode-picker-label">Активный протокол</span>
-        <div class="mode-choice-grid">{mode_buttons_html}</div>
-    </div>
-</div>'''
+        mode_picker_block = web_form_blocks.render_button_mode_picker(proxy_mode)
 
-        protocol_sections = [
-            ('vless', 'Vless 1', 6, 'vless://...'),
-            ('vless2', 'Vless 2', 6, 'vless://...'),
-            ('vmess', 'Vmess', 6, 'vmess://...'),
-            ('trojan', 'Trojan', 5, 'trojan://...'),
-            ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
-        ]
+        protocol_sections = web_form_blocks.PROTOCOL_SECTIONS
         key_pools = _ensure_current_keys_in_pools(current_keys)
         key_probe_cache = _load_key_probe_cache()
         custom_checks = _load_custom_checks()
@@ -5362,8 +5293,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         unblock_tabs_html = ''.join(unblock_tabs)
         unblock_panels_html = ''.join(unblock_panels)
 
-        initial_status_pending = 'true' if status_refresh_pending else 'false'
-        initial_command_running = 'true' if command_state['running'] else 'false'
+        initial_status_pending = web_form_blocks.js_bool(status_refresh_pending)
+        initial_command_running = web_form_blocks.js_bool(command_state['running'])
 
         start_button_label = APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL
         mode_toggle_label = f'{APP_MODE_LABEL}:'
