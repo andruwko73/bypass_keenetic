@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия 2.2.1, последнее изменение: 19.04.2026, 15:10
+#  Файл: bot.py, Версия v1.491, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -442,7 +442,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.01'
+APP_VERSION_COUNTER = '1.491'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -1941,7 +1941,7 @@ def _current_bot_version():
     match = re.search(r'^#\s*ВЕРСИЯ СКРИПТА\s+(.+?)\s*$', source_text, flags=re.MULTILINE)
     if match:
         return match.group(1).strip()
-    match = re.search(r'Версия\s+([0-9][0-9.]*)', source_text)
+    match = re.search(r'Версия\s+(v?[0-9][0-9.]*)', source_text)
     if match:
         return match.group(1).strip()
     for line in source_text.splitlines():
