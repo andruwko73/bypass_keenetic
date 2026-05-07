@@ -853,6 +853,15 @@ def test_web_form_blocks_helpers():
     assert 'socks ok' in status_blocks['socks_block']
     quick_key = web_form_blocks.quick_key_context({'proxy_mode': 'none'}, {'vless': 'vless://sample'}, 'Без прокси')
     assert quick_key == {'proto': 'vless', 'label': 'Vless 1', 'value': 'vless://sample'}
+    basics = web_form_blocks.render_form_basics(
+        '',
+        {'running': True},
+        {'proxy_mode': 'vless'},
+        {'vless': 'vless://sample'},
+        'Vless 1',
+    )
+    assert basics['quick_key']['proto'] == 'vless'
+    assert basics['initial_command_running'] == 'true'
     button_picker = web_form_blocks.render_button_mode_picker('vless', csrf_input_html='<input name="csrf_token">')
     assert 'mode-choice-grid' in button_picker
     assert 'csrf_token' in button_picker

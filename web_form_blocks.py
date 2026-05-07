@@ -116,6 +116,13 @@ def quick_key_context(status, current_keys, current_mode_label, *, fallback_prot
     }
 
 
+def render_form_basics(message, command_state, status, current_keys, current_mode_label, *, live=False):
+    basics = render_status_blocks(message, command_state, status, live=live)
+    basics['quick_key'] = quick_key_context(status, current_keys, current_mode_label)
+    basics['initial_command_running'] = js_bool((command_state or {}).get('running'))
+    return basics
+
+
 def render_select_mode_picker(active_mode, csrf_input_html, *, none_label='Без VPN (по умолчанию)'):
     options = [
         ('none', none_label),

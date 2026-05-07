@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.499, последнее изменение: 08.05.2026
+#  Файл: bot.py, Версия v1.500, последнее изменение: 08.05.2026
 
 import subprocess
 import os
@@ -412,7 +412,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.499'
+APP_VERSION_COUNTER = '1.500'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3583,6 +3583,59 @@ def _web_get_context(handler):
     }
 
 
+def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
+    key_pools = _ensure_current_keys_in_pools(current_keys)
+    key_probe_cache = _load_key_probe_cache()
+    custom_checks = _load_custom_checks()
+    custom_checks_html = key_pool_web.web_custom_checks_html(custom_checks, _service_icon_html)
+    custom_presets_html = key_pool_web.web_custom_presets_html(custom_checks, _custom_check_presets(), _service_icon_html)
+    pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
+        web_pool_form_blocks.pool_table_layout(custom_checks)
+    )
+    protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        web_form_blocks.PROTOCOL_SECTIONS,
+        current_keys,
+        protocol_statuses,
+        csrf_input_html,
+        key_pools=key_pools,
+        key_probe_cache=key_probe_cache,
+        custom_checks=custom_checks,
+        key_display_name=_pool_key_display_name,
+        hash_key=_hash_key,
+        telegram_icon_html=_telegram_icon_html,
+        youtube_icon_html=_youtube_icon_html,
+        custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(probe, checks, _service_icon_html),
+        probe_checked_at=_web_probe_checked_at,
+        custom_probe_states=key_pool_web.web_custom_probe_states,
+        service_icon_html=_service_icon_html,
+        pool_table_class=pool_table_class,
+        pool_custom_col_width=pool_custom_col_width,
+        pool_mobile_custom_col_width=pool_mobile_custom_col_width,
+        custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        custom_presets_html=custom_presets_html,
+        custom_checks_html=custom_checks_html,
+    )
+    pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks)
+    return {
+        'custom_checks_json': json.dumps(key_pool_web.web_custom_checks(custom_checks), ensure_ascii=False),
+        'pool_summary': pool_summary,
+        'pool_summary_note': web_pool_form_blocks.pool_summary_note_with_progress(
+            pool_summary['note'],
+            pool_probe_pending,
+            progress,
+            _pool_probe_progress_label,
+        ),
+        'protocol_panels_html': protocol_panels_html,
+        'protocol_tabs_html': protocol_tabs_html,
+        'topbar_status_text': web_pool_form_blocks.pool_probe_topbar_text(
+            pool_probe_pending,
+            progress,
+            _pool_probe_progress_label,
+            status['api_status'],
+        ),
+    }
+
+
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
     local_client_checker = staticmethod(_web_is_local_client)
@@ -3610,8 +3663,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
 
-        status_blocks = web_form_blocks.render_status_blocks(message, command_state, status, live=True)
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
+        form_basics = web_form_blocks.render_form_basics(message, command_state, status, current_keys, current_mode_label, live=True)
         list_route_label = _transparent_list_route_label()
 
         csrf_token = self._get_or_create_csrf_token()
@@ -3621,54 +3674,15 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             csrf_input_html=csrf_input_html,
         )
 
-        protocol_sections = web_form_blocks.PROTOCOL_SECTIONS
-        key_pools = _ensure_current_keys_in_pools(current_keys)
-        key_probe_cache = _load_key_probe_cache()
-        custom_checks = _load_custom_checks()
-        custom_checks_html = key_pool_web.web_custom_checks_html(custom_checks, _service_icon_html)
-        custom_presets_html = key_pool_web.web_custom_presets_html(custom_checks, _custom_check_presets(), _service_icon_html)
-        custom_header_icons = key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html)
-        custom_checks_json = json.dumps(key_pool_web.web_custom_checks(custom_checks), ensure_ascii=False)
-        topbar_status_text = web_pool_form_blocks.pool_probe_topbar_text(
-            pool_probe_pending,
-            current_pool_probe_progress,
-            _pool_probe_progress_label,
-            status['api_status'],
-        )
-        pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
-            web_pool_form_blocks.pool_table_layout(custom_checks)
-        )
-        protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-            protocol_sections,
+        pool_view = _web_pool_form_context(
             current_keys,
             protocol_statuses,
             csrf_input_html,
-            key_pools=key_pools,
-            key_probe_cache=key_probe_cache,
-            custom_checks=custom_checks,
-            key_display_name=_pool_key_display_name,
-            hash_key=_hash_key,
-            telegram_icon_html=_telegram_icon_html,
-            youtube_icon_html=_youtube_icon_html,
-            custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(probe, checks, _service_icon_html),
-            probe_checked_at=_web_probe_checked_at,
-            custom_probe_states=key_pool_web.web_custom_probe_states,
-            service_icon_html=_service_icon_html,
-            pool_table_class=pool_table_class,
-            pool_custom_col_width=pool_custom_col_width,
-            pool_mobile_custom_col_width=pool_mobile_custom_col_width,
-            custom_header_icons=custom_header_icons,
-            custom_presets_html=custom_presets_html,
-            custom_checks_html=custom_checks_html,
-        )
-        quick_key = web_form_blocks.quick_key_context(status, current_keys, current_mode_label)
-        pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks)
-        pool_summary_note = web_pool_form_blocks.pool_summary_note_with_progress(
-            pool_summary['note'],
+            status,
             pool_probe_pending,
             current_pool_probe_progress,
-            _pool_probe_progress_label,
         )
+        quick_key = form_basics['quick_key']
 
         dns_override_active = _dns_override_enabled()
         update_buttons_html = web_form_blocks.render_update_buttons(csrf_input_html)
@@ -3683,7 +3697,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         )
 
         initial_status_pending = web_form_blocks.js_bool(status_refresh_pending)
-        initial_command_running = web_form_blocks.js_bool(command_state['running'])
+        initial_command_running = form_basics['initial_command_running']
 
         start_button_label = APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL
         mode_toggle_label = f'{APP_MODE_LABEL}:'
@@ -3699,29 +3713,29 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             _telegram_icon_html=_telegram_icon_html,
             csrf_token=csrf_token,
-            command_block=status_blocks['command_block'],
+            command_block=form_basics['command_block'],
             command_buttons_html=command_buttons_html,
             current_mode_label=current_mode_label,
-            custom_checks_json=custom_checks_json,
-            fallback_block=status_blocks['fallback_block'],
+            custom_checks_json=pool_view['custom_checks_json'],
+            fallback_block=form_basics['fallback_block'],
             initial_command_running=initial_command_running,
             initial_status_pending=initial_status_pending,
             list_route_label=list_route_label,
-            message_block=status_blocks['message_block'],
+            message_block=form_basics['message_block'],
             mode_picker_block=mode_picker_block,
             mode_toggle_label=mode_toggle_label,
-            pool_summary=pool_summary,
-            pool_summary_note=pool_summary_note,
-            protocol_panels_html=protocol_panels_html,
-            protocol_tabs_html=protocol_tabs_html,
+            pool_summary=pool_view['pool_summary'],
+            pool_summary_note=pool_view['pool_summary_note'],
+            protocol_panels_html=pool_view['protocol_panels_html'],
+            protocol_tabs_html=pool_view['protocol_tabs_html'],
             quick_key_label=quick_key['label'],
             quick_key_proto=quick_key['proto'],
             quick_key_value=quick_key['value'],
             quick_start_note=quick_start_note,
-            socks_block=status_blocks['socks_block'],
+            socks_block=form_basics['socks_block'],
             start_button_label=start_button_label,
             status=status,
-            topbar_status_text=topbar_status_text,
+            topbar_status_text=pool_view['topbar_status_text'],
             unblock_panels_html=unblock_panels_html,
             unblock_tabs_html=unblock_tabs_html,
             update_buttons_html=update_buttons_html,
