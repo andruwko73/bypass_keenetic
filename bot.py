@@ -5045,74 +5045,29 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
             web_pool_form_blocks.pool_table_layout(custom_checks)
         )
-        protocol_tabs = []
-        protocol_panels = []
-        for panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
-            status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
-            api_ok = status_info.get('api_ok', False)
-            current_probe = key_probe_cache.get(_hash_key(current_keys.get(key_name, '')), {})
-            if not isinstance(current_probe, dict):
-                current_probe = {}
-            current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
-            current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
-            custom_states = status_info.get('custom') or _web_custom_probe_states(current_probe, custom_checks)
-            active_status_icons = ''.join([
-                _telegram_icon_html(opacity=1.0) if current_tg_ok else '',
-                _youtube_icon_html(opacity=1.0) if current_yt_ok else '',
-            ] + [
-                _service_icon_html(check.get('icon'), check.get('label', 'Service'), opacity=1.0, size=18)
-                for check in custom_checks
-                if custom_states.get(check.get('id')) == 'ok'
-            ])
-            pool_keys = key_pools.get(key_name, [])
-            pool_items_html = web_pool_form_blocks.render_pool_items(
-                key_name=key_name,
-                title=title,
-                pool_keys=pool_keys,
-                current_key=current_keys.get(key_name, ''),
-                key_probe_cache=key_probe_cache,
-                custom_checks=custom_checks,
-                key_display_name=_pool_key_display_name,
-                hash_key=_hash_key,
-                telegram_icon_html=_telegram_icon_html,
-                youtube_icon_html=_youtube_icon_html,
-                custom_check_badges=_web_custom_check_badges,
-                probe_checked_at=_web_probe_checked_at,
-                csrf_input_html=csrf_input_html,
-            )
-            tab_active = panel_index == 0
-            protocol_tabs.append(
-                web_pool_form_blocks.render_protocol_tab(
-                    key_name,
-                    title,
-                    len(pool_keys),
-                    active=tab_active,
-                )
-            )
-            protocol_panels.append(
-                web_pool_form_blocks.render_protocol_panel(
-                    key_name=key_name,
-                    title=title,
-                    rows=rows,
-                    placeholder=placeholder,
-                    current_key_value=current_keys.get(key_name, ''),
-                    status_info=status_info,
-                    active_status_icons=active_status_icons,
-                    pool_items_html=pool_items_html,
-                    pool_table_class=pool_table_class,
-                    pool_custom_col_width=pool_custom_col_width,
-                    pool_mobile_custom_col_width=pool_mobile_custom_col_width,
-                    custom_header_icons=custom_header_icons,
-                    custom_presets_html=custom_presets_html,
-                    custom_checks_html=custom_checks_html,
-                    telegram_icon_html=_telegram_icon_html,
-                    youtube_icon_html=_youtube_icon_html,
-                    active=tab_active,
-                    csrf_input_html=csrf_input_html,
-                )
-            )
-        protocol_tabs_html = ''.join(protocol_tabs)
-        protocol_panels_html = ''.join(protocol_panels)
+        protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+            protocol_sections,
+            current_keys,
+            protocol_statuses,
+            csrf_input_html,
+            key_pools=key_pools,
+            key_probe_cache=key_probe_cache,
+            custom_checks=custom_checks,
+            key_display_name=_pool_key_display_name,
+            hash_key=_hash_key,
+            telegram_icon_html=_telegram_icon_html,
+            youtube_icon_html=_youtube_icon_html,
+            custom_check_badges=_web_custom_check_badges,
+            probe_checked_at=_web_probe_checked_at,
+            custom_probe_states=_web_custom_probe_states,
+            service_icon_html=_service_icon_html,
+            pool_table_class=pool_table_class,
+            pool_custom_col_width=pool_custom_col_width,
+            pool_mobile_custom_col_width=pool_mobile_custom_col_width,
+            custom_header_icons=custom_header_icons,
+            custom_presets_html=custom_presets_html,
+            custom_checks_html=custom_checks_html,
+        )
         quick_key_proto = status['proxy_mode'] if status['proxy_mode'] in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'] else 'vless'
         quick_key_label = current_mode_label if quick_key_proto == status['proxy_mode'] else 'Vless 1'
         quick_key_value = html.escape(current_keys.get(quick_key_proto, ''))

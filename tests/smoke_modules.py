@@ -278,7 +278,19 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'Пул ключей' not in main_panel
     assert 'custom-check-form' not in main_panel
-
+    tabs_html, panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        [('vless', 'Vless 1', 3, 'vless://...')],
+        {'vless': 'vless://sample'},
+        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'}},
+        '<input name="csrf_token" value="token">',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        enable_key_pool=False,
+        enable_custom_checks=False,
+    )
+    assert 'protocol-tab active' in tabs_html
+    assert 'protocol-workspace active' in panels_html
+    assert 'csrf_token' in panels_html
 
 def test_web_template_styles_helpers():
     styles = web_template_styles.render_web_styles()

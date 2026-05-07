@@ -269,3 +269,122 @@ def render_protocol_panel(
         {subscription_subview_html}
         {check_subview_html}
     </section>'''
+
+
+def render_protocol_tabs_and_panels(
+    protocol_sections,
+    current_keys,
+    protocol_statuses,
+    csrf_input_html,
+    *,
+    key_pools=None,
+    key_probe_cache=None,
+    custom_checks=None,
+    key_display_name=None,
+    hash_key=None,
+    telegram_icon_html=None,
+    youtube_icon_html=None,
+    custom_check_badges=None,
+    probe_checked_at=None,
+    custom_probe_states=None,
+    service_icon_html=None,
+    enable_key_pool=True,
+    enable_custom_checks=True,
+    pool_table_class='pool-table',
+    pool_custom_col_width=32,
+    pool_mobile_custom_col_width=28,
+    custom_header_icons='',
+    custom_presets_html='',
+    custom_checks_html='',
+):
+    current_keys = current_keys or {}
+    protocol_statuses = protocol_statuses or {}
+    key_pools = key_pools or {}
+    key_probe_cache = key_probe_cache or {}
+    custom_checks = custom_checks or []
+    telegram_icon_html = telegram_icon_html or (lambda opacity=1.0: '')
+    youtube_icon_html = youtube_icon_html or (lambda opacity=1.0: '')
+    key_display_name = key_display_name or (lambda key: key or '')
+    hash_key = hash_key or (lambda key: key or '')
+    custom_check_badges = custom_check_badges or (lambda probe, checks: '')
+    probe_checked_at = probe_checked_at or (lambda probe: '')
+    custom_probe_states = custom_probe_states or (lambda probe, checks: {})
+    service_icon_html = service_icon_html or (lambda icon, alt, opacity=1.0, size=18: '')
+    default_status = {
+        'tone': 'empty',
+        'label': 'Не сохранён',
+        'details': 'Ключ ещё не сохранён на роутере.',
+    }
+    tabs = []
+    panels = []
+    for panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
+        status_info = protocol_statuses.get(key_name, default_status)
+        tab_active = panel_index == 0
+        pool_keys = key_pools.get(key_name, []) if enable_key_pool else []
+        tab_count = len(pool_keys) if enable_key_pool else (1 if current_keys.get(key_name, '').strip() else 0)
+        active_status_icons = ''
+        pool_items_html = ''
+        if enable_key_pool:
+            current_probe = key_probe_cache.get(hash_key(current_keys.get(key_name, '')), {})
+            if not isinstance(current_probe, dict):
+                current_probe = {}
+            api_ok = status_info.get('api_ok', False)
+            current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
+            current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
+            custom_states = status_info.get('custom') or custom_probe_states(current_probe, custom_checks)
+            active_status_icons = ''.join([
+                telegram_icon_html(opacity=1.0) if current_tg_ok else '',
+                youtube_icon_html(opacity=1.0) if current_yt_ok else '',
+            ] + [
+                service_icon_html(check.get('icon'), check.get('label', 'Service'), opacity=1.0, size=18)
+                for check in custom_checks
+                if enable_custom_checks and custom_states.get(check.get('id')) == 'ok'
+            ])
+            pool_items_html = render_pool_items(
+                key_name=key_name,
+                title=title,
+                pool_keys=pool_keys,
+                current_key=current_keys.get(key_name, ''),
+                key_probe_cache=key_probe_cache,
+                custom_checks=custom_checks,
+                key_display_name=key_display_name,
+                hash_key=hash_key,
+                telegram_icon_html=telegram_icon_html,
+                youtube_icon_html=youtube_icon_html,
+                custom_check_badges=custom_check_badges,
+                probe_checked_at=probe_checked_at,
+                csrf_input_html=csrf_input_html,
+            )
+        tabs.append(
+            render_protocol_tab(
+                key_name,
+                title,
+                tab_count,
+                active=tab_active,
+            )
+        )
+        panels.append(
+            render_protocol_panel(
+                key_name=key_name,
+                title=title,
+                rows=rows,
+                placeholder=placeholder,
+                current_key_value=current_keys.get(key_name, ''),
+                status_info=status_info,
+                active_status_icons=active_status_icons,
+                pool_items_html=pool_items_html,
+                pool_table_class=pool_table_class,
+                pool_custom_col_width=pool_custom_col_width,
+                pool_mobile_custom_col_width=pool_mobile_custom_col_width,
+                custom_header_icons=custom_header_icons,
+                custom_presets_html=custom_presets_html,
+                custom_checks_html=custom_checks_html,
+                telegram_icon_html=telegram_icon_html,
+                youtube_icon_html=youtube_icon_html,
+                active=tab_active,
+                csrf_input_html=csrf_input_html,
+                enable_key_pool=enable_key_pool,
+                enable_custom_checks=enable_custom_checks,
+            )
+        )
+    return ''.join(tabs), ''.join(panels)
