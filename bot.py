@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.496, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.497, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -453,7 +453,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.496'
+APP_VERSION_COUNTER = '1.497'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3390,6 +3390,130 @@ def _authorize_callback(call, handler_name):
     return _authorize_message(_telegram_callback_as_message(call), handler_name)
 
 
+def _pool_callback_parts(call):
+    data = (call.data or '').split(':')
+    return data, data[1] if len(data) > 1 else '', call.message.chat.id, call.message.message_id
+
+
+def _pool_callback_protocol(data):
+    if len(data) < 3:
+        raise ValueError('Некорректная команда пула.')
+    proto = _resolve_pool_protocol(data[2])
+    if not proto:
+        raise ValueError('Неизвестный протокол.')
+    return proto
+
+
+def _handle_pool_root_callback(call_id, action, data, chat_id):
+    if action == 'protocols':
+        _set_chat_menu_state(chat_id, level=20, bypass=None)
+        _clear_pool_page(chat_id)
+        bot.answer_callback_query(call_id, 'Кнопки перенесены вниз')
+        bot.send_message(chat_id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+        return True
+
+    if action == 'keys-menu':
+        _set_chat_menu_state(chat_id, level=8, bypass=None)
+        _clear_pool_page(chat_id)
+        bot.answer_callback_query(call_id, 'Открыто меню ключей')
+        bot.send_message(chat_id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
+        return True
+
+    if action == 'select' and len(data) >= 3:
+        proto = _pool_callback_protocol(data)
+        _set_chat_menu_state(chat_id, level=21, bypass=proto)
+        bot.answer_callback_query(call_id, f'Открыт пул {_pool_proto_label(proto)}')
+        _send_pool_page(chat_id, proto, page=0)
+        return True
+
+    return False
+
+
+def _handle_pool_key_callback(call_id, action, data, chat_id, proto):
+    if action not in ('apply', 'delete') or len(data) < 5:
+        return False
+    key_id = data[3]
+    page = data[4]
+    index, key_value = _pool_key_by_callback_id(proto, key_id)
+    if action == 'apply':
+        bot.answer_callback_query(call_id, f'Применяю ключ #{index}...')
+        _set_chat_menu_state(chat_id, level=21, bypass=proto)
+        bot.send_message(
+            chat_id,
+            f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
+            reply_markup=_pool_action_markup(proto, page),
+        )
+        _apply_pool_key_background(chat_id, proto, key_value, index, page=page)
+        return True
+
+    _delete_pool_key(proto, key_value)
+    bot.answer_callback_query(call_id, f'Ключ #{index} удалён')
+    _set_chat_menu_state(chat_id, level=21, bypass=proto)
+    _send_pool_page(chat_id, proto, page=page, prefix=f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.')
+    return True
+
+
+def _handle_pool_protocol_callback(call_id, action, data, chat_id, proto):
+    page = data[3] if len(data) > 3 else 0
+    if action == 'page':
+        _set_chat_menu_state(chat_id, level=21, bypass=proto)
+        bot.answer_callback_query(call_id)
+        _send_pool_page(chat_id, proto, page=page)
+        return True
+
+    if action == 'add':
+        _set_chat_menu_state(chat_id, level=22, bypass=proto)
+        bot.answer_callback_query(call_id)
+        bot.send_message(
+            chat_id,
+            f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.',
+            reply_markup=_pool_input_markup(),
+        )
+        return True
+
+    if action == 'subscribe':
+        _set_chat_menu_state(chat_id, level=23, bypass=proto)
+        bot.answer_callback_query(call_id)
+        bot.send_message(
+            chat_id,
+            f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.',
+            reply_markup=_pool_input_markup(),
+        )
+        return True
+
+    if action == 'probe':
+        started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
+        bot.answer_callback_query(call_id, 'Проверка запущена' if started else 'Проверка уже выполняется')
+        _set_chat_menu_state(chat_id, level=21, bypass=proto)
+        prefix = (
+            f'Запущена безопасная фоновая проверка пула. В очереди: {queued}. Ключи проверяются по одному с паузой, чтобы не перегружать память роутера.'
+            if started else
+            'Проверка пула уже выполняется. Дождитесь обновления статусов.'
+        )
+        _send_pool_page(chat_id, proto, page=page, prefix=prefix)
+        return True
+
+    if action == 'clear-confirm':
+        _set_chat_menu_state(chat_id, level=26, bypass=proto)
+        _set_pool_page(chat_id, page)
+        bot.answer_callback_query(call_id)
+        bot.send_message(
+            chat_id,
+            f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.',
+            reply_markup=_pool_clear_confirm_markup(),
+        )
+        return True
+
+    if action == 'clear':
+        removed = _clear_pool(proto)
+        bot.answer_callback_query(call_id, 'Пул очищен')
+        _set_chat_menu_state(chat_id, level=21, bypass=proto)
+        _send_pool_page(chat_id, proto, page=page, prefix=f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {removed}.')
+        return True
+
+    return _handle_pool_key_callback(call_id, action, data, chat_id, proto)
+
+
 # список смайлов для меню
 #  ✅ ❌ ♻️ 📃 📆 🔑 📄 ❗ ️⚠️ ⚙️ 📝 📆 🗑 📄️⚠️ 🔰 ❔ ‼️ 📑
 @bot.message_handler(commands=['start'])
@@ -3411,122 +3535,15 @@ def pool_callback(call):
             bot.answer_callback_query(call.id, 'Нет доступа', show_alert=True)
             return
 
-        data = (call.data or '').split(':')
-        action = data[1] if len(data) > 1 else ''
-        chat_id = call.message.chat.id
-        message_id = call.message.message_id
+        data, action, chat_id, message_id = _pool_callback_parts(call)
         _clear_pool_inline_keyboard(chat_id, message_id)
 
-        if action == 'protocols':
-            _set_chat_menu_state(chat_id, level=20, bypass=None)
-            _clear_pool_page(chat_id)
-            bot.answer_callback_query(call.id, 'Кнопки перенесены вниз')
-            bot.send_message(chat_id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+        if _handle_pool_root_callback(call.id, action, data, chat_id):
             return
 
-        if action == 'keys-menu':
-            _set_chat_menu_state(chat_id, level=8, bypass=None)
-            _clear_pool_page(chat_id)
-            bot.answer_callback_query(call.id, 'Открыто меню ключей')
-            bot.send_message(chat_id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
+        proto = _pool_callback_protocol(data)
+        if _handle_pool_protocol_callback(call.id, action, data, chat_id, proto):
             return
-
-        if action == 'select' and len(data) >= 3:
-            proto = _resolve_pool_protocol(data[2])
-            if not proto:
-                raise ValueError('Неизвестный протокол.')
-            _set_chat_menu_state(chat_id, level=21, bypass=proto)
-            bot.answer_callback_query(call.id, f'Открыт пул {_pool_proto_label(proto)}')
-            _send_pool_page(chat_id, proto, page=0)
-            return
-
-        if len(data) < 3:
-            raise ValueError('Некорректная команда пула.')
-
-        proto = _resolve_pool_protocol(data[2])
-        if not proto:
-            raise ValueError('Неизвестный протокол.')
-
-        if action == 'page':
-            page = data[3] if len(data) > 3 else 0
-            _set_chat_menu_state(chat_id, level=21, bypass=proto)
-            bot.answer_callback_query(call.id)
-            _send_pool_page(chat_id, proto, page=page)
-            return
-
-        if action == 'add':
-            _set_chat_menu_state(chat_id, level=22, bypass=proto)
-            bot.answer_callback_query(call.id)
-            bot.send_message(
-                chat_id,
-                f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.',
-                reply_markup=_pool_input_markup(),
-            )
-            return
-
-        if action == 'subscribe':
-            _set_chat_menu_state(chat_id, level=23, bypass=proto)
-            bot.answer_callback_query(call.id)
-            bot.send_message(
-                chat_id,
-                f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.',
-                reply_markup=_pool_input_markup(),
-            )
-            return
-
-        if action == 'probe':
-            page = data[3] if len(data) > 3 else 0
-            started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
-            bot.answer_callback_query(call.id, 'Проверка запущена' if started else 'Проверка уже выполняется')
-            _set_chat_menu_state(chat_id, level=21, bypass=proto)
-            prefix = (
-                f'Запущена безопасная фоновая проверка пула. В очереди: {queued}. Ключи проверяются по одному с паузой, чтобы не перегружать память роутера.'
-                if started else
-                'Проверка пула уже выполняется. Дождитесь обновления статусов.'
-            )
-            _send_pool_page(chat_id, proto, page=page, prefix=prefix)
-            return
-
-        if action == 'clear-confirm':
-            page = data[3] if len(data) > 3 else 0
-            _set_chat_menu_state(chat_id, level=26, bypass=proto)
-            _set_pool_page(chat_id, page)
-            bot.answer_callback_query(call.id)
-            bot.send_message(
-                chat_id,
-                f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.',
-                reply_markup=_pool_clear_confirm_markup(),
-            )
-            return
-
-        if action == 'clear':
-            page = data[3] if len(data) > 3 else 0
-            removed = _clear_pool(proto)
-            bot.answer_callback_query(call.id, 'Пул очищен')
-            _set_chat_menu_state(chat_id, level=21, bypass=proto)
-            _send_pool_page(chat_id, proto, page=page, prefix=f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {removed}.')
-            return
-
-        if action in ('apply', 'delete') and len(data) >= 5:
-            key_id = data[3]
-            page = data[4]
-            index, key_value = _pool_key_by_callback_id(proto, key_id)
-            if action == 'apply':
-                bot.answer_callback_query(call.id, f'Применяю ключ #{index}...')
-                _set_chat_menu_state(chat_id, level=21, bypass=proto)
-                bot.send_message(
-                    chat_id,
-                    f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
-                    reply_markup=_pool_action_markup(proto, page),
-                )
-                _apply_pool_key_background(chat_id, proto, key_value, index, page=page)
-            else:
-                _delete_pool_key(proto, key_value)
-                bot.answer_callback_query(call.id, f'Ключ #{index} удалён')
-                _set_chat_menu_state(chat_id, level=21, bypass=proto)
-                _send_pool_page(chat_id, proto, page=page, prefix=f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.')
-            return
-
         raise ValueError('Неизвестная команда пула.')
     except Exception as exc:
         _write_runtime_log(f'Ошибка callback пула ключей: {exc}')
