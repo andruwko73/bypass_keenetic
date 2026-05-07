@@ -2129,7 +2129,7 @@ def _protocol_status_for_key(key_name, key_value):
     )
     custom_checks = _load_custom_checks()
     cached_probe = _load_key_probe_cache().get(_hash_key(key_value), {})
-    custom_states = _web_custom_probe_states(cached_probe, custom_checks)
+    custom_states = key_pool_web.web_custom_probe_states(cached_probe, custom_checks)
     if api_transient:
         _record_key_probe(key_name, key_value, yt_ok=yt_ok)
     else:
@@ -2184,7 +2184,7 @@ def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None):
         }
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     probe = _load_key_probe_cache().get(_hash_key(key_value), {})
-    custom_states = _web_custom_probe_states(probe, custom_checks)
+    custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
     has_probe_result = (
         'tg_ok' in probe or
         'yt_ok' in probe or
@@ -3393,116 +3393,9 @@ def _web_probe_checked_at(probe):
     return time.strftime('%d.%m %H:%M', time.localtime(ts))
 
 
-def _web_custom_probe_states(probe, custom_checks=None):
-    checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    return key_pool_web.web_custom_probe_states(probe, checks)
-
 
 def _web_custom_checks():
     return key_pool_web.web_custom_checks(_load_custom_checks())
-
-
-def _web_custom_check_badges(probe, custom_checks=None):
-    checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    if not checks:
-        return ''
-    states = _web_custom_probe_states(probe, checks)
-    badges = []
-    for check in checks:
-        state = states.get(check.get('id'), 'unknown')
-        safe_label = html.escape(check.get('label', 'Проверка'))
-        safe_url = html.escape(_custom_check_url_text(check))
-        badges.append(
-            f'<span class="custom-service-slot custom-service-{state}" title="{safe_label}: {safe_url}">{_custom_check_status_icon_html(check, state)}</span>'
-        )
-    return ''.join(badges)
-
-
-def _custom_check_url_text(check):
-    urls = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
-    labels = []
-    for url in urls:
-        if not url:
-            continue
-        parsed = urlparse(url)
-        label = parsed.netloc or url
-        if parsed.path and parsed.path != '/':
-            label += parsed.path
-        labels.append(label)
-    return ', '.join(labels)
-
-
-def _custom_check_icon_html(check):
-    if check.get('icon'):
-        return f'<span class="preset-icon">{_service_icon_html(check.get("icon"), check.get("label", "Service"), opacity=1.0, size=20)}</span>'
-    return f'<span class="custom-service-badge custom-service-neutral">{html.escape(check.get("badge", "WEB"))}</span>'
-
-
-def _custom_check_status_icon_html(check, state):
-    if state == 'ok':
-        return _service_icon_html(check.get('icon'), check.get('label', 'Service'), opacity=1.0, size=18)
-    if state == 'fail':
-        return '<span class="service-probe-mark service-probe-fail">✕</span>'
-    return '<span class="service-probe-mark service-probe-unknown">?</span>'
-
-
-def _custom_check_header_icons(custom_checks=None):
-    checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    icons = []
-    for check in checks:
-        label = check.get('label', 'Service')
-        safe_label = html.escape(label)
-        if check.get('icon'):
-            content = _service_icon_html(check.get('icon'), label, opacity=1.0, size=16)
-        else:
-            content = f'<span class="custom-service-badge custom-service-neutral">{html.escape(check.get("badge", "WEB"))}</span>'
-        icons.append(f'<span class="custom-service-slot custom-service-header" title="{safe_label}">{content}</span>')
-    return ''.join(icons)
-
-
-def _web_custom_checks_html(checks=None):
-    checks = checks if checks is not None else _load_custom_checks()
-    if not checks:
-        return '<div class="custom-check-empty">Дополнительные проверки пока не добавлены.</div>'
-    items = []
-    for check in checks:
-        safe_id = html.escape(check.get('id', ''))
-        safe_label = html.escape(check.get('label', 'Проверка'))
-        safe_url = html.escape(_custom_check_url_text(check))
-        icon_html = _custom_check_icon_html(check)
-        items.append(f'''<div class="custom-check-item">
-            {icon_html}
-            <span class="custom-check-copy"><strong>{safe_label}</strong><small>{safe_url}</small></span>
-            <form method="post" action="/custom_check_delete" data-async-action="custom-check-delete" data-confirm-title="Удалить проверку?" data-confirm-message="Удалить дополнительную проверку {safe_label}?">
-                <input type="hidden" name="id" value="{safe_id}">
-                <button type="submit" class="pool-delete-btn" title="Удалить проверку">Удалить</button>
-            </form>
-        </div>''')
-    return ''.join(items)
-
-
-def _web_custom_presets_html(checks=None):
-    checks = checks if checks is not None else _load_custom_checks()
-    active_ids = {check.get('id') for check in checks}
-    items = []
-    for preset in _custom_check_presets():
-        safe_id = html.escape(preset['id'])
-        safe_label = html.escape(preset['label'])
-        safe_url = html.escape(preset.get('url', ''))
-        icon_html = _custom_check_icon_html(preset)
-        disabled = ' disabled' if preset['id'] in active_ids else ''
-        title = 'Уже добавлено' if disabled else f'Добавить проверку {safe_label}'
-        items.append(f'''<form method="post" action="/custom_check_add" data-async-action="custom-check-add">
-            <input type="hidden" name="preset" value="{safe_id}">
-            <input type="hidden" name="label" value="{safe_label}">
-            <input type="hidden" name="url" value="{safe_url}">
-            <button type="submit" class="service-preset-btn"{disabled} data-custom-preset="{safe_id}" title="{html.escape(title)}">
-                {icon_html}
-                <span>{safe_label}</span>
-            </button>
-        </form>''')
-    return ''.join(items)
-
 
 def _web_pool_snapshot(current_keys=None, include_keys=False):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
@@ -5032,10 +4925,10 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         key_pools = _ensure_current_keys_in_pools(current_keys)
         key_probe_cache = _load_key_probe_cache()
         custom_checks = _load_custom_checks()
-        custom_checks_html = _web_custom_checks_html(custom_checks)
-        custom_presets_html = _web_custom_presets_html(custom_checks)
-        custom_header_icons = _custom_check_header_icons(custom_checks)
-        custom_checks_json = json.dumps(_web_custom_checks(), ensure_ascii=False)
+        custom_checks_html = key_pool_web.web_custom_checks_html(custom_checks, _service_icon_html)
+        custom_presets_html = key_pool_web.web_custom_presets_html(custom_checks, _custom_check_presets(), _service_icon_html)
+        custom_header_icons = key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html)
+        custom_checks_json = json.dumps(key_pool_web.web_custom_checks(custom_checks), ensure_ascii=False)
         topbar_status_text = web_pool_form_blocks.pool_probe_topbar_text(
             pool_probe_pending,
             current_pool_probe_progress,
@@ -5057,9 +4950,9 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             hash_key=_hash_key,
             telegram_icon_html=_telegram_icon_html,
             youtube_icon_html=_youtube_icon_html,
-            custom_check_badges=_web_custom_check_badges,
+            custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(probe, checks, _service_icon_html),
             probe_checked_at=_web_probe_checked_at,
-            custom_probe_states=_web_custom_probe_states,
+            custom_probe_states=key_pool_web.web_custom_probe_states,
             service_icon_html=_service_icon_html,
             pool_table_class=pool_table_class,
             pool_custom_col_width=pool_custom_col_width,

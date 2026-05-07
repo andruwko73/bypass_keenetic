@@ -1,3 +1,7 @@
+import html
+from urllib.parse import urlparse
+
+
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
 POOL_PROTOCOL_LABELS = {
     'vless': 'Vless 1',
@@ -126,6 +130,102 @@ def web_custom_checks(custom_checks):
         }
         for check in custom_checks or []
     ]
+
+
+def custom_check_url_text(check):
+    urls = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
+    labels = []
+    for url in urls:
+        if not url:
+            continue
+        parsed = urlparse(url)
+        label = parsed.netloc or url
+        if parsed.path and parsed.path != '/':
+            label += parsed.path
+        labels.append(label)
+    return ', '.join(labels)
+
+
+def custom_check_icon_html(check, service_icon_html):
+    if check.get('icon'):
+        return f'<span class="preset-icon">{service_icon_html(check.get("icon"), check.get("label", "Service"), opacity=1.0, size=20)}</span>'
+    return f'<span class="custom-service-badge custom-service-neutral">{html.escape(check.get("badge", "WEB"))}</span>'
+
+
+def custom_check_status_icon_html(check, state, service_icon_html):
+    if state == 'ok':
+        return service_icon_html(check.get('icon'), check.get('label', 'Service'), opacity=1.0, size=18)
+    if state == 'fail':
+        return '<span class="service-probe-mark service-probe-fail">✕</span>'
+    return '<span class="service-probe-mark service-probe-unknown">?</span>'
+
+
+def custom_check_header_icons(custom_checks, service_icon_html):
+    icons = []
+    for check in custom_checks or []:
+        label = check.get('label', 'Service')
+        safe_label = html.escape(label)
+        if check.get('icon'):
+            content = service_icon_html(check.get('icon'), label, opacity=1.0, size=16)
+        else:
+            content = f'<span class="custom-service-badge custom-service-neutral">{html.escape(check.get("badge", "WEB"))}</span>'
+        icons.append(f'<span class="custom-service-slot custom-service-header" title="{safe_label}">{content}</span>')
+    return ''.join(icons)
+
+
+def web_custom_check_badges(probe, custom_checks, service_icon_html):
+    if not custom_checks:
+        return ''
+    states = web_custom_probe_states(probe, custom_checks)
+    badges = []
+    for check in custom_checks:
+        state = states.get(check.get('id'), 'unknown')
+        safe_label = html.escape(check.get('label', 'Проверка'))
+        safe_url = html.escape(custom_check_url_text(check))
+        badges.append(
+            f'<span class="custom-service-slot custom-service-{state}" title="{safe_label}: {safe_url}">{custom_check_status_icon_html(check, state, service_icon_html)}</span>'
+        )
+    return ''.join(badges)
+
+
+def web_custom_checks_html(custom_checks, service_icon_html):
+    if not custom_checks:
+        return '<div class="custom-check-empty">Дополнительные проверки пока не добавлены.</div>'
+    items = []
+    for check in custom_checks:
+        safe_id = html.escape(check.get('id', ''))
+        safe_label = html.escape(check.get('label', 'Проверка'))
+        safe_url = html.escape(custom_check_url_text(check))
+        items.append(f'''<div class="custom-check-item">
+            {custom_check_icon_html(check, service_icon_html)}
+            <span class="custom-check-copy"><strong>{safe_label}</strong><small>{safe_url}</small></span>
+            <form method="post" action="/custom_check_delete" data-async-action="custom-check-delete" data-confirm-title="Удалить проверку?" data-confirm-message="Удалить дополнительную проверку {safe_label}?">
+                <input type="hidden" name="id" value="{safe_id}">
+                <button type="submit" class="pool-delete-btn" title="Удалить проверку">Удалить</button>
+            </form>
+        </div>''')
+    return ''.join(items)
+
+
+def web_custom_presets_html(custom_checks, presets, service_icon_html):
+    active_ids = {check.get('id') for check in custom_checks or []}
+    items = []
+    for preset in presets or []:
+        safe_id = html.escape(preset['id'])
+        safe_label = html.escape(preset['label'])
+        safe_url = html.escape(preset.get('url', ''))
+        disabled = ' disabled' if preset['id'] in active_ids else ''
+        title = 'Уже добавлено' if disabled else f'Добавить проверку {safe_label}'
+        items.append(f'''<form method="post" action="/custom_check_add" data-async-action="custom-check-add">
+            <input type="hidden" name="preset" value="{safe_id}">
+            <input type="hidden" name="label" value="{safe_label}">
+            <input type="hidden" name="url" value="{safe_url}">
+            <button type="submit" class="service-preset-btn"{disabled} data-custom-preset="{safe_id}" title="{html.escape(title)}">
+                {custom_check_icon_html(preset, service_icon_html)}
+                <span>{safe_label}</span>
+            </button>
+        </form>''')
+    return ''.join(items)
 
 
 def web_pool_snapshot(

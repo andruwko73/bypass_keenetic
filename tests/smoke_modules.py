@@ -116,7 +116,12 @@ def test_key_pool_web():
     assert row['display_name'] == 'VLESS-KEY'
     assert row['custom'] == {'custom': 'ok'}
     assert row['key'] == 'vless-key'
-
+    icon_html = lambda icon, alt, opacity=1.0, size=18: f'<img data-icon="{icon}" alt="{alt}">'
+    check_defs = [{'id': 'custom', 'label': 'Custom', 'url': 'https://example.com/path', 'icon': 'chat'}]
+    assert key_pool_web.custom_check_url_text(check_defs[0]) == 'example.com/path'
+    assert 'custom-check-item' in key_pool_web.web_custom_checks_html(check_defs, icon_html)
+    assert 'service-preset-btn' in key_pool_web.web_custom_presets_html([], check_defs, icon_html)
+    assert 'custom-service-ok' in key_pool_web.web_custom_check_badges({'custom': {'custom': True}}, check_defs, icon_html)
 
 def test_key_pool_subscription_helpers():
     raw = '\n'.join([
