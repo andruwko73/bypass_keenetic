@@ -214,6 +214,29 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'protocol-workspace active' in panel
     assert 'custom-check-form' in panel
+    main_panel = web_pool_form_blocks.render_protocol_panel(
+        key_name='vless',
+        title='Vless 1',
+        rows=3,
+        placeholder='vless://...',
+        current_key_value='vless://sample',
+        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        active_status_icons='',
+        pool_items_html='',
+        pool_table_class='pool-table',
+        pool_custom_col_width=32,
+        pool_mobile_custom_col_width=28,
+        custom_header_icons='',
+        custom_presets_html='',
+        custom_checks_html='',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        csrf_input_html='<input name="csrf_token" value="token">',
+        enable_key_pool=False,
+        enable_custom_checks=False,
+    )
+    assert 'Пул ключей' not in main_panel
+    assert 'custom-check-form' not in main_panel
 
 
 def main():
