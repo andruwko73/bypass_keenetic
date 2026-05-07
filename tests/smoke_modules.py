@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 import web_get_actions
 import web_form_blocks
+import web_pool_form_blocks
 import web_post_actions
 
 
@@ -91,10 +92,42 @@ def test_web_form_blocks_helpers():
     assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
 
 
+def test_web_pool_form_blocks_helpers():
+    tab = web_pool_form_blocks.render_protocol_tab('vless', 'Vless 1', 1, active=True)
+    assert 'protocol-tab active' in tab
+    panel = web_pool_form_blocks.render_protocol_panel(
+        key_name='vless',
+        title='Vless 1',
+        rows=3,
+        placeholder='vless://...',
+        current_key_value='vless://sample',
+        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        active_status_icons='',
+        pool_items_html='',
+        pool_table_class='pool-table',
+        pool_custom_col_width=32,
+        pool_mobile_custom_col_width=28,
+        custom_header_icons='',
+        custom_presets_html='',
+        custom_checks_html='',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        active=True,
+        csrf_input_html='<input name="csrf_token" value="token">',
+        enable_key_pool=False,
+        enable_custom_checks=False,
+    )
+    assert 'protocol-workspace active' in panel
+    assert 'csrf_token' in panel
+    assert 'Пул ключей' not in panel
+    assert 'custom-check-form' not in panel
+
+
 def main():
     test_proxy_config_builder()
     test_web_get_actions_helpers()
     test_web_form_blocks_helpers()
+    test_web_pool_form_blocks_helpers()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
 

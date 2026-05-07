@@ -61,6 +61,7 @@ from web_command_state import (
 from web_http_common import WebRequestMixin
 import web_form_blocks
 import web_get_actions
+import web_pool_form_blocks
 import web_post_actions
 from web_form_template import render_web_form
 
@@ -2893,77 +2894,83 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'], none_label='Без VPN')
         list_route_label = _transparent_list_route_label()
 
-        mode_picker_block = web_form_blocks.render_select_mode_picker(proxy_mode, csrf_input_html)
+        mode_picker_block = web_form_blocks.render_button_mode_picker(
+            proxy_mode,
+            none_label='Без VPN',
+            csrf_input_html=csrf_input_html,
+        )
         protocol_sections = web_form_blocks.PROTOCOL_SECTIONS
         protocol_tabs = []
         protocol_panels = []
         for panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
-            safe_value = html.escape(current_keys.get(key_name, ''))
-            safe_title = html.escape(title)
             status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
-            tab_active = ' active' if panel_index == 0 else ''
-            tab_count = '1' if current_keys.get(key_name, '').strip() else '0'
+            tab_active = panel_index == 0
+            tab_count = 1 if current_keys.get(key_name, '').strip() else 0
             protocol_tabs.append(
-                f'''<button type="button" class="seg-tab protocol-tab{tab_active}" data-protocol-target="{key_name}">
-                    <span>{safe_title}</span>
-                    <span class="tab-count">{tab_count}</span>
-                </button>'''
+                web_pool_form_blocks.render_protocol_tab(
+                    key_name,
+                    title,
+                    tab_count,
+                    active=tab_active,
+                )
             )
-            protocol_panels.append(f'''<section class="protocol-workspace{tab_active}" data-protocol-card="{key_name}" data-protocol-panel="{key_name}">
-        <div class="workspace-head">
-            <div>
-                <span class="eyebrow">Ключи и мосты</span>
-                <h2>{safe_title}</h2>
-                <p class="key-status-note" data-protocol-status-details>{html.escape(status_info['details'])}</p>
-            </div>
-            <div class="key-status-wrap">
-                <span class="key-status-icons" data-protocol-status-icons></span>
-                <span class="key-status-badge key-status-{status_info['tone']}" data-protocol-status-label>{html.escape(status_info['label'])}</span>
-            </div>
-        </div>
-        <section class="protocol-subview protocol-subview-key active" data-subview="key">
-            <form method="post" action="/install" class="key-editor-form">
-                {csrf_input_html}
-                <input type="hidden" name="type" value="{key_name}">
-                <label class="field-label">Ключ {safe_title}</label>
-                <textarea name="key" rows="{rows}" placeholder="{html.escape(placeholder)}" required data-key-textarea>{safe_value}</textarea>
-                <button type="submit">Сохранить {safe_title}</button>
-            </form>
-        </section>
-    </section>''')
+            protocol_panels.append(
+                web_pool_form_blocks.render_protocol_panel(
+                    key_name=key_name,
+                    title=title,
+                    rows=rows,
+                    placeholder=placeholder,
+                    current_key_value=current_keys.get(key_name, ''),
+                    status_info=status_info,
+                    active_status_icons='',
+                    pool_items_html='',
+                    pool_table_class='pool-table',
+                    pool_custom_col_width=32,
+                    pool_mobile_custom_col_width=28,
+                    custom_header_icons='',
+                    custom_presets_html='',
+                    custom_checks_html='',
+                    telegram_icon_html=_telegram_icon_html,
+                    youtube_icon_html=lambda opacity=1.0: '',
+                    active=tab_active,
+                    csrf_input_html=csrf_input_html,
+                    enable_key_pool=False,
+                    enable_custom_checks=False,
+                )
+            )
         protocol_tabs_html = ''.join(protocol_tabs)
         protocol_panels_html = ''.join(protocol_panels)
 
         dns_override_active = _dns_override_enabled()
-        update_buttons_html = f'''<form method="post" action="/command">
+        update_buttons_html = f'''<form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить из форка?" data-confirm-message="Код и служебные файлы будут обновлены без сброса сохраненных ключей и списков.">
                 {csrf_input_html}
                 <input type="hidden" name="command" value="update">
                 <button type="submit">Переустановить из форка без сброса</button>
             </form>
-            <form method="post" action="/command">
+            <form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить independent?" data-confirm-message="Будет установлена ветка codex/independent-v1 с сохранением локальных настроек.">
                 {csrf_input_html}
                 <input type="hidden" name="command" value="update_independent">
-                <button type="submit">Переустановка (ветка Independent)</button>
+                <button type="submit">Переустановка (ветка independent)</button>
             </form>
-            <form method="post" action="/command">
+            <form method="post" action="/command" data-async-action="command" data-confirm-title="Перейти в web-only?" data-confirm-message="Будет установлена версия без Telegram-бота. Ключи, настройки и списки сохранятся локально.">
                 {csrf_input_html}
                 <input type="hidden" name="command" value="update_no_bot">
                 <button type="submit">Переустановка (без Telegram бота)</button>
             </form>'''
         command_buttons = [
-            ('restart_services', 'Перезапустить сервисы', ''),
-            ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else ''),
-            ('dns_off', 'DNS Override ВЫКЛ', 'danger'),
-            ('remove', 'Удалить компоненты', 'danger'),
-            ('reboot', 'Перезагрузить роутер', 'danger'),
+            ('restart_services', 'Перезапустить сервисы', '', 'Перезапустить сервисы?', 'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть.'),
+            ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else '', 'Включить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
+            ('dns_off', 'DNS Override ВЫКЛ', 'danger', 'Выключить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
+            ('remove', 'Удалить компоненты', 'danger', 'Удалить компоненты?', 'Будут удалены установленные компоненты программы. Настройки роутера могут измениться.'),
+            ('reboot', 'Перезагрузить роутер', 'danger', 'Перезагрузить роутер?', 'Связь с веб-интерфейсом временно пропадет.'),
         ]
         command_buttons_html = ''.join(
-            f'''<form method="post" action="/command">
+            f'''<form method="post" action="/command" data-async-action="command"{f' data-confirm-title="{html.escape(confirm_title)}" data-confirm-message="{html.escape(confirm_message)}"' if confirm_title else ''}>
             {csrf_input_html}
             <input type="hidden" name="command" value="{command}">
             <button type="submit" class="{button_class}">{html.escape(label)}</button>
         </form>'''
-            for command, label, button_class in command_buttons
+            for command, label, button_class, confirm_title, confirm_message in command_buttons
         )
 
         unblock_tabs = []
