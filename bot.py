@@ -80,6 +80,11 @@ from telegram_confirm import (
     telegram_is_cancel as _telegram_is_cancel_confirmation,
     telegram_is_confirm as _telegram_is_confirm_confirmation,
 )
+from pool_probe_controller import (
+    PoolProbeProgress,
+    pool_probe_progress_label as _controller_pool_probe_progress_label,
+    start_pool_probe_worker,
+)
 from probe_cache import (
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
@@ -440,15 +445,7 @@ status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
-pool_probe_progress_lock = threading.Lock()
-pool_probe_progress = {
-    'running': False,
-    'checked': 0,
-    'total': 0,
-    'scope': '',
-    'started_at': 0,
-    'finished_at': 0,
-}
+pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
 WEB_UPDATE_COMMANDS = ('update', 'update_independent', 'update_no_bot')
 web_command_lock = threading.Lock()
@@ -2922,23 +2919,15 @@ def _available_memory_kb():
 
 
 def _set_pool_probe_progress(**updates):
-    with pool_probe_progress_lock:
-        pool_probe_progress.update(updates)
+    pool_probe_progress.update(**updates)
 
 
 def _get_pool_probe_progress():
-    with pool_probe_progress_lock:
-        return dict(pool_probe_progress)
+    return pool_probe_progress.snapshot()
 
 
 def _pool_probe_progress_label(progress=None):
-    progress = progress or _get_pool_probe_progress()
-    scope = progress.get('scope')
-    if scope == 'manual_all':
-        return 'Полная проверка всех ключей'
-    if scope == 'protocol':
-        return 'Проверка выбранного пула'
-    return 'Фоновая проверка пула ключей'
+    return _controller_pool_probe_progress_label(progress or _get_pool_probe_progress())
 
 
 def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
@@ -3111,73 +3100,52 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'
             for proto, key_value in selected
             if key_value == (current_keys.get(proto) or '').strip()
         ]
-    if not selected:
-        return False, 0
-    if not pool_probe_lock.acquire(blocking=False):
-        return False, len(selected)
-
-    _set_pool_probe_progress(
-        running=True,
-        checked=0,
-        total=len(selected),
-        scope=scope,
-        started_at=time.time(),
-        finished_at=0,
-    )
-
     def invalidate_probe_status():
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
 
-    def worker(probe_tasks, checks):
-        checked = 0
-        total = len(probe_tasks)
-        try:
-            checked, total = run_pool_probe_worker(
-                probe_tasks,
-                checks,
-                batch_size=POOL_PROBE_BATCH_SIZE,
-                concurrency=POOL_PROBE_CONCURRENCY,
-                delay_seconds=POOL_PROBE_DELAY_SECONDS,
-                min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
-                test_port=POOL_PROBE_TEST_PORT,
-                available_memory_kb=_available_memory_kb,
-                log=_write_runtime_log,
-                proto_label=_pool_proto_label,
-                hash_key=_hash_key,
-                set_checked=lambda value: _set_pool_probe_progress(checked=value),
-                validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
-                    proto,
-                    key_value,
-                    'proxy-pool-probe-validate',
-                    _proxy_outbound_from_key,
-                ),
-                failed_custom_results=_failed_custom_probe_results,
-                record_key_probe=_record_key_probe,
-                start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
-                    _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
-                ),
-                wait_for_socks5=_wait_for_socks5_handshake,
-                check_pool_key=_check_pool_key_through_proxy,
-                timeout_budget=_pool_probe_timeout_budget,
-                stop_xray=_runner_stop_pool_probe_xray,
-                cleanup_runtime=_runner_cleanup_pool_probe_runtime,
-                invalidate_caches=invalidate_probe_status,
-            )
-        finally:
-            invalidate_probe_status()
-            _set_pool_probe_progress(
-                running=False,
-                checked=checked,
-                total=total,
-                scope=scope,
-                finished_at=time.time(),
-            )
-            pool_probe_lock.release()
-            gc.collect()
+    def run_selected_probe(probe_tasks, checks, set_checked, invalidate_caches):
+        return run_pool_probe_worker(
+            probe_tasks,
+            checks,
+            batch_size=POOL_PROBE_BATCH_SIZE,
+            concurrency=POOL_PROBE_CONCURRENCY,
+            delay_seconds=POOL_PROBE_DELAY_SECONDS,
+            min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
+            test_port=POOL_PROBE_TEST_PORT,
+            available_memory_kb=_available_memory_kb,
+            log=_write_runtime_log,
+            proto_label=_pool_proto_label,
+            hash_key=_hash_key,
+            set_checked=set_checked,
+            validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
+                proto,
+                key_value,
+                'proxy-pool-probe-validate',
+                _proxy_outbound_from_key,
+            ),
+            failed_custom_results=_failed_custom_probe_results,
+            record_key_probe=_record_key_probe,
+            start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
+                _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
+            ),
+            wait_for_socks5=_wait_for_socks5_handshake,
+            check_pool_key=_check_pool_key_through_proxy,
+            timeout_budget=_pool_probe_timeout_budget,
+            stop_xray=_runner_stop_pool_probe_xray,
+            cleanup_runtime=_runner_cleanup_pool_probe_runtime,
+            invalidate_caches=invalidate_caches,
+        )
 
-    threading.Thread(target=worker, args=(selected, custom_checks), daemon=True).start()
-    return True, len(selected)
+    return start_pool_probe_worker(
+        selected,
+        custom_checks,
+        scope=scope,
+        lock=pool_probe_lock,
+        set_progress=_set_pool_probe_progress,
+        run_worker=run_selected_probe,
+        invalidate_caches=invalidate_probe_status,
+    )
 
 
 def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, stale_only=True, scope='protocol'):

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import threading
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ import web_template_styles
 import web_template_scripts
 import web_post_actions
 import telegram_confirm
+import pool_probe_controller
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -50,6 +52,15 @@ class _FakeMarkup:
 class _FakeTypes:
     KeyboardButton = _FakeButton
     ReplyKeyboardMarkup = _FakeMarkup
+
+
+class _InlineThread:
+    def __init__(self, target, daemon=False):
+        self.target = target
+        self.daemon = daemon
+
+    def start(self):
+        self.target()
 
 
 def _hash_key(value):
@@ -177,6 +188,51 @@ def test_telegram_confirm_helpers():
     assert telegram_confirm.telegram_is_confirm('✅ Подтвердить')
     assert telegram_confirm.telegram_is_cancel('Отмена')
     assert 'Перезагрузить роутер?' in telegram_confirm.telegram_confirm_prompt('reboot')
+
+
+def test_pool_probe_controller_helpers():
+    progress = pool_probe_controller.PoolProbeProgress()
+    assert progress.snapshot()['running'] is False
+    progress.update(running=True, checked=2)
+    assert progress.snapshot()['checked'] == 2
+    assert pool_probe_controller.pool_probe_progress_label({'scope': 'protocol'}) == 'Проверка выбранного пула'
+
+    state = {}
+    invalidated = []
+    collected = []
+    times = iter([10.0, 20.0])
+
+    def set_progress(**updates):
+        state.update(updates)
+
+    def run_worker(tasks, checks, set_checked, invalidate_caches):
+        assert tasks == [('vless', 'key')]
+        assert checks == [{'id': 'custom'}]
+        set_checked(1)
+        invalidate_caches()
+        return 1, len(tasks)
+
+    started, count = pool_probe_controller.start_pool_probe_worker(
+        [('vless', 'key')],
+        [{'id': 'custom'}],
+        scope='manual_all',
+        lock=threading.Lock(),
+        set_progress=set_progress,
+        run_worker=run_worker,
+        invalidate_caches=lambda: invalidated.append('cache'),
+        time_provider=lambda: next(times),
+        collect_garbage=lambda: collected.append('gc'),
+        thread_factory=_InlineThread,
+    )
+    assert started is True
+    assert count == 1
+    assert state['running'] is False
+    assert state['checked'] == 1
+    assert state['total'] == 1
+    assert state['started_at'] == 10.0
+    assert state['finished_at'] == 20.0
+    assert invalidated == ['cache', 'cache']
+    assert collected == ['gc']
 
 
 def test_web_get_actions_helpers():
@@ -437,6 +493,7 @@ def main():
     test_web_action_feature_gates()
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
+    test_pool_probe_controller_helpers()
     print('smoke_modules: ok')
 
 
