@@ -94,6 +94,12 @@ from telegram_auth_state import (
     set_chat_menu_state as _set_chat_menu_state_impl,
     unauthorized_message_text as _telegram_unauthorized_text,
 )
+from telegram_jobs import (
+    command_result_payload as _telegram_command_result_payload,
+    final_message as _telegram_final_command_message,
+    start_background_command as _telegram_start_background_command,
+    start_result_retry_worker as _telegram_start_result_retry_worker,
+)
 from telegram_confirm import (
     TELEGRAM_CONFIRM_LEVEL,
     telegram_confirm_prompt as _telegram_confirm_prompt,
@@ -1649,49 +1655,27 @@ def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_na
     except Exception as exc:
         return_code = 1
         output = f'Ошибка запуска фоновой команды: {exc}'
-    result = {
-        'action': action,
-        'chat_id': int(chat_id),
-        'menu_name': menu_name,
-        'return_code': return_code,
-        'output': output,
-        'finished_at': time.time(),
-    }
-    _write_json_file(TELEGRAM_COMMAND_RESULT_FILE, result)
+    _write_json_file(
+        TELEGRAM_COMMAND_RESULT_FILE,
+        _telegram_command_result_payload(action, chat_id, menu_name, return_code, output),
+    )
     _remove_file(TELEGRAM_COMMAND_JOB_FILE)
 
 
 def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main-v1'):
-    state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
-    started_at = float(state.get('started_at', 0) or 0)
-    if state.get('running') and started_at and time.time() - started_at < 1800:
-        return False, '⏳ Уже выполняется обновление. Дождитесь итогового сообщения после перезапуска бота.'
-
-    _write_json_file(TELEGRAM_COMMAND_JOB_FILE, {
-        'running': True,
-        'action': action,
-        'chat_id': int(chat_id),
-        'menu_name': menu_name,
-        'started_at': time.time(),
-    })
-
-    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
-    module_dir = os.path.dirname(BOT_SOURCE_PATH)
-    code = (
-        'import sys; '
-        f"sys.path.insert(0, {module_dir!r}); "
-        f'import {module_name} as bot_module; '
-        f'bot_module._run_telegram_command_worker({action!r}, {repo_owner!r}, {repo_name!r}, {int(chat_id)!r}, {menu_name!r}, branch={branch!r})'
+    return _telegram_start_background_command(
+        job_file=TELEGRAM_COMMAND_JOB_FILE,
+        action=action,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        chat_id=chat_id,
+        menu_name=menu_name,
+        branch=branch,
+        bot_source_path=BOT_SOURCE_PATH,
+        sys_executable=sys.executable,
+        read_json_file=_read_json_file,
+        write_json_file=_write_json_file,
     )
-    subprocess.Popen(
-        [sys.executable, '-c', code],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        close_fds=True,
-        start_new_session=True,
-    )
-    return True, ''
 
 
 def _send_telegram_update_status(message, reply_markup):
@@ -1752,27 +1736,20 @@ def _deliver_pending_telegram_command_result():
     try:
         if output:
             _send_telegram_chunks(chat_id, output, reply_markup=markup)
-        if return_code == 0:
-            final_message = '✅ Обновление завершено. Лог отправлен выше.' if action == '-update' else '✅ Команда завершена. Лог отправлен выше.'
-        else:
-            final_message = '⚠️ Обновление завершилось с ошибкой. Полный лог отправлен выше.' if action == '-update' else '⚠️ Команда завершилась с ошибкой. Полный лог отправлен выше.'
-        bot.send_message(chat_id, final_message, reply_markup=markup)
+        bot.send_message(chat_id, _telegram_final_command_message(action, return_code), reply_markup=markup)
         _remove_file(TELEGRAM_COMMAND_RESULT_FILE)
     except Exception as exc:
         _write_runtime_log(f'Не удалось доставить результат фоновой Telegram-команды: {exc}')
 
 
 def _start_telegram_result_retry_worker():
-    def worker():
-        while not shutdown_requested.is_set():
-            try:
-                if os.path.exists(TELEGRAM_COMMAND_RESULT_FILE):
-                    _deliver_pending_telegram_command_result()
-            except Exception as exc:
-                _write_runtime_log(f'Ошибка retry-доставки результата фоновой Telegram-команды: {exc}')
-            shutdown_requested.wait(TELEGRAM_RESULT_RETRY_INTERVAL)
-
-    threading.Thread(target=worker, daemon=True).start()
+    _telegram_start_result_retry_worker(
+        shutdown_event=shutdown_requested,
+        result_file=TELEGRAM_COMMAND_RESULT_FILE,
+        deliver_result=_deliver_pending_telegram_command_result,
+        log_callback=_write_runtime_log,
+        retry_interval=TELEGRAM_RESULT_RETRY_INTERVAL,
+    )
 
 
 def _install_proxy_from_message(message, key_type, key_value, reply_markup):

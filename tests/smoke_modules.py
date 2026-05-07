@@ -20,6 +20,7 @@ import web_template_scripts
 import web_post_actions
 import telegram_confirm
 import telegram_auth_state
+import telegram_jobs
 import telegram_install_ui
 import telegram_key_ui
 import pool_probe_controller
@@ -219,6 +220,37 @@ def test_telegram_auth_state_helpers():
     telegram_auth_state.set_chat_menu_state(lock, states, 1, level=8, bypass='vless')
     assert telegram_auth_state.get_chat_menu_state(lock, states, 1) == {'level': 8, 'bypass': 'vless'}
     assert telegram_auth_state.unauthorized_message_text('missing_username').startswith('У вашего Telegram-аккаунта')
+
+
+def test_telegram_jobs_helpers():
+    payload = telegram_jobs.command_result_payload('-update', '42', 'service', 0, 'ok', now=lambda: 123.0)
+    assert payload['chat_id'] == 42
+    assert payload['finished_at'] == 123.0
+    assert telegram_jobs.final_message('-update', 0).startswith('✅ Обновление')
+    assert telegram_jobs.final_message('-remove', 1).startswith('⚠️ Команда')
+    code = telegram_jobs.background_command_code('/opt/etc/bot/main.py', '-update', 'owner', 'repo', 42, 'service', 'branch')
+    assert 'sys.path.insert' in code
+    assert 'branch=' in code
+
+    written = []
+    popen_calls = []
+    started, message = telegram_jobs.start_background_command(
+        job_file='job.json',
+        action='-update',
+        repo_owner='owner',
+        repo_name='repo',
+        chat_id=42,
+        menu_name='service',
+        bot_source_path='/opt/etc/bot/main.py',
+        sys_executable='python',
+        read_json_file=lambda path, default=None: {},
+        write_json_file=lambda path, payload: written.append((path, payload)),
+        popen=lambda *args, **kwargs: popen_calls.append((args, kwargs)),
+        now=lambda: 10.0,
+    )
+    assert started is True and message == ''
+    assert written[0][1]['started_at'] == 10.0
+    assert popen_calls
 
 
 def test_telegram_install_ui_helpers():
@@ -719,6 +751,7 @@ def main():
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
     test_telegram_auth_state_helpers()
+    test_telegram_jobs_helpers()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
     test_pool_probe_controller_helpers()
