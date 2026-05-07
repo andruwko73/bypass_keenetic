@@ -98,7 +98,6 @@ from pool_probe_runner import (
     build_pool_probe_core_config_batch as _runner_build_pool_probe_core_config_batch,
     cleanup_pool_probe_runtime as _runner_cleanup_pool_probe_runtime,
     pool_probe_outbound as _runner_pool_probe_outbound,
-    pool_probe_socks_inbound as _runner_pool_probe_socks_inbound,
     run_pool_probe_worker,
     start_pool_probe_xray as _runner_start_pool_probe_xray,
     stop_pool_probe_xray as _runner_stop_pool_probe_xray,
@@ -3129,10 +3128,6 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
             custom_checks=custom_checks,
         )
         _record_key_probe(proto, key_value, custom=custom_results)
-
-
-def _pool_probe_socks_inbound(port, tag):
-    return _runner_pool_probe_socks_inbound(port, tag)
 
 
 def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
