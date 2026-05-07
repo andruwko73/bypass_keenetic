@@ -224,6 +224,30 @@ def test_pool_probe_controller_helpers():
     progress.update(running=True, checked=2)
     assert progress.snapshot()['checked'] == 2
     assert pool_probe_controller.pool_probe_progress_label({'scope': 'protocol'}) == 'Проверка выбранного пула'
+    assert pool_probe_controller.failed_custom_probe_results([{'id': 'tg'}, {'label': 'empty'}]) == {'tg': False}
+    assert pool_probe_controller.pool_probe_timeout_budget(
+        [{'urls': ['https://a', 'https://b', 'https://ignored']}],
+        2,
+        1,
+        (1, 2, 3, 4, 5, 6, 10, 20),
+    ) == 85.0
+    meminfo_path = ROOT / 'tests' / '_meminfo.tmp'
+    try:
+        meminfo_path.write_text('MemAvailable:        12345 kB\n', encoding='utf-8')
+        assert pool_probe_controller.available_memory_kb(meminfo_path) == 12345
+    finally:
+        meminfo_path.unlink(missing_ok=True)
+    selected, checks = pool_probe_controller.select_pool_probe_tasks(
+        [('vless', 'fresh'), ('vless', 'new'), ('bad', 'skip'), ('vless', 'new')],
+        protocol_order=('vless',),
+        custom_checks=[{'id': 'tg'}],
+        cache={'h:fresh': {'fresh': True}},
+        hash_key=lambda value: 'h:' + value,
+        is_fresh=lambda probe, **kwargs: bool(probe and probe.get('fresh')),
+        stale_only=True,
+    )
+    assert selected == [('vless', 'new')]
+    assert checks == [{'id': 'tg'}]
 
     state = {}
     invalidated = []

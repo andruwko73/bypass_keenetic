@@ -88,7 +88,11 @@ from telegram_install_ui import (
 )
 from pool_probe_controller import (
     PoolProbeProgress,
+    available_memory_kb as _available_memory_kb,
+    failed_custom_probe_results as _failed_custom_probe_results,
     pool_probe_progress_label as _controller_pool_probe_progress_label,
+    pool_probe_timeout_budget as _controller_pool_probe_timeout_budget,
+    select_pool_probe_tasks as _controller_select_pool_probe_tasks,
     start_pool_probe_worker,
 )
 from probe_cache import (
@@ -385,6 +389,12 @@ POOL_PROBE_SINGLE_TIMEOUT_SECONDS = max(
 )
 POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
     getattr(config, 'pool_probe_batch_timeout_seconds', POOL_PROBE_SINGLE_TIMEOUT_SECONDS + 5.0)
+)
+POOL_PROBE_TIMEOUTS = (
+    POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT,
+    POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT,
+    POOL_PROBE_CUSTOM_CONNECT_TIMEOUT, POOL_PROBE_CUSTOM_READ_TIMEOUT,
+    POOL_PROBE_SINGLE_TIMEOUT_SECONDS, POOL_PROBE_BATCH_TIMEOUT_SECONDS,
 )
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
@@ -3378,27 +3388,6 @@ def _restart_proxy_services_for_protocols(protocols):
     _invalidate_key_status_cache()
 
 
-def _failed_custom_probe_results(custom_checks):
-    return {
-        check.get('id'): False
-        for check in (custom_checks or [])
-        if check.get('id')
-    }
-
-
-def _available_memory_kb():
-    try:
-        with open('/proc/meminfo', 'r', encoding='utf-8', errors='ignore') as file:
-            for line in file:
-                if line.startswith('MemAvailable:'):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        return int(parts[1])
-    except Exception:
-        pass
-    return None
-
-
 def _set_pool_probe_progress(**updates):
     pool_probe_progress.update(**updates)
 
@@ -3412,21 +3401,7 @@ def _pool_probe_progress_label(progress=None):
 
 
 def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
-    custom_target_count = 0
-    for check in custom_checks or []:
-        targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
-        custom_target_count += len([target for target in targets[:2] if target])
-    base_per_key = (
-        POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
-        POOL_PROBE_HTTP_CONNECT_TIMEOUT + POOL_PROBE_HTTP_READ_TIMEOUT +
-        custom_target_count * (POOL_PROBE_CUSTOM_CONNECT_TIMEOUT + POOL_PROBE_CUSTOM_READ_TIMEOUT)
-    )
-    retry_per_key = POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT
-    per_key = max(POOL_PROBE_SINGLE_TIMEOUT_SECONDS, base_per_key + retry_per_key + 5.0)
-    workers = max(1, int(workers or 1))
-    task_count = max(1, int(task_count or 1))
-    waves = (task_count + workers - 1) // workers
-    return max(POOL_PROBE_BATCH_TIMEOUT_SECONDS, per_key * waves + 5.0)
+    return _controller_pool_probe_timeout_budget(custom_checks, task_count, workers, POOL_PROBE_TIMEOUTS)
 
 
 def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None):
@@ -3548,24 +3523,16 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
 
 def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
     custom_checks = _load_custom_checks()
-    cache = _load_key_probe_cache() if stale_only else {}
-    now = time.time()
-    selected = []
-    seen = set()
-    for proto, key_value in tasks:
-        key_value = (key_value or '').strip()
-        if proto not in POOL_PROTOCOL_ORDER or not key_value:
-            continue
-        task_id = (proto, _hash_key(key_value))
-        if task_id in seen:
-            continue
-        seen.add(task_id)
-        if stale_only and _key_probe_is_fresh(cache.get(_hash_key(key_value)), now=now, custom_checks=custom_checks):
-            continue
-        selected.append((proto, key_value))
-        if max_keys is not None and len(selected) >= max_keys:
-            break
-    return selected, custom_checks
+    return _controller_select_pool_probe_tasks(
+        tasks,
+        protocol_order=POOL_PROTOCOL_ORDER,
+        custom_checks=custom_checks,
+        cache=_load_key_probe_cache() if stale_only else {},
+        hash_key=_hash_key,
+        is_fresh=_key_probe_is_fresh,
+        max_keys=max_keys,
+        stale_only=stale_only,
+    )
 
 
 def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):

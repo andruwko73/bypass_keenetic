@@ -37,6 +37,58 @@ def pool_probe_progress_label(progress):
     return 'Фоновая проверка пула ключей'
 
 
+def failed_custom_probe_results(custom_checks):
+    return {check.get('id'): False for check in (custom_checks or []) if check.get('id')}
+
+
+def available_memory_kb(meminfo_path='/proc/meminfo'):
+    try:
+        with open(meminfo_path, 'r', encoding='utf-8', errors='ignore') as file:
+            for line in file:
+                if line.startswith('MemAvailable:'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1])
+    except Exception:
+        pass
+    return None
+
+
+def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
+    tg_connect, tg_read, http_connect, http_read, custom_connect, custom_read, single_timeout, batch_timeout = timeouts
+    custom_target_count = 0
+    for check in custom_checks or []:
+        targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
+        custom_target_count += len([target for target in targets[:2] if target])
+    base_per_key = tg_connect + tg_read + http_connect + http_read + custom_target_count * (custom_connect + custom_read)
+    retry_per_key = tg_connect + tg_read
+    per_key = max(single_timeout, base_per_key + retry_per_key + 5.0)
+    workers = max(1, int(workers or 1))
+    task_count = max(1, int(task_count or 1))
+    waves = (task_count + workers - 1) // workers
+    return max(batch_timeout, per_key * waves + 5.0)
+
+
+def select_pool_probe_tasks(tasks, *, protocol_order, custom_checks, cache, hash_key, is_fresh, max_keys=None, stale_only=False, now=None):
+    now = time.time() if now is None else now
+    selected = []
+    seen = set()
+    for proto, key_value in tasks:
+        key_value = (key_value or '').strip()
+        if proto not in protocol_order or not key_value:
+            continue
+        task_id = (proto, hash_key(key_value))
+        if task_id in seen:
+            continue
+        seen.add(task_id)
+        if stale_only and is_fresh(cache.get(hash_key(key_value)), now=now, custom_checks=custom_checks):
+            continue
+        selected.append((proto, key_value))
+        if max_keys is not None and len(selected) >= max_keys:
+            break
+    return selected, custom_checks
+
+
 def start_pool_probe_worker(
     probe_tasks,
     checks,
