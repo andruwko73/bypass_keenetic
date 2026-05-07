@@ -1259,6 +1259,90 @@ def _send_unblock_list_contents(message, list_name, set_menu_state, reply_markup
     _send_unblock_list_menu(message, list_name)
 
 
+def _start_unblock_list_edit(message, list_name, set_menu_state, next_level, prompt, service_action):
+    bot.send_message(message.chat.id, prompt)
+    set_menu_state(next_level)
+    bot.send_message(message.chat.id, "Меню " + list_name, reply_markup=_reply_keyboard((service_action, "🔙 Назад")))
+
+
+def _apply_unblock_list_text_change(current_entries, text, remove=False):
+    entries = set(current_entries)
+    count = len(entries)
+    if remove:
+        for site in text.split('\n'):
+            entries.discard(site)
+    elif len(text) > 1:
+        entries.update(text.split('\n'))
+    return entries, count != len(entries)
+
+
+def _handle_socialnet_list_choice(message, list_name, set_menu_state, action_func, error_message):
+    if message.text in ('🔙 Назад', 'Назад'):
+        set_menu_state(2)
+        _send_unblock_list_menu(message, list_name)
+        return True
+    service_key = _resolve_socialnet_service(message.text)
+    try:
+        result = action_func(list_name, service_key=service_key)
+    except Exception as exc:
+        bot.send_message(message.chat.id, f'⚠️ {error_message}: {exc}', reply_markup=_socialnet_service_markup())
+        return True
+    set_menu_state(2)
+    bot.send_message(message.chat.id, result)
+    _send_unblock_list_menu(message, list_name)
+    return True
+
+
+def _handle_unblock_list_state(message, level, bypass, set_menu_state, reply_markup):
+    if level == 1:
+        _handle_unblock_list_selection(message, set_menu_state)
+        return True
+    if level == 2 and message.text == "📑 Показать список":
+        _send_unblock_list_contents(message, bypass, set_menu_state, reply_markup)
+        return True
+    if level == 2 and message.text == "📝 Добавить в список":
+        _start_unblock_list_edit(
+            message, bypass, set_menu_state, 3,
+            "Введите имя сайта или домена для разблокировки, либо воспользуйтесь меню для других действий",
+            "Добавить обход блокировок соцсетей",
+        )
+        return True
+    if level == 2 and message.text == "🗑 Удалить из списка":
+        _start_unblock_list_edit(
+            message, bypass, set_menu_state, 4,
+            "Введите имя сайта или домена для удаления из листа разблокировки,либо возвратитесь в главное меню",
+            "Удалить обход блокировок соцсетей",
+        )
+        return True
+    if level == 31:
+        return _handle_socialnet_list_choice(message, bypass, set_menu_state, _append_socialnet_list, 'Не удалось добавить сервисы')
+    if level == 32:
+        return _handle_socialnet_list_choice(message, bypass, set_menu_state, _remove_socialnet_list, 'Не удалось удалить сервисы')
+    if level not in (3, 4):
+        return False
+    try:
+        current_entries = set(_read_unblock_list_entries(bypass))
+    except FileNotFoundError:
+        _send_unblock_list_file_missing(message, set_menu_state, reply_markup)
+        return True
+    if level == 3 and message.text == "Добавить обход блокировок соцсетей":
+        set_menu_state(31)
+        bot.send_message(message.chat.id, f'Выберите сервис для добавления в {_list_label(bypass + ".txt")}.', reply_markup=_socialnet_service_markup())
+        return True
+    if level == 4 and message.text == "Удалить обход блокировок соцсетей":
+        set_menu_state(32)
+        bot.send_message(message.chat.id, f'Выберите сервис для удаления из {_list_label(bypass + ".txt")}.', reply_markup=_socialnet_service_markup())
+        return True
+    updated_entries, changed = _apply_unblock_list_text_change(current_entries, message.text, remove=(level == 4))
+    _write_unblock_list_entries(bypass, updated_entries)
+    bot.send_message(message.chat.id, "✅ Успешно удалено" if changed and level == 4 else
+                     "✅ Успешно добавлено" if changed else "Не найдено в списке" if level == 4 else "Было добавлено ранее")
+    set_menu_state(2)
+    subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
+    _send_unblock_list_menu(message, bypass)
+    return True
+
+
 def _service_list_markup():
     labels = [source['label'] for source in SERVICE_LIST_SOURCES.values()]
     rows = [tuple(labels[index:index + 2]) for index in range(0, len(labels), 2)]
@@ -3917,124 +4001,7 @@ def bot_message(message):
                 set_menu_state(0, None)
                 return
 
-            if level == 1:
-                _handle_unblock_list_selection(message, set_menu_state)
-                return
-
-            if level == 2 and message.text == "📑 Показать список":
-                _send_unblock_list_contents(message, bypass, set_menu_state, main)
-                return
-
-            if level == 2 and message.text == "📥 Сервисы по запросу":
-                set_menu_state(10)
-                bot.send_message(message.chat.id, f'Выберите сервис для маршрута {_list_label(bypass + ".txt")}', reply_markup=_service_list_markup())
-                return
-
-            if level == 2 and message.text == "📝 Добавить в список":
-                bot.send_message(message.chat.id,
-                                 "Введите имя сайта или домена для разблокировки, "
-                                 "либо воспользуйтесь меню для других действий")
-                set_menu_state(3)
-                bot.send_message(
-                    message.chat.id,
-                    "Меню " + bypass,
-                    reply_markup=_reply_keyboard(("Добавить обход блокировок соцсетей", "🔙 Назад")),
-                )
-                return
-
-            if level == 2 and message.text == "🗑 Удалить из списка":
-                bot.send_message(message.chat.id,
-                                 "Введите имя сайта или домена для удаления из листа разблокировки,"
-                                 "либо возвратитесь в главное меню")
-                set_menu_state(4)
-                bot.send_message(
-                    message.chat.id,
-                    "Меню " + bypass,
-                    reply_markup=_reply_keyboard(("Удалить обход блокировок соцсетей", "🔙 Назад")),
-                )
-                return
-
-            if level == 3:
-                try:
-                    mylist = set(_read_unblock_list_entries(bypass))
-                except FileNotFoundError:
-                    _send_unblock_list_file_missing(message, set_menu_state, main)
-                    return
-                k = len(mylist)
-                if message.text == "Добавить обход блокировок соцсетей":
-                    set_menu_state(31)
-                    bot.send_message(message.chat.id, f'Выберите сервис для добавления в {_list_label(bypass + ".txt")}.', reply_markup=_socialnet_service_markup())
-                    return
-                else:
-                    if len(message.text) > 1:
-                        mas = message.text.split('\n')
-                        for site in mas:
-                            mylist.add(site)
-                sortlist = sorted(mylist)
-                _write_unblock_list_entries(bypass, sortlist)
-                if k != len(sortlist):
-                    bot.send_message(message.chat.id, "✅ Успешно добавлено")
-                else:
-                    bot.send_message(message.chat.id, "Было добавлено ранее")
-                subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
-                set_menu_state(2)
-                _send_unblock_list_menu(message, bypass)
-                return
-
-            if level == 31:
-                if message.text in ('🔙 Назад', 'Назад'):
-                    set_menu_state(2)
-                    _send_unblock_list_menu(message, bypass)
-                    return
-                service_key = _resolve_socialnet_service(message.text)
-                try:
-                    result = _append_socialnet_list(bypass, service_key=service_key)
-                except Exception as exc:
-                    bot.send_message(message.chat.id, f'⚠️ Не удалось добавить сервисы: {exc}', reply_markup=_socialnet_service_markup())
-                    return
-                set_menu_state(2)
-                bot.send_message(message.chat.id, result)
-                _send_unblock_list_menu(message, bypass)
-                return
-
-            if level == 32:
-                if message.text in ('🔙 Назад', 'Назад'):
-                    set_menu_state(2)
-                    _send_unblock_list_menu(message, bypass)
-                    return
-                service_key = _resolve_socialnet_service(message.text)
-                try:
-                    result = _remove_socialnet_list(bypass, service_key=service_key)
-                except Exception as exc:
-                    bot.send_message(message.chat.id, f'⚠️ Не удалось удалить сервисы: {exc}', reply_markup=_socialnet_service_markup())
-                    return
-                set_menu_state(2)
-                bot.send_message(message.chat.id, result)
-                _send_unblock_list_menu(message, bypass)
-                return
-
-            if level == 4:
-                try:
-                    mylist = set(_read_unblock_list_entries(bypass))
-                except FileNotFoundError:
-                    _send_unblock_list_file_missing(message, set_menu_state, main)
-                    return
-                if message.text == "Удалить обход блокировок соцсетей":
-                    set_menu_state(32)
-                    bot.send_message(message.chat.id, f'Выберите сервис для удаления из {_list_label(bypass + ".txt")}.', reply_markup=_socialnet_service_markup())
-                    return
-                k = len(mylist)
-                mas = message.text.split('\n')
-                for site in mas:
-                    mylist.discard(site)
-                _write_unblock_list_entries(bypass, mylist)
-                if k != len(mylist):
-                    bot.send_message(message.chat.id, "✅ Успешно удалено")
-                else:
-                    bot.send_message(message.chat.id, "Не найдено в списке")
-                set_menu_state(2)
-                subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
-                _send_unblock_list_menu(message, bypass)
+            if _handle_unblock_list_state(message, level, bypass, set_menu_state, main):
                 return
 
             if level == 10:
