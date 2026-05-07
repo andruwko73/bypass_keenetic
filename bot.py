@@ -1221,6 +1221,35 @@ def _list_actions_markup():
     )
 
 
+def _send_unblock_list_file_missing(message, set_menu_state, reply_markup):
+    bot.send_message(message.chat.id, '⚠️ Файл списка не найден. Откройте список заново.', reply_markup=reply_markup)
+    set_menu_state(1, None)
+
+
+def _send_unblock_list_menu(message, list_name):
+    bot.send_message(message.chat.id, "Меню " + list_name, reply_markup=_list_actions_markup())
+
+
+def _handle_unblock_list_selection(message, set_menu_state):
+    selected_list = _resolve_unblock_list_selection(message.text)
+    for file_name in os.listdir('/opt/etc/unblock/'):
+        if file_name == selected_list + '.txt':
+            set_menu_state(2, selected_list)
+            bot.send_message(message.chat.id, "Меню " + _list_label(file_name), reply_markup=_list_actions_markup())
+            return
+    bot.send_message(message.chat.id, "Не найден", reply_markup=_reply_keyboard(("🔙 Назад",)))
+
+
+def _send_unblock_list_contents(message, list_name, set_menu_state, reply_markup):
+    try:
+        sites = sorted(_read_unblock_list_entries(list_name))
+    except FileNotFoundError:
+        _send_unblock_list_file_missing(message, set_menu_state, reply_markup)
+        return
+    _send_telegram_chunks(message.chat.id, '\n'.join(sites) if sites else 'Список пуст')
+    _send_unblock_list_menu(message, list_name)
+
+
 def _service_list_markup():
     labels = [source['label'] for source in SERVICE_LIST_SOURCES.values()]
     rows = [tuple(labels[index:index + 2]) for index in range(0, len(labels), 2)]
@@ -3876,37 +3905,11 @@ def bot_message(message):
                 return
 
             if level == 1:
-                # значит это список обхода блокировок
-                selected_list = _resolve_unblock_list_selection(message.text)
-                dirname = '/opt/etc/unblock/'
-                dirfiles = os.listdir(dirname)
-
-                for fln in dirfiles:
-                    if fln == selected_list + '.txt':
-                        set_menu_state(2, selected_list)
-                        bot.send_message(message.chat.id, "Меню " + _list_label(fln), reply_markup=_list_actions_markup())
-                        return
-
-                bot.send_message(message.chat.id, "Не найден", reply_markup=_reply_keyboard(("🔙 Назад",)))
+                _handle_unblock_list_selection(message, set_menu_state)
                 return
 
             if level == 2 and message.text == "📑 Показать список":
-                try:
-                    sites = sorted(_read_unblock_list_entries(bypass))
-                except FileNotFoundError:
-                    bot.send_message(message.chat.id, '⚠️ Файл списка не найден. Откройте список заново.', reply_markup=main)
-                    set_menu_state(1, None)
-                    return
-                s = 'Список пуст'
-                if sites:
-                    s = '\n'.join(sites)
-                if len(s) > 4096:
-                    for x in range(0, len(s), 4096):
-                        bot.send_message(message.chat.id, s[x:x + 4096])
-                else:
-                    bot.send_message(message.chat.id, s)
-                #bot.send_message(message.chat.id, s)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                _send_unblock_list_contents(message, bypass, set_menu_state, main)
                 return
 
             if level == 2 and message.text == "📥 Сервисы по запросу":
@@ -3942,8 +3945,7 @@ def bot_message(message):
                 try:
                     mylist = set(_read_unblock_list_entries(bypass))
                 except FileNotFoundError:
-                    bot.send_message(message.chat.id, '⚠️ Файл списка не найден. Откройте список заново.', reply_markup=main)
-                    set_menu_state(1, None)
+                    _send_unblock_list_file_missing(message, set_menu_state, main)
                     return
                 k = len(mylist)
                 if message.text == "Добавить обход блокировок соцсетей":
@@ -3963,13 +3965,13 @@ def bot_message(message):
                     bot.send_message(message.chat.id, "Было добавлено ранее")
                 subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
                 set_menu_state(2)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                _send_unblock_list_menu(message, bypass)
                 return
 
             if level == 31:
                 if message.text in ('🔙 Назад', 'Назад'):
                     set_menu_state(2)
-                    bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                    _send_unblock_list_menu(message, bypass)
                     return
                 service_key = _resolve_socialnet_service(message.text)
                 try:
@@ -3979,13 +3981,13 @@ def bot_message(message):
                     return
                 set_menu_state(2)
                 bot.send_message(message.chat.id, result)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                _send_unblock_list_menu(message, bypass)
                 return
 
             if level == 32:
                 if message.text in ('🔙 Назад', 'Назад'):
                     set_menu_state(2)
-                    bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                    _send_unblock_list_menu(message, bypass)
                     return
                 service_key = _resolve_socialnet_service(message.text)
                 try:
@@ -3995,15 +3997,14 @@ def bot_message(message):
                     return
                 set_menu_state(2)
                 bot.send_message(message.chat.id, result)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                _send_unblock_list_menu(message, bypass)
                 return
 
             if level == 4:
                 try:
                     mylist = set(_read_unblock_list_entries(bypass))
                 except FileNotFoundError:
-                    bot.send_message(message.chat.id, '⚠️ Файл списка не найден. Откройте список заново.', reply_markup=main)
-                    set_menu_state(1, None)
+                    _send_unblock_list_file_missing(message, set_menu_state, main)
                     return
                 if message.text == "Удалить обход блокировок соцсетей":
                     set_menu_state(32)
@@ -4020,7 +4021,7 @@ def bot_message(message):
                     bot.send_message(message.chat.id, "Не найдено в списке")
                 set_menu_state(2)
                 subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
+                _send_unblock_list_menu(message, bypass)
                 return
 
             if level == 10:
