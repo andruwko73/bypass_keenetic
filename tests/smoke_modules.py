@@ -10,7 +10,9 @@ import key_pool_store
 import telegram_pool_ui
 import web_get_actions
 import web_form_blocks
+import web_form_template
 import web_pool_form_blocks
+import web_template_styles
 import web_post_actions
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
@@ -259,6 +261,57 @@ def test_web_pool_form_blocks_helpers():
     assert 'custom-check-form' not in main_panel
 
 
+def test_web_template_styles_helpers():
+    styles = web_template_styles.render_web_styles()
+    assert ':root{' in styles
+    assert '.app-shell' in styles
+    assert '{{' not in styles
+
+
+def test_web_form_template_smoke():
+    page = web_form_template.render_web_form(
+        APP_BRANCH_DESCRIPTION='test',
+        APP_BRANCH_LABEL='codex/test',
+        APP_VERSION_LABEL='1',
+        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
+        TELEGRAM_SVG_B64='',
+        YOUTUBE_SVG_B64='',
+        _telegram_icon_html=lambda opacity=1.0: 'TG',
+        csrf_token='token',
+        command_block='',
+        command_buttons_html='',
+        current_mode_label='Без прокси',
+        custom_checks_json='[]',
+        fallback_block='',
+        initial_command_running='false',
+        initial_status_pending='false',
+        list_route_label='list',
+        message_block='',
+        mode_picker_block='',
+        mode_toggle_label='Режим:',
+        pool_summary={'active_text': 'none'},
+        pool_summary_note='',
+        protocol_panels_html='',
+        protocol_tabs_html='',
+        quick_key_label='Vless 1',
+        quick_key_proto='vless',
+        quick_key_value='',
+        quick_start_note='note',
+        socks_block='',
+        start_button_label='start',
+        status={'api_status': 'ok'},
+        topbar_status_text='ok',
+        unblock_panels_html='',
+        unblock_tabs_html='',
+        update_buttons_html='',
+        enable_key_pool=False,
+        enable_custom_checks=False,
+    )
+    assert ':root{' in page
+    assert '.app-shell' in page
+    assert '<script>' in page
+
+
 def test_telegram_pool_ui():
     markup = telegram_pool_ui.pool_protocol_markup(
         _FakeTypes,
@@ -288,6 +341,8 @@ def main():
     test_web_get_actions_helpers()
     test_web_form_blocks_helpers()
     test_web_pool_form_blocks_helpers()
+    test_web_template_styles_helpers()
+    test_web_form_template_smoke()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
 
