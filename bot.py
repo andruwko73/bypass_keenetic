@@ -1497,6 +1497,59 @@ def _handle_install_menu_message(message, set_menu_state):
     return False
 
 
+def _send_telegram_readme_info(message, reply_markup):
+    bot.send_message(message.chat.id, _telegram_info_text_from_readme(), parse_mode='HTML',
+                     disable_web_page_preview=True, reply_markup=reply_markup)
+
+
+TELEGRAM_MENU_CONFIRM_ACTIONS = {
+    '♻️ Перезагрузить сервисы': 'restart_services',
+    'Перезагрузить сервисы': 'restart_services',
+    '‼️Перезагрузить роутер': 'reboot',
+    'Перезагрузить роутер': 'reboot',
+    '✅ DNS Override ВКЛ': 'dns_on',
+    '❌ DNS Override ВЫКЛ': 'dns_off',
+}
+
+
+def _handle_common_telegram_menu_message(message, level, bypass, set_menu_state, main, service):
+    if _handle_telegram_confirmation(message, level, bypass, set_menu_state, service):
+        return True
+
+    if message.text == '⚙️ Сервис':
+        bot.send_message(message.chat.id, '⚙️ Сервисное меню!', reply_markup=service)
+        return True
+
+    if message.text == '‼️DNS Override' or message.text == 'DNS Override':
+        dns_menu = _reply_keyboard(("✅ DNS Override ВКЛ", "❌ DNS Override ВЫКЛ"), ("🔙 Назад",))
+        bot.send_message(message.chat.id, '‼️DNS Override!', reply_markup=dns_menu)
+        return True
+
+    action = TELEGRAM_MENU_CONFIRM_ACTIONS.get(message.text)
+    if action:
+        _request_telegram_confirmation(message, set_menu_state, action)
+        return True
+
+    # Кнопка "Обновление" убрана из меню "Сервис" (заменена на "Статус ключей").
+    if message.text == '📄 Информация':
+        _send_telegram_readme_info(message, main)
+        return True
+
+    if message.text == '/keys_free':
+        _send_remote_markdown_file(message, 'keys.md', 'Не удалось загрузить список ключей', main)
+        return True
+
+    if message.text == '🔄 Обновления' or message.text == '/check_update':
+        _send_telegram_update_status(message, service)
+        return True
+
+    if message.text == '/update':
+        _request_telegram_confirmation(message, set_menu_state, 'update_main')
+        return True
+
+    return False
+
+
 def _telegram_command_markup(menu_name):
     return _build_service_menu_markup() if menu_name == 'service' else _build_main_menu_markup()
 
@@ -3845,58 +3898,7 @@ def bot_message(message):
                     bypass = new_bypass
                 _set_chat_menu_state(message.chat.id, level=level, bypass=bypass)
 
-            if _handle_telegram_confirmation(message, level, bypass, set_menu_state, service):
-                return
-
-            if message.text == '⚙️ Сервис':
-                bot.send_message(message.chat.id, '⚙️ Сервисное меню!', reply_markup=service)
-                return
-
-            if message.text == '♻️ Перезагрузить сервисы' or message.text == 'Перезагрузить сервисы':
-                _request_telegram_confirmation(message, set_menu_state, 'restart_services')
-                return
-
-            if message.text == '‼️Перезагрузить роутер' or message.text == 'Перезагрузить роутер':
-                _request_telegram_confirmation(message, set_menu_state, 'reboot')
-                return
-
-            if message.text == '‼️DNS Override' or message.text == 'DNS Override':
-                service = _reply_keyboard(("✅ DNS Override ВКЛ", "❌ DNS Override ВЫКЛ"), ("🔙 Назад",))
-                bot.send_message(message.chat.id, '‼️DNS Override!', reply_markup=service)
-                return
-
-            if message.text == "✅ DNS Override ВКЛ" or message.text == "❌ DNS Override ВЫКЛ":
-                if message.text == "✅ DNS Override ВКЛ":
-                    _request_telegram_confirmation(message, set_menu_state, 'dns_on')
-                    return
-
-                if message.text == "❌ DNS Override ВЫКЛ":
-                    _request_telegram_confirmation(message, set_menu_state, 'dns_off')
-                    return
-
-            # Кнопка "Обновление" убрана из меню "Сервис" (заменена на "Статус ключей").
-
-            if message.text == '📄 Информация':
-                info_bot = _telegram_info_text_from_readme()
-                bot.send_message(
-                    message.chat.id,
-                    info_bot,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True,
-                    reply_markup=main,
-                )
-                return
-
-            if message.text == '/keys_free':
-                _send_remote_markdown_file(message, 'keys.md', 'Не удалось загрузить список ключей', main)
-                return
-
-            if message.text == '🔄 Обновления' or message.text == '/check_update':
-                _send_telegram_update_status(message, service)
-                return
-
-            if message.text == '/update':
-                _request_telegram_confirmation(message, set_menu_state, 'update_main')
+            if _handle_common_telegram_menu_message(message, level, bypass, set_menu_state, main, service):
                 return
 
             if message.text == "📥 Сервисы по запросу":
