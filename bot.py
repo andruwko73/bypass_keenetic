@@ -2999,22 +2999,6 @@ def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
     return _store_proxy_outbound_from_key(proto, key_value, tag, email=email)
 
 
-def _pool_probe_outbound(proto, key_value, tag):
-    return _runner_pool_probe_outbound(proto, key_value, tag, _proxy_outbound_from_key)
-
-
-def _build_pool_probe_core_config_batch(probe_tasks):
-    return _runner_build_pool_probe_core_config_batch(probe_tasks, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
-
-
-def _start_pool_probe_xray(config_json):
-    return _runner_start_pool_probe_xray(config_json)
-
-
-def _stop_pool_probe_xray(process, config_path):
-    _runner_stop_pool_probe_xray(process, config_path)
-
-
 def _find_pool_failover_candidate(candidates, service='telegram'):
     """Find one working pool key through a temporary xray before touching the active proxy."""
     probe_tasks = [(proto, (key_value or '').strip()) for proto, key_value in candidates if (key_value or '').strip()]
@@ -3024,7 +3008,7 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
         valid_batch = []
         for proto, key_value in raw_batch:
             try:
-                _pool_probe_outbound(proto, key_value, 'proxy-failover-validate')
+                _runner_pool_probe_outbound(proto, key_value, 'proxy-failover-validate', _proxy_outbound_from_key)
                 valid_batch.append((proto, key_value))
             except Exception as exc:
                 _write_runtime_log(f'Auto-failover: ключ {proto} не подготовлен для проверки: {exc}')
@@ -3034,7 +3018,9 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
         process = None
         config_path = None
         try:
-            process, config_path = _start_pool_probe_xray(_build_pool_probe_core_config_batch(valid_batch))
+            process, config_path = _runner_start_pool_probe_xray(
+                _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
+            )
             for offset, (proto, key_value) in enumerate(valid_batch):
                 port = str(int(POOL_PROBE_TEST_PORT) + offset)
                 if not _wait_for_socks5_handshake(port, timeout=6):
@@ -3076,14 +3062,10 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
         except Exception as exc:
             _write_runtime_log(f'Auto-failover: ошибка проверки кандидатов через временный xray: {exc}')
         finally:
-            _stop_pool_probe_xray(process, config_path)
-            _cleanup_pool_probe_runtime(kill_processes=True)
+            _runner_stop_pool_probe_xray(process, config_path)
+            _runner_cleanup_pool_probe_runtime(kill_processes=True)
             gc.collect()
     return None
-
-
-def _cleanup_pool_probe_runtime(kill_processes=False):
-    _runner_cleanup_pool_probe_runtime(kill_processes=kill_processes)
 
 
 def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False, missing_only=False):
@@ -3159,21 +3141,22 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=F
                 proto_label=_pool_proto_label,
                 hash_key=_hash_key,
                 set_checked=lambda value: _set_pool_probe_progress(checked=value),
-                validate_outbound=lambda proto, key_value: _pool_probe_outbound(
+                validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
                     proto,
                     key_value,
                     'proxy-pool-probe-validate',
+                    _proxy_outbound_from_key,
                 ),
                 failed_custom_results=_failed_custom_probe_results,
                 record_key_probe=_record_key_probe,
-                start_xray_for_batch=lambda valid_batch: _start_pool_probe_xray(
-                    _build_pool_probe_core_config_batch(valid_batch)
+                start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
+                    _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
                 ),
                 wait_for_socks5=_wait_for_socks5_handshake,
                 check_pool_key=_check_pool_key_through_proxy,
                 timeout_budget=_pool_probe_timeout_budget,
-                stop_xray=_stop_pool_probe_xray,
-                cleanup_runtime=_cleanup_pool_probe_runtime,
+                stop_xray=_runner_stop_pool_probe_xray,
+                cleanup_runtime=_runner_cleanup_pool_probe_runtime,
                 invalidate_caches=invalidate_probe_status,
             )
         finally:
@@ -4372,11 +4355,6 @@ def bot_message(message):
                 _send_pool_page(message.chat.id, proto, page=page, prefix=result)
                 return
 
-            if level == 5:
-                set_menu_state(0)
-                _install_proxy_from_message(message, 'shadowsocks', message.text, main)
-                return
-
             if level == 8:
                 # значит это ключи и мосты
                 if message.text == 'Где брать ключи❔':
@@ -4395,7 +4373,7 @@ def bot_message(message):
                     'Vless': 11,
                     'Vless 1': 11,
                     'Vless 2': 12,
-                    'Trojan': 10,
+                    'Trojan': 13,
                 }
                 target_level = key_input_levels.get(message.text)
                 if target_level is not None:
@@ -4403,24 +4381,10 @@ def bot_message(message):
                     bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=_reply_keyboard(("🔙 Назад",)))
                     return
 
-            if level == 9:
+            key_install_proto = {5: 'shadowsocks', 9: 'vmess', 11: 'vless', 12: 'vless2', 13: 'trojan'}.get(level)
+            if key_install_proto:
                 set_menu_state(0)
-                _install_proxy_from_message(message, 'vmess', message.text, main)
-                return
-
-            if level == 10:
-                set_menu_state(0)
-                _install_proxy_from_message(message, 'trojan', message.text, main)
-                return
-
-            if level == 11:
-                set_menu_state(0)
-                _install_proxy_from_message(message, 'vless', message.text, main)
-                return
-
-            if level == 12:
-                set_menu_state(0)
-                _install_proxy_from_message(message, 'vless2', message.text, main)
+                _install_proxy_from_message(message, key_install_proto, message.text, main)
                 return
 
             if message.text == '🌐 Через браузер':
@@ -4894,7 +4858,7 @@ def main():
     _daemonize_process()
     _register_signal_handlers()
     _write_runtime_log('main() entered', mode='w')
-    _cleanup_pool_probe_runtime(kill_processes=True)
+    _runner_cleanup_pool_probe_runtime(kill_processes=True)
     start_http_server()
     try:
         _write_all_proxy_core_config()
