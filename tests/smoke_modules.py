@@ -146,6 +146,21 @@ def test_web_post_actions_helpers():
     assert web_post_actions.dispatch({}, '/pool_add', {}) is None
 
 
+def test_web_action_feature_gates():
+    calls = []
+    disabled_ctx = {
+        'pool_actions_enabled': False,
+        'custom_checks_enabled': False,
+        'probe_all_pool_keys_async': lambda **kwargs: calls.append('pool-probe'),
+        'add_custom_check': lambda **kwargs: calls.append('custom-check'),
+    }
+    assert web_post_actions.dispatch(disabled_ctx, '/pool_probe', {}) is None
+    assert web_post_actions.dispatch(disabled_ctx, '/custom_check_add', {}) is None
+    probe = web_get_actions.dispatch({'pool_enabled': True, 'get_pool_probe_progress': lambda: {'running': False, 'total': 0}}, '/api/pool_probe')
+    assert probe['payload']['status'] == 'idle'
+    assert calls == []
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     current_keys = {'vless': 'key'}
@@ -401,6 +416,7 @@ def main():
     test_web_template_scripts_helpers()
     test_web_form_template_smoke()
     test_web_post_actions_helpers()
+    test_web_action_feature_gates()
     print('smoke_modules: ok')
 
 
