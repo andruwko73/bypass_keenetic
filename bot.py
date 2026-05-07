@@ -74,6 +74,7 @@ import key_pool_store
 import key_pool_web
 import telegram_pool_ui
 import web_pool_form_blocks
+import telegram_key_ui
 from telegram_confirm import (
     TELEGRAM_CONFIRM_LEVEL,
     telegram_confirm_prompt as _telegram_confirm_prompt,
@@ -480,8 +481,6 @@ RUNTIME_ERROR_LOG_PATHS = [
     '/opt/etc/bot/error.log',
 ]
 MENU_STATE_UNSET = object()
-TELEGRAM_KEY_INPUT_LEVELS = {'Shadowsocks': 5, 'Vmess': 9, 'Vless': 11, 'Vless 1': 11, 'Vless 2': 12, 'Trojan': 13}
-TELEGRAM_KEY_INSTALL_PROTOCOLS = {5: 'shadowsocks', 9: 'vmess', 11: 'vless', 12: 'vless2', 13: 'trojan'}
 chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
 chat_pool_pages = {}
@@ -1349,14 +1348,7 @@ def _build_main_menu_markup():
 
 
 def _build_keys_menu_markup():
-    return _reply_keyboard(
-        ("Shadowsocks", "Vmess"),
-        ("Vless 1", "Vless 2"),
-        ("Trojan",),
-        ("Где брать ключи❔", "📦 Пул ключей"),
-        ("🌐 Через браузер",),
-        ("🔙 Назад",),
-    )
+    return _reply_keyboard(*telegram_key_ui.key_menu_rows(include_pool=True))
 
 
 def _build_service_menu_markup():
@@ -4319,7 +4311,7 @@ def bot_message(message):
 
             if level == 8:
                 # значит это ключи и мосты
-                if message.text == 'Где брать ключи❔':
+                if message.text == telegram_key_ui.KEY_HELP_TEXT:
                     url = _raw_github_url('keys.md')
                     try:
                         keys = _fetch_remote_text(url)
@@ -4329,22 +4321,20 @@ def bot_message(message):
                     bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
                     set_menu_state(8)
 
-                target_level = TELEGRAM_KEY_INPUT_LEVELS.get(message.text)
+                target_level = telegram_key_ui.key_input_level(message.text, trojan_level=13)
                 if target_level is not None:
                     set_menu_state(target_level)
-                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=_reply_keyboard(("🔙 Назад",)))
+                    bot.send_message(message.chat.id, telegram_key_ui.KEY_COPY_PROMPT, reply_markup=_reply_keyboard(("🔙 Назад",)))
                     return
 
-            key_install_proto = TELEGRAM_KEY_INSTALL_PROTOCOLS.get(level)
+            key_install_proto = telegram_key_ui.key_install_protocol(level, trojan_level=13)
             if key_install_proto:
                 set_menu_state(0)
                 _install_proxy_from_message(message, key_install_proto, message.text, main)
                 return
 
-            if message.text == '🌐 Через браузер':
-                bot.send_message(message.chat.id,
-                                 f'Откройте в браузере: http://{routerip}:{browser_port}/\n'
-                                 'Введите ключ Shadowsocks, Vmess, Vless 1, Vless 2 или Trojan на странице.', reply_markup=main)
+            if message.text == telegram_key_ui.KEY_BROWSER_TEXT:
+                bot.send_message(message.chat.id, telegram_key_ui.browser_hint(routerip, browser_port), reply_markup=main)
                 return
 
             if _handle_install_menu_message(message, set_menu_state):

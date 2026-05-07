@@ -18,6 +18,7 @@ import web_template_scripts
 import web_post_actions
 import telegram_confirm
 import telegram_install_ui
+import telegram_key_ui
 import pool_probe_controller
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
@@ -203,6 +204,16 @@ def test_telegram_install_ui_helpers():
     assert telegram_install_ui.install_action_for_text('♻️ Установка / переустановка (ветка main)', include_web_only=True) == 'update_main'
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (ветка independent)', include_web_only=True) == 'update_independent'
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (без Telegram бота)', include_web_only=True) == 'update_no_bot'
+
+
+def test_telegram_key_ui_helpers():
+    assert telegram_key_ui.key_menu_rows()[0] == ('Shadowsocks', 'Vmess')
+    assert ('📦 Пул ключей' in telegram_key_ui.key_menu_rows(include_pool=True)[3])
+    assert telegram_key_ui.key_input_level('Trojan', trojan_level=13) == 13
+    assert telegram_key_ui.key_input_level('Vless 2', trojan_level=13) == 12
+    assert telegram_key_ui.key_install_protocol(13, trojan_level=13) == 'trojan'
+    assert telegram_key_ui.key_install_protocol(12, trojan_level=13) == 'vless2'
+    assert 'http://192.168.1.1:8080/' in telegram_key_ui.browser_hint('192.168.1.1', 8080)
 
 
 def test_pool_probe_controller_helpers():
@@ -509,6 +520,7 @@ def main():
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
     test_telegram_install_ui_helpers()
+    test_telegram_key_ui_helpers()
     test_pool_probe_controller_helpers()
     print('smoke_modules: ok')
 
