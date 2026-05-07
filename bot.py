@@ -2648,35 +2648,19 @@ def _pool_key_display_name(key_value):
     return label or 'Ключ прокси'
 
 
-POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
+POOL_PROTOCOL_ORDER = key_pool_web.POOL_PROTOCOL_ORDER
 # Telegram прокручивает reply-клавиатуру целиком, без закрепления нижних строк.
 # Поэтому показываем весь пул в одной прокручиваемой клавиатуре, а служебные
 # кнопки добавляем после списка ключей.
 POOL_PAGE_SIZE = telegram_pool_ui.POOL_PAGE_SIZE
-POOL_PROTOCOL_LABELS = {
-    'shadowsocks': 'Shadowsocks',
-    'vmess': 'Vmess',
-    'vless': 'Vless 1',
-    'vless2': 'Vless 2',
-    'trojan': 'Trojan',
-}
-POOL_PROTOCOL_BUTTON_PREFIXES = telegram_pool_ui.POOL_PROTOCOL_BUTTON_PREFIXES
-TELEGRAM_BUTTON_ICON = telegram_pool_ui.TELEGRAM_BUTTON_ICON
-YOUTUBE_BUTTON_ICON = telegram_pool_ui.YOUTUBE_BUTTON_ICON
 
 
 def _pool_proto_label(proto):
     return key_pool_web.pool_proto_label(proto)
 
 
-def _pool_proto_button_prefix(proto):
-    return telegram_pool_ui.pool_proto_button_prefix(proto)
 def _pool_proto_from_button_prefix(prefix):
     return telegram_pool_ui.pool_proto_from_button_prefix(prefix)
-def _shorten_button_text(text, limit=38):
-    return telegram_pool_ui.shorten_button_text(text, limit)
-def _pool_add_page_controls(markup, info):
-    telegram_pool_ui.add_page_controls(types, markup, info)
 def _pool_protocol_markup():
     return telegram_pool_ui.pool_protocol_markup(types, [_pool_proto_label(proto) for proto in POOL_PROTOCOL_ORDER])
 def _resolve_pool_protocol(text):
@@ -2692,7 +2676,7 @@ def _resolve_pool_protocol(text):
         'vless2': 'vless2',
         'trojan': 'trojan',
     }
-    for proto, label in POOL_PROTOCOL_LABELS.items():
+    for proto, label in key_pool_web.POOL_PROTOCOL_LABELS.items():
         aliases[label.lower()] = proto
         aliases[f'📦 {label}'.lower()] = proto
     return aliases.get(value)
@@ -2737,10 +2721,6 @@ def _pool_clear_confirm_markup():
     return telegram_pool_ui.pool_clear_confirm_markup(types)
 def _pool_input_markup():
     return telegram_pool_ui.pool_input_markup(types)
-def _pool_probe_text(probe):
-    return telegram_pool_ui.pool_probe_text(probe)
-def _pool_probe_button_text(probe):
-    return telegram_pool_ui.pool_probe_button_text(probe)
 def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto=None, action='apply'):
     return telegram_pool_ui.pool_key_button_label(
         index,
