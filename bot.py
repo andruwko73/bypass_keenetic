@@ -9,7 +9,6 @@
 
 import subprocess
 import os
-import ipaddress
 import re
 import stat
 import sys
@@ -143,7 +142,13 @@ from web_command_state import (
     set_flash_message as _set_flash_message_impl,
     start_command as _start_command_state,
 )
-from web_http_common import WebRequestMixin
+from web_http_common import (
+    WebRequestMixin,
+    config_web_auth_token as _web_config_auth_token,
+    config_web_auth_user as _web_config_auth_user,
+    is_local_web_client as _web_is_local_client,
+    resolve_bind_host as _web_resolve_bind_host,
+)
 import web_form_blocks
 import web_get_actions
 import web_post_actions
@@ -507,34 +512,6 @@ MENU_STATE_UNSET = object()
 chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
 chat_pool_pages = {}
-
-
-def _is_local_web_client(address):
-    try:
-        ip_obj = ipaddress.ip_address((address or '').strip())
-    except ValueError:
-        return False
-    return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
-
-
-def _get_web_auth_token():
-    if bool(getattr(config, 'web_auth_disabled', False)):
-        return ''
-
-    return str(getattr(config, 'web_auth_token', '') or '').strip()
-
-
-def _resolve_web_bind_host():
-    candidate = str(routerip or '').strip()
-    if not candidate:
-        return ''
-    try:
-        ip_obj = ipaddress.ip_address(candidate)
-    except ValueError:
-        return ''
-    if ip_obj.is_unspecified:
-        return ''
-    return candidate
 
 
 def _normalize_username(value):
@@ -4219,9 +4196,9 @@ def _web_get_context(handler):
 
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
-    local_client_checker = staticmethod(_is_local_web_client)
-    web_auth_token_getter = staticmethod(_get_web_auth_token)
-    web_auth_user_getter = staticmethod(lambda: str(getattr(config, 'web_auth_user', 'admin') or 'admin'))
+    local_client_checker = staticmethod(_web_is_local_client)
+    web_auth_token_getter = staticmethod(lambda: _web_config_auth_token(config))
+    web_auth_user_getter = staticmethod(lambda: _web_config_auth_user(config))
     flash_message_setter = staticmethod(_set_web_flash_message)
 
     def _build_form(self, message=''):
@@ -4411,7 +4388,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
 def start_http_server():
     global web_httpd
     try:
-        bind_host = _resolve_web_bind_host()
+        bind_host = _web_resolve_bind_host(routerip)
         class ReusableThreadingHTTPServer(ThreadingHTTPServer):
             allow_reuse_address = True
 

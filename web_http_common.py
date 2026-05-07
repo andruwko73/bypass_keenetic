@@ -1,9 +1,41 @@
 import base64
+import ipaddress
 import json
 import re
 import secrets
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs
+
+
+def is_local_web_client(address):
+    try:
+        ip_obj = ipaddress.ip_address((address or '').strip())
+    except ValueError:
+        return False
+    return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+
+
+def resolve_bind_host(candidate):
+    candidate = str(candidate or '').strip()
+    if not candidate:
+        return ''
+    try:
+        ip_obj = ipaddress.ip_address(candidate)
+    except ValueError:
+        return ''
+    if ip_obj.is_unspecified:
+        return ''
+    return candidate
+
+
+def config_web_auth_token(config_module):
+    if bool(getattr(config_module, 'web_auth_disabled', False)):
+        return ''
+    return str(getattr(config_module, 'web_auth_token', '') or '').strip()
+
+
+def config_web_auth_user(config_module, default='admin'):
+    return str(getattr(config_module, 'web_auth_user', default) or default)
 
 
 class WebRequestMixin:

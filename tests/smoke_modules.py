@@ -13,6 +13,7 @@ import web_get_actions
 import web_command_state
 import web_form_blocks
 import web_form_template
+import web_http_common
 import web_pool_form_blocks
 import web_template_styles
 import web_template_scripts
@@ -319,6 +320,24 @@ def test_web_command_state_helpers():
     assert web_command_state.consume_flash_message(lock, state) == ''
 
 
+def test_web_http_common_helpers():
+    class _Config:
+        web_auth_user = 'root'
+        web_auth_token = ' secret '
+        web_auth_disabled = False
+
+    assert web_http_common.is_local_web_client('192.168.1.2')
+    assert web_http_common.is_local_web_client('127.0.0.1')
+    assert not web_http_common.is_local_web_client('8.8.8.8')
+    assert web_http_common.resolve_bind_host('192.168.1.1') == '192.168.1.1'
+    assert web_http_common.resolve_bind_host('0.0.0.0') == ''
+    assert web_http_common.resolve_bind_host('bad') == ''
+    assert web_http_common.config_web_auth_token(_Config) == 'secret'
+    assert web_http_common.config_web_auth_user(_Config) == 'root'
+    _Config.web_auth_disabled = True
+    assert web_http_common.config_web_auth_token(_Config) == ''
+
+
 def test_installer_common_helpers():
     form = {'web_auth_user': ' ', 'web_auth_token': ' secret '}
     installer_common.normalize_web_auth_form(form)
@@ -596,6 +615,7 @@ def main():
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()
     test_web_command_state_helpers()
+    test_web_http_common_helpers()
     test_installer_common_helpers()
     test_key_pool_web()
     test_key_pool_subscription_helpers()
