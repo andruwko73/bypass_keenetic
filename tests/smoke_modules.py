@@ -323,6 +323,7 @@ def test_web_form_blocks_helpers():
     assert web_form_blocks.proxy_mode_label('none') == 'Без прокси'
     assert web_form_blocks.js_bool(True) == 'true'
     assert web_form_blocks.js_bool(False) == 'false'
+    assert 'csrf_token' in web_form_blocks.render_csrf_input('token')
     assert 'notice-result' in web_form_blocks.render_message_block('ok')
     assert web_form_blocks.render_message_block('', live=False) == ''
     assert 'hidden' in web_form_blocks.render_message_block('', live=True)
@@ -339,6 +340,8 @@ def test_web_form_blocks_helpers():
     )
     assert 'restart_services' in command_buttons
     assert 'csrf_token' in command_buttons
+    router_buttons = web_form_blocks.render_router_command_buttons('<input name="csrf_token">', dns_override_active=True)
+    assert 'DNS Override ВКЛ' in router_buttons and 'success-button' in router_buttons
     tabs, panels = web_form_blocks.render_unblock_lists(
         [{'name': 'custom', 'label': 'Custom', 'content': 'one\n\n two'}],
         '<input name="csrf_token">',

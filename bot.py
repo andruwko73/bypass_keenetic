@@ -4395,7 +4395,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         list_route_label = _transparent_list_route_label()
 
         csrf_token = self._get_or_create_csrf_token()
-        csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
+        csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
         mode_picker_block = web_form_blocks.render_button_mode_picker(
             proxy_mode,
             csrf_input_html=csrf_input_html,
@@ -4454,14 +4454,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
 
         dns_override_active = _dns_override_enabled()
         update_buttons_html = web_form_blocks.render_update_buttons(csrf_input_html)
-        command_buttons = [
-            ('restart_services', 'Перезапустить сервисы', '', 'Перезапустить сервисы?', 'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть.'),
-            ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else '', 'Включить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
-            ('dns_off', 'DNS Override ВЫКЛ', 'danger', 'Выключить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
-            ('remove', 'Удалить компоненты', 'danger', 'Удалить компоненты?', 'Будут удалены установленные компоненты программы. Настройки роутера могут измениться.'),
-            ('reboot', 'Перезагрузить роутер', 'danger', 'Перезагрузить роутер?', 'Связь с веб-интерфейсом временно пропадет.'),
-        ]
-        command_buttons_html = web_form_blocks.render_command_button_forms(command_buttons, csrf_input_html)
+        command_buttons_html = web_form_blocks.render_router_command_buttons(csrf_input_html, dns_override_active)
 
         unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
             unblock_lists,

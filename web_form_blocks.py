@@ -34,6 +34,10 @@ def proxy_mode_label(proxy_mode, none_label='Без прокси'):
     }.get(proxy_mode, proxy_mode)
 
 
+def render_csrf_input(csrf_token):
+    return f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
+
+
 def render_message_block(message, *, live=False):
     if message:
         safe_message = html.escape(message)
@@ -192,6 +196,19 @@ def render_command_button_forms(command_buttons, csrf_input_html):
             <button type="submit" class="{html.escape(button_class)}">{html.escape(label)}</button>
         </form>'''
         for command, label, button_class, confirm_title, confirm_message in command_buttons
+    )
+
+
+def render_router_command_buttons(csrf_input_html, dns_override_active=False):
+    return render_command_button_forms(
+        [
+            ('restart_services', 'Перезапустить сервисы', '', 'Перезапустить сервисы?', 'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть.'),
+            ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else '', 'Включить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
+            ('dns_off', 'DNS Override ВЫКЛ', 'danger', 'Выключить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
+            ('remove', 'Удалить компоненты', 'danger', 'Удалить компоненты?', 'Будут удалены установленные компоненты программы. Настройки роутера могут измениться.'),
+            ('reboot', 'Перезагрузить роутер', 'danger', 'Перезагрузить роутер?', 'Связь с веб-интерфейсом временно пропадет.'),
+        ],
+        csrf_input_html,
     )
 
 
