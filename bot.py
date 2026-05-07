@@ -1351,14 +1351,31 @@ def _build_keys_menu_markup():
     return _reply_keyboard(*telegram_key_ui.key_menu_rows(include_pool=True))
 
 
-def _send_key_help_message(message, reply_markup, set_menu_state):
-    try:
-        keys = _fetch_remote_text(_raw_github_url('keys.md'))
-    except requests.RequestException as exc:
-        bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить справку по ключам: {exc}', reply_markup=reply_markup)
-        return
-    bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
-    set_menu_state(8)
+def _handle_key_menu_message(message, level, set_menu_state, reply_markup):
+    if level == 8:
+        if message.text == telegram_key_ui.KEY_HELP_TEXT:
+            try:
+                keys = _fetch_remote_text(_raw_github_url('keys.md'))
+            except requests.RequestException as exc:
+                bot.send_message(message.chat.id, f'⚠️ Не удалось загрузить справку по ключам: {exc}', reply_markup=reply_markup)
+                return True
+            bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
+            set_menu_state(8)
+            return True
+        target_level = telegram_key_ui.key_input_level(message.text, trojan_level=13)
+        if target_level is not None:
+            set_menu_state(target_level)
+            bot.send_message(message.chat.id, telegram_key_ui.KEY_COPY_PROMPT, reply_markup=_reply_keyboard(("🔙 Назад",)))
+            return True
+    key_install_proto = telegram_key_ui.key_install_protocol(level, trojan_level=13)
+    if key_install_proto:
+        set_menu_state(0)
+        _install_proxy_from_message(message, key_install_proto, message.text, reply_markup)
+        return True
+    if message.text == telegram_key_ui.KEY_BROWSER_TEXT:
+        bot.send_message(message.chat.id, telegram_key_ui.browser_hint(routerip, browser_port), reply_markup=reply_markup)
+        return True
+    return False
 
 
 def _build_service_menu_markup():
@@ -4319,25 +4336,7 @@ def bot_message(message):
                 _send_pool_page(message.chat.id, proto, page=page, prefix=result)
                 return
 
-            if level == 8:
-                if message.text == telegram_key_ui.KEY_HELP_TEXT:
-                    _send_key_help_message(message, main, set_menu_state)
-                    return
-
-                target_level = telegram_key_ui.key_input_level(message.text, trojan_level=13)
-                if target_level is not None:
-                    set_menu_state(target_level)
-                    bot.send_message(message.chat.id, telegram_key_ui.KEY_COPY_PROMPT, reply_markup=_reply_keyboard(("🔙 Назад",)))
-                    return
-
-            key_install_proto = telegram_key_ui.key_install_protocol(level, trojan_level=13)
-            if key_install_proto:
-                set_menu_state(0)
-                _install_proxy_from_message(message, key_install_proto, message.text, main)
-                return
-
-            if message.text == telegram_key_ui.KEY_BROWSER_TEXT:
-                bot.send_message(message.chat.id, telegram_key_ui.browser_hint(routerip, browser_port), reply_markup=main)
+            if _handle_key_menu_message(message, level, set_menu_state, main):
                 return
 
             if _handle_install_menu_message(message, set_menu_state):
