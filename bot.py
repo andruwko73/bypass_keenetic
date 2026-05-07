@@ -2922,6 +2922,27 @@ def _send_pool_delete_page(chat_id, proto, page=0, prefix=None):
     bot.send_message(chat_id, text, reply_markup=_pool_delete_markup(proto, info['page']))
 
 
+def _show_pool_protocol_menu(message, set_menu_state, clear_inline=True):
+    set_menu_state(20, None)
+    if clear_inline:
+        _clear_pool_inline_keyboard(message.chat.id)
+    _clear_pool_page(message.chat.id)
+    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+
+
+def _return_to_key_menu_from_pool(message, set_menu_state):
+    set_menu_state(8, None)
+    _clear_pool_page(message.chat.id)
+    bot.send_message(message.chat.id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
+
+
+def _pool_state_proto_or_menu(message, bypass, set_menu_state, clear_inline=True):
+    proto = _resolve_pool_protocol(bypass)
+    if not proto:
+        _show_pool_protocol_menu(message, set_menu_state, clear_inline=clear_inline)
+    return proto
+
+
 def _pool_keys_for_proto(proto):
     pools = _ensure_current_keys_in_pools()
     return list(pools.get(proto, []) or [])
@@ -4014,9 +4035,7 @@ def bot_message(message):
 
             if level == 20:
                 if message.text == '🔙 В меню ключей':
-                    set_menu_state(8, None)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
+                    _return_to_key_menu_from_pool(message, set_menu_state)
                     return
                 proto = _resolve_pool_protocol(message.text)
                 if not proto:
@@ -4027,18 +4046,12 @@ def bot_message(message):
                 return
 
             if level == 21:
-                proto = _resolve_pool_protocol(bypass)
+                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
                 if not proto:
-                    set_menu_state(20, None)
-                    _clear_pool_inline_keyboard(message.chat.id)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 page = _get_pool_page(message.chat.id)
                 if message.text == '🔙 В меню ключей':
-                    set_menu_state(8, None)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, '🔑 Ключи и мосты', reply_markup=_build_keys_menu_markup())
+                    _return_to_key_menu_from_pool(message, set_menu_state)
                     return
                 selected_proto = _resolve_pool_protocol(message.text)
                 if selected_proto:
@@ -4046,10 +4059,7 @@ def bot_message(message):
                     _send_pool_page(message.chat.id, selected_proto, page=0)
                     return
                 if message.text == '🔙 К выбору протокола':
-                    set_menu_state(20, None)
-                    _clear_pool_inline_keyboard(message.chat.id)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+                    _show_pool_protocol_menu(message, set_menu_state)
                     return
                 page_delta = _pool_reply_page_delta(message.text)
                 if page_delta:
@@ -4159,12 +4169,8 @@ def bot_message(message):
                 return
 
             if level == 22:
-                proto = _resolve_pool_protocol(bypass)
+                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
                 if not proto:
-                    set_menu_state(20, None)
-                    _clear_pool_inline_keyboard(message.chat.id)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 if message.text == '🔙 К пулу':
                     set_menu_state(21)
@@ -4181,12 +4187,8 @@ def bot_message(message):
                 return
 
             if level == 23:
-                proto = _resolve_pool_protocol(bypass)
+                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
                 if not proto:
-                    set_menu_state(20, None)
-                    _clear_pool_inline_keyboard(message.chat.id)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 if message.text == '🔙 К пулу':
                     set_menu_state(21)
@@ -4206,11 +4208,8 @@ def bot_message(message):
                 return
 
             if level == 26:
-                proto = _resolve_pool_protocol(bypass)
+                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state, clear_inline=False)
                 if not proto:
-                    set_menu_state(20, None)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 page = _get_pool_page(message.chat.id)
                 if message.text == '✅ Очистить пул':
@@ -4226,12 +4225,8 @@ def bot_message(message):
                 return
 
             if level == 24:
-                proto = _resolve_pool_protocol(bypass)
+                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
                 if not proto:
-                    set_menu_state(20, None)
-                    _clear_pool_inline_keyboard(message.chat.id)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 try:
                     index, key_value = _pool_key_by_index(proto, message.text)
@@ -4244,12 +4239,8 @@ def bot_message(message):
                 return
 
             if level == 25:
-                proto = _resolve_pool_protocol(bypass)
+                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
                 if not proto:
-                    set_menu_state(20, None)
-                    _clear_pool_inline_keyboard(message.chat.id)
-                    _clear_pool_page(message.chat.id)
-                    bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
                     return
                 page = _get_pool_page(message.chat.id)
                 if message.text in ('🔙 К пулу', '🔙 Назад'):
