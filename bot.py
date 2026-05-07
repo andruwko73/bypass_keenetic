@@ -164,11 +164,6 @@ def _youtube_icon_html(opacity=1.0):
     return f'<img src="data:image/svg+xml;base64,{YOUTUBE_SVG_B64}" width="16" height="16" alt="YouTube" style="{style}">'
 
 
-def _chatgpt_icon_html(opacity=1.0):
-    style = f'vertical-align:middle;opacity:{opacity:g}'
-    return f'<img src="/static/service-icons/chatgpt.png" width="18" height="18" alt="ChatGPT" style="{style}">'
-
-
 def _service_icon_path(icon):
     icon = re.sub(r'[^a-z0-9_-]+', '', (icon or '').lower())
     if not icon:
@@ -191,10 +186,6 @@ def _load_key_pools():
 
 def _dedupe_key_list(keys):
     return key_pool_store.dedupe_key_list(keys)
-
-
-def _normalize_key_pools(pools):
-    return key_pool_store.normalize_key_pools(pools)
 
 
 def _save_key_pools(pools):
@@ -2465,56 +2456,6 @@ def _read_tail(file_path, lines=12):
         return f'Не удалось прочитать {file_path}: {exc}'
 
 
-def _v2ray_diagnostics():
-    config_path = CORE_PROXY_CONFIG_PATH
-    error_path = CORE_PROXY_ERROR_LOG
-    diagnostics = []
-    if not os.path.exists(config_path):
-        diagnostics.append(f'Конфигурация v2ray не найдена: {config_path}')
-    else:
-        try:
-            with open(config_path, 'r', encoding='utf-8') as file:
-                config_data = json.load(file)
-            inbounds = config_data.get('inbounds', [])
-            ports = [str(inbound.get('port', '?')) for inbound in inbounds]
-            details = [f'{port}({inbound.get("protocol", "?")})' for inbound, port in zip(inbounds, ports)]
-            socks_status = []
-            for inbound in inbounds:
-                if inbound.get('protocol') == 'socks':
-                    port = inbound.get('port')
-                    if port:
-                        socks_status.append(f'{port}:sock5={"ok" if _check_socks5_handshake(port) else "fail"}')
-            if socks_status:
-                details.append('socks:' + ','.join(socks_status))
-            outbounds = []
-            for outbound in config_data.get('outbounds', []):
-                tag = outbound.get('tag', '')
-                protocol = outbound.get('protocol', '')
-                if protocol in ['vless', 'vmess']:
-                    vnext = outbound.get('settings', {}).get('vnext', [])
-                    if vnext:
-                        entry = vnext[0]
-                        addr = entry.get('address', '')
-                        port = entry.get('port', '')
-                        outbounds.append(f'{tag}:{protocol}->{addr}:{port}')
-                    else:
-                        outbounds.append(f'{tag}:{protocol}')
-                else:
-                    outbounds.append(f'{tag}:{protocol}')
-            summary = f'Конфиг v2ray валиден. inbounds: {", ".join(ports)}'
-            if details:
-                summary += f' ({"; ".join(details)})'
-            if outbounds:
-                summary += f'; outbounds: {", ".join(outbounds)}'
-            diagnostics.append(summary)
-        except Exception as exc:
-            diagnostics.append(f'Ошибка парсинга конфига v2ray: {exc}')
-    error_tail = _read_tail(error_path, lines=12)
-    if error_tail:
-        diagnostics.append(f'Последние строки лога v2ray ({error_path}):\n{error_tail}')
-    return ' '.join(diagnostics)
-
-
 def _format_proxy_key_summary(key_type, key_value):
     if key_type == 'shadowsocks':
         server, port, method, password = _decode_shadowsocks_uri(key_value)
@@ -2544,30 +2485,6 @@ def _format_proxy_key_summary(key_type, key_value):
                     type=data['type'],
                     password_len=len(data['password']))
     return ''
-
-
-def _v2ray_outbound_summary(vmess_key=None, vless_key=None):
-    try:
-        config_data = _build_v2ray_config(vmess_key, vless_key)
-        lines = []
-        for outbound in config_data.get('outbounds', []):
-            tag = outbound.get('tag', '')
-            protocol = outbound.get('protocol', '')
-            stream = outbound.get('streamSettings', {})
-            if protocol in ['vless', 'vmess']:
-                vnext = outbound.get('settings', {}).get('vnext', [])
-                if vnext:
-                    entry = vnext[0]
-                    addr = entry.get('address', '')
-                    port = entry.get('port', '')
-                    lines.append(f'{tag}:{protocol} -> {addr}:{port} stream={stream}')
-                else:
-                    lines.append(f'{tag}:{protocol} stream={stream}')
-            else:
-                lines.append(f'{tag}:{protocol} stream={stream}')
-        return ' '.join(lines)
-    except Exception as exc:
-        return f'Не удалось построить сводный outbound-конфиг: {exc}'
 
 
 def _parse_trojan_key(key):
@@ -2810,11 +2727,6 @@ def _send_pool_delete_page(chat_id, proto, page=0, prefix=None):
     text, info = _format_pool_page(proto, page, prefix=prefix)
     _set_pool_page(chat_id, info['page'])
     bot.send_message(chat_id, text, reply_markup=_pool_delete_markup(proto, info['page']))
-
-
-def _send_pool_details(chat_id, proto, prefix=None, suffix=None, reply_markup=None):
-    parts = [part for part in (prefix, _format_pool_details(proto), suffix) if part]
-    _send_telegram_chunks(chat_id, '\n\n'.join(parts), reply_markup=reply_markup)
 
 
 def _pool_keys_for_proto(proto):
@@ -3379,15 +3291,6 @@ def _check_local_proxy_endpoint(key_type, port):
     return True, ''
 
 
-def _shadowsocks_runtime_mode():
-    init_script = _read_text_file('/opt/etc/init.d/S22shadowsocks')
-    if 'PROCS=ss-redir' in init_script or 'ss-redir' in init_script:
-        return 'redir'
-    if 'PROCS=ss-local' in init_script or 'ss-local' in init_script:
-        return 'socks'
-    return 'unknown'
-
-
 def _apply_installed_proxy(key_type, key_value, verify=True):
     settings = {
         'shadowsocks': {
@@ -3669,13 +3572,6 @@ def _placeholder_web_status_snapshot():
 
 def _protocol_status_snapshot(current_keys, force_refresh=False):
     return _build_status_snapshot(current_keys, force_refresh=force_refresh)['protocols']
-
-
-def _cached_protocol_status_snapshot(current_keys):
-    snapshot = _cached_status_snapshot(current_keys)
-    if snapshot is not None:
-        return snapshot['protocols']
-    return None
 
 
 def _refresh_status_caches_async(current_keys):
