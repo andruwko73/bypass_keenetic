@@ -20,6 +20,7 @@ import telegram_confirm
 import telegram_install_ui
 import telegram_key_ui
 import pool_probe_controller
+import proxy_status
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -287,6 +288,19 @@ def test_pool_probe_controller_helpers():
     assert collected == ['gc']
 
 
+def test_proxy_status_runtime_helpers():
+    assert proxy_status.port_is_listening(
+        8080,
+        command_runner=lambda *args, **kwargs: 'tcp 0 0 0.0.0.0:8080 0.0.0.0:* LISTEN\n',
+    )
+    tail_path = ROOT / 'tests' / '_tail.tmp'
+    try:
+        tail_path.write_text('one\ntwo\nthree\n', encoding='utf-8')
+        assert proxy_status.read_tail(tail_path, lines=2) == 'two\nthree'
+    finally:
+        tail_path.unlink(missing_ok=True)
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     current_keys = {'vless': 'key'}
@@ -535,6 +549,7 @@ def test_telegram_pool_ui():
 
 def main():
     test_proxy_config_builder()
+    test_proxy_status_runtime_helpers()
     test_key_pool_web()
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()

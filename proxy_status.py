@@ -1,3 +1,6 @@
+import os
+import socket
+import subprocess
 import time
 
 
@@ -13,6 +16,80 @@ TRANSIENT_STATUS_MARKERS = (
     'failed to establish a new connection',
     'connection reset',
 )
+
+
+def wait_for_port(hosts, port, timeout=15, *, sleep=time.sleep):
+    if hosts is None:
+        hosts = ['127.0.0.1', '::1', 'localhost']
+    elif isinstance(hosts, str):
+        hosts = [hosts]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for host in hosts:
+            try:
+                addrs = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
+            except OSError:
+                continue
+            for family, socktype, proto, canonname, sockaddr in addrs:
+                try:
+                    with socket.socket(family, socktype, proto) as sock:
+                        sock.settimeout(2)
+                        sock.connect(sockaddr)
+                        return True
+                except OSError:
+                    continue
+        sleep(1)
+    return False
+
+
+def port_is_listening(port, *, command_runner=subprocess.check_output):
+    for command in (['netstat', '-ltn'], ['ss', '-ltn']):
+        try:
+            output = command_runner(command, stderr=subprocess.DEVNULL, text=True)
+            if any(f':{port} ' in line or line.endswith(f':{port}') for line in output.splitlines()):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def check_socks5_handshake(port, timeout=3):
+    try:
+        with socket.create_connection(('127.0.0.1', int(port)), timeout=timeout) as sock:
+            sock.sendall(b'\x05\x01\x00')
+            return sock.recv(2) == b'\x05\x00'
+    except Exception:
+        return False
+
+
+def wait_for_socks5_handshake(port, timeout=20, *, sleep=time.sleep):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if check_socks5_handshake(port):
+            return True
+        sleep(1)
+    return False
+
+
+def ensure_service_port(port, restart_cmd=None, retries=2, sleep_after_restart=5, timeout=20, *, system_runner=os.system):
+    if wait_for_port(None, port, timeout=timeout) or port_is_listening(port):
+        return True
+    if restart_cmd:
+        for _ in range(retries):
+            system_runner(restart_cmd)
+            time.sleep(sleep_after_restart)
+            if wait_for_port(None, port, timeout=timeout) or port_is_listening(port):
+                return True
+    return False
+
+
+def read_tail(file_path, lines=12):
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
+            content = file.readlines()
+        return ''.join(content[-lines:]).strip() if content else ''
+    except Exception as exc:
+        return f'Не удалось прочитать {file_path}: {exc}'
 
 
 def is_transient_status_text(status_text):

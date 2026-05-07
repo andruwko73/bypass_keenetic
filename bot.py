@@ -49,12 +49,17 @@ from proxy_status import (
     active_mode_status_signature as _status_active_mode_signature,
     cached_active_status as _status_cached_active_status,
     cached_snapshot as _status_cached_snapshot,
+    check_socks5_handshake as _check_socks5_handshake,
+    ensure_service_port as _ensure_service_port,
     is_transient_status_text as _status_is_transient_text,
     placeholder_protocol_statuses as _status_placeholder_protocols,
+    port_is_listening as _port_is_listening,
     protocol_error_status as _status_protocol_error,
+    read_tail as _read_tail,
     status_snapshot_signature as _status_snapshot_signature_impl,
     store_active_status as _status_store_active_status,
     store_snapshot as _status_store_snapshot,
+    wait_for_socks5_handshake as _wait_for_socks5_handshake,
 )
 from unblock_lists import (
     list_label as _unblock_list_label,
@@ -2593,95 +2598,6 @@ def _load_proxy_mode():
     except Exception:
         pass
     return config.default_proxy_mode
-
-
-def _wait_for_port(hosts, port, timeout=15):
-    import socket
-    if hosts is None:
-        hosts = ['127.0.0.1', '::1', 'localhost']
-    elif isinstance(hosts, str):
-        hosts = [hosts]
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        for host in hosts:
-            try:
-                addrs = socket.getaddrinfo(host, int(port), type=socket.SOCK_STREAM)
-            except OSError:
-                continue
-            for family, socktype, proto, canonname, sockaddr in addrs:
-                try:
-                    with socket.socket(family, socktype, proto) as sock:
-                        sock.settimeout(2)
-                        sock.connect(sockaddr)
-                        return True
-                except OSError:
-                    continue
-        time.sleep(1)
-    return False
-
-
-def _port_is_listening(port):
-    try:
-        output = subprocess.check_output(['netstat', '-ltn'], stderr=subprocess.DEVNULL, text=True)
-        for line in output.splitlines():
-            if f':{port} ' in line or line.endswith(f':{port}'):
-                return True
-    except Exception:
-        pass
-    try:
-        output = subprocess.check_output(['ss', '-ltn'], stderr=subprocess.DEVNULL, text=True)
-        for line in output.splitlines():
-            if f':{port} ' in line or line.endswith(f':{port}'):
-                return True
-    except Exception:
-        pass
-    return False
-
-def _check_socks5_handshake(port, timeout=3):
-    import socket
-    try:
-        with socket.create_connection(('127.0.0.1', int(port)), timeout=timeout) as sock:
-            sock.sendall(b'\x05\x01\x00')
-            data = sock.recv(2)
-            return data == b'\x05\x00'
-    except Exception:
-        return False
-
-
-def _wait_for_socks5_handshake(port, timeout=20):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if _check_socks5_handshake(port):
-            return True
-        time.sleep(1)
-    return False
-
-
-def _ensure_service_port(port, restart_cmd=None, retries=2, sleep_after_restart=5, timeout=20):
-    if _wait_for_port(None, port, timeout=timeout):
-        return True
-    if _port_is_listening(port):
-        return True
-    if restart_cmd:
-        for _ in range(retries):
-            os.system(restart_cmd)
-            time.sleep(sleep_after_restart)
-            if _wait_for_port(None, port, timeout=timeout):
-                return True
-            if _port_is_listening(port):
-                return True
-    return False
-
-
-def _read_tail(file_path, lines=12):
-    try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
-            content = file.readlines()
-        if not content:
-            return ''
-        return ''.join(content[-lines:]).strip()
-    except Exception as exc:
-        return f'Не удалось прочитать {file_path}: {exc}'
 
 
 def _format_proxy_key_summary(key_type, key_value):
