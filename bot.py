@@ -2662,22 +2662,6 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
         custom_checks,
         _hash_key,
     )
-def _format_pool_details(proto):
-    current_keys = _load_current_keys()
-    pools = _ensure_current_keys_in_pools(current_keys)
-    cache = _load_key_probe_cache()
-    keys = pools.get(proto, []) or []
-    label = _pool_proto_label(proto)
-    if not keys:
-        return f'📦 {label}: пул пуст.'
-    lines = [f'📦 {label}: {len(keys)} ключей', '* — текущий активный ключ', '']
-    current_key = current_keys.get(proto)
-    for index, key_value in enumerate(keys, start=1):
-        probe = cache.get(_hash_key(key_value), {})
-        lines.append(_pool_key_line(index, key_value, probe=probe, current_key=current_key))
-    return '\n'.join(lines)
-
-
 def _pool_page_info(proto, page=0):
     keys = _pool_keys_for_proto(proto)
     total = len(keys)
@@ -3568,10 +3552,6 @@ def _placeholder_web_status_snapshot():
         'socks_details': '',
         'fallback_reason': _last_proxy_disable_reason(),
     }
-
-
-def _protocol_status_snapshot(current_keys, force_refresh=False):
-    return _build_status_snapshot(current_keys, force_refresh=force_refresh)['protocols']
 
 
 def _refresh_status_caches_async(current_keys):
