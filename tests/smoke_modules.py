@@ -4,6 +4,8 @@ import subprocess
 import sys
 import threading
 
+# ruff: noqa: E402
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -159,7 +161,8 @@ def test_key_pool_web():
     assert row['display_name'] == 'VLESS-KEY'
     assert row['custom'] == {'custom': 'ok'}
     assert row['key'] == 'vless-key'
-    icon_html = lambda icon, alt, opacity=1.0, size=18: f'<img data-icon="{icon}" alt="{alt}">'
+    def icon_html(icon, alt, opacity=1.0, size=18):
+        return f'<img data-icon="{icon}" alt="{alt}">'
     check_defs = [{'id': 'custom', 'label': 'Custom', 'url': 'https://example.com/path', 'icon': 'chat'}]
     assert key_pool_web.custom_check_url_text(check_defs[0]) == 'example.com/path'
     assert 'custom-check-item' in key_pool_web.web_custom_checks_html(check_defs, icon_html)
