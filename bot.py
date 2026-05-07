@@ -350,7 +350,6 @@ POOL_PROBE_MIN_AVAILABLE_KB = 120000
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 3)))
 POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
-POOL_PROBE_PAGE_MAX_KEYS = max(1, int(getattr(config, 'pool_probe_page_max_keys', 12)))
 POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 2))
 POOL_PROBE_TG_READ_TIMEOUT = float(getattr(config, 'pool_probe_tg_read_timeout', 3))
 POOL_PROBE_HTTP_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_http_connect_timeout', 2))
@@ -360,7 +359,6 @@ POOL_PROBE_CUSTOM_READ_TIMEOUT = float(getattr(config, 'pool_probe_custom_read_t
 POOL_PROBE_RETRY_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_retry_connect_timeout', 6))
 POOL_PROBE_RETRY_READ_TIMEOUT = float(getattr(config, 'pool_probe_retry_read_timeout', 10))
 POOL_PROBE_RETRY_DELAY_SECONDS = float(getattr(config, 'pool_probe_retry_delay_seconds', 0.2))
-POOL_PROBE_PAGE_REFRESH_INTERVAL = float(getattr(config, 'pool_probe_page_refresh_interval', 1800))
 POOL_PROBE_SINGLE_TIMEOUT_SECONDS = max(
     8.0,
     POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
@@ -435,9 +433,7 @@ active_mode_status_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 pool_probe_lock = threading.Lock()
-pool_probe_auto_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
-pool_probe_last_auto_started_at = 0
 pool_probe_progress_lock = threading.Lock()
 pool_probe_progress = {
     'running': False,
@@ -3582,35 +3578,6 @@ def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, 
     return _queue_pool_key_probe(tasks, max_keys=max_keys, stale_only=stale_only, missing_only=missing_only, scope=scope)
 
 
-def _probe_pool_keys_on_page_load():
-    """Refresh only stale or missing pool statuses on page open."""
-    global pool_probe_last_auto_started_at
-
-    if POOL_PROBE_PAGE_REFRESH_INTERVAL <= 0:
-        return False, 0
-
-    now = time.time()
-    progress = _get_pool_probe_progress()
-    recent_probe_at = max(float(progress.get('started_at') or 0), float(progress.get('finished_at') or 0))
-    if progress.get('running') or (recent_probe_at and now - recent_probe_at < POOL_PROBE_PAGE_REFRESH_INTERVAL):
-        return False, 0
-
-    with pool_probe_auto_lock:
-        if now - pool_probe_last_auto_started_at < POOL_PROBE_PAGE_REFRESH_INTERVAL:
-            return False, 0
-        pool_probe_last_auto_started_at = now
-
-    started, queued = _probe_all_pool_keys_async(
-        stale_only=False,
-        max_keys=None,
-        missing_only=True,
-        scope='auto_missing',
-    )
-    if started or queued:
-        return started, queued
-    return False, 0
-
-
 def _authorize_callback(call, handler_name):
     proxy = type('CallbackMessageProxy', (), {})()
     proxy.from_user = getattr(call, 'from_user', None)
@@ -4620,7 +4587,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         snapshot = _cached_status_snapshot(current_keys)
         status = snapshot['web'] if snapshot is not None else _placeholder_web_status_snapshot()
         protocol_statuses = snapshot['protocols'] if snapshot is not None else _placeholder_protocol_statuses(current_keys)
-        pool_probe_started, pool_probe_queued = _probe_pool_keys_on_page_load()
         current_pool_probe_progress = _get_pool_probe_progress()
         pool_probe_pending = (
             bool(current_pool_probe_progress.get('running')) and
