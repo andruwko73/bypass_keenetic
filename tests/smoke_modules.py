@@ -9,6 +9,7 @@ import key_pool_web
 import key_pool_store
 import web_get_actions
 import web_form_blocks
+import web_pool_form_blocks
 import web_post_actions
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
@@ -156,8 +157,63 @@ def test_web_form_blocks_helpers():
     assert 'notice-result' in web_form_blocks.render_message_block('ok')
     assert web_form_blocks.render_message_block('', live=False) == ''
     assert 'hidden' in web_form_blocks.render_message_block('', live=True)
-    assert 'mode-choice-grid' in web_form_blocks.render_button_mode_picker('vless')
+    button_picker = web_form_blocks.render_button_mode_picker('vless', csrf_input_html='<input name="csrf_token">')
+    assert 'mode-choice-grid' in button_picker
+    assert 'csrf_token' in button_picker
     assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
+
+
+def test_web_pool_form_blocks_helpers():
+    table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout([{'id': 'chat'}])
+    assert table_class == 'pool-table has-custom-checks'
+    assert custom_width == 32
+    assert mobile_width == 28
+    progress = web_pool_form_blocks.pool_probe_topbar_text(
+        True,
+        {'checked': 1, 'total': 2},
+        lambda data: 'Проверка',
+        'ok',
+    )
+    assert '1/2' in progress
+    pool_rows = web_pool_form_blocks.render_pool_items(
+        key_name='vless',
+        title='Vless 1',
+        pool_keys=['vless://sample'],
+        current_key='vless://sample',
+        key_probe_cache={'hash-vless': {'tg_ok': True}},
+        custom_checks=[],
+        key_display_name=lambda key: 'sample-key',
+        hash_key=lambda key: 'hash-vless',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        custom_check_badges=lambda probe, checks: '',
+        probe_checked_at=lambda probe: 'now',
+        csrf_input_html='<input name="csrf_token" value="token">',
+    )
+    assert 'pool-row-active' in pool_rows
+    assert 'csrf_token' in pool_rows
+    panel = web_pool_form_blocks.render_protocol_panel(
+        key_name='vless',
+        title='Vless 1',
+        rows=3,
+        placeholder='vless://...',
+        current_key_value='vless://sample',
+        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        active_status_icons='',
+        pool_items_html=pool_rows,
+        pool_table_class='pool-table',
+        pool_custom_col_width=32,
+        pool_mobile_custom_col_width=28,
+        custom_header_icons='',
+        custom_presets_html='',
+        custom_checks_html='',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        active=True,
+        csrf_input_html='<input name="csrf_token" value="token">',
+    )
+    assert 'protocol-workspace active' in panel
+    assert 'custom-check-form' in panel
 
 
 def main():
@@ -166,6 +222,7 @@ def main():
     test_key_pool_subscription_helpers()
     test_web_get_actions_helpers()
     test_web_form_blocks_helpers()
+    test_web_pool_form_blocks_helpers()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
 

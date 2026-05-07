@@ -68,6 +68,7 @@ from custom_checks_store import (
 )
 import key_pool_store
 import key_pool_web
+import web_pool_form_blocks
 from probe_cache import (
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
@@ -3066,7 +3067,12 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
         list_route_label = _transparent_list_route_label()
 
-        mode_picker_block = web_form_blocks.render_button_mode_picker(proxy_mode)
+        csrf_token = self._get_or_create_csrf_token()
+        csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
+        mode_picker_block = web_form_blocks.render_button_mode_picker(
+            proxy_mode,
+            csrf_input_html=csrf_input_html,
+        )
 
         protocol_sections = web_form_blocks.PROTOCOL_SECTIONS
         key_pools = _ensure_current_keys_in_pools(current_keys)
@@ -3076,24 +3082,18 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         custom_presets_html = _web_custom_presets_html(custom_checks)
         custom_header_icons = _custom_check_header_icons(custom_checks)
         custom_checks_json = json.dumps(_web_custom_checks(), ensure_ascii=False)
-        if pool_probe_pending:
-            progress_total = int(current_pool_probe_progress.get('total') or 0)
-            progress_checked = int(current_pool_probe_progress.get('checked') or 0)
-            progress_label = _pool_probe_progress_label(current_pool_probe_progress)
-            topbar_status_text = (
-                f'⏳ {progress_label}: {progress_checked}/{progress_total}. '
-                'Статусы обновятся без перезагрузки страницы.'
-            )
-        else:
-            topbar_status_text = status['api_status']
-        pool_table_class = 'pool-table has-custom-checks' if custom_checks else 'pool-table'
-        pool_custom_col_width = 32 * max(1, len(custom_checks))
-        pool_mobile_custom_col_width = max(28, 28 * len(custom_checks))
+        topbar_status_text = web_pool_form_blocks.pool_probe_topbar_text(
+            pool_probe_pending,
+            current_pool_probe_progress,
+            _pool_probe_progress_label,
+            status['api_status'],
+        )
+        pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
+            web_pool_form_blocks.pool_table_layout(custom_checks)
+        )
         protocol_tabs = []
         protocol_panels = []
         for panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
-            safe_value = html.escape(current_keys.get(key_name, ''))
-            safe_title = html.escape(title)
             status_info = protocol_statuses.get(key_name, {'tone': 'empty', 'label': 'Не сохранён', 'details': 'Ключ ещё не сохранён на роутере.'})
             api_ok = status_info.get('api_ok', False)
             current_probe = key_probe_cache.get(_hash_key(current_keys.get(key_name, '')), {})
@@ -3111,155 +3111,52 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 if custom_states.get(check.get('id')) == 'ok'
             ])
             pool_keys = key_pools.get(key_name, [])
-            pool_items_html = ''
-            if pool_keys:
-                for i, pk in enumerate(pool_keys):
-                    safe_pk = html.escape(pk)
-                    display_name = html.escape(_pool_key_display_name(pk))
-                    key_id = _hash_key(pk)[:12]
-                    is_current_key = bool(current_keys.get(key_name) and pk == current_keys.get(key_name))
-                    is_active = 'активен' if is_current_key else ''
-                    active_class = ' pool-row-active' if is_current_key else ''
-                    probe = key_probe_cache.get(_hash_key(pk), {})
-                    if not isinstance(probe, dict):
-                        probe = {}
-                    tg_badge = _telegram_icon_html(opacity=1.0) if probe.get('tg_ok') else (
-                        '<span class="service-probe-mark service-probe-fail">✕</span>'
-                        if 'tg_ok' in probe else
-                        '<span class="service-probe-mark service-probe-unknown">?</span>'
-                    )
-                    yt_badge = _youtube_icon_html(opacity=1.0) if probe.get('yt_ok') else (
-                        '<span class="service-probe-mark service-probe-fail">✕</span>'
-                        if 'yt_ok' in probe else
-                        '<span class="service-probe-mark service-probe-unknown">?</span>'
-                    )
-                    custom_badges = _web_custom_check_badges(probe, custom_checks)
-                    checked_at = html.escape(_web_probe_checked_at(probe))
-                    pool_items_html += f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{key_name}" data-key-id="{key_id}" data-key="{safe_pk}">
-                        <td class="pool-key-cell">
-                            <form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">
-                                <input type="hidden" name="type" value="{key_name}">
-                                <input type="hidden" name="key" value="{safe_pk}">
-                                <button type="submit" class="pool-apply-btn" title="Применить этот ключ">{display_name}</button>
-                            </form>
-                            <span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>{is_active}</span>
-                            <span class="pool-hash">{key_id}</span>
-                        </td>
-                        <td class="pool-service-cell" data-pool-tg>{tg_badge}</td>
-                        <td class="pool-service-cell" data-pool-yt>{yt_badge}</td>
-                        <td class="pool-custom-cell" data-pool-custom>{custom_badges}</td>
-                        <td class="pool-checked-cell" data-pool-checked>{checked_at}</td>
-                        <td class="pool-actions-cell">
-                            <form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула {safe_title}?">
-                                <input type="hidden" name="type" value="{key_name}">
-                                <input type="hidden" name="key" value="{safe_pk}">
-                                <button type="submit" class="pool-delete-btn" title="Удалить ключ из пула">Удалить</button>
-                            </form>
-                        </td>
-                    </tr>'''
-            if not pool_items_html:
-                pool_items_html = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите subscription.</td></tr>'
-            tab_active = ' active' if panel_index == 0 else ''
-            protocol_tabs.append(
-                f'''<button type="button" class="seg-tab protocol-tab{tab_active}" data-protocol-target="{key_name}">
-                    <span>{safe_title}</span>
-                    <span class="tab-count">{len(pool_keys)}</span>
-                </button>'''
+            pool_items_html = web_pool_form_blocks.render_pool_items(
+                key_name=key_name,
+                title=title,
+                pool_keys=pool_keys,
+                current_key=current_keys.get(key_name, ''),
+                key_probe_cache=key_probe_cache,
+                custom_checks=custom_checks,
+                key_display_name=_pool_key_display_name,
+                hash_key=_hash_key,
+                telegram_icon_html=_telegram_icon_html,
+                youtube_icon_html=_youtube_icon_html,
+                custom_check_badges=_web_custom_check_badges,
+                probe_checked_at=_web_probe_checked_at,
+                csrf_input_html=csrf_input_html,
             )
-            protocol_panels.append(f'''<section class="protocol-workspace{tab_active}" data-protocol-card="{key_name}" data-protocol-panel="{key_name}">
-        <div class="workspace-head">
-            <div>
-                <span class="eyebrow">Ключи и мосты</span>
-                <h2>{safe_title}</h2>
-                <p class="key-status-note" data-protocol-status-details>{html.escape(status_info['details'])}</p>
-            </div>
-            <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons>{active_status_icons}</span><span class="key-status-badge key-status-{status_info['tone']}" data-protocol-status-label>{status_info['label']}</span></span>
-        </div>
-        <div class="subtabs">
-            <button type="button" class="subtab active" data-subview-target="key">Ключ</button>
-            <button type="button" class="subtab" data-subview-target="pool">Пул ключей</button>
-            <button type="button" class="subtab" data-subview-target="subscription">Subscription</button>
-            <button type="button" class="subtab" data-subview-target="check">Проверка</button>
-        </div>
-        <div class="protocol-subview active" data-subview="key">
-            <form method="post" action="/install" data-async-action="install" class="key-editor-form">
-                <input type="hidden" name="type" value="{key_name}">
-                <label class="field-label">Активный ключ {safe_title}</label>
-                <textarea name="key" rows="{rows}" placeholder="{html.escape(placeholder)}" required data-key-textarea>{safe_value}</textarea>
-                <div class="form-actions">
-                    <button type="submit">Сохранить {safe_title}</button>
-                </div>
-            </form>
-        </div>
-        <div class="protocol-subview" data-subview="pool">
-            <div class="pool-toolbar">
-                <form method="post" action="/pool_probe" data-async-action="pool-probe">
-                    <input type="hidden" name="type" value="{key_name}">
-                    <button type="submit" class="secondary-button">Проверить пул</button>
-                </form>
-                <form method="post" action="/pool_clear" data-async-action="pool-clear" data-confirm-title="Очистить пул?" data-confirm-message="Очистить весь пул ключей для {safe_title}?">
-                    <input type="hidden" name="type" value="{key_name}">
-                    <button type="submit" class="danger pool-clear-btn">Очистить пул</button>
-                </form>
-            </div>
-            <div class="pool-table-wrap">
-                <table class="{pool_table_class}" style="--custom-col-mobile:{pool_mobile_custom_col_width}px">
-                    <colgroup>
-                        <col class="pool-col-key">
-                        <col class="pool-col-icon">
-                        <col class="pool-col-icon">
-                        <col class="pool-col-custom" style="width:{pool_custom_col_width}px">
-                        <col class="pool-col-checked">
-                        <col class="pool-col-actions">
-                    </colgroup>
-                    <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head">{_telegram_icon_html(opacity=1.0)}</th><th class="pool-icon-head">{_youtube_icon_html(opacity=1.0)}</th><th class="pool-icon-head pool-custom-head" data-custom-check-head>{custom_header_icons}</th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
-                    <tbody data-pool-body="{key_name}">{pool_items_html}</tbody>
-                </table>
-            </div>
-        </div>
-        <div class="protocol-subview protocol-subview-import" data-subview="subscription">
-            <form method="post" action="/pool_add" class="pool-add-form" data-async-action="pool-add">
-                <input type="hidden" name="type" value="{key_name}">
-                <label class="field-label">Добавить ключи в пул</label>
-                <textarea name="keys" rows="4" placeholder="Вставьте ключи, каждый с новой строки"></textarea>
-                <button type="submit" class="secondary-button">Добавить в пул</button>
-            </form>
-            <form method="post" action="/pool_subscribe" class="pool-subscribe-form" data-async-action="pool-subscribe">
-                <input type="hidden" name="type" value="{key_name}">
-                <label class="field-label">Загрузить subscription</label>
-                <input type="url" name="url" placeholder="https://sub.example.com/...">
-                <button type="submit" class="secondary-button">Загрузить subscription</button>
-            </form>
-        </div>
-        <div class="protocol-subview protocol-subview-check" data-subview="check">
-            <div class="status-card">
-                <span class="status-label">Состояние ключа</span>
-                <span class="status-value">{status_info['label']}</span>
-                <p class="status-note">{html.escape(status_info['details'])}</p>
-            </div>
-            <div class="custom-check-card">
-                <div class="custom-check-head">
-                    <span>
-                        <strong>Дополнительные сервисы</strong>
-                        <small>Проверяются через выбранный прокси вместе с Telegram и YouTube.</small>
-                    </span>
-                </div>
-                <div class="service-preset-grid">{custom_presets_html}</div>
-                <div class="custom-check-list" data-custom-check-list>{custom_checks_html}</div>
-                <form method="post" action="/custom_check_add" class="custom-check-form" data-async-action="custom-check-add">
-                    <input type="hidden" name="type" value="{key_name}">
-                    <input type="text" name="label" placeholder="Название, например ChatGPT">
-                    <input type="text" name="url" placeholder="Домен, IP или URL: chatgpt.com">
-                    <button type="submit" class="secondary-button">Добавить проверку</button>
-                    <button type="submit" class="secondary-button" formaction="/custom_checks_to_list" data-confirm-title="Добавить проверки в список обхода?" data-confirm-message="Домены выбранных дополнительных проверок будут добавлены в список {safe_title}.">Добавить в список обхода</button>
-                </form>
-            </div>
-            <form method="post" action="/pool_probe" data-async-action="pool-probe">
-                <input type="hidden" name="type" value="{key_name}">
-                <button type="submit">Проверить пул {safe_title}</button>
-            </form>
-        </div>
-    </section>''')
+            tab_active = panel_index == 0
+            protocol_tabs.append(
+                web_pool_form_blocks.render_protocol_tab(
+                    key_name,
+                    title,
+                    len(pool_keys),
+                    active=tab_active,
+                )
+            )
+            protocol_panels.append(
+                web_pool_form_blocks.render_protocol_panel(
+                    key_name=key_name,
+                    title=title,
+                    rows=rows,
+                    placeholder=placeholder,
+                    current_key_value=current_keys.get(key_name, ''),
+                    status_info=status_info,
+                    active_status_icons=active_status_icons,
+                    pool_items_html=pool_items_html,
+                    pool_table_class=pool_table_class,
+                    pool_custom_col_width=pool_custom_col_width,
+                    pool_mobile_custom_col_width=pool_mobile_custom_col_width,
+                    custom_header_icons=custom_header_icons,
+                    custom_presets_html=custom_presets_html,
+                    custom_checks_html=custom_checks_html,
+                    telegram_icon_html=_telegram_icon_html,
+                    youtube_icon_html=_youtube_icon_html,
+                    active=tab_active,
+                    csrf_input_html=csrf_input_html,
+                )
+            )
         protocol_tabs_html = ''.join(protocol_tabs)
         protocol_panels_html = ''.join(protocol_panels)
         quick_key_proto = status['proxy_mode'] if status['proxy_mode'] in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'] else 'vless'
@@ -3275,14 +3172,17 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
 
         dns_override_active = _dns_override_enabled()
         update_buttons_html = f'''<form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить из форка?" data-confirm-message="Код и служебные файлы будут обновлены без сброса сохраненных ключей и списков.">
+                {csrf_input_html}
                 <input type="hidden" name="command" value="update">
                 <button type="submit">Переустановить из форка без сброса</button>
             </form>
             <form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить independent?" data-confirm-message="Будет установлена ветка codex/independent-v1 с сохранением локальных настроек.">
+                {csrf_input_html}
                 <input type="hidden" name="command" value="update_independent">
                 <button type="submit">Переустановка (ветка independent)</button>
             </form>
             <form method="post" action="/command" data-async-action="command" data-confirm-title="Перейти в web-only?" data-confirm-message="Будет установлена версия без Telegram-бота. Ключи, настройки и списки сохранятся локально.">
+                {csrf_input_html}
                 <input type="hidden" name="command" value="update_no_bot">
                 <button type="submit">Переустановка (без Telegram бота)</button>
             </form>'''
@@ -3295,6 +3195,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         ]
         command_buttons_html = ''.join(
             f'''<form method="post" action="/command" data-async-action="command"{f' data-confirm-title="{html.escape(confirm_title)}" data-confirm-message="{html.escape(confirm_message)}"' if confirm_title else ''}>
+            {csrf_input_html}
             <input type="hidden" name="command" value="{command}">
             <button type="submit" class="{button_class}">{html.escape(label)}</button>
         </form>'''
@@ -3355,7 +3256,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             _telegram_icon_html=_telegram_icon_html,
-            csrf_token=self._get_or_create_csrf_token(),
+            csrf_token=csrf_token,
             command_block=command_block,
             command_buttons_html=command_buttons_html,
             current_mode_label=current_mode_label,
@@ -3396,6 +3297,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
 
         safe_command = html.escape(command, quote=True)
         safe_target = html.escape(target_label)
+        csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(self._get_or_create_csrf_token())}">'
         return f'''<!doctype html>
 <html lang="ru">
 <head>
@@ -3422,6 +3324,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     <p>Сейчас установлена web-only версия без Telegram-бота. Если перейти на {safe_target}, после переустановки может открыться форма заполнения Telegram-настроек. Можно остаться на web-only и ничего не менять.</p>
     <div class="actions">
       <form method="post" action="/command">
+        {csrf_input_html}
         <input type="hidden" name="command" value="{safe_command}">
         <input type="hidden" name="confirm_switch" value="yes">
         <button type="submit">Да, перейти</button>
@@ -3465,6 +3368,11 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         data = self._read_post_data()
         if not self._ensure_csrf_allowed(data):
             return
+        if path == '/command' and not self._wants_json():
+            command = data.get('command', [''])[0]
+            if command in ('update', 'update_independent') and data.get('confirm_switch', [''])[0] != 'yes':
+                self._send_html(self._build_switch_confirmation(command))
+                return
         action = web_post_actions.dispatch(_web_action_context(), path, data)
         if action is None:
             self._send_html('<h1>404 Not Found</h1>', status=404)
