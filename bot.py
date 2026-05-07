@@ -85,6 +85,15 @@ import key_pool_web
 import telegram_pool_ui
 import web_pool_form_blocks
 import telegram_key_ui
+from telegram_auth_state import (
+    MENU_STATE_UNSET,
+    authorize_message as _telegram_authorize_message,
+    build_authorized_identities as _build_authorized_identities,
+    callback_as_message as _telegram_callback_as_message,
+    get_chat_menu_state as _get_chat_menu_state_impl,
+    set_chat_menu_state as _set_chat_menu_state_impl,
+    unauthorized_message_text as _telegram_unauthorized_text,
+)
 from telegram_confirm import (
     TELEGRAM_CONFIRM_LEVEL,
     telegram_confirm_prompt as _telegram_confirm_prompt,
@@ -515,45 +524,9 @@ RUNTIME_ERROR_LOG_PATHS = [
     '/opt/etc/error.log',
     '/opt/etc/bot/error.log',
 ]
-MENU_STATE_UNSET = object()
 chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
 chat_pool_pages = {}
-
-
-def _normalize_username(value):
-    if value is None:
-        return ''
-    normalized = str(value).strip()
-    if normalized.startswith('@'):
-        normalized = normalized[1:]
-    return normalized.casefold()
-
-
-def _build_authorized_identities(raw_values):
-    if isinstance(raw_values, (str, int)):
-        values = [raw_values]
-    else:
-        values = list(raw_values or [])
-
-    normalized_usernames = set()
-    numeric_ids = set()
-    for value in values:
-        if value is None:
-            continue
-        text = str(value).strip()
-        if not text:
-            continue
-        if text.lstrip('-').isdigit():
-            try:
-                numeric_ids.add(int(text))
-                continue
-            except ValueError:
-                pass
-        normalized = _normalize_username(text)
-        if normalized:
-            normalized_usernames.add(normalized)
-    return normalized_usernames, numeric_ids
 
 
 AUTHORIZED_USERNAMES, AUTHORIZED_USER_IDS = _build_authorized_identities(usernames)
@@ -591,24 +564,11 @@ def _service_list_alias_map():
 
 
 def _get_chat_menu_state(chat_id):
-    with chat_menu_state_lock:
-        state = chat_menu_states.get(chat_id)
-        if state is None:
-            state = {'level': 0, 'bypass': None}
-            chat_menu_states[chat_id] = state
-        return dict(state)
+    return _get_chat_menu_state_impl(chat_menu_state_lock, chat_menu_states, chat_id)
 
 
 def _set_chat_menu_state(chat_id, level=MENU_STATE_UNSET, bypass=MENU_STATE_UNSET):
-    with chat_menu_state_lock:
-        state = chat_menu_states.get(chat_id)
-        if state is None:
-            state = {'level': 0, 'bypass': None}
-            chat_menu_states[chat_id] = state
-        if level is not MENU_STATE_UNSET:
-            state['level'] = level
-        if bypass is not MENU_STATE_UNSET:
-            state['bypass'] = bypass
+    _set_chat_menu_state_impl(chat_menu_state_lock, chat_menu_states, chat_id, level=level, bypass=bypass)
 
 
 def _get_pool_page(chat_id):
@@ -729,50 +689,18 @@ def _write_runtime_log(message, mode='a'):
             continue
 
 
-def _message_debug_text(message):
-    text = getattr(message, 'text', None)
-    if text is None:
-        return '<non-text>'
-    text = str(text).replace('\r', ' ').replace('\n', ' ')
-    if len(text) > 120:
-        return text[:117] + '...'
-    return text
-
-
 def _authorize_message(message, handler_name):
-    user = getattr(message, 'from_user', None)
-    chat = getattr(message, 'chat', None)
-    user_id = getattr(user, 'id', None)
-    username = getattr(user, 'username', None)
-    normalized_username = _normalize_username(username)
-    chat_id = getattr(chat, 'id', None)
-    chat_type = getattr(chat, 'type', None)
-
-    authorized = False
-    reason = 'unauthorized'
-    if user_id in AUTHORIZED_USER_IDS:
-        authorized = True
-        reason = 'user_id'
-    elif normalized_username and normalized_username in AUTHORIZED_USERNAMES:
-        authorized = True
-        reason = 'username'
-    elif not normalized_username:
-        reason = 'missing_username'
-
-    _write_runtime_log(
-        f'handler={handler_name} chat_id={chat_id} chat_type={chat_type} '
-        f'user_id={user_id} username={username!r} authorized={authorized} '
-        f'reason={reason} text={_message_debug_text(message)}'
+    return _telegram_authorize_message(
+        message,
+        handler_name,
+        AUTHORIZED_USERNAMES,
+        AUTHORIZED_USER_IDS,
+        log_callback=_write_runtime_log,
     )
-    return authorized, reason
 
 
 def _send_unauthorized_message(message, reason):
-    if reason == 'missing_username':
-        text = 'У вашего Telegram-аккаунта не задан username. Задайте username в настройках Telegram и повторите команду.'
-    else:
-        text = 'Вы не являетесь автором канала'
-    bot.send_message(message.chat.id, text)
+    bot.send_message(message.chat.id, _telegram_unauthorized_text(reason))
 
 
 def _read_json_file(path, default=None):
@@ -3793,11 +3721,7 @@ def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, 
 
 
 def _authorize_callback(call, handler_name):
-    proxy = type('CallbackMessageProxy', (), {})()
-    proxy.from_user = getattr(call, 'from_user', None)
-    proxy.chat = getattr(getattr(call, 'message', None), 'chat', None)
-    proxy.text = getattr(call, 'data', '')
-    return _authorize_message(proxy, handler_name)
+    return _authorize_message(_telegram_callback_as_message(call), handler_name)
 
 
 # список смайлов для меню

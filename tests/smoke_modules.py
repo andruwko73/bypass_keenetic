@@ -19,6 +19,7 @@ import web_template_styles
 import web_template_scripts
 import web_post_actions
 import telegram_confirm
+import telegram_auth_state
 import telegram_install_ui
 import telegram_key_ui
 import pool_probe_controller
@@ -205,6 +206,19 @@ def test_telegram_confirm_helpers():
     assert telegram_confirm.telegram_is_confirm('✅ Подтвердить')
     assert telegram_confirm.telegram_is_cancel('Отмена')
     assert 'Перезагрузить роутер?' in telegram_confirm.telegram_confirm_prompt('reboot')
+
+
+def test_telegram_auth_state_helpers():
+    assert telegram_auth_state.normalize_username('@Admin') == 'admin'
+    usernames, user_ids = telegram_auth_state.build_authorized_identities(['@Admin', '123'])
+    assert usernames == {'admin'}
+    assert user_ids == {123}
+    states = {}
+    lock = threading.Lock()
+    assert telegram_auth_state.get_chat_menu_state(lock, states, 1) == {'level': 0, 'bypass': None}
+    telegram_auth_state.set_chat_menu_state(lock, states, 1, level=8, bypass='vless')
+    assert telegram_auth_state.get_chat_menu_state(lock, states, 1) == {'level': 8, 'bypass': 'vless'}
+    assert telegram_auth_state.unauthorized_message_text('missing_username').startswith('У вашего Telegram-аккаунта')
 
 
 def test_telegram_install_ui_helpers():
@@ -704,6 +718,7 @@ def main():
     test_web_action_feature_gates()
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
+    test_telegram_auth_state_helpers()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
     test_pool_probe_controller_helpers()
