@@ -21,6 +21,16 @@ def pool_probe_topbar_text(pool_probe_pending, progress, progress_label_func, fa
     )
 
 
+def pool_summary_note_with_progress(pool_summary_note, pool_probe_pending, progress, progress_label_func):
+    if not pool_probe_pending:
+        return pool_summary_note
+    progress = progress or {}
+    return (
+        f"{progress_label_func(progress)}: {int(progress.get('checked') or 0)}/"
+        f"{int(progress.get('total') or 0)}. {pool_summary_note}"
+    )
+
+
 def pool_table_layout(custom_checks):
     custom_check_count = len(custom_checks or [])
     return (

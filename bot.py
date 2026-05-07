@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.498, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.499, последнее изменение: 08.05.2026
 
 import subprocess
 import os
@@ -412,7 +412,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.498'
+APP_VERSION_COUNTER = '1.499'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -2431,21 +2431,41 @@ def _handle_pool_protocol_state(message, set_menu_state):
     return True
 
 
-def _handle_pool_action_button(message, proto, page, set_menu_state):
-    action, raw_index, button_proto = _pool_reply_key_action(message.text)
-    if not action:
-        return False
-    if action == 'legacy' or not button_proto:
-        bot.send_message(
-            message.chat.id,
-            'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку вида V1/V2/VM/TR/SS.',
-            reply_markup=_pool_action_markup(proto, page),
+def _send_pool_input_prompt(chat_id, proto, prompt):
+    bot.send_message(chat_id, prompt.format(proto_label=_pool_proto_label(proto)), reply_markup=_pool_input_markup())
+
+
+def _pool_probe_start_result(proto, *, mention_proto=True):
+    started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
+    if started:
+        target = f'пула {_pool_proto_label(proto)}' if mention_proto else 'пула'
+        return started, queued, (
+            f'Запущена безопасная фоновая проверка {target}. В очереди: {queued}. '
+            'Ключи проверяются по одному с паузой, чтобы не перегружать память роутера.'
         )
+    if queued:
+        return started, queued, 'Проверка пула уже выполняется. Дождитесь обновления статусов.'
+    return started, queued, 'В пуле нет ключей для проверки.'
+
+
+def _handle_pool_action_button(message, proto, page, set_menu_state):
+    selection = _pool_reply_selection(
+        message,
+        proto,
+        page,
+        set_menu_state,
+        21,
+        _pool_action_markup,
+        'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку вида V1/V2/VM/TR/SS.',
+    )
+    if not selection:
+        return False
+    if selection['handled']:
         return True
-    if button_proto != proto:
-        proto = button_proto
-        page = 0
-        set_menu_state(21, proto)
+    action = selection['action']
+    raw_index = selection['raw_index']
+    proto = selection['proto']
+    page = selection['page']
     if action == 'delete':
         bot.send_message(
             message.chat.id,
@@ -2501,11 +2521,15 @@ def _handle_pool_manage_state(message, bypass, set_menu_state):
         return True
     if message.text == '➕ Добавить ключи':
         set_menu_state(22)
-        bot.send_message(message.chat.id, f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.', reply_markup=_pool_input_markup())
+        _send_pool_input_prompt(
+            message.chat.id,
+            proto,
+            'Отправьте один или несколько ключей для пула {proto_label}. Каждый ключ с новой строки.',
+        )
         return True
     if message.text == '🔗 Загрузить subscription':
         set_menu_state(23)
-        bot.send_message(message.chat.id, f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.', reply_markup=_pool_input_markup())
+        _send_pool_input_prompt(message.chat.id, proto, 'Отправьте subscription URL для пула {proto_label}.')
         return True
     if message.text == '✅ Применить ключ':
         bot.send_message(message.chat.id, 'Используйте нижние кнопки ✅ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
@@ -2526,12 +2550,7 @@ def _handle_pool_manage_state(message, bypass, set_menu_state):
         bot.send_message(message.chat.id, f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.', reply_markup=_pool_clear_confirm_markup())
         return True
     if message.text in ['🔍 Проверить пул', '🔍 Проверить активный']:
-        started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
-        prefix = (
-            f'Запущена безопасная фоновая проверка пула {_pool_proto_label(proto)}. В очереди: {queued}. Ключи проверяются по одному с паузой, чтобы не перегружать память роутера.'
-            if started else
-            'Проверка пула уже выполняется или в пуле нет ключей для проверки.'
-        )
+        _started, _queued, prefix = _pool_probe_start_result(proto, mention_proto=True)
         _send_pool_page(message.chat.id, proto, page=page, prefix=prefix)
         return True
     bot.send_message(message.chat.id, 'Выберите действие кнопкой внизу.', reply_markup=_pool_action_markup(proto, page))
@@ -2616,21 +2635,24 @@ def _handle_pool_delete_state(message, bypass, set_menu_state):
     if _is_pool_page_noop(message.text):
         _send_pool_delete_page(message.chat.id, proto, page=page)
         return True
-    action, raw_index, button_proto = _pool_reply_key_action(message.text)
-    if not action:
+    selection = _pool_reply_selection(
+        message,
+        proto,
+        page,
+        set_menu_state,
+        25,
+        _pool_delete_markup,
+        'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку удаления вида ✕ V1/V2/VM/TR/SS.',
+    )
+    if not selection:
         bot.send_message(message.chat.id, 'Выберите ключ для удаления кнопкой с кодом протокола V1/V2/VM/TR/SS.', reply_markup=_pool_delete_markup(proto, page))
         return True
-    if action == 'legacy' or not button_proto:
-        bot.send_message(
-            message.chat.id,
-            'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку удаления вида ✕ V1/V2/VM/TR/SS.',
-            reply_markup=_pool_delete_markup(proto, page),
-        )
+    if selection['handled']:
         return True
-    if button_proto != proto:
-        proto = button_proto
-        page = 0
-        set_menu_state(25, proto)
+    action = selection['action']
+    raw_index = selection['raw_index']
+    proto = selection['proto']
+    page = selection['page']
     if action != 'delete':
         bot.send_message(message.chat.id, 'Сейчас включен режим удаления. Нажмите кнопку ключа с префиксом ✕ или вернитесь к пулу.', reply_markup=_pool_delete_markup(proto, page))
         return True
@@ -2700,6 +2722,26 @@ def _pool_reply_key_action(text):
     if legacy_match:
         return 'legacy', legacy_match.group(1), None
     return None, None, None
+
+
+def _pool_reply_selection(message, proto, page, set_menu_state, state_level, markup_builder, stale_message):
+    action, raw_index, button_proto = _pool_reply_key_action(message.text)
+    if not action:
+        return None
+    if action == 'legacy' or not button_proto:
+        bot.send_message(message.chat.id, stale_message, reply_markup=markup_builder(proto, page))
+        return {'handled': True}
+    if button_proto != proto:
+        proto = button_proto
+        page = 0
+        set_menu_state(state_level, proto)
+    return {
+        'handled': False,
+        'action': action,
+        'raw_index': raw_index,
+        'proto': proto,
+        'page': page,
+    }
 
 
 def _pool_reply_page_delta(text):
@@ -2917,6 +2959,45 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
     )
 
 
+def _invalidate_probe_status_caches():
+    _invalidate_web_status_cache()
+    _invalidate_key_status_cache()
+
+
+def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches):
+    return run_pool_probe_worker(
+        probe_tasks,
+        checks,
+        batch_size=POOL_PROBE_BATCH_SIZE,
+        concurrency=POOL_PROBE_CONCURRENCY,
+        delay_seconds=POOL_PROBE_DELAY_SECONDS,
+        min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
+        test_port=POOL_PROBE_TEST_PORT,
+        available_memory_kb=_available_memory_kb,
+        log=_write_runtime_log,
+        proto_label=_pool_proto_label,
+        hash_key=_hash_key,
+        set_checked=set_checked,
+        validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
+            proto,
+            key_value,
+            'proxy-pool-probe-validate',
+            _proxy_outbound_from_key,
+        ),
+        failed_custom_results=_failed_custom_probe_results,
+        record_key_probe=_record_key_probe,
+        start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
+            _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
+        ),
+        wait_for_socks5=_wait_for_socks5_handshake,
+        check_pool_key=_check_pool_key_through_proxy,
+        timeout_budget=_pool_probe_timeout_budget,
+        stop_xray=_runner_stop_pool_probe_xray,
+        cleanup_runtime=_runner_cleanup_pool_probe_runtime,
+        invalidate_caches=invalidate_caches,
+    )
+
+
 def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):
     selected, custom_checks = _select_pool_probe_tasks(
         tasks,
@@ -2925,51 +3006,14 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'
     )
     if POOL_PROBE_ACTIVE_ONLY:
         selected = _controller_filter_active_probe_tasks(selected, _load_current_keys())
-    def invalidate_probe_status():
-        _invalidate_web_status_cache()
-        _invalidate_key_status_cache()
-
-    def run_selected_probe(probe_tasks, checks, set_checked, invalidate_caches):
-        return run_pool_probe_worker(
-            probe_tasks,
-            checks,
-            batch_size=POOL_PROBE_BATCH_SIZE,
-            concurrency=POOL_PROBE_CONCURRENCY,
-            delay_seconds=POOL_PROBE_DELAY_SECONDS,
-            min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
-            test_port=POOL_PROBE_TEST_PORT,
-            available_memory_kb=_available_memory_kb,
-            log=_write_runtime_log,
-            proto_label=_pool_proto_label,
-            hash_key=_hash_key,
-            set_checked=set_checked,
-            validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
-                proto,
-                key_value,
-                'proxy-pool-probe-validate',
-                _proxy_outbound_from_key,
-            ),
-            failed_custom_results=_failed_custom_probe_results,
-            record_key_probe=_record_key_probe,
-            start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
-                _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
-            ),
-            wait_for_socks5=_wait_for_socks5_handshake,
-            check_pool_key=_check_pool_key_through_proxy,
-            timeout_budget=_pool_probe_timeout_budget,
-            stop_xray=_runner_stop_pool_probe_xray,
-            cleanup_runtime=_runner_cleanup_pool_probe_runtime,
-            invalidate_caches=invalidate_caches,
-        )
-
     return start_pool_probe_worker(
         selected,
         custom_checks,
         scope=scope,
         lock=pool_probe_lock,
         set_progress=_set_pool_probe_progress,
-        run_worker=run_selected_probe,
-        invalidate_caches=invalidate_probe_status,
+        run_worker=_run_selected_pool_probe,
+        invalidate_caches=_invalidate_probe_status_caches,
     )
 
 
@@ -3334,32 +3378,24 @@ def _handle_pool_protocol_callback(call_id, action, data, chat_id, proto):
     if action == 'add':
         _set_chat_menu_state(chat_id, level=22, bypass=proto)
         bot.answer_callback_query(call_id)
-        bot.send_message(
+        _send_pool_input_prompt(
             chat_id,
-            f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.',
-            reply_markup=_pool_input_markup(),
+            proto,
+            'Отправьте один или несколько ключей для пула {proto_label}. Каждый ключ с новой строки.',
         )
         return True
 
     if action == 'subscribe':
         _set_chat_menu_state(chat_id, level=23, bypass=proto)
         bot.answer_callback_query(call_id)
-        bot.send_message(
-            chat_id,
-            f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.',
-            reply_markup=_pool_input_markup(),
-        )
+        _send_pool_input_prompt(chat_id, proto, 'Отправьте subscription URL для пула {proto_label}.')
         return True
 
     if action == 'probe':
-        started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
-        bot.answer_callback_query(call_id, 'Проверка запущена' if started else 'Проверка уже выполняется')
+        started, queued, prefix = _pool_probe_start_result(proto, mention_proto=False)
+        answer = 'Проверка запущена' if started else ('Проверка уже выполняется' if queued else 'В пуле нет ключей')
+        bot.answer_callback_query(call_id, answer)
         _set_chat_menu_state(chat_id, level=21, bypass=proto)
-        prefix = (
-            f'Запущена безопасная фоновая проверка пула. В очереди: {queued}. Ключи проверяются по одному с паузой, чтобы не перегружать память роутера.'
-            if started else
-            'Проверка пула уже выполняется. Дождитесь обновления статусов.'
-        )
         _send_pool_page(chat_id, proto, page=page, prefix=prefix)
         return True
 
@@ -3481,48 +3517,49 @@ def _start_web_bot_action():
 
 
 def _web_action_context():
-    return {
-        'app_mode_label': APP_MODE_LABEL,
-        'update_proxy': update_proxy,
-        'proxy_mode_label': _proxy_mode_label,
-        'invalidate_web_status_cache': _invalidate_web_status_cache,
-        'invalidate_key_status_cache': _invalidate_key_status_cache,
-        'start_bot': _start_web_bot_action,
-        'start_web_command': _start_web_command,
-        'get_web_command_state': _get_web_command_state,
-        'save_unblock_list': _save_unblock_list,
-        'read_text_file': _read_text_file,
-        'append_socialnet_list': _append_socialnet_list,
-        'remove_socialnet_list': _remove_socialnet_list,
-        'append_service_error': 'Ошибка добавления сервисов',
-        'remove_service_error': 'Ошибка удаления сервисов',
-        'socialnet_all_key': SOCIALNET_ALL_KEY,
-        'normalize_unblock_route_name': _normalize_unblock_route_name,
-        'custom_checks_enabled': True,
-        'append_custom_checks_to_unblock_list': _append_custom_checks_to_unblock_list,
-        'unblock_route_for_key_type': _unblock_route_for_key_type,
-        'add_custom_check': _add_custom_check,
-        'delete_custom_check': _delete_custom_check,
-        'web_custom_checks': _web_custom_checks,
-        'pool_actions_enabled': True,
-        'load_current_keys': _load_current_keys,
-        'refresh_status_caches_async': _refresh_status_caches_async,
-        'web_pool_snapshot': _web_pool_snapshot,
-        'probe_all_pool_keys_async': _probe_all_pool_keys_async,
-        'pool_keys_for_proto': _pool_keys_for_proto,
-        'probe_pool_keys_background': _probe_pool_keys_background,
-        'add_keys_to_pool': _add_keys_to_pool,
-        'delete_pool_key': _delete_pool_key,
-        'load_key_pools': _load_key_pools,
-        'install_key_for_protocol': _install_key_for_protocol,
-        'set_active_key': _set_active_key,
-        'clear_pool': _clear_pool,
-        'fetch_keys_from_subscription': _fetch_keys_from_subscription,
-        'add_subscription_keys_to_pool': key_pool_store.add_subscription_keys_to_pool,
-        'save_key_pools': _save_key_pools,
-        'pool_apply_lock': pool_apply_lock,
-        'install_verify': False,
-    }
+    context = web_post_actions.base_action_context(
+        app_mode_label=APP_MODE_LABEL,
+        update_proxy=update_proxy,
+        proxy_mode_label=_proxy_mode_label,
+        invalidate_web_status_cache=_invalidate_web_status_cache,
+        invalidate_key_status_cache=_invalidate_key_status_cache,
+        start_bot=_start_web_bot_action,
+        start_web_command=_start_web_command,
+        get_web_command_state=_get_web_command_state,
+        save_unblock_list=_save_unblock_list,
+        read_text_file=_read_text_file,
+        append_socialnet_list=_append_socialnet_list,
+        remove_socialnet_list=_remove_socialnet_list,
+        append_service_error='Ошибка добавления сервисов',
+        remove_service_error='Ошибка удаления сервисов',
+        socialnet_all_key=SOCIALNET_ALL_KEY,
+        normalize_unblock_route_name=_normalize_unblock_route_name,
+        install_key_for_protocol=_install_key_for_protocol,
+        install_verify=False,
+    )
+    context.update(web_post_actions.pool_action_context(
+        append_custom_checks_to_unblock_list=_append_custom_checks_to_unblock_list,
+        unblock_route_for_key_type=_unblock_route_for_key_type,
+        add_custom_check=_add_custom_check,
+        delete_custom_check=_delete_custom_check,
+        web_custom_checks=_web_custom_checks,
+        load_current_keys=_load_current_keys,
+        refresh_status_caches_async=_refresh_status_caches_async,
+        web_pool_snapshot=_web_pool_snapshot,
+        probe_all_pool_keys_async=_probe_all_pool_keys_async,
+        pool_keys_for_proto=_pool_keys_for_proto,
+        probe_pool_keys_background=_probe_pool_keys_background,
+        add_keys_to_pool=_add_keys_to_pool,
+        delete_pool_key=_delete_pool_key,
+        load_key_pools=_load_key_pools,
+        set_active_key=_set_active_key,
+        clear_pool=_clear_pool,
+        fetch_keys_from_subscription=_fetch_keys_from_subscription,
+        add_subscription_keys_to_pool=key_pool_store.add_subscription_keys_to_pool,
+        save_key_pools=_save_key_pools,
+        pool_apply_lock=pool_apply_lock,
+    ))
+    return context
 
 
 def _web_get_context(handler):
@@ -3573,10 +3610,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
 
-        message_block = web_form_blocks.render_message_block(message, live=True)
-        command_block = web_form_blocks.render_command_block(command_state, live=True)
-        socks_block = web_form_blocks.render_socks_block(status, live=True)
-        fallback_block = web_form_blocks.render_fallback_block(status, live=True)
+        status_blocks = web_form_blocks.render_status_blocks(message, command_state, status, live=True)
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
         list_route_label = _transparent_list_route_label()
 
@@ -3627,16 +3661,14 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             custom_presets_html=custom_presets_html,
             custom_checks_html=custom_checks_html,
         )
-        quick_key_proto = status['proxy_mode'] if status['proxy_mode'] in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'] else 'vless'
-        quick_key_label = current_mode_label if quick_key_proto == status['proxy_mode'] else 'Vless 1'
-        quick_key_value = html.escape(current_keys.get(quick_key_proto, ''))
+        quick_key = web_form_blocks.quick_key_context(status, current_keys, current_mode_label)
         pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks)
-        pool_summary_note = pool_summary['note']
-        if pool_probe_pending:
-            pool_summary_note = (
-                f"{_pool_probe_progress_label(current_pool_probe_progress)}: {int(current_pool_probe_progress.get('checked') or 0)}/"
-                f"{int(current_pool_probe_progress.get('total') or 0)}. {pool_summary_note}"
-            )
+        pool_summary_note = web_pool_form_blocks.pool_summary_note_with_progress(
+            pool_summary['note'],
+            pool_probe_pending,
+            current_pool_probe_progress,
+            _pool_probe_progress_label,
+        )
 
         dns_override_active = _dns_override_enabled()
         update_buttons_html = web_form_blocks.render_update_buttons(csrf_input_html)
@@ -3667,26 +3699,26 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             _telegram_icon_html=_telegram_icon_html,
             csrf_token=csrf_token,
-            command_block=command_block,
+            command_block=status_blocks['command_block'],
             command_buttons_html=command_buttons_html,
             current_mode_label=current_mode_label,
             custom_checks_json=custom_checks_json,
-            fallback_block=fallback_block,
+            fallback_block=status_blocks['fallback_block'],
             initial_command_running=initial_command_running,
             initial_status_pending=initial_status_pending,
             list_route_label=list_route_label,
-            message_block=message_block,
+            message_block=status_blocks['message_block'],
             mode_picker_block=mode_picker_block,
             mode_toggle_label=mode_toggle_label,
             pool_summary=pool_summary,
             pool_summary_note=pool_summary_note,
             protocol_panels_html=protocol_panels_html,
             protocol_tabs_html=protocol_tabs_html,
-            quick_key_label=quick_key_label,
-            quick_key_proto=quick_key_proto,
-            quick_key_value=quick_key_value,
+            quick_key_label=quick_key['label'],
+            quick_key_proto=quick_key['proto'],
+            quick_key_value=quick_key['value'],
             quick_start_note=quick_start_note,
-            socks_block=socks_block,
+            socks_block=status_blocks['socks_block'],
             start_button_label=start_button_label,
             status=status,
             topbar_status_text=topbar_status_text,

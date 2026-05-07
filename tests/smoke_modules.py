@@ -197,6 +197,49 @@ def test_web_post_actions_helpers():
     assert web_post_actions.form_value(data, 'missing', 'none') == 'none'
     assert web_post_actions.first_form_value(data, ('target_list_name', 'list_name')) == 'custom'
     assert web_post_actions.dispatch({}, '/pool_add', {}) is None
+    ctx = web_post_actions.base_action_context(
+        app_mode_label='Режим',
+        update_proxy=lambda mode: (True, ''),
+        proxy_mode_label=lambda mode: mode,
+        invalidate_web_status_cache=lambda: None,
+        invalidate_key_status_cache=lambda: None,
+        start_bot=lambda: 'started',
+        start_web_command=lambda command: (True, command),
+        get_web_command_state=lambda: {},
+        save_unblock_list=lambda name, content: 'saved',
+        read_text_file=lambda path: '',
+        append_socialnet_list=lambda name, service_key=None: 'added',
+        remove_socialnet_list=lambda name, service_key=None: 'removed',
+        socialnet_all_key='all',
+        normalize_unblock_route_name=lambda name: name,
+        install_key_for_protocol=lambda proto, key, verify=True: 'installed',
+    )
+    assert ctx['app_mode_label'] == 'Режим'
+    assert ctx['install_verify'] is True
+    pool_ctx = web_post_actions.pool_action_context(
+        append_custom_checks_to_unblock_list=lambda name: None,
+        unblock_route_for_key_type=lambda key_type: key_type,
+        add_custom_check=lambda **kwargs: None,
+        delete_custom_check=lambda check_id: None,
+        web_custom_checks=lambda: [],
+        load_current_keys=lambda: {},
+        refresh_status_caches_async=lambda keys: None,
+        web_pool_snapshot=lambda keys, include_keys=False: {},
+        probe_all_pool_keys_async=lambda **kwargs: (False, 0),
+        pool_keys_for_proto=lambda proto: [],
+        probe_pool_keys_background=lambda proto, keys, **kwargs: (False, 0),
+        add_keys_to_pool=lambda proto, text: 0,
+        delete_pool_key=lambda proto, key: None,
+        load_key_pools=lambda: {},
+        set_active_key=lambda proto, key: None,
+        clear_pool=lambda proto: 0,
+        fetch_keys_from_subscription=lambda url: ({}, ''),
+        add_subscription_keys_to_pool=lambda pools, proto, fetched: (pools, []),
+        save_key_pools=lambda pools: None,
+        pool_apply_lock=None,
+    )
+    assert pool_ctx['pool_actions_enabled'] is True
+    assert pool_ctx['custom_checks_enabled'] is True
 
 
 def test_web_action_feature_gates():
@@ -799,6 +842,17 @@ def test_web_form_blocks_helpers():
     assert 'notice-result' in web_form_blocks.render_message_block('ok')
     assert web_form_blocks.render_message_block('', live=False) == ''
     assert 'hidden' in web_form_blocks.render_message_block('', live=True)
+    status_blocks = web_form_blocks.render_status_blocks(
+        'ok',
+        {'label': 'cmd', 'running': False, 'result': 'done'},
+        {'socks_details': 'socks ok'},
+        live=True,
+    )
+    assert 'web-action-message' in status_blocks['message_block']
+    assert 'cmd' in status_blocks['command_block']
+    assert 'socks ok' in status_blocks['socks_block']
+    quick_key = web_form_blocks.quick_key_context({'proxy_mode': 'none'}, {'vless': 'vless://sample'}, 'Без прокси')
+    assert quick_key == {'proto': 'vless', 'label': 'Vless 1', 'value': 'vless://sample'}
     button_picker = web_form_blocks.render_button_mode_picker('vless', csrf_input_html='<input name="csrf_token">')
     assert 'mode-choice-grid' in button_picker
     assert 'csrf_token' in button_picker
@@ -837,6 +891,12 @@ def test_web_pool_form_blocks_helpers():
         'ok',
     )
     assert '1/2' in progress
+    assert web_pool_form_blocks.pool_summary_note_with_progress(
+        'note',
+        True,
+        {'checked': 1, 'total': 2},
+        lambda data: 'Проверка',
+    ) == 'Проверка: 1/2. note'
     pool_rows = web_pool_form_blocks.render_pool_items(
         key_name='vless',
         title='Vless 1',

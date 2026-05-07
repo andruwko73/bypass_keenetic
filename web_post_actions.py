@@ -4,6 +4,26 @@ import os
 PROXY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
 
 
+def base_action_context(**values):
+    defaults = {
+        'append_service_error': 'Ошибка добавления сервисов',
+        'remove_service_error': 'Ошибка удаления сервисов',
+        'install_key_for_protocol': None,
+        'install_tor': None,
+        'install_verify': True,
+    }
+    defaults.update(values)
+    return defaults
+
+
+def pool_action_context(**values):
+    values.update({
+        'custom_checks_enabled': True,
+        'pool_actions_enabled': True,
+    })
+    return values
+
+
 def form_value(data, name, default=''):
     try:
         values = data.get(name, [default])

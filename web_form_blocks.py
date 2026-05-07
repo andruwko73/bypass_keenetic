@@ -94,6 +94,28 @@ def render_fallback_block(status, *, live=False):
     return ''
 
 
+def render_status_blocks(message, command_state, status, *, live=False):
+    return {
+        'message_block': render_message_block(message, live=live),
+        'command_block': render_command_block(command_state, live=live),
+        'socks_block': render_socks_block(status, live=live),
+        'fallback_block': render_fallback_block(status, live=live),
+    }
+
+
+def quick_key_context(status, current_keys, current_mode_label, *, fallback_proto='vless', fallback_label='Vless 1', protocols=PROXY_PROTOCOLS):
+    status = status or {}
+    current_keys = current_keys or {}
+    proxy_mode = status.get('proxy_mode')
+    proto = proxy_mode if proxy_mode in protocols else fallback_proto
+    label = current_mode_label if proto == proxy_mode else fallback_label
+    return {
+        'proto': proto,
+        'label': label,
+        'value': html.escape(current_keys.get(proto, '')),
+    }
+
+
 def render_select_mode_picker(active_mode, csrf_input_html, *, none_label='Без VPN (по умолчанию)'):
     options = [
         ('none', none_label),
