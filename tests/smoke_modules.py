@@ -85,7 +85,9 @@ def test_web_form_blocks_helpers():
     assert 'notice-result' in web_form_blocks.render_message_block('ok')
     assert web_form_blocks.render_message_block('', live=False) == ''
     assert 'hidden' in web_form_blocks.render_message_block('', live=True)
-    assert 'mode-choice-grid' in web_form_blocks.render_button_mode_picker('vless')
+    button_picker = web_form_blocks.render_button_mode_picker('vless', csrf_input_html='<input name="csrf_token">')
+    assert 'mode-choice-grid' in button_picker
+    assert 'csrf_token' in button_picker
     assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
 
 
