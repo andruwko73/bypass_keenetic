@@ -473,6 +473,7 @@ RUNTIME_ERROR_LOG_PATHS = [
 ]
 MENU_STATE_UNSET = object()
 TELEGRAM_CONFIRM_LEVEL = 30
+TELEGRAM_KEY_INPUT_LEVELS = {'Shadowsocks': 5, 'Vmess': 9, 'Vless': 11, 'Vless 1': 11, 'Vless 2': 12, 'Trojan': 13}
 chat_menu_state_lock = threading.Lock()
 chat_menu_states = {}
 chat_pool_pages = {}
@@ -4375,15 +4376,7 @@ def bot_message(message):
                     bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
                     set_menu_state(8)
 
-                key_input_levels = {
-                    'Shadowsocks': 5,
-                    'Vmess': 9,
-                    'Vless': 11,
-                    'Vless 1': 11,
-                    'Vless 2': 12,
-                    'Trojan': 13,
-                }
-                target_level = key_input_levels.get(message.text)
+                target_level = TELEGRAM_KEY_INPUT_LEVELS.get(message.text)
                 if target_level is not None:
                     set_menu_state(target_level)
                     bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=_reply_keyboard(("🔙 Назад",)))
