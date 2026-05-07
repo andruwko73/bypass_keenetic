@@ -156,7 +156,7 @@ def custom_check_status_icon_html(check, state, service_icon_html):
     if state == 'ok':
         return service_icon_html(check.get('icon'), check.get('label', 'Service'), opacity=1.0, size=18)
     if state == 'fail':
-        return '<span class="service-probe-mark service-probe-fail">✕</span>'
+        return '<span class="service-probe-mark service-probe-fail">\u2715</span>'
     return '<span class="service-probe-mark service-probe-unknown">?</span>'
 
 
@@ -180,7 +180,7 @@ def web_custom_check_badges(probe, custom_checks, service_icon_html):
     badges = []
     for check in custom_checks:
         state = states.get(check.get('id'), 'unknown')
-        safe_label = html.escape(check.get('label', 'Проверка'))
+        safe_label = html.escape(check.get('label', '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430'))
         safe_url = html.escape(custom_check_url_text(check))
         badges.append(
             f'<span class="custom-service-slot custom-service-{state}" title="{safe_label}: {safe_url}">{custom_check_status_icon_html(check, state, service_icon_html)}</span>'
@@ -190,18 +190,18 @@ def web_custom_check_badges(probe, custom_checks, service_icon_html):
 
 def web_custom_checks_html(custom_checks, service_icon_html):
     if not custom_checks:
-        return '<div class="custom-check-empty">Дополнительные проверки пока не добавлены.</div>'
+        return '<div class="custom-check-empty">\u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u044b.</div>'
     items = []
     for check in custom_checks:
         safe_id = html.escape(check.get('id', ''))
-        safe_label = html.escape(check.get('label', 'Проверка'))
+        safe_label = html.escape(check.get('label', '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430'))
         safe_url = html.escape(custom_check_url_text(check))
         items.append(f'''<div class="custom-check-item">
             {custom_check_icon_html(check, service_icon_html)}
             <span class="custom-check-copy"><strong>{safe_label}</strong><small>{safe_url}</small></span>
-            <form method="post" action="/custom_check_delete" data-async-action="custom-check-delete" data-confirm-title="Удалить проверку?" data-confirm-message="Удалить дополнительную проверку {safe_label}?">
+            <form method="post" action="/custom_check_delete" data-async-action="custom-check-delete" data-confirm-title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443?" data-confirm-message="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u0443\u044e \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 {safe_label}?">
                 <input type="hidden" name="id" value="{safe_id}">
-                <button type="submit" class="pool-delete-btn" title="Удалить проверку">Удалить</button>
+                <button type="submit" class="pool-delete-btn" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443">\u0423\u0434\u0430\u043b\u0438\u0442\u044c</button>
             </form>
         </div>''')
     return ''.join(items)
@@ -215,7 +215,7 @@ def web_custom_presets_html(custom_checks, presets, service_icon_html):
         safe_label = html.escape(preset['label'])
         safe_url = html.escape(preset.get('url', ''))
         disabled = ' disabled' if preset['id'] in active_ids else ''
-        title = 'Уже добавлено' if disabled else f'Добавить проверку {safe_label}'
+        title = '\u0423\u0436\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u043e' if disabled else f'\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 {safe_label}'
         items.append(f'''<form method="post" action="/custom_check_add" data-async-action="custom-check-add">
             <input type="hidden" name="preset" value="{safe_id}">
             <input type="hidden" name="label" value="{safe_label}">
