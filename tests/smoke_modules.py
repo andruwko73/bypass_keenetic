@@ -25,6 +25,7 @@ import pool_probe_controller
 import proxy_status
 import unblock_lists
 import installer_common
+import repo_update
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -364,6 +365,47 @@ def test_installer_common_helpers():
     assert 'window.location.replace' in redirect_script
 
 
+def test_repo_update_helpers():
+    class _Response:
+        def __init__(self, url, text='', payload=None, fail=False):
+            self.url = url
+            self.text = text
+            self._payload = payload or {}
+            self._fail = fail
+            self.raw = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            if self._fail:
+                raise repo_update.requests.RequestException('fail')
+
+        def json(self):
+            return self._payload
+
+    class _Session:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **_kwargs):
+            self.calls.append(url)
+            if 'raw.githubusercontent.com' in url or 'codeload.github.com' in url:
+                return _Response(url, fail=True)
+            return _Response(url, payload={'encoding': 'base64', 'content': 'aGVsbG8='})
+
+    session = _Session()
+    url, text = repo_update.download_repo_file_text(session, 'owner', 'repo', 'branch/name', 'script.sh')
+    assert text == 'hello'
+    assert 'api.github.com' in url
+    assert any('raw.githubusercontent.com' in call for call in session.calls)
+    assert any('codeload.github.com' in call for call in session.calls)
+    assert repo_update.direct_fetch_env(('HTTP_PROXY',), {'HTTP_PROXY': 'x', 'keep': 'y'}) == {'keep': 'y'}
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     current_keys = {'vless': 'key'}
@@ -617,6 +659,7 @@ def main():
     test_web_command_state_helpers()
     test_web_http_common_helpers()
     test_installer_common_helpers()
+    test_repo_update_helpers()
     test_key_pool_web()
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()

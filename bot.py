@@ -10,16 +10,14 @@
 import subprocess
 import os
 import re
-import stat
 import sys
 import time
 import threading
 import signal
 import traceback
 import gc
-import tarfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import unquote, urlparse
 from proxy_key_store import (
     load_current_keys as _store_load_current_keys,
     load_shadowsocks_key as _store_load_shadowsocks_key,
@@ -153,10 +151,16 @@ import web_form_blocks
 import web_get_actions
 import web_post_actions
 from web_form_template import render_web_form
+from repo_update import (
+    direct_fetch_env as _repo_direct_fetch_env,
+    download_repo_script as _repo_download_script,
+    fetch_remote_text as _fetch_remote_text,
+    run_script_and_collect as _repo_run_script_and_collect,
+    write_script as _repo_write_script,
+)
 
 import telebot
 from telebot import types
-import base64
 import shutil
 # import datetime
 import requests
@@ -557,12 +561,6 @@ AUTHORIZED_USER_IDS.update(EXTRA_NUMERIC_USER_IDS)
 
 def _raw_github_url(path):
     return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/{APP_BRANCH_LABEL}/{path}?ts={int(time.time())}'
-
-
-def _fetch_remote_text(url, timeout=20):
-    response = requests.get(url, timeout=timeout)
-    response.raise_for_status()
-    return response.text
 
 
 SOCIALNET_SOURCE_URL = 'https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt'
@@ -1755,107 +1753,25 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
     return result
 
 
-def _download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, path):
-    archive_ref = repo_ref if '/' not in repo_ref else f'refs/heads/{repo_ref}'
-    archive_url = f'https://codeload.github.com/{repo_owner}/{repo_name}/tar.gz/{archive_ref}'
-    suffix = '/' + path.strip('/')
-    with session.get(archive_url, stream=True, timeout=(10, 90)) as response:
-        response.raise_for_status()
-        response.raw.decode_content = True
-        with tarfile.open(fileobj=response.raw, mode='r|gz') as archive:
-            for member in archive:
-                if member.isfile() and member.name.endswith(suffix):
-                    extracted = archive.extractfile(member)
-                    if extracted is not None:
-                        return archive_url, extracted.read().decode('utf-8')
-    raise ValueError(f'GitHub archive did not contain {path}')
-
-
-def _download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
-    headers = {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
-    raw_url = f'https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{repo_ref}/{path}'
-    try:
-        response = session.get(raw_url, headers=headers, timeout=(5, 8))
-        response.raise_for_status()
-        return raw_url, response.text
-    except requests.RequestException:
-        pass
-
-    try:
-        return _download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, path)
-    except Exception:
-        pass
-
-    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{quote(path, safe="/")}'
-    response = session.get(
-        api_url,
-        params={'ref': repo_ref},
-        headers={'Accept': 'application/vnd.github+json', **headers},
-        timeout=(10, 30),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get('encoding') != 'base64' or 'content' not in payload:
-        raise ValueError('GitHub contents API returned unexpected file payload')
-    content = ''.join(str(payload.get('content', '')).split())
-    return response.url, base64.b64decode(content).decode('utf-8')
-
-
-def _download_repo_script(repo_owner, repo_name, branch='codex/main-v1'):
-    session = requests.Session()
-    session.trust_env = False
-    url, script_text = _download_repo_file_text(session, repo_owner, repo_name, branch, 'script.sh')
-    if '#!/bin/sh' not in script_text:
-        raise ValueError('GitHub returned invalid script.sh')
-    with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
-        file.write(script_text)
-    os.chmod('/opt/root/script.sh', stat.S_IRWXU)
-    return url, script_text, branch
-
-
-def _build_direct_fetch_env():
-    env = os.environ.copy()
-    for key in DIRECT_FETCH_ENV_KEYS:
-        env.pop(key, None)
-    return env
-
-
 def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='codex/main-v1'):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
-    direct_env = _build_direct_fetch_env()
+    direct_env = _repo_direct_fetch_env(DIRECT_FETCH_ENV_KEYS)
+    progress_callback = None
     if progress_command:
-        _set_web_command_progress(progress_command, '\n'.join(logs))
+        progress_callback = lambda text: _set_web_command_progress(progress_command, text)
+        progress_callback('\n'.join(logs))
     if repo_owner and repo_name:
-        url, script_text, repo_ref = _download_repo_script(repo_owner, repo_name, branch=branch)
+        url, script_text, repo_ref = _repo_download_script(repo_owner, repo_name, branch=branch)
         direct_env['REPO_REF'] = branch
         logs.append(f'Скрипт загружен из {url}')
         logs.append(f'Коммит обновления: {repo_ref[:12]}')
         if repo_owner == fork_repo_owner and 'BOT_CONFIG_PATH' not in script_text:
             logs.append('⚠️ GitHub отдал старую версию script.sh, но legacy-пути уже подготовлены на роутере.')
-        if progress_command:
-            _set_web_command_progress(progress_command, '\n'.join(logs))
-        with open('/opt/root/script.sh', 'w', encoding='utf-8') as file:
-            file.write(script_text)
-        os.chmod('/opt/root/script.sh', stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+        if progress_callback:
+            progress_callback('\n'.join(logs))
+        _repo_write_script(script_text)
 
-    process = subprocess.Popen(
-        ['/bin/sh', '/opt/root/script.sh', action],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        env=direct_env,
-    )
-    for line in process.stdout:
-        clean_line = line.strip()
-        if clean_line:
-            logs.append(clean_line)
-            if progress_command:
-                _set_web_command_progress(progress_command, '\n'.join(logs))
-    return_code = process.wait()
-    if return_code != 0:
-        logs.append(f'Команда завершилась с кодом {return_code}.')
-    return return_code, '\n'.join(logs)
+    return _repo_run_script_and_collect(action, direct_env, logs, progress_callback)
 
 
 def _restart_router_services():
