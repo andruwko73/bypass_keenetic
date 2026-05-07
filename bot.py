@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.495, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.496, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -453,7 +453,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.495'
+APP_VERSION_COUNTER = '1.496'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -491,6 +491,13 @@ proxy_settings = {
     'vless': f'socks5h://127.0.0.1:{localportvless}',
     'vless2': f'socks5h://127.0.0.1:{localportvless2}',
     'trojan': f'socks5h://127.0.0.1:{localporttrojan_bot}',
+}
+PROXY_LOCAL_PORTS = {
+    'shadowsocks': localportsh_bot,
+    'vmess': localportvmess,
+    'vless': localportvless,
+    'vless2': localportvless2,
+    'trojan': localporttrojan_bot,
 }
 proxy_supports_http = {
     'none': True,
@@ -2072,14 +2079,7 @@ def _core_proxy_runtime_name():
 def _protocol_status_for_key(key_name, key_value):
     if not key_value.strip():
         return _status_empty_protocol_status()
-    ports = {
-        'shadowsocks': localportsh_bot,
-        'vmess': localportvmess,
-        'vless': localportvless,
-        'vless2': localportvless2,
-        'trojan': localporttrojan_bot,
-    }
-    port = ports.get(key_name)
+    port = PROXY_LOCAL_PORTS.get(key_name)
     endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_name, port)
     if not endpoint_ok:
         return {
@@ -3156,13 +3156,7 @@ def _check_local_proxy_endpoint(key_type, port):
 def _proxy_apply_settings():
     return _runtime_proxy_apply_settings(
         CORE_PROXY_SERVICE_SCRIPT,
-        {
-            'shadowsocks': localportsh_bot,
-            'vmess': localportvmess,
-            'vless': localportvless,
-            'vless2': localportvless2,
-            'trojan': localporttrojan_bot,
-        },
+        PROXY_LOCAL_PORTS,
     )
 
 
@@ -3241,13 +3235,7 @@ def _build_web_status(current_keys, protocols=None):
         state_label=state_label,
         proxy_mode=proxy_mode,
         protocols=protocols,
-        ports={
-            'shadowsocks': localportsh_bot,
-            'vmess': localportvmess,
-            'vless': localportvless,
-            'vless2': localportvless2,
-            'trojan': localporttrojan_bot,
-        },
+        ports=PROXY_LOCAL_PORTS,
         check_socks5=_check_socks5_handshake,
         check_telegram_api=check_telegram_api,
         is_transient=_is_transient_telegram_api_failure,
@@ -3989,60 +3977,61 @@ PROXY_KEY_INSTALLERS = {
 }
 
 
-def main():
-    global proxy_mode, bot_polling
-    _daemonize_process()
-    _register_signal_handlers()
-    _write_runtime_log('main() entered', mode='w')
-    _runner_cleanup_pool_probe_runtime(kill_processes=True)
-    start_http_server()
+def _restart_core_proxy_at_startup():
     try:
         _write_all_proxy_core_config()
         os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
     except Exception as exc:
         _write_runtime_log(f'Не удалось пересобрать core proxy config при старте: {exc}')
+
+
+def _mark_bot_ready_from_autostart():
     if _load_bot_autostart():
         globals()['bot_ready'] = True
+
+
+def _check_startup_proxy_endpoint():
+    endpoint_ok, endpoint_message = _check_local_proxy_endpoint(proxy_mode, PROXY_LOCAL_PORTS.get(proxy_mode))
+    if endpoint_ok:
+        return True, endpoint_message
+    _write_runtime_log(f'Прокси-режим {proxy_mode} не ответил при старте: {endpoint_message}. Перезапускаю core proxy.')
+    try:
+        os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
+        time.sleep(3)
+    except Exception:
+        pass
+    return _check_local_proxy_endpoint(proxy_mode, PROXY_LOCAL_PORTS.get(proxy_mode))
+
+
+def _restore_startup_proxy_mode():
+    global proxy_mode
     saved_proxy_mode = _load_proxy_mode()
     proxy_mode = saved_proxy_mode
-    ok, error = update_proxy(proxy_mode)
+    ok, _ = update_proxy(proxy_mode)
     if not ok:
         proxy_mode = config.default_proxy_mode
         update_proxy(proxy_mode, persist=False)
         if saved_proxy_mode in proxy_settings:
             _save_proxy_mode(saved_proxy_mode)
-    elif proxy_mode in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-        startup_settings = {
-            'shadowsocks': localportsh_bot,
-            'vmess': localportvmess,
-            'vless': localportvless,
-            'vless2': localportvless2,
-            'trojan': localporttrojan_bot,
-        }
-        startup_port = startup_settings.get(proxy_mode)
-        endpoint_ok, endpoint_message = _check_local_proxy_endpoint(proxy_mode, startup_port)
-        if not endpoint_ok:
-            _write_runtime_log(f'Прокси-режим {proxy_mode} не ответил при старте: {endpoint_message}. Перезапускаю core proxy.')
-            try:
-                os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
-                time.sleep(3)
-            except Exception:
-                pass
-            endpoint_ok, endpoint_message = _check_local_proxy_endpoint(proxy_mode, startup_port)
-        if not endpoint_ok:
-            fallback_mode = proxy_mode
-            _write_runtime_log(f'Прокси-режим {fallback_mode} временно отключён при старте: {endpoint_message}')
-            update_proxy('none', persist=False)
-            _save_proxy_mode(fallback_mode)
-        else:
-            api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=8, read_timeout=10)
-            if not api_status.startswith('✅'):
-                _write_runtime_log(f'Прокси-режим {proxy_mode} не подтверждён при старте: {api_status}')
-    _deliver_pending_telegram_command_result()
-    _start_telegram_result_retry_worker()
-    _start_auto_failover_thread()
-    _ensure_current_keys_in_pools()
-    wait_for_bot_start()
+        return
+    if proxy_mode not in PROXY_LOCAL_PORTS:
+        return
+
+    endpoint_ok, endpoint_message = _check_startup_proxy_endpoint()
+    if not endpoint_ok:
+        fallback_mode = proxy_mode
+        _write_runtime_log(f'Прокси-режим {fallback_mode} временно отключён при старте: {endpoint_message}')
+        update_proxy('none', persist=False)
+        _save_proxy_mode(fallback_mode)
+        return
+
+    api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=8, read_timeout=10)
+    if not api_status.startswith('✅'):
+        _write_runtime_log(f'Прокси-режим {proxy_mode} не подтверждён при старте: {api_status}')
+
+
+def _run_telegram_polling_loop():
+    global bot_polling
     while not shutdown_requested.is_set():
         try:
             bot_polling = True
@@ -4062,6 +4051,23 @@ def main():
             if shutdown_requested.is_set():
                 break
             time.sleep(2)
+
+
+def main():
+    _daemonize_process()
+    _register_signal_handlers()
+    _write_runtime_log('main() entered', mode='w')
+    _runner_cleanup_pool_probe_runtime(kill_processes=True)
+    start_http_server()
+    _restart_core_proxy_at_startup()
+    _mark_bot_ready_from_autostart()
+    _restore_startup_proxy_mode()
+    _deliver_pending_telegram_command_result()
+    _start_telegram_result_retry_worker()
+    _start_auto_failover_thread()
+    _ensure_current_keys_in_pools()
+    wait_for_bot_start()
+    _run_telegram_polling_loop()
     _finalize_shutdown()
 
 
