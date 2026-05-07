@@ -1333,6 +1333,11 @@ def _build_telegram_confirm_markup():
     return _reply_keyboard(("✅ Подтвердить", "Отмена"), ("🔙 Назад",))
 
 
+def _request_telegram_confirmation(message, set_menu_state, action):
+    set_menu_state(TELEGRAM_CONFIRM_LEVEL, action)
+    bot.send_message(message.chat.id, _telegram_confirm_prompt(action), reply_markup=_build_telegram_confirm_markup())
+
+
 def _telegram_confirm_prompt(action):
     prompts = {
         'update_main': (
@@ -1406,18 +1411,15 @@ def _execute_confirmed_telegram_action(chat_id, action, reply_markup):
     }
     if action in update_actions:
         params = update_actions[action]
-        started, status_message = _start_telegram_background_command(
-            '-update',
-            params['repo_owner'],
-            params['repo_name'],
+        _start_telegram_update_from_chat(
             chat_id,
-            'main',
+            reply_markup,
+            menu_name='main',
+            repo_owner=params['repo_owner'],
+            repo_name=params['repo_name'],
             branch=params['branch'],
+            start_message=params['message'],
         )
-        if not started:
-            bot.send_message(chat_id, status_message, reply_markup=reply_markup)
-            return
-        bot.send_message(chat_id, params['message'], reply_markup=reply_markup)
         return
     if action == 'restart_services':
         bot.send_message(chat_id, '🔄 Выполняется перезагрузка сервисов!', reply_markup=reply_markup)
@@ -1498,6 +1500,46 @@ def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, m
         start_new_session=True,
     )
     return True, ''
+
+
+def _send_telegram_update_status(message, reply_markup):
+    try:
+        bot_new_version = _fetch_remote_text(_raw_github_url('version.md'))
+    except requests.RequestException as exc:
+        bot.send_message(message.chat.id, f'⚠️ Не удалось проверить обновления: {exc}', reply_markup=reply_markup)
+        return
+    bot.send_message(
+        message.chat.id,
+        "*ВАША ТЕКУЩАЯ " + str(_current_bot_version()) + "*\n\n"
+        "*ПОСЛЕДНЯЯ ДОСТУПНАЯ ВЕРСИЯ:*\n\n" + str(bot_new_version),
+        parse_mode='Markdown',
+        reply_markup=reply_markup,
+    )
+    bot.send_message(
+        message.chat.id,
+        "Если вы хотите обновить текущую версию на более новую, нажмите сюда /update",
+        parse_mode='Markdown',
+        reply_markup=reply_markup,
+    )
+
+
+def _start_telegram_update_from_chat(chat_id, reply_markup, *, menu_name='service', repo_owner=None, repo_name=None,
+                                     branch='codex/main-v1', start_message=None):
+    repo_owner = repo_owner or fork_repo_owner
+    repo_name = repo_name or fork_repo_name
+    started, status_message = _start_telegram_background_command('-update', repo_owner, repo_name, chat_id, menu_name, branch=branch)
+    if not started:
+        bot.send_message(chat_id, status_message, reply_markup=reply_markup)
+        return
+    bot.send_message(
+        chat_id,
+        start_message or (
+            f'Запускаю обновление из форка {repo_owner}/{repo_name}. Обычно это занимает 1-3 минуты. '
+            'Во время обновления бот может временно пропасть из сети, потому что сервис будет перезапущен. '
+            'После запуска бот сам пришлет в этот чат лог и итоговое сообщение.'
+        ),
+        reply_markup=reply_markup,
+    )
 
 
 def _deliver_pending_telegram_command_result():
@@ -3812,13 +3854,11 @@ def bot_message(message):
                 return
 
             if message.text == '♻️ Перезагрузить сервисы' or message.text == 'Перезагрузить сервисы':
-                set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'restart_services')
-                bot.send_message(message.chat.id, _telegram_confirm_prompt('restart_services'), reply_markup=_build_telegram_confirm_markup())
+                _request_telegram_confirmation(message, set_menu_state, 'restart_services')
                 return
 
             if message.text == '‼️Перезагрузить роутер' or message.text == 'Перезагрузить роутер':
-                set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'reboot')
-                bot.send_message(message.chat.id, _telegram_confirm_prompt('reboot'), reply_markup=_build_telegram_confirm_markup())
+                _request_telegram_confirmation(message, set_menu_state, 'reboot')
                 return
 
             if message.text == '‼️DNS Override' or message.text == 'DNS Override':
@@ -3828,13 +3868,11 @@ def bot_message(message):
 
             if message.text == "✅ DNS Override ВКЛ" or message.text == "❌ DNS Override ВЫКЛ":
                 if message.text == "✅ DNS Override ВКЛ":
-                    set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'dns_on')
-                    bot.send_message(message.chat.id, _telegram_confirm_prompt('dns_on'), reply_markup=_build_telegram_confirm_markup())
+                    _request_telegram_confirmation(message, set_menu_state, 'dns_on')
                     return
 
                 if message.text == "❌ DNS Override ВЫКЛ":
-                    set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'dns_off')
-                    bot.send_message(message.chat.id, _telegram_confirm_prompt('dns_off'), reply_markup=_build_telegram_confirm_markup())
+                    _request_telegram_confirmation(message, set_menu_state, 'dns_off')
                     return
 
             # Кнопка "Обновление" убрана из меню "Сервис" (заменена на "Статус ключей").
@@ -3861,41 +3899,11 @@ def bot_message(message):
                 return
 
             if message.text == '🔄 Обновления' or message.text == '/check_update':
-                url = _raw_github_url('version.md')
-                try:
-                    bot_new_version = _fetch_remote_text(url)
-                except requests.RequestException as exc:
-                    bot.send_message(message.chat.id, f'⚠️ Не удалось проверить обновления: {exc}', reply_markup=service)
-                    return
-                bot_version = _current_bot_version()
-                service_bot_version = "*ВАША ТЕКУЩАЯ " + str(bot_version) + "*\n\n"
-                service_new_version = "*ПОСЛЕДНЯЯ ДОСТУПНАЯ ВЕРСИЯ:*\n\n" + str(bot_new_version)
-                service_update_info = service_bot_version + service_new_version
-                # bot.send_message(message.chat.id, service_bot_version, parse_mode='Markdown', reply_markup=service)
-                bot.send_message(message.chat.id, service_update_info, parse_mode='Markdown', reply_markup=service)
-
-                service_update_msg = "Если вы хотите обновить текущую версию на более новую, нажмите сюда /update"
-                bot.send_message(message.chat.id, service_update_msg, parse_mode='Markdown', reply_markup=service)
+                _send_telegram_update_status(message, service)
                 return
 
             if message.text == '/update':
-                started, status_message = _start_telegram_background_command(
-                    '-update',
-                    fork_repo_owner,
-                    fork_repo_name,
-                    message.chat.id,
-                    'service',
-                )
-                if not started:
-                    bot.send_message(message.chat.id, status_message, reply_markup=service)
-                    return
-                bot.send_message(
-                    message.chat.id,
-                    f'Запускаю обновление из форка {fork_repo_owner}/{fork_repo_name}. Обычно это занимает 1-3 минуты. '
-                    'Во время обновления бот может временно пропасть из сети, потому что сервис будет перезапущен. '
-                    'После запуска бот сам пришлет в этот чат лог и итоговое сообщение.',
-                    reply_markup=service,
-                )
+                _start_telegram_update_from_chat(message.chat.id, service)
                 return
 
             if message.text == "📥 Сервисы по запросу":
@@ -4413,23 +4421,19 @@ def bot_message(message):
                 '♻️ Установка и переустановка',
                 '♻️ Установка & переустановка',
             ):
-                set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'update_main')
-                bot.send_message(message.chat.id, _telegram_confirm_prompt('update_main'), reply_markup=_build_telegram_confirm_markup())
+                _request_telegram_confirmation(message, set_menu_state, 'update_main')
                 return
 
             if message.text == '♻️ Переустановка (ветка independent)':
-                set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'update_independent')
-                bot.send_message(message.chat.id, _telegram_confirm_prompt('update_independent'), reply_markup=_build_telegram_confirm_markup())
+                _request_telegram_confirmation(message, set_menu_state, 'update_independent')
                 return
 
             if message.text == '♻️ Переустановка (без Telegram бота)':
-                set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'update_no_bot')
-                bot.send_message(message.chat.id, _telegram_confirm_prompt('update_no_bot'), reply_markup=_build_telegram_confirm_markup())
+                _request_telegram_confirmation(message, set_menu_state, 'update_no_bot')
                 return
 
             if message.text == '⚠️ Удаление':
-                set_menu_state(TELEGRAM_CONFIRM_LEVEL, 'remove')
-                bot.send_message(message.chat.id, _telegram_confirm_prompt('remove'), reply_markup=_build_telegram_confirm_markup())
+                _request_telegram_confirmation(message, set_menu_state, 'remove')
                 return
 
             if message.text == "📝 Списки обхода":
