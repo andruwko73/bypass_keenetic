@@ -169,6 +169,11 @@ import web_form_blocks
 import web_get_actions
 import web_post_actions
 from web_form_template import render_web_form
+from web_status_builder import (
+    active_protocol_status as _status_active_protocol_status,
+    cached_protocol_status as _status_cached_protocol_status,
+    empty_protocol_status as _status_empty_protocol_status,
+)
 from repo_update import (
     direct_fetch_env as _repo_direct_fetch_env,
     download_repo_script as _repo_download_script,
@@ -2117,13 +2122,8 @@ def _core_proxy_runtime_name():
 
 
 def _protocol_status_for_key(key_name, key_value):
-    now = time.time()
     if not key_value.strip():
-        return {
-            'tone': 'empty',
-            'label': 'Не сохранён',
-            'details': 'Ключ ещё не сохранён на роутере.',
-        }
+        return _status_empty_protocol_status()
     ports = {
         'shadowsocks': localportsh_bot,
         'vmess': localportvmess,
@@ -2168,104 +2168,26 @@ def _protocol_status_for_key(key_name, key_value):
         _record_key_probe(key_name, key_value, yt_ok=yt_ok)
     else:
         _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok)
-    custom_ok = any(state == 'ok' for state in custom_states.values())
-    any_ok = api_ok or yt_ok or custom_ok
-    service_parts = [
-        f'Telegram: {"работает" if api_ok else ("перепроверяется" if api_transient else "не работает")}',
-        f'YouTube: {"работает" if yt_ok else "не работает"}',
-    ]
-    for check in custom_checks:
-        check_id = check.get('id')
-        state = custom_states.get(check_id)
-        if state in ('ok', 'fail'):
-            service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
-    details = f'Показан результат проверки активного ключа. {endpoint_message} ' + ', '.join(service_parts) + '.'
-    if endpoint_ok and api_transient:
-        return {
-            'tone': 'warn',
-            'label': 'Проверяется',
-            'details': (f'{endpoint_message} Telegram API не ответил вовремя, идёт повторная проверка. '
-                        'Статус обновится без перезагрузки страницы.').strip(),
-            'endpoint_ok': endpoint_ok,
-            'endpoint_message': endpoint_message,
-            'api_ok': False,
-            'api_message': api_message,
-            'api_pending': True,
-            'yt_ok': yt_ok,
-            'yt_message': yt_message,
-            'custom': custom_states,
-        }
-    return {
-        'tone': 'ok' if api_ok else ('warn' if any_ok else 'fail'),
-        'label': 'Работает' if api_ok else ('Частично работает' if any_ok else 'Не работает'),
-        'details': details.strip(),
-        'endpoint_ok': endpoint_ok,
-        'endpoint_message': endpoint_message,
-        'api_ok': api_ok,
-        'api_message': api_message,
-        'yt_ok': yt_ok,
-        'yt_message': yt_message,
-        'custom': custom_states,
-    }
+    return _status_active_protocol_status(
+        endpoint_ok=endpoint_ok,
+        endpoint_message=endpoint_message,
+        api_ok=api_ok,
+        api_message=api_message,
+        api_transient=api_transient,
+        yt_ok=yt_ok,
+        yt_message=yt_message,
+        custom_states=custom_states,
+        custom_checks=custom_checks,
+    )
 
 
 def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None):
     if not key_value.strip():
-        return {
-            'tone': 'empty',
-            'label': 'Не сохранён',
-            'details': 'Ключ ещё не сохранён на роутере.',
-        }
+        return _status_empty_protocol_status()
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     probe = _load_key_probe_cache().get(_hash_key(key_value), {})
     custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
-    has_probe_result = (
-        'tg_ok' in probe or
-        'yt_ok' in probe or
-        any(state in ('ok', 'fail') for state in custom_states.values())
-    )
-    if has_probe_result:
-        api_ok = bool(probe.get('tg_ok')) if 'tg_ok' in probe else False
-        yt_ok = bool(probe.get('yt_ok')) if 'yt_ok' in probe else False
-        custom_ok = any(state == 'ok' for state in custom_states.values())
-        any_ok = api_ok or yt_ok or custom_ok
-        service_parts = []
-        if 'tg_ok' in probe:
-            service_parts.append(f'Telegram: {"работает" if api_ok else "не работает"}')
-        if 'yt_ok' in probe:
-            service_parts.append(f'YouTube: {"работает" if yt_ok else "не работает"}')
-        for check in custom_checks:
-            check_id = check.get('id')
-            state = custom_states.get(check_id)
-            if state in ('ok', 'fail'):
-                service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
-        details = 'Показан последний результат проверки пула.'
-        if service_parts:
-            details += ' ' + ', '.join(service_parts) + '.'
-        return {
-            'tone': 'ok' if api_ok else ('warn' if any_ok else 'fail'),
-            'label': 'Работает' if api_ok else ('Частично работает' if any_ok else 'Не работает'),
-            'details': details,
-            'endpoint_ok': None,
-            'endpoint_message': '',
-            'api_ok': api_ok,
-            'api_message': '',
-            'yt_ok': yt_ok,
-            'yt_message': '',
-            'custom': custom_states,
-        }
-    return {
-        'tone': 'warn',
-        'label': 'Не проверялся',
-        'details': 'Ключ ждёт фоновой проверки. Чтобы не перегружать роутер, ключи проверяются по одному.',
-        'endpoint_ok': None,
-        'endpoint_message': '',
-        'api_ok': False,
-        'api_message': '',
-        'yt_ok': False,
-        'yt_message': '',
-        'custom': custom_states,
-    }
+    return _status_cached_protocol_status(key_value, probe, custom_checks, custom_states)
 
 
 def _placeholder_protocol_statuses(current_keys):

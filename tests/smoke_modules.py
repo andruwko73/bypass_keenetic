@@ -15,6 +15,7 @@ import web_form_blocks
 import web_form_template
 import web_http_common
 import web_pool_form_blocks
+import web_status_builder
 import web_template_styles
 import web_template_scripts
 import web_post_actions
@@ -637,6 +638,32 @@ def test_web_pool_form_blocks_helpers():
     assert 'protocol-workspace active' in panels_html
     assert 'csrf_token' in panels_html
 
+
+def test_web_status_builder_helpers():
+    assert web_status_builder.empty_protocol_status()['tone'] == 'empty'
+    active = web_status_builder.active_protocol_status(
+        endpoint_ok=True,
+        endpoint_message='SOCKS ok.',
+        api_ok=False,
+        api_message='timeout',
+        api_transient=True,
+        yt_ok=True,
+        yt_message='ok',
+        custom_states={'chat': 'ok'},
+        custom_checks=[{'id': 'chat', 'label': 'Chat'}],
+    )
+    assert active['tone'] == 'warn'
+    assert active['api_pending'] is True
+    cached = web_status_builder.cached_protocol_status(
+        'key',
+        {'tg_ok': False, 'yt_ok': True},
+        [{'id': 'chat', 'label': 'Chat'}],
+        {'chat': 'fail'},
+    )
+    assert cached['tone'] == 'warn'
+    assert 'YouTube: работает' in cached['details']
+
+
 def test_web_template_styles_helpers():
     styles = web_template_styles.render_web_styles()
     assert ':root{' in styles
@@ -743,6 +770,7 @@ def main():
     test_web_get_actions_helpers()
     test_web_form_blocks_helpers()
     test_web_pool_form_blocks_helpers()
+    test_web_status_builder_helpers()
     test_web_template_styles_helpers()
     test_web_template_scripts_helpers()
     test_web_form_template_smoke()
