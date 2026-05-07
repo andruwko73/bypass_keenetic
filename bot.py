@@ -2967,8 +2967,6 @@ def _get_pool_probe_progress():
 def _pool_probe_progress_label(progress=None):
     progress = progress or _get_pool_probe_progress()
     scope = progress.get('scope')
-    if scope == 'auto_missing':
-        return 'Автопроверка непроверенных ключей'
     if scope == 'manual_all':
         return 'Полная проверка всех ключей'
     if scope == 'protocol':
@@ -3111,9 +3109,9 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
     return None
 
 
-def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False, missing_only=False):
+def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
     custom_checks = _load_custom_checks()
-    cache = _load_key_probe_cache() if stale_only or missing_only else {}
+    cache = _load_key_probe_cache() if stale_only else {}
     now = time.time()
     selected = []
     seen = set()
@@ -3125,8 +3123,6 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False, missing_onl
         if task_id in seen:
             continue
         seen.add(task_id)
-        if missing_only and _key_probe_has_required_results(cache.get(_hash_key(key_value)), custom_checks=custom_checks):
-            continue
         if stale_only and _key_probe_is_fresh(cache.get(_hash_key(key_value)), now=now, custom_checks=custom_checks):
             continue
         selected.append((proto, key_value))
@@ -3135,12 +3131,11 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False, missing_onl
     return selected, custom_checks
 
 
-def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, missing_only=False, scope='manual'):
+def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):
     selected, custom_checks = _select_pool_probe_tasks(
         tasks,
         max_keys=max_keys,
         stale_only=stale_only,
-        missing_only=missing_only,
     )
     if POOL_PROBE_ACTIVE_ONLY:
         current_keys = _load_current_keys()
@@ -3588,7 +3583,7 @@ def _refresh_status_caches_async(current_keys):
     threading.Thread(target=worker, daemon=True).start()
 
 
-def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, missing_only=False, scope='manual_all'):
+def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, scope='manual_all'):
     """Запускает безопасную фоновую проверку пула через временный xray."""
     if POOL_PROBE_ACTIVE_ONLY:
         active_proto = proxy_mode if proxy_mode in POOL_PROTOCOL_ORDER else ''
@@ -3601,7 +3596,7 @@ def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, 
         for proto in POOL_PROTOCOL_ORDER
         for key_value in (pools.get(proto, []) or [])
     ]
-    return _queue_pool_key_probe(tasks, max_keys=max_keys, stale_only=stale_only, missing_only=missing_only, scope=scope)
+    return _queue_pool_key_probe(tasks, max_keys=max_keys, stale_only=stale_only, scope=scope)
 
 
 def _authorize_callback(call, handler_name):
