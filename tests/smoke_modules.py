@@ -13,6 +13,7 @@ import web_form_blocks
 import web_form_template
 import web_pool_form_blocks
 import web_template_styles
+import web_template_scripts
 import web_post_actions
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
@@ -268,6 +269,25 @@ def test_web_template_styles_helpers():
     assert '{{' not in styles
 
 
+def test_web_template_scripts_helpers():
+    scripts = web_template_scripts.render_web_scripts(
+        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
+        TELEGRAM_SVG_B64='tg',
+        YOUTUBE_SVG_B64='yt',
+        csrf_token='token',
+        custom_checks_json='[{"id":"x"}]',
+        initial_command_running='false',
+        initial_status_pending='false',
+        enable_key_pool=False,
+        enable_custom_checks=False,
+    )
+    assert 'const INITIAL_STATUS_PENDING = false;' in scripts
+    assert 'const ENABLE_KEY_POOL = false;' in scripts
+    assert "const CSRF_TOKEN = 'token';" in scripts
+    assert 'function setupAsyncForms' in scripts
+    assert '{{' not in scripts
+
+
 def test_web_form_template_smoke():
     page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
@@ -342,6 +362,7 @@ def main():
     test_web_form_blocks_helpers()
     test_web_pool_form_blocks_helpers()
     test_web_template_styles_helpers()
+    test_web_template_scripts_helpers()
     test_web_form_template_smoke()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
