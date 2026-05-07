@@ -115,7 +115,7 @@ def render_select_mode_picker(active_mode, csrf_input_html, *, none_label='Бе�
 </div>'''
 
 
-def render_button_mode_picker(active_mode, *, none_label='Без прокси'):
+def render_button_mode_picker(active_mode, *, none_label='Без прокси', csrf_input_html=''):
     options = [
         ('none', none_label),
         ('shadowsocks', 'Shadowsocks'),
@@ -126,6 +126,7 @@ def render_button_mode_picker(active_mode, *, none_label='Без прокси'):
     ]
     mode_buttons_html = ''.join(
         f'''<form method="post" action="/set_proxy" data-async-action="set-proxy">
+        {csrf_input_html}
         <input type="hidden" name="proxy_type" value="{value}">
         <button type="submit" class="mode-choice{' active' if active_mode == value else ''}" data-mode-value="{value}">
             <span>{html.escape(label)}</span>
