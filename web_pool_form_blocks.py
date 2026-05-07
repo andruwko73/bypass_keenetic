@@ -128,6 +128,8 @@ def render_protocol_panel(
     youtube_icon_html,
     active=False,
     csrf_input_html='',
+    enable_key_pool=True,
+    enable_custom_checks=True,
 ):
     active_class = ' active' if active else ''
     safe_key_name = html.escape(key_name, quote=True)
@@ -137,32 +139,25 @@ def render_protocol_panel(
     safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
     safe_label = html.escape(status_info.get('label', ''))
     safe_details = html.escape(status_info.get('details', ''))
-    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
-        <div class="workspace-head">
-            <div>
-                <span class="eyebrow">Ключи и мосты</span>
-                <h2>{safe_title}</h2>
-                <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
-            </div>
-            <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons>{active_status_icons}</span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>
-        </div>
-        <div class="subtabs">
-            <button type="button" class="subtab active" data-subview-target="key">Ключ</button>
-            <button type="button" class="subtab" data-subview-target="pool">Пул ключей</button>
-            <button type="button" class="subtab" data-subview-target="subscription">Subscription</button>
-            <button type="button" class="subtab" data-subview-target="check">Проверка</button>
-        </div>
-        <div class="protocol-subview active" data-subview="key">
-            <form method="post" action="/install" data-async-action="install" class="key-editor-form">
-                {csrf_input_html}
-                <input type="hidden" name="type" value="{safe_key_name}">
-                <label class="field-label">Активный ключ {safe_title}</label>
-                <textarea name="key" rows="{int(rows)}" placeholder="{safe_placeholder}" required data-key-textarea>{safe_value}</textarea>
-                <div class="form-actions">
-                    <button type="submit">Сохранить {safe_title}</button>
-                </div>
-            </form>
-        </div>
+    subtabs = [('key', 'Ключ')]
+    if enable_key_pool:
+        subtabs.extend([
+            ('pool', 'Пул ключей'),
+            ('subscription', 'Subscription'),
+        ])
+    if enable_key_pool or enable_custom_checks:
+        subtabs.append(('check', 'Проверка'))
+    subtabs_html = ''
+    if len(subtabs) > 1:
+        subtab_buttons = ''.join(
+            f'<button type="button" class="subtab{" active" if index == 0 else ""}" data-subview-target="{value}">{label}</button>'
+            for index, (value, label) in enumerate(subtabs)
+        )
+        subtabs_html = f'<div class="subtabs">{subtab_buttons}</div>'
+    pool_subview_html = ''
+    subscription_subview_html = ''
+    if enable_key_pool:
+        pool_subview_html = f'''
         <div class="protocol-subview" data-subview="pool">
             <div class="pool-toolbar">
                 <form method="post" action="/pool_probe" data-async-action="pool-probe">
@@ -190,7 +185,8 @@ def render_protocol_panel(
                     <tbody data-pool-body="{safe_key_name}">{pool_items_html}</tbody>
                 </table>
             </div>
-        </div>
+        </div>'''
+        subscription_subview_html = f'''
         <div class="protocol-subview protocol-subview-import" data-subview="subscription">
             <form method="post" action="/pool_add" class="pool-add-form" data-async-action="pool-add">
                 {csrf_input_html}
@@ -206,13 +202,10 @@ def render_protocol_panel(
                 <input type="url" name="url" placeholder="https://sub.example.com/...">
                 <button type="submit" class="secondary-button">Загрузить subscription</button>
             </form>
-        </div>
-        <div class="protocol-subview protocol-subview-check" data-subview="check">
-            <div class="status-card">
-                <span class="status-label">Состояние ключа</span>
-                <span class="status-value">{safe_label}</span>
-                <p class="status-note">{safe_details}</p>
-            </div>
+        </div>'''
+    custom_check_card_html = ''
+    if enable_custom_checks:
+        custom_check_card_html = f'''
             <div class="custom-check-card">
                 <div class="custom-check-head">
                     <span>
@@ -230,11 +223,49 @@ def render_protocol_panel(
                     <button type="submit" class="secondary-button">Добавить проверку</button>
                     <button type="submit" class="secondary-button" formaction="/custom_checks_to_list" data-confirm-title="Добавить проверки в список обхода?" data-confirm-message="Домены выбранных дополнительных проверок будут добавлены в список {safe_title}.">Добавить в список обхода</button>
                 </form>
-            </div>
+            </div>'''
+    check_probe_form_html = ''
+    if enable_key_pool:
+        check_probe_form_html = f'''
             <form method="post" action="/pool_probe" data-async-action="pool-probe">
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
                 <button type="submit">Проверить пул {safe_title}</button>
+            </form>'''
+    check_subview_html = ''
+    if enable_key_pool or enable_custom_checks:
+        check_subview_html = f'''
+        <div class="protocol-subview protocol-subview-check" data-subview="check">
+            <div class="status-card">
+                <span class="status-label">Состояние ключа</span>
+                <span class="status-value">{safe_label}</span>
+                <p class="status-note">{safe_details}</p>
+            </div>
+            {custom_check_card_html}
+            {check_probe_form_html}
+        </div>'''
+    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
+        <div class="workspace-head">
+            <div>
+                <span class="eyebrow">Ключи и мосты</span>
+                <h2>{safe_title}</h2>
+                <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
+            </div>
+            <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons>{active_status_icons}</span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>
+        </div>
+        {subtabs_html}
+        <div class="protocol-subview active" data-subview="key">
+            <form method="post" action="/install" data-async-action="install" class="key-editor-form">
+                {csrf_input_html}
+                <input type="hidden" name="type" value="{safe_key_name}">
+                <label class="field-label">Активный ключ {safe_title}</label>
+                <textarea name="key" rows="{int(rows)}" placeholder="{safe_placeholder}" required data-key-textarea>{safe_value}</textarea>
+                <div class="form-actions">
+                    <button type="submit">Сохранить {safe_title}</button>
+                </div>
             </form>
         </div>
+        {pool_subview_html}
+        {subscription_subview_html}
+        {check_subview_html}
     </section>'''
