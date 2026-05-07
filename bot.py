@@ -2943,6 +2943,251 @@ def _pool_state_proto_or_menu(message, bypass, set_menu_state, clear_inline=True
     return proto
 
 
+def _return_to_pool_page(message, set_menu_state, proto, page=None, prefix=None):
+    set_menu_state(21)
+    _send_pool_page(message.chat.id, proto, page=_get_pool_page(message.chat.id) if page is None else page, prefix=prefix)
+
+
+def _handle_pool_protocol_state(message, set_menu_state):
+    if message.text == '🔙 В меню ключей':
+        _return_to_key_menu_from_pool(message, set_menu_state)
+        return True
+    proto = _resolve_pool_protocol(message.text)
+    if not proto:
+        bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу.', reply_markup=_pool_protocol_markup())
+        return True
+    set_menu_state(21, proto)
+    _send_pool_page(message.chat.id, proto, page=0)
+    return True
+
+
+def _handle_pool_action_button(message, proto, page, set_menu_state):
+    action, raw_index, button_proto = _pool_reply_key_action(message.text)
+    if not action:
+        return False
+    if action == 'legacy' or not button_proto:
+        bot.send_message(
+            message.chat.id,
+            'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку вида V1/V2/VM/TR/SS.',
+            reply_markup=_pool_action_markup(proto, page),
+        )
+        return True
+    if button_proto != proto:
+        proto = button_proto
+        page = 0
+        set_menu_state(21, proto)
+    if action == 'delete':
+        bot.send_message(
+            message.chat.id,
+            'Удаление доступно только через кнопку «🗑 Удаление». Это защищает от случайного нажатия старой кнопки.',
+            reply_markup=_pool_action_markup(proto, page),
+        )
+        return True
+    try:
+        index, key_value = _pool_key_by_index(proto, raw_index)
+    except Exception as exc:
+        bot.send_message(message.chat.id, f'Ошибка выбора ключа: {exc}', reply_markup=_pool_action_markup(proto, page))
+        return True
+    if action == 'apply':
+        bot.send_message(
+            message.chat.id,
+            f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
+            reply_markup=_pool_action_markup(proto, page),
+        )
+        _apply_pool_key_background(message.chat.id, proto, key_value, index, page=page)
+        return True
+    try:
+        _delete_pool_key(proto, key_value)
+        _send_pool_page(message.chat.id, proto, page=page, prefix=f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.')
+    except Exception as exc:
+        bot.send_message(message.chat.id, f'Ошибка удаления ключа из пула: {exc}', reply_markup=_pool_action_markup(proto, page))
+    return True
+
+
+def _handle_pool_manage_state(message, bypass, set_menu_state):
+    proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
+    if not proto:
+        return True
+    page = _get_pool_page(message.chat.id)
+    if message.text == '🔙 В меню ключей':
+        _return_to_key_menu_from_pool(message, set_menu_state)
+        return True
+    selected_proto = _resolve_pool_protocol(message.text)
+    if selected_proto:
+        set_menu_state(21, selected_proto)
+        _send_pool_page(message.chat.id, selected_proto, page=0)
+        return True
+    if message.text == '🔙 К выбору протокола':
+        _show_pool_protocol_menu(message, set_menu_state)
+        return True
+    page_delta = _pool_reply_page_delta(message.text)
+    if page_delta:
+        _send_pool_page(message.chat.id, proto, page=page + page_delta)
+        return True
+    if _is_pool_page_noop(message.text) or message.text in ('📋 Показать пул', '🔄 Обновить пул', '🔙 К пулу'):
+        _send_pool_page(message.chat.id, proto, page=page)
+        return True
+    if _handle_pool_action_button(message, proto, page, set_menu_state):
+        return True
+    if message.text == '➕ Добавить ключи':
+        set_menu_state(22)
+        bot.send_message(message.chat.id, f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.', reply_markup=_pool_input_markup())
+        return True
+    if message.text == '🔗 Загрузить subscription':
+        set_menu_state(23)
+        bot.send_message(message.chat.id, f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.', reply_markup=_pool_input_markup())
+        return True
+    if message.text == '✅ Применить ключ':
+        bot.send_message(message.chat.id, 'Используйте нижние кнопки ✅ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
+        return True
+    if message.text == '🗑 Удалить ключ':
+        bot.send_message(message.chat.id, 'Используйте нижние кнопки ✕ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
+        return True
+    if message.text == '🗑 Удаление':
+        set_menu_state(25)
+        bot.send_message(
+            message.chat.id,
+            f'Выберите ключ для удаления из пула {_pool_proto_label(proto)}. Активный ключ удалить можно, но режим бота останется прежним до применения другого ключа.',
+            reply_markup=_pool_delete_markup(proto, page),
+        )
+        return True
+    if message.text == '🧹 Очистить пул':
+        set_menu_state(26)
+        bot.send_message(message.chat.id, f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.', reply_markup=_pool_clear_confirm_markup())
+        return True
+    if message.text in ['🔍 Проверить пул', '🔍 Проверить активный']:
+        started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
+        prefix = (
+            f'Запущена безопасная фоновая проверка пула {_pool_proto_label(proto)}. В очереди: {queued}. Ключи проверяются по одному с паузой, чтобы не перегружать память роутера.'
+            if started else
+            'Проверка пула уже выполняется или в пуле нет ключей для проверки.'
+        )
+        _send_pool_page(message.chat.id, proto, page=page, prefix=prefix)
+        return True
+    bot.send_message(message.chat.id, 'Выберите действие кнопкой внизу.', reply_markup=_pool_action_markup(proto, page))
+    return True
+
+
+def _handle_pool_add_state(message, bypass, set_menu_state):
+    proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
+    if not proto:
+        return True
+    if message.text == '🔙 К пулу':
+        _return_to_pool_page(message, set_menu_state, proto)
+        return True
+    added = _add_keys_to_pool(proto, message.text)
+    _return_to_pool_page(message, set_menu_state, proto, prefix=f'Добавлено ключей в пул {_pool_proto_label(proto)}: {added}')
+    return True
+
+
+def _handle_pool_subscription_state(message, bypass, set_menu_state):
+    proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
+    if not proto:
+        return True
+    if message.text == '🔙 К пулу':
+        _return_to_pool_page(message, set_menu_state, proto)
+        return True
+    try:
+        fetched, error = _fetch_keys_from_subscription(message.text.strip())
+        if error:
+            raise ValueError(error)
+        source_proto = 'vless' if proto == 'vless2' else proto
+        added = _add_keys_to_pool(proto, '\n'.join(fetched.get(source_proto, []) or []))
+        result = f'Загружено из subscription в пул {_pool_proto_label(proto)}: {added} новых ключей.'
+    except Exception as exc:
+        result = f'Ошибка загрузки subscription: {exc}'
+    _return_to_pool_page(message, set_menu_state, proto, prefix=result)
+    return True
+
+
+def _handle_pool_clear_state(message, bypass, set_menu_state):
+    proto = _pool_state_proto_or_menu(message, bypass, set_menu_state, clear_inline=False)
+    if not proto:
+        return True
+    page = _get_pool_page(message.chat.id)
+    if message.text == '✅ Очистить пул':
+        removed = _clear_pool(proto)
+        _return_to_pool_page(message, set_menu_state, proto, page=page, prefix=f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {removed}.')
+        return True
+    if message.text in ('Отмена', '🔙 К пулу'):
+        _return_to_pool_page(message, set_menu_state, proto, page=page, prefix='Очистка пула отменена.')
+        return True
+    bot.send_message(message.chat.id, 'Подтвердите очистку или нажмите отмену.', reply_markup=_pool_clear_confirm_markup())
+    return True
+
+
+def _handle_pool_apply_state(message, bypass, set_menu_state):
+    proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
+    if not proto:
+        return True
+    try:
+        index, key_value = _pool_key_by_index(proto, message.text)
+        result = f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{_apply_pool_key(proto, key_value)}'
+    except Exception as exc:
+        result = f'Ошибка применения ключа из пула: {exc}'
+    set_menu_state(21)
+    _send_pool_page(message.chat.id, proto, prefix=result)
+    return True
+
+
+def _handle_pool_delete_state(message, bypass, set_menu_state):
+    proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
+    if not proto:
+        return True
+    page = _get_pool_page(message.chat.id)
+    if message.text in ('🔙 К пулу', '🔙 Назад'):
+        _return_to_pool_page(message, set_menu_state, proto, page=page)
+        return True
+    page_delta = _pool_reply_page_delta(message.text)
+    if page_delta:
+        set_menu_state(25)
+        _send_pool_delete_page(message.chat.id, proto, page=page + page_delta, prefix='Режим удаления: выберите ключ кнопкой ниже.')
+        return True
+    if _is_pool_page_noop(message.text):
+        _send_pool_delete_page(message.chat.id, proto, page=page)
+        return True
+    action, raw_index, button_proto = _pool_reply_key_action(message.text)
+    if not action:
+        bot.send_message(message.chat.id, 'Выберите ключ для удаления кнопкой с кодом протокола V1/V2/VM/TR/SS.', reply_markup=_pool_delete_markup(proto, page))
+        return True
+    if action == 'legacy' or not button_proto:
+        bot.send_message(
+            message.chat.id,
+            'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку удаления вида ✕ V1/V2/VM/TR/SS.',
+            reply_markup=_pool_delete_markup(proto, page),
+        )
+        return True
+    if button_proto != proto:
+        proto = button_proto
+        page = 0
+        set_menu_state(25, proto)
+    if action != 'delete':
+        bot.send_message(message.chat.id, 'Сейчас включен режим удаления. Нажмите кнопку ключа с префиксом ✕ или вернитесь к пулу.', reply_markup=_pool_delete_markup(proto, page))
+        return True
+    try:
+        index, key_value = _pool_key_by_index(proto, raw_index)
+        _delete_pool_key(proto, key_value)
+        result = f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.'
+    except Exception as exc:
+        result = f'Ошибка удаления ключа из пула: {exc}'
+    _return_to_pool_page(message, set_menu_state, proto, page=page, prefix=result)
+    return True
+
+
+def _handle_telegram_pool_state(message, level, bypass, set_menu_state):
+    handlers = {
+        20: lambda: _handle_pool_protocol_state(message, set_menu_state),
+        21: lambda: _handle_pool_manage_state(message, bypass, set_menu_state),
+        22: lambda: _handle_pool_add_state(message, bypass, set_menu_state),
+        23: lambda: _handle_pool_subscription_state(message, bypass, set_menu_state),
+        24: lambda: _handle_pool_apply_state(message, bypass, set_menu_state),
+        25: lambda: _handle_pool_delete_state(message, bypass, set_menu_state),
+        26: lambda: _handle_pool_clear_state(message, bypass, set_menu_state),
+    }
+    handler = handlers.get(level)
+    return handler() if handler else False
+
+
 def _pool_keys_for_proto(proto):
     pools = _ensure_current_keys_in_pools()
     return list(pools.get(proto, []) or [])
@@ -4033,259 +4278,7 @@ def bot_message(message):
                     set_menu_state(2, target_route)
                 return
 
-            if level == 20:
-                if message.text == '🔙 В меню ключей':
-                    _return_to_key_menu_from_pool(message, set_menu_state)
-                    return
-                proto = _resolve_pool_protocol(message.text)
-                if not proto:
-                    bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу.', reply_markup=_pool_protocol_markup())
-                    return
-                set_menu_state(21, proto)
-                _send_pool_page(message.chat.id, proto, page=0)
-                return
-
-            if level == 21:
-                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
-                if not proto:
-                    return
-                page = _get_pool_page(message.chat.id)
-                if message.text == '🔙 В меню ключей':
-                    _return_to_key_menu_from_pool(message, set_menu_state)
-                    return
-                selected_proto = _resolve_pool_protocol(message.text)
-                if selected_proto:
-                    set_menu_state(21, selected_proto)
-                    _send_pool_page(message.chat.id, selected_proto, page=0)
-                    return
-                if message.text == '🔙 К выбору протокола':
-                    _show_pool_protocol_menu(message, set_menu_state)
-                    return
-                page_delta = _pool_reply_page_delta(message.text)
-                if page_delta:
-                    _send_pool_page(message.chat.id, proto, page=page + page_delta)
-                    return
-                if _is_pool_page_noop(message.text):
-                    _send_pool_page(message.chat.id, proto, page=page)
-                    return
-                action, raw_index, button_proto = _pool_reply_key_action(message.text)
-                if action:
-                    if action == 'legacy' or not button_proto:
-                        bot.send_message(
-                            message.chat.id,
-                            'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку вида V1/V2/VM/TR/SS.',
-                            reply_markup=_pool_action_markup(proto, page),
-                        )
-                        return
-                    if button_proto != proto:
-                        proto = button_proto
-                        page = 0
-                        set_menu_state(21, proto)
-                    if action == 'delete':
-                        bot.send_message(
-                            message.chat.id,
-                            'Удаление доступно только через кнопку «🗑 Удаление». Это защищает от случайного нажатия старой кнопки.',
-                            reply_markup=_pool_action_markup(proto, page),
-                        )
-                        return
-                    try:
-                        index, key_value = _pool_key_by_index(proto, raw_index)
-                    except Exception as exc:
-                        bot.send_message(message.chat.id, f'Ошибка выбора ключа: {exc}', reply_markup=_pool_action_markup(proto, page))
-                        return
-                    if action == 'apply':
-                        bot.send_message(
-                            message.chat.id,
-                            f'Применяю ключ #{index} для {_pool_proto_label(proto)}. Это может занять до 30 секунд.',
-                            reply_markup=_pool_action_markup(proto, page),
-                        )
-                        _apply_pool_key_background(message.chat.id, proto, key_value, index, page=page)
-                    else:
-                        try:
-                            _delete_pool_key(proto, key_value)
-                            _send_pool_page(message.chat.id, proto, page=page, prefix=f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.')
-                        except Exception as exc:
-                            bot.send_message(message.chat.id, f'Ошибка удаления ключа из пула: {exc}', reply_markup=_pool_action_markup(proto, page))
-                    return
-                if message.text in ('📋 Показать пул', '🔄 Обновить пул'):
-                    _send_pool_page(message.chat.id, proto, page=page)
-                    return
-                if message.text == '🔙 К пулу':
-                    _send_pool_page(message.chat.id, proto, page=page)
-                    return
-                if message.text == '➕ Добавить ключи':
-                    set_menu_state(22)
-                    bot.send_message(
-                        message.chat.id,
-                        f'Отправьте один или несколько ключей для пула {_pool_proto_label(proto)}. Каждый ключ с новой строки.',
-                        reply_markup=_pool_input_markup(),
-                    )
-                    return
-                if message.text == '🔗 Загрузить subscription':
-                    set_menu_state(23)
-                    bot.send_message(
-                        message.chat.id,
-                        f'Отправьте subscription URL для пула {_pool_proto_label(proto)}.',
-                        reply_markup=_pool_input_markup(),
-                    )
-                    return
-                if message.text == '✅ Применить ключ':
-                    bot.send_message(message.chat.id, 'Используйте нижние кнопки ✅ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
-                    return
-                if message.text == '🗑 Удалить ключ':
-                    bot.send_message(message.chat.id, 'Используйте нижние кнопки ✕ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
-                    return
-                if message.text == '🗑 Удаление':
-                    set_menu_state(25)
-                    bot.send_message(
-                        message.chat.id,
-                        f'Выберите ключ для удаления из пула {_pool_proto_label(proto)}. Активный ключ удалить можно, но режим бота останется прежним до применения другого ключа.',
-                        reply_markup=_pool_delete_markup(proto, page),
-                    )
-                    return
-                if message.text == '🧹 Очистить пул':
-                    set_menu_state(26)
-                    bot.send_message(
-                        message.chat.id,
-                        f'Очистить весь пул {_pool_proto_label(proto)}? Это удалит все ключи из пула.',
-                        reply_markup=_pool_clear_confirm_markup(),
-                    )
-                    return
-                if message.text in ['🔍 Проверить пул', '🔍 Проверить активный']:
-                    started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
-                    prefix = (
-                        f'Запущена безопасная фоновая проверка пула {_pool_proto_label(proto)}. В очереди: {queued}. Ключи проверяются по одному с паузой, чтобы не перегружать память роутера.'
-                        if started else
-                        'Проверка пула уже выполняется или в пуле нет ключей для проверки.'
-                    )
-                    _send_pool_page(
-                        message.chat.id,
-                        proto,
-                        page=page,
-                        prefix=prefix,
-                    )
-                    return
-                bot.send_message(message.chat.id, 'Выберите действие кнопкой внизу.', reply_markup=_pool_action_markup(proto, page))
-                return
-
-            if level == 22:
-                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
-                if not proto:
-                    return
-                if message.text == '🔙 К пулу':
-                    set_menu_state(21)
-                    _send_pool_page(message.chat.id, proto, page=_get_pool_page(message.chat.id))
-                    return
-                added = _add_keys_to_pool(proto, message.text)
-                set_menu_state(21)
-                _send_pool_page(
-                    message.chat.id,
-                    proto,
-                    page=_get_pool_page(message.chat.id),
-                    prefix=f'Добавлено ключей в пул {_pool_proto_label(proto)}: {added}',
-                )
-                return
-
-            if level == 23:
-                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
-                if not proto:
-                    return
-                if message.text == '🔙 К пулу':
-                    set_menu_state(21)
-                    _send_pool_page(message.chat.id, proto, page=_get_pool_page(message.chat.id))
-                    return
-                try:
-                    fetched, error = _fetch_keys_from_subscription(message.text.strip())
-                    if error:
-                        raise ValueError(error)
-                    source_proto = 'vless' if proto == 'vless2' else proto
-                    added = _add_keys_to_pool(proto, '\n'.join(fetched.get(source_proto, []) or []))
-                    result = f'Загружено из subscription в пул {_pool_proto_label(proto)}: {added} новых ключей.'
-                except Exception as exc:
-                    result = f'Ошибка загрузки subscription: {exc}'
-                set_menu_state(21)
-                _send_pool_page(message.chat.id, proto, page=_get_pool_page(message.chat.id), prefix=result)
-                return
-
-            if level == 26:
-                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state, clear_inline=False)
-                if not proto:
-                    return
-                page = _get_pool_page(message.chat.id)
-                if message.text == '✅ Очистить пул':
-                    removed = _clear_pool(proto)
-                    set_menu_state(21)
-                    _send_pool_page(message.chat.id, proto, page=page, prefix=f'Пул {_pool_proto_label(proto)} очищен. Удалено ключей: {removed}.')
-                    return
-                if message.text in ('Отмена', '🔙 К пулу'):
-                    set_menu_state(21)
-                    _send_pool_page(message.chat.id, proto, page=page, prefix='Очистка пула отменена.')
-                    return
-                bot.send_message(message.chat.id, 'Подтвердите очистку или нажмите отмену.', reply_markup=_pool_clear_confirm_markup())
-                return
-
-            if level == 24:
-                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
-                if not proto:
-                    return
-                try:
-                    index, key_value = _pool_key_by_index(proto, message.text)
-                    result = _apply_pool_key(proto, key_value)
-                    result = f'Ключ #{index} применён для {_pool_proto_label(proto)}.\n{result}'
-                except Exception as exc:
-                    result = f'Ошибка применения ключа из пула: {exc}'
-                set_menu_state(21)
-                _send_pool_page(message.chat.id, proto, prefix=result)
-                return
-
-            if level == 25:
-                proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
-                if not proto:
-                    return
-                page = _get_pool_page(message.chat.id)
-                if message.text in ('🔙 К пулу', '🔙 Назад'):
-                    set_menu_state(21)
-                    _send_pool_page(message.chat.id, proto, page=page)
-                    return
-                page_delta = _pool_reply_page_delta(message.text)
-                if page_delta:
-                    set_menu_state(25)
-                    _send_pool_delete_page(
-                        message.chat.id,
-                        proto,
-                        page=page + page_delta,
-                        prefix='Режим удаления: выберите ключ кнопкой ниже.',
-                    )
-                    return
-                if _is_pool_page_noop(message.text):
-                    _send_pool_delete_page(message.chat.id, proto, page=page)
-                    return
-                action, raw_index, button_proto = _pool_reply_key_action(message.text)
-                if not action:
-                    bot.send_message(message.chat.id, 'Выберите ключ для удаления кнопкой с кодом протокола V1/V2/VM/TR/SS.', reply_markup=_pool_delete_markup(proto, page))
-                    return
-                if action == 'legacy' or not button_proto:
-                    bot.send_message(
-                        message.chat.id,
-                        'Эта кнопка пула устарела и не содержит протокол. Откройте пул заново и нажмите кнопку удаления вида ✕ V1/V2/VM/TR/SS.',
-                        reply_markup=_pool_delete_markup(proto, page),
-                    )
-                    return
-                if button_proto != proto:
-                    proto = button_proto
-                    page = 0
-                    set_menu_state(25, proto)
-                if action != 'delete':
-                    bot.send_message(message.chat.id, 'Сейчас включен режим удаления. Нажмите кнопку ключа с префиксом ✕ или вернитесь к пулу.', reply_markup=_pool_delete_markup(proto, page))
-                    return
-                try:
-                    index, key_value = _pool_key_by_index(proto, raw_index)
-                    _delete_pool_key(proto, key_value)
-                    result = f'Ключ #{index} удалён из пула {_pool_proto_label(proto)}.'
-                except Exception as exc:
-                    result = f'Ошибка удаления ключа из пула: {exc}'
-                set_menu_state(21)
-                _send_pool_page(message.chat.id, proto, page=page, prefix=result)
+            if _handle_telegram_pool_state(message, level, bypass, set_menu_state):
                 return
 
             if _handle_key_menu_message(message, level, set_menu_state, main):
