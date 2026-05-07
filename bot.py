@@ -1203,36 +1203,32 @@ def _append_custom_checks_to_unblock_list(list_name, custom_checks=None):
     return _apply_entries_to_unblock_list(route_name, entries, 'Дополнительные сервисы', remove=False)
 
 
-def _socialnet_service_markup():
+def _reply_keyboard(*rows):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    options = [types.KeyboardButton(_socialnet_service_label(key)) for key in SOCIALNET_SERVICE_KEYS]
-    options.append(types.KeyboardButton(_socialnet_service_label(SOCIALNET_ALL_KEY)))
-    for index in range(0, len(options), 2):
-        markup.row(*options[index:index + 2])
-    markup.add(types.KeyboardButton("🔙 Назад"))
+    for row in rows:
+        markup.row(*(types.KeyboardButton(label) for label in row))
     return markup
+
+
+def _socialnet_service_markup():
+    options = [_socialnet_service_label(key) for key in SOCIALNET_SERVICE_KEYS]
+    options.append(_socialnet_service_label(SOCIALNET_ALL_KEY))
+    rows = [tuple(options[index:index + 2]) for index in range(0, len(options), 2)]
+    return _reply_keyboard(*rows, ("🔙 Назад",))
 
 
 def _list_actions_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton("📑 Показать список")
-    item2 = types.KeyboardButton("📝 Добавить в список")
-    item3 = types.KeyboardButton("🗑 Удалить из списка")
-    item4 = types.KeyboardButton("📥 Сервисы по запросу")
-    back = types.KeyboardButton("🔙 Назад")
-    markup.row(item1, item2, item3)
-    markup.row(item4)
-    markup.row(back)
-    return markup
+    return _reply_keyboard(
+        ("📑 Показать список", "📝 Добавить в список", "🗑 Удалить из списка"),
+        ("📥 Сервисы по запросу",),
+        ("🔙 Назад",),
+    )
 
 
 def _service_list_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    buttons = [types.KeyboardButton(source['label']) for source in SERVICE_LIST_SOURCES.values()]
-    for index in range(0, len(buttons), 2):
-        markup.row(*buttons[index:index + 2])
-    markup.add(types.KeyboardButton("🔙 Назад"))
-    return markup
+    labels = [source['label'] for source in SERVICE_LIST_SOURCES.values()]
+    rows = [tuple(labels[index:index + 2]) for index in range(0, len(labels), 2)]
+    return _reply_keyboard(*rows, ("🔙 Назад",))
 
 
 def _resolve_service_list_name(value):
@@ -1320,55 +1316,34 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
 
 
 def _build_main_menu_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton("🔰 Установка и удаление")
-    item2 = types.KeyboardButton("🔑 Ключи и мосты")
-    item3 = types.KeyboardButton("📝 Списки обхода")
-    item4 = types.KeyboardButton("📄 Информация")
-    item5 = types.KeyboardButton("⚙️ Сервис")
-    markup.add(item1)
-    markup.add(item2, item3)
-    markup.add(item4, item5)
-    return markup
+    return _reply_keyboard(
+        ("🔰 Установка и удаление",),
+        ("🔑 Ключи и мосты", "📝 Списки обхода"),
+        ("📄 Информация", "⚙️ Сервис"),
+    )
 
 
 def _build_keys_menu_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton("Shadowsocks")
-    item2 = types.KeyboardButton("Vmess")
-    item3 = types.KeyboardButton("Vless 1")
-    item4 = types.KeyboardButton("Vless 2")
-    item5 = types.KeyboardButton("Trojan")
-    item6 = types.KeyboardButton("Где брать ключи❔")
-    item7 = types.KeyboardButton("🌐 Через браузер")
-    item8 = types.KeyboardButton("📦 Пул ключей")
-    markup.add(item1, item2)
-    markup.add(item3, item4)
-    markup.add(item5)
-    markup.add(item6, item8)
-    markup.add(item7)
-    markup.add(types.KeyboardButton("🔙 Назад"))
-    return markup
+    return _reply_keyboard(
+        ("Shadowsocks", "Vmess"),
+        ("Vless 1", "Vless 2"),
+        ("Trojan",),
+        ("Где брать ключи❔", "📦 Пул ключей"),
+        ("🌐 Через браузер",),
+        ("🔙 Назад",),
+    )
 
 
 def _build_service_menu_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton("♻️ Перезагрузить сервисы")
-    item2 = types.KeyboardButton("‼️Перезагрузить роутер")
-    item3 = types.KeyboardButton("‼️DNS Override")
-    item4 = types.KeyboardButton("📊 Статус ключей")
-    back = types.KeyboardButton("🔙 Назад")
-    markup.add(item1, item2)
-    markup.add(item3, item4)
-    markup.add(back)
-    return markup
+    return _reply_keyboard(
+        ("♻️ Перезагрузить сервисы", "‼️Перезагрузить роутер"),
+        ("‼️DNS Override", "📊 Статус ключей"),
+        ("🔙 Назад",),
+    )
 
 
 def _build_telegram_confirm_markup():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row(types.KeyboardButton("✅ Подтвердить"), types.KeyboardButton("Отмена"))
-    markup.row(types.KeyboardButton("🔙 Назад"))
-    return markup
+    return _reply_keyboard(("✅ Подтвердить", "Отмена"), ("🔙 Назад",))
 
 
 def _telegram_confirm_prompt(action):
@@ -3924,25 +3899,8 @@ def bot_message(message):
             _send_unauthorized_message(message, reason)
             return
 
-        main = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        m1 = types.KeyboardButton("🔰 Установка и удаление")
-        m2 = types.KeyboardButton("🔑 Ключи и мосты")
-        m3 = types.KeyboardButton("📝 Списки обхода")
-        m4 = types.KeyboardButton("📄 Информация")
-        m5 = types.KeyboardButton("⚙️ Сервис")
-        main.add(m1)
-        main.add(m2, m3)
-        main.add(m4, m5)
-
-        service = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        m1 = types.KeyboardButton("♻️ Перезагрузить сервисы")
-        m2 = types.KeyboardButton("‼️Перезагрузить роутер")
-        m3 = types.KeyboardButton("‼️DNS Override")
-        m4 = types.KeyboardButton("📊 Статус ключей")
-        back = types.KeyboardButton("🔙 Назад")
-        service.add(m1, m2)
-        service.add(m3, m4)
-        service.add(back)
+        main = _build_main_menu_markup()
+        service = _build_service_menu_markup()
 
         if message.chat.type == 'private':
             command = message.text.split(maxsplit=1)[0].split('@', 1)[0]
@@ -4040,12 +3998,7 @@ def bot_message(message):
                 return
 
             if message.text == '‼️DNS Override' or message.text == 'DNS Override':
-                service = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                m1 = types.KeyboardButton("✅ DNS Override ВКЛ")
-                m2 = types.KeyboardButton("❌ DNS Override ВЫКЛ")
-                back = types.KeyboardButton("🔙 Назад")
-                service.add(m1, m2)
-                service.add(back)
+                service = _reply_keyboard(("✅ DNS Override ВКЛ", "❌ DNS Override ВЫКЛ"), ("🔙 Назад",))
                 bot.send_message(message.chat.id, '‼️DNS Override!', reply_markup=service)
                 return
 
