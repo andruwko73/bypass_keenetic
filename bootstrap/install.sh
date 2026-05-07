@@ -104,6 +104,7 @@ restore_path /opt/etc/bot/main.py
 restore_path /opt/etc/bot/installer.py
 restore_path /opt/etc/bot/installer.env
 restore_path /opt/etc/bot/web_form_template.py
+restore_path /opt/etc/bot/web_form_blocks.py
 restore_path /opt/etc/bot/web_http_common.py
 restore_path /opt/etc/bot/web_get_actions.py
 restore_path /opt/etc/bot/web_post_actions.py
@@ -198,6 +199,7 @@ backup_path "$BOT_MAIN_PATH"
 backup_path "$INSTALLER_PATH"
 backup_path "$INSTALLER_ENV_PATH"
 backup_path "$BOT_DIR/web_form_template.py"
+backup_path "$BOT_DIR/web_form_blocks.py"
 backup_path "$BOT_DIR/web_http_common.py"
 backup_path "$BOT_DIR/web_get_actions.py"
 backup_path "$BOT_DIR/web_post_actions.py"
@@ -234,6 +236,7 @@ download_file "$RAW_BASE/script.sh" "$TMP_DIR/script.sh" 'if \[ "$1" = "-install
 download_file "$RAW_BASE/bot.py" "$TMP_DIR/main.py" 'KeyInstallHTTPRequestHandler'
 download_file "$RAW_BASE/installer.py" "$TMP_DIR/installer.py" 'ThreadingHTTPServer'
 download_file "$RAW_BASE/web_form_template.py" "$TMP_DIR/web_form_template.py" 'render_web_form'
+download_file "$RAW_BASE/web_form_blocks.py" "$TMP_DIR/web_form_blocks.py" 'render_message_block'
 download_file "$RAW_BASE/web_http_common.py" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
 download_file "$RAW_BASE/web_get_actions.py" "$TMP_DIR/web_get_actions.py" 'dispatch'
 download_file "$RAW_BASE/web_post_actions.py" "$TMP_DIR/web_post_actions.py" 'dispatch'
@@ -250,6 +253,7 @@ download_file "$RAW_BASE/S98telegram_bot_installer" "$TMP_DIR/S98telegram_bot_in
 cp "$TMP_DIR/main.py" "$BOT_MAIN_PATH"
 cp "$TMP_DIR/installer.py" "$INSTALLER_PATH"
 cp "$TMP_DIR/web_form_template.py" "$BOT_DIR/web_form_template.py"
+cp "$TMP_DIR/web_form_blocks.py" "$BOT_DIR/web_form_blocks.py"
 cp "$TMP_DIR/web_http_common.py" "$BOT_DIR/web_http_common.py"
 cp "$TMP_DIR/web_get_actions.py" "$BOT_DIR/web_get_actions.py"
 cp "$TMP_DIR/web_post_actions.py" "$BOT_DIR/web_post_actions.py"
@@ -264,7 +268,7 @@ cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
 cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
+chmod 644 "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 /bin/sh "$TMP_DIR/script.sh" -install

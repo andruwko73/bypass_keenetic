@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT))
 
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 import web_get_actions
+import web_form_blocks
 import web_post_actions
 
 
@@ -77,9 +78,21 @@ def test_web_get_actions_helpers():
     assert command['payload'] == {'running': False}
 
 
+def test_web_form_blocks_helpers():
+    assert web_form_blocks.proxy_mode_label('none', none_label='Без VPN') == 'Без VPN'
+    assert web_form_blocks.js_bool(True) == 'true'
+    assert web_form_blocks.js_bool(False) == 'false'
+    assert 'notice-result' in web_form_blocks.render_message_block('ok')
+    assert web_form_blocks.render_message_block('', live=False) == ''
+    assert 'hidden' in web_form_blocks.render_message_block('', live=True)
+    assert 'mode-choice-grid' in web_form_blocks.render_button_mode_picker('vless')
+    assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
+
+
 def main():
     test_proxy_config_builder()
     test_web_get_actions_helpers()
+    test_web_form_blocks_helpers()
     test_web_post_actions_helpers()
     print('smoke_modules: ok')
 

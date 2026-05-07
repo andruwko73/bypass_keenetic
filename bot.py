@@ -59,6 +59,7 @@ from web_command_state import (
     start_command as _start_command_state,
 )
 from web_http_common import WebRequestMixin
+import web_form_blocks
 import web_get_actions
 import web_post_actions
 from web_form_template import render_web_form
@@ -2881,70 +2882,19 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         protocol_statuses = snapshot['protocols'] if snapshot is not None else _placeholder_protocol_statuses(current_keys)
         _refresh_status_caches_async(current_keys)
         unblock_lists = _load_unblock_lists()
-        status_refresh_pending = (
-            'Фоновая проверка связи выполняется' in status.get('api_status', '') or
-            any(item.get('label') == 'Проверяется' for item in protocol_statuses.values())
-        )
+        status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses)
         csrf_token = self._get_or_create_csrf_token()
         csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
 
-        message_block = ''
-        if message:
-            safe_message = html.escape(message)
-            message_block = f'''<div class="notice notice-result">
-  <strong>Результат</strong>
-  <pre class="log-output">{safe_message}</pre>
-</div>'''
-
-        command_block = ''
-        if command_state['label']:
-            command_title = 'Команда выполняется' if command_state['running'] else 'Последняя команда'
-            command_text = command_state['result'] or f'⏳ {command_state["label"]} ещё выполняется. Обновление страницы происходит автоматически.'
-            command_block = f'''<div class="notice notice-status">
-  <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
-  <pre class="log-output">{html.escape(command_text)}</pre>
-</div>'''
-
-        socks_block = ''
-        if status['socks_details']:
-            socks_block = f'<p class="status-note">{html.escape(status["socks_details"])}' + '</p>'
-        fallback_block = ''
-        if status.get('fallback_reason') and status['proxy_mode'] == 'none':
-            fallback_block = f'<p class="status-note">Последняя неудачная попытка прокси: {html.escape(status["fallback_reason"])}</p>'
-
-        current_mode_label = {
-            'none': 'Без VPN',
-            'shadowsocks': 'Shadowsocks',
-            'vmess': 'Vmess',
-            'vless': 'Vless 1',
-            'vless2': 'Vless 2',
-            'trojan': 'Trojan',
-        }.get(status['proxy_mode'], status['proxy_mode'])
+        message_block = web_form_blocks.render_message_block(message)
+        command_block = web_form_blocks.render_command_block(command_state)
+        socks_block = web_form_blocks.render_socks_block(status)
+        fallback_block = web_form_blocks.render_fallback_block(status)
+        current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'], none_label='Без VPN')
         list_route_label = _transparent_list_route_label()
 
-        mode_picker_block = f'''<div id="mode-picker" class="hero-popover mode-picker hidden">
-    <form method="post" action="/set_proxy" class="mode-picker-form">
-        {csrf_input_html}
-        <label class="mode-picker-label" for="hero-proxy-type">Активный протокол</label>
-        <select id="hero-proxy-type" name="proxy_type">
-            <option value="none"{' selected' if proxy_mode == 'none' else ''}>Без VPN (по умолчанию)</option>
-            <option value="shadowsocks"{' selected' if proxy_mode == 'shadowsocks' else ''}>Shadowsocks</option>
-            <option value="vmess"{' selected' if proxy_mode == 'vmess' else ''}>Vmess</option>
-            <option value="vless"{' selected' if proxy_mode == 'vless' else ''}>Vless 1</option>
-            <option value="vless2"{' selected' if proxy_mode == 'vless2' else ''}>Vless 2</option>
-            <option value="trojan"{' selected' if proxy_mode == 'trojan' else ''}>Trojan</option>
-        </select>
-        <button type="submit">Применить режим</button>
-    </form>
-</div>'''
-
-        protocol_sections = [
-            ('vless', 'Vless 1', 6, 'vless://...'),
-            ('vless2', 'Vless 2', 6, 'vless://...'),
-            ('vmess', 'Vmess', 6, 'vmess://...'),
-            ('trojan', 'Trojan', 5, 'trojan://...'),
-            ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
-        ]
+        mode_picker_block = web_form_blocks.render_select_mode_picker(proxy_mode, csrf_input_html)
+        protocol_sections = web_form_blocks.PROTOCOL_SECTIONS
         protocol_tabs = []
         protocol_panels = []
         for panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
@@ -3052,13 +3002,13 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         unblock_tabs_html = ''.join(unblock_tabs)
         unblock_panels_html = ''.join(unblock_panels)
 
-        quick_key_proto = status['proxy_mode'] if status['proxy_mode'] in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'] else 'vless'
+        quick_key_proto = status['proxy_mode'] if status['proxy_mode'] in web_form_blocks.PROXY_PROTOCOLS else 'vless'
         quick_key_label = current_mode_label if quick_key_proto == status['proxy_mode'] else 'Vless 1'
         quick_key_value = html.escape(current_keys.get(quick_key_proto, ''))
         pool_summary = {'active_text': quick_key_label, 'note': ''}
         pool_summary_note = ''
-        initial_status_pending = 'true' if status_refresh_pending else 'false'
-        initial_command_running = 'true' if command_state['running'] else 'false'
+        initial_status_pending = web_form_blocks.js_bool(status_refresh_pending)
+        initial_command_running = web_form_blocks.js_bool(command_state['running'])
         start_button_label = APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL
         mode_toggle_label = f'{APP_MODE_LABEL}:'
         quick_start_note = APP_QUICK_START_NOTE
