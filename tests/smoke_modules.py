@@ -17,6 +17,7 @@ import web_template_styles
 import web_template_scripts
 import web_post_actions
 import telegram_confirm
+import telegram_install_ui
 import pool_probe_controller
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
@@ -175,12 +176,19 @@ def test_web_action_feature_gates():
 
 def test_telegram_confirm_state_source():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
-    assert 'if level == TELEGRAM_CONFIRM_LEVEL:' in source
+    install_source = (ROOT / 'telegram_install_ui.py').read_text(encoding='utf-8')
+    assert 'def _handle_telegram_confirmation(' in source
+    assert '_handle_telegram_confirmation(message, level, bypass, set_menu_state, service)' in source
+    assert 'if level != TELEGRAM_CONFIRM_LEVEL:' in source
     assert '_telegram_is_confirm_confirmation(message.text)' in source
     assert '_telegram_is_cancel_confirmation(message.text)' in source
-    assert '_execute_confirmed_telegram_action(message.chat.id, action, service)' in source
-    for action in ('restart_services', 'reboot', 'dns_on', 'dns_off', 'update_main', 'update_independent', 'update_no_bot', 'remove'):
+    assert '_execute_confirmed_telegram_action(message.chat.id, action, reply_markup)' in source
+    assert 'def _handle_install_menu_message(' in source
+    assert '_telegram_install_action(message.text, include_web_only=True)' in source
+    for action in ('restart_services', 'reboot', 'dns_on', 'dns_off'):
         assert f"_request_telegram_confirmation(message, set_menu_state, '{action}')" in source
+    for action in ('update_main', 'update_independent', 'update_no_bot', 'remove'):
+        assert f"'{action}'" in install_source
 
 
 def test_telegram_confirm_helpers():
@@ -188,6 +196,13 @@ def test_telegram_confirm_helpers():
     assert telegram_confirm.telegram_is_confirm('✅ Подтвердить')
     assert telegram_confirm.telegram_is_cancel('Отмена')
     assert 'Перезагрузить роутер?' in telegram_confirm.telegram_confirm_prompt('reboot')
+
+
+def test_telegram_install_ui_helpers():
+    assert telegram_install_ui.install_action_for_text('🔰 Установка и удаление', include_web_only=True) == 'menu'
+    assert telegram_install_ui.install_action_for_text('♻️ Установка / переустановка (ветка main)', include_web_only=True) == 'update_main'
+    assert telegram_install_ui.install_action_for_text('♻️ Переустановка (ветка independent)', include_web_only=True) == 'update_independent'
+    assert telegram_install_ui.install_action_for_text('♻️ Переустановка (без Telegram бота)', include_web_only=True) == 'update_no_bot'
 
 
 def test_pool_probe_controller_helpers():
@@ -493,6 +508,7 @@ def main():
     test_web_action_feature_gates()
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
+    test_telegram_install_ui_helpers()
     test_pool_probe_controller_helpers()
     print('smoke_modules: ok')
 

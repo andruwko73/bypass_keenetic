@@ -80,6 +80,11 @@ from telegram_confirm import (
     telegram_is_cancel as _telegram_is_cancel_confirmation,
     telegram_is_confirm as _telegram_is_confirm_confirmation,
 )
+from telegram_install_ui import (
+    INSTALL_MENU_TEXT,
+    install_action_for_text as _telegram_install_action,
+    install_menu_rows as _telegram_install_menu_rows,
+)
 from pool_probe_controller import (
     PoolProbeProgress,
     pool_probe_progress_label as _controller_pool_probe_progress_label,
@@ -1410,6 +1415,33 @@ def _execute_confirmed_telegram_action(chat_id, action, reply_markup):
             bot.send_message(chat_id, '⚠️ Удаление завершилось с ошибкой. Полный лог отправлен выше.', reply_markup=reply_markup)
         return
     bot.send_message(chat_id, 'Команда не распознана.', reply_markup=reply_markup)
+
+
+def _handle_telegram_confirmation(message, level, bypass, set_menu_state, reply_markup):
+    if level != TELEGRAM_CONFIRM_LEVEL:
+        return False
+    if _telegram_is_confirm_confirmation(message.text):
+        action = bypass
+        set_menu_state(0, None)
+        _execute_confirmed_telegram_action(message.chat.id, action, reply_markup)
+        return True
+    if _telegram_is_cancel_confirmation(message.text):
+        set_menu_state(0, None)
+        bot.send_message(message.chat.id, 'Действие отменено.', reply_markup=reply_markup)
+        return True
+    bot.send_message(message.chat.id, _telegram_confirm_prompt(bypass), reply_markup=_build_telegram_confirm_markup())
+    return True
+
+
+def _handle_install_menu_message(message, set_menu_state):
+    action = _telegram_install_action(message.text, include_web_only=True)
+    if action == 'menu':
+        bot.send_message(message.chat.id, INSTALL_MENU_TEXT, reply_markup=_reply_keyboard(*_telegram_install_menu_rows(include_web_only=True)))
+        return True
+    if action:
+        _request_telegram_confirmation(message, set_menu_state, action)
+        return True
+    return False
 
 
 def _telegram_command_markup(menu_name):
@@ -3767,17 +3799,7 @@ def bot_message(message):
                     bypass = new_bypass
                 _set_chat_menu_state(message.chat.id, level=level, bypass=bypass)
 
-            if level == TELEGRAM_CONFIRM_LEVEL:
-                if _telegram_is_confirm_confirmation(message.text):
-                    action = bypass
-                    set_menu_state(0, None)
-                    _execute_confirmed_telegram_action(message.chat.id, action, service)
-                    return
-                if _telegram_is_cancel_confirmation(message.text):
-                    set_menu_state(0, None)
-                    bot.send_message(message.chat.id, 'Действие отменено.', reply_markup=service)
-                    return
-                bot.send_message(message.chat.id, _telegram_confirm_prompt(bypass), reply_markup=_build_telegram_confirm_markup())
+            if _handle_telegram_confirmation(message, level, bypass, set_menu_state, service):
                 return
 
             if message.text == '⚙️ Сервис':
@@ -4324,39 +4346,7 @@ def bot_message(message):
                                  'Введите ключ Shadowsocks, Vmess, Vless 1, Vless 2 или Trojan на странице.', reply_markup=main)
                 return
 
-            if message.text == '🔰 Установка и удаление':
-                bot.send_message(
-                    message.chat.id,
-                    '🔰 Установка и удаление',
-                    reply_markup=_reply_keyboard(
-                        ("♻️ Установка / переустановка (ветка main)",),
-                        ("♻️ Переустановка (ветка independent)",),
-                        ("♻️ Переустановка (без Telegram бота)",),
-                        ("⚠️ Удаление",),
-                        ("🔙 Назад",),
-                    ),
-                )
-                return
-
-            if message.text in (
-                '♻️ Установка / переустановка (ветка main)',
-                '♻️ Установка переустановка (ветка main)',
-                '♻️ Установка и переустановка',
-                '♻️ Установка & переустановка',
-            ):
-                _request_telegram_confirmation(message, set_menu_state, 'update_main')
-                return
-
-            if message.text == '♻️ Переустановка (ветка independent)':
-                _request_telegram_confirmation(message, set_menu_state, 'update_independent')
-                return
-
-            if message.text == '♻️ Переустановка (без Telegram бота)':
-                _request_telegram_confirmation(message, set_menu_state, 'update_no_bot')
-                return
-
-            if message.text == '⚠️ Удаление':
-                _request_telegram_confirmation(message, set_menu_state, 'remove')
+            if _handle_install_menu_message(message, set_menu_state):
                 return
 
             if message.text == "📝 Списки обхода":
