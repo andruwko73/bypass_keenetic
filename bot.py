@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.500, последнее изменение: 08.05.2026
+#  Файл: bot.py, Версия v1.501, последнее изменение: 08.05.2026
 
 import subprocess
 import os
@@ -80,7 +80,6 @@ from custom_checks_store import (
     load_custom_checks as _load_custom_checks,
     normalize_check_url as _normalize_check_url,
     route_entries_from_values as _route_entries_from_values,
-    save_custom_checks as _save_custom_checks,
 )
 import key_pool_store
 import key_pool_web
@@ -136,22 +135,14 @@ from pool_probe_controller import (
 from probe_cache import (
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
-    key_probe_has_required_results as _key_probe_has_required_results,
     key_probe_is_fresh as _key_probe_is_fresh,
     load_key_probe_cache as _load_key_probe_cache,
     record_key_probe as _record_key_probe,
-    save_key_probe_cache as _save_key_probe_cache,
 )
 from service_catalog import (
-    CHATGPT_ROUTE_ENTRIES,
-    CLAUDE_ROUTE_ENTRIES,
     CONNECTIVITY_CHECK_DOMAINS,
     CUSTOM_CHECK_PRESETS,
-    DISCORD_ROUTE_ENTRIES,
-    GROK_ROUTE_ENTRIES,
     SERVICE_LIST_SOURCES,
-    TELEGRAM_UNBLOCK_ENTRIES,
-    YOUTUBE_UNBLOCK_ENTRIES,
 )
 from pool_probe_runner import (
     build_pool_probe_core_config_batch as _runner_build_pool_probe_core_config_batch,
@@ -412,7 +403,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.500'
+APP_VERSION_COUNTER = '1.501'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3605,7 +3596,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
         custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(probe, checks, _service_icon_html),
-        probe_checked_at=_web_probe_checked_at,
+        probe_checked_at=key_pool_web.web_probe_checked_at,
         custom_probe_states=key_pool_web.web_custom_probe_states,
         service_icon_html=_service_icon_html,
         pool_table_class=pool_table_class,
