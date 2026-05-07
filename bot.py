@@ -5125,21 +5125,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             )
 
         dns_override_active = _dns_override_enabled()
-        update_buttons_html = f'''<form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить из форка?" data-confirm-message="Код и служебные файлы будут обновлены без сброса сохраненных ключей и списков.">
-                {csrf_input_html}
-                <input type="hidden" name="command" value="update">
-                <button type="submit">Переустановить из форка без сброса</button>
-            </form>
-            <form method="post" action="/command" data-async-action="command" data-confirm-title="Переустановить independent?" data-confirm-message="Будет установлена ветка codex/independent-v1 с сохранением локальных настроек.">
-                {csrf_input_html}
-                <input type="hidden" name="command" value="update_independent">
-                <button type="submit">Переустановка (ветка independent)</button>
-            </form>
-            <form method="post" action="/command" data-async-action="command" data-confirm-title="Перейти в web-only?" data-confirm-message="Будет установлена версия без Telegram-бота. Ключи, настройки и списки сохранятся локально.">
-                {csrf_input_html}
-                <input type="hidden" name="command" value="update_no_bot">
-                <button type="submit">Переустановка (без Telegram бота)</button>
-            </form>'''
+        update_buttons_html = web_form_blocks.render_update_buttons(csrf_input_html)
         command_buttons = [
             ('restart_services', 'Перезапустить сервисы', '', 'Перезапустить сервисы?', 'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть.'),
             ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else '', 'Включить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
@@ -5147,52 +5133,15 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             ('remove', 'Удалить компоненты', 'danger', 'Удалить компоненты?', 'Будут удалены установленные компоненты программы. Настройки роутера могут измениться.'),
             ('reboot', 'Перезагрузить роутер', 'danger', 'Перезагрузить роутер?', 'Связь с веб-интерфейсом временно пропадет.'),
         ]
-        command_buttons_html = ''.join(
-            f'''<form method="post" action="/command" data-async-action="command"{f' data-confirm-title="{html.escape(confirm_title)}" data-confirm-message="{html.escape(confirm_message)}"' if confirm_title else ''}>
-            {csrf_input_html}
-            <input type="hidden" name="command" value="{command}">
-            <button type="submit" class="{button_class}">{html.escape(label)}</button>
-        </form>'''
-            for command, label, button_class, confirm_title, confirm_message in command_buttons
-        )
+        command_buttons_html = web_form_blocks.render_command_button_forms(command_buttons, csrf_input_html)
 
-        unblock_tabs = []
-        unblock_panels = []
-        for list_index, entry in enumerate(unblock_lists):
-            safe_name = html.escape(entry['name'])
-            safe_label = html.escape(entry['label'])
-            safe_content = html.escape(entry['content'])
-            active_class = ' active' if list_index == 0 else ''
-            social_service_buttons = ''.join(
-                f'''<button type="submit" name="service_key" value="{html.escape(key)}" formaction="/append_socialnet" class="secondary-button" data-confirm-title="Добавить {_socialnet_service_label(key)}?" data-confirm-message="Добавить {_socialnet_service_label(key)} в {safe_label}?">{html.escape(_socialnet_service_label(key))}</button>'''
-                for key in SOCIALNET_SERVICE_KEYS
-            )
-            unblock_tabs.append(f'''<button type="button" class="seg-tab list-tab{active_class}" data-list-target="{safe_name}">{safe_label}</button>''')
-            line_count = len([line for line in entry['content'].splitlines() if line.strip()])
-            unblock_panels.append(f'''<section class="list-workspace{active_class}" data-list-panel="{safe_name}">
-        <div class="workspace-head">
-            <div>
-                <span class="eyebrow">Список обхода</span>
-                <h2>{safe_label}</h2>
-                <p class="section-subtitle">Записей: {line_count}. Файл: <span class="file-chip">{safe_name}</span></p>
-            </div>
-        </div>
-        <form method="post" action="/save_unblock_list" data-async-action="save-list" class="list-editor-form">
-            <input type="hidden" name="list_name" value="{safe_name}">
-            <textarea name="content" rows="12" placeholder="example.org&#10;api.telegram.org">{safe_content}</textarea>
-            <div class="form-actions">
-                <button type="submit">Сохранить список</button>
-            </div>
-            <div class="social-list-actions">
-                <span class="social-list-title">Добавить в список</span>
-                {social_service_buttons}
-                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/append_socialnet" class="secondary-button" data-confirm-title="Добавить все сервисы?" data-confirm-message="Добавить все сервисы в {safe_label}?">{html.escape(_socialnet_service_label(SOCIALNET_ALL_KEY))}</button>
-                <button type="submit" name="service_key" value="{SOCIALNET_ALL_KEY}" formaction="/remove_socialnet" class="danger" data-confirm-title="Удалить все сервисы?" data-confirm-message="Удалить все сервисы из {safe_label}?">Удалить сервисы</button>
-            </div>
-        </form>
-    </section>''')
-        unblock_tabs_html = ''.join(unblock_tabs)
-        unblock_panels_html = ''.join(unblock_panels)
+        unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
+            unblock_lists,
+            csrf_input_html,
+            SOCIALNET_SERVICE_KEYS,
+            SOCIALNET_ALL_KEY,
+            _socialnet_service_label,
+        )
 
         initial_status_pending = web_form_blocks.js_bool(status_refresh_pending)
         initial_command_running = web_form_blocks.js_bool(command_state['running'])

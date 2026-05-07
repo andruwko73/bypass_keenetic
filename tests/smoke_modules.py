@@ -184,7 +184,25 @@ def test_web_form_blocks_helpers():
     assert 'mode-choice-grid' in button_picker
     assert 'csrf_token' in button_picker
     assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
-
+    update_buttons = web_form_blocks.render_update_buttons('<input name="csrf_token">')
+    assert 'update_independent' in update_buttons
+    assert 'data-confirm-title=' in update_buttons
+    command_buttons = web_form_blocks.render_command_button_forms(
+        [('restart_services', 'Restart', '', 'Confirm?', 'Do it?')],
+        '<input name="csrf_token">',
+    )
+    assert 'restart_services' in command_buttons
+    assert 'csrf_token' in command_buttons
+    tabs, panels = web_form_blocks.render_unblock_lists(
+        [{'name': 'custom', 'label': 'Custom', 'content': 'one\n\n two'}],
+        '<input name="csrf_token">',
+        ('vk',),
+        'all',
+        lambda key: 'All' if key == 'all' else key.upper(),
+    )
+    assert 'data-list-target="custom"' in tabs
+    assert 'Записей: 2' in panels
+    assert 'csrf_token' in panels
 
 def test_web_pool_form_blocks_helpers():
     table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout([{'id': 'chat'}])

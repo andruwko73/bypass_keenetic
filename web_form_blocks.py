@@ -140,3 +140,137 @@ def render_button_mode_picker(active_mode, *, none_label='Без прокси', 
         <div class="mode-choice-grid">{mode_buttons_html}</div>
     </div>
 </div>'''
+
+
+DEFAULT_UPDATE_COMMANDS = (
+    (
+        'update',
+        'Переустановить из форка без сброса',
+        'Переустановить из форка?',
+        'Код и служебные файлы будут обновлены без сброса сохраненных ключей и списков.',
+    ),
+    (
+        'update_independent',
+        'Переустановка (ветка independent)',
+        'Переустановить independent?',
+        'Будет установлена ветка codex/independent-v1 с сохранением локальных настроек.',
+    ),
+    (
+        'update_no_bot',
+        'Переустановка (без Telegram бота)',
+        'Перейти в web-only?',
+        'Будет установлена версия без Telegram-бота. Ключи, настройки и списки сохранятся локально.',
+    ),
+)
+
+
+def _confirm_attrs(title='', message=''):
+    if not title and not message:
+        return ''
+    return (
+        f' data-confirm-title="{html.escape(title)}"'
+        f' data-confirm-message="{html.escape(message)}"'
+    )
+
+
+def render_update_buttons(csrf_input_html, commands=DEFAULT_UPDATE_COMMANDS):
+    return ''.join(
+        f'''<form method="post" action="/command" data-async-action="command"{_confirm_attrs(confirm_title, confirm_message)}>
+                {csrf_input_html}
+                <input type="hidden" name="command" value="{html.escape(command)}">
+                <button type="submit">{html.escape(label)}</button>
+            </form>'''
+        for command, label, confirm_title, confirm_message in commands
+    )
+
+
+def render_command_button_forms(command_buttons, csrf_input_html):
+    return ''.join(
+        f'''<form method="post" action="/command" data-async-action="command"{_confirm_attrs(confirm_title, confirm_message)}>
+            {csrf_input_html}
+            <input type="hidden" name="command" value="{html.escape(command)}">
+            <button type="submit" class="{html.escape(button_class)}">{html.escape(label)}</button>
+        </form>'''
+        for command, label, button_class, confirm_title, confirm_message in command_buttons
+    )
+
+
+def render_unblock_lists(
+    unblock_lists,
+    csrf_input_html,
+    social_service_keys,
+    socialnet_all_key,
+    socialnet_service_label,
+    *,
+    async_forms=True,
+    show_line_count=True,
+    confirm_service_actions=True,
+    textarea_rows=12,
+):
+    tabs = []
+    panels = []
+    form_async_attr = ' data-async-action="save-list"' if async_forms else ''
+    social_title = 'Добавить в список' if show_line_count else 'Добавить соцсети'
+    all_add_label = socialnet_service_label(socialnet_all_key) if show_line_count else 'Все соцсети'
+    all_remove_label = 'Удалить сервисы' if show_line_count else 'Удалить соцсети'
+
+    def service_button(key, action, class_name, label, confirm_title='', confirm_message=''):
+        confirm_attrs = _confirm_attrs(confirm_title, confirm_message) if confirm_service_actions else ''
+        return (
+            f'<button type="submit" name="service_key" value="{html.escape(key)}" '
+            f'formaction="{action}" class="{class_name}"{confirm_attrs}>{html.escape(label)}</button>'
+        )
+
+    for list_index, entry in enumerate(unblock_lists):
+        name = entry.get('name', '')
+        label = entry.get('label', '')
+        content = entry.get('content', '')
+        safe_name = html.escape(name)
+        safe_label = html.escape(label)
+        safe_content = html.escape(content)
+        active_class = ' active' if list_index == 0 else ''
+        social_service_buttons = ''.join(
+            service_button(
+                key,
+                '/append_socialnet',
+                'secondary-button',
+                socialnet_service_label(key),
+                f'Добавить {socialnet_service_label(key)}?',
+                f'Добавить {socialnet_service_label(key)} в {label}?',
+            )
+            for key in social_service_keys
+        )
+        tabs.append(f'''<button type="button" class="seg-tab list-tab{active_class}" data-list-target="{safe_name}">{safe_label}</button>''')
+        if show_line_count:
+            line_count = len([line for line in content.splitlines() if line.strip()])
+            header_html = f'''<div>
+                <span class="eyebrow">Список обхода</span>
+                <h2>{safe_label}</h2>
+                <p class="section-subtitle">Записей: {line_count}. Файл: <span class="file-chip">{safe_name}</span></p>
+            </div>'''
+        else:
+            header_html = f'''<div>
+            <span class="eyebrow">Список обхода</span>
+                <h2>{safe_label}</h2>
+            </div>
+            <span class="file-chip">{safe_name}</span>'''
+        panels.append(f'''<section class="list-workspace{active_class}" data-list-panel="{safe_name}">
+        <div class="workspace-head">
+            {header_html}
+        </div>
+        <form method="post" action="/save_unblock_list"{form_async_attr} class="list-editor-form">
+            {csrf_input_html}
+            <input type="hidden" name="list_name" value="{safe_name}">
+            <textarea name="content" rows="{int(textarea_rows)}" placeholder="example.org&#10;api.telegram.org">{safe_content}</textarea>
+            <div class="form-actions">
+                <button type="submit">Сохранить список</button>
+            </div>
+            <div class="social-list-actions">
+                <span class="social-list-title">{social_title}</span>
+                {social_service_buttons}
+                {service_button(socialnet_all_key, '/append_socialnet', 'secondary-button', all_add_label, 'Добавить все сервисы?', f'Добавить все сервисы в {label}?')}
+                {service_button(socialnet_all_key, '/remove_socialnet', 'danger', all_remove_label, 'Удалить все сервисы?', f'Удалить все сервисы из {label}?')}
+            </div>
+        </form>
+    </section>''')
+    return ''.join(tabs), ''.join(panels)
