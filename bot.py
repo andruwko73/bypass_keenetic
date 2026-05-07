@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.492, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.493, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -39,6 +39,10 @@ from proxy_config_builder import (
     build_proxy_core_config as _builder_build_proxy_core_config,
     build_shadowsocks_config as _builder_build_shadowsocks_config,
     build_trojan_config as _builder_build_trojan_config,
+)
+from proxy_apply_runtime import (
+    apply_installed_proxy_runtime as _runtime_apply_installed_proxy,
+    proxy_apply_settings as _runtime_proxy_apply_settings,
 )
 from proxy_status import (
     active_mode_status_signature as _status_active_mode_signature,
@@ -447,7 +451,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.492'
+APP_VERSION_COUNTER = '1.493'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3208,77 +3212,36 @@ def _check_local_proxy_endpoint(key_type, port):
     return True, ''
 
 
-def _apply_installed_proxy(key_type, key_value, verify=True):
-    settings = {
-        'shadowsocks': {
-            'label': 'Shadowsocks',
-            'port': localportsh_bot,
-            'restart_cmds': ['/opt/etc/init.d/S22shadowsocks restart', CORE_PROXY_SERVICE_SCRIPT + ' restart'],
-            'startup_wait': 8,
+def _proxy_apply_settings():
+    return _runtime_proxy_apply_settings(
+        CORE_PROXY_SERVICE_SCRIPT,
+        {
+            'shadowsocks': localportsh_bot,
+            'vmess': localportvmess,
+            'vless': localportvless,
+            'vless2': localportvless2,
+            'trojan': localporttrojan_bot,
         },
-        'vmess': {
-            'label': 'Vmess',
-            'port': localportvmess,
-            'restart_cmds': [CORE_PROXY_SERVICE_SCRIPT + ' restart'],
-            'startup_wait': 18,
-        },
-        'vless': {
-            'label': 'Vless 1',
-            'port': localportvless,
-            'restart_cmds': [CORE_PROXY_SERVICE_SCRIPT + ' restart'],
-            'startup_wait': 18,
-        },
-        'vless2': {
-            'label': 'Vless 2',
-            'port': localportvless2,
-            'restart_cmds': [CORE_PROXY_SERVICE_SCRIPT + ' restart'],
-            'startup_wait': 18,
-        },
-        'trojan': {
-            'label': 'Trojan',
-            'port': localporttrojan_bot,
-            'restart_cmds': ['/opt/etc/init.d/S22trojan restart', CORE_PROXY_SERVICE_SCRIPT + ' restart'],
-            'startup_wait': 8,
-        }
-    }
-    current = settings[key_type]
-    active_mode = _load_proxy_mode()
-    active_label = _proxy_mode_label(active_mode)
-    for command in current['restart_cmds']:
-        os.system(command)
-    time.sleep(current['startup_wait'])
-
-    diagnostics = _build_proxy_diagnostics(key_type, key_value)
-    restart_cmd = current['restart_cmds'][-1]
-    if not _ensure_service_port(current['port'], restart_cmd, retries=2, sleep_after_restart=5):
-        return (f'⚠️ {current["label"]} ключ сохранён, но локальный порт 127.0.0.1:{current["port"]} '
-                f'не поднялся. Текущий {APP_MODE_NOUN} {active_label} сохранён. {diagnostics}').strip()
-
-    endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_type, current['port'])
-    if not endpoint_ok:
-        return (f'⚠️ {current["label"]} ключ сохранён, но {endpoint_message} '
-                f'Текущий {APP_MODE_NOUN} {active_label} сохранён. {diagnostics}').strip()
-
-    if not verify:
-        return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
-                'Проверка Telegram API и YouTube выполняется в фоне; '
-                f'статус обновится без перезагрузки страницы. Текущий {APP_MODE_NOUN} {active_label} сохранён.').strip()
-
-    api_ok, api_probe_message = _check_telegram_api_through_proxy(
-        proxy_settings.get(key_type),
-        connect_timeout=10,
-        read_timeout=15,
     )
-    yt_ok, _ = _check_http_through_proxy(proxy_settings.get(key_type), url='https://www.youtube.com', connect_timeout=3, read_timeout=5)
-    _record_key_probe(key_type, key_value, tg_ok=api_ok, yt_ok=yt_ok)
-    if api_ok:
-        return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
-                f'Доступ к Telegram API через этот ключ подтверждён. '
-                f'Текущий {APP_MODE_NOUN} {active_label} сохранён.').strip()
-    return (f'⚠️ {current["label"]} ключ сохранён. {endpoint_message} '
-            f'Но Telegram API не проходит через этот ключ. '
-            f'Текущий {APP_MODE_NOUN} {active_label} сохранён. '
-            f'❌ Не удалось подключиться к Telegram API: {api_probe_message} {diagnostics}').strip()
+
+
+def _apply_installed_proxy(key_type, key_value, verify=True):
+    return _runtime_apply_installed_proxy(
+        key_type,
+        key_value,
+        settings=_proxy_apply_settings(),
+        app_mode_noun=APP_MODE_NOUN,
+        load_proxy_mode=_load_proxy_mode,
+        proxy_mode_label=_proxy_mode_label,
+        proxy_url_getter=lambda proto: proxy_settings.get(proto),
+        build_diagnostics=_build_proxy_diagnostics,
+        ensure_service_port=_ensure_service_port,
+        check_local_endpoint=_check_local_proxy_endpoint,
+        check_telegram_api=_check_telegram_api_through_proxy,
+        check_http=_check_http_through_proxy,
+        record_key_probe=_record_key_probe,
+        verify=verify,
+    )
 
 
 def update_proxy(proxy_type, persist=True):

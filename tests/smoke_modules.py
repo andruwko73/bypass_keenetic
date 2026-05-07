@@ -27,6 +27,7 @@ import telegram_install_ui
 import telegram_key_ui
 import pool_probe_controller
 import pool_probe_runner
+import proxy_apply_runtime
 import proxy_status
 import unblock_lists
 import installer_common
@@ -313,6 +314,57 @@ def test_telegram_key_ui_helpers():
     assert telegram_key_ui.key_install_protocol(13, trojan_level=13) == 'trojan'
     assert telegram_key_ui.key_install_protocol(12, trojan_level=13) == 'vless2'
     assert 'http://192.168.1.1:8080/' in telegram_key_ui.browser_hint('192.168.1.1', 8080)
+
+
+def test_proxy_apply_runtime_helpers():
+    settings = proxy_apply_runtime.proxy_apply_settings('/opt/etc/init.d/S24xray', {
+        'shadowsocks': 10815,
+        'vmess': 10810,
+        'vless': 10811,
+        'vless2': 10813,
+        'trojan': 10816,
+    })
+    commands = []
+    sleeps = []
+    records = []
+    result = proxy_apply_runtime.apply_installed_proxy_runtime(
+        'vless',
+        'key',
+        settings=settings,
+        app_mode_noun='режим бота',
+        load_proxy_mode=lambda: 'none',
+        proxy_mode_label=lambda mode: 'Без прокси',
+        proxy_url_getter=lambda proto: 'proxy-url',
+        build_diagnostics=lambda proto, key: 'diag',
+        ensure_service_port=lambda port, restart_cmd, **kwargs: True,
+        check_local_endpoint=lambda proto, port: (True, 'SOCKS ok.'),
+        check_telegram_api=lambda proxy, **kwargs: (True, 'tg ok'),
+        check_http=lambda proxy, **kwargs: (False, 'yt fail'),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        run_command=commands.append,
+        sleep=sleeps.append,
+    )
+    assert result.startswith('✅ Vless 1 ключ сохранён.')
+    assert commands == ['/opt/etc/init.d/S24xray restart']
+    assert sleeps == [18]
+    assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': False})]
+    pending = proxy_apply_runtime.apply_installed_proxy_runtime(
+        'trojan',
+        'key',
+        settings=settings,
+        app_mode_noun='режим бота',
+        load_proxy_mode=lambda: 'trojan',
+        proxy_mode_label=lambda mode: 'Trojan',
+        proxy_url_getter=lambda proto: 'unused',
+        build_diagnostics=lambda proto, key: '',
+        ensure_service_port=lambda port, restart_cmd, **kwargs: True,
+        check_local_endpoint=lambda proto, port: (True, 'SOCKS ok.'),
+        check_telegram_api=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('must not verify')),
+        verify=False,
+        run_command=lambda command: None,
+        sleep=lambda seconds: None,
+    )
+    assert 'в фоне' in pending
 
 
 def test_pool_probe_controller_helpers():
@@ -888,6 +940,7 @@ def main():
     test_telegram_jobs_helpers()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
+    test_proxy_apply_runtime_helpers()
     test_pool_probe_controller_helpers()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
