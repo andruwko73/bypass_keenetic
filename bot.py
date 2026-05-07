@@ -2629,15 +2629,6 @@ def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto
         action=action,
         display_name=_pool_key_display_name,
     )
-def _pool_key_line(index, key_value, probe=None, current_key=None):
-    return telegram_pool_ui.pool_key_line(
-        index,
-        key_value,
-        probe=probe,
-        current_key=current_key,
-        display_name=_pool_key_display_name,
-        hash_key=_hash_key,
-    )
 def _format_pool_summary():
     current_keys = _load_current_keys()
     pools = _ensure_current_keys_in_pools(current_keys)
