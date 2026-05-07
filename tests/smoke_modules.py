@@ -22,6 +22,7 @@ import web_post_actions
 import telegram_confirm
 import telegram_auth_state
 import telegram_jobs
+import telegram_message_flow
 import telegram_install_ui
 import telegram_key_ui
 import pool_probe_controller
@@ -73,6 +74,17 @@ class _InlineThread:
 
     def start(self):
         self.target()
+
+
+class _FakeChat:
+    def __init__(self, chat_id, chat_type='private'):
+        self.id = chat_id
+        self.type = chat_type
+
+
+class _FakeMessage:
+    def __init__(self, chat_id=1, chat_type='private'):
+        self.chat = _FakeChat(chat_id, chat_type)
 
 
 def _hash_key(value):
@@ -232,6 +244,27 @@ def test_telegram_auth_state_helpers():
     telegram_auth_state.set_chat_menu_state(lock, states, 1, level=8, bypass='vless')
     assert telegram_auth_state.get_chat_menu_state(lock, states, 1) == {'level': 8, 'bypass': 'vless'}
     assert telegram_auth_state.unauthorized_message_text('missing_username').startswith('У вашего Telegram-аккаунта')
+
+
+def test_telegram_message_flow_helpers():
+    message = _FakeMessage(chat_id=7)
+    saved = []
+    session = telegram_message_flow.private_menu_session(
+        message,
+        lambda chat_id: {'level': 2, 'bypass': 'vless'},
+        lambda chat_id, level, bypass: saved.append((chat_id, level, bypass)),
+        unset_marker=telegram_auth_state.MENU_STATE_UNSET,
+    )
+    assert telegram_message_flow.is_private_message(message)
+    assert session.level == 2 and session.bypass == 'vless'
+    session.set(3)
+    session.set(telegram_auth_state.MENU_STATE_UNSET, 'vmess')
+    session.set(new_bypass=None)
+    assert saved == [(7, 3, 'vless'), (7, 3, 'vmess'), (7, 3, None)]
+    calls = []
+    assert telegram_message_flow.run_handlers(lambda: False, lambda: calls.append('hit') or True)
+    assert calls == ['hit']
+    assert not telegram_message_flow.is_private_message(_FakeMessage(chat_type='group'))
 
 
 def test_telegram_jobs_helpers():
@@ -851,6 +884,7 @@ def main():
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
     test_telegram_auth_state_helpers()
+    test_telegram_message_flow_helpers()
     test_telegram_jobs_helpers()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.491, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.492, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -14,7 +14,6 @@ import sys
 import time
 import threading
 import signal
-import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 from proxy_key_store import (
@@ -98,6 +97,12 @@ from telegram_jobs import (
     final_message as _telegram_final_command_message,
     start_background_command as _telegram_start_background_command,
     start_result_retry_worker as _telegram_start_result_retry_worker,
+)
+from telegram_message_flow import (
+    is_private_message as _telegram_is_private_message,
+    private_menu_session as _telegram_private_menu_session,
+    recover_private_message_error as _telegram_recover_private_message_error,
+    run_handlers as _telegram_run_handlers,
 )
 from telegram_confirm import (
     TELEGRAM_CONFIRM_LEVEL,
@@ -442,7 +447,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.491'
+APP_VERSION_COUNTER = '1.492'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3680,67 +3685,42 @@ def bot_message(message):
         main = _build_main_menu_markup()
         service = _build_service_menu_markup()
 
-        if message.chat.type == 'private':
-            if _handle_private_stateless_command(message, main, service):
-                return
+        if not _telegram_is_private_message(message):
+            return
 
-        if message.chat.type == 'private':
+        if _handle_private_stateless_command(message, main, service):
+            return
 
-            state = _get_chat_menu_state(message.chat.id)
-            level = state['level']
-            bypass = state['bypass']
-
-            def set_menu_state(new_level=MENU_STATE_UNSET, new_bypass=MENU_STATE_UNSET):
-                nonlocal level, bypass
-                if new_level is not MENU_STATE_UNSET:
-                    level = new_level
-                if new_bypass is not MENU_STATE_UNSET:
-                    bypass = new_bypass
-                _set_chat_menu_state(message.chat.id, level=level, bypass=bypass)
-
-            if _handle_common_telegram_menu_message(message, level, bypass, set_menu_state, main, service):
-                return
-
-            if _handle_service_request_menu(message, level, bypass, set_menu_state):
-                return
-
-            if _handle_back_to_main_message(message, set_menu_state, main):
-                return
-
-            if _handle_unblock_list_state(message, level, bypass, set_menu_state, main):
-                return
-
-            if _handle_service_list_state(message, level, bypass, set_menu_state):
-                return
-
-            if _handle_telegram_pool_state(message, level, bypass, set_menu_state):
-                return
-
-            if _handle_key_menu_message(message, level, set_menu_state, main):
-                return
-
-            if _handle_install_menu_message(message, set_menu_state):
-                return
-
-            if _handle_main_menu_openers(message, set_menu_state):
-                return
+        menu_session = _telegram_private_menu_session(
+            message,
+            _get_chat_menu_state,
+            _set_chat_menu_state,
+            unset_marker=MENU_STATE_UNSET,
+        )
+        if _telegram_run_handlers(
+            lambda: _handle_common_telegram_menu_message(
+                message, menu_session.level, menu_session.bypass, menu_session.set, main, service
+            ),
+            lambda: _handle_service_request_menu(message, menu_session.level, menu_session.bypass, menu_session.set),
+            lambda: _handle_back_to_main_message(message, menu_session.set, main),
+            lambda: _handle_unblock_list_state(message, menu_session.level, menu_session.bypass, menu_session.set, main),
+            lambda: _handle_service_list_state(message, menu_session.level, menu_session.bypass, menu_session.set),
+            lambda: _handle_telegram_pool_state(message, menu_session.level, menu_session.bypass, menu_session.set),
+            lambda: _handle_key_menu_message(message, menu_session.level, menu_session.set, main),
+            lambda: _handle_install_menu_message(message, menu_session.set),
+            lambda: _handle_main_menu_openers(message, menu_session.set),
+        ):
+            return
 
     except Exception as error:
-        _write_runtime_log(traceback.format_exc(), mode='w')
-        try:
-            os.chmod(r"/opt/etc/error.log", 0o0755)
-        except Exception:
-            pass
-        try:
-            if getattr(getattr(message, 'chat', None), 'type', None) == 'private':
-                _set_chat_menu_state(message.chat.id, level=0, bypass=None)
-                bot.send_message(
-                    message.chat.id,
-                    f'⚠️ Команда не выполнена из-за внутренней ошибки: {error}',
-                    reply_markup=_build_main_menu_markup(),
-                )
-        except Exception:
-            pass
+        _telegram_recover_private_message_error(
+            message,
+            error,
+            write_log=_write_runtime_log,
+            reset_state=lambda chat_id: _set_chat_menu_state(chat_id, level=0, bypass=None),
+            send_message=bot.send_message,
+            main_markup=_build_main_menu_markup,
+        )
 
 
 def _start_web_bot_action():
