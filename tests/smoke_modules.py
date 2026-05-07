@@ -298,6 +298,37 @@ def test_proxy_status_runtime_helpers():
         8080,
         command_runner=lambda *args, **kwargs: 'tcp 0 0 0.0.0.0:8080 0.0.0.0:* LISTEN\n',
     )
+    original_get = proxy_status.requests.get
+
+    class _Response:
+        status_code = 204
+
+        def close(self):
+            pass
+
+    try:
+        proxy_status.requests.get = lambda *args, **kwargs: _Response()
+        ok, message = proxy_status.check_http_through_proxy('socks5://127.0.0.1:1080')
+        assert ok is True
+        assert 'HTTP 204' in message
+        ok, message = proxy_status.check_custom_target_through_proxy(
+            lambda value: 'https://example.com/path',
+            'socks5://127.0.0.1:1080',
+            'example.com',
+        )
+        assert ok is True
+        assert 'example.com' in message
+    finally:
+        proxy_status.requests.get = original_get
+
+    custom_results = proxy_status.probe_custom_targets(
+        'proxy',
+        [{'id': 'custom', 'urls': ['bad', 'ok']}, {'label': 'skip'}],
+        lambda proxy, target, **kwargs: (target == 'ok', ''),
+        connect_timeout=1,
+        read_timeout=1,
+    )
+    assert custom_results == {'custom': True}
     tail_path = ROOT / 'tests' / '_tail.tmp'
     try:
         tail_path.write_text('one\ntwo\nthree\n', encoding='utf-8')

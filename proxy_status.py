@@ -1,7 +1,9 @@
 import os
+import requests
 import socket
 import subprocess
 import time
+from urllib.parse import urlparse
 
 
 TRANSIENT_STATUS_MARKERS = (
@@ -182,3 +184,73 @@ def protocol_error_status(exc):
         'label': 'Ошибка проверки',
         'details': f'Не удалось завершить проверку ключа: {exc}',
     }
+
+
+def check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=2, read_timeout=3):
+    try:
+        response = requests.get(
+            url,
+            timeout=(connect_timeout, read_timeout),
+            proxies={'https': proxy_url, 'http': proxy_url},
+            stream=True,
+        )
+        status_code = response.status_code
+        response.close()
+        if status_code < 500:
+            return True, f'Веб-доступ через ключ подтверждён (HTTP {status_code}).'
+        return False, f'Веб-проверка через ключ вернула HTTP {status_code}.'
+    except requests.exceptions.ConnectTimeout:
+        return False, 'Прокси не установил соединение за отведённое время.'
+    except requests.exceptions.ReadTimeout:
+        return False, 'Удалённый сервер не ответил вовремя через этот ключ.'
+    except requests.exceptions.RequestException as exc:
+        return False, f'Веб-проверка через ключ завершилась ошибкой: {exc}'
+
+
+def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_timeout=2, read_timeout=3):
+    try:
+        target_url = normalize_url(url)
+        response = requests.get(
+            target_url,
+            timeout=(connect_timeout, read_timeout),
+            proxies={'https': proxy_url, 'http': proxy_url},
+            headers={'User-Agent': 'bypass_keenetic health check'},
+            stream=True,
+        )
+        status_code = response.status_code
+        response.close()
+        if status_code < 500:
+            return True, f'Доступ к {urlparse(target_url).netloc} подтверждён (HTTP {status_code}).'
+        return False, f'{urlparse(target_url).netloc} вернул HTTP {status_code}.'
+    except ValueError as exc:
+        return False, str(exc)
+    except requests.exceptions.ConnectTimeout:
+        return False, 'Прокси не установил соединение за отведённое время.'
+    except requests.exceptions.ReadTimeout:
+        return False, 'Сервис не ответил вовремя через этот ключ.'
+    except requests.exceptions.RequestException as exc:
+        return False, f'Проверка сервиса завершилась ошибкой: {str(exc).splitlines()[0][:180]}'
+
+
+def probe_custom_targets(proxy_url, custom_checks, target_checker, *, connect_timeout, read_timeout, max_targets=None):
+    results = {}
+    for check in custom_checks or []:
+        check_id = check.get('id')
+        if not check_id:
+            continue
+        targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
+        if max_targets is not None:
+            targets = targets[:max_targets]
+        target_results = []
+        for target in targets:
+            ok, _ = target_checker(
+                proxy_url,
+                target,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+            )
+            target_results.append(ok)
+            if ok:
+                break
+        results[check_id] = any(target_results)
+    return results

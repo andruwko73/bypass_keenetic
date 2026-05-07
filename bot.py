@@ -46,12 +46,15 @@ from proxy_status import (
     active_mode_status_signature as _status_active_mode_signature,
     cached_active_status as _status_cached_active_status,
     cached_snapshot as _status_cached_snapshot,
+    check_custom_target_through_proxy as _status_check_custom_target,
+    check_http_through_proxy as _status_check_http,
     check_socks5_handshake as _check_socks5_handshake,
     ensure_service_port as _ensure_service_port,
     is_transient_status_text as _status_is_transient_text,
     placeholder_protocol_statuses as _status_placeholder_protocols,
     port_is_listening as _port_is_listening,
     protocol_error_status as _status_protocol_error,
+    probe_custom_targets as _status_probe_custom_targets,
     read_tail as _read_tail,
     status_snapshot_signature as _status_snapshot_signature_impl,
     store_active_status as _status_store_active_status,
@@ -1394,6 +1397,66 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
     )
 
 
+def _send_key_status_report(message, service_markup):
+    text_lines = ['<b>Статус доступа к Telegram по ключам (web):</b>']
+    emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
+    proto_labels = {
+        'shadowsocks': 'Shadowsocks',
+        'vmess': 'Vmess',
+        'vless': 'Vless 1',
+        'vless2': 'Vless 2',
+        'trojan': 'Trojan',
+    }
+    try:
+        current_keys = _load_current_keys()
+        snapshot = _build_status_snapshot(current_keys, force_refresh=True)
+        statuses = snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {}
+    except Exception as exc:
+        statuses = {}
+        text_lines.append(f'❌ Ошибка получения статуса: {html.escape(str(exc))}')
+    for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+        st = statuses.get(proto, {}) if isinstance(statuses, dict) else {}
+        mark = emoji.get(st.get('tone', 'empty'), '➖')
+        label = proto_labels.get(proto, proto)
+        status = st.get('label', 'Нет данных')
+        status_text = html.unescape(status).replace('\xa0', ' ')
+        has_telegram_icon = '<img' in status or 'Telegram' in status_text
+        status_clean = re.sub(r'<[^>]+>', '', status_text).strip()
+        if has_telegram_icon and 'Telegram' not in status_clean:
+            status_clean = f'{status_clean} 📱 Telegram'
+        details = st.get('details', '')
+        text_lines.append(f"{mark} <b>{label}</b>: {status_clean}")
+        if details:
+            text_lines.append(f"<i>{details}</i>")
+    bot.send_message(message.chat.id, '\n'.join(text_lines), parse_mode='HTML', reply_markup=service_markup)
+
+
+def _handle_private_stateless_command(message, main, service):
+    command = message.text.split(maxsplit=1)[0].split('@', 1)[0]
+    if command == '/getlist':
+        parts = message.text.split()
+        if len(parts) < 2:
+            names = ', '.join(source['label'] for source in SERVICE_LIST_SOURCES.values())
+            bot.send_message(message.chat.id, f'Использование: /getlist название [маршрут]\nДоступно: {names}', reply_markup=main)
+            return True
+        route_name = parts[2] if len(parts) > 2 else None
+        _handle_getlist_request(message, parts[1], route_name=route_name, reply_markup=main)
+        return True
+
+    if message.text == '📊 Статус ключей':
+        _send_key_status_report(message, service)
+        return True
+
+    if message.text in ('📦 Пул ключей', '/pool'):
+        _set_chat_menu_state(message.chat.id, level=20, bypass=None)
+        _clear_pool_inline_keyboard(message.chat.id)
+        _clear_pool_page(message.chat.id)
+        bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+        return True
+
+    return False
+
+
 def _build_main_menu_markup():
     return _reply_keyboard(
         ("🔰 Установка и удаление",),
@@ -1592,6 +1655,59 @@ def _handle_common_telegram_menu_message(message, level, bypass, set_menu_state,
         _request_telegram_confirmation(message, set_menu_state, 'update_main')
         return True
 
+    return False
+
+
+def _handle_service_request_menu(message, level, bypass, set_menu_state):
+    if message.text != "📥 Сервисы по запросу":
+        return False
+    if level == 2 and bypass:
+        set_menu_state(10)
+        bot.send_message(message.chat.id, f'Выберите сервис для маршрута {_list_label(bypass + ".txt")}', reply_markup=_service_list_markup())
+    else:
+        set_menu_state(10, 'vless')
+        bot.send_message(
+            message.chat.id,
+            'Выберите сервис. По умолчанию список будет добавлен в маршрут Vless 1.',
+            reply_markup=_service_list_markup(),
+        )
+    return True
+
+
+def _handle_back_to_main_message(message, set_menu_state, main):
+    if message.text not in ('🔙 Назад', 'Назад'):
+        return False
+    _clear_pool_inline_keyboard(message.chat.id)
+    _clear_pool_page(message.chat.id)
+    bot.send_message(message.chat.id, '✅ Добро пожаловать в меню!', reply_markup=main)
+    set_menu_state(0, None)
+    return True
+
+
+def _handle_service_list_state(message, level, bypass, set_menu_state):
+    if level != 10:
+        return False
+    target_route = bypass
+    reply_markup = _list_actions_markup() if target_route else _service_list_markup()
+    _handle_getlist_request(message, message.text, route_name=target_route, reply_markup=reply_markup)
+    if target_route:
+        set_menu_state(2, target_route)
+    return True
+
+
+def _handle_main_menu_openers(message, set_menu_state):
+    if message.text == "📝 Списки обхода":
+        set_menu_state(1, None)
+        bot.send_message(
+            message.chat.id,
+            "📝 Списки обхода",
+            reply_markup=_telegram_unblock_lists_markup(("📥 Сервисы по запросу",)),
+        )
+        return True
+    if message.text == "🔑 Ключи и мосты":
+        set_menu_state(8, None)
+        bot.send_message(message.chat.id, "🔑 Ключи и мосты", reply_markup=_build_keys_menu_markup())
+        return True
     return False
 
 
@@ -2016,94 +2132,38 @@ def _invalidate_key_status_cache():
 
 
 def _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=2, read_timeout=3):
-    try:
-        response = requests.get(
-            url,
-            timeout=(connect_timeout, read_timeout),
-            proxies={'https': proxy_url, 'http': proxy_url},
-            stream=True,
-        )
-        status_code = response.status_code
-        response.close()
-        if status_code < 500:
-            return True, f'Веб-доступ через ключ подтверждён (HTTP {status_code}).'
-        return False, f'Веб-проверка через ключ вернула HTTP {status_code}.'
-    except requests.exceptions.ConnectTimeout:
-        return False, 'Прокси не установил соединение за отведённое время.'
-    except requests.exceptions.ReadTimeout:
-        return False, 'Удалённый сервер не ответил вовремя через этот ключ.'
-    except requests.exceptions.RequestException as exc:
-        return False, f'Веб-проверка через ключ завершилась ошибкой: {exc}'
+    return _status_check_http(proxy_url, url=url, connect_timeout=connect_timeout, read_timeout=read_timeout)
 
 
 def _check_custom_target_through_proxy(proxy_url, url, connect_timeout=2, read_timeout=3):
-    try:
-        target_url = _normalize_check_url(url)
-        response = requests.get(
-            target_url,
-            timeout=(connect_timeout, read_timeout),
-            proxies={'https': proxy_url, 'http': proxy_url},
-            headers={'User-Agent': 'bypass_keenetic health check'},
-            stream=True,
-        )
-        status_code = response.status_code
-        response.close()
-        if status_code < 500:
-            return True, f'Доступ к {urlparse(target_url).netloc} подтверждён (HTTP {status_code}).'
-        return False, f'{urlparse(target_url).netloc} вернул HTTP {status_code}.'
-    except ValueError as exc:
-        return False, str(exc)
-    except requests.exceptions.ConnectTimeout:
-        return False, 'Прокси не установил соединение за отведённое время.'
-    except requests.exceptions.ReadTimeout:
-        return False, 'Сервис не ответил вовремя через этот ключ.'
-    except requests.exceptions.RequestException as exc:
-        return False, f'Проверка сервиса завершилась ошибкой: {str(exc).splitlines()[0][:180]}'
+    return _status_check_custom_target(
+        _normalize_check_url,
+        proxy_url,
+        url,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+    )
 
 
 def _probe_custom_targets(proxy_url, custom_checks=None, connect_timeout=2, read_timeout=3):
-    results = {}
-    for check in (custom_checks if custom_checks is not None else _load_custom_checks()):
-        check_id = check.get('id')
-        if not check_id:
-            continue
-        targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
-        targets = targets[:2]
-        target_results = []
-        for target in targets:
-            ok, _ = _check_custom_target_through_proxy(
-                proxy_url,
-                target,
-                connect_timeout=connect_timeout,
-                read_timeout=read_timeout,
-            )
-            target_results.append(ok)
-            if ok:
-                break
-        results[check_id] = any(target_results)
-    return results
+    return _status_probe_custom_targets(
+        proxy_url,
+        custom_checks if custom_checks is not None else _load_custom_checks(),
+        _check_custom_target_through_proxy,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_targets=2,
+    )
 
 
 def _probe_custom_targets_for_pool(proxy_url, custom_checks=None):
-    results = {}
-    for check in (custom_checks if custom_checks is not None else _load_custom_checks()):
-        check_id = check.get('id')
-        if not check_id:
-            continue
-        targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
-        target_results = []
-        for target in targets:
-            ok, _ = _check_custom_target_through_proxy(
-                proxy_url,
-                target,
-                connect_timeout=POOL_PROBE_CUSTOM_CONNECT_TIMEOUT,
-                read_timeout=POOL_PROBE_CUSTOM_READ_TIMEOUT,
-            )
-            target_results.append(ok)
-            if ok:
-                break
-        results[check_id] = any(target_results)
-    return results
+    return _status_probe_custom_targets(
+        proxy_url,
+        custom_checks if custom_checks is not None else _load_custom_checks(),
+        _check_custom_target_through_proxy,
+        connect_timeout=POOL_PROBE_CUSTOM_CONNECT_TIMEOUT,
+        read_timeout=POOL_PROBE_CUSTOM_READ_TIMEOUT,
+    )
 
 
 def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_timeout=10):
@@ -3898,57 +3958,7 @@ def bot_message(message):
         service = _build_service_menu_markup()
 
         if message.chat.type == 'private':
-            command = message.text.split(maxsplit=1)[0].split('@', 1)[0]
-            if command == '/getlist':
-                parts = message.text.split()
-                if len(parts) < 2:
-                    names = ', '.join(source['label'] for source in SERVICE_LIST_SOURCES.values())
-                    bot.send_message(message.chat.id, f'Использование: /getlist название [маршрут]\nДоступно: {names}', reply_markup=main)
-                    return
-                route_name = parts[2] if len(parts) > 2 else None
-                _handle_getlist_request(message, parts[1], route_name=route_name, reply_markup=main)
-                return
-
-            if message.text == '📊 Статус ключей':
-                text_lines = ['<b>Статус доступа к Telegram по ключам (web):</b>']
-                emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
-                proto_labels = {
-                    'shadowsocks': 'Shadowsocks',
-                    'vmess': 'Vmess',
-                    'vless': 'Vless 1',
-                    'vless2': 'Vless 2',
-                    'trojan': 'Trojan',
-                }
-                try:
-                    current_keys = _load_current_keys()
-                    snapshot = _build_status_snapshot(current_keys, force_refresh=True)
-                    statuses = snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {}
-                except Exception as exc:
-                    statuses = {}
-                    text_lines.append(f'❌ Ошибка получения статуса: {html.escape(str(exc))}')
-                for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-                    st = statuses.get(proto, {}) if isinstance(statuses, dict) else {}
-                    mark = emoji.get(st.get('tone', 'empty'), '➖')
-                    label = proto_labels.get(proto, proto)
-                    status = st.get('label', 'Нет данных')
-                    status_text = html.unescape(status).replace('\xa0', ' ')
-                    has_telegram_icon = '<img' in status or 'Telegram' in status_text
-                    # Удаляем HTML-теги из статуса: Telegram-сообщение не поддерживает <img>.
-                    status_clean = re.sub(r'<[^>]+>', '', status_text).strip()
-                    if has_telegram_icon and 'Telegram' not in status_clean:
-                        status_clean = f'{status_clean} 📱 Telegram'
-                    details = st.get('details', '')
-                    text_lines.append(f"{mark} <b>{label}</b>: {status_clean}")
-                    if details:
-                        text_lines.append(f"<i>{details}</i>")
-                bot.send_message(message.chat.id, '\n'.join(text_lines), parse_mode='HTML', reply_markup=service)
-                return
-
-            if message.text in ('📦 Пул ключей', '/pool'):
-                _set_chat_menu_state(message.chat.id, level=20, bypass=None)
-                _clear_pool_inline_keyboard(message.chat.id)
-                _clear_pool_page(message.chat.id)
-                bot.send_message(message.chat.id, _format_pool_summary(), reply_markup=_pool_protocol_markup())
+            if _handle_private_stateless_command(message, main, service):
                 return
 
         if message.chat.type == 'private':
@@ -3968,31 +3978,16 @@ def bot_message(message):
             if _handle_common_telegram_menu_message(message, level, bypass, set_menu_state, main, service):
                 return
 
-            if message.text == "📥 Сервисы по запросу":
-                if level == 2 and bypass:
-                    set_menu_state(10)
-                    bot.send_message(message.chat.id, f'Выберите сервис для маршрута {_list_label(bypass + ".txt")}', reply_markup=_service_list_markup())
-                else:
-                    set_menu_state(10, 'vless')
-                    bot.send_message(message.chat.id, 'Выберите сервис. По умолчанию список будет добавлен в маршрут Vless 1.', reply_markup=_service_list_markup())
+            if _handle_service_request_menu(message, level, bypass, set_menu_state):
                 return
 
-            if message.text == '🔙 Назад' or message.text == "Назад":
-                _clear_pool_inline_keyboard(message.chat.id)
-                _clear_pool_page(message.chat.id)
-                bot.send_message(message.chat.id, '✅ Добро пожаловать в меню!', reply_markup=main)
-                set_menu_state(0, None)
+            if _handle_back_to_main_message(message, set_menu_state, main):
                 return
 
             if _handle_unblock_list_state(message, level, bypass, set_menu_state, main):
                 return
 
-            if level == 10:
-                target_route = bypass
-                reply_markup = _list_actions_markup() if target_route else _service_list_markup()
-                _handle_getlist_request(message, message.text, route_name=target_route, reply_markup=reply_markup)
-                if target_route:
-                    set_menu_state(2, target_route)
+            if _handle_service_list_state(message, level, bypass, set_menu_state):
                 return
 
             if _handle_telegram_pool_state(message, level, bypass, set_menu_state):
@@ -4004,18 +3999,7 @@ def bot_message(message):
             if _handle_install_menu_message(message, set_menu_state):
                 return
 
-            if message.text == "📝 Списки обхода":
-                set_menu_state(1, None)
-                bot.send_message(
-                    message.chat.id,
-                    "📝 Списки обхода",
-                    reply_markup=_telegram_unblock_lists_markup(("📥 Сервисы по запросу",)),
-                )
-                return
-
-            if message.text == "🔑 Ключи и мосты":
-                set_menu_state(8, None)
-                bot.send_message(message.chat.id, "🔑 Ключи и мосты", reply_markup=_build_keys_menu_markup())
+            if _handle_main_menu_openers(message, set_menu_state):
                 return
 
     except Exception as error:
