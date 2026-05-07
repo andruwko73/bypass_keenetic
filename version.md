@@ -1,7 +1,7 @@
-*v1.493 (07 May 2026) -* codex/independent-v1
+*v1.494 (07 May 2026) -* codex/independent-v1
 - *Версия codex считается по числу коммитов ветки с префиксом v1.*
-- *Proxy apply runtime вынесен в общий helper*
-- *Telegram message flow вынесен из bot_message в общий компактный helper*
+- *Web status snapshot вынесен в общий helper*
+- *Добавлена smoke-проверка согласованности codex-версии с числом коммитов*
 - *Telegram-бот, web-интерфейс и расширенный пул ключей*
 
 - [Releases](https://github.com/andruwko73/bypass_keenetic/releases) | [Changelog](https://github.com/andruwko73/bypass_keenetic/blob/codex/independent-v1/CHANGELOG.md) | [Issues](https://github.com/andruwko73/bypass_keenetic/issues)

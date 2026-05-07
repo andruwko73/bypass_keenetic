@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.493, последнее изменение: 07.05.2026
+#  Файл: bot.py, Версия v1.494, последнее изменение: 07.05.2026
 
 import subprocess
 import os
@@ -178,6 +178,7 @@ from web_http_common import (
 import web_form_blocks
 import web_get_actions
 import web_post_actions
+import web_status_runtime
 from web_form_template import render_web_form
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
@@ -451,7 +452,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.493'
+APP_VERSION_COUNTER = '1.494'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3295,53 +3296,23 @@ def _is_transient_telegram_api_failure(status_text):
 
 
 def _build_web_status(current_keys, protocols=None):
-    now = time.time()
     state_label = 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
-    socks_details = ''
-    socks_ok = False
-    current_protocol = protocols.get(proxy_mode) if isinstance(protocols, dict) else None
-    if current_protocol and proxy_mode in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-        socks_ok = bool(current_protocol.get('endpoint_ok'))
-        socks_details = current_protocol.get('endpoint_message', '')
-        api_ok = bool(current_protocol.get('api_ok'))
-        api_message = str(current_protocol.get('api_message', '') or '')
-        if api_ok:
-            api_status = '✅ Доступ к api.telegram.org подтверждён.'
-        elif socks_ok and _is_transient_telegram_api_failure(api_message):
-            api_status = ('⏳ Telegram API не ответил вовремя через текущий режим. '
-                          'Локальный SOCKS работает, идёт повторная проверка. '
-                          'Статус обновится без перезагрузки страницы.')
-        elif proxy_mode == 'none':
-            api_status = f'❌ Прямой доступ к api.telegram.org не проходит: {api_message}'
-        else:
-            api_status = f'❌ Доступ к Telegram API через режим {proxy_mode} не проходит: {api_message}'
-    elif proxy_mode in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
-        port = {
+    return web_status_runtime.build_web_status_snapshot(
+        state_label=state_label,
+        proxy_mode=proxy_mode,
+        protocols=protocols,
+        ports={
             'shadowsocks': localportsh_bot,
             'vmess': localportvmess,
             'vless': localportvless,
             'vless2': localportvless2,
             'trojan': localporttrojan_bot,
-        }.get(proxy_mode)
-        if port:
-            socks_ok = _check_socks5_handshake(port)
-            socks_details = f'Локальный SOCKS {proxy_mode} 127.0.0.1:{port}: {"доступен" if socks_ok else "не отвечает как SOCKS5"}'
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
-        if (proxy_mode != 'none' and socks_ok and not api_status.startswith('✅') and
-                _is_transient_telegram_api_failure(api_status)):
-            api_status = ('⏳ Telegram API не ответил вовремя через текущий режим. '
-                          'Локальный SOCKS работает, идёт повторная проверка. '
-                          'Статус обновится без перезагрузки страницы.')
-    else:
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
-    snapshot = {
-        'state_label': state_label,
-        'proxy_mode': proxy_mode,
-        'api_status': api_status,
-        'socks_details': socks_details,
-        'fallback_reason': _last_proxy_disable_reason(),
-    }
-    return snapshot
+        },
+        check_socks5=_check_socks5_handshake,
+        check_telegram_api=check_telegram_api,
+        is_transient=_is_transient_telegram_api_failure,
+        fallback_reason=_last_proxy_disable_reason(),
+    )
 
 
 def _status_snapshot_signature(current_keys):

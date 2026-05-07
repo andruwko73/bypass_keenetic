@@ -1,4 +1,6 @@
 from pathlib import Path
+import re
+import subprocess
 import sys
 import threading
 
@@ -19,6 +21,7 @@ import web_status_builder
 import web_template_styles
 import web_template_scripts
 import web_post_actions
+import web_status_runtime
 import telegram_confirm
 import telegram_auth_state
 import telegram_jobs
@@ -206,6 +209,50 @@ def test_web_action_feature_gates():
     probe = web_get_actions.dispatch({'pool_enabled': True, 'get_pool_probe_progress': lambda: {'running': False, 'total': 0}}, '/api/pool_probe')
     assert probe['payload']['status'] == 'idle'
     assert calls == []
+
+
+def _expected_codex_version_counter():
+    count = int(subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=ROOT, text=True).strip())
+    dirty = subprocess.check_output(['git', 'status', '--short'], cwd=ROOT, text=True).strip()
+    return f'1.{count + (1 if dirty else 0)}'
+
+
+def test_codex_version_matches_commit_count():
+    expected = _expected_codex_version_counter()
+    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    version_md = (ROOT / 'version.md').read_text(encoding='utf-8')
+    installer = (ROOT / 'installer.py').read_text(encoding='utf-8')
+    assert f"APP_VERSION_COUNTER = '{expected}'" in source
+    assert re.search(rf'Версия\s+v{re.escape(expected)}\b', source)
+    assert version_md.startswith(f'*v{expected} ')
+    assert f'# ВЕРСИЯ СКРИПТА v{expected}' in installer
+
+
+def test_web_status_runtime_helpers():
+    pending = web_status_runtime.build_web_status_snapshot(
+        state_label='state',
+        proxy_mode='vless',
+        protocols={'vless': {'endpoint_ok': True, 'endpoint_message': 'SOCKS ok.', 'api_ok': False, 'api_message': 'timeout'}},
+        ports={'vless': 10811},
+        check_socks5=lambda port: False,
+        check_telegram_api=lambda **kwargs: 'unused',
+        is_transient=lambda text: 'timeout' in text,
+        fallback_reason='fallback',
+    )
+    assert pending['api_status'].startswith('⏳ Telegram API')
+    assert pending['socks_details'] == 'SOCKS ok.'
+    fallback = web_status_runtime.build_web_status_snapshot(
+        state_label='state',
+        proxy_mode='vless',
+        protocols={},
+        ports={'vless': 10811},
+        check_socks5=lambda port: True,
+        check_telegram_api=lambda **kwargs: '❌ timeout',
+        is_transient=lambda text: 'timeout' in text,
+        fallback_reason='',
+    )
+    assert fallback['socks_details'].endswith('доступен')
+    assert fallback['api_status'].startswith('⏳ Telegram API')
 
 
 def test_telegram_confirm_state_source():
@@ -933,6 +980,8 @@ def main():
     test_web_form_template_smoke()
     test_web_post_actions_helpers()
     test_web_action_feature_gates()
+    test_codex_version_matches_commit_count()
+    test_web_status_runtime_helpers()
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
     test_telegram_auth_state_helpers()
