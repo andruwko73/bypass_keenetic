@@ -21,6 +21,7 @@ import telegram_install_ui
 import telegram_key_ui
 import pool_probe_controller
 import proxy_status
+import unblock_lists
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -301,6 +302,11 @@ def test_proxy_status_runtime_helpers():
         tail_path.unlink(missing_ok=True)
 
 
+def test_unblock_list_helpers():
+    assert unblock_lists.normalize_unblock_route_name('vless.txt') == 'vless'
+    assert unblock_lists.entries_from_service_text('one\n#comment\ntwo # note\none', {'skip'}) == ['one', 'two']
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     current_keys = {'vless': 'key'}
@@ -550,6 +556,7 @@ def test_telegram_pool_ui():
 def main():
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()
+    test_unblock_list_helpers()
     test_key_pool_web()
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()

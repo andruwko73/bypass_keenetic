@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 
 
@@ -43,6 +44,48 @@ def save_unblock_list_file(list_name, text):
             file.write(normalized + '\n')
     subprocess.run([UNBLOCK_UPDATE_SCRIPT], check=False)
     return safe_name
+
+
+def unblock_list_path(list_name, unblock_dir=UNBLOCK_DIR):
+    return os.path.join(unblock_dir, f'{list_name}.txt')
+
+
+def read_unblock_list_entries(list_name, unblock_dir=UNBLOCK_DIR):
+    list_path = unblock_list_path(list_name, unblock_dir=unblock_dir)
+    if not os.path.exists(list_path):
+        raise FileNotFoundError(list_path)
+    with open(list_path, encoding='utf-8') as file:
+        return [line.strip() for line in file if line.strip()]
+
+
+def write_unblock_list_entries(list_name, entries, unblock_dir=UNBLOCK_DIR):
+    list_path = unblock_list_path(list_name, unblock_dir=unblock_dir)
+    with open(list_path, 'w', encoding='utf-8') as file:
+        for line in sorted(set(entries)):
+            if line:
+                file.write(line + '\n')
+
+
+def normalize_unblock_route_name(list_name):
+    safe_name = os.path.basename((list_name or '').strip())
+    if safe_name.endswith('.txt'):
+        safe_name = safe_name[:-4]
+    if not safe_name or not re.match(r'^[A-Za-z0-9_-]+$', safe_name):
+        raise ValueError('Некорректное имя списка')
+    return safe_name
+
+
+def entries_from_service_text(text, excluded_entries=None):
+    entries = []
+    seen = set()
+    excluded_entries = set(excluded_entries or [])
+    for raw_line in (text or '').replace('\r', '\n').split('\n'):
+        line = raw_line.split('#', 1)[0].strip()
+        if not line or line.lower() in excluded_entries or line in seen:
+            continue
+        seen.add(line)
+        entries.append(line)
+    return entries
 
 
 def list_label(file_name, include_vpn=False):

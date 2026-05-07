@@ -62,9 +62,14 @@ from proxy_status import (
     wait_for_socks5_handshake as _wait_for_socks5_handshake,
 )
 from unblock_lists import (
+    entries_from_service_text as _entries_from_service_text,
     list_label as _unblock_list_label,
     load_unblock_lists as _load_unblock_lists_store,
+    normalize_unblock_route_name as _normalize_unblock_route_name,
+    read_unblock_list_entries as _read_unblock_list_entries,
     save_unblock_list_file as _save_unblock_list_file,
+    unblock_list_path as _unblock_list_path,
+    write_unblock_list_entries as _write_unblock_list_entries,
 )
 from custom_checks_store import (
     add_custom_check as _store_add_custom_check,
@@ -1057,45 +1062,8 @@ def _send_remote_markdown_file(message, path, error_message, reply_markup=None):
     return True
 
 
-def _unblock_list_path(list_name):
-    return os.path.join('/opt/etc/unblock', f'{list_name}.txt')
-
-
-def _read_unblock_list_entries(list_name):
-    list_path = _unblock_list_path(list_name)
-    if not os.path.exists(list_path):
-        raise FileNotFoundError(list_path)
-    with open(list_path, encoding='utf-8') as file:
-        return [line.strip() for line in file if line.strip()]
-
-
-def _write_unblock_list_entries(list_name, entries):
-    list_path = _unblock_list_path(list_name)
-    with open(list_path, 'w', encoding='utf-8') as file:
-        for line in sorted(set(entries)):
-            if line:
-                file.write(line + '\n')
-
-
-def _normalize_unblock_route_name(list_name):
-    safe_name = os.path.basename((list_name or '').strip())
-    if safe_name.endswith('.txt'):
-        safe_name = safe_name[:-4]
-    if not safe_name or not re.match(r'^[A-Za-z0-9_-]+$', safe_name):
-        raise ValueError('Некорректное имя списка')
-    return safe_name
-
-
 def _socialnet_entries_from_text(text):
-    entries = []
-    seen = set()
-    for raw_line in (text or '').replace('\r', '\n').split('\n'):
-        line = raw_line.split('#', 1)[0].strip()
-        if not line or line.lower() in SOCIALNET_EXCLUDED_ENTRIES or line in seen:
-            continue
-        seen.add(line)
-        entries.append(line)
-    return entries
+    return _entries_from_service_text(text, SOCIALNET_EXCLUDED_ENTRIES)
 
 
 def _resolve_socialnet_service(value):
