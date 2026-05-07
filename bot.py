@@ -1869,6 +1869,13 @@ def _telegram_unblock_list_options():
     return [(entry['label'], entry['name'][:-4]) for entry in _load_unblock_lists(with_content=False)]
 
 
+def _telegram_unblock_lists_markup(*extra_rows):
+    labels = [label for label, _ in _telegram_unblock_list_options()]
+    rows = [tuple(labels[index:index + 2]) for index in range(0, len(labels), 2)]
+    rows.extend(extra_rows)
+    return _reply_keyboard(*rows, ("🔙 Назад",))
+
+
 def _resolve_unblock_list_selection(text):
     normalized = text.strip()
     for label, base_name in _telegram_unblock_list_options():
@@ -4098,23 +4105,11 @@ def bot_message(message):
 
                 for fln in dirfiles:
                     if fln == selected_list + '.txt':
-                        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                        item1 = types.KeyboardButton("📑 Показать список")
-                        item2 = types.KeyboardButton("📝 Добавить в список")
-                        item3 = types.KeyboardButton("🗑 Удалить из списка")
-                        item4 = types.KeyboardButton("📥 Сервисы по запросу")
-                        back = types.KeyboardButton("🔙 Назад")
-                        markup.row(item1, item2, item3)
-                        markup.row(item4)
-                        markup.row(back)
                         set_menu_state(2, selected_list)
-                        bot.send_message(message.chat.id, "Меню " + _list_label(fln), reply_markup=markup)
+                        bot.send_message(message.chat.id, "Меню " + _list_label(fln), reply_markup=_list_actions_markup())
                         return
 
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                back = types.KeyboardButton("🔙 Назад")
-                markup.add(back)
-                bot.send_message(message.chat.id, "Не найден", reply_markup=markup)
+                bot.send_message(message.chat.id, "Не найден", reply_markup=_reply_keyboard(("🔙 Назад",)))
                 return
 
             if level == 2 and message.text == "📑 Показать список":
@@ -4133,16 +4128,7 @@ def bot_message(message):
                 else:
                     bot.send_message(message.chat.id, s)
                 #bot.send_message(message.chat.id, s)
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("📑 Показать список")
-                item2 = types.KeyboardButton("📝 Добавить в список")
-                item3 = types.KeyboardButton("🗑 Удалить из списка")
-                item4 = types.KeyboardButton("📥 Сервисы по запросу")
-                back = types.KeyboardButton("🔙 Назад")
-                markup.row(item1, item2, item3)
-                markup.row(item4)
-                markup.row(back)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
                 return
 
             if level == 2 and message.text == "📥 Сервисы по запросу":
@@ -4154,24 +4140,24 @@ def bot_message(message):
                 bot.send_message(message.chat.id,
                                  "Введите имя сайта или домена для разблокировки, "
                                  "либо воспользуйтесь меню для других действий")
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("Добавить обход блокировок соцсетей")
-                back = types.KeyboardButton("🔙 Назад")
-                markup.add(item1, back)
                 set_menu_state(3)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                bot.send_message(
+                    message.chat.id,
+                    "Меню " + bypass,
+                    reply_markup=_reply_keyboard(("Добавить обход блокировок соцсетей", "🔙 Назад")),
+                )
                 return
 
             if level == 2 and message.text == "🗑 Удалить из списка":
                 bot.send_message(message.chat.id,
                                  "Введите имя сайта или домена для удаления из листа разблокировки,"
                                  "либо возвратитесь в главное меню")
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("Удалить обход блокировок соцсетей")
-                back = types.KeyboardButton("🔙 Назад")
-                markup.add(item1, back)
                 set_menu_state(4)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                bot.send_message(
+                    message.chat.id,
+                    "Меню " + bypass,
+                    reply_markup=_reply_keyboard(("Удалить обход блокировок соцсетей", "🔙 Назад")),
+                )
                 return
 
             if level == 3:
@@ -4197,18 +4183,9 @@ def bot_message(message):
                     bot.send_message(message.chat.id, "✅ Успешно добавлено")
                 else:
                     bot.send_message(message.chat.id, "Было добавлено ранее")
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("📑 Показать список")
-                item2 = types.KeyboardButton("📝 Добавить в список")
-                item3 = types.KeyboardButton("🗑 Удалить из списка")
-                item4 = types.KeyboardButton("📥 Сервисы по запросу")
-                back = types.KeyboardButton("🔙 Назад")
-                markup.row(item1, item2, item3)
-                markup.row(item4)
-                markup.row(back)
                 subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
                 set_menu_state(2)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
                 return
 
             if level == 31:
@@ -4263,18 +4240,9 @@ def bot_message(message):
                     bot.send_message(message.chat.id, "✅ Успешно удалено")
                 else:
                     bot.send_message(message.chat.id, "Не найдено в списке")
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("📑 Показать список")
-                item2 = types.KeyboardButton("📝 Добавить в список")
-                item3 = types.KeyboardButton("🗑 Удалить из списка")
-                item4 = types.KeyboardButton("📥 Сервисы по запросу")
-                back = types.KeyboardButton("🔙 Назад")
-                markup.row(item1, item2, item3)
-                markup.row(item4)
-                markup.row(back)
                 set_menu_state(2)
                 subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
-                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=markup)
+                bot.send_message(message.chat.id, "Меню " + bypass, reply_markup=_list_actions_markup())
                 return
 
             if level == 10:
@@ -4587,48 +4555,18 @@ def bot_message(message):
                     bot.send_message(message.chat.id, keys, parse_mode='Markdown', disable_web_page_preview=True)
                     set_menu_state(8)
 
-                if message.text == 'Shadowsocks':
-                    #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
-                    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                    back = types.KeyboardButton("🔙 Назад")
-                    markup.add(back)
-                    set_menu_state(5)
-                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
-                    return
-
-                if message.text == 'Vmess':
-                    #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
-                    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                    back = types.KeyboardButton("🔙 Назад")
-                    markup.add(back)
-                    set_menu_state(9)
-                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
-                    return
-
-                if message.text == 'Vless' or message.text == 'Vless 1':
-                    #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
-                    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                    back = types.KeyboardButton("🔙 Назад")
-                    markup.add(back)
-                    set_menu_state(11)
-                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
-                    return
-
-                if message.text == 'Vless 2':
-                    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                    back = types.KeyboardButton("🔙 Назад")
-                    markup.add(back)
-                    set_menu_state(12)
-                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
-                    return
-
-                if message.text == 'Trojan':
-                    #bot.send_message(message.chat.id, "Скопируйте ключ сюда")
-                    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                    back = types.KeyboardButton("🔙 Назад")
-                    markup.add(back)
-                    set_menu_state(10)
-                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=markup)
+                key_input_levels = {
+                    'Shadowsocks': 5,
+                    'Vmess': 9,
+                    'Vless': 11,
+                    'Vless 1': 11,
+                    'Vless 2': 12,
+                    'Trojan': 10,
+                }
+                target_level = key_input_levels.get(message.text)
+                if target_level is not None:
+                    set_menu_state(target_level)
+                    bot.send_message(message.chat.id, "🔑 Скопируйте ключ сюда", reply_markup=_reply_keyboard(("🔙 Назад",)))
                     return
 
             if level == 9:
@@ -4658,18 +4596,17 @@ def bot_message(message):
                 return
 
             if message.text == '🔰 Установка и удаление':
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                item1 = types.KeyboardButton("♻️ Установка / переустановка (ветка main)")
-                item2 = types.KeyboardButton("♻️ Переустановка (ветка independent)")
-                item3 = types.KeyboardButton("♻️ Переустановка (без Telegram бота)")
-                item4 = types.KeyboardButton("⚠️ Удаление")
-                back = types.KeyboardButton("🔙 Назад")
-                markup.row(item1)
-                markup.row(item2)
-                markup.row(item3)
-                markup.row(item4)
-                markup.row(back)
-                bot.send_message(message.chat.id, '🔰 Установка и удаление', reply_markup=markup)
+                bot.send_message(
+                    message.chat.id,
+                    '🔰 Установка и удаление',
+                    reply_markup=_reply_keyboard(
+                        ("♻️ Установка / переустановка (ветка main)",),
+                        ("♻️ Переустановка (ветка independent)",),
+                        ("♻️ Переустановка (без Telegram бота)",),
+                        ("⚠️ Удаление",),
+                        ("🔙 Назад",),
+                    ),
+                )
                 return
 
             if message.text in (
@@ -4699,15 +4636,11 @@ def bot_message(message):
 
             if message.text == "📝 Списки обхода":
                 set_menu_state(1, None)
-                markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-                options = _telegram_unblock_list_options()
-                buttons = [types.KeyboardButton(label) for label, _ in options]
-                for index in range(0, len(buttons), 2):
-                    markup.row(*buttons[index:index + 2])
-                markup.add(types.KeyboardButton("📥 Сервисы по запросу"))
-                back = types.KeyboardButton("🔙 Назад")
-                markup.add(back)
-                bot.send_message(message.chat.id, "📝 Списки обхода", reply_markup=markup)
+                bot.send_message(
+                    message.chat.id,
+                    "📝 Списки обхода",
+                    reply_markup=_telegram_unblock_lists_markup(("📥 Сервисы по запросу",)),
+                )
                 return
 
             if message.text == "🔑 Ключи и мосты":
