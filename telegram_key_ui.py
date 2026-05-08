@@ -1,9 +1,6 @@
 KEY_HELP_TEXT = 'Где брать ключи❔'
 KEY_BROWSER_TEXT = '🌐 Через браузер'
 KEY_COPY_PROMPT = '🔑 Скопируйте ключ сюда'
-TOR_TEXT = 'Tor'
-TOR_MANUAL_TEXT = 'Tor вручную'
-TOR_TELEGRAM_TEXT = 'Tor через telegram'
 
 KEY_INPUT_LEVELS = {
     'Shadowsocks': 5,
@@ -31,10 +28,6 @@ def key_menu_rows(include_pool=False):
         (KEY_BROWSER_TEXT,),
         ('🔙 Назад',),
     )
-
-
-def tor_menu_rows():
-    return ((TOR_MANUAL_TEXT, TOR_TELEGRAM_TEXT), ('🔙 Назад',))
 
 
 def key_input_level(text, trojan_level):

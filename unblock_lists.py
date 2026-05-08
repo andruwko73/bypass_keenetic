@@ -8,7 +8,6 @@ UNBLOCK_UPDATE_SCRIPT = '/opt/bin/unblock_update.sh'
 
 BASE_LABELS = {
     'shadowsocks': 'Shadowsocks',
-    'tor': 'Tor',
     'vmess': 'Vmess',
     'vless': 'Vless 1',
     'vless-2': 'Vless 2',
@@ -16,7 +15,6 @@ BASE_LABELS = {
 }
 
 DEFAULT_ORDER = ['vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt']
-VPN_ORDER = DEFAULT_ORDER + ['vpn.txt', 'tor.txt']
 
 
 def normalize_unblock_list(text):
@@ -90,12 +88,7 @@ def entries_from_service_text(text, excluded_entries=None):
 
 def list_label(file_name, include_vpn=False):
     base = file_name[:-4] if file_name.endswith('.txt') else file_name
-    labels = dict(BASE_LABELS)
-    if include_vpn:
-        labels['vpn'] = 'VPN (общий список)'
-    if include_vpn and base.startswith('vpn-'):
-        return f'VPN: {base[4:]}'
-    return labels.get(base, base)
+    return BASE_LABELS.get(base, base)
 
 
 def load_unblock_lists(with_content=True, read_text_file=None, include_vpn=False):
@@ -103,15 +96,11 @@ def load_unblock_lists(with_content=True, read_text_file=None, include_vpn=False
         file_names = sorted(name for name in os.listdir(UNBLOCK_DIR) if name.endswith('.txt'))
     except Exception:
         file_names = []
-    if include_vpn:
-        file_names = [name for name in file_names if name not in ['vpn.txt', 'tor.txt']]
-        preferred_order = VPN_ORDER
-    else:
-        file_names = [
-            name for name in file_names
-            if name not in ['vpn.txt', 'tor.txt'] and not name.startswith('vpn-')
-        ]
-        preferred_order = DEFAULT_ORDER
+    file_names = [
+        name for name in file_names
+        if name not in ['vpn.txt', 'tor.txt'] and not name.startswith('vpn-')
+    ]
+    preferred_order = DEFAULT_ORDER
     ordered = []
     for item in preferred_order:
         if item in file_names:

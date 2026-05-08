@@ -748,12 +748,11 @@ def test_installer_common_helpers():
         ['token', 'username'],
     ) == (True, '')
     ok, message = installer_common.validate_installer_form(
-        {'token': 'x', 'username': 'u', 'appapiid': 'abc'},
-        ['token', 'username', 'appapiid'],
-        require_app_api=True,
+        {'token': 'x', 'username': 'u', 'browser_port': 'bad'},
+        ['token', 'username'],
     )
     assert ok is False
-    assert 'appapiid' in message
+    assert 'browser_port' in message
     assert installer_common.installer_target_url(
         {'routerip': '192.168.1.2', 'browser_port': '9090'},
         8080,

@@ -123,7 +123,7 @@ def render_form_basics(message, command_state, status, current_keys, current_mod
     return basics
 
 
-def render_select_mode_picker(active_mode, csrf_input_html, *, none_label='Без VPN (по умолчанию)'):
+def render_select_mode_picker(active_mode, csrf_input_html, *, none_label='Без прокси (по умолчанию)'):
     options = [
         ('none', none_label),
         ('shadowsocks', 'Shadowsocks'),

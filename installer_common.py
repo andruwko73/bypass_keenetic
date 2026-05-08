@@ -88,13 +88,10 @@ def web_auth_summary(form, default_user='admin'):
     return web_auth_user, note
 
 
-def validate_installer_form(form, required_fields, require_app_api=False):
+def validate_installer_form(form, required_fields):
     missing = [key for key in required_fields if not form_value(form, key)]
     if missing:
         return False, 'Не заполнены обязательные поля: ' + ', '.join(missing)
-
-    if require_app_api and not re.fullmatch(r'\d{5,}', form_value(form, 'appapiid')):
-        return False, 'Поле appapiid должно содержать только цифры.'
 
     if not browser_port_is_valid(form_value(form, 'browser_port')):
         return False, 'Поле browser_port должно содержать номер порта.'

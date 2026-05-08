@@ -2,7 +2,7 @@
 
 *Об этом форке*
 - Это форк проекта [keenetic-dev/bypass_keenetic_dev](https://github.com/keenetic-dev/bypass_keenetic)
-- В форке добавлены веб-интерфейс установки ключей и мостов, выбор маршрутизации Telegram через локальный VPN/прокси, поддержка VLESS, VLESS 2, Shadowsocks, Trojan и Vmess, а также обновлённое управление через Telegram-бота
+- В форке добавлены веб-интерфейс установки ключей, выбор маршрутизации Telegram через локальный прокси, поддержка VLESS, VLESS 2, Shadowsocks, Trojan и Vmess, а также обновлённое управление через Telegram-бота
 
 *Полезные ссылки*
 - *Fork by NetworK* [@znetworkx](https://github.com/znetworkx/bypass_keenetic)

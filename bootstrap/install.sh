@@ -144,7 +144,6 @@ restore_path /opt/etc/init.d/S99telegram_bot
 restore_path /opt/etc/init.d/S98telegram_bot_installer
 restore_path /opt/etc/init.d/S99web_bot
 restore_path /opt/etc/ndm/fs.d/100-ipset.sh
-restore_path /opt/etc/tor/torrc
 restore_path /opt/etc/shadowsocks.json
 restore_path /opt/etc/init.d/S22shadowsocks
 restore_path /opt/etc/xray/config.json
@@ -157,7 +156,6 @@ restore_path /opt/bin/unblock_dnsmasq.sh
 restore_path /opt/bin/unblock_update.sh
 restore_path /opt/etc/init.d/S99unblock
 restore_path /opt/etc/ndm/netfilter.d/100-redirect.sh
-restore_path /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
 restore_path /opt/etc/dnsmasq.conf
 restore_path /opt/etc/crontab
 
@@ -180,7 +178,6 @@ fi
 /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || true
-/opt/etc/init.d/S35tor restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
 
 echo "Rollback completed from \$BACKUP_DIR"
@@ -256,7 +253,6 @@ backup_path "$SERVICE_PATH"
 backup_path "$INSTALLER_SERVICE_PATH"
 backup_path "/opt/etc/init.d/S99web_bot"
 backup_path "/opt/etc/ndm/fs.d/100-ipset.sh"
-backup_path "/opt/etc/tor/torrc"
 backup_path "/opt/etc/shadowsocks.json"
 backup_path "/opt/etc/init.d/S22shadowsocks"
 backup_path "/opt/etc/xray/config.json"
@@ -269,7 +265,6 @@ backup_path "/opt/bin/unblock_dnsmasq.sh"
 backup_path "/opt/bin/unblock_update.sh"
 backup_path "/opt/etc/init.d/S99unblock"
 backup_path "/opt/etc/ndm/netfilter.d/100-redirect.sh"
-backup_path "/opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh"
 backup_path "/opt/etc/dnsmasq.conf"
 backup_path "/opt/etc/crontab"
 write_rollback_script
@@ -336,15 +331,13 @@ ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 /bin/sh "$TMP_DIR/script.sh" -install
 
-if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ] && [ -n "${TG_APP_API_ID:-}" ] && [ -n "${TG_APP_API_HASH:-}" ]; then
+if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then
     cat > "$BOT_CONFIG_PATH" <<EOF
-# ВЕРСИЯ СКРИПТА 2.2.0
+# ВЕРСИЯ СКРИПТА v1.503
 
 token = '${TG_BOT_TOKEN}'
 usernames = ['${TG_USERNAME}']
 
-appapiid = '${TG_APP_API_ID}'
-appapihash = '${TG_APP_API_HASH}'
 routerip = '${ROUTER_IP}'
 browser_port = '${BROWSER_PORT}'
 web_auth_user = 'admin'
@@ -354,11 +347,7 @@ fork_repo_owner = '${REPO_OWNER}'
 fork_repo_name = '${REPO_NAME}'
 fork_button_label = '${FORK_BUTTON_LABEL}'
 
-vpn_allowed="IKE|SSTP|OpenVPN|Wireguard|L2TP"
-
 localportsh = '1082'
-dnsporttor = '9053'
-localporttor = '9141'
 localportvmess = '10810'
 localportvless = '10811'
 localporttrojan = '10829'

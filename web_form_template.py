@@ -219,7 +219,7 @@ def render_web_form(
 
                 <section class="app-view" data-view="keys">
                     <div class="view-head">
-                        <span class="eyebrow">Ключи и мосты</span>
+                        <span class="eyebrow">Ключи</span>
                         <h2>Подключения по протоколам</h2>
                         <p class="section-subtitle">{keys_view_subtitle}</p>
                     </div>

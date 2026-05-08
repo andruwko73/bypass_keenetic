@@ -601,7 +601,7 @@ if [ "$1" = "-install" ]; then
     sed -i "s/10813/${localportvless2}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10814/${localportvless2_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10829/${localporttrojan}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
-    echo "Установлено перенаправление пакетов с адресатами из unblock в: Shadowsocks, Trojan, xray/v2ray. Правила работают на всех интерфейсах, включая клиентов, подключённых к роутеру по VPN."
+    echo "Установлено перенаправление пакетов с адресатами из unblock в: Shadowsocks, Trojan, xray/v2ray. Правила работают на всех интерфейсах роутера."
 
     # dnsmasq.conf
     #rm -rf /opt/etc/dnsmasq.conf

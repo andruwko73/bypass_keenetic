@@ -69,7 +69,7 @@ def build_config(form):
     web_auth_user = form.get('web_auth_user', 'admin').strip() or 'admin'
     web_auth_token = form.get('web_auth_token', '').strip()
 
-    return f"""# ВЕРСИЯ СКРИПТА v1.502
+    return f"""# ВЕРСИЯ СКРИПТА v1.503
 
 token = '{escape_python(form['token'])}'
 usernames = ['{escape_python(form['username'])}']
@@ -294,6 +294,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                             <option value="shadowsocks">shadowsocks</option>
                             <option value="vmess">vmess</option>
                             <option value="vless">vless</option>
+                            <option value="vless2">vless2</option>
                             <option value="trojan">trojan</option>
                         </select>
                     </div>

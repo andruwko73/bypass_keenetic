@@ -9,7 +9,6 @@ def base_action_context(**values):
         'append_service_error': 'Ошибка добавления сервисов',
         'remove_service_error': 'Ошибка удаления сервисов',
         'install_key_for_protocol': None,
-        'install_tor': None,
         'install_verify': True,
     }
     defaults.update(values)
@@ -344,8 +343,6 @@ def _install(ctx, data):
         lock = _acquire_pool_lock(ctx)
         if key_type in PROXY_PROTOCOLS:
             result = _ctx(ctx, 'install_key_for_protocol')(key_type, key_value, verify=_ctx(ctx, 'install_verify', True))
-        elif key_type == 'tor' and _ctx(ctx, 'install_tor'):
-            result = _ctx(ctx, 'install_tor')(key_value)
         else:
             success = False
             result = 'Тип ключа не распознан.'

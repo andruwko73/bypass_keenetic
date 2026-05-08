@@ -61,7 +61,7 @@ done
 if [ -z "$(iptables-save 2>/dev/null | grep unblocksh)" ]; then
 	ipset create unblocksh hash:net -exist 2>/dev/null
 
-	# Redirect rules are intentionally not bound to an interface, so router VPN clients use the same bypass.
+	# Redirect rules are intentionally not bound to an interface, so router clients use the same bypass.
 	iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblocksh dst -j REDIRECT --to-port 1082
 	iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblocksh dst -j REDIRECT --to-port 1082
 

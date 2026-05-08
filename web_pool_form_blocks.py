@@ -257,7 +257,7 @@ def render_protocol_panel(
     return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
         <div class="workspace-head">
             <div>
-                <span class="eyebrow">Ключи и мосты</span>
+                <span class="eyebrow">Ключи</span>
                 <h2>{safe_title}</h2>
                 <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
             </div>
