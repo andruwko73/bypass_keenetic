@@ -1,4 +1,4 @@
-def render_web_styles():
+def render_web_styles(TELEGRAM_SVG_B64=''):
     return '''        :root{
             --bg:#12161d;
             --bg-accent:#1a2330;
@@ -752,4 +752,4 @@ def render_web_styles():
         [data-theme="light"] .command-progress-track{background:#d9e4ee;}
         [data-theme="light"] .confirm-backdrop{background:rgba(31,41,55,.36);}
         [data-theme="light"] .mobile-nav{background:rgba(255,255,255,.96);border-color:var(--border);box-shadow:0 14px 34px rgba(46,63,86,.18);}
-'''
+'''.replace('{TELEGRAM_SVG_B64}', str(TELEGRAM_SVG_B64 or ''))

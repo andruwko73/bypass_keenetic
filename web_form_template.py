@@ -78,7 +78,7 @@ def render_web_form(
                                 </form>
                             </div>
                         </div>'''
-    web_styles = render_web_styles()
+    web_styles = render_web_styles(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
     web_scripts = render_web_scripts(
         POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
         TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,

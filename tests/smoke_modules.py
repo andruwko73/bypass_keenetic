@@ -1011,9 +1011,11 @@ def test_web_status_builder_helpers():
 
 
 def test_web_template_styles_helpers():
-    styles = web_template_styles.render_web_styles()
+    styles = web_template_styles.render_web_styles(TELEGRAM_SVG_B64='tg-icon')
     assert ':root{' in styles
     assert '.app-shell' in styles
+    assert 'tg-icon' in styles
+    assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
 
 
@@ -1043,7 +1045,7 @@ def test_web_form_template_smoke():
         APP_BRANCH_LABEL='codex/test',
         APP_VERSION_LABEL='1',
         POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
-        TELEGRAM_SVG_B64='',
+        TELEGRAM_SVG_B64='tg-icon',
         YOUTUBE_SVG_B64='',
         _telegram_icon_html=lambda opacity=1.0: 'TG',
         csrf_token='token',
@@ -1078,6 +1080,8 @@ def test_web_form_template_smoke():
     )
     assert ':root{' in page
     assert '.app-shell' in page
+    assert 'tg-icon' in page
+    assert '{TELEGRAM_SVG_B64}' not in page
     assert '<script>' in page
 
 
