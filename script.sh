@@ -657,7 +657,9 @@ if [ "$1" = "-update" ]; then
     opkg update > /dev/null 2>&1
     core_proxy_pkg=$(detect_core_proxy_package)
     opkg install "$core_proxy_pkg" > /dev/null 2>&1 || true
-    opkg remove tor tor-geoip obfs4 > /dev/null 2>&1 || true
+    for legacy_pkg in obfs4 tor-geoip tor; do
+      opkg remove "$legacy_pkg" > /dev/null 2>&1 || true
+    done
     # opkg update
     echo "Ваша версия KeenOS" "${keen_os_full}."
     echo "Пакеты обновлены."
