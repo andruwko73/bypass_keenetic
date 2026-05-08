@@ -3,7 +3,7 @@ set -eu
 
 REPO_OWNER="${BYPASS_REPO_OWNER:-andruwko73}"
 REPO_NAME="${BYPASS_REPO_NAME:-bypass_keenetic}"
-REPO_BRANCH="${BYPASS_REPO_BRANCH:-codex/independent-v1}"
+REPO_BRANCH="${BYPASS_REPO_BRANCH:-codex/main}"
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
 
 BOT_DIR="/opt/etc/bot"
@@ -333,7 +333,7 @@ ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then
     cat > "$BOT_CONFIG_PATH" <<EOF
-# ВЕРСИЯ СКРИПТА v1.506
+# ВЕРСИЯ СКРИПТА v1.510
 
 token = '${TG_BOT_TOKEN}'
 usernames = ['${TG_USERNAME}']
@@ -346,6 +346,7 @@ web_auth_disabled = False
 fork_repo_owner = '${REPO_OWNER}'
 fork_repo_name = '${REPO_NAME}'
 fork_button_label = '${FORK_BUTTON_LABEL}'
+app_runtime_mode = 'advanced'
 
 localportsh = '1082'
 localportvmess = '10810'

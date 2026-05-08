@@ -64,7 +64,7 @@ def download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
     return response.url, base64.b64decode(content).decode('utf-8')
 
 
-def download_repo_script(repo_owner, repo_name, branch='codex/main-v1'):
+def download_repo_script(repo_owner, repo_name, branch='codex/main'):
     session = requests.Session()
     session.trust_env = False
     url, script_text = download_repo_file_text(session, repo_owner, repo_name, branch, 'script.sh')

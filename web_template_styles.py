@@ -75,6 +75,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 .mode-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
                 .mode-choice-grid form{display:block;margin:0;}
                 .mode-choice{width:100%;height:var(--control-height);min-height:var(--control-height);justify-content:center;background:rgba(34,67,73,.28);border-color:rgba(78,216,205,.5);box-shadow:none;color:#96f1eb;}
+                .app-mode-choice-grid{grid-template-columns:1fr;}
+                .app-mode-choice-grid .mode-choice{height:auto;min-height:48px;display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:3px;padding:8px 10px;white-space:normal;}
+                .app-mode-choice-grid .mode-choice small{font-size:12px;line-height:1.25;color:var(--muted);font-weight:600;}
                 .mode-choice.active{background:rgba(48,191,181,.18);border-color:rgba(78,216,205,.5);color:#94f3ec;}
                 .mode-choice:hover{filter:none;transform:none;background:rgba(35,98,104,.42);}
         h1{margin:0 0 4px;font-size:22px;line-height:1.15;letter-spacing:0;color:var(--text);}

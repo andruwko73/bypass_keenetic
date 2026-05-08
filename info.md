@@ -2,7 +2,7 @@
 
 *Об этом форке*
 - Это форк проекта [keenetic-dev/bypass_keenetic_dev](https://github.com/keenetic-dev/bypass_keenetic)
-- В форке добавлены веб-интерфейс установки ключей, выбор маршрутизации Telegram через локальный прокси, поддержка VLESS, VLESS 2, Shadowsocks, Trojan и Vmess, а также обновлённое управление через Telegram-бота
+- В форке добавлены единый веб-интерфейс, режимы Простой/Сложный/Web only, выбор маршрутизации Telegram через локальный прокси, поддержка VLESS, VLESS 2, Shadowsocks, Trojan и Vmess, а также обновлённое управление через Telegram-бота
 
 *Полезные ссылки*
 - *Fork by NetworK* [@znetworkx](https://github.com/znetworkx/bypass_keenetic)
@@ -15,8 +15,8 @@
 
 *Быстрый bootstrap после Entware*
 - Если Entware уже установлен и `/opt` готов, можно запустить bootstrap одной SSH-командой и продолжить первичную настройку уже через браузер
-- Команда: `sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/codex/independent-v1/bootstrap/install.sh | sh'`
-- После запуска откроется страница первичной настройки на `http://192.168.1.1:8080/`, где нужно указать BotFather token, username, app api id и app api hash. Страница доступна только из локальной сети.
+- Команда: `sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/codex/main/bootstrap/install.sh | sh'`
+- После запуска откроется страница первичной настройки на `http://192.168.1.1:8080/`, где нужно указать BotFather token и username или включить режим Web only. Страница доступна только из локальной сети.
 - Bootstrap создаёт backup на роутере и rollback-скрипт в `/opt/root/bypass-last-rollback.sh`
 
 *Шаблоны списков*

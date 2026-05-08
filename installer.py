@@ -30,14 +30,10 @@ BOT_MAIN_PATH = os.path.join(BOT_DIR, 'main.py')
 LEGACY_MAIN_PATH = '/opt/etc/bot.py'
 BOT_SERVICE_PATH = '/opt/etc/init.d/S99telegram_bot'
 INSTALLER_SERVICE_PATH = '/opt/etc/init.d/S98telegram_bot_installer'
+APP_RUNTIME_MODE_FILE = '/opt/etc/bot_app_mode'
 DEFAULT_BROWSER_PORT = int(os.environ.get('BYPASS_INSTALLER_PORT', '8080'))
 DEFAULT_FORK_REPO_OWNER = 'andruwko73'
 DEFAULT_FORK_REPO_NAME = 'bypass_keenetic'
-WEB_ONLY_BRANCH = 'codex/web-only-v1'
-WEB_ONLY_SCRIPT_URL = (
-    f'https://raw.githubusercontent.com/{DEFAULT_FORK_REPO_OWNER}/'
-    f'{DEFAULT_FORK_REPO_NAME}/{WEB_ONLY_BRANCH}/script.sh'
-)
 
 
 def get_keys_for_proto(proto):
@@ -68,11 +64,12 @@ def build_config(form):
     default_proxy_mode = form.get('default_proxy_mode', 'none').strip() or 'none'
     web_auth_user = form.get('web_auth_user', 'admin').strip() or 'admin'
     web_auth_token = form.get('web_auth_token', '').strip()
+    app_runtime_mode = form.get('app_runtime_mode', 'advanced').strip() or 'advanced'
 
-    return f"""# ВЕРСИЯ СКРИПТА v1.506
+    return f"""# ВЕРСИЯ СКРИПТА v1.510
 
-token = '{escape_python(form['token'])}'
-usernames = ['{escape_python(form['username'])}']
+token = '{escape_python(form.get('token', ''))}'
+usernames = ['{escape_python(form.get('username', ''))}']
 
 routerip = '{escape_python(router_ip)}'
 browser_port = '{escape_python(browser_port)}'
@@ -82,6 +79,7 @@ web_auth_disabled = False
 fork_repo_owner = '{escape_python(fork_repo_owner)}'
 fork_repo_name = '{escape_python(fork_repo_name)}'
 fork_button_label = '{escape_python(fork_button_label)}'
+app_runtime_mode = '{escape_python(app_runtime_mode)}'
 
 localportsh = '1082'
 localportvmess = '10810'
@@ -106,6 +104,10 @@ def write_config(form):
         BOT_MAIN_PATH,
         LEGACY_MAIN_PATH,
     )
+    mode = form.get('app_runtime_mode', 'advanced').strip() or 'advanced'
+    os.makedirs(os.path.dirname(APP_RUNTIME_MODE_FILE), exist_ok=True)
+    with open(APP_RUNTIME_MODE_FILE, 'w', encoding='utf-8') as f:
+        f.write(mode + '\n')
 
 
 def switch_to_main_bot():
@@ -118,14 +120,20 @@ def switch_to_main_bot():
 
 
 def install_web_only():
-    command = (
-        f'sleep 2; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true; '
-        f'curl -fsSL {WEB_ONLY_SCRIPT_URL!r} -o /tmp/bypass_web_only_install.sh && '
-        'chmod 755 /tmp/bypass_web_only_install.sh && '
-        'install_action=-install; [ -x /opt/bin/unblock_update.sh ] && install_action=-update; '
-        'REPO_REF=codex/web-only-v1 /bin/sh /tmp/bypass_web_only_install.sh "$install_action"'
-    )
-    start_detached_shell(command)
+    write_config({
+        'token': '',
+        'username': '',
+        'routerip': detect_router_ip(),
+        'browser_port': str(DEFAULT_BROWSER_PORT),
+        'default_proxy_mode': 'none',
+        'web_auth_user': 'admin',
+        'web_auth_token': '',
+        'app_runtime_mode': 'web_only',
+    })
+    os.makedirs(os.path.dirname(APP_RUNTIME_MODE_FILE), exist_ok=True)
+    with open(APP_RUNTIME_MODE_FILE, 'w', encoding='utf-8') as f:
+        f.write('web_only\n')
+    switch_to_main_bot()
 
 
 def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
@@ -302,7 +310,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                 <button type="submit">Сохранить и запустить основной бот</button>
             </form>
             <form method="post" action="/install-web-only">
-                <button class="secondary-button" type="submit">Установить без бота Telegram</button>
+                <button class="secondary-button" type="submit">Запустить режим Web only</button>
             </form>
             <hr style="margin:32px 0 18px; border:0; border-top:1px solid var(--line);">
             <h2 style="margin:0 0 12px; font-size:22px;">Пул ключей</h2>
@@ -402,7 +410,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
             target_url = installer_target_url({}, DEFAULT_BROWSER_PORT)
             self._send_html(
                 page_html(
-                    f'Запущена установка web-only версии без Telegram бота. Через несколько секунд откроется основной web-интерфейс: {target_url}',
+                    f'Включен режим Web only в единой версии. Через несколько секунд откроется основной web-интерфейс: {target_url}',
                     redirect_url=target_url,
                     redirect_delay_seconds=8,
                 )

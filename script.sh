@@ -11,7 +11,7 @@
 # оригинальный репозиторий (tas-unn), пользовательский форк
 
 repo="andruwko73"
-REPO_REF="${REPO_REF:-codex/independent-v1}"
+REPO_REF="${REPO_REF:-codex/main}"
 
 config_get() {
   key="$1"

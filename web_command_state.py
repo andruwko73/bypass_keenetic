@@ -2,7 +2,7 @@ import threading
 import time
 
 
-DEFAULT_UPDATE_COMMANDS = ('update', 'update_independent', 'update_no_bot')
+DEFAULT_UPDATE_COMMANDS = ('update',)
 COMMON_UPDATE_PROGRESS_STEPS = (
     ('Версия бота', 90, 'Проверка версии и завершение обновления'),
     ('Версия прокси', 90, 'Проверка версии и завершение обновления'),

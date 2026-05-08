@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.509, последнее изменение: 09.05.2026
+#  Файл: bot.py, Версия v1.510, последнее изменение: 09.05.2026
 
 import subprocess
 import os
@@ -329,7 +329,8 @@ def _start_auto_failover_thread():
     def worker():
         while not shutdown_requested.is_set():
             try:
-                _attempt_auto_failover()
+                if _app_mode_pool_enabled():
+                    _attempt_auto_failover()
             except Exception as exc:
                 _write_runtime_log(f'Auto-failover error: {exc}')
             shutdown_requested.wait(AUTO_FAILOVER_POLL_SECONDS)
@@ -337,8 +338,8 @@ def _start_auto_failover_thread():
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
 
-token = config.token
-usernames = config.usernames
+token = getattr(config, 'token', '') or '0:WEBONLY_DISABLED'
+usernames = getattr(config, 'usernames', [])
 routerip = config.routerip
 browser_port = config.browser_port
 fork_repo_owner = getattr(config, 'fork_repo_owner', 'andruwko73')
@@ -403,9 +404,9 @@ POOL_PROBE_TIMEOUTS = (
     POOL_PROBE_SINGLE_TIMEOUT_SECONDS, POOL_PROBE_BATCH_TIMEOUT_SECONDS,
 )
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
-APP_BRANCH_LABEL = 'codex/independent-v1'
-APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.509'
+APP_BRANCH_LABEL = 'codex/main'
+APP_BRANCH_DESCRIPTION = 'единая codex-ветка'
+APP_VERSION_COUNTER = '1.510'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -414,6 +415,17 @@ APP_START_REPEAT_LABEL = 'Повторить запуск бота'
 APP_START_RESULT = 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд.'
 APP_QUICK_START_NOTE = 'После установки ключей можно сразу запустить или перезапустить Telegram-бота.'
 APP_PROXY_USER_LABEL = 'Бот'
+APP_RUNTIME_MODE_FILE = '/opt/etc/bot_app_mode'
+APP_RUNTIME_MODES = (
+    ('simple', 'Простой', 'интерфейс и Telegram-бот как codex/main-v1'),
+    ('advanced', 'Сложный', 'полный интерфейс и Telegram-бот как codex/independent-v1'),
+    ('web_only', 'Web only', 'полный веб-интерфейс без Telegram polling'),
+)
+APP_RUNTIME_MODE_DATA = {
+    value: {'label': label, 'description': description}
+    for value, label, description in APP_RUNTIME_MODES
+}
+APP_DEFAULT_RUNTIME_MODE = getattr(config, 'app_runtime_mode', 'advanced')
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
 STATIC_DIR = os.path.join(BOT_DIR, 'static')
@@ -476,7 +488,7 @@ pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
-WEB_UPDATE_COMMANDS = ('update', 'update_independent', 'update_no_bot')
+WEB_UPDATE_COMMANDS = ('update',)
 web_command_lock = threading.Lock()
 web_command_state = {
     'running': False,
@@ -512,6 +524,86 @@ AUTHORIZED_USERNAMES, AUTHORIZED_USER_IDS = _build_authorized_identities(usernam
 EXTRA_AUTHORIZED_USER_IDS = getattr(config, 'authorized_user_ids', [])
 _, EXTRA_NUMERIC_USER_IDS = _build_authorized_identities(EXTRA_AUTHORIZED_USER_IDS)
 AUTHORIZED_USER_IDS.update(EXTRA_NUMERIC_USER_IDS)
+
+
+def _normalize_app_runtime_mode(mode):
+    mode = str(mode or '').strip().lower().replace('-', '_')
+    return mode if mode in APP_RUNTIME_MODE_DATA else 'advanced'
+
+
+def _load_app_runtime_mode():
+    try:
+        with open(APP_RUNTIME_MODE_FILE, 'r', encoding='utf-8') as f:
+            mode = f.read().strip()
+    except FileNotFoundError:
+        mode = APP_DEFAULT_RUNTIME_MODE
+    except Exception as exc:
+        _write_runtime_log(f'Не удалось прочитать режим программы: {exc}')
+        mode = APP_DEFAULT_RUNTIME_MODE
+    return _normalize_app_runtime_mode(mode)
+
+
+def _save_app_runtime_mode(mode):
+    mode = _normalize_app_runtime_mode(mode)
+    os.makedirs(os.path.dirname(APP_RUNTIME_MODE_FILE), exist_ok=True)
+    with open(APP_RUNTIME_MODE_FILE, 'w', encoding='utf-8') as f:
+        f.write(mode + '\n')
+    return mode
+
+
+def _app_runtime_mode_label(mode=None):
+    mode = _normalize_app_runtime_mode(mode or _load_app_runtime_mode())
+    return APP_RUNTIME_MODE_DATA[mode]['label']
+
+
+def _app_mode_pool_enabled(mode=None):
+    return _normalize_app_runtime_mode(mode or _load_app_runtime_mode()) in ('advanced', 'web_only')
+
+
+def _app_mode_telegram_enabled(mode=None):
+    return _normalize_app_runtime_mode(mode or _load_app_runtime_mode()) != 'web_only'
+
+
+def _schedule_app_service_restart():
+    def worker():
+        time.sleep(1.5)
+        os.system('/opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 &')
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _set_app_runtime_mode(mode):
+    requested = str(mode or '').strip().lower().replace('-', '_')
+    if requested not in APP_RUNTIME_MODE_DATA:
+        return False, 'Неизвестный режим программы.', {
+            'app_mode': _load_app_runtime_mode(),
+            'app_mode_label': _app_runtime_mode_label(),
+        }
+    previous = _load_app_runtime_mode()
+    current = _save_app_runtime_mode(requested)
+    restart_required = (
+        _app_mode_telegram_enabled(previous) != _app_mode_telegram_enabled(current) or
+        _app_mode_pool_enabled(previous) != _app_mode_pool_enabled(current)
+    )
+    if current == 'web_only':
+        globals()['bot_ready'] = False
+        _save_bot_autostart(False)
+    elif previous == 'web_only':
+        globals()['bot_ready'] = True
+        _save_bot_autostart(True)
+    if restart_required:
+        _schedule_app_service_restart()
+    _invalidate_web_status_cache()
+    _invalidate_key_status_cache()
+    label = _app_runtime_mode_label(current)
+    suffix = ' Сервис перезапускается для применения режима.' if restart_required else ' Страница обновится для применения интерфейса.'
+    return True, f'Режим программы установлен: {label}.{suffix}', {
+        'app_mode': current,
+        'app_mode_label': label,
+        'pool_enabled': _app_mode_pool_enabled(current),
+        'telegram_enabled': _app_mode_telegram_enabled(current),
+        'reload_after_ms': 2500 if restart_required else 1200,
+    }
 
 
 def _raw_github_url(path):
@@ -1217,6 +1309,9 @@ def _handle_private_stateless_command(message, main, service):
         return True
 
     if message.text in ('📦 Пул ключей', '/pool'):
+        if not _app_mode_pool_enabled():
+            bot.send_message(message.chat.id, 'Пул ключей отключен в простом режиме.', reply_markup=main)
+            return True
         _set_chat_menu_state(message.chat.id, level=20, bypass=None)
         _clear_pool_inline_keyboard(message.chat.id)
         _clear_pool_page(message.chat.id)
@@ -1235,7 +1330,7 @@ def _build_main_menu_markup():
 
 
 def _build_keys_menu_markup():
-    return _reply_keyboard(*telegram_key_ui.key_menu_rows(include_pool=True))
+    return _reply_keyboard(*telegram_key_ui.key_menu_rows(include_pool=_app_mode_pool_enabled()))
 
 
 def _handle_key_menu_message(message, level, set_menu_state, reply_markup):
@@ -1278,34 +1373,17 @@ def _request_telegram_confirmation(message, set_menu_state, action):
 
 
 def _execute_confirmed_telegram_action(chat_id, action, reply_markup):
+    if action in ('update_independent', 'update_no_bot'):
+        action = 'update_main'
     update_actions = {
         'update_main': {
             'repo_owner': fork_repo_owner,
             'repo_name': fork_repo_name,
-            'branch': 'codex/main-v1',
+            'branch': 'codex/main',
             'message': (
                 f'Запускаю установку/переустановку из ветки main форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
                 'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
                 'потому что сервис будет перезапущен. После запуска бот сам пришлет в этот чат лог и итоговое сообщение.'
-            ),
-        },
-        'update_independent': {
-            'repo_owner': 'andruwko73',
-            'repo_name': 'bypass_keenetic',
-            'branch': 'codex/independent-v1',
-            'message': (
-                'Запускаю переустановку из ветки andruwko73/bypass_keenetic (codex/independent-v1) без сброса ключей и списков.\n'
-                'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети.\n'
-                'После запуска бот сам пришлет лог и итоговое сообщение.'
-            ),
-        },
-        'update_no_bot': {
-            'repo_owner': 'andruwko73',
-            'repo_name': 'bypass_keenetic',
-            'branch': 'codex/web-only-v1',
-            'message': (
-                'Запускаю переустановку web-only из ветки andruwko73/bypass_keenetic (codex/web-only-v1) без сброса ключей, настроек и списков.\n'
-                'После перехода Telegram-бот будет отключён. Управление останется через web-интерфейс.'
             ),
         },
     }
@@ -1484,7 +1562,7 @@ def _telegram_command_markup(menu_name):
     return _build_service_menu_markup() if menu_name == 'service' else _build_main_menu_markup()
 
 
-def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main-v1'):
+def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main'):
     try:
         return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
     except Exception as exc:
@@ -1497,7 +1575,7 @@ def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_na
     _remove_file(TELEGRAM_COMMAND_JOB_FILE)
 
 
-def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main-v1'):
+def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main'):
     return _telegram_start_background_command(
         job_file=TELEGRAM_COMMAND_JOB_FILE,
         action=action,
@@ -1535,7 +1613,7 @@ def _send_telegram_update_status(message, reply_markup):
 
 
 def _start_telegram_update_from_chat(chat_id, reply_markup, *, menu_name='service', repo_owner=None, repo_name=None,
-                                     branch='codex/main-v1', start_message=None):
+                                     branch='codex/main', start_message=None):
     repo_owner = repo_owner or fork_repo_owner
     repo_name = repo_name or fork_repo_name
     started, status_message = _start_telegram_background_command('-update', repo_owner, repo_name, chat_id, menu_name, branch=branch)
@@ -1609,7 +1687,7 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
     return result
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='codex/main-v1'):
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='codex/main'):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _repo_direct_fetch_env(DIRECT_FETCH_ENV_KEYS)
     progress_callback = None
@@ -1722,29 +1800,13 @@ def _dns_override_enabled():
 
 
 def _run_web_command(command):
+    if command in ('update_independent', 'update_no_bot'):
+        command = 'update'
     if command == 'install_original':
         _, output = _run_script_action('-install', 'tas-unn', 'bypass_keenetic')
         return output
     if command == 'update':
         _, output = _run_script_action('-update', fork_repo_owner, fork_repo_name, progress_command='update')
-        return output
-    if command == 'update_independent':
-        _, output = _run_script_action(
-            '-update',
-            'andruwko73',
-            'bypass_keenetic',
-            progress_command='update_independent',
-            branch='codex/independent-v1',
-        )
-        return output
-    if command == 'update_no_bot':
-        _, output = _run_script_action(
-            '-update',
-            'andruwko73',
-            'bypass_keenetic',
-            progress_command='update_no_bot',
-            branch='codex/web-only-v1',
-        )
         return output
     if command == 'remove':
         _, output = _run_script_action('-remove', fork_repo_owner, fork_repo_name)
@@ -1908,10 +1970,15 @@ def _probe_custom_targets_for_pool(proxy_url, custom_checks=None):
 
 
 def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_timeout=10):
-    url = f'https://api.telegram.org/bot{token}/getMe'
+    authenticated_check = _app_mode_telegram_enabled()
+    url = f'https://api.telegram.org/bot{token}/getMe' if authenticated_check else 'https://api.telegram.org/'
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
     try:
         response = requests.get(url, timeout=(connect_timeout, read_timeout), proxies=proxies)
+        if not authenticated_check:
+            if response.status_code < 500:
+                return True, 'Доступ к api.telegram.org подтверждён.'
+            response.raise_for_status()
         response.raise_for_status()
         data = response.json()
         if data.get('ok'):
@@ -2018,8 +2085,6 @@ def _web_command_label(command):
     labels = {
         'install_original': 'Установить оригинальную версию',
         'update': 'Переустановить из форка без сброса',
-        'update_independent': 'Переустановка (ветка independent)',
-        'update_no_bot': 'Переустановка (без Telegram бота)',
         'remove': 'Удалить компоненты',
         'restart_services': 'Перезапустить сервисы',
         'dns_on': 'DNS Override ВКЛ',
@@ -2661,6 +2726,8 @@ def _handle_pool_delete_state(message, bypass, set_menu_state):
 
 
 def _handle_telegram_pool_state(message, level, bypass, set_menu_state):
+    if not _app_mode_pool_enabled():
+        return False
     handlers = {
         20: lambda: _handle_pool_protocol_state(message, set_menu_state),
         21: lambda: _handle_pool_manage_state(message, bypass, set_menu_state),
@@ -3137,8 +3204,14 @@ def _is_transient_telegram_api_failure(status_text):
     return _status_is_transient_text(status_text)
 
 
+def _telegram_state_label():
+    if not _app_mode_telegram_enabled():
+        return 'Web only: Telegram polling отключен'
+    return 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
+
+
 def _build_web_status(current_keys, protocols=None):
-    state_label = 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
+    state_label = _telegram_state_label()
     return web_status_runtime.build_web_status_snapshot(
         state_label=state_label,
         proxy_mode=proxy_mode,
@@ -3249,7 +3322,7 @@ def _store_active_mode_protocol_status(current_keys, status):
 
 def _placeholder_web_status_snapshot():
     return {
-        'state_label': 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен'),
+        'state_label': _telegram_state_label(),
         'proxy_mode': proxy_mode,
         'api_status': '⏳ Проверяется связь текущего режима. Статус обновится без перезагрузки страницы.',
         'socks_details': '',
@@ -3434,6 +3507,9 @@ def pool_callback(call):
         if not authorized:
             bot.answer_callback_query(call.id, 'Нет доступа', show_alert=True)
             return
+        if not _app_mode_pool_enabled():
+            bot.answer_callback_query(call.id, 'Пул ключей отключен в простом режиме', show_alert=True)
+            return
 
         data, action, chat_id, message_id = _pool_callback_parts(call)
         _clear_pool_inline_keyboard(chat_id, message_id)
@@ -3504,6 +3580,11 @@ def bot_message(message):
 
 def _start_web_bot_action():
     global bot_ready
+    if not _app_mode_telegram_enabled():
+        bot_ready = False
+        _save_bot_autostart(False)
+        _invalidate_web_status_cache()
+        return 'Сейчас выбран режим Web only. Telegram polling отключен.'
     bot_ready = True
     _save_bot_autostart(True)
     _invalidate_web_status_cache()
@@ -3511,8 +3592,10 @@ def _start_web_bot_action():
 
 
 def _web_action_context():
+    pool_enabled = _app_mode_pool_enabled()
     context = web_post_actions.base_action_context(
         app_mode_label=APP_MODE_LABEL,
+        set_app_runtime_mode=_set_app_runtime_mode,
         update_proxy=update_proxy,
         proxy_mode_label=_proxy_mode_label,
         invalidate_web_status_cache=_invalidate_web_status_cache,
@@ -3552,11 +3635,14 @@ def _web_action_context():
         add_subscription_keys_to_pool=key_pool_store.add_subscription_keys_to_pool,
         save_key_pools=_save_key_pools,
         pool_apply_lock=pool_apply_lock,
+        custom_checks_enabled=pool_enabled,
+        pool_actions_enabled=pool_enabled,
     ))
     return context
 
 
 def _web_get_context(handler):
+    pool_enabled = _app_mode_pool_enabled()
     return {
         'build_form': handler._build_form,
         'consume_flash_message': _consume_web_flash_message,
@@ -3566,7 +3652,7 @@ def _web_get_context(handler):
         'refresh_status_caches_async': _refresh_status_caches_async,
         'pool_probe_locked': pool_probe_lock.locked,
         'get_web_command_state': _get_web_command_state,
-        'pool_enabled': True,
+        'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
         'web_pool_snapshot': _web_pool_snapshot,
         'pool_status_summary': _pool_status_summary,
@@ -3639,6 +3725,25 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
     }
 
 
+def _web_simple_form_context(current_keys, protocol_statuses, csrf_input_html, status):
+    protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        web_form_blocks.PROTOCOL_SECTIONS,
+        current_keys,
+        protocol_statuses,
+        csrf_input_html,
+        enable_key_pool=False,
+        enable_custom_checks=False,
+    )
+    return {
+        'custom_checks_json': '[]',
+        'pool_summary': {'active_text': '', 'note': ''},
+        'pool_summary_note': '',
+        'protocol_panels_html': protocol_panels_html,
+        'protocol_tabs_html': protocol_tabs_html,
+        'topbar_status_text': status['api_status'],
+    }
+
+
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
     local_client_checker = staticmethod(_web_is_local_client)
@@ -3647,6 +3752,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     flash_message_setter = staticmethod(_set_web_flash_message)
 
     def _build_form(self, message=''):
+        app_runtime_mode = _load_app_runtime_mode()
+        pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
         command_state = _consume_web_command_state_for_render()
         current_keys = _load_current_keys()
         snapshot = _cached_status_snapshot(current_keys)
@@ -3676,15 +3783,23 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             proxy_mode,
             csrf_input_html=csrf_input_html,
         )
-
-        pool_view = _web_pool_form_context(
-            current_keys,
-            protocol_statuses,
-            csrf_input_html,
-            status,
-            pool_probe_pending,
-            current_pool_probe_progress,
+        app_runtime_mode_picker_block = web_form_blocks.render_app_runtime_mode_picker(
+            app_runtime_mode,
+            APP_RUNTIME_MODES,
+            csrf_input_html=csrf_input_html,
         )
+
+        if pool_enabled:
+            pool_view = _web_pool_form_context(
+                current_keys,
+                protocol_statuses,
+                csrf_input_html,
+                status,
+                pool_probe_pending,
+                current_pool_probe_progress,
+            )
+        else:
+            pool_view = _web_simple_form_context(current_keys, protocol_statuses, csrf_input_html, status)
         quick_key = form_basics['quick_key']
 
         dns_override_active = _dns_override_enabled()
@@ -3702,9 +3817,14 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         initial_status_pending = web_form_blocks.js_bool(status_refresh_pending)
         initial_command_running = form_basics['initial_command_running']
 
-        start_button_label = APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL
+        telegram_enabled = _app_mode_telegram_enabled(app_runtime_mode)
+        start_button_label = ('Telegram отключён' if not telegram_enabled else
+                              (APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL))
         mode_toggle_label = f'{APP_MODE_LABEL}:'
-        quick_start_note = APP_QUICK_START_NOTE
+        quick_start_note = (
+            'В режиме Web only Telegram polling отключен; управление доступно через веб-интерфейс.'
+            if not telegram_enabled else APP_QUICK_START_NOTE
+        )
 
 
         return render_web_form(
@@ -3715,6 +3835,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             _telegram_icon_html=_telegram_icon_html,
+            app_runtime_mode_label=_app_runtime_mode_label(app_runtime_mode),
+            app_runtime_mode_picker_block=app_runtime_mode_picker_block,
             csrf_token=csrf_token,
             command_block=form_basics['command_block'],
             command_buttons_html=command_buttons_html,
@@ -3742,6 +3864,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             unblock_panels_html=unblock_panels_html,
             unblock_tabs_html=unblock_tabs_html,
             update_buttons_html=update_buttons_html,
+            enable_custom_checks=pool_enabled,
+            enable_key_pool=pool_enabled,
         )
 
     def do_GET(self):
@@ -3922,7 +4046,7 @@ def _restart_core_proxy_at_startup():
 
 
 def _mark_bot_ready_from_autostart():
-    if _load_bot_autostart():
+    if _app_mode_telegram_enabled() and _load_bot_autostart():
         globals()['bot_ready'] = True
 
 
@@ -3994,16 +4118,25 @@ def main():
     _register_signal_handlers()
     _write_runtime_log('main() entered', mode='w')
     _runner_cleanup_pool_probe_runtime(kill_processes=True)
+    runtime_mode = _load_app_runtime_mode()
+    _write_runtime_log(f'app runtime mode: {runtime_mode}')
     start_http_server()
     _restart_core_proxy_at_startup()
     _mark_bot_ready_from_autostart()
     _restore_startup_proxy_mode()
-    _deliver_pending_telegram_command_result()
-    _start_telegram_result_retry_worker()
-    _start_auto_failover_thread()
-    _ensure_current_keys_in_pools()
-    wait_for_bot_start()
-    _run_telegram_polling_loop()
+    if _app_mode_pool_enabled(runtime_mode):
+        _start_auto_failover_thread()
+        _ensure_current_keys_in_pools()
+    if _app_mode_telegram_enabled(runtime_mode):
+        _deliver_pending_telegram_command_result()
+        _start_telegram_result_retry_worker()
+        wait_for_bot_start()
+        _run_telegram_polling_loop()
+    else:
+        globals()['bot_ready'] = False
+        _save_bot_autostart(False)
+        while not shutdown_requested.is_set():
+            shutdown_requested.wait(1)
     _finalize_shutdown()
 
 

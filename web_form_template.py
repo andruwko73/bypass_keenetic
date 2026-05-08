@@ -14,6 +14,8 @@ def render_web_form(
     csrf_token,
     command_block,
     command_buttons_html,
+    app_runtime_mode_label,
+    app_runtime_mode_picker_block,
     current_mode_label,
     custom_checks_json,
     fallback_block,
@@ -121,7 +123,12 @@ def render_web_form(
                     <span id="theme-toggle-label">Темная тема</span>
                 </button>
                 <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_VERSION_LABEL)}</span>
+                <button type="button" id="app-mode-toggle-button" class="mode-toggle" onclick="toggleAppModePicker()">
+                    <span>Режим:</span>
+                    <span id="app-mode-label">{html.escape(app_runtime_mode_label)}</span>
+                </button>
                 {mode_picker_block}
+                {app_runtime_mode_picker_block}
             </div>
         </header>
         {message_block}

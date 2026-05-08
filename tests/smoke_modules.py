@@ -334,7 +334,7 @@ def test_telegram_confirm_state_source():
     for action in ('restart_services', 'reboot', 'dns_on', 'dns_off'):
         assert f"'{action}'" in source
     assert "_request_telegram_confirmation(message, set_menu_state, 'update_main')" in source
-    for action in ('update_main', 'update_independent', 'update_no_bot', 'remove'):
+    for action in ('update_main', 'remove'):
         assert f"'{action}'" in install_source
 
 
@@ -412,9 +412,9 @@ def test_telegram_jobs_helpers():
 
 def test_telegram_install_ui_helpers():
     assert telegram_install_ui.install_action_for_text('🔰 Установка и удаление', include_web_only=True) == 'menu'
-    assert telegram_install_ui.install_action_for_text('♻️ Установка / переустановка (ветка main)', include_web_only=True) == 'update_main'
-    assert telegram_install_ui.install_action_for_text('♻️ Переустановка (ветка independent)', include_web_only=True) == 'update_independent'
-    assert telegram_install_ui.install_action_for_text('♻️ Переустановка (без Telegram бота)', include_web_only=True) == 'update_no_bot'
+    assert telegram_install_ui.install_action_for_text('♻️ Установка и переустановка', include_web_only=True) == 'update_main'
+    assert telegram_install_ui.install_action_for_text('♻️ Переустановка (ветка independent)', include_web_only=True) is None
+    assert telegram_install_ui.install_action_for_text('♻️ Переустановка (без Telegram бота)', include_web_only=True) is None
 
 
 def test_telegram_key_ui_helpers():
@@ -869,7 +869,8 @@ def test_web_form_blocks_helpers():
     assert 'csrf_token' in button_picker
     assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
     update_buttons = web_form_blocks.render_update_buttons('<input name="csrf_token">')
-    assert 'update_independent' in update_buttons
+    assert 'value="update"' in update_buttons
+    assert 'update_independent' not in update_buttons
     assert 'data-confirm-title=' in update_buttons
     command_buttons = web_form_blocks.render_command_button_forms(
         [('restart_services', 'Restart', '', 'Confirm?', 'Do it?')],
@@ -1051,6 +1052,8 @@ def test_web_form_template_smoke():
         csrf_token='token',
         command_block='',
         command_buttons_html='',
+        app_runtime_mode_label='Сложный',
+        app_runtime_mode_picker_block='',
         current_mode_label='Без прокси',
         custom_checks_json='[]',
         fallback_block='',

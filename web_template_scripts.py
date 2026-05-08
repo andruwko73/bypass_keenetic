@@ -65,6 +65,22 @@ def render_web_scripts(
             if (!picker) {{
                 return;
             }}
+            const appPicker = document.getElementById('app-mode-picker');
+            if (appPicker) {{
+                appPicker.classList.add('hidden');
+            }}
+            picker.classList.toggle('hidden');
+        }}
+
+        function toggleAppModePicker() {{
+            const picker = document.getElementById('app-mode-picker');
+            if (!picker) {{
+                return;
+            }}
+            const modePicker = document.getElementById('mode-picker');
+            if (modePicker) {{
+                modePicker.classList.add('hidden');
+            }}
             picker.classList.toggle('hidden');
         }}
 
@@ -814,6 +830,25 @@ def render_web_scripts(
                                     currentMode.textContent = selectedLabel;
                                 }}
                             }}
+                            if (action === 'set-app-mode') {{
+                                const picker = document.getElementById('app-mode-picker');
+                                if (picker) {{
+                                    picker.classList.add('hidden');
+                                }}
+                                const selectedMode = String(formData.get('app_mode') || '');
+                                document.querySelectorAll('[data-app-mode-value]').forEach(function(choice) {{
+                                    choice.classList.toggle('active', choice.dataset.appModeValue === selectedMode);
+                                }});
+                                const label = document.getElementById('app-mode-label');
+                                if (label && payload.app_mode_label) {{
+                                    label.textContent = payload.app_mode_label;
+                                }}
+                                if (payload.reload_after_ms) {{
+                                    window.setTimeout(function() {{
+                                        window.location.reload();
+                                    }}, Number(payload.reload_after_ms) || 1500);
+                                }}
+                            }}
                             if (action === 'command') {{
                                 showCommandState(payload.command_state);
                                 if (!commandPollTimer) {{
@@ -844,14 +879,13 @@ def render_web_scripts(
             document.addEventListener('click', function(event) {{
                 const picker = document.getElementById('mode-picker');
                 const toggle = document.getElementById('mode-toggle-button');
-                if (!picker || !toggle) {{
-                    return;
-                }}
-                if (picker.classList.contains('hidden')) {{
-                    return;
-                }}
-                if (!picker.contains(event.target) && !toggle.contains(event.target)) {{
+                if (picker && toggle && !picker.classList.contains('hidden') && !picker.contains(event.target) && !toggle.contains(event.target)) {{
                     picker.classList.add('hidden');
+                }}
+                const appPicker = document.getElementById('app-mode-picker');
+                const appToggle = document.getElementById('app-mode-toggle-button');
+                if (appPicker && appToggle && !appPicker.classList.contains('hidden') && !appPicker.contains(event.target) && !appToggle.contains(event.target)) {{
+                    appPicker.classList.add('hidden');
                 }}
             }});
             document.addEventListener('visibilitychange', function() {{

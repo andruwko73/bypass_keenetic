@@ -175,24 +175,32 @@ def render_button_mode_picker(active_mode, *, none_label='Без прокси', 
 </div>'''
 
 
+def render_app_runtime_mode_picker(active_mode, modes, csrf_input_html=''):
+    mode_buttons_html = ''.join(
+        f'''<form method="post" action="/set_app_mode" data-async-action="set-app-mode">
+        {csrf_input_html}
+        <input type="hidden" name="app_mode" value="{html.escape(value)}">
+        <button type="submit" class="mode-choice{' active' if active_mode == value else ''}" data-app-mode-value="{html.escape(value)}">
+            <span>{html.escape(label)}</span>
+            <small>{html.escape(description)}</small>
+        </button>
+    </form>'''
+        for value, label, description in modes
+    )
+    return f'''<div id="app-mode-picker" class="hero-popover mode-picker app-mode-picker hidden">
+    <div class="mode-picker-form">
+        <span class="mode-picker-label">Вариант программы</span>
+        <div class="mode-choice-grid app-mode-choice-grid">{mode_buttons_html}</div>
+    </div>
+</div>'''
+
+
 DEFAULT_UPDATE_COMMANDS = (
     (
         'update',
         'Переустановить из форка без сброса',
         'Переустановить из форка?',
         'Код и служебные файлы будут обновлены без сброса сохраненных ключей и списков.',
-    ),
-    (
-        'update_independent',
-        'Переустановка (ветка independent)',
-        'Переустановить independent?',
-        'Будет установлена ветка codex/independent-v1 с сохранением локальных настроек.',
-    ),
-    (
-        'update_no_bot',
-        'Переустановка (без Telegram бота)',
-        'Перейти в web-only?',
-        'Будет установлена версия без Telegram-бота. Ключи, настройки и списки сохранятся локально.',
     ),
 )
 

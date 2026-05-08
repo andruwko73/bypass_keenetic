@@ -1,8 +1,8 @@
-*v1.509 (09 May 2026) -* codex/independent-v1
-- *Removed leftover tor/vpn artifacts during install and update*
+*v1.510 (09 May 2026) -* codex/main
+- *Объединены codex/main-v1, codex/independent-v1 и codex/web-only-v1 в одну ветку codex/main*
+- *Добавлен выбор режима программы: Простой, Сложный, Web only*
+- *Простой режим скрывает пул ключей и расширенные проверки, Сложный оставляет полный Telegram-бот и web-интерфейс*
+- *Web only запускает тот же web-интерфейс без Telegram polling*
 - *Версия codex считается по числу коммитов ветки с префиксом v1.*
-- *Web status snapshot вынесен в общий helper*
-- *Добавлена smoke-проверка согласованности codex-версии с числом коммитов*
-- *Telegram-бот, web-интерфейс и расширенный пул ключей*
 
-- [Releases](https://github.com/andruwko73/bypass_keenetic/releases) | [Changelog](https://github.com/andruwko73/bypass_keenetic/blob/codex/independent-v1/CHANGELOG.md) | [Issues](https://github.com/andruwko73/bypass_keenetic/issues)
+- [Releases](https://github.com/andruwko73/bypass_keenetic/releases) | [Changelog](https://github.com/andruwko73/bypass_keenetic/blob/codex/main/CHANGELOG.md) | [Issues](https://github.com/andruwko73/bypass_keenetic/issues)

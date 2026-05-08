@@ -16,11 +16,12 @@ def base_action_context(**values):
 
 
 def pool_action_context(**values):
-    values.update({
+    defaults = {
         'custom_checks_enabled': True,
         'pool_actions_enabled': True,
-    })
-    return values
+    }
+    defaults.update(values)
+    return defaults
 
 
 def form_value(data, name, default=''):
@@ -114,6 +115,15 @@ def _set_proxy(ctx, data):
 def _start(ctx, data):
     result = _ctx(ctx, 'start_bot')()
     return _result(result, success=True)
+
+
+def _set_app_mode(ctx, data):
+    mode = form_value(data, 'app_mode')
+    setter = _ctx(ctx, 'set_app_runtime_mode')
+    if not setter:
+        return _result('Переключение режима недоступно.', success=False)
+    success, message, extra = setter(mode)
+    return _result(message, success=success, extra=extra)
 
 
 def _command(ctx, data):
@@ -372,6 +382,7 @@ def dispatch(ctx, path, data):
         return None
     common_actions = {
         '/set_proxy': _set_proxy,
+        '/set_app_mode': _set_app_mode,
         '/start': _start,
         '/command': _command,
         '/save_unblock_list': _save_unblock_list,
