@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.507, последнее изменение: 08.05.2026
+#  Файл: bot.py, Версия v1.508, последнее изменение: 08.05.2026
 
 import subprocess
 import os
@@ -267,7 +267,9 @@ def _save_key_pools(pools):
 def _fetch_keys_from_subscription(url):
     """Загружает ключи из subscription-ссылки (base64-encoded список)."""
     try:
-        resp = requests.get(url, timeout=15)
+        session = requests.Session()
+        session.trust_env = False
+        resp = session.get(url, timeout=15)
         resp.raise_for_status()
         raw = resp.text.strip()
         return key_pool_store.classify_subscription_keys(raw), None
@@ -403,7 +405,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.507'
+APP_VERSION_COUNTER = '1.508'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3579,7 +3581,11 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
     key_pools = _ensure_current_keys_in_pools(current_keys)
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
-    custom_checks_html = key_pool_web.web_custom_checks_html(custom_checks, _service_icon_html)
+    custom_checks_html = key_pool_web.web_custom_checks_html(
+        custom_checks,
+        _service_icon_html,
+        csrf_input_html=csrf_input_html,
+    )
     custom_presets_html = key_pool_web.web_custom_presets_html(
         custom_checks,
         _custom_check_presets(),

@@ -208,7 +208,7 @@ def web_custom_check_badges(probe, custom_checks, service_icon_html):
     return ''.join(badges)
 
 
-def web_custom_checks_html(custom_checks, service_icon_html):
+def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html=''):
     if not custom_checks:
         return '<div class="custom-check-empty">\u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u044b.</div>'
     items = []
@@ -220,6 +220,7 @@ def web_custom_checks_html(custom_checks, service_icon_html):
             {custom_check_icon_html(check, service_icon_html)}
             <span class="custom-check-copy"><strong>{safe_label}</strong><small>{safe_url}</small></span>
             <form method="post" action="/custom_check_delete" data-async-action="custom-check-delete" data-confirm-title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443?" data-confirm-message="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u0443\u044e \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 {safe_label}?">
+                {csrf_input_html}
                 <input type="hidden" name="id" value="{safe_id}">
                 <button type="submit" class="pool-delete-btn" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443">\u0423\u0434\u0430\u043b\u0438\u0442\u044c</button>
             </form>
