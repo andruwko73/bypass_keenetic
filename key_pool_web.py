@@ -227,7 +227,7 @@ def web_custom_checks_html(custom_checks, service_icon_html):
     return ''.join(items)
 
 
-def web_custom_presets_html(custom_checks, presets, service_icon_html):
+def web_custom_presets_html(custom_checks, presets, service_icon_html, csrf_input_html=''):
     active_ids = {check.get('id') for check in custom_checks or []}
     items = []
     for preset in presets or []:
@@ -237,6 +237,7 @@ def web_custom_presets_html(custom_checks, presets, service_icon_html):
         disabled = ' disabled' if preset['id'] in active_ids else ''
         title = '\u0423\u0436\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u043e' if disabled else f'\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 {safe_label}'
         items.append(f'''<form method="post" action="/custom_check_add" data-async-action="custom-check-add">
+            {csrf_input_html}
             <input type="hidden" name="preset" value="{safe_id}">
             <input type="hidden" name="label" value="{safe_label}">
             <input type="hidden" name="url" value="{safe_url}">

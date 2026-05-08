@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.506, последнее изменение: 08.05.2026
+#  Файл: bot.py, Версия v1.507, последнее изменение: 08.05.2026
 
 import subprocess
 import os
@@ -403,7 +403,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/independent-v1'
 APP_BRANCH_DESCRIPTION = 'Telegram бот'
-APP_VERSION_COUNTER = '1.506'
+APP_VERSION_COUNTER = '1.507'
 APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3580,7 +3580,12 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     custom_checks_html = key_pool_web.web_custom_checks_html(custom_checks, _service_icon_html)
-    custom_presets_html = key_pool_web.web_custom_presets_html(custom_checks, _custom_check_presets(), _service_icon_html)
+    custom_presets_html = key_pool_web.web_custom_presets_html(
+        custom_checks,
+        _custom_check_presets(),
+        _service_icon_html,
+        csrf_input_html=csrf_input_html,
+    )
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
