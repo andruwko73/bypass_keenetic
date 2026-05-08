@@ -451,11 +451,11 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="pool_probe_runner.py key_pool_store.py key_pool_web.py telegram_pool_ui.py probe_cache.py custom_checks_store.py service_catalog.py web_form_template.py web_template_styles.py web_template_scripts.py web_form_blocks.py web_pool_form_blocks.py web_http_common.py web_get_actions.py web_post_actions.py web_command_state.py unblock_lists.py proxy_key_store.py proxy_protocols.py proxy_config_builder.py proxy_status.py installer_common.py"
+BOT_RUNTIME_MODULES="auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py service_catalog.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py web_command_state.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py"
 
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
-    opkg remove bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
+    opkg remove tor tor-geoip obfs4 bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
     echo "Пакеты удалены, удаляем папки, файлы и настройки"
     ipset flush testset
     ipset flush unblocksh
@@ -657,6 +657,7 @@ if [ "$1" = "-update" ]; then
     opkg update > /dev/null 2>&1
     core_proxy_pkg=$(detect_core_proxy_package)
     opkg install "$core_proxy_pkg" > /dev/null 2>&1 || true
+    opkg remove tor tor-geoip obfs4 > /dev/null 2>&1 || true
     # opkg update
     echo "Ваша версия KeenOS" "${keen_os_full}."
     echo "Пакеты обновлены."
@@ -674,6 +675,9 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
+    for module in $BOT_RUNTIME_MODULES; do
+      stage_runtime_module "$module" "" || exit 1
+    done
     stage_runtime_module pool_probe_runner.py run_pool_probe_worker || exit 1
     stage_runtime_module key_pool_store.py "def normalize_key_pools" || exit 1
     stage_runtime_module key_pool_web.py pool_status_summary || exit 1
