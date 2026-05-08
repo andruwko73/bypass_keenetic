@@ -38,6 +38,15 @@ cleanup_update_artifacts() {
   done
 }
 
+cleanup_removed_connection_artifacts() {
+  [ -x /opt/etc/init.d/S35tor ] && /opt/etc/init.d/S35tor stop >/dev/null 2>&1 || true
+  rm -f /opt/etc/init.d/S35tor 2>/dev/null || true
+  rm -rf /opt/etc/tor /opt/tmp/tor /opt/etc/openvpn /opt/etc/wireguard 2>/dev/null || true
+  rm -f /opt/etc/unblock/tor.txt /opt/etc/unblock/tor-*.txt /opt/etc/unblock/vpn.txt /opt/etc/unblock/vpn-*.txt 2>/dev/null || true
+  rm -rf /opt/etc/ndm/netfilter.d/100-unblock-vpn /opt/etc/ndm/netfilter.d/100-unblock-vpn.sh 2>/dev/null || true
+  rm -rf /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh 2>/dev/null || true
+}
+
 cleanup_pool_probe_runtime() {
   for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
     kill "$pid" >/dev/null 2>&1 || true
@@ -456,6 +465,7 @@ BOT_RUNTIME_MODULES="auto_failover_runtime.py custom_checks_store.py entware_dns
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     opkg remove tor tor-geoip obfs4 bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
+    cleanup_removed_connection_artifacts
     echo "Пакеты удалены, удаляем папки, файлы и настройки"
     ipset flush testset
     ipset flush unblocksh
@@ -660,6 +670,7 @@ if [ "$1" = "-update" ]; then
     for legacy_pkg in obfs4 tor-geoip tor; do
       opkg remove "$legacy_pkg" > /dev/null 2>&1 || true
     done
+    cleanup_removed_connection_artifacts
     # opkg update
     echo "Ваша версия KeenOS" "${keen_os_full}."
     echo "Пакеты обновлены."
@@ -741,8 +752,7 @@ if [ "$1" = "-update" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
     backup_runtime_modules $BOT_RUNTIME_MODULES
-    rm -f /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh > /dev/null 2>&1
-    rm -f /opt/etc/init.d/S35tor > /dev/null 2>&1
+    cleanup_removed_connection_artifacts
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
 
