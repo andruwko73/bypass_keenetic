@@ -983,6 +983,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             isolation:isolate;
             contain:paint;
         }
+        [data-theme="glass"] .topbar-actions[data-liquid]{
+            overflow:visible;
+            isolation:auto;
+            contain:none;
+        }
         [data-theme="glass"] [data-liquid]::before{
             content:"";
             position:absolute;
@@ -1029,8 +1034,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             --lr:0rad;
             --lsx:.94;
             --lsy:.94;
-            width:88px;
-            height:88px;
+            width:132px;
+            height:132px;
             pointer-events:none;
             border-radius:999px;
             z-index:70;
@@ -1112,7 +1117,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
-            [data-theme="glass"] .liquid-global-lens{width:76px;height:76px;}
+            [data-theme="glass"] .liquid-global-lens{width:114px;height:114px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

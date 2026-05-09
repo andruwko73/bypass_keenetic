@@ -1056,7 +1056,8 @@ def test_web_template_styles_helpers():
     assert '--lsx' in styles
     assert 'backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12)' in styles
     assert 'background:rgba(255,255,255,.006)' in styles
-    assert '[data-theme="glass"] .liquid-global-lens{width:76px;height:76px;}' in styles
+    assert '[data-theme="glass"] .topbar-actions[data-liquid]' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:114px;height:114px;}' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
@@ -1081,6 +1082,9 @@ def test_web_template_scripts_helpers():
     assert 'function toggleThemePicker()' in scripts
     assert 'function setupLiquidPointer()' in scripts
     assert 'liquid-global-lens' in scripts
+    assert '.topbar-actions' in scripts
+    assert 'data-liquid-group' in scripts
+    assert ".hero-popover [data-liquid=\"true\"]" in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
     assert 'lastLensPoint' in scripts
     assert "globalLens.style.setProperty('--lr'" in scripts

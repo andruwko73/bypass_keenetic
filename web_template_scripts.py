@@ -116,6 +116,7 @@ def render_web_scripts(
                 '.nav-item',
                 '.seg-tab',
                 '.subtab',
+                '.topbar-actions',
                 '.api-pill',
                 '.version-badge',
                 '.mode-choice',
@@ -244,7 +245,14 @@ def render_web_scripts(
 
             function findLiquidElement(clientX, clientY) {{
                 const target = document.elementFromPoint(clientX, clientY);
-                return target ? target.closest('[data-liquid="true"]') : null;
+                if (!target) {{
+                    return null;
+                }}
+                const popoverElement = target.closest('.hero-popover [data-liquid="true"]');
+                if (popoverElement) {{
+                    return popoverElement;
+                }}
+                return target.closest('[data-liquid-group="true"]') || target.closest('[data-liquid="true"]');
             }}
 
             function activateFromPoint(clientX, clientY, holdMs) {{
@@ -294,6 +302,9 @@ def render_web_scripts(
                 }}
                 element.dataset.liquid = 'true';
                 element.dataset.liquidReady = '1';
+                if (element.classList.contains('topbar-actions')) {{
+                    element.dataset.liquidGroup = 'true';
+                }}
                 element.addEventListener('focus', function() {{
                     const rect = element.getBoundingClientRect();
                     activateLiquid(element, rect.left + rect.width / 2, rect.top + rect.height / 2, 420);
