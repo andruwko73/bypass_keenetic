@@ -123,10 +123,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 .section-title{margin:0 0 6px;font-size:24px;color:var(--text);}
                 .section-subtitle{margin:0;color:var(--muted);overflow-wrap:anywhere;word-break:break-word;}
                 .start-card{display:flex;flex-direction:column;justify-content:space-between;}
-                .app-mode-control{position:relative;margin-top:12px;}
+                .app-mode-control{position:relative;margin:0;min-width:0;}
                 .app-mode-command{width:100%;justify-content:space-between;gap:12px;}
                 .app-mode-control .app-mode-picker{top:calc(100% + 8px);left:0;right:auto;width:min(360px,100%);min-width:min(360px,100%);}
                 .command-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}
+                .command-grid.service-command-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;margin-top:10px;}
                 .command-grid form{min-width:0;}
                 .command-grid button{width:100%;height:var(--control-height);min-height:var(--control-height);display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:0 12px;}
                 .card-topline{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px;}
@@ -619,6 +620,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 430px){
             .command-grid{grid-template-columns:1fr;}
+            .command-grid.service-command-grid{grid-template-columns:1fr;}
             .status-card-top{align-items:flex-start;}
             .api-pill{font-size:12px;}
             .mode-choice{font-size:11px;padding:0 4px;}

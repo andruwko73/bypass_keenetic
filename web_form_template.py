@@ -14,6 +14,7 @@ def render_web_form(
     csrf_token,
     command_block,
     command_buttons_html,
+    app_runtime_mode_description,
     app_runtime_mode_label,
     app_runtime_mode_picker_block,
     current_mode_label,
@@ -48,6 +49,13 @@ def render_web_form(
     quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
     pool_probe_async_attr = ' data-async-action="pool-probe"' if enable_async_forms else ''
     csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
+    start_button_block = ''
+    if start_button_label:
+        start_button_block = f'''
+                            <form method="post" action="/start"{start_form_async_attr}>
+                                {csrf_input_html}
+                                <button type="submit">{html.escape(start_button_label)}</button>
+                            </form>'''
     quick_key_note = (
         'Быстрое редактирование активного ключа. Полное управление пулом находится во вкладке "Ключи".'
         if enable_key_pool else
@@ -110,8 +118,8 @@ def render_web_form(
         <header class="topbar">
             <div class="topbar-actions">
                 <div class="app-caption">
-                    <strong>Панель обхода на роутере</strong>
-                    <span class="app-branch">Ветка: {html.escape(APP_BRANCH_LABEL)} · {html.escape(APP_BRANCH_DESCRIPTION)}</span>
+                    <strong>Локальная панель управления обходом на роутере</strong>
+                    <span class="app-branch">Режим работы: {html.escape(app_runtime_mode_description)}</span>
                 </div>
                 <span class="api-pill" id="web-api-pill">{html.escape(topbar_status_text)}</span>
                 <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
@@ -181,23 +189,22 @@ def render_web_form(
                                     <p class="status-note">{html.escape(quick_start_note)}</p>
                                 </div>
                             </div>
-                            <form method="post" action="/start"{start_form_async_attr}>
-                                {csrf_input_html}
-                                <button type="submit">{start_button_label}</button>
-                            </form>
+                            {start_button_block}
                         </div>
                     </div>
                     <div class="overview-service-grid">
                         <section class="panel service-panel service-panel-wide">
                             <h3>Сервисные команды</h3>
-                            <div class="app-mode-control">
-                                <button type="button" id="app-mode-toggle-button" class="mode-toggle app-mode-command" onclick="toggleAppModePicker()">
-                                    <span>Режим работы программы:</span>
-                                    <span id="app-mode-label">{html.escape(app_runtime_mode_label)}</span>
-                                </button>
-                                {app_runtime_mode_picker_block}
+                            <div class="command-grid service-command-grid">
+                                <div class="app-mode-control">
+                                    <button type="button" id="app-mode-toggle-button" class="mode-toggle app-mode-command" onclick="toggleAppModePicker()">
+                                        <span>Режим работы программы:</span>
+                                        <span id="app-mode-label">{html.escape(app_runtime_mode_label)}</span>
+                                    </button>
+                                    {app_runtime_mode_picker_block}
+                                </div>
+                                {command_buttons_html}
                             </div>
-                            <div class="command-grid">{command_buttons_html}</div>
                         </section>
                     </div>
                     <section class="panel overview-key-panel">

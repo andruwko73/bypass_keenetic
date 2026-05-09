@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.514, последнее изменение: 09.05.2026
+#  Файл: bot.py, Версия v1.515, последнее изменение: 09.05.2026
 
 import subprocess
 import os
@@ -406,7 +406,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/main'
 APP_BRANCH_DESCRIPTION = 'единая codex-ветка'
-APP_VERSION_COUNTER = '1.514'
+APP_VERSION_COUNTER = '1.515'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -554,6 +554,11 @@ def _save_app_runtime_mode(mode):
 def _app_runtime_mode_label(mode=None):
     mode = _normalize_app_runtime_mode(mode or _load_app_runtime_mode())
     return APP_RUNTIME_MODE_DATA[mode]['label']
+
+
+def _app_runtime_mode_description(mode=None):
+    mode = _normalize_app_runtime_mode(mode or _load_app_runtime_mode())
+    return APP_RUNTIME_MODE_DATA[mode]['description']
 
 
 def _app_mode_pool_enabled(mode=None):
@@ -3817,8 +3822,9 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         initial_command_running = form_basics['initial_command_running']
 
         telegram_enabled = _app_mode_telegram_enabled(app_runtime_mode)
-        start_button_label = ('Telegram отключён' if not telegram_enabled else
-                              (APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL))
+        start_button_label = '' if not telegram_enabled else (
+            APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL
+        )
         mode_toggle_label = f'{APP_MODE_LABEL}:'
         quick_start_note = (
             'В режиме Web only Telegram-бот отключен; управление доступно через веб-интерфейс.'
@@ -3834,6 +3840,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             _telegram_icon_html=_telegram_icon_html,
+            app_runtime_mode_description=_app_runtime_mode_description(app_runtime_mode),
             app_runtime_mode_label=_app_runtime_mode_label(app_runtime_mode),
             app_runtime_mode_picker_block=app_runtime_mode_picker_block,
             csrf_token=csrf_token,

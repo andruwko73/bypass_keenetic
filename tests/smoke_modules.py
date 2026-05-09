@@ -1056,6 +1056,7 @@ def test_web_form_template_smoke():
         csrf_token='token',
         command_block='',
         command_buttons_html='',
+        app_runtime_mode_description='интерфейс с пулом ключей и Telegram-бот',
         app_runtime_mode_label='Сложный',
         app_runtime_mode_picker_block='',
         current_mode_label='Без прокси',
@@ -1088,6 +1089,8 @@ def test_web_form_template_smoke():
     assert '.app-shell' in page
     assert 'tg-icon' in page
     assert 'app-mode-toggle-button' in page
+    assert 'Локальная панель управления обходом на роутере' in page
+    assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
     assert 'Переустановка компонентов' not in page
     assert '{TELEGRAM_SVG_B64}' not in page
     assert '<script>' in page
