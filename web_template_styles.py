@@ -1029,8 +1029,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             --lr:0rad;
             --lsx:.94;
             --lsy:.94;
-            width:62px;
-            height:62px;
+            width:88px;
+            height:88px;
             pointer-events:none;
             border-radius:999px;
             z-index:70;
@@ -1038,15 +1038,15 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             opacity:0;
             overflow:hidden;
             transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0) rotate(var(--lr)) scale(var(--lsx),var(--lsy));
-            background:rgba(255,255,255,.018);
-            border:1px solid rgba(236,255,253,.34);
+            background:rgba(255,255,255,.006);
+            border:1px solid rgba(236,255,253,.42);
             box-shadow:
-                inset 0 1px 2px rgba(255,255,255,.42),
-                inset 0 -9px 16px rgba(6,18,26,.18),
-                0 2px 10px rgba(0,0,0,.14),
-                0 0 16px rgba(138,247,238,.12);
-            backdrop-filter:blur(1.4px) saturate(165%) contrast(1.05) brightness(1.08);
-            -webkit-backdrop-filter:blur(1.4px) saturate(165%) contrast(1.05) brightness(1.08);
+                inset 0 1px 2px rgba(255,255,255,.5),
+                inset 0 -12px 20px rgba(6,18,26,.12),
+                0 3px 13px rgba(0,0,0,.1),
+                0 0 22px rgba(138,247,238,.1);
+            backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12);
+            -webkit-backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12);
             transition:none;
             will-change:transform,opacity;
         }
@@ -1060,15 +1060,15 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         .liquid-global-lens::before{
             background:
-                radial-gradient(circle at 30% 22%, rgba(255,255,255,.38) 0 3px, rgba(255,255,255,.12) 21%, transparent 56%),
-                radial-gradient(circle at 62% 68%, rgba(138,247,238,.12), transparent 58%),
-                linear-gradient(145deg, rgba(255,255,255,.12), transparent 42%, rgba(255,255,255,.06));
+                radial-gradient(circle at 30% 22%, rgba(255,255,255,.42) 0 3px, rgba(255,255,255,.11) 18%, transparent 48%),
+                radial-gradient(circle at 64% 70%, rgba(138,247,238,.075), transparent 60%),
+                conic-gradient(from 210deg, rgba(255,255,255,.28) 0 8%, transparent 15% 62%, rgba(255,255,255,.18) 69%, transparent 79% 100%);
         }
         .liquid-global-lens::after{
-            inset:5px;
-            border:1px solid rgba(255,255,255,.18);
-            box-shadow:inset 6px 5px 10px rgba(255,255,255,.1), inset -8px -10px 18px rgba(6,18,26,.14);
-            opacity:.86;
+            inset:7px;
+            border:1px solid rgba(255,255,255,.24);
+            box-shadow:inset 8px 7px 14px rgba(255,255,255,.11), inset -10px -12px 20px rgba(6,18,26,.1);
+            opacity:.72;
         }
         [data-theme="glass"] .liquid-global-lens{display:block;}
         [data-theme="glass"] .liquid-global-lens-active{
@@ -1112,7 +1112,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
-            [data-theme="glass"] .liquid-global-lens{width:56px;height:56px;}
+            [data-theme="glass"] .liquid-global-lens{width:76px;height:76px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

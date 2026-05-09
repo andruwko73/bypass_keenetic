@@ -1054,8 +1054,9 @@ def test_web_template_styles_helpers():
     assert '.liquid-global-lens-active' in styles
     assert '.liquid-global-lens::before' in styles
     assert '--lsx' in styles
-    assert 'backdrop-filter:blur(1.4px) saturate(165%) contrast(1.05) brightness(1.08)' in styles
-    assert '[data-theme="glass"] .liquid-global-lens{width:56px;height:56px;}' in styles
+    assert 'backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12)' in styles
+    assert 'background:rgba(255,255,255,.006)' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:76px;height:76px;}' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
