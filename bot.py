@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.531, последнее изменение: 09.05.2026
+#  Файл: bot.py, Версия v1.532, последнее изменение: 09.05.2026
 
 import subprocess
 import os
@@ -406,7 +406,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.531'
+APP_VERSION_COUNTER = '1.532'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -730,6 +730,22 @@ def _has_socks_support():
         return True
     except Exception:
         return False
+
+
+def _reset_telegram_http_session(reason=''):
+    try:
+        telebot.apihelper._get_req_session(reset=True)
+    except TypeError:
+        try:
+            session = telebot.apihelper._get_req_session()
+            close = getattr(session, 'close', None)
+            if close:
+                close()
+        except Exception:
+            pass
+    except Exception as exc:
+        if reason:
+            _write_runtime_log(f'Не удалось сбросить Telegram HTTP-сессию ({reason}): {exc}')
 
 
 def _daemonize_process():
@@ -3178,6 +3194,7 @@ def update_proxy(proxy_type, persist=True):
         for key in ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy']:
             if key in os.environ:
                 del os.environ[key]
+    _reset_telegram_http_session(f'proxy={proxy_type}')
 
     if persist:
         _save_proxy_mode(proxy_type)
@@ -4104,6 +4121,7 @@ def _run_telegram_polling_loop():
         except Exception as err:
             bot_polling = False
             _write_runtime_log(err)
+            _reset_telegram_http_session('polling error')
             if shutdown_requested.is_set():
                 break
             if _is_polling_conflict(err):
