@@ -151,6 +151,24 @@ def render_web_scripts(
                 }}, typeof delay === 'number' ? delay : 180);
             }}
 
+            function clampLiquidLensPoint(clientX, clientY) {{
+                const rect = globalLens.getBoundingClientRect();
+                const viewport = window.visualViewport || null;
+                const viewportWidth = viewport ? viewport.width : window.innerWidth;
+                const viewportHeight = viewport ? viewport.height : window.innerHeight;
+                const radiusX = Math.max((rect.width || 132) / 2, 40);
+                const radiusY = Math.max((rect.height || 132) / 2, 40);
+                const margin = 8;
+                const minX = radiusX + margin;
+                const minY = radiusY + margin;
+                const maxX = Math.max(minX, viewportWidth - radiusX - margin);
+                const maxY = Math.max(minY, viewportHeight - radiusY - margin);
+                return {{
+                    x: Math.min(Math.max(clientX, minX), maxX),
+                    y: Math.min(Math.max(clientY, minY), maxY)
+                }};
+            }}
+
             function moveGlobalLens(clientX, clientY, holdMs) {{
                 if (!glassThemeActive()) {{
                     hideGlobalLens(0);
@@ -160,8 +178,9 @@ def render_web_scripts(
                     clearTimeout(lensTimer);
                     lensTimer = null;
                 }}
-                globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px');
-                globalLens.style.setProperty('--ly', clientY.toFixed(1) + 'px');
+                const lensPoint = clampLiquidLensPoint(clientX, clientY);
+                globalLens.style.setProperty('--lx', lensPoint.x.toFixed(1) + 'px');
+                globalLens.style.setProperty('--ly', lensPoint.y.toFixed(1) + 'px');
                 globalLens.classList.add('liquid-global-lens-active');
                 lensTimer = window.setTimeout(function() {{
                     hideGlobalLens(160);

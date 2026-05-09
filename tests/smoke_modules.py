@@ -1088,6 +1088,9 @@ def test_web_template_scripts_helpers():
     assert 'data-liquid-group' in scripts
     assert ".hero-popover [data-liquid=\"true\"]" in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
+    assert 'function clampLiquidLensPoint(clientX, clientY)' in scripts
+    assert 'window.visualViewport' in scripts
+    assert "globalLens.style.setProperty('--lx', lensPoint.x.toFixed(1) + 'px')" in scripts
     assert 'function findLiquidAction(clientX, clientY)' in scripts
     assert 'function applyLiquidAction(clientX, clientY)' in scripts
     assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
@@ -1100,7 +1103,6 @@ def test_web_template_scripts_helpers():
     assert "globalLens.style.setProperty('--lsx'" not in scripts
     assert 'lensTarget' not in scripts
     assert 'function renderLiquidLens()' not in scripts
-    assert "globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px')" in scripts
     assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
     assert 'function cancelQueuedLiquidMove()' in scripts
     assert 'window.requestAnimationFrame' in scripts
