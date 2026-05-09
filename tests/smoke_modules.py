@@ -38,6 +38,7 @@ import proxy_apply_runtime
 import proxy_status
 import unblock_lists
 import installer_common
+import installer
 import repo_update
 import entware_dns_runtime
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
@@ -765,6 +766,20 @@ def test_installer_common_helpers():
     assert 'window.location.replace' in redirect_script
 
 
+def test_installer_page_is_bot_setup_only():
+    original_detect_router_ip = installer.detect_router_ip
+    try:
+        installer.detect_router_ip = lambda: '192.168.1.1'
+        page = installer.page_html()
+    finally:
+        installer.detect_router_ip = original_detect_router_ip
+    assert 'BotFather token' in page
+    assert 'Telegram username' in page
+    assert 'Пул ключей' not in page
+    assert 'proto-select' not in page
+    assert '/api/keys' not in page
+
+
 def test_repo_update_helpers():
     class _Response:
         def __init__(self, url, text='', payload=None, fail=False):
@@ -1178,6 +1193,7 @@ def main():
     test_web_command_state_helpers()
     test_web_http_common_helpers()
     test_installer_common_helpers()
+    test_installer_page_is_bot_setup_only()
     test_repo_update_helpers()
     test_key_pool_web()
     test_key_pool_subscription_helpers()

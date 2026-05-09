@@ -1,9 +1,7 @@
 #!/usr/bin/python3
 import html
-import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
 
 from installer_common import (
     detect_router_ip,
@@ -19,11 +17,9 @@ from installer_common import (
     web_auth_summary,
     write_installer_config,
 )
-import key_pool_store
 
 
 BOT_DIR = '/opt/etc/bot'
-KEY_POOLS_PATH = os.path.join(BOT_DIR, 'key_pools.json')
 BOT_CONFIG_PATH = os.path.join(BOT_DIR, 'bot_config.py')
 LEGACY_CONFIG_PATH = '/opt/etc/bot_config.py'
 BOT_MAIN_PATH = os.path.join(BOT_DIR, 'main.py')
@@ -34,25 +30,6 @@ APP_RUNTIME_MODE_FILE = '/opt/etc/bot_app_mode'
 DEFAULT_BROWSER_PORT = int(os.environ.get('BYPASS_INSTALLER_PORT', '8080'))
 DEFAULT_FORK_REPO_OWNER = 'andruwko73'
 DEFAULT_FORK_REPO_NAME = 'bypass_keenetic'
-
-
-def get_keys_for_proto(proto):
-    pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
-    return pools.get(proto, [])
-
-
-def add_key_to_pool(proto, key):
-    pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
-    pools, added = key_pool_store.add_keys_to_pool(pools, proto, key)
-    key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
-    return bool(added)
-
-
-def remove_key_from_pool(proto, key):
-    pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
-    pools, removed = key_pool_store.delete_pool_key(pools, proto, key)
-    key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
-    return bool(removed)
 
 
 def build_config(form):
@@ -66,7 +43,7 @@ def build_config(form):
     web_auth_token = form.get('web_auth_token', '').strip()
     app_runtime_mode = form.get('app_runtime_mode', 'advanced').strip() or 'advanced'
 
-    return f"""# ВЕРСИЯ СКРИПТА v1.524
+    return f"""# ВЕРСИЯ СКРИПТА v1.525
 
 token = '{escape_python(form.get('token', ''))}'
 usernames = ['{escape_python(form.get('username', ''))}']
@@ -139,98 +116,6 @@ def install_web_only():
 def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
     router_ip = detect_router_ip()
     notice, redirect_head, redirect_script = installer_page_parts(message, redirect_url, redirect_delay_seconds)
-    key_pool_script = """
-    <script>
-        const protoSelect = document.getElementById('proto-select');
-        const keyListDiv = document.getElementById('key-list');
-        const newKeyInput = document.getElementById('new-key-input');
-
-        async function fetchKeys() {
-            const proto = protoSelect.value;
-            keyListDiv.innerHTML = 'Загрузка...';
-            try {
-                const resp = await fetch('/api/keys?proto=' + encodeURIComponent(proto));
-                const data = await resp.json();
-                if (data.keys && Array.isArray(data.keys)) {
-                    if (data.keys.length === 0) {
-                        keyListDiv.innerHTML = '<em>Нет ключей для выбранного протокола.</em>';
-                    } else {
-                        const list = document.createElement('ul');
-                        list.style.paddingLeft = '18px';
-                        data.keys.forEach(function(key) {
-                            const item = document.createElement('li');
-                            item.style.marginBottom = '6px';
-                            const text = document.createElement('span');
-                            text.style.wordBreak = 'break-all';
-                            text.textContent = key;
-                            const button = document.createElement('button');
-                            button.type = 'button';
-                            button.textContent = 'Удалить';
-                            button.style.marginLeft = '8px';
-                            button.style.color = '#e66';
-                            button.style.background = 'none';
-                            button.style.border = 'none';
-                            button.style.cursor = 'pointer';
-                            button.onclick = function() { removeKey(proto, key); };
-                            item.appendChild(text);
-                            item.appendChild(button);
-                            list.appendChild(item);
-                        });
-                        keyListDiv.replaceChildren(list);
-                    }
-                } else {
-                    keyListDiv.innerHTML = '<span style="color:#e66">Ошибка загрузки ключей</span>';
-                }
-            } catch (e) {
-                keyListDiv.innerHTML = '<span style="color:#e66">Ошибка запроса</span>';
-            }
-        }
-
-        async function addKey() {
-            const proto = protoSelect.value;
-            const key = newKeyInput.value.trim();
-            if (!key) return alert('Введите ключ!');
-            try {
-                const resp = await fetch('/api/keys/add', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proto: proto, key: key })
-                });
-                const data = await resp.json();
-                if (data.result) {
-                    newKeyInput.value = '';
-                    fetchKeys();
-                } else {
-                    alert('Ключ уже есть или ошибка добавления');
-                }
-            } catch (e) {
-                alert('Ошибка запроса');
-            }
-        }
-
-        async function removeKey(proto, key) {
-            if (!confirm('Удалить этот ключ?')) return;
-            try {
-                const resp = await fetch('/api/keys/remove', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proto: proto, key: key })
-                });
-                const data = await resp.json();
-                if (data.result) {
-                    fetchKeys();
-                } else {
-                    alert('Ошибка удаления');
-                }
-            } catch (e) {
-                alert('Ошибка запроса');
-            }
-        }
-
-        protoSelect.addEventListener('change', fetchKeys);
-        window.addEventListener('DOMContentLoaded', fetchKeys);
-    </script>
-"""
     return f"""<!doctype html>
 <html lang=\"ru\">
 <head>
@@ -254,12 +139,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
         .secondary-button {{ background:#2f4050; color:var(--text); border:1px solid var(--line); }}
         .notice {{ margin:0 0 18px; padding:12px 14px; border-radius:12px; background:rgba(255,209,102,.12); color:var(--warn); border:1px solid rgba(255,209,102,.25); }}
         .hint {{ margin-top:18px; font-size:14px; color:var(--muted); }}
-        .pool-row {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; margin-bottom:12px; }}
-        .pool-row input {{ min-width:0; }}
-        .pool-row button {{ margin-top:0; width:auto; white-space:nowrap; }}
-        #key-list ul {{ margin:0; padding-left:18px; }}
-        #key-list li {{ margin-bottom:6px; overflow-wrap:anywhere; }}
-        @media (max-width: 680px) {{ .wrap {{ padding:18px 12px 36px; }} .card {{ padding:18px; border-radius:14px; }} .grid,.pool-row {{ grid-template-columns:1fr; }} h1 {{ font-size:24px; }} button,.pool-row button {{ width:100%; }} }}
+        @media (max-width: 680px) {{ .wrap {{ padding:18px 12px 36px; }} .card {{ padding:18px; border-radius:14px; }} .grid {{ grid-template-columns:1fr; }} h1 {{ font-size:24px; }} button {{ width:100%; }} }}
     </style>
 </head>
 <body>
@@ -312,29 +192,9 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
             <form method="post" action="/install-web-only">
                 <button class="secondary-button" type="submit">Запустить режим Web only</button>
             </form>
-            <hr style="margin:32px 0 18px; border:0; border-top:1px solid var(--line);">
-            <h2 style="margin:0 0 12px; font-size:22px;">Пул ключей</h2>
-            <div id="key-pool-ui">
-                <div style="margin-bottom:12px;">
-                    <label for="proto-select">Протокол:</label>
-                    <select id="proto-select">
-                        <option value="shadowsocks">shadowsocks</option>
-                        <option value="vmess">vmess</option>
-                        <option value="vless">vless</option>
-                        <option value="vless2">vless2</option>
-                        <option value="trojan">trojan</option>
-                    </select>
-                </div>
-                <div class="pool-row">
-                    <input id="new-key-input" type="text" placeholder="Новый ключ...">
-                    <button onclick="addKey()" type="button">Добавить</button>
-                </div>
-                <div id="key-list"></div>
-            </div>
             <div class="hint">После сохранения эта страница будет заменена основным интерфейсом бота на том же адресе.</div>
         </div>
     </div>
-{key_pool_script}
 </body>
 </html>
 """
@@ -354,15 +214,6 @@ class InstallerHandler(BaseHTTPRequestHandler):
         except Exception:
             self.send_response(404)
             self.end_headers()
-
-    def _send_json(self, payload, status=200):
-        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Connection', 'close')
-        self.end_headers()
-        self.wfile.write(body)
 
     def _request_is_allowed(self):
         client_ip = self.client_address[0] if self.client_address else ''
@@ -392,14 +243,6 @@ class InstallerHandler(BaseHTTPRequestHandler):
         if self.path.startswith('/static/youtube.png'):
             self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'youtube.png'))
             return
-        if self.path.startswith('/api/keys'):
-            query = parse_qs(urlparse(self.path).query)
-            proto = query.get('proto', [''])[0]
-            if not proto:
-                self._send_json({'error': 'no proto'}, status=400)
-                return
-            self._send_json({'proto': proto, 'keys': get_keys_for_proto(proto)})
-            return
         self._send_html(page_html())
 
     def do_POST(self):
@@ -415,24 +258,6 @@ class InstallerHandler(BaseHTTPRequestHandler):
                     redirect_delay_seconds=8,
                 )
             )
-            return
-        if self.path.startswith('/api/keys/add') or self.path.startswith('/api/keys/remove'):
-            content_length = int(self.headers.get('Content-Length', '0'))
-            raw_body = self.rfile.read(content_length).decode('utf-8', errors='ignore')
-            try:
-                data = json.loads(raw_body)
-            except Exception:
-                self._send_json({'error': 'bad json'}, status=400)
-                return
-            proto = data.get('proto')
-            key = data.get('key')
-            if not proto or not key:
-                self._send_json({'error': 'missing proto or key'}, status=400)
-                return
-            if self.path.startswith('/api/keys/add'):
-                self._send_json({'result': add_key_to_pool(proto, key)})
-                return
-            self._send_json({'result': remove_key_from_pool(proto, key)})
             return
         if self.path != '/save':
             self._send_html(page_html('Неизвестное действие.'), status=404)
