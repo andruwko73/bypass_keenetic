@@ -128,6 +128,10 @@ def render_web_scripts(
             let lensTimer = null;
             let liquidMoveFrame = 0;
             let pendingLiquidMove = null;
+            let liquidTouchState = null;
+            let liquidPointerState = null;
+            let liquidSyntheticTarget = null;
+            let liquidSyntheticUntil = 0;
             const globalLens = document.createElement('div');
             globalLens.className = 'liquid-global-lens';
             globalLens.setAttribute('aria-hidden', 'true');
@@ -230,6 +234,45 @@ def render_web_scripts(
                 return target.closest('[data-liquid-group="true"]') || target.closest('[data-liquid="true"]');
             }}
 
+            function findLiquidAction(clientX, clientY) {{
+                const target = document.elementFromPoint(clientX, clientY);
+                if (!target) {{
+                    return null;
+                }}
+                const action = target.closest('button[type="button"], a[href], [role="button"]');
+                if (!action || action.disabled || action.getAttribute('aria-disabled') === 'true') {{
+                    return null;
+                }}
+                if (action.classList.contains('danger') || action.closest('.danger')) {{
+                    return null;
+                }}
+                return action;
+            }}
+
+            function applyLiquidAction(clientX, clientY) {{
+                const action = findLiquidAction(clientX, clientY);
+                if (!action || !glassThemeActive()) {{
+                    return false;
+                }}
+                liquidSyntheticTarget = action;
+                liquidSyntheticUntil = Date.now() + 700;
+                action.click();
+                return true;
+            }}
+
+            function trackLiquidMovement(state, clientX, clientY) {{
+                if (!state) {{
+                    return;
+                }}
+                const dx = clientX - state.startX;
+                const dy = clientY - state.startY;
+                state.lastX = clientX;
+                state.lastY = clientY;
+                if ((dx * dx + dy * dy) > 144) {{
+                    state.moved = true;
+                }}
+            }}
+
             function activateFromPoint(clientX, clientY, holdMs) {{
                 const nextElement = findLiquidElement(clientX, clientY);
                 if (activeElement && activeElement !== nextElement) {{
@@ -311,19 +354,50 @@ def render_web_scripts(
                 }});
                 observer.observe(document.body, {{ childList: true, subtree: true }});
             }}
+            document.addEventListener('click', function(event) {{
+                if (!liquidSyntheticTarget || Date.now() > liquidSyntheticUntil || !event.isTrusted) {{
+                    return;
+                }}
+                if (event.target === liquidSyntheticTarget || liquidSyntheticTarget.contains(event.target)) {{
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    liquidSyntheticTarget = null;
+                    liquidSyntheticUntil = 0;
+                }}
+            }}, true);
             document.addEventListener('pointermove', function(event) {{
+                if (liquidPointerState && liquidPointerState.pointerId === event.pointerId) {{
+                    trackLiquidMovement(liquidPointerState, event.clientX, event.clientY);
+                }}
                 queueActivateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 440 : 280);
             }}, {{ passive: true }});
             document.addEventListener('pointerdown', function(event) {{
+                liquidPointerState = {{
+                    pointerId: event.pointerId,
+                    pointerType: event.pointerType,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    lastX: event.clientX,
+                    lastY: event.clientY,
+                    moved: false
+                }};
                 activateFromPoint(event.clientX, event.clientY, 480);
             }}, {{ passive: true }});
-            document.addEventListener('pointerup', function() {{
+            document.addEventListener('pointerup', function(event) {{
+                if (liquidPointerState && liquidPointerState.pointerId === event.pointerId) {{
+                    trackLiquidMovement(liquidPointerState, event.clientX, event.clientY);
+                    if (liquidPointerState.moved && event.pointerType !== 'touch') {{
+                        applyLiquidAction(event.clientX, event.clientY);
+                    }}
+                }}
+                liquidPointerState = null;
                 cancelQueuedLiquidMove();
                 clearLiquid(activeElement, 260);
                 hideGlobalLens(260);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('pointercancel', function() {{
+                liquidPointerState = null;
                 cancelQueuedLiquidMove();
                 clearLiquid(activeElement, 120);
                 hideGlobalLens(120);
@@ -332,22 +406,36 @@ def render_web_scripts(
             document.addEventListener('touchstart', function(event) {{
                 if (event.touches && event.touches.length) {{
                     const touch = event.touches[0];
+                    liquidTouchState = {{
+                        startX: touch.clientX,
+                        startY: touch.clientY,
+                        lastX: touch.clientX,
+                        lastY: touch.clientY,
+                        moved: false
+                    }};
                     activateFromPoint(touch.clientX, touch.clientY, 360);
                 }}
             }}, {{ passive: true }});
             document.addEventListener('touchmove', function(event) {{
                 if (event.touches && event.touches.length) {{
                     const touch = event.touches[0];
+                    trackLiquidMovement(liquidTouchState, touch.clientX, touch.clientY);
                     queueActivateFromPoint(touch.clientX, touch.clientY, 260);
                 }}
             }}, {{ passive: true }});
-            document.addEventListener('touchend', function() {{
+            document.addEventListener('touchend', function(event) {{
+                if (liquidTouchState && liquidTouchState.moved && event.changedTouches && event.changedTouches.length) {{
+                    const touch = event.changedTouches[0];
+                    applyLiquidAction(touch.clientX, touch.clientY);
+                }}
+                liquidTouchState = null;
                 cancelQueuedLiquidMove();
                 clearLiquid(activeElement, 120);
                 hideGlobalLens(120);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('touchcancel', function() {{
+                liquidTouchState = null;
                 cancelQueuedLiquidMove();
                 clearLiquid(activeElement, 80);
                 hideGlobalLens(80);

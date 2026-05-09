@@ -1088,6 +1088,11 @@ def test_web_template_scripts_helpers():
     assert 'data-liquid-group' in scripts
     assert ".hero-popover [data-liquid=\"true\"]" in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
+    assert 'function findLiquidAction(clientX, clientY)' in scripts
+    assert 'function applyLiquidAction(clientX, clientY)' in scripts
+    assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
+    assert 'button[type="button"], a[href], [role="button"]' in scripts
+    assert 'liquidSyntheticTarget' in scripts
     assert 'lastLensPoint' not in scripts
     assert "globalLens.style.setProperty('--lr'" not in scripts
     assert "globalLens.style.setProperty('--lsx'" not in scripts
