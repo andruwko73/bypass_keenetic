@@ -1053,6 +1053,8 @@ def test_web_template_styles_helpers():
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
     assert '.liquid-global-lens::before' in styles
+    assert '@keyframes liquid-caustic' in styles
+    assert 'liquid-global-lens-active::before' in styles
     assert '--lsx' in styles
     assert 'backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12)' in styles
     assert 'background:rgba(255,255,255,.006)' in styles
@@ -1089,6 +1091,9 @@ def test_web_template_scripts_helpers():
     assert 'lastLensPoint' in scripts
     assert "globalLens.style.setProperty('--lr'" in scripts
     assert "globalLens.style.setProperty('--lsx'" in scripts
+    assert 'lensTarget' in scripts
+    assert 'function renderLiquidLens()' in scripts
+    assert 'function queueLiquidLensRender()' in scripts
     assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
     assert 'function cancelQueuedLiquidMove()' in scripts
     assert 'window.requestAnimationFrame' in scripts

@@ -1068,6 +1068,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 radial-gradient(circle at 30% 22%, rgba(255,255,255,.42) 0 3px, rgba(255,255,255,.11) 18%, transparent 48%),
                 radial-gradient(circle at 64% 70%, rgba(138,247,238,.075), transparent 60%),
                 conic-gradient(from 210deg, rgba(255,255,255,.28) 0 8%, transparent 15% 62%, rgba(255,255,255,.18) 69%, transparent 79% 100%);
+            transform:rotate(0deg);
+            transform-origin:center;
         }
         .liquid-global-lens::after{
             inset:7px;
@@ -1078,6 +1080,13 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="glass"] .liquid-global-lens{display:block;}
         [data-theme="glass"] .liquid-global-lens-active{
             opacity:1;
+        }
+        [data-theme="glass"] .liquid-global-lens-active::before{
+            animation:liquid-caustic 2.4s linear infinite;
+        }
+        @keyframes liquid-caustic{
+            from{transform:rotate(0deg);}
+            to{transform:rotate(360deg);}
         }
         @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
             [data-theme="glass"] .topbar,
@@ -1094,6 +1103,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         @media (prefers-reduced-motion: reduce){
             [data-theme="glass"] *,
             [data-theme="glass"] .hero-popover{transition:none!important;animation:none!important;}
+            [data-theme="glass"] .liquid-global-lens-active::before{animation:none!important;}
             [data-theme="glass"] button:hover,
             [data-theme="glass"] .mode-choice:hover,
             [data-theme="glass"] .seg-tab:hover,
