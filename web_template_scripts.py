@@ -105,6 +105,10 @@ def render_web_scripts(
         }}
 
         function setupLiquidPointer() {{
+            if (document.body.dataset.liquidPointerReady === '1') {{
+                return;
+            }}
+            document.body.dataset.liquidPointerReady = '1';
             const selectors = [
                 'button',
                 '.nav-item',
@@ -116,6 +120,68 @@ def render_web_scripts(
                 '.theme-toggle',
                 '.mode-toggle'
             ].join(',');
+            const fadeTimers = new WeakMap();
+            let activeElement = null;
+
+            function setLiquidPosition(element, clientX, clientY) {{
+                const rect = element.getBoundingClientRect();
+                if (!rect.width || !rect.height) {{
+                    return false;
+                }}
+                element.style.setProperty('--mx', (((clientX - rect.left) / rect.width) * 100).toFixed(2) + '%');
+                element.style.setProperty('--my', (((clientY - rect.top) / rect.height) * 100).toFixed(2) + '%');
+                return true;
+            }}
+
+            function clearLiquid(element, delay) {{
+                if (!element) {{
+                    return;
+                }}
+                const previousTimer = fadeTimers.get(element);
+                if (previousTimer) {{
+                    clearTimeout(previousTimer);
+                }}
+                const timer = setTimeout(function() {{
+                    element.classList.remove('liquid-active');
+                    element.style.removeProperty('--mx');
+                    element.style.removeProperty('--my');
+                    fadeTimers.delete(element);
+                }}, typeof delay === 'number' ? delay : 180);
+                fadeTimers.set(element, timer);
+            }}
+
+            function activateLiquid(element, clientX, clientY, holdMs) {{
+                if (!element || !setLiquidPosition(element, clientX, clientY)) {{
+                    return;
+                }}
+                const previousTimer = fadeTimers.get(element);
+                if (previousTimer) {{
+                    clearTimeout(previousTimer);
+                    fadeTimers.delete(element);
+                }}
+                element.classList.add('liquid-active');
+                const timer = setTimeout(function() {{
+                    clearLiquid(element, 120);
+                }}, holdMs || 360);
+                fadeTimers.set(element, timer);
+            }}
+
+            function findLiquidElement(clientX, clientY) {{
+                const target = document.elementFromPoint(clientX, clientY);
+                return target ? target.closest('[data-liquid="true"]') : null;
+            }}
+
+            function activateFromPoint(clientX, clientY, holdMs) {{
+                const nextElement = findLiquidElement(clientX, clientY);
+                if (activeElement && activeElement !== nextElement) {{
+                    clearLiquid(activeElement, 120);
+                }}
+                activeElement = nextElement;
+                if (nextElement) {{
+                    activateLiquid(nextElement, clientX, clientY, holdMs);
+                }}
+            }}
+
             function attach(element) {{
                 if (!element || element.dataset.liquidReady === '1') {{
                     return;
@@ -123,18 +189,29 @@ def render_web_scripts(
                 element.dataset.liquid = 'true';
                 element.dataset.liquidReady = '1';
                 element.addEventListener('pointermove', function(event) {{
-                    const rect = element.getBoundingClientRect();
-                    if (!rect.width || !rect.height) {{
-                        return;
-                    }}
-                    element.style.setProperty('--mx', (((event.clientX - rect.left) / rect.width) * 100).toFixed(2) + '%');
-                    element.style.setProperty('--my', (((event.clientY - rect.top) / rect.height) * 100).toFixed(2) + '%');
+                    activateLiquid(element, event.clientX, event.clientY, event.pointerType === 'touch' ? 520 : 280);
+                }});
+                element.addEventListener('pointerdown', function(event) {{
+                    activateLiquid(element, event.clientX, event.clientY, 620);
+                }});
+                element.addEventListener('pointerup', function() {{
+                    clearLiquid(element, 260);
+                }});
+                element.addEventListener('pointercancel', function() {{
+                    clearLiquid(element, 160);
                 }});
                 element.addEventListener('pointerleave', function() {{
-                    element.style.removeProperty('--mx');
-                    element.style.removeProperty('--my');
+                    clearLiquid(element, 140);
+                }});
+                element.addEventListener('focus', function() {{
+                    const rect = element.getBoundingClientRect();
+                    activateLiquid(element, rect.left + rect.width / 2, rect.top + rect.height / 2, 420);
+                }});
+                element.addEventListener('blur', function() {{
+                    clearLiquid(element, 0);
                 }});
             }}
+
             function scan(root) {{
                 const scope = root && root.querySelectorAll ? root : document;
                 scope.querySelectorAll(selectors).forEach(attach);
@@ -155,6 +232,24 @@ def render_web_scripts(
                 }});
                 observer.observe(document.body, {{ childList: true, subtree: true }});
             }}
+            document.addEventListener('pointermove', function(event) {{
+                if (event.pointerType === 'touch') {{
+                    activateFromPoint(event.clientX, event.clientY, 520);
+                }}
+            }}, {{ passive: true }});
+            document.addEventListener('pointerdown', function(event) {{
+                activateFromPoint(event.clientX, event.clientY, 620);
+            }}, {{ passive: true }});
+            document.addEventListener('pointerup', function() {{
+                clearLiquid(activeElement, 260);
+                activeElement = null;
+            }}, {{ passive: true }});
+            document.addEventListener('touchmove', function(event) {{
+                if (event.touches && event.touches.length) {{
+                    const touch = event.touches[0];
+                    activateFromPoint(touch.clientX, touch.clientY, 520);
+                }}
+            }}, {{ passive: true }});
         }}
 
         function toggleModePicker() {{

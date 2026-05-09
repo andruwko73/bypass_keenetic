@@ -820,9 +820,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             inset:0;
             pointer-events:none;
             background:
-                linear-gradient(115deg, rgba(255,255,255,.055), transparent 28%, rgba(138,247,238,.035) 54%, transparent 78%),
-                repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 76px);
-            opacity:.8;
+                linear-gradient(115deg, rgba(255,255,255,.055), transparent 30%, rgba(138,247,238,.035) 58%, transparent 82%),
+                linear-gradient(180deg, rgba(255,255,255,.025), transparent 42%, rgba(255,255,255,.018));
+            opacity:.72;
         }
         [data-theme="glass"] .app-shell{position:relative;}
         [data-theme="glass"] .topbar,
@@ -971,6 +971,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             position:relative;
             overflow:hidden;
             isolation:isolate;
+            --lens-size:clamp(56px,5.8vw,78px);
         }
         [data-theme="glass"] [data-liquid]::before{
             content:"";
@@ -979,13 +980,44 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             z-index:0;
             pointer-events:none;
             border-radius:inherit;
-            background:radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.34), rgba(138,247,238,.12) 26%, transparent 58%);
+            background:
+                radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.42), rgba(138,247,238,.18) 24%, rgba(229,189,115,.08) 38%, transparent 68%),
+                linear-gradient(115deg, transparent 0 28%, rgba(255,255,255,.14) 42%, transparent 58% 100%);
             opacity:0;
             transition:opacity .18s ease;
         }
-        [data-theme="glass"] [data-liquid] > *{position:relative;z-index:1;}
+        [data-theme="glass"] [data-liquid]::after{
+            content:"";
+            position:absolute;
+            left:var(--mx, 50%);
+            top:var(--my, 50%);
+            z-index:3;
+            width:var(--lens-size);
+            height:var(--lens-size);
+            pointer-events:none;
+            border-radius:999px;
+            background:
+                radial-gradient(circle at 34% 24%, rgba(255,255,255,.92) 0 5px, rgba(255,255,255,.42) 19%, rgba(138,247,238,.24) 45%, rgba(255,255,255,.1) 73%),
+                linear-gradient(135deg, rgba(255,255,255,.34), rgba(138,247,238,.12));
+            border:1px solid rgba(236,255,253,.7);
+            box-shadow:
+                inset 0 1px 2px rgba(255,255,255,.82),
+                inset 0 -14px 24px rgba(7,20,29,.32),
+                0 10px 26px rgba(0,0,0,.34),
+                0 0 30px rgba(138,247,238,.3);
+            backdrop-filter:blur(4px) saturate(220%) brightness(1.26);
+            -webkit-backdrop-filter:blur(4px) saturate(220%) brightness(1.26);
+            opacity:0;
+            transform:translate(-50%,-50%) scale(.68);
+            transition:opacity .16s ease, transform .18s cubic-bezier(.2,.85,.2,1);
+        }
+        [data-theme="glass"] [data-liquid] > *{position:relative;z-index:2;}
         [data-theme="glass"] [data-liquid]:hover::before,
-        [data-theme="glass"] [data-liquid]:focus-visible::before{opacity:1;}
+        [data-theme="glass"] [data-liquid]:focus-visible::before,
+        [data-theme="glass"] [data-liquid].liquid-active::before{opacity:1;}
+        [data-theme="glass"] [data-liquid]:hover::after,
+        [data-theme="glass"] [data-liquid]:focus-visible::after,
+        [data-theme="glass"] [data-liquid].liquid-active::after{opacity:1;transform:translate(-50%,-50%) scale(1);}
         @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
             [data-theme="glass"] .topbar,
             [data-theme="glass"] .side-nav,
@@ -1023,6 +1055,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
+            [data-theme="glass"] [data-liquid]{--lens-size:68px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }
