@@ -111,11 +111,6 @@ def render_web_scripts(
                 return;
             }}
             document.body.dataset.liquidPointerReady = '1';
-            const coarsePointer = window.matchMedia && window.matchMedia('(hover: none), (pointer: coarse)').matches;
-            if (coarsePointer) {{
-                document.documentElement.classList.add('liquid-touch-static');
-                return;
-            }}
             const selectors = [
                 'button',
                 '.nav-item',
@@ -323,11 +318,29 @@ def render_web_scripts(
                 hideGlobalLens(120);
                 activeElement = null;
             }}, {{ passive: true }});
-            document.addEventListener('touchmove', function(event) {{
-                if (!window.PointerEvent && event.touches && event.touches.length) {{
+            document.addEventListener('touchstart', function(event) {{
+                if (event.touches && event.touches.length) {{
                     const touch = event.touches[0];
-                    queueActivateFromPoint(touch.clientX, touch.clientY, 440);
+                    activateFromPoint(touch.clientX, touch.clientY, 360);
                 }}
+            }}, {{ passive: true }});
+            document.addEventListener('touchmove', function(event) {{
+                if (event.touches && event.touches.length) {{
+                    const touch = event.touches[0];
+                    queueActivateFromPoint(touch.clientX, touch.clientY, 260);
+                }}
+            }}, {{ passive: true }});
+            document.addEventListener('touchend', function() {{
+                cancelQueuedLiquidMove();
+                clearLiquid(activeElement, 120);
+                hideGlobalLens(120);
+                activeElement = null;
+            }}, {{ passive: true }});
+            document.addEventListener('touchcancel', function() {{
+                cancelQueuedLiquidMove();
+                clearLiquid(activeElement, 80);
+                hideGlobalLens(80);
+                activeElement = null;
             }}, {{ passive: true }});
         }}
 

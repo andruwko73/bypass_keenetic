@@ -993,26 +993,26 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             position:fixed;
             left:0;
             top:0;
-            width:58px;
-            height:58px;
+            width:46px;
+            height:46px;
             pointer-events:none;
             border-radius:999px;
             z-index:70;
             display:none;
             opacity:0;
-            transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0) scale(.82);
+            transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0) scale(.9);
             background:
-                radial-gradient(circle at 34% 24%, rgba(255,255,255,.48) 0 3px, rgba(255,255,255,.14) 20%, rgba(255,255,255,.04) 44%, transparent 72%),
-                radial-gradient(circle at 58% 62%, rgba(138,247,238,.09), transparent 58%);
-            border:1px solid rgba(236,255,253,.46);
+                radial-gradient(circle at 34% 24%, rgba(255,255,255,.18) 0 2px, rgba(255,255,255,.055) 22%, transparent 64%),
+                radial-gradient(circle at 58% 62%, rgba(138,247,238,.055), transparent 68%);
+            border:1px solid rgba(236,255,253,.24);
             box-shadow:
-                inset 0 1px 1px rgba(255,255,255,.48),
-                inset 0 -8px 14px rgba(7,20,29,.16),
-                0 4px 14px rgba(0,0,0,.2),
-                0 0 18px rgba(138,247,238,.16);
-            backdrop-filter:saturate(145%) brightness(1.08);
-            -webkit-backdrop-filter:saturate(145%) brightness(1.08);
-            transition:opacity .12s ease;
+                inset 0 1px 1px rgba(255,255,255,.24),
+                inset 0 -7px 12px rgba(7,20,29,.1),
+                0 2px 10px rgba(0,0,0,.14),
+                0 0 12px rgba(138,247,238,.1);
+            backdrop-filter:saturate(135%) brightness(1.05);
+            -webkit-backdrop-filter:saturate(135%) brightness(1.05);
+            transition:none;
             will-change:transform,opacity;
         }
         [data-theme="glass"] .liquid-global-lens{display:block;}
@@ -1020,8 +1020,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             opacity:1;
             transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0) scale(1);
         }
-        [data-theme="glass"].liquid-touch-static [data-liquid]::before,
-        [data-theme="glass"].liquid-touch-static .liquid-global-lens{display:none!important;}
         @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
             [data-theme="glass"] .topbar,
             [data-theme="glass"] .side-nav,
@@ -1060,12 +1058,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
-            [data-theme="glass"] .liquid-global-lens{width:54px;height:54px;}
+            [data-theme="glass"] .liquid-global-lens{width:42px;height:42px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
-        }
-        @media (hover: none), (pointer: coarse){
-            [data-theme="glass"] [data-liquid]::before,
-            [data-theme="glass"] .liquid-global-lens{display:none!important;}
         }
 '''.replace('{TELEGRAM_SVG_B64}', str(TELEGRAM_SVG_B64 or ''))

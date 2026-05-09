@@ -1049,7 +1049,7 @@ def test_web_template_styles_helpers():
     assert '[data-liquid]::before' in styles
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
-    assert '@media (hover: none), (pointer: coarse)' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:42px;height:42px;}' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
@@ -1074,7 +1074,6 @@ def test_web_template_scripts_helpers():
     assert 'function toggleThemePicker()' in scripts
     assert 'function setupLiquidPointer()' in scripts
     assert 'liquid-global-lens' in scripts
-    assert 'liquid-touch-static' in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
     assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
     assert 'function cancelQueuedLiquidMove()' in scripts
@@ -1084,7 +1083,9 @@ def test_web_template_scripts_helpers():
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
     assert 'activeCommandName' in scripts
+    assert "document.addEventListener('touchstart'" in scripts
     assert "document.addEventListener('touchmove'" in scripts
+    assert "document.addEventListener('touchend'" in scripts
     assert "document.addEventListener('pointercancel'" in scripts
     assert 'elementFromPoint' in scripts
     assert "localStorage.setItem('router-theme', nextTheme);" in scripts
