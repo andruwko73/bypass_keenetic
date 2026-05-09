@@ -170,7 +170,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .brand{display:flex;align-items:center;gap:12px;min-width:0;}
         .brand-mark{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:8px;background:rgba(31,122,106,.18);border:1px solid rgba(31,122,106,.35);color:#7ff0d8;font-size:15px;font-weight:900;text-transform:uppercase;}
         .brand p{margin:0;font-size:12px;color:var(--muted);}
-        .topbar-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;position:relative;}
+        .topbar-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;position:relative;min-width:0;}
         .api-pill{display:inline-flex;align-items:center;max-width:min(520px,42vw);padding:8px 10px;border-radius:8px;background:rgba(31,122,106,.14);border:1px solid rgba(31,122,106,.28);color:#9be4d3;font-size:12px;font-weight:700;line-height:1.35;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;}
         .workspace-layout{display:grid;grid-template-columns:128px minmax(0,1fr);gap:14px;align-items:start;}
         .side-nav{position:sticky;top:96px;display:grid;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(23,30,40,.94);box-shadow:var(--shadow);}
@@ -269,9 +269,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         h2{font-size:19px;font-weight:700;line-height:1.22;}
         .brand p,.section-subtitle,.status-note,.key-status-note{color:#b9c6d3;}
         .topbar-actions{width:100%;display:grid;grid-template-columns:minmax(340px,.9fr) minmax(320px,1.2fr) auto auto auto;align-items:center;justify-content:stretch;gap:8px;}
-        .app-caption{display:block;min-width:0;color:#eef7ff;white-space:normal;}
-        .app-caption strong{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;}
-        .app-branch{display:block;margin-top:3px;font-size:11px;font-weight:700;line-height:1.2;color:var(--muted);}
+        .app-caption{display:block;min-width:0;color:#eef7ff;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
+        .app-caption strong{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
+        .app-branch{display:block;margin-top:3px;font-size:11px;font-weight:700;line-height:1.2;color:var(--muted);white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
         .version-badge{justify-self:end;align-self:start;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:3px 7px;border-radius:7px;border:1px solid rgba(91,124,150,.42);background:rgba(17,25,35,.7);color:var(--muted);font-size:10px;font-weight:800;line-height:1;letter-spacing:.04em;white-space:nowrap;box-shadow:none;}
         [data-theme="light"] .version-badge{background:rgba(255,253,248,.82);}
         .api-pill,.mode-toggle,.theme-toggle{height:var(--control-height);min-height:var(--control-height);border-radius:8px;border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);box-shadow:none;font-size:12px;}
@@ -498,8 +498,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .topbar{position:static;align-items:stretch;flex-direction:column;padding:10px;}
             .app-shell,.topbar,.app-main,.app-view,.view-head,.status-card,.service-panel,.overview-key-panel,.mobile-nav{box-sizing:border-box;max-width:100%;}
             .topbar-actions{width:100%;display:grid;grid-template-columns:1fr 1fr;justify-content:stretch;gap:8px;}
-            .app-caption{display:grid;gap:2px;min-width:0;white-space:normal;}
-            .app-caption strong{max-width:none;font-size:14px;overflow-wrap:anywhere;}
+            .app-caption{display:grid;gap:2px;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
+            .app-caption strong{max-width:none;font-size:14px;overflow-wrap:anywhere;word-break:break-word;}
             .section-subtitle,.status-note,.status-value{overflow-wrap:anywhere;}
             .app-caption,.api-pill{grid-column:1 / -1;}
             .api-pill,.theme-toggle,.mode-toggle,.version-badge{width:100%;justify-content:center;max-width:none;text-align:center;}
