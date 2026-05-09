@@ -285,6 +285,9 @@ def render_web_scripts(
                 liquidSyntheticTarget = action;
                 liquidSyntheticUntil = Date.now() + 700;
                 action.click();
+                if (action.blur) {{
+                    action.blur();
+                }}
                 resetLiquidState();
                 return true;
             }}

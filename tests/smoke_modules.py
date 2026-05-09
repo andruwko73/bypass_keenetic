@@ -1049,6 +1049,7 @@ def test_web_template_styles_helpers():
     assert '[data-liquid]::before' in styles
     assert '[data-liquid]::after' in styles
     assert '[data-liquid].liquid-active{' in styles
+    assert '@media (hover: hover)' in styles
     assert 'radial-gradient(circle at var(--mx, 50%) var(--my, 50%)' in styles
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
@@ -1096,6 +1097,7 @@ def test_web_template_scripts_helpers():
     assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
     assert 'function resetLiquidState()' in scripts
     assert "document.querySelectorAll('[data-liquid].liquid-active')" in scripts
+    assert 'action.blur' in scripts
     assert 'button[type="button"], a[href], [role="button"]' in scripts
     assert 'liquidSyntheticTarget' in scripts
     assert 'lastLensPoint' not in scripts

@@ -910,7 +910,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 rgba(23,58,66,.58);
             box-shadow:0 12px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.22);
         }
-        [data-theme="glass"] [data-liquid]:hover,
         [data-theme="glass"] [data-liquid]:focus-visible,
         [data-theme="glass"] [data-liquid].liquid-active{
             background:
@@ -919,6 +918,16 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 rgba(23,58,66,.58);
             border-color:rgba(188,255,250,.58);
             box-shadow:0 12px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.24), inset 0 -1px 0 rgba(138,247,238,.1);
+        }
+        @media (hover: hover){
+            [data-theme="glass"] [data-liquid]:hover{
+                background:
+                    radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.2), rgba(138,247,238,.1) 23%, transparent 56%),
+                    linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,.05) 42%, rgba(138,247,238,.12)),
+                    rgba(23,58,66,.58);
+                border-color:rgba(188,255,250,.58);
+                box-shadow:0 12px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.24), inset 0 -1px 0 rgba(138,247,238,.1);
+            }
         }
         [data-theme="glass"] button:active,
         [data-theme="glass"] .mode-choice:active,
@@ -1021,12 +1030,14 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             transition:opacity .12s ease;
         }
         [data-theme="glass"] [data-liquid] > *{position:relative;z-index:3;}
-        [data-theme="glass"] [data-liquid]:hover::before,
         [data-theme="glass"] [data-liquid]:focus-visible::before,
         [data-theme="glass"] [data-liquid].liquid-active::before{opacity:1;}
-        [data-theme="glass"] [data-liquid]:hover::after,
         [data-theme="glass"] [data-liquid]:focus-visible::after,
         [data-theme="glass"] [data-liquid].liquid-active::after{opacity:.72;}
+        @media (hover: hover){
+            [data-theme="glass"] [data-liquid]:hover::before{opacity:1;}
+            [data-theme="glass"] [data-liquid]:hover::after{opacity:.72;}
+        }
         .liquid-global-lens{
             position:fixed;
             left:0;
