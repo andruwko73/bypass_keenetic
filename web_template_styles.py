@@ -993,8 +993,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             position:fixed;
             left:0;
             top:0;
-            width:46px;
-            height:46px;
+            width:62px;
+            height:62px;
             pointer-events:none;
             border-radius:999px;
             z-index:70;
@@ -1058,7 +1058,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
-            [data-theme="glass"] .liquid-global-lens{width:42px;height:42px;}
+            [data-theme="glass"] .liquid-global-lens{width:56px;height:56px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

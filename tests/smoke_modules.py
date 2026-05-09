@@ -1049,7 +1049,7 @@ def test_web_template_styles_helpers():
     assert '[data-liquid]::before' in styles
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
-    assert '[data-theme="glass"] .liquid-global-lens{width:42px;height:42px;}' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:56px;height:56px;}' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
