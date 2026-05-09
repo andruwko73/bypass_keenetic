@@ -1089,11 +1089,54 @@ def test_web_form_template_smoke():
     assert '.app-shell' in page
     assert 'tg-icon' in page
     assert 'app-mode-toggle-button' in page
+    assert 'service-command-grid' in page
     assert 'Локальная панель управления обходом на роутере' in page
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
     assert 'Переустановка компонентов' not in page
     assert '{TELEGRAM_SVG_B64}' not in page
     assert '<script>' in page
+    web_only_page = web_form_template.render_web_form(
+        APP_BRANCH_DESCRIPTION='test',
+        APP_BRANCH_LABEL='codex/test',
+        APP_VERSION_LABEL='1',
+        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
+        TELEGRAM_SVG_B64='tg-icon',
+        YOUTUBE_SVG_B64='',
+        _telegram_icon_html=lambda opacity=1.0: 'TG',
+        csrf_token='token',
+        command_block='',
+        command_buttons_html='',
+        app_runtime_mode_description='интерфейс с пулом ключей без Telegram-бота',
+        app_runtime_mode_label='Web only',
+        app_runtime_mode_picker_block='',
+        current_mode_label='Без прокси',
+        custom_checks_json='[]',
+        fallback_block='',
+        initial_command_running='false',
+        initial_status_pending='false',
+        list_route_label='list',
+        message_block='',
+        mode_picker_block='',
+        mode_toggle_label='Режим:',
+        pool_summary={'active_text': 'none'},
+        pool_summary_note='',
+        protocol_panels_html='',
+        protocol_tabs_html='',
+        quick_key_label='Vless 1',
+        quick_key_proto='vless',
+        quick_key_value='',
+        quick_start_note='note',
+        socks_block='',
+        start_button_label='',
+        status={'api_status': 'ok'},
+        topbar_status_text='ok',
+        unblock_panels_html='',
+        unblock_tabs_html='',
+        enable_key_pool=True,
+        enable_custom_checks=True,
+    )
+    assert 'action="/start"' not in web_only_page
+    assert 'Telegram отключ' not in web_only_page
 
 
 def test_telegram_pool_ui():
