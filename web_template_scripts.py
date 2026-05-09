@@ -202,6 +202,15 @@ def render_web_scripts(
                 fadeTimers.set(element, timer);
             }}
 
+            function resetLiquidState() {{
+                cancelQueuedLiquidMove();
+                document.querySelectorAll('[data-liquid].liquid-active').forEach(function(element) {{
+                    clearLiquid(element, 0);
+                }});
+                activeElement = null;
+                hideGlobalLens(0);
+            }}
+
             function activateLiquid(element, clientX, clientY, holdMs) {{
                 if (!element || !setLiquidPosition(element, clientX, clientY)) {{
                     return;
@@ -257,6 +266,7 @@ def render_web_scripts(
                 liquidSyntheticTarget = action;
                 liquidSyntheticUntil = Date.now() + 700;
                 action.click();
+                resetLiquidState();
                 return true;
             }}
 
@@ -387,7 +397,10 @@ def render_web_scripts(
                 if (liquidPointerState && liquidPointerState.pointerId === event.pointerId) {{
                     trackLiquidMovement(liquidPointerState, event.clientX, event.clientY);
                     if (liquidPointerState.moved && event.pointerType !== 'touch') {{
-                        applyLiquidAction(event.clientX, event.clientY);
+                        if (applyLiquidAction(event.clientX, event.clientY)) {{
+                            liquidPointerState = null;
+                            return;
+                        }}
                     }}
                 }}
                 liquidPointerState = null;
@@ -426,7 +439,10 @@ def render_web_scripts(
             document.addEventListener('touchend', function(event) {{
                 if (liquidTouchState && liquidTouchState.moved && event.changedTouches && event.changedTouches.length) {{
                     const touch = event.changedTouches[0];
-                    applyLiquidAction(touch.clientX, touch.clientY);
+                    if (applyLiquidAction(touch.clientX, touch.clientY)) {{
+                        liquidTouchState = null;
+                        return;
+                    }}
                 }}
                 liquidTouchState = null;
                 cancelQueuedLiquidMove();

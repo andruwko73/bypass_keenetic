@@ -1091,6 +1091,8 @@ def test_web_template_scripts_helpers():
     assert 'function findLiquidAction(clientX, clientY)' in scripts
     assert 'function applyLiquidAction(clientX, clientY)' in scripts
     assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
+    assert 'function resetLiquidState()' in scripts
+    assert "document.querySelectorAll('[data-liquid].liquid-active')" in scripts
     assert 'button[type="button"], a[href], [role="button"]' in scripts
     assert 'liquidSyntheticTarget' in scripts
     assert 'lastLensPoint' not in scripts
