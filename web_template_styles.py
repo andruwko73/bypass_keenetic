@@ -125,7 +125,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 .start-card{display:flex;flex-direction:column;justify-content:space-between;}
                 .app-mode-control{position:relative;margin:0;min-width:0;}
                 .app-mode-command{width:100%;justify-content:space-between;gap:12px;}
-                .service-panel .app-mode-picker{position:static;width:min(640px,100%);min-width:0;margin-top:10px;}
+                .service-panel .app-mode-picker{position:static;width:min(360px,100%);min-width:min(260px,100%);margin-top:10px;}
                 .command-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}
                 .command-grid.service-command-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;margin-top:10px;}
                 .command-grid form{min-width:0;}
