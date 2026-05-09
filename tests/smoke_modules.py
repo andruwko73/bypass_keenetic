@@ -1047,8 +1047,8 @@ def test_web_template_styles_helpers():
     assert '@media (prefers-reduced-motion: reduce)' in styles
     assert '@media (prefers-contrast: more)' in styles
     assert '[data-liquid]::before' in styles
-    assert '[data-liquid]::after' in styles
-    assert '.liquid-active::after' in styles
+    assert '.liquid-global-lens' in styles
+    assert '.liquid-global-lens-active' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
@@ -1072,12 +1072,15 @@ def test_web_template_scripts_helpers():
     assert "glass: 'Liquid Glass'" in scripts
     assert 'function toggleThemePicker()' in scripts
     assert 'function setupLiquidPointer()' in scripts
+    assert 'liquid-global-lens' in scripts
+    assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
     assert 'function hideActionMessage()' in scripts
     assert 'function scheduleActionMessageHide(delayMs)' in scripts
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
     assert 'activeCommandName' in scripts
     assert "document.addEventListener('touchmove'" in scripts
+    assert "document.addEventListener('pointercancel'" in scripts
     assert 'elementFromPoint' in scripts
     assert "localStorage.setItem('router-theme', nextTheme);" in scripts
     assert 'function setupAsyncForms' in scripts

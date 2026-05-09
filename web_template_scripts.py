@@ -124,6 +124,42 @@ def render_web_scripts(
             ].join(',');
             const fadeTimers = new WeakMap();
             let activeElement = null;
+            let lensTimer = null;
+            const globalLens = document.createElement('div');
+            globalLens.className = 'liquid-global-lens';
+            globalLens.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(globalLens);
+
+            function glassThemeActive() {{
+                return document.documentElement.getAttribute('data-theme') === 'glass';
+            }}
+
+            function hideGlobalLens(delay) {{
+                if (lensTimer) {{
+                    clearTimeout(lensTimer);
+                    lensTimer = null;
+                }}
+                lensTimer = window.setTimeout(function() {{
+                    globalLens.classList.remove('liquid-global-lens-active');
+                }}, typeof delay === 'number' ? delay : 180);
+            }}
+
+            function moveGlobalLens(clientX, clientY, holdMs) {{
+                if (!glassThemeActive()) {{
+                    hideGlobalLens(0);
+                    return;
+                }}
+                if (lensTimer) {{
+                    clearTimeout(lensTimer);
+                    lensTimer = null;
+                }}
+                globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px');
+                globalLens.style.setProperty('--ly', clientY.toFixed(1) + 'px');
+                globalLens.classList.add('liquid-global-lens-active');
+                lensTimer = window.setTimeout(function() {{
+                    hideGlobalLens(160);
+                }}, holdMs || 420);
+            }}
 
             function setLiquidPosition(element, clientX, clientY) {{
                 const rect = element.getBoundingClientRect();
@@ -143,6 +179,13 @@ def render_web_scripts(
                 if (previousTimer) {{
                     clearTimeout(previousTimer);
                 }}
+                if (delay === 0) {{
+                    element.classList.remove('liquid-active');
+                    element.style.removeProperty('--mx');
+                    element.style.removeProperty('--my');
+                    fadeTimers.delete(element);
+                    return;
+                }}
                 const timer = setTimeout(function() {{
                     element.classList.remove('liquid-active');
                     element.style.removeProperty('--mx');
@@ -156,6 +199,10 @@ def render_web_scripts(
                 if (!element || !setLiquidPosition(element, clientX, clientY)) {{
                     return;
                 }}
+                if (activeElement && activeElement !== element) {{
+                    clearLiquid(activeElement, 0);
+                }}
+                activeElement = element;
                 const previousTimer = fadeTimers.get(element);
                 if (previousTimer) {{
                     clearTimeout(previousTimer);
@@ -176,11 +223,14 @@ def render_web_scripts(
             function activateFromPoint(clientX, clientY, holdMs) {{
                 const nextElement = findLiquidElement(clientX, clientY);
                 if (activeElement && activeElement !== nextElement) {{
-                    clearLiquid(activeElement, 120);
+                    clearLiquid(activeElement, 0);
                 }}
-                activeElement = nextElement;
                 if (nextElement) {{
                     activateLiquid(nextElement, clientX, clientY, holdMs);
+                    moveGlobalLens(clientX, clientY, holdMs);
+                }} else {{
+                    activeElement = null;
+                    hideGlobalLens(160);
                 }}
             }}
 
@@ -190,27 +240,14 @@ def render_web_scripts(
                 }}
                 element.dataset.liquid = 'true';
                 element.dataset.liquidReady = '1';
-                element.addEventListener('pointermove', function(event) {{
-                    activateLiquid(element, event.clientX, event.clientY, event.pointerType === 'touch' ? 520 : 280);
-                }});
-                element.addEventListener('pointerdown', function(event) {{
-                    activateLiquid(element, event.clientX, event.clientY, 620);
-                }});
-                element.addEventListener('pointerup', function() {{
-                    clearLiquid(element, 260);
-                }});
-                element.addEventListener('pointercancel', function() {{
-                    clearLiquid(element, 160);
-                }});
-                element.addEventListener('pointerleave', function() {{
-                    clearLiquid(element, 140);
-                }});
                 element.addEventListener('focus', function() {{
                     const rect = element.getBoundingClientRect();
                     activateLiquid(element, rect.left + rect.width / 2, rect.top + rect.height / 2, 420);
+                    moveGlobalLens(rect.left + rect.width / 2, rect.top + rect.height / 2, 420);
                 }});
                 element.addEventListener('blur', function() {{
                     clearLiquid(element, 0);
+                    hideGlobalLens(0);
                 }});
             }}
 
@@ -235,15 +272,19 @@ def render_web_scripts(
                 observer.observe(document.body, {{ childList: true, subtree: true }});
             }}
             document.addEventListener('pointermove', function(event) {{
-                if (event.pointerType === 'touch') {{
-                    activateFromPoint(event.clientX, event.clientY, 520);
-                }}
+                activateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 520 : 320);
             }}, {{ passive: true }});
             document.addEventListener('pointerdown', function(event) {{
                 activateFromPoint(event.clientX, event.clientY, 620);
             }}, {{ passive: true }});
             document.addEventListener('pointerup', function() {{
                 clearLiquid(activeElement, 260);
+                hideGlobalLens(260);
+                activeElement = null;
+            }}, {{ passive: true }});
+            document.addEventListener('pointercancel', function() {{
+                clearLiquid(activeElement, 120);
+                hideGlobalLens(120);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('touchmove', function(event) {{
