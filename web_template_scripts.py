@@ -42,6 +42,8 @@ def render_web_scripts(
         let statusPollTimer = null;
         let statusPollUntil = 0;
         let commandPollTimer = null;
+        let actionMessageTimer = null;
+        let activeCommandName = '';
 
         const THEME_LABELS = {{
             dark: 'Темная',
@@ -763,11 +765,38 @@ def render_web_scripts(
             }}
         }}
 
-        function showActionMessage(text, ok) {{
+        function clearActionMessageTimer() {{
+            if (actionMessageTimer) {{
+                window.clearTimeout(actionMessageTimer);
+                actionMessageTimer = null;
+            }}
+        }}
+
+        function hideActionMessage() {{
+            clearActionMessageTimer();
             const block = document.getElementById('web-action-message');
             if (!block) {{
                 return;
             }}
+            block.classList.add('hidden');
+            const output = block.querySelector('.log-output');
+            if (output) {{
+                output.textContent = '';
+            }}
+        }}
+
+        function scheduleActionMessageHide(delayMs) {{
+            clearActionMessageTimer();
+            actionMessageTimer = window.setTimeout(hideActionMessage, Number(delayMs) || 9000);
+        }}
+
+        function showActionMessage(text, ok, options) {{
+            const block = document.getElementById('web-action-message');
+            if (!block) {{
+                return;
+            }}
+            clearActionMessageTimer();
+            options = options || {{}};
             block.classList.remove('hidden');
             block.classList.toggle('notice-status', !!ok);
             block.classList.toggle('notice-result', !ok);
@@ -778,6 +807,9 @@ def render_web_scripts(
             const output = block.querySelector('.log-output');
             if (output) {{
                 output.textContent = text || '';
+            }}
+            if (ok && options.autoHide) {{
+                scheduleActionMessageHide(options.delayMs || 9000);
             }}
         }}
 
@@ -802,6 +834,20 @@ def render_web_scripts(
             return !!state.running;
         }}
 
+        function maybeReloadAfterUpdateCommand(state) {{
+            const commandName = (state && state.command) || activeCommandName || '';
+            if (commandName !== 'update') {{
+                return;
+            }}
+            if (state && state.running) {{
+                return;
+            }}
+            activeCommandName = '';
+            window.setTimeout(function() {{
+                window.location.reload();
+            }}, 1500);
+        }}
+
         function pollCommandState() {{
             if (!ENABLE_LIVE_STATUS) {{
                 return;
@@ -813,9 +859,13 @@ def render_web_scripts(
             }})
                 .then(function(response) {{ return response.json(); }})
                 .then(function(payload) {{
-                    if (showCommandState(payload)) {{
+                    const running = showCommandState(payload);
+                    if (running) {{
+                        scheduleActionMessageHide(2500);
                         commandPollTimer = window.setTimeout(pollCommandState, 4000);
                     }} else {{
+                        hideActionMessage();
+                        maybeReloadAfterUpdateCommand(payload);
                         scheduleStatusPolling(30000);
                     }}
                 }})
@@ -954,6 +1004,9 @@ def render_web_scripts(
                         if (action === 'command' && (confirmTitle || confirmMessage)) {{
                             formData.set('confirm_switch', 'yes');
                         }}
+                        if (action === 'command') {{
+                            activeCommandName = String(formData.get('command') || '');
+                        }}
                         setButtonBusy(button, true);
                         if (proto && (action === 'install' || action === 'pool-apply' || action === 'pool-probe')) {{
                             markProtocolPending(proto);
@@ -982,7 +1035,10 @@ def render_web_scripts(
                         }})
                         .then(function(payload) {{
                             const ok = payload._responseOk && payload.ok !== false;
-                            showActionMessage(payload.result || 'Готово.', ok);
+                            showActionMessage(payload.result || 'Готово.', ok, {{
+                                autoHide: ok,
+                                delayMs: action === 'command' ? 5000 : 9000
+                            }});
                             if (ok && proto && action === 'install') {{
                                 const card = form.closest('[data-protocol-card]');
                                 const textarea = card ? card.querySelector('[data-key-textarea]') : null;
@@ -1050,7 +1106,11 @@ def render_web_scripts(
                                 }}
                             }}
                             if (action === 'command') {{
-                                showCommandState(payload.command_state);
+                                if (showCommandState(payload.command_state)) {{
+                                    scheduleActionMessageHide(2500);
+                                }} else {{
+                                    maybeReloadAfterUpdateCommand(payload.command_state);
+                                }}
                                 if (!commandPollTimer) {{
                                     pollCommandState();
                                 }}
@@ -1101,6 +1161,10 @@ def render_web_scripts(
             setupProtocolSubtabs();
             setupLiquidPointer();
             setupAsyncForms();
+            const actionBlock = document.getElementById('web-action-message');
+            if (actionBlock && !actionBlock.classList.contains('hidden')) {{
+                scheduleActionMessageHide(9000);
+            }}
             if (INITIAL_STATUS_PENDING) {{
                 scheduleStatusPolling(POOL_PROBE_POLL_EXTENSION_MS);
             }}

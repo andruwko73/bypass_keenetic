@@ -1072,6 +1072,11 @@ def test_web_template_scripts_helpers():
     assert "glass: 'Liquid Glass'" in scripts
     assert 'function toggleThemePicker()' in scripts
     assert 'function setupLiquidPointer()' in scripts
+    assert 'function hideActionMessage()' in scripts
+    assert 'function scheduleActionMessageHide(delayMs)' in scripts
+    assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
+    assert 'actionMessageTimer' in scripts
+    assert 'activeCommandName' in scripts
     assert "document.addEventListener('touchmove'" in scripts
     assert 'elementFromPoint' in scripts
     assert "localStorage.setItem('router-theme', nextTheme);" in scripts
