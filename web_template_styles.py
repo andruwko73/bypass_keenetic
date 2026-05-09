@@ -616,6 +616,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-subview-import .pool-subscribe-form{display:grid;}
             .protocol-subview-import .pool-subscribe-form input{grid-column:auto;}
             .command-grid{grid-template-columns:1fr 1fr;gap:10px;}
+            .command-grid.service-command-grid{grid-template-columns:1fr;}
             .command-grid button{height:var(--control-height);min-height:var(--control-height);font-size:13px;}
             button,input,textarea,select{font-size:13px;}
             .custom-check-form button:first-of-type{white-space:nowrap;font-size:12px;padding-left:6px;padding-right:6px;}
