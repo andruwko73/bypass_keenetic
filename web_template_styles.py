@@ -230,7 +230,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .overview-service-grid,.service-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
         .overview-service-grid{margin-top:12px;}
         .service-panel-wide{grid-column:1 / -1;}
-        .service-panel{border-radius:8px;}
+        .service-panel{position:relative;z-index:6;overflow:visible;border-radius:8px;}
         .service-panel h3{margin:0 0 12px;font-size:18px;}
         .key-status-icons img,.pool-service-cell img,.status-value img,.api-pill img{width:20px!important;height:20px!important;}
         /* Compact design pass: one visual language for cards, forms, buttons and navigation. */
@@ -309,7 +309,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .service-panel h3{font-size:14px;line-height:1.22;margin-bottom:8px;}
         .command-grid{gap:7px;margin-top:0;}
         .command-grid button{height:var(--control-height);min-height:var(--control-height);justify-content:center;}
-        .overview-key-panel{margin-top:10px;}
+        .overview-key-panel{position:relative;z-index:1;margin-top:10px;}
         .overview-key-panel .key-editor-form{display:grid;gap:7px;}
         .overview-key-panel .form-actions{gap:8px;}
         .protocol-tabs,.list-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;}
