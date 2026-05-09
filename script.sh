@@ -85,7 +85,10 @@ download_static_asset() {
   url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${repo_path}"
 
   rm -f "$target"
-  GITHUB_API_TIMEOUT=8 download_repo_file_via_api "$url" "$target" >/dev/null 2>&1 || true
+  GITHUB_API_TIMEOUT=12 download_repo_file_via_api "$url" "$target" >/dev/null 2>&1 || true
+  if [ ! -s "$target" ]; then
+    curl -fsSL --connect-timeout 12 --max-time 30 --retry 2 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1 || true
+  fi
   [ -s "$target" ] || rm -f "$target"
 }
 

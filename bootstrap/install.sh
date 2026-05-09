@@ -55,7 +55,7 @@ download_file() {
 }
 
 download_static_assets() {
-    icons="chatgpt claude copilot deepseek facebook gemini grok instagram meta mistral perplexity"
+    icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
     mkdir -p "$STATIC_DIR/service-icons"
     curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/telegram.png" "$RAW_BASE/static/telegram.png" || true
     curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/youtube.png" "$RAW_BASE/static/youtube.png" || true
@@ -333,7 +333,7 @@ ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then
     cat > "$BOT_CONFIG_PATH" <<EOF
-# ВЕРСИЯ СКРИПТА v1.510
+# ВЕРСИЯ СКРИПТА v1.511
 
 token = '${TG_BOT_TOKEN}'
 usernames = ['${TG_USERNAME}']
