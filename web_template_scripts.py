@@ -125,6 +125,8 @@ def render_web_scripts(
             const fadeTimers = new WeakMap();
             let activeElement = null;
             let lensTimer = null;
+            let liquidMoveFrame = 0;
+            let pendingLiquidMove = null;
             const globalLens = document.createElement('div');
             globalLens.className = 'liquid-global-lens';
             globalLens.setAttribute('aria-hidden', 'true');
@@ -234,6 +236,33 @@ def render_web_scripts(
                 }}
             }}
 
+            function queueActivateFromPoint(clientX, clientY, holdMs) {{
+                pendingLiquidMove = {{
+                    clientX: clientX,
+                    clientY: clientY,
+                    holdMs: holdMs
+                }};
+                if (liquidMoveFrame) {{
+                    return;
+                }}
+                liquidMoveFrame = window.requestAnimationFrame(function() {{
+                    const point = pendingLiquidMove;
+                    pendingLiquidMove = null;
+                    liquidMoveFrame = 0;
+                    if (point) {{
+                        activateFromPoint(point.clientX, point.clientY, point.holdMs);
+                    }}
+                }});
+            }}
+
+            function cancelQueuedLiquidMove() {{
+                pendingLiquidMove = null;
+                if (liquidMoveFrame) {{
+                    window.cancelAnimationFrame(liquidMoveFrame);
+                    liquidMoveFrame = 0;
+                }}
+            }}
+
             function attach(element) {{
                 if (!element || element.dataset.liquidReady === '1') {{
                     return;
@@ -272,25 +301,27 @@ def render_web_scripts(
                 observer.observe(document.body, {{ childList: true, subtree: true }});
             }}
             document.addEventListener('pointermove', function(event) {{
-                activateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 520 : 320);
+                queueActivateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 440 : 280);
             }}, {{ passive: true }});
             document.addEventListener('pointerdown', function(event) {{
-                activateFromPoint(event.clientX, event.clientY, 620);
+                activateFromPoint(event.clientX, event.clientY, 480);
             }}, {{ passive: true }});
             document.addEventListener('pointerup', function() {{
+                cancelQueuedLiquidMove();
                 clearLiquid(activeElement, 260);
                 hideGlobalLens(260);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('pointercancel', function() {{
+                cancelQueuedLiquidMove();
                 clearLiquid(activeElement, 120);
                 hideGlobalLens(120);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('touchmove', function(event) {{
-                if (event.touches && event.touches.length) {{
+                if (!window.PointerEvent && event.touches && event.touches.length) {{
                     const touch = event.touches[0];
-                    activateFromPoint(touch.clientX, touch.clientY, 520);
+                    queueActivateFromPoint(touch.clientX, touch.clientY, 440);
                 }}
             }}, {{ passive: true }});
         }}

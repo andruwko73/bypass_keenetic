@@ -980,8 +980,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             pointer-events:none;
             border-radius:inherit;
             background:
-                radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.42), rgba(138,247,238,.18) 24%, rgba(229,189,115,.08) 38%, transparent 68%),
-                linear-gradient(115deg, transparent 0 28%, rgba(255,255,255,.14) 42%, transparent 58% 100%);
+                radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.18), rgba(138,247,238,.07) 24%, transparent 58%),
+                linear-gradient(115deg, transparent 0 30%, rgba(255,255,255,.08) 46%, transparent 62% 100%);
             opacity:0;
             transition:opacity .18s ease;
         }
@@ -993,8 +993,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             position:fixed;
             left:0;
             top:0;
-            width:82px;
-            height:82px;
+            width:58px;
+            height:58px;
             pointer-events:none;
             border-radius:999px;
             z-index:70;
@@ -1002,17 +1002,17 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             opacity:0;
             transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0) scale(.82);
             background:
-                radial-gradient(circle at 34% 24%, rgba(255,255,255,.94) 0 5px, rgba(255,255,255,.44) 19%, rgba(138,247,238,.26) 45%, rgba(255,255,255,.1) 73%),
-                linear-gradient(135deg, rgba(255,255,255,.34), rgba(138,247,238,.12));
-            border:1px solid rgba(236,255,253,.7);
+                radial-gradient(circle at 34% 24%, rgba(255,255,255,.48) 0 3px, rgba(255,255,255,.14) 20%, rgba(255,255,255,.04) 44%, transparent 72%),
+                radial-gradient(circle at 58% 62%, rgba(138,247,238,.09), transparent 58%);
+            border:1px solid rgba(236,255,253,.46);
             box-shadow:
-                inset 0 1px 2px rgba(255,255,255,.84),
-                inset 0 -15px 24px rgba(7,20,29,.32),
-                0 10px 28px rgba(0,0,0,.34),
-                0 0 32px rgba(138,247,238,.3);
-            backdrop-filter:blur(4px) saturate(220%) brightness(1.26);
-            -webkit-backdrop-filter:blur(4px) saturate(220%) brightness(1.26);
-            transition:opacity .16s ease, transform .22s cubic-bezier(.2,.85,.2,1);
+                inset 0 1px 1px rgba(255,255,255,.48),
+                inset 0 -8px 14px rgba(7,20,29,.16),
+                0 4px 14px rgba(0,0,0,.2),
+                0 0 18px rgba(138,247,238,.16);
+            backdrop-filter:saturate(145%) brightness(1.08);
+            -webkit-backdrop-filter:saturate(145%) brightness(1.08);
+            transition:opacity .12s ease;
             will-change:transform,opacity;
         }
         [data-theme="glass"] .liquid-global-lens{display:block;}
@@ -1058,7 +1058,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
-            [data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}
+            [data-theme="glass"] .liquid-global-lens{width:54px;height:54px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

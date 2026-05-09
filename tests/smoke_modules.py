@@ -1074,6 +1074,9 @@ def test_web_template_scripts_helpers():
     assert 'function setupLiquidPointer()' in scripts
     assert 'liquid-global-lens' in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
+    assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
+    assert 'function cancelQueuedLiquidMove()' in scripts
+    assert 'window.requestAnimationFrame' in scripts
     assert 'function hideActionMessage()' in scripts
     assert 'function scheduleActionMessageHide(delayMs)' in scripts
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
