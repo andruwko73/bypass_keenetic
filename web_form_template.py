@@ -49,13 +49,21 @@ def render_web_form(
     quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
     pool_probe_async_attr = ' data-async-action="pool-probe"' if enable_async_forms else ''
     csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
-    start_button_block = ''
+    quick_start_forms = []
     if start_button_label:
-        start_button_block = f'''
-                            <form method="post" action="/start"{start_form_async_attr}>
-                                {csrf_input_html}
-                                <button type="submit">{html.escape(start_button_label)}</button>
-                            </form>'''
+        quick_start_forms.append(f'''<form method="post" action="/start"{start_form_async_attr}>
+                                    {csrf_input_html}
+                                    <button type="submit">{html.escape(start_button_label)}</button>
+                                </form>''')
+    quick_start_forms.append(f'''<form method="post" action="/command" data-async-action="command" data-confirm-title="Обновить до последнего релиза?" data-confirm-message="Код и служебные файлы будут обновлены без сброса ключей, пулов и списков.">
+                                    {csrf_input_html}
+                                    <input type="hidden" name="command" value="update">
+                                    <button type="submit">Обновить до последнего релиза</button>
+                                </form>''')
+    quick_start_block = f'''
+                            <div class="status-card-actions quick-start-actions">
+                                {''.join(quick_start_forms)}
+                            </div>'''
     quick_key_note = (
         'Быстрое редактирование активного ключа. Полное управление пулом находится во вкладке "Ключи".'
         if enable_key_pool else
@@ -189,7 +197,7 @@ def render_web_form(
                                     <p class="status-note">{html.escape(quick_start_note)}</p>
                                 </div>
                             </div>
-                            {start_button_block}
+                            {quick_start_block}
                         </div>
                     </div>
                     <div class="overview-service-grid">

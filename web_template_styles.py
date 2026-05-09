@@ -303,6 +303,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .status-note{font-size:12px;line-height:1.35;}
         .status-card .outline-button,.status-card form{margin-top:auto;}
         .status-card-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:auto;}
+        .quick-start-actions{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));}
         .status-card-actions form{display:block;margin:0;}
         .status-card-actions button{width:100%;min-width:0;margin-top:0;}
         .overview-service-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px;}

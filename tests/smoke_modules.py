@@ -1090,6 +1090,10 @@ def test_web_form_template_smoke():
     assert 'tg-icon' in page
     assert 'app-mode-toggle-button' in page
     assert 'service-command-grid' in page
+    assert 'quick-start-actions' in page
+    assert 'value="update"' in page
+    assert 'Обновить до последнего релиза' in page
+    assert 'data-confirm-title="Обновить до последнего релиза?' in page
     assert 'Локальная панель управления обходом на роутере' in page
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
     assert 'Переустановка компонентов' not in page
@@ -1137,6 +1141,7 @@ def test_web_form_template_smoke():
     )
     assert 'action="/start"' not in web_only_page
     assert 'Telegram отключ' not in web_only_page
+    assert 'value="update"' in web_only_page
 
 
 def test_telegram_pool_ui():
