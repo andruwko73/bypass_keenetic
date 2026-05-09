@@ -1047,8 +1047,14 @@ def test_web_template_styles_helpers():
     assert '@media (prefers-reduced-motion: reduce)' in styles
     assert '@media (prefers-contrast: more)' in styles
     assert '[data-liquid]::before' in styles
+    assert '[data-liquid]::after' in styles
+    assert '[data-liquid].liquid-active{' in styles
+    assert 'radial-gradient(circle at var(--mx, 50%) var(--my, 50%)' in styles
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
+    assert '.liquid-global-lens::before' in styles
+    assert '--lsx' in styles
+    assert 'backdrop-filter:blur(1.4px) saturate(165%) contrast(1.05) brightness(1.08)' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:56px;height:56px;}' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
@@ -1075,6 +1081,9 @@ def test_web_template_scripts_helpers():
     assert 'function setupLiquidPointer()' in scripts
     assert 'liquid-global-lens' in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
+    assert 'lastLensPoint' in scripts
+    assert "globalLens.style.setProperty('--lr'" in scripts
+    assert "globalLens.style.setProperty('--lsx'" in scripts
     assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
     assert 'function cancelQueuedLiquidMove()' in scripts
     assert 'window.requestAnimationFrame' in scripts

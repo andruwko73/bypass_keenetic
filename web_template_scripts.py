@@ -127,6 +127,7 @@ def render_web_scripts(
             let lensTimer = null;
             let liquidMoveFrame = 0;
             let pendingLiquidMove = null;
+            let lastLensPoint = null;
             const globalLens = document.createElement('div');
             globalLens.className = 'liquid-global-lens';
             globalLens.setAttribute('aria-hidden', 'true');
@@ -143,6 +144,10 @@ def render_web_scripts(
                 }}
                 lensTimer = window.setTimeout(function() {{
                     globalLens.classList.remove('liquid-global-lens-active');
+                    globalLens.style.removeProperty('--lr');
+                    globalLens.style.removeProperty('--lsx');
+                    globalLens.style.removeProperty('--lsy');
+                    lastLensPoint = null;
                 }}, typeof delay === 'number' ? delay : 180);
             }}
 
@@ -155,6 +160,26 @@ def render_web_scripts(
                     clearTimeout(lensTimer);
                     lensTimer = null;
                 }}
+                const now = window.performance ? window.performance.now() : Date.now();
+                if (lastLensPoint) {{
+                    const dx = clientX - lastLensPoint.x;
+                    const dy = clientY - lastLensPoint.y;
+                    const dt = Math.max(now - lastLensPoint.t, 16);
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const speed = Math.min(distance / dt, 1.8);
+                    const stretch = 1 + Math.min(speed * 0.13, 0.18);
+                    const squeeze = 1 - Math.min(speed * 0.045, 0.06);
+                    if (distance > 0.5) {{
+                        globalLens.style.setProperty('--lr', Math.atan2(dy, dx).toFixed(4) + 'rad');
+                    }}
+                    globalLens.style.setProperty('--lsx', stretch.toFixed(3));
+                    globalLens.style.setProperty('--lsy', squeeze.toFixed(3));
+                }} else {{
+                    globalLens.style.setProperty('--lr', '0rad');
+                    globalLens.style.setProperty('--lsx', '1');
+                    globalLens.style.setProperty('--lsy', '1');
+                }}
+                lastLensPoint = {{ x: clientX, y: clientY, t: now }};
                 globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px');
                 globalLens.style.setProperty('--ly', clientY.toFixed(1) + 'px');
                 globalLens.classList.add('liquid-global-lens-active');
