@@ -1128,6 +1128,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
             [data-theme="glass"] .liquid-global-lens{width:114px;height:114px;}
+            [data-theme="glass"] .liquid-global-lens-active::before{animation:none;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

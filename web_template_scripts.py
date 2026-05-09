@@ -129,9 +129,6 @@ def render_web_scripts(
             let liquidMoveFrame = 0;
             let pendingLiquidMove = null;
             let lastLensPoint = null;
-            let lensTarget = null;
-            let lensCurrent = null;
-            let lensRenderFrame = 0;
             const globalLens = document.createElement('div');
             globalLens.className = 'liquid-global-lens';
             globalLens.setAttribute('aria-hidden', 'true');
@@ -151,46 +148,8 @@ def render_web_scripts(
                     globalLens.style.removeProperty('--lr');
                     globalLens.style.removeProperty('--lsx');
                     globalLens.style.removeProperty('--lsy');
-                    lensTarget = null;
-                    lensCurrent = null;
-                    if (lensRenderFrame) {{
-                        window.cancelAnimationFrame(lensRenderFrame);
-                        lensRenderFrame = 0;
-                    }}
                     lastLensPoint = null;
                 }}, typeof delay === 'number' ? delay : 180);
-            }}
-
-            function renderLiquidLens() {{
-                lensRenderFrame = 0;
-                if (!lensTarget || !glassThemeActive() || !globalLens.classList.contains('liquid-global-lens-active')) {{
-                    return;
-                }}
-                if (!lensCurrent) {{
-                    lensCurrent = {{ x: lensTarget.x, y: lensTarget.y }};
-                }}
-                const dx = lensTarget.x - lensCurrent.x;
-                const dy = lensTarget.y - lensCurrent.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                const follow = distance > 90 ? 0.68 : 0.52;
-                if (distance < 0.45) {{
-                    lensCurrent.x = lensTarget.x;
-                    lensCurrent.y = lensTarget.y;
-                }} else {{
-                    lensCurrent.x += dx * follow;
-                    lensCurrent.y += dy * follow;
-                }}
-                globalLens.style.setProperty('--lx', lensCurrent.x.toFixed(1) + 'px');
-                globalLens.style.setProperty('--ly', lensCurrent.y.toFixed(1) + 'px');
-                if (Math.abs(lensTarget.x - lensCurrent.x) > 0.45 || Math.abs(lensTarget.y - lensCurrent.y) > 0.45) {{
-                    lensRenderFrame = window.requestAnimationFrame(renderLiquidLens);
-                }}
-            }}
-
-            function queueLiquidLensRender() {{
-                if (!lensRenderFrame) {{
-                    lensRenderFrame = window.requestAnimationFrame(renderLiquidLens);
-                }}
             }}
 
             function moveGlobalLens(clientX, clientY, holdMs) {{
@@ -222,14 +181,9 @@ def render_web_scripts(
                     globalLens.style.setProperty('--lsy', '1');
                 }}
                 lastLensPoint = {{ x: clientX, y: clientY, t: now }};
-                lensTarget = {{ x: clientX, y: clientY }};
-                if (!lensCurrent) {{
-                    lensCurrent = {{ x: clientX, y: clientY }};
-                    globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px');
-                    globalLens.style.setProperty('--ly', clientY.toFixed(1) + 'px');
-                }}
+                globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px');
+                globalLens.style.setProperty('--ly', clientY.toFixed(1) + 'px');
                 globalLens.classList.add('liquid-global-lens-active');
-                queueLiquidLensRender();
                 lensTimer = window.setTimeout(function() {{
                     hideGlobalLens(160);
                 }}, holdMs || 420);

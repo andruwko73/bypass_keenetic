@@ -1091,9 +1091,9 @@ def test_web_template_scripts_helpers():
     assert 'lastLensPoint' in scripts
     assert "globalLens.style.setProperty('--lr'" in scripts
     assert "globalLens.style.setProperty('--lsx'" in scripts
-    assert 'lensTarget' in scripts
-    assert 'function renderLiquidLens()' in scripts
-    assert 'function queueLiquidLensRender()' in scripts
+    assert 'lensTarget' not in scripts
+    assert 'function renderLiquidLens()' not in scripts
+    assert "globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px')" in scripts
     assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
     assert 'function cancelQueuedLiquidMove()' in scripts
     assert 'window.requestAnimationFrame' in scripts
