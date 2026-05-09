@@ -134,9 +134,22 @@ def render_web_form(
                     <span>{html.escape(mode_toggle_label)}</span>
                     <span>{html.escape(current_mode_label)}</span>
                 </button>
-                <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Переключить тему">
-                    <span id="theme-toggle-label">Темная тема</span>
-                </button>
+                <div class="theme-control">
+                    <button type="button" id="theme-toggle-button" class="theme-toggle" onclick="toggleThemePicker()" title="Выбрать тему интерфейса">
+                        <span>Тема:</span>
+                        <span id="theme-toggle-label">Темная</span>
+                    </button>
+                    <div id="theme-picker" class="hero-popover mode-picker theme-picker hidden">
+                        <div class="mode-picker-form">
+                            <span class="mode-picker-label">Оформление интерфейса</span>
+                            <div class="mode-choice-grid">
+                                <button type="button" class="mode-choice" data-theme-choice="dark" onclick="setTheme('dark')"><span>Темная</span></button>
+                                <button type="button" class="mode-choice" data-theme-choice="light" onclick="setTheme('light')"><span>Светлая</span></button>
+                                <button type="button" class="mode-choice" data-theme-choice="glass" onclick="setTheme('glass')"><span>Liquid Glass</span></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_VERSION_LABEL)}</span>
                 {mode_picker_block}
             </div>

@@ -1041,6 +1041,12 @@ def test_web_template_styles_helpers():
     assert ':root{' in styles
     assert '.app-shell' in styles
     assert 'tg-icon' in styles
+    assert '[data-theme="glass"]' in styles
+    assert '--glass-blur' in styles
+    assert '@supports not ((backdrop-filter:blur(1px))' in styles
+    assert '@media (prefers-reduced-motion: reduce)' in styles
+    assert '@media (prefers-contrast: more)' in styles
+    assert '[data-liquid]::before' in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
 
@@ -1060,6 +1066,10 @@ def test_web_template_scripts_helpers():
     assert 'const INITIAL_STATUS_PENDING = false;' in scripts
     assert 'const ENABLE_KEY_POOL = false;' in scripts
     assert "const CSRF_TOKEN = 'token';" in scripts
+    assert "glass: 'Liquid Glass'" in scripts
+    assert 'function toggleThemePicker()' in scripts
+    assert 'function setupLiquidPointer()' in scripts
+    assert "localStorage.setItem('router-theme', nextTheme);" in scripts
     assert 'function setupAsyncForms' in scripts
     assert "formData.set('confirm_switch', 'yes');" in scripts
     assert '{{' not in scripts
@@ -1110,6 +1120,9 @@ def test_web_form_template_smoke():
     assert '.app-shell' in page
     assert 'tg-icon' in page
     assert 'app-mode-toggle-button' in page
+    assert 'theme-picker' in page
+    assert 'data-theme-choice="glass"' in page
+    assert 'Liquid Glass' in page
     assert 'service-command-grid' in page
     assert 'quick-start-actions' in page
     assert 'value="update"' in page

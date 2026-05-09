@@ -43,20 +43,117 @@ def render_web_scripts(
         let statusPollUntil = 0;
         let commandPollTimer = null;
 
+        const THEME_LABELS = {{
+            dark: 'Темная',
+            light: 'Светлая',
+            glass: 'Liquid Glass'
+        }};
+
+        function normalizeTheme(value) {{
+            return Object.prototype.hasOwnProperty.call(THEME_LABELS, value) ? value : 'dark';
+        }}
+
+        function updateThemeControls(theme) {{
+            const currentTheme = normalizeTheme(theme || document.documentElement.getAttribute('data-theme'));
+            const label = document.getElementById('theme-toggle-label');
+            if (label) {{
+                label.textContent = THEME_LABELS[currentTheme];
+            }}
+            document.querySelectorAll('[data-theme-choice]').forEach(function(button) {{
+                button.classList.toggle('active', button.dataset.themeChoice === currentTheme);
+            }});
+        }}
+
         (function() {{
-            const savedTheme = localStorage.getItem('router-theme');
-            const theme = savedTheme === 'light' ? 'light' : 'dark';
+            const theme = normalizeTheme(localStorage.getItem('router-theme'));
             document.documentElement.setAttribute('data-theme', theme);
         }})();
 
-        function toggleTheme() {{
-            const root = document.documentElement;
-            const nextTheme = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-            root.setAttribute('data-theme', nextTheme);
+        function setTheme(theme) {{
+            const nextTheme = normalizeTheme(theme);
+            document.documentElement.setAttribute('data-theme', nextTheme);
             localStorage.setItem('router-theme', nextTheme);
-            const label = document.getElementById('theme-toggle-label');
-            if (label) {{
-                label.textContent = nextTheme === 'light' ? 'Светлая тема' : 'Темная тема';
+            updateThemeControls(nextTheme);
+            const picker = document.getElementById('theme-picker');
+            if (picker) {{
+                picker.classList.add('hidden');
+            }}
+        }}
+
+        function toggleTheme() {{
+            const currentTheme = normalizeTheme(document.documentElement.getAttribute('data-theme'));
+            const order = ['dark', 'light', 'glass'];
+            const nextTheme = order[(order.indexOf(currentTheme) + 1) % order.length];
+            setTheme(nextTheme);
+        }}
+
+        function toggleThemePicker() {{
+            const picker = document.getElementById('theme-picker');
+            if (!picker) {{
+                return;
+            }}
+            const modePicker = document.getElementById('mode-picker');
+            if (modePicker) {{
+                modePicker.classList.add('hidden');
+            }}
+            const appPicker = document.getElementById('app-mode-picker');
+            if (appPicker) {{
+                appPicker.classList.add('hidden');
+            }}
+            picker.classList.toggle('hidden');
+            updateThemeControls();
+        }}
+
+        function setupLiquidPointer() {{
+            const selectors = [
+                'button',
+                '.nav-item',
+                '.seg-tab',
+                '.subtab',
+                '.api-pill',
+                '.version-badge',
+                '.mode-choice',
+                '.theme-toggle',
+                '.mode-toggle'
+            ].join(',');
+            function attach(element) {{
+                if (!element || element.dataset.liquidReady === '1') {{
+                    return;
+                }}
+                element.dataset.liquid = 'true';
+                element.dataset.liquidReady = '1';
+                element.addEventListener('pointermove', function(event) {{
+                    const rect = element.getBoundingClientRect();
+                    if (!rect.width || !rect.height) {{
+                        return;
+                    }}
+                    element.style.setProperty('--mx', (((event.clientX - rect.left) / rect.width) * 100).toFixed(2) + '%');
+                    element.style.setProperty('--my', (((event.clientY - rect.top) / rect.height) * 100).toFixed(2) + '%');
+                }});
+                element.addEventListener('pointerleave', function() {{
+                    element.style.removeProperty('--mx');
+                    element.style.removeProperty('--my');
+                }});
+            }}
+            function scan(root) {{
+                const scope = root && root.querySelectorAll ? root : document;
+                scope.querySelectorAll(selectors).forEach(attach);
+                if (root && root.matches && root.matches(selectors)) {{
+                    attach(root);
+                }}
+            }}
+            scan(document);
+            if (window.MutationObserver) {{
+                const observer = new MutationObserver(function(records) {{
+                    records.forEach(function(record) {{
+                        record.addedNodes.forEach(function(node) {{
+                            if (node.nodeType === 1) {{
+                                scan(node);
+                            }}
+                        }});
+                    }});
+                }});
+                observer.observe(document.body, {{ childList: true, subtree: true }});
             }}
         }}
 
@@ -69,6 +166,10 @@ def render_web_scripts(
             if (appPicker) {{
                 appPicker.classList.add('hidden');
             }}
+            const themePicker = document.getElementById('theme-picker');
+            if (themePicker) {{
+                themePicker.classList.add('hidden');
+            }}
             picker.classList.toggle('hidden');
         }}
 
@@ -80,6 +181,10 @@ def render_web_scripts(
             const modePicker = document.getElementById('mode-picker');
             if (modePicker) {{
                 modePicker.classList.add('hidden');
+            }}
+            const themePicker = document.getElementById('theme-picker');
+            if (themePicker) {{
+                themePicker.classList.add('hidden');
             }}
             picker.classList.toggle('hidden');
         }}
@@ -872,10 +977,7 @@ def render_web_scripts(
 
         document.addEventListener('DOMContentLoaded', function() {{
             const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-            const label = document.getElementById('theme-toggle-label');
-            if (label) {{
-                label.textContent = currentTheme === 'light' ? 'Светлая тема' : 'Темная тема';
-            }}
+            updateThemeControls(currentTheme);
             document.addEventListener('click', function(event) {{
                 const picker = document.getElementById('mode-picker');
                 const toggle = document.getElementById('mode-toggle-button');
@@ -887,6 +989,11 @@ def render_web_scripts(
                 if (appPicker && appToggle && !appPicker.classList.contains('hidden') && !appPicker.contains(event.target) && !appToggle.contains(event.target)) {{
                     appPicker.classList.add('hidden');
                 }}
+                const themePicker = document.getElementById('theme-picker');
+                const themeToggle = document.getElementById('theme-toggle-button');
+                if (themePicker && themeToggle && !themePicker.classList.contains('hidden') && !themePicker.contains(event.target) && !themeToggle.contains(event.target)) {{
+                    themePicker.classList.add('hidden');
+                }}
             }});
             document.addEventListener('visibilitychange', function() {{
                 if (!document.hidden) {{
@@ -897,6 +1004,7 @@ def render_web_scripts(
             setupSegmentedTabs('.protocol-tab', '[data-protocol-panel]', 'data-protocol-target', 'data-protocol-panel', 'router-active-protocol');
             setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
             setupProtocolSubtabs();
+            setupLiquidPointer();
             setupAsyncForms();
             if (INITIAL_STATUS_PENDING) {{
                 scheduleStatusPolling(POOL_PROBE_POLL_EXTENSION_MS);
