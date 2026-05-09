@@ -39,7 +39,6 @@ def render_web_form(
     topbar_status_text,
     unblock_panels_html,
     unblock_tabs_html,
-    update_buttons_html,
     enable_async_forms=True,
     enable_custom_checks=True,
     enable_key_pool=True,
@@ -123,12 +122,7 @@ def render_web_form(
                     <span id="theme-toggle-label">Темная тема</span>
                 </button>
                 <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_VERSION_LABEL)}</span>
-                <button type="button" id="app-mode-toggle-button" class="mode-toggle" onclick="toggleAppModePicker()">
-                    <span>Режим:</span>
-                    <span id="app-mode-label">{html.escape(app_runtime_mode_label)}</span>
-                </button>
                 {mode_picker_block}
-                {app_runtime_mode_picker_block}
             </div>
         </header>
         {message_block}
@@ -194,12 +188,15 @@ def render_web_form(
                         </div>
                     </div>
                     <div class="overview-service-grid">
-                        <section class="panel service-panel">
-                            <h3>Переустановка компонентов</h3>
-                            <div class="command-grid">{update_buttons_html}</div>
-                        </section>
-                        <section class="panel service-panel">
+                        <section class="panel service-panel service-panel-wide">
                             <h3>Сервисные команды</h3>
+                            <div class="app-mode-control">
+                                <button type="button" id="app-mode-toggle-button" class="mode-toggle app-mode-command" onclick="toggleAppModePicker()">
+                                    <span>Режим работы программы:</span>
+                                    <span id="app-mode-label">{html.escape(app_runtime_mode_label)}</span>
+                                </button>
+                                {app_runtime_mode_picker_block}
+                            </div>
                             <div class="command-grid">{command_buttons_html}</div>
                         </section>
                     </div>

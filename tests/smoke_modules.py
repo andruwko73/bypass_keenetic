@@ -868,10 +868,14 @@ def test_web_form_blocks_helpers():
     assert 'mode-choice-grid' in button_picker
     assert 'csrf_token' in button_picker
     assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
-    update_buttons = web_form_blocks.render_update_buttons('<input name="csrf_token">')
-    assert 'value="update"' in update_buttons
-    assert 'update_independent' not in update_buttons
-    assert 'data-confirm-title=' in update_buttons
+    app_picker = web_form_blocks.render_app_runtime_mode_picker(
+        'advanced',
+        [('advanced', 'Сложный', 'интерфейс с пулом ключей и Telegram-бот')],
+        csrf_input_html='<input name="csrf_token">',
+    )
+    assert 'Режим работы программы' in app_picker
+    assert 'data-confirm-title=' in app_picker
+    assert 'интерфейс с пулом ключей и Telegram-бот' in app_picker
     command_buttons = web_form_blocks.render_command_button_forms(
         [('restart_services', 'Restart', '', 'Confirm?', 'Do it?')],
         '<input name="csrf_token">',
@@ -1077,13 +1081,14 @@ def test_web_form_template_smoke():
         topbar_status_text='ok',
         unblock_panels_html='',
         unblock_tabs_html='',
-        update_buttons_html='',
         enable_key_pool=False,
         enable_custom_checks=False,
     )
     assert ':root{' in page
     assert '.app-shell' in page
     assert 'tg-icon' in page
+    assert 'app-mode-toggle-button' in page
+    assert 'Переустановка компонентов' not in page
     assert '{TELEGRAM_SVG_B64}' not in page
     assert '<script>' in page
 

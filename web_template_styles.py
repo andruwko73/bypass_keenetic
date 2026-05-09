@@ -123,6 +123,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 .section-title{margin:0 0 6px;font-size:24px;color:var(--text);}
                 .section-subtitle{margin:0;color:var(--muted);overflow-wrap:anywhere;word-break:break-word;}
                 .start-card{display:flex;flex-direction:column;justify-content:space-between;}
+                .app-mode-control{position:relative;margin-top:12px;}
+                .app-mode-command{width:100%;justify-content:space-between;gap:12px;}
+                .app-mode-control .app-mode-picker{top:calc(100% + 8px);left:0;right:auto;width:min(360px,100%);min-width:min(360px,100%);}
                 .command-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px;}
                 .command-grid form{min-width:0;}
                 .command-grid button{width:100%;height:var(--control-height);min-height:var(--control-height);display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:0 12px;}
@@ -227,6 +230,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .pool-add-form,.pool-subscribe-form,.list-editor-form{margin-top:0;}
         .overview-service-grid,.service-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
         .overview-service-grid{margin-top:12px;}
+        .service-panel-wide{grid-column:1 / -1;}
         .service-panel{border-radius:8px;}
         .service-panel h3{margin:0 0 12px;font-size:18px;}
         .key-status-icons img,.pool-service-cell img,.status-value img,.api-pill img{width:20px!important;height:20px!important;}

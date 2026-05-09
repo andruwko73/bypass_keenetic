@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.511, последнее изменение: 09.05.2026
+#  Файл: bot.py, Версия v1.512, последнее изменение: 09.05.2026
 
 import subprocess
 import os
@@ -406,8 +406,8 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/main'
 APP_BRANCH_DESCRIPTION = 'единая codex-ветка'
-APP_VERSION_COUNTER = '1.511'
-APP_VERSION_LABEL = f'v{APP_VERSION_COUNTER}'
+APP_VERSION_COUNTER = '1.512'
+APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
 APP_START_IDLE_LABEL = 'Запустить бота'
@@ -417,9 +417,9 @@ APP_QUICK_START_NOTE = 'После установки ключей можно с
 APP_PROXY_USER_LABEL = 'Бот'
 APP_RUNTIME_MODE_FILE = '/opt/etc/bot_app_mode'
 APP_RUNTIME_MODES = (
-    ('simple', 'Простой', 'интерфейс и Telegram-бот как codex/main-v1'),
-    ('advanced', 'Сложный', 'полный интерфейс и Telegram-бот как codex/independent-v1'),
-    ('web_only', 'Web only', 'полный веб-интерфейс без Telegram polling'),
+    ('simple', 'Простой', 'интерфейс и Telegram-бот'),
+    ('advanced', 'Сложный', 'интерфейс с пулом ключей и Telegram-бот'),
+    ('web_only', 'Web only', 'интерфейс с пулом ключей без Telegram-бота'),
 )
 APP_RUNTIME_MODE_DATA = {
     value: {'label': label, 'description': description}
@@ -3206,7 +3206,7 @@ def _is_transient_telegram_api_failure(status_text):
 
 def _telegram_state_label():
     if not _app_mode_telegram_enabled():
-        return 'Web only: Telegram polling отключен'
+        return 'Web only: Telegram-бот отключен'
     return 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
 
 
@@ -3584,7 +3584,7 @@ def _start_web_bot_action():
         bot_ready = False
         _save_bot_autostart(False)
         _invalidate_web_status_cache()
-        return 'Сейчас выбран режим Web only. Telegram polling отключен.'
+        return 'Сейчас выбран режим Web only. Telegram-бот отключен.'
     bot_ready = True
     _save_bot_autostart(True)
     _invalidate_web_status_cache()
@@ -3803,7 +3803,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         quick_key = form_basics['quick_key']
 
         dns_override_active = _dns_override_enabled()
-        update_buttons_html = web_form_blocks.render_update_buttons(csrf_input_html)
         command_buttons_html = web_form_blocks.render_router_command_buttons(csrf_input_html, dns_override_active)
 
         unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
@@ -3822,7 +3821,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                               (APP_START_REPEAT_LABEL if bot_ready else APP_START_IDLE_LABEL))
         mode_toggle_label = f'{APP_MODE_LABEL}:'
         quick_start_note = (
-            'В режиме Web only Telegram polling отключен; управление доступно через веб-интерфейс.'
+            'В режиме Web only Telegram-бот отключен; управление доступно через веб-интерфейс.'
             if not telegram_enabled else APP_QUICK_START_NOTE
         )
 
@@ -3863,7 +3862,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             topbar_status_text=pool_view['topbar_status_text'],
             unblock_panels_html=unblock_panels_html,
             unblock_tabs_html=unblock_tabs_html,
-            update_buttons_html=update_buttons_html,
             enable_custom_checks=pool_enabled,
             enable_key_pool=pool_enabled,
         )

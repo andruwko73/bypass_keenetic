@@ -176,33 +176,31 @@ def render_button_mode_picker(active_mode, *, none_label='Без прокси', 
 
 
 def render_app_runtime_mode_picker(active_mode, modes, csrf_input_html=''):
-    mode_buttons_html = ''.join(
-        f'''<form method="post" action="/set_app_mode" data-async-action="set-app-mode">
+    def render_mode_form(value, label, description):
+        confirm_attrs = _confirm_attrs(
+            f'Переключить режим на {label}?',
+            'Сервис может перезапуститься, страница обновится. Ключи и списки сохранятся.',
+        )
+        active_class = ' active' if active_mode == value else ''
+        return f'''<form method="post" action="/set_app_mode" data-async-action="set-app-mode"{confirm_attrs}>
         {csrf_input_html}
         <input type="hidden" name="app_mode" value="{html.escape(value)}">
-        <button type="submit" class="mode-choice{' active' if active_mode == value else ''}" data-app-mode-value="{html.escape(value)}">
+        <button type="submit" class="mode-choice{active_class}" data-app-mode-value="{html.escape(value)}">
             <span>{html.escape(label)}</span>
             <small>{html.escape(description)}</small>
         </button>
     </form>'''
+
+    mode_buttons_html = ''.join(
+        render_mode_form(value, label, description)
         for value, label, description in modes
     )
     return f'''<div id="app-mode-picker" class="hero-popover mode-picker app-mode-picker hidden">
     <div class="mode-picker-form">
-        <span class="mode-picker-label">Вариант программы</span>
+        <span class="mode-picker-label">Режим работы программы</span>
         <div class="mode-choice-grid app-mode-choice-grid">{mode_buttons_html}</div>
     </div>
 </div>'''
-
-
-DEFAULT_UPDATE_COMMANDS = (
-    (
-        'update',
-        'Переустановить из форка без сброса',
-        'Переустановить из форка?',
-        'Код и служебные файлы будут обновлены без сброса сохраненных ключей и списков.',
-    ),
-)
 
 
 def _confirm_attrs(title='', message=''):
@@ -211,17 +209,6 @@ def _confirm_attrs(title='', message=''):
     return (
         f' data-confirm-title="{html.escape(title)}"'
         f' data-confirm-message="{html.escape(message)}"'
-    )
-
-
-def render_update_buttons(csrf_input_html, commands=DEFAULT_UPDATE_COMMANDS):
-    return ''.join(
-        f'''<form method="post" action="/command" data-async-action="command"{_confirm_attrs(confirm_title, confirm_message)}>
-                {csrf_input_html}
-                <input type="hidden" name="command" value="{html.escape(command)}">
-                <button type="submit">{html.escape(label)}</button>
-            </form>'''
-        for command, label, confirm_title, confirm_message in commands
     )
 
 
