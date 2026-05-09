@@ -342,6 +342,7 @@ def test_telegram_confirm_helpers():
     assert telegram_confirm.TELEGRAM_CONFIRM_LEVEL == 30
     assert telegram_confirm.telegram_is_confirm('✅ Подтвердить')
     assert telegram_confirm.telegram_is_cancel('Отмена')
+    assert 'Обновить до последнего релиза?' in telegram_confirm.telegram_confirm_prompt('update_main')
     assert 'Перезагрузить роутер?' in telegram_confirm.telegram_confirm_prompt('reboot')
 
 
@@ -412,6 +413,7 @@ def test_telegram_jobs_helpers():
 
 def test_telegram_install_ui_helpers():
     assert telegram_install_ui.install_action_for_text('🔰 Установка и удаление', include_web_only=True) == 'menu'
+    assert telegram_install_ui.install_action_for_text('⬆️ Обновить до последнего релиза', include_web_only=True) == 'update_main'
     assert telegram_install_ui.install_action_for_text('♻️ Установка и переустановка', include_web_only=True) == 'update_main'
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (ветка independent)', include_web_only=True) is None
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (без Telegram бота)', include_web_only=True) is None
@@ -875,7 +877,8 @@ def test_web_form_blocks_helpers():
     )
     assert 'Режим работы программы' in app_picker
     assert 'data-confirm-title=' in app_picker
-    assert 'интерфейс с пулом ключей и Telegram-бот' in app_picker
+    assert 'data-app-mode-value="advanced"' in app_picker
+    assert '<small>' not in app_picker
     command_buttons = web_form_blocks.render_command_button_forms(
         [('restart_services', 'Restart', '', 'Confirm?', 'Do it?')],
         '<input name="csrf_token">',

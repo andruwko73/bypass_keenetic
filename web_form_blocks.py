@@ -176,7 +176,7 @@ def render_button_mode_picker(active_mode, *, none_label='Без прокси', 
 
 
 def render_app_runtime_mode_picker(active_mode, modes, csrf_input_html=''):
-    def render_mode_form(value, label, description):
+    def render_mode_form(value, label, _description):
         confirm_attrs = _confirm_attrs(
             f'Переключить режим на {label}?',
             'Сервис может перезапуститься, страница обновится. Ключи и списки сохранятся.',
@@ -187,7 +187,6 @@ def render_app_runtime_mode_picker(active_mode, modes, csrf_input_html=''):
         <input type="hidden" name="app_mode" value="{html.escape(value)}">
         <button type="submit" class="mode-choice{active_class}" data-app-mode-value="{html.escape(value)}">
             <span>{html.escape(label)}</span>
-            <small>{html.escape(description)}</small>
         </button>
     </form>'''
 

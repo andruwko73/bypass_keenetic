@@ -209,10 +209,10 @@ def render_web_form(
                                         <span>Режим работы программы:</span>
                                         <span id="app-mode-label">{html.escape(app_runtime_mode_label)}</span>
                                     </button>
+                                    {app_runtime_mode_picker_block}
                                 </div>
                                 {command_buttons_html}
                             </div>
-                            {app_runtime_mode_picker_block}
                         </section>
                     </div>
                     <section class="panel overview-key-panel">
