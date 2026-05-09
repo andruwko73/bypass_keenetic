@@ -494,13 +494,15 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
         @media (max-width: 760px){
             :root{--control-height:38px;}
+            html,body{max-width:100%;overflow-x:hidden;}
             body{padding:10px 10px calc(128px + env(safe-area-inset-bottom, 0px));scroll-padding-bottom:calc(128px + env(safe-area-inset-bottom, 0px));}
                         .hero{padding:16px;border-radius:20px;}
             .topbar{position:static;align-items:stretch;flex-direction:column;padding:10px;}
             .app-shell,.topbar,.app-main,.app-view,.view-head,.status-card,.service-panel,.overview-key-panel,.mobile-nav{box-sizing:border-box;max-width:100%;}
             .topbar-actions{width:100%;display:grid;grid-template-columns:1fr 1fr;justify-content:stretch;gap:8px;}
-            .app-caption{display:grid;gap:2px;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
-            .app-caption strong{max-width:none;font-size:14px;overflow-wrap:anywhere;word-break:break-word;}
+            .app-caption{display:grid;gap:2px;width:100%;max-width:calc(100vw - 32px);min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
+            .app-caption strong,.app-branch{max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
+            .app-caption strong{font-size:14px;}
             .section-subtitle,.status-note,.status-value{overflow-wrap:anywhere;}
             .app-caption,.api-pill{grid-column:1 / -1;}
             .api-pill,.theme-toggle,.mode-toggle,.version-badge{width:100%;justify-content:center;max-width:none;text-align:center;}
