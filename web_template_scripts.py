@@ -111,6 +111,11 @@ def render_web_scripts(
                 return;
             }}
             document.body.dataset.liquidPointerReady = '1';
+            const coarsePointer = window.matchMedia && window.matchMedia('(hover: none), (pointer: coarse)').matches;
+            if (coarsePointer) {{
+                document.documentElement.classList.add('liquid-touch-static');
+                return;
+            }}
             const selectors = [
                 'button',
                 '.nav-item',

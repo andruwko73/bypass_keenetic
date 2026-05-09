@@ -1020,6 +1020,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             opacity:1;
             transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0) scale(1);
         }
+        [data-theme="glass"].liquid-touch-static [data-liquid]::before,
+        [data-theme="glass"].liquid-touch-static .liquid-global-lens{display:none!important;}
         @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
             [data-theme="glass"] .topbar,
             [data-theme="glass"] .side-nav,
@@ -1061,5 +1063,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             [data-theme="glass"] .liquid-global-lens{width:54px;height:54px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
+        }
+        @media (hover: none), (pointer: coarse){
+            [data-theme="glass"] [data-liquid]::before,
+            [data-theme="glass"] .liquid-global-lens{display:none!important;}
         }
 '''.replace('{TELEGRAM_SVG_B64}', str(TELEGRAM_SVG_B64 or ''))

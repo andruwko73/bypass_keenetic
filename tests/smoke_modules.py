@@ -1049,6 +1049,7 @@ def test_web_template_styles_helpers():
     assert '[data-liquid]::before' in styles
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
+    assert '@media (hover: none), (pointer: coarse)' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
@@ -1073,6 +1074,7 @@ def test_web_template_scripts_helpers():
     assert 'function toggleThemePicker()' in scripts
     assert 'function setupLiquidPointer()' in scripts
     assert 'liquid-global-lens' in scripts
+    assert 'liquid-touch-static' in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
     assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
     assert 'function cancelQueuedLiquidMove()' in scripts
