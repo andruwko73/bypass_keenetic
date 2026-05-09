@@ -1031,9 +1031,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             position:fixed;
             left:0;
             top:0;
-            --lr:0rad;
-            --lsx:.94;
-            --lsy:.94;
             width:132px;
             height:132px;
             pointer-events:none;
@@ -1042,7 +1039,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             display:none;
             opacity:0;
             overflow:hidden;
-            transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0) rotate(var(--lr)) scale(var(--lsx),var(--lsy));
+            transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0);
             background:rgba(255,255,255,.006);
             border:1px solid rgba(236,255,253,.42);
             box-shadow:
@@ -1065,28 +1062,19 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         .liquid-global-lens::before{
             background:
-                radial-gradient(circle at 30% 22%, rgba(255,255,255,.42) 0 3px, rgba(255,255,255,.11) 18%, transparent 48%),
-                radial-gradient(circle at 64% 70%, rgba(138,247,238,.075), transparent 60%),
-                conic-gradient(from 210deg, rgba(255,255,255,.28) 0 8%, transparent 15% 62%, rgba(255,255,255,.18) 69%, transparent 79% 100%);
-            transform:rotate(0deg);
-            transform-origin:center;
+                radial-gradient(circle at 24% 18%, rgba(255,255,255,.5) 0 4px, rgba(255,255,255,.14) 18%, transparent 48%),
+                radial-gradient(circle at 68% 74%, rgba(138,247,238,.035), transparent 64%),
+                linear-gradient(135deg, rgba(255,255,255,.24), transparent 34%, rgba(255,255,255,.08) 68%, transparent 100%);
         }
         .liquid-global-lens::after{
             inset:7px;
             border:1px solid rgba(255,255,255,.24);
-            box-shadow:inset 8px 7px 14px rgba(255,255,255,.11), inset -10px -12px 20px rgba(6,18,26,.1);
+            box-shadow:inset 12px 10px 18px rgba(255,255,255,.13), inset -14px -16px 24px rgba(6,18,26,.11);
             opacity:.72;
         }
         [data-theme="glass"] .liquid-global-lens{display:block;}
         [data-theme="glass"] .liquid-global-lens-active{
             opacity:1;
-        }
-        [data-theme="glass"] .liquid-global-lens-active::before{
-            animation:liquid-caustic 2.4s linear infinite;
-        }
-        @keyframes liquid-caustic{
-            from{transform:rotate(0deg);}
-            to{transform:rotate(360deg);}
         }
         @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
             [data-theme="glass"] .topbar,
@@ -1103,7 +1091,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         @media (prefers-reduced-motion: reduce){
             [data-theme="glass"] *,
             [data-theme="glass"] .hero-popover{transition:none!important;animation:none!important;}
-            [data-theme="glass"] .liquid-global-lens-active::before{animation:none!important;}
             [data-theme="glass"] button:hover,
             [data-theme="glass"] .mode-choice:hover,
             [data-theme="glass"] .seg-tab:hover,
@@ -1128,7 +1115,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
             [data-theme="glass"] .liquid-global-lens{width:114px;height:114px;}
-            [data-theme="glass"] .liquid-global-lens-active::before{animation:none;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

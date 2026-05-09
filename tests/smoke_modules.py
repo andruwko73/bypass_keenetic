@@ -1053,9 +1053,9 @@ def test_web_template_styles_helpers():
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
     assert '.liquid-global-lens::before' in styles
-    assert '@keyframes liquid-caustic' in styles
-    assert 'liquid-global-lens-active::before' in styles
-    assert '--lsx' in styles
+    assert '@keyframes liquid-caustic' not in styles
+    assert '--lsx' not in styles
+    assert 'radial-gradient(circle at 24% 18%' in styles
     assert 'backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12)' in styles
     assert 'background:rgba(255,255,255,.006)' in styles
     assert '[data-theme="glass"] .topbar-actions[data-liquid]' in styles
@@ -1088,9 +1088,9 @@ def test_web_template_scripts_helpers():
     assert 'data-liquid-group' in scripts
     assert ".hero-popover [data-liquid=\"true\"]" in scripts
     assert 'function moveGlobalLens(clientX, clientY, holdMs)' in scripts
-    assert 'lastLensPoint' in scripts
-    assert "globalLens.style.setProperty('--lr'" in scripts
-    assert "globalLens.style.setProperty('--lsx'" in scripts
+    assert 'lastLensPoint' not in scripts
+    assert "globalLens.style.setProperty('--lr'" not in scripts
+    assert "globalLens.style.setProperty('--lsx'" not in scripts
     assert 'lensTarget' not in scripts
     assert 'function renderLiquidLens()' not in scripts
     assert "globalLens.style.setProperty('--lx', clientX.toFixed(1) + 'px')" in scripts
