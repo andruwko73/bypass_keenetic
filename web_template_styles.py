@@ -502,7 +502,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .topbar-actions{width:100%;display:grid;grid-template-columns:1fr 1fr;justify-content:stretch;gap:8px;}
             .app-caption{display:grid;gap:2px;width:100%;max-width:calc(100vw - 32px);min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
             .app-caption strong,.app-branch{max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
-            .app-caption strong{font-size:14px;}
+            .app-caption strong{max-width:28ch;font-size:14px;line-height:1.18;}
             .section-subtitle,.status-note,.status-value{overflow-wrap:anywhere;}
             .app-caption,.api-pill{grid-column:1 / -1;}
             .api-pill,.theme-toggle,.mode-toggle,.version-badge{width:100%;justify-content:center;max-width:none;text-align:center;}
