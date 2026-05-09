@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.513, последнее изменение: 09.05.2026
+#  Файл: bot.py, Версия v1.514, последнее изменение: 09.05.2026
 
 import subprocess
 import os
@@ -406,7 +406,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'codex/main'
 APP_BRANCH_DESCRIPTION = 'единая codex-ветка'
-APP_VERSION_COUNTER = '1.513'
+APP_VERSION_COUNTER = '1.514'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'

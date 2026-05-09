@@ -110,7 +110,7 @@ def render_web_form(
         <header class="topbar">
             <div class="topbar-actions">
                 <div class="app-caption">
-                    <strong>Локальная панель управления обходом на роутере</strong>
+                    <strong>Панель обхода на роутере</strong>
                     <span class="app-branch">Ветка: {html.escape(APP_BRANCH_LABEL)} · {html.escape(APP_BRANCH_DESCRIPTION)}</span>
                 </div>
                 <span class="api-pill" id="web-api-pill">{html.escape(topbar_status_text)}</span>
