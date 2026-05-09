@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.522, последнее изменение: 09.05.2026
+#  Файл: bot.py, Версия v1.523, последнее изменение: 09.05.2026
 
 import subprocess
 import os
@@ -404,9 +404,9 @@ POOL_PROBE_TIMEOUTS = (
     POOL_PROBE_SINGLE_TIMEOUT_SECONDS, POOL_PROBE_BATCH_TIMEOUT_SECONDS,
 )
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
-APP_BRANCH_LABEL = 'codex/main'
-APP_BRANCH_DESCRIPTION = 'единая codex-ветка'
-APP_VERSION_COUNTER = '1.522'
+APP_BRANCH_LABEL = 'main'
+APP_BRANCH_DESCRIPTION = 'единая версия'
+APP_VERSION_COUNTER = '1.523'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -1384,7 +1384,7 @@ def _execute_confirmed_telegram_action(chat_id, action, reply_markup):
         'update_main': {
             'repo_owner': fork_repo_owner,
             'repo_name': fork_repo_name,
-            'branch': 'codex/main',
+            'branch': 'main',
             'message': (
                 f'Запускаю установку/переустановку из ветки main форка {fork_repo_owner}/{fork_repo_name} без сброса ключей и списков. '
                 'Обычно это занимает 1-3 минуты. Во время обновления бот может временно пропасть из сети, '
@@ -1567,7 +1567,7 @@ def _telegram_command_markup(menu_name):
     return _build_service_menu_markup() if menu_name == 'service' else _build_main_menu_markup()
 
 
-def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main'):
+def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
     try:
         return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
     except Exception as exc:
@@ -1580,7 +1580,7 @@ def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_na
     _remove_file(TELEGRAM_COMMAND_JOB_FILE)
 
 
-def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='codex/main'):
+def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
     return _telegram_start_background_command(
         job_file=TELEGRAM_COMMAND_JOB_FILE,
         action=action,
@@ -1618,7 +1618,7 @@ def _send_telegram_update_status(message, reply_markup):
 
 
 def _start_telegram_update_from_chat(chat_id, reply_markup, *, menu_name='service', repo_owner=None, repo_name=None,
-                                     branch='codex/main', start_message=None):
+                                     branch='main', start_message=None):
     repo_owner = repo_owner or fork_repo_owner
     repo_name = repo_name or fork_repo_name
     started, status_message = _start_telegram_background_command('-update', repo_owner, repo_name, chat_id, menu_name, branch=branch)
@@ -1692,7 +1692,7 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
     return result
 
 
-def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='codex/main'):
+def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main'):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
     direct_env = _repo_direct_fetch_env(DIRECT_FETCH_ENV_KEYS)
     progress_callback = None

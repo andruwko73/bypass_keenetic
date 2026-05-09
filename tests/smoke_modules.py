@@ -803,6 +803,9 @@ def test_repo_update_helpers():
     assert 'api.github.com' in url
     assert any('raw.githubusercontent.com' in call for call in session.calls)
     assert any('codeload.github.com' in call for call in session.calls)
+    assert any('/refs/tags/branch/name' in call for call in session.calls)
+    assert repo_update.download_repo_script.__defaults__ == ('main',)
+    assert telegram_jobs.start_background_command.__kwdefaults__['branch'] == 'main'
     assert repo_update.direct_fetch_env(('HTTP_PROXY',), {'HTTP_PROXY': 'x', 'keep': 'y'}) == {'keep': 'y'}
 
 

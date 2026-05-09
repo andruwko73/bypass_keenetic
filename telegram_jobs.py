@@ -43,7 +43,7 @@ def start_background_command(
     sys_executable,
     read_json_file,
     write_json_file,
-    branch='codex/main',
+    branch='main',
     stale_after=1800,
     now=None,
     popen=subprocess.Popen,

@@ -11,7 +11,7 @@
 # оригинальный репозиторий (tas-unn), пользовательский форк
 
 repo="andruwko73"
-REPO_REF="${REPO_REF:-codex/main}"
+REPO_REF="${REPO_REF:-main}"
 
 config_get() {
   key="$1"
@@ -337,15 +337,24 @@ prepare_update_archive() {
   archive_file="$archive_work/repo.tar.gz"
   mkdir -p "$archive_work" || return 1
 
-  archive_ref="$REPO_REF"
-  case "$archive_ref" in
+  archive_refs="$REPO_REF"
+  case "$REPO_REF" in
     refs/*) ;;
-    */*) archive_ref="refs/heads/$archive_ref" ;;
+    *) archive_refs="$REPO_REF refs/heads/$REPO_REF refs/tags/$REPO_REF" ;;
   esac
-  archive_url="https://codeload.github.com/${repo}/bypass_keenetic/tar.gz/${archive_ref}"
 
-  curl -fsSL --connect-timeout 8 --max-time 90 -o "$archive_file" "$archive_url" >/dev/null 2>&1 || return 1
-  tar -xzf "$archive_file" -C "$archive_work" >/dev/null 2>&1 || return 1
+  archive_ready=0
+  for archive_ref in $archive_refs; do
+    archive_url="https://codeload.github.com/${repo}/bypass_keenetic/tar.gz/${archive_ref}"
+    rm -f "$archive_file"
+    if curl -fsSL --connect-timeout 8 --max-time 90 -o "$archive_file" "$archive_url" >/dev/null 2>&1; then
+      if tar -xzf "$archive_file" -C "$archive_work" >/dev/null 2>&1; then
+        archive_ready=1
+        break
+      fi
+    fi
+  done
+  [ "$archive_ready" = "1" ] || return 1
   UPDATE_ARCHIVE_ROOT=$(find "$archive_work" -mindepth 1 -maxdepth 1 -type d | head -n1)
   [ -n "$UPDATE_ARCHIVE_ROOT" ] && [ -d "$UPDATE_ARCHIVE_ROOT" ] || return 1
   export UPDATE_ARCHIVE_ROOT

@@ -18,19 +18,33 @@ def fetch_remote_text(url, timeout=20):
     return response.text
 
 
+def _archive_ref_candidates(repo_ref):
+    yield repo_ref
+    if not repo_ref.startswith('refs/'):
+        yield f'refs/heads/{repo_ref}'
+        yield f'refs/tags/{repo_ref}'
+
+
 def download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, path):
-    archive_ref = repo_ref if '/' not in repo_ref else f'refs/heads/{repo_ref}'
-    archive_url = f'https://codeload.github.com/{repo_owner}/{repo_name}/tar.gz/{archive_ref}'
     suffix = '/' + path.strip('/')
-    with session.get(archive_url, stream=True, timeout=(10, 90)) as response:
-        response.raise_for_status()
-        response.raw.decode_content = True
-        with tarfile.open(fileobj=response.raw, mode='r|gz') as archive:
-            for member in archive:
-                if member.isfile() and member.name.endswith(suffix):
-                    extracted = archive.extractfile(member)
-                    if extracted is not None:
-                        return archive_url, extracted.read().decode('utf-8')
+    last_error = None
+    for archive_ref in _archive_ref_candidates(repo_ref):
+        archive_url = f'https://codeload.github.com/{repo_owner}/{repo_name}/tar.gz/{archive_ref}'
+        try:
+            with session.get(archive_url, stream=True, timeout=(10, 90)) as response:
+                response.raise_for_status()
+                response.raw.decode_content = True
+                with tarfile.open(fileobj=response.raw, mode='r|gz') as archive:
+                    for member in archive:
+                        if member.isfile() and member.name.endswith(suffix):
+                            extracted = archive.extractfile(member)
+                            if extracted is not None:
+                                return archive_url, extracted.read().decode('utf-8')
+        except Exception as exc:
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
     raise ValueError(f'GitHub archive did not contain {path}')
 
 
@@ -64,7 +78,7 @@ def download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
     return response.url, base64.b64decode(content).decode('utf-8')
 
 
-def download_repo_script(repo_owner, repo_name, branch='codex/main'):
+def download_repo_script(repo_owner, repo_name, branch='main'):
     session = requests.Session()
     session.trust_env = False
     url, script_text = download_repo_file_text(session, repo_owner, repo_name, branch, 'script.sh')
