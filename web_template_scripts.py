@@ -557,7 +557,7 @@ def render_web_scripts(
             }}, {{ passive: true }});
             document.addEventListener('touchend', function(event) {{
                 suppressLiquidFocus(500);
-                if (liquidTouchState && liquidTouchState.moved && !liquidTouchState.scrolled && event.changedTouches && event.changedTouches.length) {{
+                if (liquidTouchState && !liquidTouchState.scrolled && event.changedTouches && event.changedTouches.length) {{
                     const touch = event.changedTouches[0];
                     const heldMs = Date.now() - liquidTouchState.startTs;
                     if ((liquidTouchState.moved || heldMs >= 320) && applyLiquidAction(touch.clientX, touch.clientY)) {{
