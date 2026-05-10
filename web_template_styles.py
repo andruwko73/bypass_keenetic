@@ -959,6 +959,14 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             color:#f2fffe;
             box-shadow:0 12px 30px rgba(32,211,198,.12), inset 0 1px 0 rgba(255,255,255,.24);
         }
+        [data-theme="glass"] .mobile-nav .nav-item.active{
+            background:
+                linear-gradient(135deg, rgba(255,255,255,.1), rgba(138,247,238,.06)),
+                rgba(18,39,47,.46);
+            border-color:rgba(145,255,241,.38);
+            color:#e7fffd;
+            box-shadow:inset 0 -3px 0 rgba(138,247,238,.58), inset 0 1px 0 rgba(255,255,255,.18);
+        }
         [data-theme="glass"] input,
         [data-theme="glass"] textarea,
         [data-theme="glass"] select{
@@ -1038,6 +1046,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="glass"] [data-liquid].liquid-active::before{opacity:1;}
         [data-theme="glass"] [data-liquid]:focus-visible::after,
         [data-theme="glass"] [data-liquid].liquid-active::after{opacity:.72;}
+        [data-theme="glass"] [data-liquid].liquid-resetting::before,
+        [data-theme="glass"] [data-liquid].liquid-resetting::after{
+            opacity:0!important;
+            transition:none!important;
+        }
         @media (hover: hover){
             [data-theme="glass"] [data-liquid]:hover::before{opacity:1;}
             [data-theme="glass"] [data-liquid]:hover::after{opacity:.72;}

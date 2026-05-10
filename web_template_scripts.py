@@ -229,17 +229,27 @@ def render_web_scripts(
                     clearTimeout(previousTimer);
                 }}
                 if (delay === 0) {{
+                    element.classList.add('liquid-resetting');
                     element.classList.remove('liquid-active');
                     element.style.removeProperty('--mx');
                     element.style.removeProperty('--my');
                     fadeTimers.delete(element);
+                    window.requestAnimationFrame(function() {{
+                        window.requestAnimationFrame(function() {{
+                            element.classList.remove('liquid-resetting');
+                        }});
+                    }});
                     return;
                 }}
                 const timer = setTimeout(function() {{
+                    element.classList.add('liquid-resetting');
                     element.classList.remove('liquid-active');
                     element.style.removeProperty('--mx');
                     element.style.removeProperty('--my');
                     fadeTimers.delete(element);
+                    window.requestAnimationFrame(function() {{
+                        element.classList.remove('liquid-resetting');
+                    }});
                 }}, typeof delay === 'number' ? delay : 180);
                 fadeTimers.set(element, timer);
             }}
@@ -266,6 +276,7 @@ def render_web_scripts(
                     clearTimeout(previousTimer);
                     fadeTimers.delete(element);
                 }}
+                element.classList.remove('liquid-resetting');
                 element.classList.add('liquid-active');
                 const timer = setTimeout(function() {{
                     clearLiquid(element, 120);
