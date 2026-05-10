@@ -132,6 +132,7 @@ def render_web_scripts(
             let liquidPointerState = null;
             let liquidSyntheticTarget = null;
             let liquidSyntheticUntil = 0;
+            let suppressLiquidFocusUntil = 0;
             const globalLens = document.createElement('div');
             globalLens.className = 'liquid-global-lens';
             globalLens.setAttribute('aria-hidden', 'true');
@@ -139,6 +140,24 @@ def render_web_scripts(
 
             function glassThemeActive() {{
                 return document.documentElement.getAttribute('data-theme') === 'glass';
+            }}
+
+            function touchLikeInputActive() {{
+                return !!(window.matchMedia && window.matchMedia('(hover: none), (pointer: coarse)').matches);
+            }}
+
+            function suppressLiquidFocus(ms) {{
+                suppressLiquidFocusUntil = Math.max(suppressLiquidFocusUntil, Date.now() + (ms || 600));
+            }}
+
+            function shouldAnimateLiquidFocus(element) {{
+                if (Date.now() < suppressLiquidFocusUntil) {{
+                    return false;
+                }}
+                if (touchLikeInputActive() && element.matches && !element.matches(':focus-visible')) {{
+                    return false;
+                }}
+                return true;
             }}
 
             function hideGlobalLens(delay) {{
@@ -288,6 +307,7 @@ def render_web_scripts(
                 }}
                 liquidSyntheticTarget = action;
                 liquidSyntheticUntil = Date.now() + 700;
+                suppressLiquidFocus(900);
                 action.click();
                 if (action.blur) {{
                     action.blur();
@@ -367,6 +387,9 @@ def render_web_scripts(
                     element.dataset.liquidGroup = 'true';
                 }}
                 element.addEventListener('focus', function() {{
+                    if (!shouldAnimateLiquidFocus(element)) {{
+                        return;
+                    }}
                     const rect = element.getBoundingClientRect();
                     activateLiquid(element, rect.left + rect.width / 2, rect.top + rect.height / 2, 420);
                     moveGlobalLens(rect.left + rect.width / 2, rect.top + rect.height / 2, 420);
@@ -402,8 +425,13 @@ def render_web_scripts(
                     return;
                 }}
                 if (event.target === liquidSyntheticTarget || liquidSyntheticTarget.contains(event.target)) {{
+                    const syntheticTarget = liquidSyntheticTarget;
                     event.preventDefault();
                     event.stopImmediatePropagation();
+                    if (syntheticTarget.blur) {{
+                        syntheticTarget.blur();
+                    }}
+                    resetLiquidState();
                     liquidSyntheticTarget = null;
                     liquidSyntheticUntil = 0;
                 }}
@@ -441,6 +469,9 @@ def render_web_scripts(
                             return;
                         }}
                     }}
+                }}
+                if (event.pointerType === 'touch') {{
+                    suppressLiquidFocus(500);
                 }}
                 liquidPointerState = null;
                 cancelQueuedLiquidMove();
@@ -482,6 +513,7 @@ def render_web_scripts(
                 }}
             }}, {{ passive: true }});
             document.addEventListener('touchend', function(event) {{
+                suppressLiquidFocus(500);
                 if (liquidTouchState && liquidTouchState.moved && !liquidTouchState.scrolled && event.changedTouches && event.changedTouches.length) {{
                     const touch = event.changedTouches[0];
                     if (applyLiquidAction(touch.clientX, touch.clientY)) {{

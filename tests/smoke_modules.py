@@ -1068,6 +1068,8 @@ def test_web_template_styles_helpers():
     assert 'background:rgba(255,255,255,.006)' in styles
     assert '[data-theme="glass"] .topbar-actions[data-liquid]' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:114px;height:114px;}' in styles
+    assert '@media (hover: none), (pointer: coarse)' in styles
+    assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
@@ -1112,6 +1114,9 @@ def test_web_template_scripts_helpers():
     assert 'window.scrollY || window.pageYOffset || 0' in scripts
     assert "document.querySelectorAll('[data-liquid].liquid-active')" in scripts
     assert 'action.blur' in scripts
+    assert 'function shouldAnimateLiquidFocus(element)' in scripts
+    assert "element.matches(':focus-visible')" in scripts
+    assert 'function suppressLiquidFocus(ms)' in scripts
     assert 'button[type="button"], a[href], [role="button"]' in scripts
     assert 'liquidSyntheticTarget' in scripts
     assert 'lastLensPoint' not in scripts

@@ -894,21 +894,23 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             -webkit-backdrop-filter:blur(12px) saturate(145%);
             transition:transform .18s cubic-bezier(.2,.8,.2,1), background-color .18s ease, border-color .18s ease, box-shadow .18s ease, color .18s ease;
         }
-        [data-theme="glass"] button:hover,
-        [data-theme="glass"] .secondary-button:hover,
-        [data-theme="glass"] .success-button:hover,
-        [data-theme="glass"] .outline-button:hover,
-        [data-theme="glass"] .service-preset-btn:hover,
-        [data-theme="glass"] .mode-choice:hover,
-        [data-theme="glass"] .seg-tab:hover,
-        [data-theme="glass"] .subtab:hover,
-        [data-theme="glass"] .nav-item:hover{
-            transform:translateY(-1px);
-            border-color:rgba(180,255,249,.54);
-            background:
-                linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,.05) 42%, rgba(138,247,238,.12)),
-                rgba(23,58,66,.58);
-            box-shadow:0 12px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.22);
+        @media (hover: hover){
+            [data-theme="glass"] button:hover,
+            [data-theme="glass"] .secondary-button:hover,
+            [data-theme="glass"] .success-button:hover,
+            [data-theme="glass"] .outline-button:hover,
+            [data-theme="glass"] .service-preset-btn:hover,
+            [data-theme="glass"] .mode-choice:hover,
+            [data-theme="glass"] .seg-tab:hover,
+            [data-theme="glass"] .subtab:hover,
+            [data-theme="glass"] .nav-item:hover{
+                transform:translateY(-1px);
+                border-color:rgba(180,255,249,.54);
+                background:
+                    linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,.05) 42%, rgba(138,247,238,.12)),
+                    rgba(23,58,66,.58);
+                box-shadow:0 12px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.22);
+            }
         }
         [data-theme="glass"] [data-liquid]:focus-visible,
         [data-theme="glass"] [data-liquid].liquid-active{
@@ -939,9 +941,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             border-color:rgba(241,118,107,.48);
             color:#ffc8c2;
         }
-        [data-theme="glass"] button.danger:hover{
-            background:linear-gradient(135deg, rgba(255,215,207,.16), rgba(123,43,49,.66));
-            border-color:rgba(255,151,141,.62);
+        @media (hover: hover){
+            [data-theme="glass"] button.danger:hover{
+                background:linear-gradient(135deg, rgba(255,215,207,.16), rgba(123,43,49,.66));
+                border-color:rgba(255,151,141,.62);
+            }
         }
         [data-theme="glass"] .mode-choice.active,
         [data-theme="glass"] .seg-tab.active,
@@ -1037,6 +1041,22 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         @media (hover: hover){
             [data-theme="glass"] [data-liquid]:hover::before{opacity:1;}
             [data-theme="glass"] [data-liquid]:hover::after{opacity:.72;}
+        }
+        @media (hover: none), (pointer: coarse){
+            [data-theme="glass"] button:hover,
+            [data-theme="glass"] .secondary-button:hover,
+            [data-theme="glass"] .success-button:hover,
+            [data-theme="glass"] .outline-button:hover,
+            [data-theme="glass"] .service-preset-btn:hover,
+            [data-theme="glass"] .mode-choice:hover,
+            [data-theme="glass"] .seg-tab:hover,
+            [data-theme="glass"] .subtab:hover,
+            [data-theme="glass"] .nav-item:hover{
+                transform:none;
+                filter:none;
+            }
+            [data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before,
+            [data-theme="glass"] [data-liquid]:not(.liquid-active):hover::after{opacity:0;}
         }
         .liquid-global-lens{
             position:fixed;
