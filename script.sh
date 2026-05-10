@@ -322,7 +322,11 @@ download_raw_file_via_socks() {
 
   for port in ${GITHUB_RAW_SOCKS_PORTS:-10811 10813 10812 10814 10815}; do
     if curl -fsSL --socks5-hostname "127.0.0.1:${port}" --connect-timeout 6 --max-time 35 --retry 1 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1; then
-      echo "Downloaded via local SOCKS port ${port}."
+      if [ "${RAW_GITHUB_SOCKS_NOTICE_SHOWN:-0}" != "1" ]; then
+        echo "Downloading GitHub files via local SOCKS port ${port}."
+        RAW_GITHUB_SOCKS_NOTICE_SHOWN=1
+        export RAW_GITHUB_SOCKS_NOTICE_SHOWN
+      fi
       return 0
     fi
   done

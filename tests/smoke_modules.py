@@ -278,6 +278,13 @@ def test_codex_version_matches_commit_count():
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in installer
 
 
+def test_update_script_socks_download_notice_is_not_repeated():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'Downloaded via local SOCKS port' not in script
+    assert 'Downloading GitHub files via local SOCKS port ${port}.' in script
+    assert 'RAW_GITHUB_SOCKS_NOTICE_SHOWN=1' in script
+
+
 def test_entware_dns_runtime_helpers():
     class _Result:
         def __init__(self, returncode):
