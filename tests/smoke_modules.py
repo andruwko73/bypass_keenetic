@@ -1103,6 +1103,13 @@ def test_web_template_scripts_helpers():
     assert 'function applyLiquidAction(clientX, clientY)' in scripts
     assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
     assert 'function resetLiquidState()' in scripts
+    assert 'state.scrolled = true' in scripts
+    assert "if (typeof delay === 'number' && delay <= 0)" in scripts
+    assert 'if (liquidTouchState && liquidTouchState.scrolled)' in scripts
+    assert 'if (liquidPointerState.scrolled)' in scripts
+    assert "window.addEventListener('scroll'" in scripts
+    assert "document.addEventListener('visibilitychange'" in scripts
+    assert 'window.scrollY || window.pageYOffset || 0' in scripts
     assert "document.querySelectorAll('[data-liquid].liquid-active')" in scripts
     assert 'action.blur' in scripts
     assert 'button[type="button"], a[href], [role="button"]' in scripts

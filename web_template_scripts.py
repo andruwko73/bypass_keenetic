@@ -146,6 +146,10 @@ def render_web_scripts(
                     clearTimeout(lensTimer);
                     lensTimer = null;
                 }}
+                if (typeof delay === 'number' && delay <= 0) {{
+                    globalLens.classList.remove('liquid-global-lens-active');
+                    return;
+                }}
                 lensTimer = window.setTimeout(function() {{
                     globalLens.classList.remove('liquid-global-lens-active');
                 }}, typeof delay === 'number' ? delay : 180);
@@ -298,8 +302,15 @@ def render_web_scripts(
                 }}
                 const dx = clientX - state.startX;
                 const dy = clientY - state.startY;
+                const scrollDx = Math.abs((window.scrollX || window.pageXOffset || 0) - (state.scrollX || 0));
+                const scrollDy = Math.abs((window.scrollY || window.pageYOffset || 0) - (state.scrollY || 0));
                 state.lastX = clientX;
                 state.lastY = clientY;
+                if ((scrollDx + scrollDy) > 6) {{
+                    state.scrolled = true;
+                    resetLiquidState();
+                    return;
+                }}
                 if ((dx * dx + dy * dy) > 144) {{
                     state.moved = true;
                 }}
@@ -400,6 +411,9 @@ def render_web_scripts(
             document.addEventListener('pointermove', function(event) {{
                 if (liquidPointerState && liquidPointerState.pointerId === event.pointerId) {{
                     trackLiquidMovement(liquidPointerState, event.clientX, event.clientY);
+                    if (liquidPointerState.scrolled) {{
+                        return;
+                    }}
                 }}
                 queueActivateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 440 : 280);
             }}, {{ passive: true }});
@@ -411,6 +425,9 @@ def render_web_scripts(
                     startY: event.clientY,
                     lastX: event.clientX,
                     lastY: event.clientY,
+                    scrollX: window.scrollX || window.pageXOffset || 0,
+                    scrollY: window.scrollY || window.pageYOffset || 0,
+                    scrolled: false,
                     moved: false
                 }};
                 activateFromPoint(event.clientX, event.clientY, 480);
@@ -418,7 +435,7 @@ def render_web_scripts(
             document.addEventListener('pointerup', function(event) {{
                 if (liquidPointerState && liquidPointerState.pointerId === event.pointerId) {{
                     trackLiquidMovement(liquidPointerState, event.clientX, event.clientY);
-                    if (liquidPointerState.moved && event.pointerType !== 'touch') {{
+                    if (liquidPointerState.moved && !liquidPointerState.scrolled && event.pointerType !== 'touch') {{
                         if (applyLiquidAction(event.clientX, event.clientY)) {{
                             liquidPointerState = null;
                             return;
@@ -446,6 +463,9 @@ def render_web_scripts(
                         startY: touch.clientY,
                         lastX: touch.clientX,
                         lastY: touch.clientY,
+                        scrollX: window.scrollX || window.pageXOffset || 0,
+                        scrollY: window.scrollY || window.pageYOffset || 0,
+                        scrolled: false,
                         moved: false
                     }};
                     activateFromPoint(touch.clientX, touch.clientY, 360);
@@ -455,11 +475,14 @@ def render_web_scripts(
                 if (event.touches && event.touches.length) {{
                     const touch = event.touches[0];
                     trackLiquidMovement(liquidTouchState, touch.clientX, touch.clientY);
+                    if (liquidTouchState && liquidTouchState.scrolled) {{
+                        return;
+                    }}
                     queueActivateFromPoint(touch.clientX, touch.clientY, 260);
                 }}
             }}, {{ passive: true }});
             document.addEventListener('touchend', function(event) {{
-                if (liquidTouchState && liquidTouchState.moved && event.changedTouches && event.changedTouches.length) {{
+                if (liquidTouchState && liquidTouchState.moved && !liquidTouchState.scrolled && event.changedTouches && event.changedTouches.length) {{
                     const touch = event.changedTouches[0];
                     if (applyLiquidAction(touch.clientX, touch.clientY)) {{
                         liquidTouchState = null;
@@ -479,6 +502,19 @@ def render_web_scripts(
                 hideGlobalLens(80);
                 activeElement = null;
             }}, {{ passive: true }});
+            window.addEventListener('scroll', function() {{
+                if (liquidTouchState) {{
+                    liquidTouchState.scrolled = true;
+                }}
+                resetLiquidState();
+            }}, {{ passive: true }});
+            document.addEventListener('visibilitychange', function() {{
+                if (document.hidden) {{
+                    liquidTouchState = null;
+                    liquidPointerState = null;
+                    resetLiquidState();
+                }}
+            }});
         }}
 
         function toggleModePicker() {{
