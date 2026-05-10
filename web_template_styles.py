@@ -1025,35 +1025,36 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             pointer-events:none;
             border-radius:inherit;
             background:
-                radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.22), rgba(138,247,238,.08) 22%, transparent 56%),
+                radial-gradient(circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.18), rgba(138,247,238,.06) 22%, transparent 52%),
                 linear-gradient(115deg, transparent 0 28%, rgba(255,255,255,.1) 45%, transparent 64% 100%);
             opacity:0;
             transition:opacity .12s ease;
+            transform:scale(.92);
         }
         [data-theme="glass"] [data-liquid]::after{
             content:"";
             position:absolute;
             left:var(--mx, 50%);
             top:var(--my, 50%);
-            width:132px;
-            height:132px;
+            width:118px;
+            height:118px;
             z-index:1;
             pointer-events:none;
             border-radius:999px;
-            transform:translate(-50%,-50%) scale(.78);
+            transform:translate(-50%,-50%) scale(.82);
             background:
-                radial-gradient(circle at 34% 28%, rgba(255,255,255,.2) 0 4px, rgba(255,255,255,.07) 20%, transparent 48%),
-                conic-gradient(from 32deg, transparent 0 18%, rgba(255,255,255,.13) 21%, transparent 34% 61%, rgba(138,247,238,.12) 66%, transparent 78%);
+                radial-gradient(circle at 32% 24%, rgba(255,255,255,.14) 0 4px, rgba(255,255,255,.05) 18%, transparent 45%),
+                conic-gradient(from 30deg, transparent 0 18%, rgba(255,255,255,.1) 21%, transparent 34% 61%, rgba(138,247,238,.08) 66%, transparent 78%);
             opacity:0;
             mix-blend-mode:screen;
-            filter:blur(.2px);
+            filter:blur(.35px);
             transition:opacity .12s ease;
         }
         [data-theme="glass"] [data-liquid] > *{position:relative;z-index:3;}
         [data-theme="glass"] [data-liquid]:focus-visible::before,
         [data-theme="glass"] [data-liquid].liquid-active::before{opacity:1;}
         [data-theme="glass"] [data-liquid]:focus-visible::after,
-        [data-theme="glass"] [data-liquid].liquid-active::after{opacity:.72;}
+        [data-theme="glass"] [data-liquid].liquid-active::after{opacity:.6;}
         [data-theme="glass"] [data-liquid].liquid-resetting::before,
         [data-theme="glass"] [data-liquid].liquid-resetting::after{
             opacity:0!important;
@@ -1076,9 +1077,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 transform:none;
                 filter:none;
             }
-            [data-theme="glass"] [data-liquid].liquid-active::before{opacity:.42;}
+            [data-theme="glass"] [data-liquid].liquid-active::before{opacity:.32;}
             [data-theme="glass"] [data-liquid].liquid-active::after{opacity:0;}
-            [data-theme="glass"] [data-liquid-group="true"].liquid-active::before{opacity:.5;}
+            [data-theme="glass"] [data-liquid-group="true"].liquid-active::before{opacity:.4;}
             [data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before,
             [data-theme="glass"] [data-liquid]:not(.liquid-active):hover::after{opacity:0;}
         }
@@ -1086,8 +1087,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             position:fixed;
             left:0;
             top:0;
-            width:132px;
-            height:132px;
+            width:150px;
+            height:150px;
             pointer-events:none;
             border-radius:999px;
             z-index:70;
@@ -1095,15 +1096,15 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             opacity:0;
             overflow:hidden;
             transform:translate3d(calc(var(--lx, -100px) - 50%),calc(var(--ly, -100px) - 50%),0);
-            background:rgba(255,255,255,.006);
-            border:1px solid rgba(236,255,253,.42);
+            background:rgba(255,255,255,.004);
+            border:1px solid rgba(236,255,253,.26);
             box-shadow:
-                inset 0 1px 2px rgba(255,255,255,.5),
-                inset 0 -12px 20px rgba(6,18,26,.12),
-                0 3px 13px rgba(0,0,0,.1),
-                0 0 22px rgba(138,247,238,.1);
-            backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12);
-            -webkit-backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12);
+            inset 0 1px 2px rgba(255,255,255,.38),
+                inset 0 -12px 20px rgba(6,18,26,.11),
+                0 3px 13px rgba(0,0,0,.09),
+                0 0 18px rgba(138,247,238,.06);
+            backdrop-filter:blur(.9px) saturate(172%) contrast(1.05) brightness(1.08);
+            -webkit-backdrop-filter:blur(.9px) saturate(172%) contrast(1.05) brightness(1.08);
             transition:none;
             will-change:transform,opacity;
         }
@@ -1117,14 +1118,14 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         .liquid-global-lens::before{
             background:
-                radial-gradient(circle at 24% 18%, rgba(255,255,255,.5) 0 4px, rgba(255,255,255,.14) 18%, transparent 48%),
-                radial-gradient(circle at 68% 74%, rgba(138,247,238,.035), transparent 64%),
-                linear-gradient(135deg, rgba(255,255,255,.24), transparent 34%, rgba(255,255,255,.08) 68%, transparent 100%);
+                radial-gradient(circle at 20% 18%, rgba(255,255,255,.34) 0 6px, rgba(255,255,255,.1) 26%, rgba(255,255,255,.02) 46%, transparent 62%),
+                radial-gradient(circle at 72% 74%, rgba(138,247,238,.025), transparent 66%),
+                linear-gradient(130deg, rgba(255,255,255,.16), transparent 39%, rgba(255,255,255,.055) 68%, transparent 100%);
         }
         .liquid-global-lens::after{
-            inset:7px;
-            border:1px solid rgba(255,255,255,.24);
-            box-shadow:inset 12px 10px 18px rgba(255,255,255,.13), inset -14px -16px 24px rgba(6,18,26,.11);
+            inset:9px;
+            border:1px solid rgba(255,255,255,.2);
+            box-shadow:inset 10px 8px 15px rgba(255,255,255,.08), inset -14px -16px 24px rgba(6,18,26,.1);
             opacity:.72;
         }
         [data-theme="glass"] .liquid-global-lens{display:block;}
@@ -1169,7 +1170,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (max-width: 760px){
             [data-theme="glass"]{--glass-blur:12px;}
-            [data-theme="glass"] .liquid-global-lens{width:114px;height:114px;}
+            [data-theme="glass"] .liquid-global-lens{width:128px;height:128px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

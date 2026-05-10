@@ -1070,7 +1070,7 @@ def test_web_template_styles_helpers():
     assert '[data-theme="glass"] .mobile-nav[data-liquid]' in styles
     assert '[data-theme="glass"] .mobile-nav[data-liquid]{position:fixed;}' in styles
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
-    assert '[data-theme="glass"] .liquid-global-lens{width:114px;height:114px;}' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:128px;height:128px;}' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
     assert '[data-theme="glass"] .mobile-nav .nav-item.active' in styles

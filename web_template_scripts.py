@@ -129,6 +129,7 @@ def render_web_scripts(
             ].join(',');
             const fadeTimers = new WeakMap();
             let activeElement = null;
+            let liquidActionCooldownUntil = 0;
             let lensTimer = null;
             let liquidMoveFrame = 0;
             let pendingLiquidMove = null;
@@ -281,6 +282,9 @@ def render_web_scripts(
                 if (!element || !setLiquidPosition(element, clientX, clientY)) {{
                     return;
                 }}
+                if (activeElement === element && element.classList.contains('liquid-active')) {{
+                    return;
+                }}
                 if (activeElement && activeElement !== element) {{
                     clearLiquid(activeElement, 0);
                 }}
@@ -332,6 +336,7 @@ def render_web_scripts(
                 }}
                 liquidSyntheticTarget = action;
                 liquidSyntheticUntil = Date.now() + 700;
+                liquidActionCooldownUntil = Date.now() + 260;
                 suppressLiquidFocus(900);
                 action.click();
                 if (action.blur) {{
@@ -362,6 +367,9 @@ def render_web_scripts(
             }}
 
             function activateFromPoint(clientX, clientY, holdMs) {{
+                if (Date.now() < liquidActionCooldownUntil) {{
+                    return;
+                }}
                 const nextElement = findLiquidElement(clientX, clientY);
                 if (activeElement && activeElement !== nextElement) {{
                     clearLiquid(activeElement, 0);
@@ -376,6 +384,9 @@ def render_web_scripts(
             }}
 
             function queueActivateFromPoint(clientX, clientY, holdMs) {{
+                if (Date.now() < liquidActionCooldownUntil) {{
+                    return;
+                }}
                 pendingLiquidMove = {{
                     clientX: clientX,
                     clientY: clientY,
@@ -478,6 +489,7 @@ def render_web_scripts(
                     startY: event.clientY,
                     lastX: event.clientX,
                     lastY: event.clientY,
+                    startTs: Date.now(),
                     scrollX: window.scrollX || window.pageXOffset || 0,
                     scrollY: window.scrollY || window.pageYOffset || 0,
                     scrolled: false,
@@ -488,7 +500,12 @@ def render_web_scripts(
             document.addEventListener('pointerup', function(event) {{
                 if (liquidPointerState && liquidPointerState.pointerId === event.pointerId) {{
                     trackLiquidMovement(liquidPointerState, event.clientX, event.clientY);
-                    if (liquidPointerState.moved && !liquidPointerState.scrolled && event.pointerType !== 'touch') {{
+                    const heldMs = Date.now() - liquidPointerState.startTs;
+                    if (
+                        !liquidPointerState.scrolled &&
+                        ((event.pointerType !== 'touch' && (liquidPointerState.moved || heldMs >= 320)) ||
+                        (event.pointerType === 'touch' && heldMs >= 320))
+                    ) {{
                         if (applyLiquidAction(event.clientX, event.clientY)) {{
                             liquidPointerState = null;
                             return;
@@ -500,15 +517,15 @@ def render_web_scripts(
                 }}
                 liquidPointerState = null;
                 cancelQueuedLiquidMove();
-                clearLiquid(activeElement, 260);
-                hideGlobalLens(260);
+                clearLiquid(activeElement, 140);
+                hideGlobalLens(140);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('pointercancel', function() {{
                 liquidPointerState = null;
                 cancelQueuedLiquidMove();
-                clearLiquid(activeElement, 120);
-                hideGlobalLens(120);
+                clearLiquid(activeElement, 90);
+                hideGlobalLens(90);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('touchstart', function(event) {{
@@ -519,6 +536,7 @@ def render_web_scripts(
                         startY: touch.clientY,
                         lastX: touch.clientX,
                         lastY: touch.clientY,
+                        startTs: Date.now(),
                         scrollX: window.scrollX || window.pageXOffset || 0,
                         scrollY: window.scrollY || window.pageYOffset || 0,
                         scrolled: false,
@@ -541,15 +559,16 @@ def render_web_scripts(
                 suppressLiquidFocus(500);
                 if (liquidTouchState && liquidTouchState.moved && !liquidTouchState.scrolled && event.changedTouches && event.changedTouches.length) {{
                     const touch = event.changedTouches[0];
-                    if (applyLiquidAction(touch.clientX, touch.clientY)) {{
+                    const heldMs = Date.now() - liquidTouchState.startTs;
+                    if ((liquidTouchState.moved || heldMs >= 320) && applyLiquidAction(touch.clientX, touch.clientY)) {{
                         liquidTouchState = null;
                         return;
                     }}
                 }}
                 liquidTouchState = null;
                 cancelQueuedLiquidMove();
-                clearLiquid(activeElement, 120);
-                hideGlobalLens(120);
+                clearLiquid(activeElement, 90);
+                hideGlobalLens(90);
                 activeElement = null;
             }}, {{ passive: true }});
             document.addEventListener('touchcancel', function() {{
