@@ -114,8 +114,12 @@ def render_web_scripts(
             const selectors = [
                 'button',
                 '.nav-item',
+                '.side-nav',
+                '.mobile-nav',
                 '.seg-tab',
+                '.segmented',
                 '.subtab',
+                '.subtabs',
                 '.topbar-actions',
                 '.api-pill',
                 '.version-badge',
@@ -158,6 +162,16 @@ def render_web_scripts(
                     return false;
                 }}
                 return true;
+            }}
+
+            function isLiquidGroupElement(element) {{
+                return !!(element && element.classList && (
+                    element.classList.contains('topbar-actions') ||
+                    element.classList.contains('mobile-nav') ||
+                    element.classList.contains('side-nav') ||
+                    element.classList.contains('segmented') ||
+                    element.classList.contains('subtabs')
+                ));
             }}
 
             function hideGlobalLens(delay) {{
@@ -394,7 +408,7 @@ def render_web_scripts(
                 }}
                 element.dataset.liquid = 'true';
                 element.dataset.liquidReady = '1';
-                if (element.classList.contains('topbar-actions')) {{
+                if (isLiquidGroupElement(element)) {{
                     element.dataset.liquidGroup = 'true';
                 }}
                 element.addEventListener('focus', function() {{
