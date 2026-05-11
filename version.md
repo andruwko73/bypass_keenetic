@@ -1,5 +1,5 @@
-*v1.562 (11 May 2026) -* main
-*Equalized mode and theme controls in the header on desktop and mobile.*
+*v1.563 (11 May 2026) -* main
+*Kept the header title readable and made mobile mode/theme pickers float over the page instead of stretching the header.*
 
 *v1.560 (11 May 2026) -* main
 *Liquid Glass visual pass: softer surfaces, calmer borders and hover states, clearer active controls, and a lighter lens treatment while keeping the mobile lens size.*
