@@ -278,13 +278,14 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .app-branch{display:block;margin-top:3px;font-size:11px;font-weight:700;line-height:1.2;color:var(--muted);white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
         .version-badge{justify-self:end;align-self:start;display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:3px 7px;border-radius:7px;border:1px solid rgba(91,124,150,.42);background:rgba(17,25,35,.7);color:var(--muted);font-size:10px;font-weight:800;line-height:1;letter-spacing:.04em;white-space:nowrap;box-shadow:none;}
         [data-theme="light"] .version-badge{background:rgba(255,253,248,.82);}
-        .api-pill,.mode-toggle,.theme-toggle{height:var(--control-height);min-height:var(--control-height);min-width:0;max-width:100%;border-radius:8px;border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);box-shadow:none;font-size:12px;}
+        .api-pill,.mode-toggle,.theme-toggle{min-height:var(--control-height);min-width:0;max-width:100%;border-radius:8px;border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);box-shadow:none;font-size:12px;}
+        .mode-toggle,.theme-toggle{height:var(--control-height);}
         .mode-toggle,.theme-toggle{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;}
         .mode-toggle,.theme-toggle{overflow:hidden;white-space:nowrap;}
         .mode-toggle span,.theme-toggle span{min-width:0;}
         .mode-toggle span:first-child,.theme-toggle span:first-child{flex:none;}
         .mode-toggle span:last-child,.theme-toggle span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-        .api-pill{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;max-width:none;font-size:12px;line-height:1.25;color:#d9e6ef;}
+        .api-pill{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;height:auto;min-height:calc(var(--control-height) + 8px);max-width:none;padding-top:6px;padding-bottom:6px;font-size:12px;line-height:1.25;color:#d9e6ef;}
         .api-pill::before{content:"";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:6px;background-color:rgba(48,191,181,.14);background-image:url("data:image/svg+xml;base64,{TELEGRAM_SVG_B64}");background-repeat:no-repeat;background-position:center;background-size:13px 13px;}
         .workspace-layout{grid-template-columns:138px minmax(0,1fr);gap:12px;}
         .side-nav{top:86px;padding:9px;gap:7px;}

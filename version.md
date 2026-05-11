@@ -1,3 +1,6 @@
+*v1.559 (11 May 2026) -* main
+*Topbar pool-check status now grows vertically for long progress text instead of clipping wrapped lines.*
+
 *v1.558 (11 May 2026) -* main
 *Доработаны фоновые команды и пул ключей: веб-команды получили сохраняемый статус после рестарта, update/remove блокируются общим job-файлом с Telegram, JSON пулов и проверок пишется атомарно, auto-failover сначала перебирает ключи текущего Vless/Vless 2, а веб применяет ключ из пула с проверкой сразу. Веб-страница вынесла CSS/JS в отдельные ассеты, status API не прячет старт проверки пула за кэшем, Liquid Glass получил более лёгкую лупу по всему интерфейсу.*
 

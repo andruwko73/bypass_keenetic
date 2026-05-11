@@ -1102,6 +1102,7 @@ def test_web_template_styles_helpers():
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
     assert 'width:72px;' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
+    assert '.api-pill{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;height:auto;min-height:calc(var(--control-height) + 8px);' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
     assert '[data-theme="glass"] .mobile-nav .nav-item.active' in styles
