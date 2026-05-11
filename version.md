@@ -1,3 +1,6 @@
+*v1.560 (11 May 2026) -* main
+*Liquid Glass visual pass: softer surfaces, calmer borders and hover states, clearer active controls, and a lighter lens treatment while keeping the mobile lens size.*
+
 *v1.559 (11 May 2026) -* main
 *Topbar pool-check status now grows vertically for long progress text instead of clipping wrapped lines.*
 
