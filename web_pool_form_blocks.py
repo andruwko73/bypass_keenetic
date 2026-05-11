@@ -103,7 +103,7 @@ def render_pool_items(
                                 {csrf_input_html}
                                 <input type="hidden" name="type" value="{safe_key_name}">
                                 <input type="hidden" name="key" value="{safe_pool_key}">
-                                <button type="submit" class="pool-delete-btn" title="Удалить ключ из пула">Удалить</button>
+                                <button type="submit" class="pool-delete-btn" title="Удалить ключ из пула"><span class="pool-delete-icon" aria-hidden="true">&times;</span><span class="pool-delete-label">Удалить</span></button>
                             </form>
                         </td>
                     </tr>''')

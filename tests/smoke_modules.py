@@ -114,6 +114,7 @@ def test_proxy_config_builder():
 
     core_config = build_proxy_core_config(
         shadowsocks_key=SS_KEY,
+        vless_key='vless://00000000-0000-0000-0000-000000000000@example.com:443?security=tls#sample',
         trojan_key=TROJAN_KEY,
         ports=PORTS,
         error_log_path='/tmp/xray-error.log',
@@ -123,6 +124,12 @@ def test_proxy_config_builder():
     outbound_tags = {outbound.get('tag') for outbound in core_config['outbounds']}
     assert {'proxy-shadowsocks', 'proxy-trojan', 'direct'} <= outbound_tags
     assert core_config['routing']['rules'][0]['outboundTag'] == 'direct'
+    transparent_inbounds = [
+        inbound for inbound in core_config['inbounds']
+        if inbound.get('protocol') == 'dokodemo-door'
+    ]
+    assert transparent_inbounds
+    assert all(inbound['settings']['network'] == 'tcp,udp' for inbound in transparent_inbounds)
 
 
 def test_key_pool_web():
@@ -958,6 +965,8 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'pool-row-active' in pool_rows
     assert 'csrf_token' in pool_rows
+    assert 'pool-delete-icon' in pool_rows
+    assert '&times;' in pool_rows
     panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
         title='Vless 1',
@@ -1063,14 +1072,15 @@ def test_web_template_styles_helpers():
     assert '.liquid-global-lens::before' in styles
     assert '@keyframes liquid-caustic' not in styles
     assert '--lsx' not in styles
-    assert 'radial-gradient(circle at 24% 18%' in styles
-    assert 'backdrop-filter:blur(1.1px) saturate(185%) contrast(1.08) brightness(1.12)' in styles
-    assert 'background:rgba(255,255,255,.006)' in styles
-    assert '[data-theme="glass"] .topbar-actions[data-liquid]' in styles
+    assert 'radial-gradient(circle at 20% 18%' in styles
+    assert 'backdrop-filter:blur(.55px) saturate(145%) contrast(1.03) brightness(1.06)' in styles
+    assert 'background:rgba(255,255,255,.004)' in styles
+    assert '[data-theme="glass"] .topbar-actions[data-liquid]' not in styles
     assert '[data-theme="glass"] .mobile-nav[data-liquid]' in styles
     assert '[data-theme="glass"] .mobile-nav[data-liquid]{position:fixed;}' in styles
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
-    assert '[data-theme="glass"] .liquid-global-lens{width:128px;height:128px;}' in styles
+    assert 'width:96px;' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
     assert '[data-theme="glass"] .mobile-nav .nav-item.active' in styles
@@ -1100,7 +1110,8 @@ def test_web_template_scripts_helpers():
     assert 'function toggleThemePicker()' in scripts
     assert 'function setupLiquidPointer()' in scripts
     assert 'liquid-global-lens' in scripts
-    assert '.topbar-actions' in scripts
+    assert '.topbar-actions' not in scripts
+    assert 'button:not(.pool-delete-btn)' in scripts
     assert '.mobile-nav' in scripts
     assert '.segmented' in scripts
     assert 'data-liquid-group' in scripts

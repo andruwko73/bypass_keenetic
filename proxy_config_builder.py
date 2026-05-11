@@ -26,7 +26,7 @@ def transparent_inbound(port, tag):
         'listen': '0.0.0.0',
         'protocol': 'dokodemo-door',
         'settings': {
-            'network': 'tcp',
+            'network': 'tcp,udp',
             'followRedirect': True,
         },
         'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},

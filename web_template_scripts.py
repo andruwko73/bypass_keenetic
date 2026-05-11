@@ -112,7 +112,7 @@ def render_web_scripts(
             }}
             document.body.dataset.liquidPointerReady = '1';
             const selectors = [
-                'button',
+                'button:not(.pool-delete-btn)',
                 '.nav-item',
                 '.side-nav',
                 '.mobile-nav',
@@ -120,9 +120,6 @@ def render_web_scripts(
                 '.segmented',
                 '.subtab',
                 '.subtabs',
-                '.topbar-actions',
-                '.api-pill',
-                '.version-badge',
                 '.mode-choice',
                 '.theme-toggle',
                 '.mode-toggle'
@@ -167,7 +164,6 @@ def render_web_scripts(
 
             function isLiquidGroupElement(element) {{
                 return !!(element && element.classList && (
-                    element.classList.contains('topbar-actions') ||
                     element.classList.contains('mobile-nav') ||
                     element.classList.contains('side-nav') ||
                     element.classList.contains('segmented') ||
@@ -194,8 +190,8 @@ def render_web_scripts(
                 const viewport = window.visualViewport || null;
                 const viewportWidth = viewport ? viewport.width : window.innerWidth;
                 const viewportHeight = viewport ? viewport.height : window.innerHeight;
-                const radiusX = Math.max((rect.width || 132) / 2, 40);
-                const radiusY = Math.max((rect.height || 132) / 2, 40);
+                const radiusX = Math.max((rect.width || 96) / 2, 36);
+                const radiusY = Math.max((rect.height || 96) / 2, 36);
                 const margin = 8;
                 const minX = radiusX + margin;
                 const minY = radiusY + margin;
@@ -478,8 +474,9 @@ def render_web_scripts(
                     if (liquidPointerState.scrolled) {{
                         return;
                     }}
+                    queueActivateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 440 : 280);
+                    return;
                 }}
-                queueActivateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 440 : 280);
             }}, {{ passive: true }});
             document.addEventListener('pointerdown', function(event) {{
                 liquidPointerState = {{
@@ -901,7 +898,7 @@ def render_web_scripts(
                         '<form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула?">' +
                             '<input type="hidden" name="type" value="' + proto + '">' +
                             '<input type="hidden" name="key" value="' + key + '">' +
-                            '<button type="submit" class="pool-delete-btn" title="Удалить ключ из пула">Удалить</button>' +
+                            '<button type="submit" class="pool-delete-btn" title="Удалить ключ из пула"><span class="pool-delete-icon" aria-hidden="true">&times;</span><span class="pool-delete-label">Удалить</span></button>' +
                         '</form>' +
                     '</td>' +
                 '</tr>';
