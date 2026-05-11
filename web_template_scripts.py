@@ -477,6 +477,9 @@ def render_web_scripts(
                     queueActivateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 440 : 280);
                     return;
                 }}
+                if (event.pointerType !== 'touch' && !touchLikeInputActive()) {{
+                    queueActivateFromPoint(event.clientX, event.clientY, 260);
+                }}
             }}, {{ passive: true }});
             document.addEventListener('pointerdown', function(event) {{
                 liquidPointerState = {{
@@ -1081,12 +1084,14 @@ def render_web_scripts(
                     const pending = updateWebStatus(payload);
                     if (pending) {{
                         statusPollUntil = Math.max(statusPollUntil, Date.now() + 30000);
+                    }} else {{
+                        statusPollUntil = 0;
                     }}
                 }})
                 .catch(function() {{}})
                 .finally(function() {{
                     if (Date.now() < statusPollUntil && !document.hidden) {{
-                        statusPollTimer = window.setTimeout(pollStatus, 4000);
+                        statusPollTimer = window.setTimeout(pollStatus, 8000);
                     }}
                 }});
         }}

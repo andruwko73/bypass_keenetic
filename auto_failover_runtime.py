@@ -22,6 +22,7 @@ def attempt_auto_failover(
     log,
     grace_seconds,
     switch_cooldown_seconds,
+    check_timeouts=(4, 6),
     protocols=POOL_PROTOCOLS,
     time_provider=time.time,
 ):
@@ -31,7 +32,8 @@ def attempt_auto_failover(
     if state['last_attempt'] and now - state['last_attempt'] < switch_cooldown_seconds:
         return False
 
-    ok, _ = check_telegram_api(proxy_url, connect_timeout=4, read_timeout=6)
+    connect_timeout, read_timeout = check_timeouts
+    ok, _ = check_telegram_api(proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout)
     if ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0

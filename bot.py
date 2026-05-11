@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.552, последнее изменение: 11.05.2026
+#  Файл: bot.py, Версия v1.553, последнее изменение: 11.05.2026
 
 import subprocess
 import os
@@ -199,9 +199,11 @@ import bot_config as config
 
 # --- Пул ключей и авто-фейловер Telegram API ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
-AUTO_FAILOVER_GRACE_SECONDS = 60
-AUTO_FAILOVER_POLL_SECONDS = 10
+AUTO_FAILOVER_GRACE_SECONDS = int(getattr(config, 'auto_failover_grace_seconds', 180))
+AUTO_FAILOVER_POLL_SECONDS = int(getattr(config, 'auto_failover_poll_seconds', 60))
 AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switch_cooldown_seconds', 180))
+AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT = float(getattr(config, 'auto_failover_check_connect_timeout', 2))
+AUTO_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'auto_failover_check_read_timeout', 3))
 auto_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
@@ -322,6 +324,7 @@ def _attempt_auto_failover():
         log=_write_runtime_log,
         grace_seconds=AUTO_FAILOVER_GRACE_SECONDS,
         switch_cooldown_seconds=AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
+        check_timeouts=(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
     )
 
 
@@ -370,13 +373,14 @@ WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
+WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 3.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
-POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.3))
+POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.8))
 POOL_PROBE_MIN_AVAILABLE_KB = 120000
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
-POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 3)))
+POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 1)))
 POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
 POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 2))
 POOL_PROBE_TG_READ_TIMEOUT = float(getattr(config, 'pool_probe_tg_read_timeout', 3))
@@ -406,7 +410,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.552'
+APP_VERSION_COUNTER = '1.553'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -476,12 +480,17 @@ status_snapshot_cache = {
     'data': None,
     'signature': None,
 }
+web_status_api_cache = {
+    'timestamp': 0,
+    'payload': None,
+}
 active_mode_status_cache = {
     'timestamp': 0,
     'signature': None,
     'status': None,
 }
 active_mode_status_cache_lock = threading.Lock()
+web_status_api_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 pool_probe_lock = threading.Lock()
@@ -1949,6 +1958,28 @@ def _invalidate_status_snapshot_cache():
     status_snapshot_cache['timestamp'] = 0
     status_snapshot_cache['data'] = None
     status_snapshot_cache['signature'] = None
+    _invalidate_web_status_api_cache()
+
+
+def _invalidate_web_status_api_cache():
+    with web_status_api_cache_lock:
+        web_status_api_cache['timestamp'] = 0
+        web_status_api_cache['payload'] = None
+
+
+def _get_web_status_api_cache():
+    with web_status_api_cache_lock:
+        payload = web_status_api_cache.get('payload')
+        return {
+            'timestamp': web_status_api_cache.get('timestamp', 0),
+            'payload': payload,
+        } if payload is not None else None
+
+
+def _store_web_status_api_cache(payload, timestamp=None):
+    with web_status_api_cache_lock:
+        web_status_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
+        web_status_api_cache['payload'] = payload
 
 
 def _invalidate_key_status_cache():
@@ -3673,6 +3704,9 @@ def _web_get_context(handler):
         'active_mode_status_snapshot': _active_mode_status_snapshot,
         'refresh_status_caches_async': _refresh_status_caches_async,
         'pool_probe_locked': pool_probe_lock.locked,
+        'get_status_api_cache': _get_web_status_api_cache,
+        'store_status_api_cache': _store_web_status_api_cache,
+        'status_api_cache_ttl': WEB_STATUS_API_CACHE_TTL,
         'get_web_command_state': _get_web_command_state,
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
@@ -3768,6 +3802,7 @@ def _web_simple_form_context(current_keys, protocol_statuses, csrf_input_html, s
 
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
+    quiet_log_prefixes = ('/api/status', '/api/pool_probe', '/api/command_state', '/static/')
     local_client_checker = staticmethod(_web_is_local_client)
     web_auth_token_getter = staticmethod(lambda: _web_config_auth_token(config))
     web_auth_user_getter = staticmethod(lambda: _web_config_auth_user(config))

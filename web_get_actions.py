@@ -26,6 +26,18 @@ def _pool_probe_running(progress):
 
 
 def _status_payload(ctx):
+    now = _ctx(ctx, 'time_provider', time.time)()
+    cache_ttl = float(_ctx(ctx, 'status_api_cache_ttl', 0) or 0)
+    cache_getter = _ctx(ctx, 'get_status_api_cache')
+    if cache_ttl > 0 and cache_getter:
+        cached = cache_getter()
+        if (
+            isinstance(cached, dict) and
+            cached.get('payload') is not None and
+            now - float(cached.get('timestamp') or 0) < cache_ttl
+        ):
+            return cached['payload']
+
     current_keys = _ctx(ctx, 'load_current_keys')()
     snapshot = _ctx(ctx, 'cached_status_snapshot')(current_keys)
     if snapshot is None:
@@ -63,8 +75,11 @@ def _status_payload(ctx):
         'custom_checks': _ctx(ctx, 'web_custom_checks')(),
         'pool_probe_running': _pool_probe_running(progress),
         'pool_probe_progress': progress,
-        'timestamp': _ctx(ctx, 'time_provider', time.time)(),
+        'timestamp': now,
     })
+    cache_store = _ctx(ctx, 'store_status_api_cache')
+    if cache_ttl > 0 and cache_store:
+        cache_store(payload, now)
     return payload
 
 

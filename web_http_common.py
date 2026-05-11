@@ -47,6 +47,13 @@ class WebRequestMixin:
     web_auth_token_getter = staticmethod(lambda: '')
     web_auth_user_getter = staticmethod(lambda: 'admin')
     flash_message_setter = staticmethod(lambda message: None)
+    quiet_log_prefixes = ()
+
+    def log_message(self, format, *args):
+        path = getattr(self, 'path', '') or ''
+        if any(path.startswith(prefix) for prefix in self.quiet_log_prefixes):
+            return
+        return super().log_message(format, *args)
 
     def _request_is_allowed(self):
         client_ip = self.client_address[0] if self.client_address else ''
