@@ -843,6 +843,7 @@ def test_web_get_actions_helpers():
     current_keys = {'vless': 'key'}
     ctx = {
         'build_form': lambda message: 'form:' + message,
+        'build_protocol_panel': lambda proto: 'panel:' + proto,
         'consume_flash_message': lambda: 'saved',
         'load_current_keys': lambda: current_keys,
         'cached_status_snapshot': lambda keys: None,
@@ -866,6 +867,8 @@ def test_web_get_actions_helpers():
     assert refreshed == [current_keys]
     probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
     assert probe['payload']['status'] == 'running'
+    panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'proto=vless')
+    assert panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'panel:vless'}
     static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
     assert static['path'].replace('\\', '/').endswith('/service-icons/test.png')
 
@@ -1025,6 +1028,23 @@ def test_web_pool_form_blocks_helpers():
     assert 'protocol-tab active' in tabs_html
     assert 'protocol-workspace active' in panels_html
     assert 'csrf_token' in panels_html
+    lazy_tabs_html, lazy_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        [
+            ('vless', 'Vless 1', 3, 'vless://...'),
+            ('vless2', 'Vless 2', 3, 'vless://...'),
+        ],
+        {'vless': 'vless://sample', 'vless2': 'vless://hidden'},
+        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'}},
+        '<input name="csrf_token" value="token">',
+        key_pools={'vless': ['vless://sample'], 'vless2': ['vless://hidden']},
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        active_protocol='vless',
+        lazy_protocol_panels=True,
+    )
+    assert lazy_tabs_html.count('protocol-tab') == 2
+    assert 'data-protocol-panel-lazy="1"' in lazy_panels_html
+    assert 'vless://hidden' not in lazy_panels_html
 
 
 def test_web_status_builder_helpers():
@@ -1161,6 +1181,9 @@ def test_web_template_scripts_helpers():
     assert 'elementFromPoint' in scripts
     assert "localStorage.setItem('router-theme', nextTheme);" in scripts
     assert 'function setupAsyncForms' in scripts
+    assert 'function setupProtocolTabs()' in scripts
+    assert "fetch('/api/protocol_panel?proto='" in scripts
+    assert 'function setupProtocolSubtabs(root)' in scripts
     assert "formData.set('confirm_switch', 'yes');" in scripts
     assert '{{' not in scripts
 

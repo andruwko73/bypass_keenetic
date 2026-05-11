@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.554, последнее изменение: 11.05.2026
+#  Файл: bot.py, Версия v1.555, последнее изменение: 11.05.2026
 
 import subprocess
 import os
@@ -410,7 +410,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.554'
+APP_VERSION_COUNTER = '1.555'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -3698,6 +3698,7 @@ def _web_get_context(handler):
     pool_enabled = _app_mode_pool_enabled()
     return {
         'build_form': handler._build_form,
+        'build_protocol_panel': handler._build_protocol_panel,
         'consume_flash_message': _consume_web_flash_message,
         'load_current_keys': _load_current_keys,
         'cached_status_snapshot': _cached_status_snapshot,
@@ -3717,6 +3718,61 @@ def _web_get_context(handler):
         'static_dir': STATIC_DIR,
         'service_icons_enabled': True,
     }
+
+
+def _default_web_protocol():
+    protocol_keys = [section[0] for section in web_form_blocks.PROTOCOL_SECTIONS]
+    if proxy_mode in protocol_keys:
+        return proxy_mode
+    return protocol_keys[0] if protocol_keys else ''
+
+
+def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_input_html):
+    protocol_sections = [section for section in web_form_blocks.PROTOCOL_SECTIONS if section[0] == protocol]
+    if not protocol_sections:
+        raise ValueError('Неизвестный протокол')
+    key_pools = _ensure_current_keys_in_pools(current_keys)
+    key_probe_cache = _load_key_probe_cache()
+    custom_checks = _load_custom_checks()
+    custom_checks_html = key_pool_web.web_custom_checks_html(
+        custom_checks,
+        _service_icon_html,
+        csrf_input_html=csrf_input_html,
+    )
+    custom_presets_html = key_pool_web.web_custom_presets_html(
+        custom_checks,
+        _custom_check_presets(),
+        _service_icon_html,
+        csrf_input_html=csrf_input_html,
+    )
+    pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
+        web_pool_form_blocks.pool_table_layout(custom_checks)
+    )
+    _tabs_html, panel_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        protocol_sections,
+        current_keys,
+        protocol_statuses,
+        csrf_input_html,
+        key_pools=key_pools,
+        key_probe_cache=key_probe_cache,
+        custom_checks=custom_checks,
+        key_display_name=_pool_key_display_name,
+        hash_key=_hash_key,
+        telegram_icon_html=_telegram_icon_html,
+        youtube_icon_html=_youtube_icon_html,
+        custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(probe, checks, _service_icon_html),
+        probe_checked_at=key_pool_web.web_probe_checked_at,
+        custom_probe_states=key_pool_web.web_custom_probe_states,
+        service_icon_html=_service_icon_html,
+        pool_table_class=pool_table_class,
+        pool_custom_col_width=pool_custom_col_width,
+        pool_mobile_custom_col_width=pool_mobile_custom_col_width,
+        custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        custom_presets_html=custom_presets_html,
+        custom_checks_html=custom_checks_html,
+        active_protocol=protocol,
+    )
+    return panel_html
 
 
 def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
@@ -3759,6 +3815,8 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
+        active_protocol=_default_web_protocol(),
+        lazy_protocol_panels=True,
     )
     pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks)
     return {
@@ -3925,12 +3983,27 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             enable_key_pool=pool_enabled,
         )
 
+    def _build_protocol_panel(self, protocol):
+        app_runtime_mode = _load_app_runtime_mode()
+        if not _app_mode_pool_enabled(app_runtime_mode):
+            raise ValueError('Пул ключей отключён в текущем режиме программы')
+        current_keys = _load_current_keys()
+        snapshot = _cached_status_snapshot(current_keys)
+        if snapshot is None:
+            snapshot = _active_mode_status_snapshot(current_keys)
+            if not pool_probe_lock.locked():
+                _refresh_status_caches_async(current_keys)
+        csrf_token = self._get_or_create_csrf_token()
+        csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
+        return _web_protocol_panel_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
+
     def do_GET(self):
         if not self._ensure_request_allowed():
             return
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         try:
-            action = web_get_actions.dispatch(_web_get_context(self), path)
+            action = web_get_actions.dispatch(_web_get_context(self), path, parsed_url.query)
         except Exception as exc:
             if path.startswith('/api/'):
                 self._send_json({'error': str(exc)}, status=500)

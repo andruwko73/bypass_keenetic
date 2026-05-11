@@ -118,6 +118,19 @@ def render_protocol_tab(key_name, title, pool_count, *, active=False):
                 </button>'''
 
 
+def render_lazy_protocol_panel_placeholder(key_name, title, *, active=False):
+    active_class = ' active' if active else ''
+    safe_key_name = html.escape(key_name, quote=True)
+    safe_title = html.escape(title)
+    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}" data-protocol-panel-lazy="1" data-protocol-loaded="0">
+        <div class="protocol-lazy-placeholder" data-protocol-loading="{safe_key_name}">
+            <span class="eyebrow">Ключи</span>
+            <h2>{safe_title}</h2>
+            <p class="section-subtitle">Загрузка данных вкладки...</p>
+        </div>
+    </section>'''
+
+
 def render_protocol_panel(
     *,
     key_name,
@@ -306,6 +319,8 @@ def render_protocol_tabs_and_panels(
     custom_header_icons='',
     custom_presets_html='',
     custom_checks_html='',
+    active_protocol=None,
+    lazy_protocol_panels=False,
 ):
     current_keys = current_keys or {}
     protocol_statuses = protocol_statuses or {}
@@ -327,13 +342,27 @@ def render_protocol_tabs_and_panels(
     }
     tabs = []
     panels = []
-    for panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
+    protocol_keys = [section[0] for section in protocol_sections]
+    if active_protocol not in protocol_keys:
+        active_protocol = protocol_keys[0] if protocol_keys else None
+    for _panel_index, (key_name, title, rows, placeholder) in enumerate(protocol_sections):
         status_info = protocol_statuses.get(key_name, default_status)
-        tab_active = panel_index == 0
+        tab_active = key_name == active_protocol
         pool_keys = key_pools.get(key_name, []) if enable_key_pool else []
         tab_count = len(pool_keys) if enable_key_pool else (1 if current_keys.get(key_name, '').strip() else 0)
         active_status_icons = ''
         pool_items_html = ''
+        tabs.append(
+            render_protocol_tab(
+                key_name,
+                title,
+                tab_count,
+                active=tab_active,
+            )
+        )
+        if lazy_protocol_panels and enable_key_pool and not tab_active:
+            panels.append(render_lazy_protocol_panel_placeholder(key_name, title, active=False))
+            continue
         if enable_key_pool:
             current_probe = key_probe_cache.get(hash_key(current_keys.get(key_name, '')), {})
             if not isinstance(current_probe, dict):
@@ -365,14 +394,6 @@ def render_protocol_tabs_and_panels(
                 probe_checked_at=probe_checked_at,
                 csrf_input_html=csrf_input_html,
             )
-        tabs.append(
-            render_protocol_tab(
-                key_name,
-                title,
-                tab_count,
-                active=tab_active,
-            )
-        )
         panels.append(
             render_protocol_panel(
                 key_name=key_name,

@@ -194,6 +194,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .protocol-workspace,.list-workspace{display:none;padding:18px;border:1px solid var(--border);border-radius:8px;background:linear-gradient(180deg, rgba(23,30,40,.96), rgba(32,42,56,.94));box-shadow:var(--shadow);}
         [data-theme="light"] .protocol-workspace,[data-theme="light"] .list-workspace{background:linear-gradient(180deg, rgba(255,253,248,.96), rgba(245,237,224,.94));}
         .protocol-workspace.active,.list-workspace.active{display:block;}
+        .protocol-lazy-placeholder{display:grid;gap:8px;min-height:190px;align-content:center;text-align:center;color:var(--muted);}
+        .protocol-lazy-placeholder h2{margin:0;color:var(--text);}
         .workspace-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px;}
         .subtabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;}
         .subtab{border-radius:0;border-right:1px solid var(--border);background:transparent;color:var(--muted);box-shadow:none;}

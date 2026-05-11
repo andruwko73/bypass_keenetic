@@ -689,8 +689,118 @@ def render_web_scripts(
             activate(localStorage.getItem(storageKey));
         }}
 
-        function setupProtocolSubtabs() {{
-            document.querySelectorAll('[data-protocol-panel]').forEach(function(panel) {{
+        function setupProtocolTabs() {{
+            const buttons = document.querySelectorAll('.protocol-tab');
+            const storageKey = 'router-active-protocol';
+            const loading = {{}};
+
+            function findPanel(protocol) {{
+                return document.querySelector('[data-protocol-panel="' + protocol + '"]');
+            }}
+
+            function showLoadError(panel, error) {{
+                const target = panel ? panel.querySelector('[data-protocol-loading]') : null;
+                if (!target) {{
+                    return;
+                }}
+                const message = error && error.message ? error.message : 'Не удалось загрузить вкладку.';
+                target.innerHTML = '<span class="eyebrow">Ключи</span><h2>Ошибка загрузки</h2><p class="section-subtitle">' + escapeHtml(message) + '</p><button type="button" class="secondary-button" data-protocol-retry>Повторить</button>';
+                const retry = target.querySelector('[data-protocol-retry]');
+                if (retry) {{
+                    retry.addEventListener('click', function() {{
+                        const protocol = panel.getAttribute('data-protocol-panel');
+                        panel.dataset.protocolLoading = '0';
+                        loadPanel(protocol, panel);
+                    }});
+                }}
+            }}
+
+            function loadPanel(protocol, panel) {{
+                if (!ENABLE_KEY_POOL || !protocol || !panel || panel.dataset.protocolLoaded === '1' || loading[protocol]) {{
+                    return;
+                }}
+                loading[protocol] = true;
+                panel.dataset.protocolLoading = '1';
+                fetch('/api/protocol_panel?proto=' + encodeURIComponent(protocol), {{
+                    headers: {{ 'Accept': 'application/json' }},
+                    cache: 'no-store'
+                }})
+                    .then(function(response) {{
+                        return response.json().then(function(payload) {{
+                            if (!response.ok || !payload.ok) {{
+                                throw new Error((payload && payload.error) || 'HTTP ' + response.status);
+                            }}
+                            return payload;
+                        }});
+                    }})
+                    .then(function(payload) {{
+                        const wrapper = document.createElement('div');
+                        wrapper.innerHTML = String(payload.html || '').trim();
+                        const loadedPanel = wrapper.firstElementChild;
+                        if (!loadedPanel) {{
+                            throw new Error('Пустой ответ сервера');
+                        }}
+                        loadedPanel.classList.add('active');
+                        loadedPanel.dataset.protocolLoaded = '1';
+                        panel.replaceWith(loadedPanel);
+                        setupProtocolSubtabs(loadedPanel);
+                        setupAsyncForms(loadedPanel);
+                    }})
+                    .catch(function(error) {{
+                        showLoadError(panel, error);
+                    }})
+                    .finally(function() {{
+                        loading[protocol] = false;
+                        if (panel) {{
+                            panel.dataset.protocolLoading = '0';
+                        }}
+                    }});
+            }}
+
+            function activate(value) {{
+                let selected = value || localStorage.getItem(storageKey) || (buttons[0] ? buttons[0].dataset.protocolTarget : '');
+                if (selected && !Array.from(buttons).some(function(button) {{ return button.dataset.protocolTarget === selected; }})) {{
+                    selected = buttons[0] ? buttons[0].dataset.protocolTarget : '';
+                }}
+                buttons.forEach(function(button) {{
+                    button.classList.toggle('active', button.dataset.protocolTarget === selected);
+                }});
+                document.querySelectorAll('[data-protocol-panel]').forEach(function(panel) {{
+                    panel.classList.toggle('active', panel.getAttribute('data-protocol-panel') === selected);
+                }});
+                if (selected) {{
+                    localStorage.setItem(storageKey, selected);
+                }}
+                const selectedPanel = findPanel(selected);
+                if (selectedPanel && selectedPanel.dataset.protocolPanelLazy === '1' && selectedPanel.dataset.protocolLoaded !== '1') {{
+                    loadPanel(selected, selectedPanel);
+                }}
+            }}
+
+            buttons.forEach(function(button) {{
+                button.addEventListener('click', function() {{
+                    activate(button.dataset.protocolTarget);
+                }});
+            }});
+            activate(localStorage.getItem(storageKey));
+        }}
+
+        function setupProtocolSubtabs(root) {{
+            const panels = [];
+            if (root && root.matches && root.matches('[data-protocol-panel]')) {{
+                panels.push(root);
+            }}
+            const scope = root && root.querySelectorAll ? root : document;
+            scope.querySelectorAll('[data-protocol-panel]').forEach(function(panel) {{
+                if (!panels.includes(panel)) {{
+                    panels.push(panel);
+                }}
+            }});
+            panels.forEach(function(panel) {{
+                if (panel.dataset.subtabsReady === '1') {{
+                    return;
+                }}
+                panel.dataset.subtabsReady = '1';
                 const buttons = panel.querySelectorAll('[data-subview-target]');
                 function activate(value) {{
                     const selected = value || 'key';
@@ -1501,7 +1611,7 @@ def render_web_scripts(
                 }}
             }});
             setupViewNavigation();
-            setupSegmentedTabs('.protocol-tab', '[data-protocol-panel]', 'data-protocol-target', 'data-protocol-panel', 'router-active-protocol');
+            setupProtocolTabs();
             setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
             setupProtocolSubtabs();
             setupLiquidPointer();

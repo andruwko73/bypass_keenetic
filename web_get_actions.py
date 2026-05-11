@@ -1,6 +1,7 @@
 import os
 import posixpath
 import time
+from urllib.parse import parse_qs
 
 
 PAGE_ROUTES = ('/', '/index.html', '/command')
@@ -107,7 +108,20 @@ def _static_file(ctx, path):
     return None
 
 
-def dispatch(ctx, path):
+def _protocol_panel_payload(ctx, query):
+    params = parse_qs(query or '', keep_blank_values=True)
+    protocol = (params.get('proto') or [''])[0]
+    build_protocol_panel = _ctx(ctx, 'build_protocol_panel')
+    if not protocol or not build_protocol_panel:
+        return {'ok': False, 'error': 'Неизвестный протокол'}
+    try:
+        panel_html = build_protocol_panel(protocol)
+    except ValueError as exc:
+        return {'ok': False, 'error': str(exc)}
+    return {'ok': True, 'protocol': protocol, 'html': panel_html}
+
+
+def dispatch(ctx, path, query=''):
     if path in PAGE_ROUTES:
         build_form = _ctx(ctx, 'build_form')
         consume_flash_message = _ctx(ctx, 'consume_flash_message')
@@ -118,6 +132,9 @@ def dispatch(ctx, path):
         return {'kind': 'json', 'payload': _ctx(ctx, 'get_web_command_state')(), 'status': 200}
     if path == '/api/pool_probe' and _ctx(ctx, 'pool_enabled', False):
         return {'kind': 'json', 'payload': _pool_probe_payload(ctx), 'status': 200}
+    if path == '/api/protocol_panel' and _ctx(ctx, 'pool_enabled', False):
+        payload = _protocol_panel_payload(ctx, query)
+        return {'kind': 'json', 'payload': payload, 'status': 200 if payload.get('ok') else 400}
 
     filepath = _static_file(ctx, path)
     if filepath:
