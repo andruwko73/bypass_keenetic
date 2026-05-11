@@ -940,6 +940,15 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             visibility:visible;
             transform:translateY(0) scale(1);
         }
+        [data-theme="glass"] .topbar .hero-popover{
+            background:
+                linear-gradient(145deg, rgba(38,58,70,.98), rgba(15,28,38,.96)),
+                rgba(15,28,38,.96);
+            border-color:rgba(167,238,232,.3);
+            box-shadow:0 18px 52px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.12);
+            backdrop-filter:blur(10px) saturate(145%);
+            -webkit-backdrop-filter:blur(10px) saturate(145%);
+        }
         [data-theme="glass"] button,
         [data-theme="glass"] .secondary-button,
         [data-theme="glass"] .success-button,

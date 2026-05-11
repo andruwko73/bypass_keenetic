@@ -1,5 +1,5 @@
-*v1.565 (11 May 2026) -* main
-*Anchored header pickers to their own buttons and raised them above the page content.*
+*v1.566 (11 May 2026) -* main
+*Made header dropdowns more opaque so they read clearly above the page content.*
 
 *v1.560 (11 May 2026) -* main
 *Liquid Glass visual pass: softer surfaces, calmer borders and hover states, clearer active controls, and a lighter lens treatment while keeping the mobile lens size.*

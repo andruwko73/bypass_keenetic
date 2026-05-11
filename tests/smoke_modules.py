@@ -1115,6 +1115,8 @@ def test_web_template_styles_helpers():
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
     assert '[data-theme="glass"] .mobile-nav .nav-item.active' in styles
+    assert '[data-theme="glass"] .topbar .hero-popover' in styles
+    assert 'rgba(15,28,38,.96)' in styles
     assert '[data-theme="glass"] [data-liquid].liquid-resetting::before' in styles
     assert '[data-theme="glass"] [data-liquid-group="true"].liquid-active::before' in styles
     assert 'repeating-linear-gradient' not in styles
