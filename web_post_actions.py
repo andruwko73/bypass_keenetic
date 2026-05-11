@@ -221,9 +221,12 @@ def _custom_check_delete(ctx, data):
 def _pool_probe(ctx, data):
     proto = form_value(data, 'type')
     success = True
+    probe_started = False
+    queued = 0
     try:
         if not proto:
             started, queued = _ctx(ctx, 'probe_all_pool_keys_async')(stale_only=False)
+            probe_started = bool(started)
             if started:
                 result = f'Безопасная проверка всех пулов запущена. В очереди: {queued}.'
             elif queued:
@@ -235,6 +238,7 @@ def _pool_probe(ctx, data):
         else:
             keys = _ctx(ctx, 'pool_keys_for_proto')(proto)
             started, queued = _ctx(ctx, 'probe_pool_keys_background')(proto, keys, stale_only=False)
+            probe_started = bool(started)
             if started:
                 result = f'Безопасная проверка пула {proto} запущена. В очереди: {queued}.'
             elif queued:
@@ -244,7 +248,9 @@ def _pool_probe(ctx, data):
     except Exception as exc:
         success = False
         result = f'Ошибка запуска проверки пула: {exc}'
-    return _result(result, success=success, extra={'pool_probe_started': success})
+    if probe_started:
+        _invalidate_status(ctx)
+    return _result(result, success=success, extra={'pool_probe_started': probe_started, 'pool_probe_queued': queued})
 
 
 def _pool_add(ctx, data):
@@ -294,7 +300,7 @@ def _pool_apply(ctx, data):
             raise ValueError('Неизвестный протокол')
         if key_to_apply not in (pools.get(proto, []) or []):
             raise ValueError('Ключ не найден в пуле')
-        result = _ctx(ctx, 'install_key_for_protocol')(proto, key_to_apply, verify=False)
+        result = _ctx(ctx, 'install_key_for_protocol')(proto, key_to_apply, verify=True)
         _ctx(ctx, 'set_active_key')(proto, key_to_apply)
         _invalidate_status(ctx)
         _refresh_pool_status(ctx)
@@ -332,10 +338,14 @@ def _pool_subscribe(ctx, data):
         fetched, error = _ctx(ctx, 'fetch_keys_from_subscription')(form_value(data, 'url'))
         if error:
             raise ValueError(error)
-        pools, added_keys = _ctx(ctx, 'add_subscription_keys_to_pool')(_ctx(ctx, 'load_key_pools')(), proto, fetched)
-        _ctx(ctx, 'save_key_pools')(pools)
-        if added_keys:
-            _ctx(ctx, 'probe_pool_keys_background')(proto, added_keys)
+        add_saved = _ctx(ctx, 'add_subscription_keys_to_pool_saved')
+        if add_saved:
+            pools, added_keys = add_saved(proto, fetched)
+        else:
+            pools, added_keys = _ctx(ctx, 'add_subscription_keys_to_pool')(_ctx(ctx, 'load_key_pools')(), proto, fetched)
+            _ctx(ctx, 'save_key_pools')(pools)
+            if added_keys:
+                _ctx(ctx, 'probe_pool_keys_background')(proto, added_keys)
         result = f'Загружено из subscription и добавлено в пул {proto}: {len(added_keys)} ключей'
         _invalidate_status(ctx)
     except Exception as exc:

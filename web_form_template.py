@@ -3,6 +3,14 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
+def render_web_style_asset(TELEGRAM_SVG_B64=''):
+    return render_web_styles(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
+
+
+def render_web_script_asset(**kwargs):
+    return render_web_scripts(**kwargs)
+
+
 def render_web_form(
     APP_BRANCH_DESCRIPTION,
     APP_BRANCH_LABEL,
@@ -95,20 +103,7 @@ def render_web_form(
                                 </form>
                             </div>
                         </div>'''
-    web_styles = render_web_styles(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
-    web_scripts = render_web_scripts(
-        POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
-        TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
-        YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
-        csrf_token=csrf_token,
-        custom_checks_json=custom_checks_json,
-        initial_command_running=initial_command_running,
-        initial_status_pending=initial_status_pending,
-        enable_async_forms=enable_async_forms,
-        enable_custom_checks=enable_custom_checks,
-        enable_key_pool=enable_key_pool,
-        enable_live_status=enable_live_status,
-    )
+    asset_version = html.escape(str(APP_VERSION_LABEL or '1'))
     return f'''<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -116,10 +111,8 @@ def render_web_form(
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <link rel="icon" href="data:,">
   <title>Установка ключей прокси</title>
-    <style>
-{web_styles}    </style>
-    <script>
-{web_scripts}    </script>
+    <link rel="stylesheet" href="/static/app.css?v={asset_version}">
+    <script src="/static/app.js?v={asset_version}" defer></script>
 </head>
 <body>
     <div class="app-shell">

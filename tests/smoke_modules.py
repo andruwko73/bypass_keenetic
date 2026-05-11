@@ -1093,14 +1093,14 @@ def test_web_template_styles_helpers():
     assert '@keyframes liquid-caustic' not in styles
     assert '--lsx' not in styles
     assert 'radial-gradient(circle at 20% 18%' in styles
-    assert 'backdrop-filter:blur(.55px) saturate(145%) contrast(1.03) brightness(1.06)' in styles
+    assert 'backdrop-filter:blur(.18px) saturate(125%) contrast(1.02) brightness(1.04)' in styles
     assert 'background:rgba(255,255,255,.004)' in styles
     assert '[data-theme="glass"] .topbar-actions[data-liquid]' not in styles
     assert '[data-theme="glass"] .mobile-nav[data-liquid]' in styles
     assert '[data-theme="glass"] .mobile-nav[data-liquid]{position:fixed;}' in styles
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
-    assert 'width:96px;' in styles
-    assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
+    assert 'width:72px;' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:64px;height:64px;}' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
     assert '[data-theme="glass"] .mobile-nav .nav-item.active' in styles
@@ -1229,9 +1229,9 @@ def test_web_form_template_smoke():
         enable_key_pool=False,
         enable_custom_checks=False,
     )
-    assert ':root{' in page
-    assert '.app-shell' in page
-    assert 'tg-icon' in page
+    assert '/static/app.css?v=' in page
+    assert '/static/app.js?v=' in page
+    assert 'class="app-shell"' in page
     assert 'app-mode-toggle-button' in page
     assert 'theme-picker' in page
     assert 'data-theme-choice="glass"' in page
@@ -1245,7 +1245,7 @@ def test_web_form_template_smoke():
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
     assert 'Переустановка компонентов' not in page
     assert '{TELEGRAM_SVG_B64}' not in page
-    assert '<script>' in page
+    assert '<script src="/static/app.js' in page
     web_only_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',

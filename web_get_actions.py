@@ -29,8 +29,11 @@ def _pool_probe_running(progress):
 def _status_payload(ctx):
     now = _ctx(ctx, 'time_provider', time.time)()
     cache_ttl = float(_ctx(ctx, 'status_api_cache_ttl', 0) or 0)
+    pool_enabled = _ctx(ctx, 'pool_enabled', False)
+    progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})() if pool_enabled else {}
+    pool_probe_running = _pool_probe_running(progress)
     cache_getter = _ctx(ctx, 'get_status_api_cache')
-    if cache_ttl > 0 and cache_getter:
+    if cache_ttl > 0 and cache_getter and not pool_probe_running:
         cached = cache_getter()
         if (
             isinstance(cached, dict) and
@@ -60,7 +63,7 @@ def _status_payload(ctx):
         'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
         'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
     }
-    if not _ctx(ctx, 'pool_enabled', False):
+    if not pool_enabled:
         payload.update({
             'custom_checks': [],
             'pool_summary': {'active_text': '', 'note': ''},
@@ -69,17 +72,16 @@ def _status_payload(ctx):
         })
         return payload
 
-    progress = _ctx(ctx, 'get_pool_probe_progress')()
     payload.update({
         'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys),
         'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
         'custom_checks': _ctx(ctx, 'web_custom_checks')(),
-        'pool_probe_running': _pool_probe_running(progress),
+        'pool_probe_running': pool_probe_running,
         'pool_probe_progress': progress,
         'timestamp': now,
     })
     cache_store = _ctx(ctx, 'store_status_api_cache')
-    if cache_ttl > 0 and cache_store:
+    if cache_ttl > 0 and cache_store and not pool_probe_running:
         cache_store(payload, now)
     return payload
 
@@ -126,6 +128,20 @@ def dispatch(ctx, path, query=''):
         build_form = _ctx(ctx, 'build_form')
         consume_flash_message = _ctx(ctx, 'consume_flash_message')
         return {'kind': 'html', 'html': build_form(consume_flash_message())}
+    if path == '/static/app.css':
+        return {
+            'kind': 'text',
+            'text': _call(ctx, 'build_style_asset') or '',
+            'content_type': 'text/css; charset=utf-8',
+            'cache_seconds': 86400,
+        }
+    if path == '/static/app.js':
+        return {
+            'kind': 'text',
+            'text': _call(ctx, 'build_script_asset') or '',
+            'content_type': 'application/javascript; charset=utf-8',
+            'cache_seconds': 0,
+        }
     if path == '/api/status':
         return {'kind': 'json', 'payload': _status_payload(ctx), 'status': 200}
     if path == '/api/command_state':

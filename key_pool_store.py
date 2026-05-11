@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import tempfile
 
 
 PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
@@ -41,8 +42,19 @@ def save_key_pools(path, pools):
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as file:
-        json.dump(pools, file, ensure_ascii=False, indent=2)
+    fd, temp_path = tempfile.mkstemp(prefix='.key_pools_', suffix='.json', dir=directory or None)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as file:
+            json.dump(pools, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
     return pools
 
 
@@ -152,10 +164,19 @@ def failover_candidates(pools, current_proto, current_key, protocols=PROTOCOLS):
     pools = normalize_key_pools(pools)
     current_proto = str(current_proto or '').strip()
     current_key = str(current_key or '').strip()
+    protocol_order = [proto for proto in (protocols or PROTOCOLS) if proto in pools]
+    priority = []
+    if current_proto in protocol_order:
+        priority.append(current_proto)
+    if current_proto == 'vless' and 'vless2' in protocol_order:
+        priority.append('vless2')
+    elif current_proto == 'vless2' and 'vless' in protocol_order:
+        priority.append('vless')
+    for proto in protocol_order:
+        if proto not in priority:
+            priority.append(proto)
     candidates = []
-    for proto in protocols or PROTOCOLS:
-        if proto not in pools:
-            continue
+    for proto in priority:
         for key_value in pools.get(proto, []) or []:
             key_value = str(key_value or '').strip()
             if not key_value:

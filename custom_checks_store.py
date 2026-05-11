@@ -2,6 +2,7 @@ import ipaddress
 import json
 import os
 import re
+import tempfile
 from urllib.parse import urlparse
 
 from service_catalog import CUSTOM_CHECK_PRESETS
@@ -163,8 +164,20 @@ def save_custom_checks(checks):
         if len(result) >= CUSTOM_CHECK_MAX:
             break
     os.makedirs(os.path.dirname(CUSTOM_CHECKS_PATH), exist_ok=True)
-    with open(CUSTOM_CHECKS_PATH, 'w', encoding='utf-8') as file:
-        json.dump({'checks': result}, file, ensure_ascii=False, indent=2)
+    directory = os.path.dirname(CUSTOM_CHECKS_PATH)
+    fd, temp_path = tempfile.mkstemp(prefix='.custom_checks_', suffix='.json', dir=directory)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as file:
+            json.dump({'checks': result}, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, CUSTOM_CHECKS_PATH)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
     return result
 
 

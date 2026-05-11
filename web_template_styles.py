@@ -856,7 +856,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             --glass-border:rgba(145,255,241,.3);
             --glass-highlight:rgba(255,255,255,.26);
             --glass-shadow:0 14px 34px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.16);
-            --glass-blur:10px;
+            --glass-blur:6px;
         }
         [data-theme="glass"] body{
             color:var(--text);
@@ -1132,8 +1132,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             position:fixed;
             left:0;
             top:0;
-            width:96px;
-            height:96px;
+            width:72px;
+            height:72px;
             pointer-events:none;
             border-radius:999px;
             z-index:70;
@@ -1148,8 +1148,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 inset 0 -12px 20px rgba(6,18,26,.11),
                 0 3px 13px rgba(0,0,0,.09),
                 0 0 18px rgba(138,247,238,.06);
-            backdrop-filter:blur(.55px) saturate(145%) contrast(1.03) brightness(1.06);
-            -webkit-backdrop-filter:blur(.55px) saturate(145%) contrast(1.03) brightness(1.06);
+            backdrop-filter:blur(.18px) saturate(125%) contrast(1.02) brightness(1.04);
+            -webkit-backdrop-filter:blur(.18px) saturate(125%) contrast(1.02) brightness(1.04);
             transition:none;
             will-change:transform,opacity;
         }
@@ -1214,8 +1214,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             }
         }
         @media (max-width: 760px){
-            [data-theme="glass"]{--glass-blur:8px;}
-            [data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}
+            [data-theme="glass"]{--glass-blur:5px;}
+            [data-theme="glass"] .liquid-global-lens{width:64px;height:64px;}
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }

@@ -190,8 +190,8 @@ def render_web_scripts(
                 const viewport = window.visualViewport || null;
                 const viewportWidth = viewport ? viewport.width : window.innerWidth;
                 const viewportHeight = viewport ? viewport.height : window.innerHeight;
-                const radiusX = Math.max((rect.width || 96) / 2, 36);
-                const radiusY = Math.max((rect.height || 96) / 2, 36);
+                const radiusX = Math.max((rect.width || 72) / 2, 30);
+                const radiusY = Math.max((rect.height || 72) / 2, 30);
                 const margin = 8;
                 const minX = radiusX + margin;
                 const minY = radiusY + margin;
@@ -372,11 +372,10 @@ def render_web_scripts(
                 }}
                 if (nextElement) {{
                     activateLiquid(nextElement, clientX, clientY, holdMs);
-                    moveGlobalLens(clientX, clientY, holdMs);
                 }} else {{
                     activeElement = null;
-                    hideGlobalLens(160);
                 }}
+                moveGlobalLens(clientX, clientY, holdMs);
             }}
 
             function queueActivateFromPoint(clientX, clientY, holdMs) {{
@@ -1372,14 +1371,14 @@ def render_web_scripts(
                 return;
             }}
             if (busy) {{
-                button.dataset.originalText = button.textContent;
+                button.dataset.originalHtml = button.innerHTML;
                 button.disabled = true;
                 button.textContent = 'Выполняется...';
             }} else {{
                 button.disabled = false;
-                if (button.dataset.originalText) {{
-                    button.textContent = button.dataset.originalText;
-                    delete button.dataset.originalText;
+                if (button.dataset.originalHtml) {{
+                    button.innerHTML = button.dataset.originalHtml;
+                    delete button.dataset.originalHtml;
                 }}
             }}
         }}

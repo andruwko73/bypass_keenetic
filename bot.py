@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.556, последнее изменение: 11.05.2026
+#  Файл: bot.py, Версия v1.557, последнее изменение: 11.05.2026
 
 import subprocess
 import os
@@ -14,6 +14,9 @@ import sys
 import time
 import threading
 import signal
+import ipaddress
+import socket
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 from proxy_key_store import (
@@ -174,7 +177,7 @@ import web_form_blocks
 import web_get_actions
 import web_post_actions
 import web_status_runtime
-from web_form_template import render_web_form
+from web_form_template import render_web_form, render_web_script_asset, render_web_style_asset
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
@@ -199,6 +202,8 @@ import bot_config as config
 
 # --- Пул ключей и авто-фейловер Telegram API ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
+SUBSCRIPTION_MAX_BYTES = int(getattr(config, 'subscription_max_bytes', 2 * 1024 * 1024))
+SUBSCRIPTION_ALLOW_PRIVATE_URLS = bool(getattr(config, 'subscription_allow_private_urls', False))
 AUTO_FAILOVER_GRACE_SECONDS = int(getattr(config, 'auto_failover_grace_seconds', 180))
 AUTO_FAILOVER_POLL_SECONDS = int(getattr(config, 'auto_failover_poll_seconds', 60))
 AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switch_cooldown_seconds', 180))
@@ -255,7 +260,8 @@ def _service_icon_html(icon, alt, opacity=1.0, size=18):
 
 
 def _load_key_pools():
-    return key_pool_store.load_key_pools(KEY_POOLS_PATH)
+    with key_pool_lock:
+        return key_pool_store.load_key_pools(KEY_POOLS_PATH)
 
 
 def _dedupe_key_list(keys):
@@ -263,17 +269,73 @@ def _dedupe_key_list(keys):
 
 
 def _save_key_pools(pools):
-    return key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+    with key_pool_lock:
+        return key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+
+
+def _private_subscription_address(hostname):
+    host = str(hostname or '').strip()
+    if not host:
+        return True
+    addresses = set()
+    try:
+        addresses.add(ipaddress.ip_address(host))
+    except ValueError:
+        try:
+            for item in socket.getaddrinfo(host, None):
+                addresses.add(ipaddress.ip_address(item[4][0]))
+        except Exception:
+            return True
+    for address in addresses:
+        if (
+            address.is_private or
+            address.is_loopback or
+            address.is_link_local or
+            address.is_multicast or
+            address.is_unspecified or
+            address.is_reserved
+        ):
+            return True
+    return False
+
+
+def _read_limited_response(response, max_bytes):
+    content_length = response.headers.get('Content-Length')
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                raise ValueError('subscription response is too large')
+        except ValueError:
+            raise ValueError('subscription response is too large')
+    chunks = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=16384, decode_unicode=False):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError('subscription response is too large')
+        chunks.append(chunk)
+    encoding = response.encoding or 'utf-8'
+    return b''.join(chunks).decode(encoding, errors='replace').strip()
 
 
 def _fetch_keys_from_subscription(url):
     """Загружает ключи из subscription-ссылки (base64-encoded список)."""
     try:
+        parsed = urlparse(str(url or '').strip())
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            raise ValueError('subscription URL must be http:// or https://')
+        if not SUBSCRIPTION_ALLOW_PRIVATE_URLS and _private_subscription_address(parsed.hostname):
+            raise ValueError('private, local and reserved subscription hosts are not allowed')
         session = requests.Session()
         session.trust_env = False
-        resp = session.get(url, timeout=15)
-        resp.raise_for_status()
-        raw = resp.text.strip()
+        resp = session.get(url, stream=True, timeout=(5, 15))
+        try:
+            resp.raise_for_status()
+            raw = _read_limited_response(resp, SUBSCRIPTION_MAX_BYTES)
+        finally:
+            resp.close()
         return key_pool_store.classify_subscription_keys(raw), None
     except requests.RequestException as exc:
         return None, f'Ошибка загрузки subscription: {exc}'
@@ -283,8 +345,9 @@ def _fetch_keys_from_subscription(url):
 
 
 def _set_active_key(proto, key):
-    pools = key_pool_store.set_active_key(_load_key_pools(), proto, key)
-    _save_key_pools(pools)
+    with key_pool_lock:
+        pools = key_pool_store.set_active_key(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto, key)
+        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
 
 
 def _install_key_for_protocol(proto, key_value, verify=True):
@@ -367,6 +430,8 @@ PROXY_MODE_FILE = '/opt/etc/bot_proxy_mode'
 BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
 TELEGRAM_COMMAND_JOB_FILE = '/opt/etc/bot/telegram_command_job.json'
 TELEGRAM_COMMAND_RESULT_FILE = '/opt/etc/bot/telegram_command_result.json'
+WEB_COMMAND_STATE_FILE = '/opt/etc/bot/web_command_state.json'
+COMMAND_JOB_STALE_AFTER = 1800
 TELEGRAM_RESULT_RETRY_INTERVAL = 30
 
 WEB_STATUS_CACHE_TTL = 60
@@ -380,6 +445,7 @@ POOL_PROBE_ACTIVE_ONLY = False
 POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.8))
 POOL_PROBE_MIN_AVAILABLE_KB = 120000
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
+POOL_FAILOVER_TEST_PORT = str(getattr(config, 'pool_failover_test_port', int(POOL_PROBE_TEST_PORT) + 64))
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 1)))
 POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
 POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 2))
@@ -410,7 +476,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.556'
+APP_VERSION_COUNTER = '1.557'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -493,6 +559,7 @@ active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
+key_pool_lock = threading.RLock()
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_progress = PoolProbeProgress()
@@ -720,9 +787,22 @@ def _read_json_file(path, default=None):
 
 
 def _write_json_file(path, payload):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as file:
-        json.dump(payload, file, ensure_ascii=False)
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix='.' + os.path.basename(path) + '.', suffix='.tmp', dir=directory or None)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as file:
+            json.dump(payload, file, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 
 def _remove_file(path):
@@ -1618,6 +1698,7 @@ def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, m
         sys_executable=sys.executable,
         read_json_file=_read_json_file,
         write_json_file=_write_json_file,
+        stale_after=COMMAND_JOB_STALE_AFTER,
     )
 
 
@@ -2146,12 +2227,74 @@ def _web_command_label(command):
     return labels.get(command, command)
 
 
+def _web_command_state_defaults():
+    return {
+        'running': False,
+        'command': '',
+        'label': '',
+        'result': '',
+        'progress': 0,
+        'progress_label': '',
+        'started_at': 0,
+        'finished_at': 0,
+        'shown_after_finish': False,
+    }
+
+
+def _normalize_web_command_state(value):
+    state = _web_command_state_defaults()
+    if isinstance(value, dict):
+        state.update(value)
+    return state
+
+
+def _read_web_command_state_file():
+    return _normalize_web_command_state(_read_json_file(WEB_COMMAND_STATE_FILE, {}) or {})
+
+
+def _write_web_command_state_file(state):
+    _write_json_file(WEB_COMMAND_STATE_FILE, _normalize_web_command_state(state))
+
+
+def _shared_command_job_running(state=None, source=None):
+    state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) if state is None else (state or {})
+    if not state.get('running'):
+        return False
+    if source and state.get('source') != source:
+        return False
+    started_at = float(state.get('started_at') or 0)
+    return bool(started_at and time.time() - started_at < COMMAND_JOB_STALE_AFTER)
+
+
+def _web_background_command_code(command):
+    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
+    module_dir = os.path.dirname(BOT_SOURCE_PATH)
+    return (
+        'import sys; '
+        f"sys.path.insert(0, {module_dir!r}); "
+        f'import {module_name} as bot_module; '
+        f'bot_module._run_web_command_worker({command!r})'
+    )
+
+
 def _get_web_command_state():
+    state = _read_web_command_state_file()
+    if state.get('running') and not _shared_command_job_running(source='web'):
+        state['running'] = False
+        state['result'] = state.get('result') or 'Команда прервана или сервис был перезапущен до записи результата.'
+        state['progress_label'] = ''
+        state['finished_at'] = time.time()
+        _write_web_command_state_file(state)
+    with web_command_lock:
+        web_command_state.update(state)
     return _command_state_snapshot(web_command_lock, web_command_state)
 
 
 def _consume_web_command_state_for_render():
-    return _consume_command_state_for_render_impl(web_command_lock, web_command_state)
+    _get_web_command_state()
+    consumed = _consume_command_state_for_render_impl(web_command_lock, web_command_state)
+    _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
+    return consumed
 
 
 def _estimate_web_command_progress(command, result_text):
@@ -2166,6 +2309,7 @@ def _set_web_command_progress(command, result_text):
         result_text,
         _estimate_web_command_progress,
     )
+    _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
 
 
 def _set_web_flash_message(message):
@@ -2186,6 +2330,10 @@ def _finish_web_command(command, result):
         update_commands=WEB_UPDATE_COMMANDS,
         finished_progress_label='Завершено',
     )
+    _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
+    job_state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
+    if job_state.get('source') == 'web':
+        _remove_file(TELEGRAM_COMMAND_JOB_FILE)
 
 
 def _execute_web_command(command):
@@ -2196,7 +2344,13 @@ def _execute_web_command(command):
     _finish_web_command(command, result)
 
 
-def _start_web_command(command):
+def _run_web_command_worker(command):
+    with web_command_lock:
+        web_command_state.update(_read_web_command_state_file())
+    _execute_web_command(command)
+
+
+def _start_web_command_legacy(command):
     return _start_command_state(
         web_command_lock,
         web_command_state,
@@ -2212,6 +2366,45 @@ def _start_web_command(command):
             f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы.'
         ),
     )
+
+
+def _start_web_command(command):
+    label = _web_command_label(command)
+    job_state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
+    if _shared_command_job_running(job_state):
+        current_label = 'служебная команда Telegram'
+        if job_state.get('source') == 'web':
+            current_label = _web_command_label(job_state.get('command') or command)
+        return False, f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
+
+    state = _web_command_state_defaults()
+    state.update({
+        'running': True,
+        'command': command,
+        'label': label,
+        'progress': 5 if command in WEB_UPDATE_COMMANDS else 0,
+        'progress_label': 'Подготовка запуска обновления' if command in WEB_UPDATE_COMMANDS else '',
+        'started_at': time.time(),
+        'finished_at': 0,
+    })
+    with web_command_lock:
+        web_command_state.update(state)
+    _write_web_command_state_file(state)
+    _write_json_file(TELEGRAM_COMMAND_JOB_FILE, {
+        'running': True,
+        'source': 'web',
+        'command': command,
+        'started_at': state['started_at'],
+    })
+    subprocess.Popen(
+        [sys.executable, '-c', _web_background_command_code(command)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        close_fds=True,
+        start_new_session=True,
+    )
+    return True, f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы.'
 
 
 def _load_bot_autostart():
@@ -2944,30 +3137,32 @@ def _clear_installed_key_for_protocol(proto):
 
 
 def _delete_pool_key(proto, key_value):
-    pools, removed = key_pool_store.delete_pool_key(_load_key_pools(), proto, key_value)
-    if not removed:
-        raise ValueError('\u041a\u043b\u044e\u0447 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0432 \u043f\u0443\u043b\u0435.')
-    current_key = (_load_current_keys().get(proto) or '').strip()
-    was_current = bool(current_key and current_key == key_value)
-    keys = _dedupe_key_list(pools.get(proto, []) or [])
-    promoted_key = keys[0] if was_current and keys else ''
-    if promoted_key:
-        _install_key_for_protocol(proto, promoted_key, verify=False)
-        pools = key_pool_store.set_active_key(pools, proto, promoted_key)
-    elif was_current:
-        _clear_installed_key_for_protocol(proto)
-    _save_key_pools(pools)
+    with key_pool_lock:
+        pools, removed = key_pool_store.delete_pool_key(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto, key_value)
+        if not removed:
+            raise ValueError('\u041a\u043b\u044e\u0447 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0432 \u043f\u0443\u043b\u0435.')
+        current_key = (_load_current_keys().get(proto) or '').strip()
+        was_current = bool(current_key and current_key == key_value)
+        keys = _dedupe_key_list(pools.get(proto, []) or [])
+        promoted_key = keys[0] if was_current and keys else ''
+        if promoted_key:
+            _install_key_for_protocol(proto, promoted_key, verify=False)
+            pools = key_pool_store.set_active_key(pools, proto, promoted_key)
+        elif was_current:
+            _clear_installed_key_for_protocol(proto)
+        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
     _forget_key_probes([key_value])
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
 
 
 def _clear_pool(proto):
-    pools, removed_keys = key_pool_store.clear_pool(_load_key_pools(), proto)
-    _save_key_pools(pools)
-    current_key = (_load_current_keys().get(proto) or '').strip()
-    if current_key and current_key in removed_keys:
-        _clear_installed_key_for_protocol(proto)
+    with key_pool_lock:
+        pools, removed_keys = key_pool_store.clear_pool(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto)
+        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+        current_key = (_load_current_keys().get(proto) or '').strip()
+        if current_key and current_key in removed_keys:
+            _clear_installed_key_for_protocol(proto)
     if removed_keys:
         _forget_key_probes(removed_keys)
     _invalidate_web_status_cache()
@@ -3045,7 +3240,7 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
         candidates,
         service=service,
         batch_size=POOL_PROBE_BATCH_SIZE,
-        test_port=POOL_PROBE_TEST_PORT,
+        test_port=POOL_FAILOVER_TEST_PORT,
         proxy_outbound_from_key=_proxy_outbound_from_key,
         wait_for_socks5=_wait_for_socks5_handshake,
         check_telegram_api=_check_telegram_api_through_proxy,
@@ -3144,12 +3339,28 @@ def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, sta
 
 
 def _add_keys_to_pool(proto, keys_text):
-    pools, added_keys = key_pool_store.add_keys_to_pool(_load_key_pools(), proto, keys_text)
-    _save_key_pools(pools)
+    with key_pool_lock:
+        pools, added_keys = key_pool_store.add_keys_to_pool(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto, keys_text)
+        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
     _probe_pool_keys_background(proto, added_keys)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     return len(added_keys)
+
+
+def _add_subscription_keys_to_pool(proto, fetched_keys):
+    with key_pool_lock:
+        pools, added_keys = key_pool_store.add_subscription_keys_to_pool(
+            key_pool_store.load_key_pools(KEY_POOLS_PATH),
+            proto,
+            fetched_keys,
+        )
+        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+    if added_keys:
+        _probe_pool_keys_background(proto, added_keys)
+    _invalidate_web_status_cache()
+    _invalidate_key_status_cache()
+    return pools, added_keys
 
 
 def _web_custom_checks():
@@ -3686,6 +3897,7 @@ def _web_action_context():
         clear_pool=_clear_pool,
         fetch_keys_from_subscription=_fetch_keys_from_subscription,
         add_subscription_keys_to_pool=key_pool_store.add_subscription_keys_to_pool,
+        add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
         save_key_pools=_save_key_pools,
         pool_apply_lock=pool_apply_lock,
         custom_checks_enabled=pool_enabled,
@@ -3699,6 +3911,8 @@ def _web_get_context(handler):
     return {
         'build_form': handler._build_form,
         'build_protocol_panel': handler._build_protocol_panel,
+        'build_style_asset': handler._build_style_asset,
+        'build_script_asset': handler._build_script_asset,
         'consume_flash_message': _consume_web_flash_message,
         'load_current_keys': _load_current_keys,
         'cached_status_snapshot': _cached_status_snapshot,
@@ -3866,6 +4080,43 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     web_auth_user_getter = staticmethod(lambda: _web_config_auth_user(config))
     flash_message_setter = staticmethod(_set_web_flash_message)
 
+    def _build_style_asset(self):
+        return render_web_style_asset(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
+
+    def _build_script_asset(self):
+        app_runtime_mode = _load_app_runtime_mode()
+        pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
+        csrf_token = self._get_or_create_csrf_token()
+        current_keys = _load_current_keys()
+        snapshot = _cached_status_snapshot(current_keys)
+        progress = _get_pool_probe_progress()
+        pool_probe_pending = bool(progress.get('running')) and int(progress.get('total') or 0) > 0
+        if snapshot is None:
+            snapshot = _active_mode_status_snapshot(current_keys)
+        status_refresh_pending = web_form_blocks.status_refresh_pending(
+            snapshot.get('web', {}),
+            snapshot.get('protocols', {}),
+            pool_probe_pending,
+        )
+        custom_checks_json = (
+            json.dumps(key_pool_web.web_custom_checks(_load_custom_checks()), ensure_ascii=False)
+            if pool_enabled else
+            '[]'
+        )
+        return render_web_script_asset(
+            POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
+            TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
+            YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
+            csrf_token=csrf_token,
+            custom_checks_json=custom_checks_json,
+            initial_command_running=web_form_blocks.js_bool(bool(_get_web_command_state().get('running'))),
+            initial_status_pending=web_form_blocks.js_bool(status_refresh_pending),
+            enable_async_forms=True,
+            enable_custom_checks=pool_enabled,
+            enable_key_pool=pool_enabled,
+            enable_live_status=True,
+        )
+
     def _build_form(self, message=''):
         app_runtime_mode = _load_app_runtime_mode()
         pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
@@ -4018,6 +4269,12 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             self._send_json(action.get('payload', {}), status=action.get('status', 200))
         elif kind == 'html':
             self._send_html(action.get('html', ''))
+        elif kind == 'text':
+            self._send_text_asset(
+                action.get('text', ''),
+                content_type=action.get('content_type', 'text/plain; charset=utf-8'),
+                cache_seconds=action.get('cache_seconds', 0),
+            )
         elif kind == 'png':
             self._send_png(action.get('path', ''))
         else:

@@ -175,6 +175,22 @@ class WebRequestMixin:
         self.wfile.write(body)
         self.close_connection = True
 
+    def _send_text_asset(self, text, content_type='text/plain; charset=utf-8', cache_seconds=0):
+        body = (text or '').encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        if cache_seconds:
+            self.send_header('Cache-Control', f'public, max-age={int(cache_seconds)}')
+        else:
+            self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        self.wfile.write(body)
+        self.close_connection = True
+
     def _send_redirect(self, location='/'):
         self.send_response(303)
         self.send_header('Location', location)

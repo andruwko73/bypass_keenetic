@@ -47,6 +47,7 @@ def start_background_command(
     stale_after=1800,
     now=None,
     popen=subprocess.Popen,
+    source='telegram',
 ):
     now = time.time if now is None else now
     state = read_json_file(job_file, {}) or {}
@@ -56,6 +57,7 @@ def start_background_command(
 
     write_json_file(job_file, {
         'running': True,
+        'source': source,
         'action': action,
         'chat_id': int(chat_id),
         'menu_name': menu_name,
