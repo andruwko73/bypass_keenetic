@@ -123,10 +123,13 @@ def render_web_form(
                     <span class="app-branch">Режим работы: {html.escape(app_runtime_mode_description)}</span>
                 </div>
                 <span class="api-pill" id="web-api-pill">{html.escape(topbar_status_text)}</span>
-                <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
-                    <span>{html.escape(mode_toggle_label)}</span>
-                    <span>{html.escape(current_mode_label)}</span>
-                </button>
+                <div class="mode-control">
+                    <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
+                        <span>{html.escape(mode_toggle_label)}</span>
+                        <span>{html.escape(current_mode_label)}</span>
+                    </button>
+                    {mode_picker_block}
+                </div>
                 <div class="theme-control">
                     <button type="button" id="theme-toggle-button" class="theme-toggle" onclick="toggleThemePicker()" title="Выбрать тему интерфейса">
                         <span>Тема:</span>
@@ -144,7 +147,6 @@ def render_web_form(
                     </div>
                 </div>
                 <span class="version-badge" title="Номер версии по количеству коммитов в ветке">{html.escape(APP_VERSION_LABEL)}</span>
-                {mode_picker_block}
             </div>
         </header>
         {message_block}

@@ -1107,8 +1107,10 @@ def test_web_template_styles_helpers():
     assert '.topbar-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch;gap:8px;}' in styles
     assert '.app-caption strong{max-width:none;padding-right:60px;font-size:14px;line-height:1.18;white-space:normal;}' in styles
     assert '.app-branch{font-size:10.5px;line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:clip;overflow-wrap:normal;word-break:normal;}' in styles
-    assert '.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);right:0;left:auto;width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:62;}' in styles
-    assert '.topbar-actions > #mode-picker{position:absolute;top:calc(100% + 8px);left:0;right:auto;width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:62;}' in styles
+    assert '.topbar{position:relative;z-index:100;' in styles
+    assert '.mode-control,.theme-control{position:relative;min-width:0;}' in styles
+    assert '.mode-control #mode-picker,.theme-control .theme-picker{top:calc(100% + 8px);width:min(320px,calc(100vw - 32px));min-width:260px;z-index:140;}' in styles
+    assert '.mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:140;}' in styles
     assert '.version-badge{grid-column:2;grid-row:1;justify-self:end;align-self:start;width:auto;min-width:48px;' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
@@ -1292,6 +1294,7 @@ def test_web_form_template_smoke():
     assert '/static/app.js?v=' in page
     assert 'class="app-shell"' in page
     assert 'app-mode-toggle-button' in page
+    assert 'class="mode-control"' in page
     assert 'theme-picker' in page
     assert 'data-theme-choice="glass"' in page
     assert 'Liquid Glass' in page
