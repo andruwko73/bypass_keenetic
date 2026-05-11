@@ -560,7 +560,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             #mode-toggle-button{grid-column:1;grid-row:3;}
             .theme-control{grid-column:2;grid-row:3;}
             .theme-control{width:100%;}
-            .theme-control .theme-picker{top:calc(100% + 8px);right:0;left:auto;width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:62;}
+            .theme-control .theme-picker{position:absolute;top:calc(100% + 8px);right:0;left:auto;width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:62;}
             .topbar-actions > #mode-picker{position:absolute;top:calc(100% + 8px);left:0;right:auto;width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:62;}
             .api-pill,.theme-toggle,.mode-toggle,.version-badge{width:100%;justify-content:center;max-width:none;text-align:center;}
             .theme-toggle,.mode-toggle{min-width:0;gap:5px;padding-left:6px;padding-right:6px;font-size:12px;}
