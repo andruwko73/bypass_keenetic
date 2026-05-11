@@ -477,7 +477,11 @@ def render_web_scripts(
                     queueActivateFromPoint(event.clientX, event.clientY, event.pointerType === 'touch' ? 440 : 280);
                     return;
                 }}
-                if (event.pointerType !== 'touch' && !touchLikeInputActive()) {{
+                if (
+                    event.pointerType === 'mouse' ||
+                    event.pointerType === 'pen' ||
+                    (!event.pointerType && !touchLikeInputActive())
+                ) {{
                     queueActivateFromPoint(event.clientX, event.clientY, 260);
                 }}
             }}, {{ passive: true }});
