@@ -33,6 +33,7 @@ import telegram_key_ui
 import telegram_info_runtime
 import pool_probe_controller
 import pool_probe_runner
+import probe_cache
 import auto_failover_runtime
 import proxy_apply_runtime
 import proxy_status
@@ -1100,7 +1101,7 @@ def test_web_template_styles_helpers():
     assert '[data-theme="glass"] .mobile-nav[data-liquid]{position:fixed;}' in styles
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
     assert 'width:72px;' in styles
-    assert '[data-theme="glass"] .liquid-global-lens{width:64px;height:64px;}' in styles
+    assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
     assert '[data-theme="glass"] .mobile-nav .nav-item.active' in styles
@@ -1109,6 +1110,56 @@ def test_web_template_styles_helpers():
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
+
+
+def test_probe_cache_update_entry_min_interval():
+    cache = {}
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok=True,
+        yt_ok=False,
+        now=100,
+        min_write_interval=30,
+    )
+    key_id = probe_cache.hash_key('key-1')
+    assert cache[key_id]['ts'] == 100
+    assert cache[key_id]['tg_ok'] is True
+    assert cache[key_id]['yt_ok'] is False
+
+    assert not probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok=True,
+        yt_ok=False,
+        now=120,
+        min_write_interval=30,
+    )
+    assert cache[key_id]['ts'] == 100
+
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok='unknown',
+        now=121,
+        min_write_interval=30,
+    )
+    assert cache[key_id]['tg_ok'] is None
+    assert cache[key_id]['ts'] == 121
+
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok='unknown',
+        yt_ok=False,
+        now=152,
+        min_write_interval=30,
+    )
+    assert cache[key_id]['ts'] == 152
 
 
 def test_web_template_scripts_helpers():

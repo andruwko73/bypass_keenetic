@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.557, последнее изменение: 11.05.2026
+#  Файл: bot.py, Версия v1.558, последнее изменение: 11.05.2026
 
 import subprocess
 import os
@@ -136,6 +136,7 @@ from pool_probe_controller import (
     start_pool_probe_worker,
 )
 from probe_cache import (
+    KeyProbeBatchRecorder as _KeyProbeBatchRecorder,
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
     key_probe_is_fresh as _key_probe_is_fresh,
@@ -448,6 +449,8 @@ POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_FAILOVER_TEST_PORT = str(getattr(config, 'pool_failover_test_port', int(POOL_PROBE_TEST_PORT) + 64))
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 1)))
 POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
+POOL_PROBE_CACHE_FLUSH_EVERY = max(1, int(getattr(config, 'pool_probe_cache_flush_every', 5)))
+POOL_PROBE_CACHE_FLUSH_INTERVAL = max(0.2, float(getattr(config, 'pool_probe_cache_flush_interval', 2.0)))
 POOL_PROBE_TG_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_tg_connect_timeout', 2))
 POOL_PROBE_TG_READ_TIMEOUT = float(getattr(config, 'pool_probe_tg_read_timeout', 3))
 POOL_PROBE_HTTP_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_http_connect_timeout', 2))
@@ -476,7 +479,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.557'
+APP_VERSION_COUNTER = '1.558'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -2198,11 +2201,12 @@ def _protocol_status_for_key(key_name, key_value):
     )
 
 
-def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None):
+def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key_probe_cache=None):
     if not key_value.strip():
         return _status_empty_protocol_status()
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    probe = _load_key_probe_cache().get(_hash_key(key_value), {})
+    cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
+    probe = cache.get(_hash_key(key_value), {})
     custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
     return _status_cached_protocol_status(key_value, probe, custom_checks, custom_states)
 
@@ -3273,37 +3277,44 @@ def _invalidate_probe_status_caches():
 
 
 def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches):
-    return run_pool_probe_worker(
-        probe_tasks,
-        checks,
-        batch_size=POOL_PROBE_BATCH_SIZE,
-        concurrency=POOL_PROBE_CONCURRENCY,
-        delay_seconds=POOL_PROBE_DELAY_SECONDS,
-        min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
-        test_port=POOL_PROBE_TEST_PORT,
-        available_memory_kb=_available_memory_kb,
-        log=_write_runtime_log,
-        proto_label=_pool_proto_label,
-        hash_key=_hash_key,
-        set_checked=set_checked,
-        validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
-            proto,
-            key_value,
-            'proxy-pool-probe-validate',
-            _proxy_outbound_from_key,
-        ),
-        failed_custom_results=_failed_custom_probe_results,
-        record_key_probe=_record_key_probe,
-        start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
-            _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
-        ),
-        wait_for_socks5=_wait_for_socks5_handshake,
-        check_pool_key=_check_pool_key_through_proxy,
-        timeout_budget=_pool_probe_timeout_budget,
-        stop_xray=_runner_stop_pool_probe_xray,
-        cleanup_runtime=_runner_cleanup_pool_probe_runtime,
-        invalidate_caches=invalidate_caches,
+    probe_recorder = _KeyProbeBatchRecorder(
+        flush_every=POOL_PROBE_CACHE_FLUSH_EVERY,
+        flush_interval=POOL_PROBE_CACHE_FLUSH_INTERVAL,
     )
+    try:
+        return run_pool_probe_worker(
+            probe_tasks,
+            checks,
+            batch_size=POOL_PROBE_BATCH_SIZE,
+            concurrency=POOL_PROBE_CONCURRENCY,
+            delay_seconds=POOL_PROBE_DELAY_SECONDS,
+            min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
+            test_port=POOL_PROBE_TEST_PORT,
+            available_memory_kb=_available_memory_kb,
+            log=_write_runtime_log,
+            proto_label=_pool_proto_label,
+            hash_key=_hash_key,
+            set_checked=set_checked,
+            validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
+                proto,
+                key_value,
+                'proxy-pool-probe-validate',
+                _proxy_outbound_from_key,
+            ),
+            failed_custom_results=_failed_custom_probe_results,
+            record_key_probe=probe_recorder.record,
+            start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
+                _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
+            ),
+            wait_for_socks5=_wait_for_socks5_handshake,
+            check_pool_key=_check_pool_key_through_proxy,
+            timeout_budget=_pool_probe_timeout_budget,
+            stop_xray=_runner_stop_pool_probe_xray,
+            cleanup_runtime=_runner_cleanup_pool_probe_runtime,
+            invalidate_caches=invalidate_caches,
+        )
+    finally:
+        probe_recorder.flush()
 
 
 def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):
@@ -3502,6 +3513,7 @@ def _build_status_snapshot(current_keys, force_refresh=False):
         return cached
 
     custom_checks = _load_custom_checks()
+    key_probe_cache = _load_key_probe_cache()
     protocols = {}
     for key_name, key_value in current_keys.items():
         try:
@@ -3509,7 +3521,12 @@ def _build_status_snapshot(current_keys, force_refresh=False):
                 protocols[key_name] = _protocol_status_for_key(key_name, key_value)
                 _store_active_mode_protocol_status(current_keys, protocols[key_name])
             else:
-                protocols[key_name] = _cached_protocol_status_for_key(key_name, key_value, custom_checks=custom_checks)
+                protocols[key_name] = _cached_protocol_status_for_key(
+                    key_name,
+                    key_value,
+                    custom_checks=custom_checks,
+                    key_probe_cache=key_probe_cache,
+                )
         except Exception as exc:
             _write_runtime_log(f'Ошибка проверки ключа {key_name}: {exc}')
             protocols[key_name] = _status_protocol_error(exc)
