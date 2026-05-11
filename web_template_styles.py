@@ -269,7 +269,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         h1{font-size:18px;font-weight:700;}
         h2{font-size:19px;font-weight:700;line-height:1.22;}
         .brand p,.section-subtitle,.status-note,.key-status-note{color:#b9c6d3;}
-        .topbar-actions{width:100%;display:grid;grid-template-columns:minmax(360px,.9fr) minmax(260px,1.05fr) minmax(150px,.42fr) minmax(142px,.36fr) auto;align-items:center;justify-content:stretch;gap:8px;min-height:0;max-width:100%;}
+        .topbar-actions{width:100%;display:grid;grid-template-columns:minmax(360px,.9fr) minmax(260px,1.05fr) minmax(150px,.39fr) minmax(150px,.39fr) auto;align-items:center;justify-content:stretch;gap:8px;min-height:0;max-width:100%;}
         .theme-control{position:relative;min-width:0;}
         .theme-control .theme-toggle{width:100%;justify-content:center;}
         .theme-control .theme-picker{top:calc(100% + 8px);right:0;width:min(420px,calc(100vw - 32px));min-width:260px;z-index:32;}
@@ -455,7 +455,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             body{padding:8px;}
             .app-shell{height:calc(100vh - 16px);display:flex;flex-direction:column;min-height:0;}
             .topbar{position:static;flex:none;margin-bottom:8px;padding:8px 10px;}
-            .topbar-actions{grid-template-columns:minmax(360px,.9fr) minmax(260px,1.05fr) minmax(150px,.42fr) minmax(142px,.36fr) auto;}
+            .topbar-actions{grid-template-columns:minmax(360px,.9fr) minmax(260px,1.05fr) minmax(150px,.39fr) minmax(150px,.39fr) auto;}
             .workspace-layout{flex:1;min-height:0;align-items:stretch;}
             .side-nav{position:static;align-self:start;}
             .app-main{height:100%;min-height:0;overflow:hidden;}
@@ -500,7 +500,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         @media (min-width: 761px) and (max-width: 1180px){
             body{padding:8px;}
             .app-shell{max-width:none;}
-            .topbar-actions{grid-template-columns:minmax(300px,.9fr) minmax(220px,1fr) minmax(130px,.42fr) minmax(126px,.36fr) auto;gap:7px;}
+            .topbar-actions{grid-template-columns:minmax(300px,.9fr) minmax(220px,1fr) minmax(128px,.39fr) minmax(128px,.39fr) auto;gap:7px;}
             .app-caption strong{font-size:14px;line-height:1.16;}
             .app-branch{font-size:10px;line-height:1.18;}
             .api-pill{font-size:11px;line-height:1.18;padding:6px 8px;}
@@ -512,7 +512,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .nav-item{padding-left:8px;padding-right:8px;}
         }
         @media (min-width: 761px) and (max-width: 920px){
-            .topbar-actions{grid-template-columns:minmax(250px,.95fr) minmax(0,1fr) minmax(78px,.34fr) minmax(86px,.36fr) auto;gap:6px;}
+            .topbar-actions{grid-template-columns:minmax(250px,.95fr) minmax(0,1fr) minmax(82px,.35fr) minmax(82px,.35fr) auto;gap:6px;}
             #mode-toggle-button span:first-child,
             #theme-toggle-button span:first-child{display:none;}
             .api-pill{font-size:10.5px;}
@@ -550,10 +550,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                         .hero{padding:16px;border-radius:20px;}
             .topbar{position:static;align-items:stretch;flex-direction:column;padding:10px;}
             .app-shell,.topbar,.app-main,.app-view,.view-head,.status-card,.service-panel,.overview-key-panel,.mobile-nav{box-sizing:border-box;max-width:100%;}
-            .topbar-actions{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;justify-content:stretch;gap:8px;}
-            .app-caption{grid-column:1;grid-row:1;display:grid;gap:2px;width:100%;max-width:none;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
-            .app-caption strong,.app-branch{max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
-            .app-caption strong{max-width:none;font-size:14px;line-height:1.18;}
+            .topbar-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch;gap:8px;}
+            .app-caption{grid-column:1 / -1;grid-row:1;display:grid;gap:2px;width:100%;max-width:none;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
+            .app-caption strong,.app-branch{max-width:100%;min-width:0;overflow-wrap:anywhere;word-break:break-word;}
+            .app-caption strong{max-width:none;padding-right:60px;font-size:14px;line-height:1.18;white-space:normal;}
+            .app-branch{font-size:10.5px;line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:clip;overflow-wrap:normal;word-break:normal;}
             .section-subtitle,.status-note,.status-value{overflow-wrap:anywhere;}
             .api-pill{grid-column:1 / -1;grid-row:2;}
             #mode-toggle-button{grid-column:1;grid-row:3;}
@@ -683,19 +684,20 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .custom-check-form button:first-of-type{white-space:nowrap;font-size:12px;padding-left:6px;padding-right:6px;}
         }
         @media (max-width: 430px){
-            .topbar-actions{grid-template-columns:minmax(0,1fr) auto;}
-            .app-caption{grid-column:1;grid-row:1;}
+            .topbar-actions{grid-template-columns:repeat(2,minmax(0,1fr));}
+            .app-caption{grid-column:1 / -1;grid-row:1;}
             .version-badge{grid-column:2;grid-row:1;}
             .api-pill{grid-column:1 / -1;grid-row:2;}
             .command-grid{grid-template-columns:1fr;}
             .command-grid.service-command-grid{grid-template-columns:1fr;}
             .status-card-top{align-items:flex-start;}
             .api-pill{font-size:12px;}
+            .app-branch{font-size:10px;}
             .mode-choice{font-size:11px;padding:0 4px;}
         }
         @media (max-width: 560px){
-            .topbar-actions{grid-template-columns:minmax(0,1fr) auto;}
-            .app-caption{grid-column:1;grid-row:1;}
+            .topbar-actions{grid-template-columns:repeat(2,minmax(0,1fr));}
+            .app-caption{grid-column:1 / -1;grid-row:1;}
             .version-badge{grid-column:2;grid-row:1;}
             .api-pill{grid-column:1 / -1;grid-row:2;}
         }

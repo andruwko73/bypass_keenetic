@@ -1,5 +1,5 @@
-*v1.561 (11 May 2026) -* main
-*Unified topbar brand layout across desktop views and moved the mobile version badge into the top-right corner of the header.*
+*v1.562 (11 May 2026) -* main
+*Equalized mode and theme controls in the header on desktop and mobile.*
 
 *v1.560 (11 May 2026) -* main
 *Liquid Glass visual pass: softer surfaces, calmer borders and hover states, clearer active controls, and a lighter lens treatment while keeping the mobile lens size.*
