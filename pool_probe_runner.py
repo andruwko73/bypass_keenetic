@@ -311,6 +311,11 @@ def run_pool_probe_worker(
     invalidate_caches,
     cancel_event=None,
     on_cancelled_remaining=None,
+    set_note=None,
+    low_memory_delay_seconds=15.0,
+    max_low_memory_wait_seconds=180.0,
+    sleep=time.sleep,
+    time_provider=time.time,
 ):
     total = len(probe_tasks)
     checked = 0
@@ -328,23 +333,42 @@ def run_pool_probe_worker(
         checked += 1
         set_checked(checked)
 
+    low_memory_since = None
+
+    def update_note(text):
+        if set_note:
+            try:
+                set_note(text)
+            except Exception:
+                pass
+
     def memory_below_limit():
         available_kb = available_memory_kb()
         if available_kb is not None and available_kb < min_available_kb:
-            log(
-                f'Проверка пула остановлена: доступной памяти {available_kb} KB, '
-                f'порог {min_available_kb} KB.'
-            )
-            return True
-        return False
+            return available_kb
+        return None
 
     try:
         while probe_tasks:
             if cancel_requested():
                 log('Проверка пула приостановлена для применения выбранного ключа.')
                 break
-            if memory_below_limit():
-                break
+            low_memory_kb = memory_below_limit()
+            if low_memory_kb is not None:
+                if low_memory_since is None:
+                    low_memory_since = time_provider()
+                note = (
+                    f'Проверка ждёт свободную память: доступно {low_memory_kb} KB, '
+                    f'порог {min_available_kb} KB.'
+                )
+                update_note(note)
+                if max_low_memory_wait_seconds and time_provider() - low_memory_since >= max_low_memory_wait_seconds:
+                    log(note)
+                    break
+                sleep(max(1.0, float(low_memory_delay_seconds or 1.0)))
+                continue
+            low_memory_since = None
+            update_note('')
 
             raw_batch = probe_tasks[:batch_size]
             del probe_tasks[:batch_size]
@@ -372,8 +396,16 @@ def run_pool_probe_worker(
             config_path = None
             try:
                 process, config_path = start_xray_for_batch(valid_batch)
-                if memory_below_limit():
-                    break
+                low_memory_kb = memory_below_limit()
+                if low_memory_kb is not None:
+                    note = (
+                        f'Проверка остановила временный xray: доступно {low_memory_kb} KB, '
+                        f'порог {min_available_kb} KB.'
+                    )
+                    log(note)
+                    update_note(note)
+                    probe_tasks[:0] = valid_batch
+                    continue
                 ready_batch = []
                 for offset, (proto, key_value) in enumerate(valid_batch):
                     port = str(int(test_port) + offset)
@@ -449,7 +481,7 @@ def run_pool_probe_worker(
                 gc.collect()
 
             if checked < total and probe_tasks:
-                time.sleep(delay_seconds)
+                sleep(delay_seconds)
     except Exception as exc:
         log(f'Ошибка фоновой проверки пула ключей: {exc}')
     finally:

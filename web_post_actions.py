@@ -19,6 +19,7 @@ def pool_action_context(**values):
     defaults = {
         'custom_checks_enabled': True,
         'pool_actions_enabled': True,
+        'cancel_pool_probe': None,
     }
     defaults.update(values)
     return defaults
@@ -253,6 +254,19 @@ def _pool_probe(ctx, data):
     return _result(result, success=success, extra={'pool_probe_started': probe_started, 'pool_probe_queued': queued})
 
 
+def _pool_probe_cancel(ctx, data):
+    cancel_pool_probe = _ctx(ctx, 'cancel_pool_probe')
+    if not cancel_pool_probe:
+        return _result('Остановка проверки пула недоступна.', success=False)
+    try:
+        cancelled, result = cancel_pool_probe()
+    except Exception as exc:
+        return _result(f'Ошибка остановки проверки пула: {exc}', success=False)
+    if cancelled:
+        _invalidate_status(ctx)
+    return _result(result, success=True, extra={'pool_probe_cancelled': bool(cancelled)})
+
+
 def _pool_add(ctx, data):
     proto = form_value(data, 'type')
     success = True
@@ -400,7 +414,7 @@ def _install(ctx, data):
 
 def dispatch(ctx, path, data):
     custom_actions = {'/custom_checks_to_list', '/custom_check_add', '/custom_check_delete'}
-    pool_actions = {'/pool_probe', '/pool_add', '/pool_delete', '/pool_apply', '/pool_clear', '/pool_subscribe'}
+    pool_actions = {'/pool_probe', '/pool_probe_cancel', '/pool_add', '/pool_delete', '/pool_apply', '/pool_clear', '/pool_subscribe'}
     if path in custom_actions and not _ctx(ctx, 'custom_checks_enabled', False):
         return None
     if path in pool_actions and not _ctx(ctx, 'pool_actions_enabled', False):
@@ -427,6 +441,7 @@ def dispatch(ctx, path, data):
         '/custom_check_add': _custom_check_add,
         '/custom_check_delete': _custom_check_delete,
         '/pool_probe': _pool_probe,
+        '/pool_probe_cancel': _pool_probe_cancel,
         '/pool_add': _pool_add,
         '/pool_delete': _pool_delete,
         '/pool_apply': _pool_apply,

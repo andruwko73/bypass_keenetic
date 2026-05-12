@@ -51,6 +51,7 @@ def render_web_form(
     quick_key_proto,
     quick_key_value,
     quick_start_note,
+    router_health,
     socks_block,
     start_button_label,
     status,
@@ -65,6 +66,7 @@ def render_web_form(
     start_form_async_attr = ' data-async-action="start"' if enable_async_forms else ''
     quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
     pool_probe_async_attr = ' data-async-action="pool-probe"' if enable_async_forms else ''
+    pool_probe_cancel_async_attr = ' data-async-action="pool-probe-cancel"' if enable_async_forms else ''
     csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
     quick_start_forms = []
     if start_button_label:
@@ -87,6 +89,9 @@ def render_web_form(
         'Быстрое редактирование активного ключа. Остальные ключи находятся во вкладке "Ключи".'
     )
     quick_key_secondary_label = 'Открыть пул ключей' if enable_key_pool else 'Открыть все ключи'
+    router_health = router_health or {}
+    router_memory_text = html.escape(str(router_health.get('memory_text') or 'недоступно'))
+    router_health_note = html.escape(str(router_health.get('note') or 'данные обновляются из /proc с коротким кэшем'))
     keys_view_subtitle = (
         'Выберите протокол, сохраните активный ключ или управляйте его пулом.'
         if enable_key_pool else
@@ -104,11 +109,15 @@ def render_web_form(
                                     <p class="status-note" id="pool-summary-note">{html.escape(pool_summary_note)}</p>
                                     </div>
                                 </div>
-                            <div class="status-card-actions">
+                            <div class="status-card-actions key-pool-actions">
                                 <button type="button" class="outline-button" data-view-target="keys">Открыть ключи</button>
                                 <form method="post" action="/pool_probe"{pool_probe_async_attr}>
                                     {csrf_input_html}
                                     <button type="submit" class="outline-button">Проверить все ключи</button>
+                                </form>
+                                <form method="post" action="/pool_probe_cancel"{pool_probe_cancel_async_attr}>
+                                    {csrf_input_html}
+                                    <button type="submit" class="outline-button">Остановить проверку</button>
                                 </form>
                             </div>
                         </div>'''
@@ -220,6 +229,16 @@ def render_web_form(
                                     <span class="status-label">Активный режим</span>
                                     <span class="status-value" id="current-mode-label">{html.escape(current_mode_label)}</span>
                                     <p class="status-note">Списки обхода: <span id="list-route-label">{html.escape(list_route_label)}</span></p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="status-card router-health-card">
+                            <div class="status-card-top">
+                                <span class="card-icon">CPU</span>
+                                <div class="status-copy">
+                                    <span class="status-label">Роутер</span>
+                                    <span class="status-value" id="router-memory-text">{router_memory_text}</span>
+                                    <p class="status-note" id="router-health-note">{router_health_note}</p>
                                 </div>
                             </div>
                         </div>

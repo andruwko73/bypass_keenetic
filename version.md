@@ -1,3 +1,6 @@
+*v1.571 (12 May 2026) -* main
+*Added low-memory pool-check pausing and manual stop, a cached router health card, pool search/sort controls, Telegram-first failover ordering, update rollback from the web UI, and a Playwright UI smoke test while keeping the existing features intact.*
+
 *v1.570 (12 May 2026) -* main
 *Kept the Liquid Glass side navigation aligned with the overview card on desktop while preserving the global lens above the header.*
 

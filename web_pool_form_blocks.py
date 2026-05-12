@@ -15,6 +15,9 @@ def pool_probe_topbar_text(pool_probe_pending, progress, progress_label_func, fa
     progress_total = int(progress.get('total') or 0)
     progress_checked = int(progress.get('checked') or 0)
     progress_label = progress_label_func(progress)
+    progress_note = str(progress.get('note') or '').strip()
+    if progress_note:
+        return f'⏳ {progress_label}: {progress_checked}/{progress_total}. {progress_note}'
     return (
         f'⏳ {progress_label}: {progress_checked}/{progress_total}. '
         'Статусы обновятся без перезагрузки страницы.'
@@ -25,9 +28,11 @@ def pool_summary_note_with_progress(pool_summary_note, pool_probe_pending, progr
     if not pool_probe_pending:
         return pool_summary_note
     progress = progress or {}
+    progress_note = str(progress.get('note') or '').strip()
+    note_suffix = progress_note if progress_note else pool_summary_note
     return (
         f"{progress_label_func(progress)}: {int(progress.get('checked') or 0)}/"
-        f"{int(progress.get('total') or 0)}. {pool_summary_note}"
+        f"{int(progress.get('total') or 0)}. {note_suffix}"
     )
 
 
@@ -46,6 +51,12 @@ def _service_probe_badge(probe, probe_key, ok_html):
     if probe_key in probe:
         return '<span class="service-probe-mark service-probe-fail">✕</span>'
     return '<span class="service-probe-mark service-probe-unknown">?</span>'
+
+
+def _probe_state(probe, probe_key):
+    if not isinstance(probe, dict) or probe_key not in probe or probe.get(probe_key) is None:
+        return 'unknown'
+    return 'ok' if probe.get(probe_key) else 'fail'
 
 
 def render_pool_items(
@@ -68,7 +79,7 @@ def render_pool_items(
     safe_key_name = html.escape(key_name, quote=True)
     safe_title = html.escape(title)
     current_key = current_key or ''
-    for pool_key in pool_keys or []:
+    for index, pool_key in enumerate(pool_keys or []):
         key_hash = hash_key(pool_key)
         key_id = html.escape(str(key_hash[:12]))
         safe_pool_key = html.escape(pool_key, quote=True)
@@ -79,11 +90,17 @@ def render_pool_items(
         probe = key_probe_cache.get(key_hash, {})
         if not isinstance(probe, dict):
             probe = {}
+        tg_state = html.escape(_probe_state(probe, 'tg_ok'), quote=True)
+        yt_state = html.escape(_probe_state(probe, 'yt_ok'), quote=True)
+        try:
+            checked_ts = int(probe.get('ts') or 0)
+        except Exception:
+            checked_ts = 0
         tg_badge = _service_probe_badge(probe, 'tg_ok', telegram_icon_html(opacity=1.0))
         yt_badge = _service_probe_badge(probe, 'yt_ok', youtube_icon_html(opacity=1.0))
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
-        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-key="{safe_pool_key}">
+        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-key="{safe_pool_key}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-checked-ts="{int(checked_ts)}">
                         <td class="pool-key-cell">
                             <form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">
                                 {csrf_input_html}
@@ -193,6 +210,20 @@ def render_protocol_panel(
                     <input type="hidden" name="type" value="{safe_key_name}">
                     <button type="submit" class="danger pool-clear-btn">Очистить пул</button>
                 </form>
+                <form method="post" action="/pool_probe_cancel" data-async-action="pool-probe-cancel">
+                    {csrf_input_html}
+                    <button type="submit" class="secondary-button">Остановить проверку</button>
+                </form>
+            </div>
+            <div class="pool-controls" data-pool-controls="{safe_key_name}">
+                <input type="search" data-pool-filter="{safe_key_name}" placeholder="Поиск по пулу">
+                <select data-pool-sort="{safe_key_name}" aria-label="Сортировка пула">
+                    <option value="original">Исходный порядок</option>
+                    <option value="active">Активный сверху</option>
+                    <option value="telegram">Telegram сначала</option>
+                    <option value="youtube">YouTube сначала</option>
+                    <option value="checked">Свежие проверки</option>
+                </select>
             </div>
             <div class="pool-table-wrap">
                 <table class="{html.escape(pool_table_class, quote=True)}" style="--custom-col-mobile:{int(pool_mobile_custom_col_width)}px">

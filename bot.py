@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.570, последнее изменение: 12.05.2026
+#  Файл: bot.py, Версия v1.571, последнее изменение: 12.05.2026
 
 import subprocess
 import os
@@ -389,6 +389,8 @@ def _attempt_auto_failover():
         grace_seconds=AUTO_FAILOVER_GRACE_SECONDS,
         switch_cooldown_seconds=AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
         check_timeouts=(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
+        key_probe_cache=_load_key_probe_cache,
+        hash_key=_hash_key,
     )
 
 
@@ -451,11 +453,14 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 3.0))
+ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 5.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
 POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.8))
 POOL_PROBE_MIN_AVAILABLE_KB = int(getattr(config, 'pool_probe_min_available_kb', 190000))
+POOL_PROBE_LOW_MEMORY_DELAY_SECONDS = float(getattr(config, 'pool_probe_low_memory_delay_seconds', 12.0))
+POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS = float(getattr(config, 'pool_probe_low_memory_max_wait_seconds', 180.0))
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_FAILOVER_TEST_PORT = str(getattr(config, 'pool_failover_test_port', int(POOL_PROBE_TEST_PORT) + 64))
 POOL_PROBE_BATCH_SIZE_CONFIGURED = hasattr(config, 'pool_probe_batch_size')
@@ -491,7 +496,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.570'
+APP_VERSION_COUNTER = '1.571'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -565,6 +570,10 @@ web_status_api_cache = {
     'timestamp': 0,
     'payload': None,
 }
+router_health_cache = {
+    'timestamp': 0,
+    'payload': None,
+}
 active_mode_status_cache = {
     'timestamp': 0,
     'signature': None,
@@ -572,6 +581,7 @@ active_mode_status_cache = {
 }
 active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
+router_health_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 key_pool_lock = threading.RLock()
@@ -580,6 +590,7 @@ pool_apply_lock = threading.Lock()
 pool_probe_cancel_event = threading.Event()
 pool_probe_resume_lock = threading.Lock()
 pool_probe_resume_payload = None
+pool_probe_resume_after_cancel = True
 pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
 WEB_UPDATE_COMMANDS = ('update',)
@@ -1928,6 +1939,70 @@ def _dns_override_enabled():
         return False
 
 
+def _latest_update_backup_dir(root='/opt/root'):
+    try:
+        candidates = [
+            os.path.join(root, name)
+            for name in os.listdir(root)
+            if name.startswith('backup-') and os.path.isdir(os.path.join(root, name))
+        ]
+    except Exception:
+        return ''
+    if not candidates:
+        return ''
+    return max(candidates, key=lambda path: (os.path.getmtime(path), path))
+
+
+def _restore_backup_file(source, target, mode=None):
+    if not os.path.isfile(source):
+        return False
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    shutil.copy2(source, target)
+    if mode is not None:
+        try:
+            os.chmod(target, mode)
+        except Exception:
+            pass
+    return True
+
+
+def _rollback_last_update():
+    backup_dir = _latest_update_backup_dir()
+    if not backup_dir:
+        return 'Резервная копия обновления не найдена в /opt/root/backup-* .'
+    restored = []
+    main_source = os.path.join(backup_dir, 'bot.py')
+    if _restore_backup_file(main_source, BOT_SOURCE_PATH, 0o755):
+        restored.append('main.py')
+    for name in os.listdir(backup_dir):
+        if not name.endswith('.py') or name == 'bot.py':
+            continue
+        if _restore_backup_file(os.path.join(backup_dir, name), os.path.join(BOT_DIR, name), 0o644):
+            restored.append(name)
+    fixed_targets = {
+        'installer.py': ('/opt/etc/bot/installer.py', 0o755),
+        'S98telegram_bot_installer': ('/opt/etc/init.d/S98telegram_bot_installer', 0o755),
+        'S99telegram_bot': ('/opt/etc/init.d/S99telegram_bot', 0o755),
+        'unblock_ipset.sh': ('/opt/bin/unblock_ipset.sh', 0o755),
+        'unblock_dnsmasq.sh': ('/opt/bin/unblock_dnsmasq.sh', 0o755),
+        'unblock_update.sh': ('/opt/bin/unblock_update.sh', 0o755),
+        'dnsmasq.conf': ('/opt/etc/dnsmasq.conf', 0o644),
+        '100-ipset.sh': ('/opt/etc/ndm/fs.d/100-ipset.sh', 0o755),
+        '100-redirect.sh': ('/opt/etc/ndm/netfilter.d/100-redirect.sh', 0o755),
+    }
+    for name, (target, mode) in fixed_targets.items():
+        if _restore_backup_file(os.path.join(backup_dir, name), target, mode):
+            restored.append(name)
+    if not restored:
+        return f'Backup найден ({backup_dir}), но в нём нет файлов для восстановления.'
+    _invalidate_web_status_cache()
+    _schedule_app_service_restart()
+    return (
+        f'Откат выполнен из {backup_dir}. Восстановлено файлов: {len(restored)}. '
+        'Сервис бота будет перезапущен через несколько секунд.'
+    )
+
+
 def _run_web_command(command):
     if command in ('update_independent', 'update_no_bot'):
         command = 'update'
@@ -1937,6 +2012,8 @@ def _run_web_command(command):
     if command == 'update':
         _, output = _run_script_action('-update', fork_repo_owner, fork_repo_name, progress_command='update')
         return output
+    if command == 'rollback_update':
+        return _rollback_last_update()
     if command == 'remove':
         _, output = _run_script_action('-remove', fork_repo_owner, fork_repo_name)
         return output
@@ -2079,6 +2156,123 @@ def _store_web_status_api_cache(payload, timestamp=None):
     with web_status_api_cache_lock:
         web_status_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
         web_status_api_cache['payload'] = payload
+
+
+def _read_proc_text(path, max_bytes=16384):
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as file:
+            return file.read(max_bytes)
+    except Exception:
+        return ''
+
+
+def _read_proc_meminfo():
+    values = {}
+    for line in _read_proc_text('/proc/meminfo').splitlines():
+        if ':' not in line:
+            continue
+        key, value = line.split(':', 1)
+        parts = value.strip().split()
+        if not parts:
+            continue
+        try:
+            values[key] = int(parts[0])
+        except Exception:
+            pass
+    return values
+
+
+def _process_rss_kb(pid='self'):
+    for line in _read_proc_text(f'/proc/{pid}/status').splitlines():
+        if line.startswith('VmRSS:'):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    return int(parts[1])
+                except Exception:
+                    return None
+    return None
+
+
+def _count_proc_cmdline(marker):
+    count = 0
+    proc_root = '/proc'
+    try:
+        names = os.listdir(proc_root)
+    except Exception:
+        return 0
+    for name in names:
+        if not name.isdigit():
+            continue
+        text = _read_proc_text(os.path.join(proc_root, name, 'cmdline'), max_bytes=2048)
+        if marker in text.replace('\x00', ' '):
+            count += 1
+    return count
+
+
+def _router_health_snapshot():
+    now = time.time()
+    with router_health_cache_lock:
+        payload = router_health_cache.get('payload')
+        if payload is not None and now - float(router_health_cache.get('timestamp') or 0) < ROUTER_HEALTH_CACHE_TTL:
+            return dict(payload)
+
+    meminfo = _read_proc_meminfo()
+    total_kb = int(meminfo.get('MemTotal') or 0)
+    available_kb = int(meminfo.get('MemAvailable') or meminfo.get('MemFree') or 0)
+    swap_total_kb = int(meminfo.get('SwapTotal') or 0)
+    swap_free_kb = int(meminfo.get('SwapFree') or 0)
+    used_kb = max(0, total_kb - available_kb) if total_kb else 0
+    used_mb = int(round(used_kb / 1024.0)) if used_kb else 0
+    total_mb = int(round(total_kb / 1024.0)) if total_kb else 0
+    available_mb = int(round(available_kb / 1024.0)) if available_kb else 0
+    used_percent = int(round((used_kb / float(total_kb)) * 100)) if total_kb else 0
+    load_text = ' / '.join((_read_proc_text('/proc/loadavg').split()[:3] or []))
+    bot_rss_kb = _process_rss_kb('self')
+    bot_rss_mb = int(round(bot_rss_kb / 1024.0)) if bot_rss_kb else 0
+    probe_progress = _get_pool_probe_progress() if 'pool_probe_progress' in globals() else {}
+    probe_running = bool(probe_progress.get('running')) and int(probe_progress.get('total') or 0) > 0
+    probe_text = (
+        f"проверка {int(probe_progress.get('checked') or 0)}/{int(probe_progress.get('total') or 0)}"
+        if probe_running else 'проверка не идёт'
+    )
+    probe_note = str(probe_progress.get('note') or '').strip()
+    temp_xray_count = _count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0
+    swap_used_mb = int(round(max(0, swap_total_kb - swap_free_kb) / 1024.0)) if swap_total_kb else 0
+    memory_text = f'{used_mb} / {total_mb} MB' if total_mb else 'недоступно'
+    details = []
+    if available_mb:
+        details.append(f'доступно {available_mb} MB')
+    if used_percent:
+        details.append(f'{used_percent}%')
+    if load_text:
+        details.append(f'load {load_text}')
+    if bot_rss_mb:
+        details.append(f'бот {bot_rss_mb} MB')
+    if swap_total_kb:
+        details.append(f'swap {swap_used_mb} MB')
+    details.append(probe_text)
+    if temp_xray_count:
+        details.append(f'временный xray: {temp_xray_count}')
+    if probe_note:
+        details.append(probe_note)
+    payload = {
+        'memory_text': memory_text,
+        'note': ', '.join(details),
+        'available_kb': available_kb,
+        'used_kb': used_kb,
+        'total_kb': total_kb,
+        'used_percent': used_percent,
+        'load_text': load_text,
+        'bot_rss_kb': bot_rss_kb or 0,
+        'pool_probe_running': probe_running,
+        'pool_probe_text': probe_text,
+        'temporary_xray_count': temp_xray_count,
+    }
+    with router_health_cache_lock:
+        router_health_cache['timestamp'] = now
+        router_health_cache['payload'] = payload
+    return dict(payload)
 
 
 def _invalidate_key_status_cache():
@@ -2237,6 +2431,7 @@ def _web_command_label(command):
     labels = {
         'install_original': 'Установить оригинальную версию',
         'update': 'Обновить до последнего релиза',
+        'rollback_update': 'Откатить последнее обновление',
         'remove': 'Удалить компоненты',
         'restart_services': 'Перезапустить сервисы',
         'dns_on': 'DNS Override ВКЛ',
@@ -3314,6 +3509,8 @@ def _store_cancelled_pool_probe(probe_tasks, checks, scope):
     remaining = list(probe_tasks or [])
     if not remaining:
         return
+    if not pool_probe_resume_after_cancel:
+        return
     with pool_probe_resume_lock:
         pool_probe_resume_payload = {
             'tasks': remaining,
@@ -3331,6 +3528,8 @@ def _take_cancelled_pool_probe():
 
 
 def _start_selected_pool_probe_tasks(selected, custom_checks, scope):
+    global pool_probe_resume_after_cancel
+    pool_probe_resume_after_cancel = True
     return start_pool_probe_worker(
         selected,
         custom_checks,
@@ -3381,8 +3580,10 @@ def _resume_cancelled_pool_probe():
 
 
 def _pause_pool_probe_for_apply(timeout=12.0):
+    global pool_probe_resume_after_cancel
     if not pool_probe_lock.locked():
         return False, ''
+    pool_probe_resume_after_cancel = True
     pool_probe_cancel_event.set()
     deadline = time.time() + max(0.5, float(timeout or 0))
     while pool_probe_lock.locked() and time.time() < deadline:
@@ -3390,6 +3591,23 @@ def _pause_pool_probe_for_apply(timeout=12.0):
     if pool_probe_lock.locked():
         return True, 'Проверка пула завершает текущий ключ; применение продолжено без ожидания всей очереди.'
     return True, 'Проверка пула приостановлена; после применения ключа она продолжится.'
+
+
+def _cancel_pool_probe(timeout=2.0):
+    global pool_probe_resume_after_cancel, pool_probe_resume_payload
+    if not pool_probe_lock.locked():
+        return False, 'Проверка пула сейчас не выполняется.'
+    pool_probe_resume_after_cancel = False
+    with pool_probe_resume_lock:
+        pool_probe_resume_payload = None
+    pool_probe_cancel_event.set()
+    _set_pool_probe_progress(note='Остановка проверки пула после текущего ключа.')
+    deadline = time.time() + max(0.2, float(timeout or 0))
+    while pool_probe_lock.locked() and time.time() < deadline:
+        time.sleep(0.2)
+    if pool_probe_lock.locked():
+        return True, 'Остановка проверки пула запрошена. Текущий ключ будет завершён, временный xray остановится.'
+    return True, 'Проверка пула остановлена.'
 
 
 def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches, scope='manual', cancel_event=None):
@@ -3436,6 +3654,9 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             invalidate_caches=invalidate_caches,
             cancel_event=cancel_event,
             on_cancelled_remaining=lambda remaining: _store_cancelled_pool_probe(remaining, checks, scope),
+            set_note=lambda note: _set_pool_probe_progress(note=note),
+            low_memory_delay_seconds=POOL_PROBE_LOW_MEMORY_DELAY_SECONDS,
+            max_low_memory_wait_seconds=POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS,
         )
     finally:
         probe_recorder.flush()
@@ -4024,6 +4245,7 @@ def _web_action_context():
         pool_keys_for_proto=_pool_keys_for_proto,
         probe_pool_keys_background=_probe_pool_keys_background,
         pause_pool_probe_for_apply=_pause_pool_probe_for_apply,
+        cancel_pool_probe=_cancel_pool_probe,
         resume_cancelled_pool_probe=_resume_cancelled_pool_probe,
         add_keys_to_pool=_add_keys_to_pool,
         delete_pool_key=_delete_pool_key,
@@ -4058,6 +4280,7 @@ def _web_get_context(handler):
         'store_status_api_cache': _store_web_status_api_cache,
         'status_api_cache_ttl': WEB_STATUS_API_CACHE_TTL,
         'get_web_command_state': _get_web_command_state,
+        'router_health_snapshot': _router_health_snapshot,
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
         'web_pool_snapshot': _web_pool_snapshot,
@@ -4254,6 +4477,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 _refresh_status_caches_async(current_keys)
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
+        router_health = _router_health_snapshot()
 
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
         form_basics = web_form_blocks.render_form_basics(message, command_state, status, current_keys, current_mode_label, live=True)
@@ -4340,6 +4564,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             quick_key_proto=quick_key['proto'],
             quick_key_value=quick_key['value'],
             quick_start_note=quick_start_note,
+            router_health=router_health,
             socks_block=form_basics['socks_block'],
             start_button_label=start_button_label,
             status=status,

@@ -280,6 +280,7 @@ def web_pool_snapshot(
                 'yt': probe_state(probe, 'yt_ok'),
                 'custom': web_custom_probe_states(probe, custom_checks),
                 'checked_at': probe_checked_at(probe),
+                'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,
             }
             if include_keys:
                 row['key'] = key_value

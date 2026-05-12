@@ -24,6 +24,8 @@ def attempt_auto_failover(
     switch_cooldown_seconds,
     check_timeouts=(4, 6),
     protocols=POOL_PROTOCOLS,
+    key_probe_cache=None,
+    hash_key=None,
     time_provider=time.time,
 ):
     now = time_provider()
@@ -51,7 +53,16 @@ def attempt_auto_failover(
     try:
         current_keys = load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
-        candidates = failover_candidates(load_key_pools(), proxy_mode, active_key, protocols=protocols)
+        probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
+        candidates = failover_candidates(
+            load_key_pools(),
+            proxy_mode,
+            active_key,
+            protocols=protocols,
+            key_probe_cache=probe_cache,
+            hash_key=hash_key,
+            service='telegram',
+        )
 
         if not candidates:
             log('Auto-failover: ключей в пулах нет, переключать не на что.')

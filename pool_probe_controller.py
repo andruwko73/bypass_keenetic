@@ -9,6 +9,7 @@ def initial_pool_probe_progress():
         'checked': 0,
         'total': 0,
         'scope': '',
+        'note': '',
         'started_at': 0,
         'finished_at': 0,
     }
@@ -164,6 +165,7 @@ def start_pool_probe_worker(
         checked=0,
         total=len(probe_tasks),
         scope=scope,
+        note='',
         started_at=time_provider(),
         finished_at=0,
     )
@@ -186,6 +188,7 @@ def start_pool_probe_worker(
                 checked=checked,
                 total=total,
                 scope=scope,
+                note='',
                 finished_at=time_provider(),
             )
             lock.release()

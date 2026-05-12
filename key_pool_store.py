@@ -160,10 +160,39 @@ def clear_pool(pools, proto):
     return pools, removed_keys
 
 
-def failover_candidates(pools, current_proto, current_key, protocols=PROTOCOLS):
+def failover_candidates(
+    pools,
+    current_proto,
+    current_key,
+    protocols=PROTOCOLS,
+    key_probe_cache=None,
+    hash_key=None,
+    service='telegram',
+):
     pools = normalize_key_pools(pools)
     current_proto = str(current_proto or '').strip()
     current_key = str(current_key or '').strip()
+    key_probe_cache = key_probe_cache or {}
+    service_field = 'yt_ok' if service == 'youtube' else 'tg_ok'
+
+    def probe_score(key_value):
+        if not key_probe_cache or not hash_key:
+            return (2, 0)
+        probe = key_probe_cache.get(hash_key(key_value), {})
+        if not isinstance(probe, dict):
+            return (2, 0)
+        if probe.get(service_field) is True:
+            score = 3
+        elif service_field in probe and probe.get(service_field) is False:
+            score = 1
+        else:
+            score = 2
+        try:
+            checked_ts = int(probe.get('ts') or 0)
+        except Exception:
+            checked_ts = 0
+        return (score, checked_ts)
+
     protocol_order = [proto for proto in (protocols or PROTOCOLS) if proto in pools]
     priority = []
     if current_proto in protocol_order:
@@ -177,11 +206,15 @@ def failover_candidates(pools, current_proto, current_key, protocols=PROTOCOLS):
             priority.append(proto)
     candidates = []
     for proto in priority:
-        for key_value in pools.get(proto, []) or []:
+        proto_candidates = []
+        for index, key_value in enumerate(pools.get(proto, []) or []):
             key_value = str(key_value or '').strip()
             if not key_value:
                 continue
             if proto == current_proto and key_value == current_key:
                 continue
-            candidates.append((proto, key_value))
+            score, checked_ts = probe_score(key_value)
+            proto_candidates.append((proto, key_value, score, checked_ts, index))
+        proto_candidates.sort(key=lambda item: (-item[2], -item[3], item[4]))
+        candidates.extend((proto, key_value) for proto, key_value, _score, _checked_ts, _index in proto_candidates)
     return candidates

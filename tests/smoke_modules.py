@@ -202,6 +202,18 @@ def test_key_pool_subscription_helpers():
         protocols=('vless', 'vmess'),
     )
     assert candidates == [('vless', 'next'), ('vmess', 'vmess-key')]
+    scored_candidates = key_pool_store.failover_candidates(
+        {'vless': ['active', 'bad', 'good', 'unknown'], 'vmess': ['vmess-key']},
+        'vless',
+        'active',
+        protocols=('vless', 'vmess'),
+        key_probe_cache={
+            _hash_key('bad'): {'tg_ok': False, 'ts': 9},
+            _hash_key('good'): {'tg_ok': True, 'ts': 1},
+        },
+        hash_key=_hash_key,
+    )
+    assert scored_candidates[:3] == [('vless', 'good'), ('vless', 'unknown'), ('vless', 'bad')]
 
 
 def test_web_post_actions_helpers():
@@ -240,6 +252,7 @@ def test_web_post_actions_helpers():
         probe_all_pool_keys_async=lambda **kwargs: (False, 0),
         pool_keys_for_proto=lambda proto: [],
         probe_pool_keys_background=lambda proto, keys, **kwargs: (False, 0),
+        cancel_pool_probe=lambda: (False, 'idle'),
         add_keys_to_pool=lambda proto, text: 0,
         delete_pool_key=lambda proto, key: None,
         load_key_pools=lambda: {},
@@ -263,6 +276,7 @@ def test_web_action_feature_gates():
         'add_custom_check': lambda **kwargs: calls.append('custom-check'),
     }
     assert web_post_actions.dispatch(disabled_ctx, '/pool_probe', {}) is None
+    assert web_post_actions.dispatch(disabled_ctx, '/pool_probe_cancel', {}) is None
     assert web_post_actions.dispatch(disabled_ctx, '/custom_check_add', {}) is None
     probe = web_get_actions.dispatch({'pool_enabled': True, 'get_pool_probe_progress': lambda: {'running': False, 'total': 0}}, '/api/pool_probe')
     assert probe['payload']['status'] == 'idle'
@@ -477,7 +491,7 @@ def test_auto_failover_runtime_helpers():
         check_telegram_api=lambda proxy, **kwargs: (False, 'fail'),
         load_current_keys=lambda: {'vless': 'active'},
         load_key_pools=lambda: {'vless': ['active', 'next']},
-        failover_candidates=lambda pools, mode, active, protocols=(): [('vless', 'next')],
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
         find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, False),
         install_key_for_protocol=lambda proto, key, verify=True: calls.append(('install', proto, key, verify)) or 'ok',
         update_proxy=lambda proto: calls.append(('update', proto)),
@@ -503,7 +517,7 @@ def test_auto_failover_runtime_helpers():
         check_telegram_api=lambda proxy, **kwargs: locked_calls.append('check') or (False, 'fail'),
         load_current_keys=lambda: {'vless': 'active'},
         load_key_pools=lambda: {'vless': ['active', 'next']},
-        failover_candidates=lambda pools, mode, active, protocols=(): [('vless', 'next')],
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
         find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, False),
         install_key_for_protocol=lambda proto, key, verify=True: None,
         update_proxy=lambda proto: None,
@@ -733,7 +747,8 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (0, 1)
     assert remaining == [('vless', 'left')]
 
-    memory_values = iter([999999, 1000])
+    memory_values = iter([999999, 1000, 1000])
+    time_values = iter([0.0, 2.0])
     started_batches = []
     stopped = []
     cleaned = []
@@ -761,6 +776,10 @@ def test_pool_probe_runner_failover_candidate():
         stop_xray=lambda process, config_path: stopped.append((process, config_path)),
         cleanup_runtime=lambda kill_processes=False: cleaned.append(kill_processes),
         invalidate_caches=lambda: None,
+        low_memory_delay_seconds=0,
+        max_low_memory_wait_seconds=1,
+        sleep=lambda seconds: None,
+        time_provider=lambda: next(time_values),
     )
     assert (checked, total) == (0, 1)
     assert started_batches == [[('vless', 'low-memory')]]
@@ -1194,17 +1213,18 @@ def test_web_template_styles_helpers():
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
     assert '@media (min-width: 1024px){[data-theme="glass"] .side-nav[data-liquid]{position:static;}}' in styles
     assert 'width:72px;' in styles
-    assert 'z-index:130;' in styles
+    assert 'z-index:300;' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
     assert '.api-pill{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;height:auto;min-height:calc(var(--control-height) + 8px);' in styles
     assert '.app-caption strong{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;white-space:normal;overflow:visible;text-overflow:clip;' in styles
     assert '.topbar-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch;gap:8px;}' in styles
     assert '.app-caption strong{max-width:none;padding-right:60px;font-size:14px;line-height:1.18;white-space:normal;}' in styles
     assert '.app-branch{font-size:10.5px;line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:clip;overflow-wrap:normal;word-break:normal;}' in styles
-    assert '.topbar{position:relative;z-index:100;' in styles
+    assert '.topbar{position:relative;z-index:260;' in styles
     assert '.mode-control,.theme-control{position:relative;min-width:0;}' in styles
-    assert '.mode-control #mode-picker,.theme-control .theme-picker{top:calc(100% + 8px);width:min(320px,calc(100vw - 32px));min-width:260px;z-index:140;}' in styles
-    assert '.mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:140;}' in styles
+    assert '.mode-control #mode-picker,.theme-control .theme-picker{top:calc(100% + 8px);width:min(320px,calc(100vw - 32px));min-width:260px;z-index:330;}' in styles
+    assert '.mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:330;}' in styles
+    assert '.pool-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,.32fr);' in styles
     assert '.version-badge{grid-column:2;grid-row:1;justify-self:end;align-self:start;width:auto;min-width:48px;' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
@@ -1380,6 +1400,7 @@ def test_web_form_template_smoke():
         quick_key_proto='vless',
         quick_key_value='',
         quick_start_note='note',
+        router_health={'memory_text': '10 / 64 MB', 'note': 'load 0.01'},
         socks_block='',
         start_button_label='start',
         status={'api_status': 'ok'},
@@ -1399,6 +1420,8 @@ def test_web_form_template_smoke():
     assert 'Liquid Glass' in page
     assert 'service-command-grid' in page
     assert 'quick-start-actions' in page
+    assert 'router-memory-text' in page
+    assert '10 / 64 MB' in page
     assert 'value="update"' in page
     assert 'Обновить до последнего релиза' in page
     assert 'data-confirm-title="Обновить до последнего релиза?' in page
@@ -1441,6 +1464,7 @@ def test_web_form_template_smoke():
         quick_key_proto='vless',
         quick_key_value='',
         quick_start_note='note',
+        router_health={'memory_text': '10 / 64 MB', 'note': 'load 0.01'},
         socks_block='',
         start_button_label='',
         status={'api_status': 'ok'},

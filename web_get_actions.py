@@ -62,6 +62,7 @@ def _status_payload(ctx):
     payload = {
         'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
         'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
+        'router_health': _ctx(ctx, 'router_health_snapshot', lambda: {})(),
     }
     if not pool_enabled:
         payload.update({

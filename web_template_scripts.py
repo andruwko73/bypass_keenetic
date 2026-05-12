@@ -749,6 +749,7 @@ def render_web_scripts(
                         loadedPanel.dataset.protocolLoaded = '1';
                         panel.replaceWith(loadedPanel);
                         setupProtocolSubtabs(loadedPanel);
+                        setupPoolControls(loadedPanel);
                         setupAsyncForms(loadedPanel);
                     }})
                     .catch(function(error) {{
@@ -984,6 +985,84 @@ def render_web_scripts(
             syncCustomCheckColumns();
         }}
 
+        function poolStateRank(value) {{
+            if (value === 'ok') {{
+                return 3;
+            }}
+            if (value === 'unknown') {{
+                return 2;
+            }}
+            if (value === 'fail') {{
+                return 1;
+            }}
+            return 0;
+        }}
+
+        function applyPoolView(proto) {{
+            if (!proto) {{
+                return;
+            }}
+            const body = document.querySelector('[data-pool-body="' + proto + '"]');
+            if (!body) {{
+                return;
+            }}
+            const filterInput = document.querySelector('[data-pool-filter="' + proto + '"]');
+            const sortSelect = document.querySelector('[data-pool-sort="' + proto + '"]');
+            const filterText = filterInput ? filterInput.value.trim().toLowerCase() : '';
+            const sortMode = sortSelect ? sortSelect.value : 'original';
+            const rows = Array.from(body.querySelectorAll('[data-pool-row]'));
+            rows.forEach(function(row) {{
+                const haystack = String(row.dataset.search || row.dataset.key || '').toLowerCase();
+                row.classList.toggle('pool-row-hidden', !!filterText && haystack.indexOf(filterText) === -1);
+            }});
+            rows.sort(function(left, right) {{
+                const leftIndex = Number(left.dataset.poolIndex || 0);
+                const rightIndex = Number(right.dataset.poolIndex || 0);
+                if (sortMode === 'active') {{
+                    const activeDelta = Number(right.dataset.active || 0) - Number(left.dataset.active || 0);
+                    if (activeDelta) {{
+                        return activeDelta;
+                    }}
+                }} else if (sortMode === 'telegram') {{
+                    const tgDelta = poolStateRank(right.dataset.tgState) - poolStateRank(left.dataset.tgState);
+                    if (tgDelta) {{
+                        return tgDelta;
+                    }}
+                }} else if (sortMode === 'youtube') {{
+                    const ytDelta = poolStateRank(right.dataset.ytState) - poolStateRank(left.dataset.ytState);
+                    if (ytDelta) {{
+                        return ytDelta;
+                    }}
+                }} else if (sortMode === 'checked') {{
+                    const checkedDelta = Number(right.dataset.checkedTs || 0) - Number(left.dataset.checkedTs || 0);
+                    if (checkedDelta) {{
+                        return checkedDelta;
+                    }}
+                }}
+                return leftIndex - rightIndex;
+            }});
+            rows.forEach(function(row) {{
+                body.appendChild(row);
+            }});
+        }}
+
+        function setupPoolControls(root) {{
+            if (!ENABLE_KEY_POOL) {{
+                return;
+            }}
+            const scope = root && root.querySelectorAll ? root : document;
+            scope.querySelectorAll('[data-pool-filter], [data-pool-sort]').forEach(function(control) {{
+                if (control.dataset.poolControlReady === '1') {{
+                    return;
+                }}
+                control.dataset.poolControlReady = '1';
+                const proto = control.dataset.poolFilter || control.dataset.poolSort || '';
+                control.addEventListener(control.matches('input') ? 'input' : 'change', function() {{
+                    applyPoolView(proto);
+                }});
+            }});
+        }}
+
         function renderPoolBody(proto, pool) {{
             const body = document.querySelector('[data-pool-body="' + proto + '"]');
             if (!body || !pool) {{
@@ -996,18 +1075,21 @@ def render_web_scripts(
             }}
             if (!rows.length) {{
                 body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите subscription.</td></tr>';
+                setupPoolControls(body.closest('[data-protocol-panel]') || document);
                 return;
             }}
-            body.innerHTML = rows.map(function(row) {{
+            body.innerHTML = rows.map(function(row, position) {{
                 const activeClass = row.active ? ' pool-row-active' : '';
                 const activeText = row.active ? 'активен' : '';
                 const key = escapeHtml(row.key || '');
-                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + escapeHtml(row.key_id) + '" data-key="' + key + '">' +
+                const rowIndex = Number(row.index || (position + 1)) - 1;
+                const displayName = escapeHtml(row.display_name || '');
+                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + escapeHtml(row.key_id) + '" data-key="' + key + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + key + '">' +
                     '<td class="pool-key-cell">' +
                         '<form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">' +
                             '<input type="hidden" name="type" value="' + proto + '">' +
                             '<input type="hidden" name="key" value="' + key + '">' +
-                            '<button type="submit" class="pool-apply-btn" title="Применить этот ключ">' + escapeHtml(row.display_name) + '</button>' +
+                            '<button type="submit" class="pool-apply-btn" title="Применить этот ключ">' + displayName + '</button>' +
                         '</form>' +
                         '<span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>' + activeText + '</span>' +
                         '<span class="pool-hash">' + escapeHtml(row.key_id) + '</span>' +
@@ -1026,6 +1108,8 @@ def render_web_scripts(
                 '</tr>';
             }}).join('');
             setupAsyncForms(body);
+            setupPoolControls(body.closest('[data-protocol-panel]') || document);
+            applyPoolView(proto);
         }}
 
         function updatePoolRows(proto, pool) {{
@@ -1051,6 +1135,10 @@ def render_web_scripts(
                     return;
                 }}
                 item.classList.toggle('pool-row-active', !!row.active);
+                item.dataset.active = row.active ? '1' : '0';
+                item.dataset.tgState = row.tg || 'unknown';
+                item.dataset.ytState = row.yt || 'unknown';
+                item.dataset.checkedTs = String(row.checked_ts || 0);
                 const meta = item.querySelector('[data-pool-key-meta]');
                 if (meta) {{
                     meta.textContent = row.active ? 'активен' : '';
@@ -1072,6 +1160,7 @@ def render_web_scripts(
                     checked.textContent = row.checked_at || '';
                 }}
             }});
+            applyPoolView(proto);
         }}
 
         function updatePoolStatus(pools) {{
@@ -1125,6 +1214,21 @@ def render_web_scripts(
             return 'Фоновая проверка пула ключей';
         }}
 
+        function updateRouterHealth(health) {{
+            if (!health) {{
+                return;
+            }}
+            const memory = document.getElementById('router-memory-text');
+            if (memory) {{
+                memory.textContent = health.memory_text || 'недоступно';
+            }}
+            const note = document.getElementById('router-health-note');
+            if (note) {{
+                note.textContent = health.note || '';
+                note.classList.toggle('hidden', !note.textContent);
+            }}
+        }}
+
         function updateWebStatus(snapshot) {{
             if (!snapshot || !snapshot.web) {{
                 return false;
@@ -1147,7 +1251,10 @@ def render_web_scripts(
                 const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
                 const poolProbeVisible = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
                 const progressLabel = poolProbeProgressLabel(progress.scope || '');
-                const progressText = progress.total
+                const progressNote = progress.note ? String(progress.note) : '';
+                const progressText = progressNote
+                    ? '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + progressNote
+                    : progress.total
                     ? '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + progress.total + '. Статусы обновятся без перезагрузки страницы.'
                     : '⏳ ' + progressLabel + '. Статусы обновятся без перезагрузки страницы.';
                 apiPill.textContent = poolProbeVisible ? progressText : (web.api_status || '');
@@ -1177,11 +1284,13 @@ def render_web_scripts(
                 const progress = snapshot.pool_probe_progress || {{}};
                 let summaryNote = poolSummary.note || '';
                 if (!!snapshot.pool_probe_running && Number(progress.total || 0) > 0) {{
-                    summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + summaryNote;
+                    const progressNote = progress.note ? String(progress.note) : summaryNote;
+                    summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + progressNote;
                 }}
                 setOptionalText('pool-active-summary', poolSummary.active_text || '');
                 setOptionalText('pool-summary-note', summaryNote);
             }}
+            updateRouterHealth(snapshot.router_health);
             if (ENABLE_KEY_POOL) {{
                 updatePoolStatus(snapshot.pools);
             }}
@@ -1361,6 +1470,7 @@ def render_web_scripts(
                 }}
                 const isActive = item.dataset.key === key;
                 item.classList.toggle('pool-row-active', isActive);
+                item.dataset.active = isActive ? '1' : '0';
                 const meta = item.querySelector('[data-pool-key-meta]');
                 if (meta) {{
                     meta.textContent = isActive ? 'активен' : '';
@@ -1370,6 +1480,7 @@ def render_web_scripts(
                     mobileMeta.textContent = meta ? meta.textContent : '';
                 }}
             }});
+            applyPoolView(proto);
         }}
 
         function setButtonBusy(button, busy) {{
@@ -1565,7 +1676,9 @@ def render_web_scripts(
                                     }}, Number(payload.reload_after_ms) || 1500);
                                 }}
                             }}
-                            if (action === 'command') {{
+                            if (action === 'pool-probe-cancel') {{
+                                scheduleStatusPolling(15000);
+                            }} else if (action === 'command') {{
                                 if (showCommandState(payload.command_state)) {{
                                     scheduleActionMessageHide(2500);
                                 }} else {{
@@ -1619,6 +1732,7 @@ def render_web_scripts(
             setupProtocolTabs();
             setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
             setupProtocolSubtabs();
+            setupPoolControls();
             setupLiquidPointer();
             setupAsyncForms();
             const actionBlock = document.getElementById('web-action-message');

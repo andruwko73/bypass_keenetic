@@ -226,6 +226,7 @@ def render_router_command_buttons(csrf_input_html, dns_override_active=False):
     return render_command_button_forms(
         [
             ('restart_services', 'Перезапустить сервисы', '', 'Перезапустить сервисы?', 'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть.'),
+            ('rollback_update', 'Откатить обновление', 'secondary-button', 'Откатить последнее обновление?', 'Будет восстановлен последний backup из /opt/root и перезапущен сервис бота.'),
             ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else '', 'Включить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
             ('dns_off', 'DNS Override ВЫКЛ', 'danger', 'Выключить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
             ('remove', 'Удалить компоненты', 'danger', 'Удалить компоненты?', 'Будут удалены установленные компоненты программы. Настройки роутера могут измениться.'),
