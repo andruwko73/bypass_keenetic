@@ -1158,6 +1158,7 @@ def test_web_template_styles_helpers():
     assert '[data-theme="glass"] .mobile-nav[data-liquid]{position:fixed;}' in styles
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
     assert 'width:72px;' in styles
+    assert 'z-index:130;' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
     assert '.api-pill{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;height:auto;min-height:calc(var(--control-height) + 8px);' in styles
     assert '.app-caption strong{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;white-space:normal;overflow:visible;text-overflow:clip;' in styles

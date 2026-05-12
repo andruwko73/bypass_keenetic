@@ -1,3 +1,6 @@
+*v1.568 (12 May 2026) -* main
+*Raised the Liquid Glass lens above the compact topbar so it remains visible while moving across the header.*
+
 *v1.567 (12 May 2026) -* main
 *Optimized web assets and router load: static cached JS with inline runtime config, pool checks pause and resume around key application, auto-failover waits for active pool checks, fixed waits during key install were replaced with readiness checks, and Liquid Glass avoids pointer work outside the glass theme.*
 

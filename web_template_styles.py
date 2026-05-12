@@ -1160,7 +1160,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             height:72px;
             pointer-events:none;
             border-radius:999px;
-            z-index:70;
+            z-index:130;
             display:none;
             opacity:0;
             overflow:hidden;
