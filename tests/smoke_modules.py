@@ -434,6 +434,17 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert 'RAW_GITHUB_SOCKS_NOTICE_SHOWN=1' in script
 
 
+def test_runtime_startup_limits_router_flash_and_overhead():
+    service = (ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
+    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert 'PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT"' in service
+    assert 'cleanup_python_bytecode' in service
+    assert 'trim_runtime_logs' in service
+    assert 'threading.stack_size(256 * 1024)' in source
+    assert 'not app_runtime_mode.app_mode_telegram_enabled(_runtime_mode_at_import())' in source
+    assert 'class _NoopTeleBot' in source
+
+
 def test_runtime_modules_are_installed_by_update_scripts():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
@@ -1683,6 +1694,7 @@ def main():
     test_web_post_actions_helpers()
     test_web_action_feature_gates()
     test_codex_version_matches_commit_count()
+    test_runtime_startup_limits_router_flash_and_overhead()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_telegram_confirm_state_source()

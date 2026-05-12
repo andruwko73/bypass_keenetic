@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.578, последнее изменение: 12.05.2026
+#  Файл: bot.py, Версия v1.579, последнее изменение: 12.05.2026
 
 import subprocess
 import os
@@ -19,6 +19,11 @@ import socket
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
+
+try:
+    threading.stack_size(256 * 1024)
+except (ValueError, RuntimeError):
+    pass
 from proxy_key_store import (
     load_current_keys as _store_load_current_keys,
     load_shadowsocks_key as _store_load_shadowsocks_key,
@@ -195,14 +200,94 @@ from repo_update import (
     write_script as _repo_write_script,
 )
 
-import telebot
-from telebot import types
 import shutil
 # import datetime
 import requests
 import json
 import html
 import bot_config as config
+
+COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
+
+
+def _runtime_mode_at_import():
+    return app_runtime_mode.load_app_runtime_mode(
+        app_runtime_mode.APP_RUNTIME_MODE_FILE,
+        default_mode=getattr(config, 'app_runtime_mode', 'advanced'),
+    )
+
+
+class _NoopTelegramApiHelper:
+    proxy = {}
+
+    @staticmethod
+    def _get_req_session(reset=False):
+        class _Session:
+            def close(self):
+                return None
+
+        return _Session()
+
+
+class _NoopTelegramMarkup:
+    def __init__(self, *args, **kwargs):
+        self.rows = []
+
+    def row(self, *buttons):
+        self.rows.append(list(buttons))
+
+
+class _NoopTelegramTypes:
+    KeyboardButton = str
+    ReplyKeyboardMarkup = _NoopTelegramMarkup
+
+
+class _NoopTeleBot:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def message_handler(self, *args, **kwargs):
+        return lambda func: func
+
+    def callback_query_handler(self, *args, **kwargs):
+        return lambda func: func
+
+    def send_message(self, *args, **kwargs):
+        return None
+
+    def answer_callback_query(self, *args, **kwargs):
+        return None
+
+    def edit_message_reply_markup(self, *args, **kwargs):
+        return None
+
+    def infinity_polling(self, *args, **kwargs):
+        return None
+
+    def stop_polling(self):
+        return None
+
+    def stop_bot(self):
+        return None
+
+    def delete_webhook(self, *args, **kwargs):
+        return None
+
+    def close(self):
+        return None
+
+
+class _NoopTelegramModule:
+    apihelper = _NoopTelegramApiHelper()
+    TeleBot = _NoopTeleBot
+
+
+if COMMAND_WORKER_MODE or not app_runtime_mode.app_mode_telegram_enabled(_runtime_mode_at_import()):
+    telebot = _NoopTelegramModule()
+    types = _NoopTelegramTypes()
+else:
+    import telebot
+    from telebot import types
 
 # --- Пул ключей и авто-фейловер Telegram API ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
@@ -430,9 +515,6 @@ localporttrojan_bot = str(getattr(config, 'localporttrojan_bot', 10830))
 dnsovertlsport = config.dnsovertlsport
 dnsoverhttpsport = config.dnsoverhttpsport
 
-COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
-
-
 class _CommandWorkerTeleBot:
     def message_handler(self, *args, **kwargs):
         return lambda func: func
@@ -499,7 +581,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.578'
+APP_VERSION_COUNTER = '1.579'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'

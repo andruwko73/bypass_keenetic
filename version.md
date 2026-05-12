@@ -1,3 +1,6 @@
+*v1.579 (12 May 2026) -* main
+*Reduced Web only startup overhead by skipping Telegram imports, limited Python thread stack reservations, and stopped runtime bytecode/log growth on the router flash.*
+
 *v1.578 (12 May 2026) -* main
 *Split app runtime mode and router health logic out of bot.py for safer maintenance.*
 

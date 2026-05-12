@@ -7,6 +7,33 @@ BOT_CONFIG_PATH="$BOT_DIR/bot_config.py"
 LEGACY_CONFIG_PATH="/opt/etc/bot_config.py"
 INSTALLER_SERVICE_PATH="/opt/etc/init.d/S98telegram_bot_installer"
 
+cleanup_python_bytecode() {
+    if [ -d "$BOT_DIR" ]; then
+        find "$BOT_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+    fi
+    rm -rf /opt/etc/__pycache__ /opt/root/__pycache__ 2>/dev/null || true
+}
+
+trim_log_file() {
+    path="$1"
+    max_bytes="$2"
+    [ -f "$path" ] || return 0
+    size=$(wc -c < "$path" 2>/dev/null || echo 0)
+    [ "$size" -gt "$max_bytes" ] 2>/dev/null || return 0
+    tmp_path="${path}.tmp.$$"
+    tail -c "$max_bytes" "$path" > "$tmp_path" 2>/dev/null && cat "$tmp_path" > "$path"
+    rm -f "$tmp_path" 2>/dev/null || true
+}
+
+trim_runtime_logs() {
+    trim_log_file "$LOG_FILE" 262144
+    trim_log_file /opt/etc/error.log 262144
+    trim_log_file /opt/etc/xray/error.log 524288
+    trim_log_file /opt/etc/xray/access.log 262144
+    trim_log_file /opt/etc/v2ray/error.log 524288
+    trim_log_file /opt/etc/v2ray/access.log 262144
+}
+
 check_process() {
     for proc in /proc/[0-9]*; do
         [ -r "$proc/cmdline" ] || continue
@@ -102,7 +129,9 @@ case "$1" in
             exit 0
         fi
 
-        python3 "$MAIN_SCRIPT" >> "$LOG_FILE" 2>&1 &
+        cleanup_python_bytecode
+        trim_runtime_logs
+        PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT" >> "$LOG_FILE" 2>&1 &
         pid=$!
         sleep 2
 
