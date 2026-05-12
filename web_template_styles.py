@@ -189,6 +189,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .status-overview-head .section-subtitle{font-size:12px;line-height:1.3;}
         .status-head-attention{align-self:stretch;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
         .status-dashboard{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px;}
+        .status-dashboard-column{display:contents;}
         .status-card-wide{grid-column:1 / -1;min-height:0;}
         .health-meter{width:100%;height:6px;margin:7px 0 2px;border-radius:999px;background:rgba(159,176,200,.14);overflow:hidden;}
         .health-meter span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#47d7c6,#7ff0d8);transition:width .25s ease,background .25s ease;}
@@ -506,14 +507,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .view-head,.segmented,.status-dashboard,.overview-service-grid{margin-bottom:0;}
             .view-head{padding:9px 12px;}
             .status-dashboard{gap:8px;align-items:stretch;}
-            .status-dashboard-with-pool{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"telegram active" "router pool" "quick pool";}
-            .status-dashboard-with-pool .telegram-status-card{grid-area:telegram;}
-            .status-dashboard-with-pool .active-mode-card{grid-area:active;}
-            .status-dashboard-with-pool .router-health-card{grid-area:router;}
-            .status-dashboard-with-pool .key-pool-card{grid-area:pool;}
-            .status-dashboard-with-pool .quick-start-card{grid-area:quick;}
-            .status-card{min-height:68px;padding:9px;}
-            .router-health-card,.quick-start-card{min-height:0;}
+            .status-dashboard-with-pool{grid-template-columns:repeat(2,minmax(0,1fr));}
+            .status-dashboard-with-pool .status-dashboard-column{display:grid;grid-template-rows:auto minmax(0,1fr);gap:8px;align-content:stretch;align-items:stretch;min-width:0;}
+            .status-dashboard-with-pool .router-health-card,.status-dashboard-with-pool .key-pool-card{height:100%;}
+            .status-card{min-height:0;padding:9px;}
+            .router-health-card,.quick-start-card,.active-mode-card{min-height:0;}
             .key-pool-card{min-height:0;}
             .overview-service-grid{gap:8px;margin-top:0;}
             .service-panel,.overview-key-panel{padding:9px;}

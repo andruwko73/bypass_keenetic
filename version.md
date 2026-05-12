@@ -1,3 +1,6 @@
+*v1.574 (12 May 2026) -* main
+*Removed the duplicate Telegram API status card, renamed the active mode card, swapped it with Quick start, aligned the status dashboard into compact columns, moved Stop check next to Check pool, and kept the no-issues summary shorter.*
+
 *v1.573 (12 May 2026) -* main
 *Equalized the desktop status dashboard columns so the left and right cards align with the service command grid.*
 

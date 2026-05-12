@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'status-layout-6'
+ASSET_CACHE_REVISION = 'status-layout-11'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -53,7 +53,7 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool):
         items.append(('warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и отфильтруйте строки с проблемами.'))
 
     if not items:
-        items.append(('ok', 'Критичных проблем не найдено', 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.'))
+        items.append(('ok', 'Проблем не найдено', 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.'))
     return items
 
 
@@ -256,50 +256,43 @@ def render_web_form(
                         <ul class="attention-list status-head-attention" id="status-attention-list">{attention_html}</ul>
                     </div>
                     <div class="status-dashboard{dashboard_pool_class}">
-                        <div class="status-card status-card-wide telegram-status-card">
-                            <div class="status-card-top">
-                                <span class="card-icon">{_telegram_icon_html(opacity=1.0)}</span>
-                                <div class="status-copy">
-                                    <span class="status-label">Telegram API</span>
-                                    <span class="status-value" id="web-api-status">{html.escape(status['api_status'])}</span>
-                                    {socks_block}
-                                    {fallback_block}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="status-card active-mode-card">
-                            <div class="status-card-top">
-                                <span class="card-icon">◇</span>
-                                <div class="status-copy">
-                                    <span class="status-label">Активный режим</span>
-                                    <span class="status-value" id="current-mode-label">{html.escape(current_mode_label)}</span>
-                                    <p class="status-note">Списки обхода: <span id="list-route-label">{html.escape(list_route_label)}</span></p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="status-card router-health-card">
-                            <div class="status-card-top">
-                                <span class="card-icon">CPU</span>
-                                <div class="status-copy">
-                                    <span class="status-label">Роутер</span>
-                                    <span class="status-value" id="router-memory-text">{router_memory_text}</span>
-                                    <div class="health-meter{router_memory_tone}" id="router-memory-meter" title="Занято памяти: {router_memory_percent}%">
-                                        <span style="width:{router_memory_percent}%"></span>
+                        <div class="status-dashboard-column status-dashboard-column-primary">
+                            <div class="status-card quick-start-card">
+                                <div class="status-card-top">
+                                    <span class="card-icon">↗</span>
+                                    <div class="status-copy">
+                                        <span class="status-label">Быстрый старт</span>
+                                        <p class="status-note">{html.escape(quick_start_note)}</p>
                                     </div>
-                                    <p class="status-note" id="router-health-note">{router_health_note}</p>
+                                </div>
+                                {quick_start_block}
+                            </div>
+                            <div class="status-card router-health-card">
+                                <div class="status-card-top">
+                                    <span class="card-icon">CPU</span>
+                                    <div class="status-copy">
+                                        <span class="status-label">Роутер</span>
+                                        <span class="status-value" id="router-memory-text">{router_memory_text}</span>
+                                        <div class="health-meter{router_memory_tone}" id="router-memory-meter" title="Занято памяти: {router_memory_percent}%">
+                                            <span style="width:{router_memory_percent}%"></span>
+                                        </div>
+                                        <p class="status-note" id="router-health-note">{router_health_note}</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        {key_pool_status_card}
-                        <div class="status-card quick-start-card">
-                            <div class="status-card-top">
-                                <span class="card-icon">↗</span>
-                                <div class="status-copy">
-                                    <span class="status-label">Быстрый старт</span>
-                                    <p class="status-note">{html.escape(quick_start_note)}</p>
+                        <div class="status-dashboard-column status-dashboard-column-secondary">
+                            <div class="status-card active-mode-card">
+                                <div class="status-card-top">
+                                    <span class="card-icon">◇</span>
+                                    <div class="status-copy">
+                                        <span class="status-label">Активный режим Telegram-бота</span>
+                                        <span class="status-value" id="current-mode-label">{html.escape(current_mode_label)}</span>
+                                        <p class="status-note">Списки обхода: <span id="list-route-label">{html.escape(list_route_label)}</span></p>
+                                    </div>
                                 </div>
                             </div>
-                            {quick_start_block}
+                            {key_pool_status_card}
                         </div>
                     </div>
                     <div class="overview-service-grid">

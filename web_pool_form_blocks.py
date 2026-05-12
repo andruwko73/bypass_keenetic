@@ -207,14 +207,14 @@ def render_protocol_panel(
                     <input type="hidden" name="type" value="{safe_key_name}">
                     <button type="submit" class="secondary-button">Проверить пул</button>
                 </form>
+                <form method="post" action="/pool_probe_cancel" data-async-action="pool-probe-cancel">
+                    {csrf_input_html}
+                    <button type="submit" class="secondary-button">Остановить проверку</button>
+                </form>
                 <form method="post" action="/pool_clear" data-async-action="pool-clear" data-confirm-title="Очистить пул?" data-confirm-message="Очистить весь пул ключей для {safe_title}?">
                     {csrf_input_html}
                     <input type="hidden" name="type" value="{safe_key_name}">
                     <button type="submit" class="danger pool-clear-btn">Очистить пул</button>
-                </form>
-                <form method="post" action="/pool_probe_cancel" data-async-action="pool-probe-cancel">
-                    {csrf_input_html}
-                    <button type="submit" class="secondary-button">Остановить проверку</button>
                 </form>
             </div>
             <div class="pool-controls" data-pool-controls="{safe_key_name}">

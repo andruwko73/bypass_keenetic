@@ -333,7 +333,7 @@ ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then
     cat > "$BOT_CONFIG_PATH" <<EOF
-# ВЕРСИЯ СКРИПТА v1.573
+# ВЕРСИЯ СКРИПТА v1.574
 
 token = '${TG_BOT_TOKEN}'
 usernames = ['${TG_USERNAME}']

@@ -1350,7 +1350,7 @@ def render_web_scripts(
                 items.push(['warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и включите быстрый фильтр "Есть проблемы".']);
             }}
             if (!items.length) {{
-                items.push(['ok', 'Критичных проблем не найдено', 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.']);
+                items.push(['ok', 'Проблем не найдено', 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.']);
             }}
             list.innerHTML = items.map(function(item) {{
                 return attentionItemHtml(item[0], item[1], item[2]);
