@@ -404,6 +404,7 @@ def test_telegram_jobs_helpers():
     assert telegram_jobs.final_message('-remove', 1).startswith('⚠️ Команда')
     code = telegram_jobs.background_command_code('/opt/etc/bot/main.py', '-update', 'owner', 'repo', 42, 'service', 'branch')
     assert 'sys.path.insert' in code
+    assert 'BYPASS_KEENETIC_COMMAND_WORKER' in code
     assert 'branch=' in code
 
     written = []
@@ -492,6 +493,28 @@ def test_auto_failover_runtime_helpers():
     assert state['last_fail'] == 0.0
     assert ('update', 'vless') in calls
     assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': False} for call in calls)
+    locked_calls = []
+    locked_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=locked_state,
+        pool_probe_locked=lambda: True,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: locked_calls.append('check') or (False, 'fail'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(): [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, False),
+        install_key_for_protocol=lambda proto, key, verify=True: None,
+        update_proxy=lambda proto: None,
+        set_active_key=lambda proto, key: None,
+        record_key_probe=lambda proto, key, **kwargs: None,
+        log=lambda message: None,
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        time_provider=lambda: 20.0,
+    ) is False
+    assert locked_calls == []
 
 
 def test_proxy_apply_runtime_helpers():
@@ -524,7 +547,7 @@ def test_proxy_apply_runtime_helpers():
     )
     assert result.startswith('✅ Vless 1 ключ сохранён.')
     assert commands == ['/opt/etc/init.d/S24xray restart']
-    assert sleeps == [18]
+    assert sleeps == []
     assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': False})]
     pending = proxy_apply_runtime.apply_installed_proxy_runtime(
         'trojan',
@@ -677,6 +700,38 @@ def test_pool_probe_runner_failover_candidate():
     assert stopped == [('process', 'config.json')]
     assert cleaned == [True]
     assert 'не подготовлен' in logs[0]
+
+    cancel_event = threading.Event()
+    cancel_event.set()
+    remaining = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'left')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: (_ for _ in ()).throw(AssertionError('cancelled')),
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: None,
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: None,
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+        cancel_event=cancel_event,
+        on_cancelled_remaining=remaining.extend,
+    )
+    assert (checked, total) == (0, 1)
+    assert remaining == [('vless', 'left')]
 
 
 def test_proxy_status_runtime_helpers():
@@ -870,6 +925,8 @@ def test_web_get_actions_helpers():
     assert probe['payload']['status'] == 'running'
     panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'proto=vless')
     assert panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'panel:vless'}
+    script_asset = web_get_actions.dispatch({'build_script_asset': lambda: 'js'}, '/static/app.js')
+    assert script_asset['cache_seconds'] == 86400
     static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
     assert static['path'].replace('\\', '/').endswith('/service-icons/test.png')
 
@@ -1186,9 +1243,11 @@ def test_web_template_scripts_helpers():
         enable_key_pool=False,
         enable_custom_checks=False,
     )
-    assert 'const INITIAL_STATUS_PENDING = false;' in scripts
-    assert 'const ENABLE_KEY_POOL = false;' in scripts
-    assert "const CSRF_TOKEN = 'token';" in scripts
+    assert 'const APP_CONFIG = window.BK_APP_CONFIG || {};' in scripts
+    assert 'const INITIAL_STATUS_PENDING = !!APP_CONFIG.initialStatusPending;' in scripts
+    assert 'const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;' in scripts
+    assert "const CSRF_TOKEN = String(APP_CONFIG.csrfToken || '');" in scripts
+    assert '"token"' not in scripts
     assert "glass: 'Liquid Glass'" in scripts
     assert 'function toggleThemePicker()' in scripts
     assert 'function setupLiquidPointer()' in scripts
@@ -1230,6 +1289,7 @@ def test_web_template_scripts_helpers():
     assert 'lensTarget' not in scripts
     assert 'function renderLiquidLens()' not in scripts
     assert 'function queueActivateFromPoint(clientX, clientY, holdMs)' in scripts
+    assert 'if (!glassThemeActive())' in scripts
     assert 'function cancelQueuedLiquidMove()' in scripts
     assert 'window.requestAnimationFrame' in scripts
     assert 'function hideActionMessage()' in scripts
@@ -1309,6 +1369,9 @@ def test_web_form_template_smoke():
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
     assert 'Переустановка компонентов' not in page
     assert '{TELEGRAM_SVG_B64}' not in page
+    assert 'window.BK_APP_CONFIG=' in page
+    assert '"csrfToken":"token"' in page
+    assert '"enableKeyPool":false' in page
     assert '<script src="/static/app.js' in page
     web_only_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',

@@ -29,6 +29,8 @@ def attempt_auto_failover(
     now = time_provider()
     if state['in_progress']:
         return False
+    if pool_probe_locked and pool_probe_locked():
+        return False
     if state['last_attempt'] and now - state['last_attempt'] < switch_cooldown_seconds:
         return False
 

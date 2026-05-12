@@ -1,3 +1,6 @@
+*v1.567 (12 May 2026) -* main
+*Optimized web assets and router load: static cached JS with inline runtime config, pool checks pause and resume around key application, auto-failover waits for active pool checks, fixed waits during key install were replaced with readiness checks, and Liquid Glass avoids pointer work outside the glass theme.*
+
 *v1.566 (11 May 2026) -* main
 *Made header dropdowns more opaque so they read clearly above the page content.*
 

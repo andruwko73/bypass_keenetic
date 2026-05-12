@@ -275,10 +275,15 @@ def run_pool_probe_worker(
     stop_xray,
     cleanup_runtime,
     invalidate_caches,
+    cancel_event=None,
+    on_cancelled_remaining=None,
 ):
     total = len(probe_tasks)
     checked = 0
     marked_tasks = set()
+
+    def cancel_requested():
+        return bool(cancel_event is not None and cancel_event.is_set())
 
     def mark_checked(proto, key_value):
         nonlocal checked
@@ -291,6 +296,9 @@ def run_pool_probe_worker(
 
     try:
         while probe_tasks:
+            if cancel_requested():
+                log('Проверка пула приостановлена для применения выбранного ключа.')
+                break
             available_kb = available_memory_kb()
             if available_kb is not None and available_kb < min_available_kb:
                 log(
@@ -404,6 +412,11 @@ def run_pool_probe_worker(
     except Exception as exc:
         log(f'Ошибка фоновой проверки пула ключей: {exc}')
     finally:
+        if cancel_requested() and probe_tasks and on_cancelled_remaining:
+            try:
+                on_cancelled_remaining(list(probe_tasks))
+            except Exception as exc:
+                log(f'Не удалось сохранить очередь продолжения проверки пула: {exc}')
         invalidate_caches()
         gc.collect()
 

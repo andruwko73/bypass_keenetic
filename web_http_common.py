@@ -43,6 +43,7 @@ class WebRequestMixin:
     csrf_token_re = re.compile(r'^[A-Za-z0-9_-]{32,256}$')
     csrf_error_as_json = False
     auth_realm = 'bypass_keenetic web'
+    max_post_bytes = 1024 * 1024
     local_client_checker = staticmethod(lambda address: False)
     web_auth_token_getter = staticmethod(lambda: '')
     web_auth_user_getter = staticmethod(lambda: 'admin')
@@ -140,6 +141,8 @@ class WebRequestMixin:
             length = int(self.headers.get('Content-Length', 0))
         except Exception:
             length = 0
+        if length > self.max_post_bytes:
+            raise ValueError('POST body is too large.')
         body = self.rfile.read(max(0, length)).decode('utf-8', errors='replace')
         return parse_qs(body)
 

@@ -23,7 +23,8 @@ def background_command_code(bot_source_path, action, repo_owner, repo_name, chat
     module_name = os.path.splitext(os.path.basename(bot_source_path))[0]
     module_dir = os.path.dirname(bot_source_path)
     return (
-        'import sys; '
+        'import os, sys; '
+        "os.environ['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'; "
         f"sys.path.insert(0, {module_dir!r}); "
         f'import {module_name} as bot_module; '
         f'bot_module._run_telegram_command_worker({action!r}, {repo_owner!r}, {repo_name!r}, '

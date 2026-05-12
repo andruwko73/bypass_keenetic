@@ -146,6 +146,7 @@ def start_pool_probe_worker(
     set_progress,
     run_worker,
     invalidate_caches,
+    cancel_event=None,
     time_provider=time.time,
     collect_garbage=gc.collect,
     thread_factory=threading.Thread,
@@ -155,6 +156,8 @@ def start_pool_probe_worker(
         return False, 0
     if not lock.acquire(blocking=False):
         return False, len(probe_tasks)
+    if cancel_event is not None:
+        cancel_event.clear()
 
     set_progress(
         running=True,
@@ -169,12 +172,13 @@ def start_pool_probe_worker(
         checked = 0
         total = len(probe_tasks)
         try:
-            checked, total = run_worker(
-                probe_tasks,
-                checks,
-                set_checked=lambda value: set_progress(checked=value),
-                invalidate_caches=invalidate_caches,
-            )
+            worker_kwargs = {
+                'set_checked': lambda value: set_progress(checked=value),
+                'invalidate_caches': invalidate_caches,
+            }
+            if cancel_event is not None:
+                worker_kwargs['cancel_event'] = cancel_event
+            checked, total = run_worker(probe_tasks, checks, **worker_kwargs)
         finally:
             invalidate_caches()
             set_progress(

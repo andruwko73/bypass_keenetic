@@ -140,7 +140,7 @@ def dispatch(ctx, path, query=''):
             'kind': 'text',
             'text': _call(ctx, 'build_script_asset') or '',
             'content_type': 'application/javascript; charset=utf-8',
-            'cache_seconds': 0,
+            'cache_seconds': 86400,
         }
     if path == '/api/status':
         return {'kind': 'json', 'payload': _status_payload(ctx), 'status': 200}

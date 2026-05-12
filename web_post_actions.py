@@ -293,8 +293,13 @@ def _pool_apply(ctx, data):
     key_to_apply = form_value(data, 'key')
     success = True
     lock = None
+    pause_note = ''
+    should_resume_probe = False
     try:
         lock = _acquire_pool_lock(ctx)
+        pause_pool_probe = _ctx(ctx, 'pause_pool_probe_for_apply')
+        if pause_pool_probe:
+            should_resume_probe, pause_note = pause_pool_probe()
         pools = _ctx(ctx, 'load_key_pools')()
         if proto not in PROXY_PROTOCOLS:
             raise ValueError('Неизвестный протокол')
@@ -304,12 +309,16 @@ def _pool_apply(ctx, data):
         _ctx(ctx, 'set_active_key')(proto, key_to_apply)
         _invalidate_status(ctx)
         _refresh_pool_status(ctx)
+        if pause_note:
+            result = f'{pause_note}\n{result}'
     except Exception as exc:
         success = False
         result = f'Ошибка применения ключа из пула: {exc}'
     finally:
         if lock:
             lock.release()
+        if should_resume_probe:
+            _call(ctx, 'resume_cancelled_pool_probe')
     extra = {'protocol': proto, 'key': key_to_apply}
     extra.update(_pool_payload(ctx))
     return _result(result, success=success, extra=extra)
@@ -359,8 +368,12 @@ def _install(ctx, data):
     key_value = form_value(data, 'key')
     success = True
     lock = None
+    should_resume_probe = False
     try:
         lock = _acquire_pool_lock(ctx)
+        pause_pool_probe = _ctx(ctx, 'pause_pool_probe_for_apply')
+        if pause_pool_probe and key_type in PROXY_PROTOCOLS:
+            should_resume_probe, _ = pause_pool_probe()
         if key_type in PROXY_PROTOCOLS:
             result = _ctx(ctx, 'install_key_for_protocol')(key_type, key_value, verify=_ctx(ctx, 'install_verify', True))
         else:
@@ -378,6 +391,8 @@ def _install(ctx, data):
     finally:
         if lock:
             lock.release()
+        if should_resume_probe:
+            _call(ctx, 'resume_cancelled_pool_probe')
     extra = {'protocol': key_type, 'key': key_value}
     extra.update(_pool_payload(ctx))
     return _result(result, success=success, extra=extra)

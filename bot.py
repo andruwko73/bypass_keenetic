@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.566, последнее изменение: 11.05.2026
+#  Файл: bot.py, Версия v1.567, последнее изменение: 12.05.2026
 
 import subprocess
 import os
@@ -425,7 +425,18 @@ localporttrojan_bot = str(getattr(config, 'localporttrojan_bot', 10830))
 dnsovertlsport = config.dnsovertlsport
 dnsoverhttpsport = config.dnsoverhttpsport
 
-bot = telebot.TeleBot(token)
+COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
+
+
+class _CommandWorkerTeleBot:
+    def message_handler(self, *args, **kwargs):
+        return lambda func: func
+
+    def callback_query_handler(self, *args, **kwargs):
+        return lambda func: func
+
+
+bot = _CommandWorkerTeleBot() if COMMAND_WORKER_MODE else telebot.TeleBot(token)
 sid = "0"
 PROXY_MODE_FILE = '/opt/etc/bot_proxy_mode'
 BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
@@ -447,6 +458,7 @@ POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.8
 POOL_PROBE_MIN_AVAILABLE_KB = 120000
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_FAILOVER_TEST_PORT = str(getattr(config, 'pool_failover_test_port', int(POOL_PROBE_TEST_PORT) + 64))
+POOL_PROBE_BATCH_SIZE_CONFIGURED = hasattr(config, 'pool_probe_batch_size')
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 1)))
 POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
 POOL_PROBE_CACHE_FLUSH_EVERY = max(1, int(getattr(config, 'pool_probe_cache_flush_every', 5)))
@@ -479,7 +491,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.566'
+APP_VERSION_COUNTER = '1.567'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -565,6 +577,9 @@ status_refresh_in_progress = set()
 key_pool_lock = threading.RLock()
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
+pool_probe_cancel_event = threading.Event()
+pool_probe_resume_lock = threading.Lock()
+pool_probe_resume_payload = None
 pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
 WEB_UPDATE_COMMANDS = ('update',)
@@ -3097,14 +3112,20 @@ def _apply_pool_key_background(chat_id, proto, key_value, index, page=0):
                 reply_markup=_pool_action_markup(proto, page),
             )
             return
+        should_resume_probe = False
         try:
+            should_resume_probe, pause_note = _pause_pool_probe_for_apply()
             result = _apply_pool_key(proto, key_value)
             display_name = _pool_key_display_name(key_value)
             prefix = f'✅ Ключ #{index} «{display_name}» применён для {_pool_proto_label(proto)}.\n{result}'
+            if pause_note:
+                prefix = f'{pause_note}\n{prefix}'
         except Exception as exc:
             prefix = f'Ошибка применения ключа #{index} из пула {_pool_proto_label(proto)}: {exc}'
         finally:
             pool_apply_lock.release()
+            if should_resume_probe:
+                _resume_cancelled_pool_probe()
         _send_pool_page(chat_id, proto, page=page, prefix=prefix)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -3149,12 +3170,24 @@ def _delete_pool_key(proto, key_value):
         was_current = bool(current_key and current_key == key_value)
         keys = _dedupe_key_list(pools.get(proto, []) or [])
         promoted_key = keys[0] if was_current and keys else ''
-        if promoted_key:
-            _install_key_for_protocol(proto, promoted_key, verify=False)
-            pools = key_pool_store.set_active_key(pools, proto, promoted_key)
-        elif was_current:
-            _clear_installed_key_for_protocol(proto)
-        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+        should_clear_current = was_current and not promoted_key
+        if not was_current:
+            key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+            should_clear_current = False
+    if promoted_key:
+        _install_key_for_protocol(proto, promoted_key, verify=False)
+    elif should_clear_current:
+        _clear_installed_key_for_protocol(proto)
+    if was_current:
+        with key_pool_lock:
+            latest_pools, _ = key_pool_store.delete_pool_key(
+                key_pool_store.load_key_pools(KEY_POOLS_PATH),
+                proto,
+                key_value,
+            )
+            if promoted_key:
+                latest_pools = key_pool_store.set_active_key(latest_pools, proto, promoted_key)
+            key_pool_store.save_key_pools(KEY_POOLS_PATH, latest_pools)
     _forget_key_probes([key_value])
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
@@ -3276,17 +3309,106 @@ def _invalidate_probe_status_caches():
     _invalidate_key_status_cache()
 
 
-def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches):
+def _store_cancelled_pool_probe(probe_tasks, checks, scope):
+    global pool_probe_resume_payload
+    remaining = list(probe_tasks or [])
+    if not remaining:
+        return
+    with pool_probe_resume_lock:
+        pool_probe_resume_payload = {
+            'tasks': remaining,
+            'checks': list(checks or []),
+            'scope': scope or 'manual',
+        }
+
+
+def _take_cancelled_pool_probe():
+    global pool_probe_resume_payload
+    with pool_probe_resume_lock:
+        payload = pool_probe_resume_payload
+        pool_probe_resume_payload = None
+    return payload if payload and payload.get('tasks') else None
+
+
+def _start_selected_pool_probe_tasks(selected, custom_checks, scope):
+    return start_pool_probe_worker(
+        selected,
+        custom_checks,
+        scope=scope,
+        lock=pool_probe_lock,
+        set_progress=_set_pool_probe_progress,
+        run_worker=lambda probe_tasks, checks, set_checked, invalidate_caches, cancel_event=None: _run_selected_pool_probe(
+            probe_tasks,
+            checks,
+            set_checked,
+            invalidate_caches,
+            scope=scope,
+            cancel_event=cancel_event,
+        ),
+        invalidate_caches=_invalidate_probe_status_caches,
+        cancel_event=pool_probe_cancel_event,
+    )
+
+
+def _resume_cancelled_pool_probe():
+    payload = _take_cancelled_pool_probe()
+    if not payload:
+        if pool_probe_cancel_event.is_set():
+            def delayed_resume():
+                deadline = time.time() + 60
+                while pool_probe_lock.locked() and time.time() < deadline:
+                    time.sleep(0.5)
+                delayed_payload = _take_cancelled_pool_probe()
+                if delayed_payload:
+                    _start_selected_pool_probe_tasks(
+                        delayed_payload.get('tasks') or [],
+                        delayed_payload.get('checks') or [],
+                        delayed_payload.get('scope') or 'manual',
+                    )
+                elif not pool_probe_lock.locked():
+                    pool_probe_cancel_event.clear()
+
+            threading.Thread(target=delayed_resume, daemon=True).start()
+        return False, 0
+    started, queued = _start_selected_pool_probe_tasks(
+        payload.get('tasks') or [],
+        payload.get('checks') or [],
+        payload.get('scope') or 'manual',
+    )
+    if started:
+        _write_runtime_log(f'Проверка пула продолжена после применения ключа. Осталось в очереди: {queued}.')
+    return started, queued
+
+
+def _pause_pool_probe_for_apply(timeout=12.0):
+    if not pool_probe_lock.locked():
+        return False, ''
+    pool_probe_cancel_event.set()
+    deadline = time.time() + max(0.5, float(timeout or 0))
+    while pool_probe_lock.locked() and time.time() < deadline:
+        time.sleep(0.2)
+    if pool_probe_lock.locked():
+        return True, 'Проверка пула завершает текущий ключ; применение продолжено без ожидания всей очереди.'
+    return True, 'Проверка пула приостановлена; после применения ключа она продолжится.'
+
+
+def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches, scope='manual', cancel_event=None):
     probe_recorder = _KeyProbeBatchRecorder(
         flush_every=POOL_PROBE_CACHE_FLUSH_EVERY,
         flush_interval=POOL_PROBE_CACHE_FLUSH_INTERVAL,
     )
+    batch_size = POOL_PROBE_BATCH_SIZE
+    if not POOL_PROBE_BATCH_SIZE_CONFIGURED:
+        available_kb = _available_memory_kb()
+        if available_kb is not None and available_kb >= 200000:
+            batch_size = min(2, max(1, len(probe_tasks or [])))
+    concurrency = max(1, min(POOL_PROBE_CONCURRENCY, batch_size))
     try:
         return run_pool_probe_worker(
             probe_tasks,
             checks,
-            batch_size=POOL_PROBE_BATCH_SIZE,
-            concurrency=POOL_PROBE_CONCURRENCY,
+            batch_size=batch_size,
+            concurrency=concurrency,
             delay_seconds=POOL_PROBE_DELAY_SECONDS,
             min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
             test_port=POOL_PROBE_TEST_PORT,
@@ -3312,6 +3434,8 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             stop_xray=_runner_stop_pool_probe_xray,
             cleanup_runtime=_runner_cleanup_pool_probe_runtime,
             invalidate_caches=invalidate_caches,
+            cancel_event=cancel_event,
+            on_cancelled_remaining=lambda remaining: _store_cancelled_pool_probe(remaining, checks, scope),
         )
     finally:
         probe_recorder.flush()
@@ -3325,15 +3449,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'
     )
     if POOL_PROBE_ACTIVE_ONLY:
         selected = _controller_filter_active_probe_tasks(selected, _load_current_keys())
-    return start_pool_probe_worker(
-        selected,
-        custom_checks,
-        scope=scope,
-        lock=pool_probe_lock,
-        set_progress=_set_pool_probe_progress,
-        run_worker=_run_selected_pool_probe,
-        invalidate_caches=_invalidate_probe_status_caches,
-    )
+    return _start_selected_pool_probe_tasks(selected, custom_checks, scope)
 
 
 def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, stale_only=True, scope='protocol'):
@@ -3907,6 +4023,8 @@ def _web_action_context():
         probe_all_pool_keys_async=_probe_all_pool_keys_async,
         pool_keys_for_proto=_pool_keys_for_proto,
         probe_pool_keys_background=_probe_pool_keys_background,
+        pause_pool_probe_for_apply=_pause_pool_probe_for_apply,
+        resume_cancelled_pool_probe=_resume_cancelled_pool_probe,
         add_keys_to_pool=_add_keys_to_pool,
         delete_pool_key=_delete_pool_key,
         load_key_pools=_load_key_pools,
@@ -4101,36 +4219,17 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         return render_web_style_asset(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
 
     def _build_script_asset(self):
-        app_runtime_mode = _load_app_runtime_mode()
-        pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
-        csrf_token = self._get_or_create_csrf_token()
-        current_keys = _load_current_keys()
-        snapshot = _cached_status_snapshot(current_keys)
-        progress = _get_pool_probe_progress()
-        pool_probe_pending = bool(progress.get('running')) and int(progress.get('total') or 0) > 0
-        if snapshot is None:
-            snapshot = _active_mode_status_snapshot(current_keys)
-        status_refresh_pending = web_form_blocks.status_refresh_pending(
-            snapshot.get('web', {}),
-            snapshot.get('protocols', {}),
-            pool_probe_pending,
-        )
-        custom_checks_json = (
-            json.dumps(key_pool_web.web_custom_checks(_load_custom_checks()), ensure_ascii=False)
-            if pool_enabled else
-            '[]'
-        )
         return render_web_script_asset(
             POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
-            csrf_token=csrf_token,
-            custom_checks_json=custom_checks_json,
-            initial_command_running=web_form_blocks.js_bool(bool(_get_web_command_state().get('running'))),
-            initial_status_pending=web_form_blocks.js_bool(status_refresh_pending),
+            csrf_token='',
+            custom_checks_json='[]',
+            initial_command_running='false',
+            initial_status_pending='false',
             enable_async_forms=True,
-            enable_custom_checks=pool_enabled,
-            enable_key_pool=pool_enabled,
+            enable_custom_checks=True,
+            enable_key_pool=True,
             enable_live_status=True,
         )
 
@@ -4301,7 +4400,11 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
-        data = self._read_post_data()
+        try:
+            data = self._read_post_data()
+        except ValueError as exc:
+            self._send_action_result(str(exc), success=False)
+            return
         if not self._ensure_csrf_allowed(data):
             return
         action = web_post_actions.dispatch(_web_action_context(), path, data)

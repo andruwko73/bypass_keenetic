@@ -1,4 +1,5 @@
 import html
+import json
 from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
@@ -9,6 +10,14 @@ def render_web_style_asset(TELEGRAM_SVG_B64=''):
 
 def render_web_script_asset(**kwargs):
     return render_web_scripts(**kwargs)
+
+
+def _script_json(data):
+    return json.dumps(data, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/')
+
+
+def _script_bool(value):
+    return str(value).strip().lower() == 'true'
 
 
 def render_web_form(
@@ -104,6 +113,23 @@ def render_web_form(
                             </div>
                         </div>'''
     asset_version = html.escape(str(APP_VERSION_LABEL or '1'))
+    try:
+        custom_checks = json.loads(custom_checks_json or '[]') if enable_custom_checks else []
+        if not isinstance(custom_checks, list):
+            custom_checks = []
+    except Exception:
+        custom_checks = []
+    app_config_json = _script_json({
+        'csrfToken': csrf_token,
+        'customChecks': custom_checks,
+        'initialCommandRunning': _script_bool(initial_command_running),
+        'initialStatusPending': _script_bool(initial_status_pending),
+        'enableAsyncForms': bool(enable_async_forms),
+        'enableCustomChecks': bool(enable_custom_checks),
+        'enableKeyPool': bool(enable_key_pool),
+        'enableLiveStatus': bool(enable_live_status),
+        'poolProbePollExtensionMs': int(POOL_PROBE_UI_POLL_EXTENSION_MS),
+    })
     return f'''<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -112,6 +138,7 @@ def render_web_form(
     <link rel="icon" href="data:,">
   <title>Установка ключей прокси</title>
     <link rel="stylesheet" href="/static/app.css?v={asset_version}">
+    <script>window.BK_APP_CONFIG={app_config_json};</script>
     <script src="/static/app.js?v={asset_version}" defer></script>
 </head>
 <body>

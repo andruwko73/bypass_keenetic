@@ -63,11 +63,16 @@ def apply_installed_proxy_runtime(
     active_label = proxy_mode_label(load_proxy_mode())
     for command in current['restart_cmds']:
         run_command(command)
-    sleep(current['startup_wait'])
 
     diagnostics = build_diagnostics(key_type, key_value)
     restart_cmd = current['restart_cmds'][-1]
-    if not ensure_service_port(current['port'], restart_cmd, retries=2, sleep_after_restart=5):
+    if not ensure_service_port(
+        current['port'],
+        restart_cmd,
+        retries=2,
+        sleep_after_restart=3,
+        timeout=current['startup_wait'],
+    ):
         return (f'⚠️ {current["label"]} ключ сохранён, но локальный порт 127.0.0.1:{current["port"]} '
                 f'не поднялся. Текущий {app_mode_noun} {active_label} сохранён. {diagnostics}').strip()
 

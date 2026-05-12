@@ -1,6 +1,3 @@
-import html
-
-
 def render_web_scripts(
     POOL_PROBE_UI_POLL_EXTENSION_MS,
     TELEGRAM_SVG_B64,
@@ -14,23 +11,19 @@ def render_web_scripts(
     enable_key_pool=True,
     enable_live_status=True,
 ):
-    enable_async_forms_js = 'true' if enable_async_forms else 'false'
-    enable_custom_checks_js = 'true' if enable_custom_checks else 'false'
-    enable_key_pool_js = 'true' if enable_key_pool else 'false'
-    enable_live_status_js = 'true' if enable_live_status else 'false'
-    custom_checks_json = custom_checks_json if enable_custom_checks else '[]'
-    return f'''        const INITIAL_STATUS_PENDING = {initial_status_pending};
-        const INITIAL_COMMAND_RUNNING = {initial_command_running};
-        const ENABLE_ASYNC_FORMS = {enable_async_forms_js};
-        const ENABLE_CUSTOM_CHECKS = {enable_custom_checks_js};
-        const ENABLE_KEY_POOL = {enable_key_pool_js};
-        const ENABLE_LIVE_STATUS = {enable_live_status_js};
-        const POOL_PROBE_POLL_EXTENSION_MS = {POOL_PROBE_UI_POLL_EXTENSION_MS};
+    return f'''        const APP_CONFIG = window.BK_APP_CONFIG || {{}};
+        const INITIAL_STATUS_PENDING = !!APP_CONFIG.initialStatusPending;
+        const INITIAL_COMMAND_RUNNING = !!APP_CONFIG.initialCommandRunning;
+        const ENABLE_ASYNC_FORMS = APP_CONFIG.enableAsyncForms !== false;
+        const ENABLE_CUSTOM_CHECKS = APP_CONFIG.enableCustomChecks !== false;
+        const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;
+        const ENABLE_LIVE_STATUS = APP_CONFIG.enableLiveStatus !== false;
+        const POOL_PROBE_POLL_EXTENSION_MS = Number(APP_CONFIG.poolProbePollExtensionMs || {POOL_PROBE_UI_POLL_EXTENSION_MS});
         const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
         const YOUTUBE_ICON_SRC = 'data:image/svg+xml;base64,{YOUTUBE_SVG_B64}';
         const SERVICE_ICON_BASE = '/static/service-icons/';
-        const CSRF_TOKEN = '{html.escape(csrf_token)}';
-        let customChecks = ENABLE_CUSTOM_CHECKS ? {custom_checks_json} : [];
+        const CSRF_TOKEN = String(APP_CONFIG.csrfToken || '');
+        let customChecks = ENABLE_CUSTOM_CHECKS && Array.isArray(APP_CONFIG.customChecks) ? APP_CONFIG.customChecks : [];
         const PROTOCOL_LABELS = {{
             none: 'Без прокси',
             shadowsocks: 'Shadowsocks',
@@ -363,6 +356,14 @@ def render_web_scripts(
             }}
 
             function activateFromPoint(clientX, clientY, holdMs) {{
+                if (!glassThemeActive()) {{
+                    if (activeElement) {{
+                        clearLiquid(activeElement, 0);
+                        activeElement = null;
+                    }}
+                    hideGlobalLens(0);
+                    return;
+                }}
                 if (Date.now() < liquidActionCooldownUntil) {{
                     return;
                 }}
@@ -379,6 +380,11 @@ def render_web_scripts(
             }}
 
             function queueActivateFromPoint(clientX, clientY, holdMs) {{
+                if (!glassThemeActive()) {{
+                    cancelQueuedLiquidMove();
+                    hideGlobalLens(0);
+                    return;
+                }}
                 if (Date.now() < liquidActionCooldownUntil) {{
                     return;
                 }}
