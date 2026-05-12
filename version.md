@@ -1,3 +1,6 @@
+*v1.573 (12 May 2026) -* main
+*Equalized the desktop status dashboard columns so the left and right cards align with the service command grid.*
+
 *v1.572 (12 May 2026) -* main
 *Fixed pool-check resume after low-memory pauses, restored static assets during web rollback, tightened the desktop health/pool layout, themed pool sorting, and made pool search match display names immediately.*
 

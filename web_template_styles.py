@@ -506,7 +506,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .view-head,.segmented,.status-dashboard,.overview-service-grid{margin-bottom:0;}
             .view-head{padding:9px 12px;}
             .status-dashboard{gap:8px;align-items:stretch;}
-            .status-dashboard-with-pool{grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);grid-template-areas:"telegram active" "router pool" "quick pool";}
+            .status-dashboard-with-pool{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"telegram active" "router pool" "quick pool";}
             .status-dashboard-with-pool .telegram-status-card{grid-area:telegram;}
             .status-dashboard-with-pool .active-mode-card{grid-area:active;}
             .status-dashboard-with-pool .router-health-card{grid-area:router;}
