@@ -10,6 +10,7 @@ def render_web_scripts(
     enable_custom_checks=True,
     enable_key_pool=True,
     enable_live_status=True,
+    enable_telegram=True,
 ):
     return f'''        const APP_CONFIG = window.BK_APP_CONFIG || {{}};
         const INITIAL_STATUS_PENDING = !!APP_CONFIG.initialStatusPending;
@@ -18,6 +19,7 @@ def render_web_scripts(
         const ENABLE_CUSTOM_CHECKS = APP_CONFIG.enableCustomChecks !== false;
         const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;
         const ENABLE_LIVE_STATUS = APP_CONFIG.enableLiveStatus !== false;
+        const ENABLE_TELEGRAM = APP_CONFIG.enableTelegram !== false;
         const POOL_PROBE_POLL_EXTENSION_MS = Number(APP_CONFIG.poolProbePollExtensionMs || {POOL_PROBE_UI_POLL_EXTENSION_MS});
         const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
         const YOUTUBE_ICON_SRC = 'data:image/svg+xml;base64,{YOUTUBE_SVG_B64}';
@@ -1339,7 +1341,7 @@ def render_web_scripts(
             const apiLooksOk = !apiStatus || ['подтверж', 'работает', 'ok', 'доступ'].some(function(marker) {{
                 return apiLower.indexOf(marker) !== -1;
             }});
-            if (!apiLooksOk) {{
+            if (ENABLE_TELEGRAM && !apiLooksOk) {{
                 items.push(['warn', 'Telegram API требует внимания', apiStatus]);
             }}
             if (ENABLE_KEY_POOL && !!snapshot.pool_probe_running) {{
@@ -1350,7 +1352,12 @@ def render_web_scripts(
                 items.push(['warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и включите быстрый фильтр "Есть проблемы".']);
             }}
             if (!items.length) {{
-                items.push(['ok', 'Проблем не найдено', 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.']);
+                const okText = ENABLE_TELEGRAM
+                    ? 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.'
+                    : ENABLE_KEY_POOL
+                    ? 'Память роутера в норме, проверка пула сейчас не мешает работе.'
+                    : 'Память роутера в норме, веб-интерфейс готов к работе.';
+                items.push(['ok', 'Проблем не найдено', okText]);
             }}
             list.innerHTML = items.map(function(item) {{
                 return attentionItemHtml(item[0], item[1], item[2]);

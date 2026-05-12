@@ -56,9 +56,11 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await assertVisibleBox(page, '#theme-picker:not(.hidden)', `${name} theme picker`);
   await page.locator('#theme-toggle-button').click();
 
-  await page.locator('#mode-toggle-button').click();
-  await assertVisibleBox(page, '#mode-picker:not(.hidden)', `${name} mode picker`);
-  await page.locator('#mode-toggle-button').click();
+  if (await page.locator('#mode-toggle-button').count()) {
+    await page.locator('#mode-toggle-button').click();
+    await assertVisibleBox(page, '#mode-picker:not(.hidden)', `${name} mode picker`);
+    await page.locator('#mode-toggle-button').click();
+  }
 
   await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);

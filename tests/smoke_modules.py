@@ -1449,6 +1449,7 @@ def test_web_form_template_smoke():
     assert 'window.BK_APP_CONFIG=' in page
     assert '"csrfToken":"token"' in page
     assert '"enableKeyPool":false' in page
+    assert '"enableTelegram":true' in page
     assert '<script src="/static/app.js' in page
     web_only_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
@@ -1490,9 +1491,16 @@ def test_web_form_template_smoke():
         unblock_tabs_html='',
         enable_key_pool=True,
         enable_custom_checks=True,
+        enable_telegram=False,
     )
     assert 'action="/start"' not in web_only_page
     assert 'Telegram отключ' not in web_only_page
+    assert 'web-api-pill' not in web_only_page
+    assert 'id="mode-toggle-button"' not in web_only_page
+    assert 'active-mode-card' not in web_only_page
+    assert 'Telegram API отвечает' not in web_only_page
+    assert 'Веб-интерфейс, состояние роутера' in web_only_page
+    assert '"enableTelegram":false' in web_only_page
     assert 'value="update"' not in web_only_page
 
 
