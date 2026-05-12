@@ -1,3 +1,6 @@
+*v1.578 (12 May 2026) -* main
+*Split app runtime mode and router health logic out of bot.py for safer maintenance.*
+
 *v1.577 (12 May 2026) -* main
 *Refreshed README screenshots from Advanced mode with sanitized desktop and mobile captures.*
 

@@ -12,9 +12,12 @@ sys.path.insert(0, str(ROOT))
 
 import key_pool_web
 import key_pool_store
+import app_runtime_mode
+import router_health_runtime
 import telegram_pool_ui
 import web_get_actions
 import web_command_state
+import web_commands_runtime
 import web_form_blocks
 import web_form_template
 import web_http_common
@@ -76,6 +79,130 @@ class _FakeMarkup:
 class _FakeTypes:
     KeyboardButton = _FakeButton
     ReplyKeyboardMarkup = _FakeMarkup
+
+
+def test_app_runtime_mode_helpers(tmp_path):
+    mode_path = tmp_path / 'bot_app_mode'
+    assert app_runtime_mode.normalize_app_runtime_mode('web-only') == 'web_only'
+    assert app_runtime_mode.normalize_app_runtime_mode('bad') == 'advanced'
+    assert app_runtime_mode.load_app_runtime_mode(mode_path, default_mode='simple') == 'simple'
+    assert app_runtime_mode.save_app_runtime_mode('web-only', mode_path) == 'web_only'
+    assert mode_path.read_text(encoding='utf-8') == 'web_only\n'
+    assert app_runtime_mode.load_app_runtime_mode(mode_path, default_mode='simple') == 'web_only'
+    assert app_runtime_mode.app_runtime_mode_label('advanced') == 'Сложный'
+    assert app_runtime_mode.app_mode_pool_enabled('web_only')
+    assert not app_runtime_mode.app_mode_telegram_enabled('web_only')
+
+
+def test_app_runtime_mode_setter_callbacks():
+    current = {'mode': 'advanced'}
+    calls = []
+
+    def load_mode():
+        return current['mode']
+
+    def save_mode(mode):
+        current['mode'] = app_runtime_mode.normalize_app_runtime_mode(mode)
+        calls.append(('save', current['mode']))
+        return current['mode']
+
+    ok, message, extra = app_runtime_mode.set_app_runtime_mode(
+        'web-only',
+        load_mode=load_mode,
+        save_mode=save_mode,
+        schedule_restart=lambda: calls.append(('restart', None)),
+        set_telegram_autostart=lambda enabled: calls.append(('telegram', enabled)),
+        invalidate_status_cache=lambda: calls.append(('status', None)),
+        invalidate_key_status_cache=lambda: calls.append(('keys', None)),
+    )
+    assert ok
+    assert 'Web only' in message
+    assert extra['app_mode'] == 'web_only'
+    assert extra['pool_enabled'] is True
+    assert extra['telegram_enabled'] is False
+    assert ('telegram', False) in calls
+    assert ('restart', None) in calls
+
+    ok, _, extra = app_runtime_mode.set_app_runtime_mode(
+        'missing',
+        load_mode=load_mode,
+        save_mode=save_mode,
+        schedule_restart=lambda: calls.append(('bad-restart', None)),
+        set_telegram_autostart=lambda enabled: calls.append(('bad-telegram', enabled)),
+        invalidate_status_cache=lambda: calls.append(('bad-status', None)),
+        invalidate_key_status_cache=lambda: calls.append(('bad-keys', None)),
+    )
+    assert not ok
+    assert extra['app_mode'] == 'web_only'
+    assert ('bad-restart', None) not in calls
+
+
+def test_router_health_runtime_payload_uses_keenetic_memory():
+    payload = router_health_runtime.build_router_health_payload(
+        meminfo={
+            'MemTotal': 485 * 1024,
+            'MemFree': 80 * 1024,
+            'Buffers': 20 * 1024,
+            'Cached': 100 * 1024,
+            'SReclaimable': 30 * 1024,
+            'MemAvailable': 201 * 1024,
+            'SwapTotal': 472 * 1024,
+            'SwapFree': 472 * 1024,
+        },
+        ndmc_system={
+            'memory_used': 281 * 1024,
+            'memory_total': 512 * 1024,
+            'memfree': 80 * 1024,
+            'membuffers': 20 * 1024,
+            'memcache': 130 * 1024,
+        },
+        load_text='0.10 / 0.14 / 0.10',
+        bot_rss_kb=52 * 1024,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+    )
+    assert payload['memory_source'] == 'keenetic'
+    assert payload['memory_text'] == 'Память: занято 281 из 512 MB'
+    assert payload['used_percent'] == 55
+    assert payload['pool_probe_text'] == 'Не запущена'
+    assert 'Бот использует 52 MB RAM.' in payload['note']
+
+
+def test_router_health_runtime_process_rss_parser():
+    def fake_read(_path, max_bytes=16384):
+        return 'Name:\tpython\nVmRSS:\t  54321 kB\n'
+
+    assert router_health_runtime.process_rss_kb('self', read_text=fake_read) == 54321
+
+
+def test_web_commands_runtime_dispatch():
+    calls = []
+
+    def run_script(action, owner, repo, progress_command=None):
+        calls.append((action, owner, repo, progress_command))
+        return 0, f'{action}:{owner}/{repo}:{progress_command}'
+
+    assert web_commands_runtime.web_command_label('dns_on') == 'DNS Override ВКЛ'
+    assert web_commands_runtime.web_command_label('custom') == 'custom'
+    assert web_commands_runtime.run_web_command(
+        'update_no_bot',
+        run_script_action=run_script,
+        fork_repo_owner='fork-owner',
+        fork_repo_name='fork-repo',
+        rollback_last_update=lambda: 'rollback',
+        restart_router_services=lambda: 'restart',
+        set_dns_override=lambda enabled: f'dns:{enabled}',
+    ) == '-update:fork-owner/fork-repo:update'
+    assert calls[-1] == ('-update', 'fork-owner', 'fork-repo', 'update')
+    assert web_commands_runtime.run_web_command(
+        'dns_off',
+        run_script_action=run_script,
+        fork_repo_owner='fork-owner',
+        fork_repo_name='fork-repo',
+        rollback_last_update=lambda: 'rollback',
+        restart_router_services=lambda: 'restart',
+        set_dns_override=lambda enabled: f'dns:{enabled}',
+    ) == 'dns:False'
 
 
 class _InlineThread:
@@ -305,6 +432,15 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert 'Downloaded via local SOCKS port' not in script
     assert 'Downloading GitHub files via local SOCKS port ${port}.' in script
     assert 'RAW_GITHUB_SOCKS_NOTICE_SHOWN=1' in script
+
+
+def test_runtime_modules_are_installed_by_update_scripts():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    for module in ('app_runtime_mode.py', 'router_health_runtime.py', 'web_commands_runtime.py'):
+        assert module in script
+        assert f'$RAW_BASE/{module}' in bootstrap
+        assert f'$BOT_DIR/{module}' in bootstrap
 
 
 def test_entware_dns_runtime_helpers():

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.577, последнее изменение: 12.05.2026
+#  Файл: bot.py, Версия v1.578, последнее изменение: 12.05.2026
 
 import subprocess
 import os
@@ -92,6 +92,8 @@ import telegram_key_ui
 import entware_dns_runtime
 import telegram_info_runtime
 import auto_failover_runtime
+import app_runtime_mode
+import router_health_runtime
 from telegram_auth_state import (
     MENU_STATE_UNSET,
     authorize_message as _telegram_authorize_message,
@@ -178,6 +180,7 @@ import web_form_blocks
 import web_get_actions
 import web_post_actions
 import web_status_runtime
+import web_commands_runtime
 from web_form_template import render_web_form, render_web_script_asset, render_web_style_asset
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
@@ -496,7 +499,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.577'
+APP_VERSION_COUNTER = '1.578'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -505,16 +508,8 @@ APP_START_REPEAT_LABEL = 'Повторить запуск бота'
 APP_START_RESULT = 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд.'
 APP_QUICK_START_NOTE = 'После установки ключей можно сразу запустить или перезапустить Telegram-бота.'
 APP_PROXY_USER_LABEL = 'Бот'
-APP_RUNTIME_MODE_FILE = '/opt/etc/bot_app_mode'
-APP_RUNTIME_MODES = (
-    ('simple', 'Простой', 'интерфейс и Telegram-бот'),
-    ('advanced', 'Сложный', 'интерфейс с пулом ключей и Telegram-бот'),
-    ('web_only', 'Web only', 'интерфейс с пулом ключей без Telegram-бота'),
-)
-APP_RUNTIME_MODE_DATA = {
-    value: {'label': label, 'description': description}
-    for value, label, description in APP_RUNTIME_MODES
-}
+APP_RUNTIME_MODE_FILE = app_runtime_mode.APP_RUNTIME_MODE_FILE
+APP_RUNTIME_MODES = app_runtime_mode.APP_RUNTIME_MODES
 APP_DEFAULT_RUNTIME_MODE = getattr(config, 'app_runtime_mode', 'advanced')
 BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
@@ -570,10 +565,7 @@ web_status_api_cache = {
     'timestamp': 0,
     'payload': None,
 }
-router_health_cache = {
-    'timestamp': 0,
-    'payload': None,
-}
+router_health = router_health_runtime.RouterHealthRuntime(cache_ttl=ROUTER_HEALTH_CACHE_TTL)
 active_mode_status_cache = {
     'timestamp': 0,
     'signature': None,
@@ -581,7 +573,6 @@ active_mode_status_cache = {
 }
 active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
-router_health_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 key_pool_lock = threading.RLock()
@@ -593,7 +584,7 @@ pool_probe_resume_payload = None
 pool_probe_resume_after_cancel = True
 pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
-WEB_UPDATE_COMMANDS = ('update',)
+WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
 web_command_lock = threading.Lock()
 web_command_state = {
     'running': False,
@@ -632,46 +623,35 @@ AUTHORIZED_USER_IDS.update(EXTRA_NUMERIC_USER_IDS)
 
 
 def _normalize_app_runtime_mode(mode):
-    mode = str(mode or '').strip().lower().replace('-', '_')
-    return mode if mode in APP_RUNTIME_MODE_DATA else 'advanced'
+    return app_runtime_mode.normalize_app_runtime_mode(mode)
 
 
 def _load_app_runtime_mode():
-    try:
-        with open(APP_RUNTIME_MODE_FILE, 'r', encoding='utf-8') as f:
-            mode = f.read().strip()
-    except FileNotFoundError:
-        mode = APP_DEFAULT_RUNTIME_MODE
-    except Exception as exc:
-        _write_runtime_log(f'Не удалось прочитать режим программы: {exc}')
-        mode = APP_DEFAULT_RUNTIME_MODE
-    return _normalize_app_runtime_mode(mode)
+    return app_runtime_mode.load_app_runtime_mode(
+        APP_RUNTIME_MODE_FILE,
+        APP_DEFAULT_RUNTIME_MODE,
+        log=_write_runtime_log,
+    )
 
 
 def _save_app_runtime_mode(mode):
-    mode = _normalize_app_runtime_mode(mode)
-    os.makedirs(os.path.dirname(APP_RUNTIME_MODE_FILE), exist_ok=True)
-    with open(APP_RUNTIME_MODE_FILE, 'w', encoding='utf-8') as f:
-        f.write(mode + '\n')
-    return mode
+    return app_runtime_mode.save_app_runtime_mode(mode, APP_RUNTIME_MODE_FILE)
 
 
 def _app_runtime_mode_label(mode=None):
-    mode = _normalize_app_runtime_mode(mode or _load_app_runtime_mode())
-    return APP_RUNTIME_MODE_DATA[mode]['label']
+    return app_runtime_mode.app_runtime_mode_label(mode or _load_app_runtime_mode())
 
 
 def _app_runtime_mode_description(mode=None):
-    mode = _normalize_app_runtime_mode(mode or _load_app_runtime_mode())
-    return APP_RUNTIME_MODE_DATA[mode]['description']
+    return app_runtime_mode.app_runtime_mode_description(mode or _load_app_runtime_mode())
 
 
 def _app_mode_pool_enabled(mode=None):
-    return _normalize_app_runtime_mode(mode or _load_app_runtime_mode()) in ('advanced', 'web_only')
+    return app_runtime_mode.app_mode_pool_enabled(mode or _load_app_runtime_mode())
 
 
 def _app_mode_telegram_enabled(mode=None):
-    return _normalize_app_runtime_mode(mode or _load_app_runtime_mode()) != 'web_only'
+    return app_runtime_mode.app_mode_telegram_enabled(mode or _load_app_runtime_mode())
 
 
 def _schedule_app_service_restart():
@@ -683,37 +663,19 @@ def _schedule_app_service_restart():
 
 
 def _set_app_runtime_mode(mode):
-    requested = str(mode or '').strip().lower().replace('-', '_')
-    if requested not in APP_RUNTIME_MODE_DATA:
-        return False, 'Неизвестный режим программы.', {
-            'app_mode': _load_app_runtime_mode(),
-            'app_mode_label': _app_runtime_mode_label(),
-        }
-    previous = _load_app_runtime_mode()
-    current = _save_app_runtime_mode(requested)
-    restart_required = (
-        _app_mode_telegram_enabled(previous) != _app_mode_telegram_enabled(current) or
-        _app_mode_pool_enabled(previous) != _app_mode_pool_enabled(current)
+    def set_telegram_autostart(enabled):
+        globals()['bot_ready'] = bool(enabled)
+        _save_bot_autostart(enabled)
+
+    return app_runtime_mode.set_app_runtime_mode(
+        mode,
+        load_mode=_load_app_runtime_mode,
+        save_mode=_save_app_runtime_mode,
+        schedule_restart=_schedule_app_service_restart,
+        set_telegram_autostart=set_telegram_autostart,
+        invalidate_status_cache=_invalidate_web_status_cache,
+        invalidate_key_status_cache=_invalidate_key_status_cache,
     )
-    if current == 'web_only':
-        globals()['bot_ready'] = False
-        _save_bot_autostart(False)
-    elif previous == 'web_only':
-        globals()['bot_ready'] = True
-        _save_bot_autostart(True)
-    if restart_required:
-        _schedule_app_service_restart()
-    _invalidate_web_status_cache()
-    _invalidate_key_status_cache()
-    label = _app_runtime_mode_label(current)
-    suffix = ' Сервис перезапускается для применения режима.' if restart_required else ' Страница обновится для применения интерфейса.'
-    return True, f'Режим программы установлен: {label}.{suffix}', {
-        'app_mode': current,
-        'app_mode_label': label,
-        'pool_enabled': _app_mode_pool_enabled(current),
-        'telegram_enabled': _app_mode_telegram_enabled(current),
-        'reload_after_ms': 2500 if restart_required else 1200,
-    }
 
 
 def _raw_github_url(path):
@@ -2024,29 +1986,15 @@ def _rollback_last_update():
 
 
 def _run_web_command(command):
-    if command in ('update_independent', 'update_no_bot'):
-        command = 'update'
-    if command == 'install_original':
-        _, output = _run_script_action('-install', 'tas-unn', 'bypass_keenetic')
-        return output
-    if command == 'update':
-        _, output = _run_script_action('-update', fork_repo_owner, fork_repo_name, progress_command='update')
-        return output
-    if command == 'rollback_update':
-        return _rollback_last_update()
-    if command == 'remove':
-        _, output = _run_script_action('-remove', fork_repo_owner, fork_repo_name)
-        return output
-    if command == 'restart_services':
-        return _restart_router_services()
-    if command == 'dns_on':
-        return _set_dns_override(True)
-    if command == 'dns_off':
-        return _set_dns_override(False)
-    if command == 'reboot':
-        os.system('ndmc -c system reboot')
-        return '🔄 Роутер перезагружается. Это займёт около 2 минут.'
-    return 'Команда не распознана.'
+    return web_commands_runtime.run_web_command(
+        command,
+        run_script_action=_run_script_action,
+        fork_repo_owner=fork_repo_owner,
+        fork_repo_name=fork_repo_name,
+        rollback_last_update=_rollback_last_update,
+        restart_router_services=_restart_router_services,
+        set_dns_override=_set_dns_override,
+    )
 
 
 def _read_text_file(file_path):
@@ -2178,198 +2126,8 @@ def _store_web_status_api_cache(payload, timestamp=None):
         web_status_api_cache['payload'] = payload
 
 
-def _read_proc_text(path, max_bytes=16384):
-    try:
-        with open(path, 'r', encoding='utf-8', errors='ignore') as file:
-            return file.read(max_bytes)
-    except Exception:
-        return ''
-
-
-def _read_proc_meminfo():
-    values = {}
-    for line in _read_proc_text('/proc/meminfo').splitlines():
-        if ':' not in line:
-            continue
-        key, value = line.split(':', 1)
-        parts = value.strip().split()
-        if not parts:
-            continue
-        try:
-            values[key] = int(parts[0])
-        except Exception:
-            pass
-    return values
-
-
-def _read_ndmc_system_snapshot():
-    try:
-        result = subprocess.run(
-            ['ndmc', '-c', 'show system'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-    except Exception:
-        return {}
-    values = {}
-    for line in (result.stdout or '').splitlines():
-        if ':' not in line:
-            continue
-        key, value = line.split(':', 1)
-        key = key.strip().lower()
-        value = value.strip()
-        if not key or not value:
-            continue
-        if key == 'memory' and '/' in value:
-            used_text, total_text = value.split('/', 1)
-            try:
-                values['memory_used'] = int(used_text.strip())
-                values['memory_total'] = int(total_text.strip())
-            except Exception:
-                pass
-            continue
-        try:
-            values[key] = int(value.split()[0])
-        except Exception:
-            values[key] = value
-    return values
-
-
-def _process_rss_kb(pid='self'):
-    for line in _read_proc_text(f'/proc/{pid}/status').splitlines():
-        if line.startswith('VmRSS:'):
-            parts = line.split()
-            if len(parts) >= 2:
-                try:
-                    return int(parts[1])
-                except Exception:
-                    return None
-    return None
-
-
-def _count_proc_cmdline(marker):
-    count = 0
-    proc_root = '/proc'
-    try:
-        names = os.listdir(proc_root)
-    except Exception:
-        return 0
-    for name in names:
-        if not name.isdigit():
-            continue
-        text = _read_proc_text(os.path.join(proc_root, name, 'cmdline'), max_bytes=2048)
-        if marker in text.replace('\x00', ' '):
-            count += 1
-    return count
-
-
 def _router_health_snapshot():
-    now = time.time()
-    with router_health_cache_lock:
-        payload = router_health_cache.get('payload')
-        if payload is not None and now - float(router_health_cache.get('timestamp') or 0) < ROUTER_HEALTH_CACHE_TTL:
-            return dict(payload)
-
-    meminfo = _read_proc_meminfo()
-    ndmc_system = _read_ndmc_system_snapshot()
-    total_kb = int(meminfo.get('MemTotal') or 0)
-    free_kb = int(meminfo.get('MemFree') or 0)
-    buffers_kb = int(meminfo.get('Buffers') or 0)
-    cached_kb = int(meminfo.get('Cached') or 0)
-    reclaimable_kb = int(meminfo.get('SReclaimable') or 0)
-    linux_cache_kb = max(0, buffers_kb + cached_kb + reclaimable_kb)
-    available_kb = int(meminfo.get('MemAvailable') or (free_kb + linux_cache_kb) or free_kb or 0)
-    swap_total_kb = int(meminfo.get('SwapTotal') or 0)
-    swap_free_kb = int(meminfo.get('SwapFree') or 0)
-    display_total_kb = int(ndmc_system.get('memory_total') or ndmc_system.get('memtotal') or total_kb or 0)
-    ndmc_free_kb = int(ndmc_system.get('memfree') or 0)
-    ndmc_buffers_kb = int(ndmc_system.get('membuffers') or 0)
-    ndmc_cache_kb = int(ndmc_system.get('memcache') or 0)
-    ndmc_cache_total_kb = max(0, ndmc_buffers_kb + ndmc_cache_kb)
-    if display_total_kb and int(ndmc_system.get('memory_used') or 0):
-        used_kb = int(ndmc_system.get('memory_used') or 0)
-        display_cache_kb = ndmc_cache_total_kb
-        display_free_kb = ndmc_free_kb
-        memory_source = 'keenetic'
-    elif display_total_kb and ndmc_free_kb:
-        used_kb = max(0, display_total_kb - ndmc_free_kb - ndmc_cache_total_kb)
-        display_cache_kb = ndmc_cache_total_kb
-        display_free_kb = ndmc_free_kb
-        memory_source = 'keenetic'
-    else:
-        display_total_kb = total_kb
-        used_kb = max(0, total_kb - free_kb - buffers_kb - cached_kb) if total_kb else 0
-        display_cache_kb = max(0, buffers_kb + cached_kb)
-        display_free_kb = free_kb
-        memory_source = 'proc'
-    used_mb = int(round(used_kb / 1024.0)) if used_kb else 0
-    total_mb = int(round(display_total_kb / 1024.0)) if display_total_kb else 0
-    available_mb = int(round(available_kb / 1024.0)) if available_kb else 0
-    free_mb = int(round(display_free_kb / 1024.0)) if display_free_kb else 0
-    cache_mb = int(round(display_cache_kb / 1024.0)) if display_cache_kb else 0
-    used_percent = int(round((used_kb / float(display_total_kb)) * 100)) if display_total_kb else 0
-    available_percent = int(round((available_kb / float(display_total_kb)) * 100)) if display_total_kb else 0
-    load_text = ' / '.join((_read_proc_text('/proc/loadavg').split()[:3] or []))
-    bot_rss_kb = _process_rss_kb('self')
-    bot_rss_mb = int(round(bot_rss_kb / 1024.0)) if bot_rss_kb else 0
-    probe_progress = _get_pool_probe_progress() if 'pool_probe_progress' in globals() else {}
-    probe_running = bool(probe_progress.get('running')) and int(probe_progress.get('total') or 0) > 0
-    probe_checked = int(probe_progress.get('checked') or 0)
-    probe_total = int(probe_progress.get('total') or 0)
-    probe_note = str(probe_progress.get('note') or '').strip()
-    temp_xray_count = _count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0
-    swap_used_mb = int(round(max(0, swap_total_kb - swap_free_kb) / 1024.0)) if swap_total_kb else 0
-    memory_text = f'Память: занято {used_mb} из {total_mb} MB' if total_mb else 'Память: данные недоступны'
-    details = []
-    if used_mb:
-        details.append(f'Занято по данным роутера: {used_mb} MB ({used_percent}%).')
-    if free_mb:
-        details.append(f'Свободно: {free_mb} MB.')
-    if available_mb:
-        details.append(f'Доступно для приложений: {available_mb} MB ({available_percent}%).')
-    if cache_mb:
-        details.append(f'Кэш и буферы: {cache_mb} MB.')
-    if load_text:
-        details.append(f'Нагрузка CPU за 1/5/15 мин: {load_text}.')
-    if bot_rss_mb:
-        details.append(f'Бот использует {bot_rss_mb} MB RAM.')
-    if swap_total_kb:
-        swap_total_mb = int(round(swap_total_kb / 1024.0))
-        details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB.')
-    if probe_running:
-        details.append(f'Проверка пула: выполняется, проверено {probe_checked} из {probe_total} ключей.')
-    else:
-        details.append('Проверка пула: сейчас не запущена.')
-    if temp_xray_count:
-        details.append(f'Временный xray-процессов: {temp_xray_count}.')
-    if probe_note:
-        details.append(probe_note if probe_note.endswith(('.', '!', '?')) else f'{probe_note}.')
-    payload = {
-        'memory_text': memory_text,
-        'note': ' '.join(details),
-        'available_kb': available_kb,
-        'used_kb': used_kb,
-        'total_kb': display_total_kb,
-        'proc_total_kb': total_kb,
-        'used_percent': used_percent,
-        'linux_cache_kb': display_cache_kb,
-        'memory_source': memory_source,
-        'load_text': load_text,
-        'bot_rss_kb': bot_rss_kb or 0,
-        'pool_probe_running': probe_running,
-        'pool_probe_text': (
-            f'Проверяется {probe_checked}/{probe_total}'
-            if probe_running else 'Не запущена'
-        ),
-        'temporary_xray_count': temp_xray_count,
-    }
-    with router_health_cache_lock:
-        router_health_cache['timestamp'] = now
-        router_health_cache['payload'] = payload
-    return dict(payload)
+    return router_health.snapshot(_get_pool_probe_progress)
 
 
 def _invalidate_key_status_cache():
@@ -2525,17 +2283,7 @@ def _placeholder_protocol_statuses(current_keys):
 
 
 def _web_command_label(command):
-    labels = {
-        'install_original': 'Установить оригинальную версию',
-        'update': 'Обновить до последнего релиза',
-        'rollback_update': 'Откатить последнее обновление',
-        'remove': 'Удалить компоненты',
-        'restart_services': 'Перезапустить сервисы',
-        'dns_on': 'DNS Override ВКЛ',
-        'dns_off': 'DNS Override ВЫКЛ',
-        'reboot': 'Перезагрузить роутер',
-    }
-    return labels.get(command, command)
+    return web_commands_runtime.web_command_label(command)
 
 
 def _web_command_state_defaults():
