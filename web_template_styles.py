@@ -1086,6 +1086,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         [data-theme="glass"] .mobile-nav[data-liquid]{position:fixed;}
         [data-theme="glass"] .side-nav[data-liquid]{position:sticky;}
+        @media (min-width: 1024px){[data-theme="glass"] .side-nav[data-liquid]{position:static;}}
         [data-theme="glass"] [data-liquid]::before{
             content:"";
             position:absolute;

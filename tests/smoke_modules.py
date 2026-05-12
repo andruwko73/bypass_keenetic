@@ -1192,6 +1192,7 @@ def test_web_template_styles_helpers():
     assert '[data-theme="glass"] .mobile-nav[data-liquid]' in styles
     assert '[data-theme="glass"] .mobile-nav[data-liquid]{position:fixed;}' in styles
     assert '[data-theme="glass"] .side-nav[data-liquid]{position:sticky;}' in styles
+    assert '@media (min-width: 1024px){[data-theme="glass"] .side-nav[data-liquid]{position:static;}}' in styles
     assert 'width:72px;' in styles
     assert 'z-index:130;' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles

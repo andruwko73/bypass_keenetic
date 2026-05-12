@@ -1,3 +1,6 @@
+*v1.570 (12 May 2026) -* main
+*Kept the Liquid Glass side navigation aligned with the overview card on desktop while preserving the global lens above the header.*
+
 *v1.569 (12 May 2026) -* main
 *Normalized the header-to-content spacing and made pool checks stop temporary xray probes when router memory drops below the safe threshold.*
 
