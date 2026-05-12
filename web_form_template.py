@@ -4,6 +4,9 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
+ASSET_CACHE_REVISION = 'status-layout-5'
+
+
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
     return render_web_styles(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
 
@@ -18,6 +21,40 @@ def _script_json(data):
 
 def _script_bool(value):
     return str(value).strip().lower() == 'true'
+
+
+def _safe_percent(value):
+    try:
+        return max(0, min(100, int(round(float(value)))))
+    except Exception:
+        return 0
+
+
+def _attention_items(status, router_health, pool_summary_note, enable_key_pool):
+    items = []
+    status = status or {}
+    router_health = router_health or {}
+    used_percent = _safe_percent(router_health.get('used_percent'))
+    if used_percent >= 85:
+        items.append(('danger', 'Память роутера почти заполнена', f'Сейчас занято {used_percent}%. Лучше остановить проверку пула или перезапустить сервис.'))
+    elif used_percent >= 70:
+        items.append(('warn', 'Память роутера под нагрузкой', f'Сейчас занято {used_percent}%. Проверку большого пула стоит запускать осторожно.'))
+
+    api_status = str(status.get('api_status') or '').strip()
+    api_status_lower = api_status.lower()
+    if api_status and not any(marker in api_status_lower for marker in ('подтверж', 'работает', 'ok', 'доступ')):
+        items.append(('warn', 'Telegram API требует внимания', api_status))
+
+    if enable_key_pool and router_health.get('pool_probe_running'):
+        items.append(('info', 'Проверка пула выполняется', str(router_health.get('pool_probe_text') or 'Статусы обновляются без перезагрузки страницы.')))
+
+    pool_note_lower = str(pool_summary_note or '').lower()
+    if enable_key_pool and 'не работает' in pool_note_lower:
+        items.append(('warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и отфильтруйте строки с проблемами.'))
+
+    if not items:
+        items.append(('ok', 'Критичных проблем не найдено', 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.'))
+    return items
 
 
 def render_web_form(
@@ -74,15 +111,10 @@ def render_web_form(
                                     {csrf_input_html}
                                     <button type="submit">{html.escape(start_button_label)}</button>
                                 </form>''')
-    quick_start_forms.append(f'''<form method="post" action="/command" data-async-action="command" data-confirm-title="Обновить до последнего релиза?" data-confirm-message="Код и служебные файлы будут обновлены без сброса ключей, пулов и списков.">
-                                    {csrf_input_html}
-                                    <input type="hidden" name="command" value="update">
-                                    <button type="submit">Обновить до последнего релиза</button>
-                                </form>''')
     quick_start_block = f'''
                             <div class="status-card-actions quick-start-actions">
                                 {''.join(quick_start_forms)}
-                            </div>'''
+                            </div>''' if quick_start_forms else ''
     quick_key_note = (
         'Быстрое редактирование активного ключа. Полное управление пулом находится во вкладке "Ключи".'
         if enable_key_pool else
@@ -92,15 +124,28 @@ def render_web_form(
     router_health = router_health or {}
     router_memory_text = html.escape(str(router_health.get('memory_text') or 'недоступно'))
     router_health_note = html.escape(str(router_health.get('note') or 'данные обновляются из /proc с коротким кэшем'))
+    router_memory_percent = _safe_percent(router_health.get('used_percent'))
+    router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
+    attention_html = ''.join(
+        f'''<li class="attention-item attention-{html.escape(tone, quote=True)}">
+                                <span class="attention-dot"></span>
+                                <div>
+                                    <strong>{html.escape(title)}</strong>
+                                    <span>{html.escape(text)}</span>
+                                </div>
+                            </li>'''
+        for tone, title, text in _attention_items(status, router_health, pool_summary_note, enable_key_pool)
+    )
     keys_view_subtitle = (
         'Выберите протокол, сохраните активный ключ или управляйте его пулом.'
         if enable_key_pool else
         'Выберите протокол и сохраните активный ключ.'
     )
     key_pool_status_card = ''
+    dashboard_pool_class = ' status-dashboard-with-pool' if enable_key_pool else ''
     if enable_key_pool:
         key_pool_status_card = f'''
-                        <div class="status-card">
+                        <div class="status-card key-pool-card">
                             <div class="status-card-top">
                                     <span class="card-icon">⚿</span>
                                     <div class="status-copy">
@@ -110,7 +155,6 @@ def render_web_form(
                                     </div>
                                 </div>
                             <div class="status-card-actions key-pool-actions">
-                                <button type="button" class="outline-button" data-view-target="keys">Открыть ключи</button>
                                 <form method="post" action="/pool_probe"{pool_probe_async_attr}>
                                     {csrf_input_html}
                                     <button type="submit" class="outline-button">Проверить все ключи</button>
@@ -121,7 +165,7 @@ def render_web_form(
                                 </form>
                             </div>
                         </div>'''
-    asset_version = html.escape(str(APP_VERSION_LABEL or '1'))
+    asset_version = html.escape(f'{APP_VERSION_LABEL or "1"}-{ASSET_CACHE_REVISION}')
     try:
         custom_checks = json.loads(custom_checks_json or '[]') if enable_custom_checks else []
         if not isinstance(custom_checks, list):
@@ -204,13 +248,15 @@ def render_web_form(
             </nav>
             <main class="app-main">
                 <section class="app-view active" data-view="status">
-                    <div class="view-head">
-                        <span class="eyebrow">Обзор</span>
-                        <h2>Статус и сервис</h2>
-                        <p class="section-subtitle">Связь, активный режим и сервисные действия собраны в одном месте.</p>
+                    <div class="view-head status-overview-head">
+                        <div class="status-overview-copy">
+                            <h2>Статус и сервис</h2>
+                            <p class="section-subtitle">Связь, активный режим и сервисные действия собраны в одном месте.</p>
+                        </div>
+                        <ul class="attention-list status-head-attention" id="status-attention-list">{attention_html}</ul>
                     </div>
-                    <div class="status-dashboard">
-                        <div class="status-card status-card-wide">
+                    <div class="status-dashboard{dashboard_pool_class}">
+                        <div class="status-card status-card-wide telegram-status-card">
                             <div class="status-card-top">
                                 <span class="card-icon">{_telegram_icon_html(opacity=1.0)}</span>
                                 <div class="status-copy">
@@ -219,10 +265,9 @@ def render_web_form(
                                     {socks_block}
                                     {fallback_block}
                                 </div>
-                                <span class="status-dot"></span>
                             </div>
                         </div>
-                        <div class="status-card">
+                        <div class="status-card active-mode-card">
                             <div class="status-card-top">
                                 <span class="card-icon">◇</span>
                                 <div class="status-copy">
@@ -238,12 +283,15 @@ def render_web_form(
                                 <div class="status-copy">
                                     <span class="status-label">Роутер</span>
                                     <span class="status-value" id="router-memory-text">{router_memory_text}</span>
+                                    <div class="health-meter{router_memory_tone}" id="router-memory-meter" title="Занято памяти: {router_memory_percent}%">
+                                        <span style="width:{router_memory_percent}%"></span>
+                                    </div>
                                     <p class="status-note" id="router-health-note">{router_health_note}</p>
                                 </div>
                             </div>
                         </div>
                         {key_pool_status_card}
-                        <div class="status-card">
+                        <div class="status-card quick-start-card">
                             <div class="status-card-top">
                                 <span class="card-icon">↗</span>
                                 <div class="status-copy">

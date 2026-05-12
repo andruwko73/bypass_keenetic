@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.571, последнее изменение: 12.05.2026
+#  Файл: bot.py, Версия v1.572, последнее изменение: 12.05.2026
 
 import subprocess
 import os
@@ -496,7 +496,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.571'
+APP_VERSION_COUNTER = '1.572'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -1979,6 +1979,26 @@ def _rollback_last_update():
             continue
         if _restore_backup_file(os.path.join(backup_dir, name), os.path.join(BOT_DIR, name), 0o644):
             restored.append(name)
+    static_source = os.path.join(backup_dir, 'static')
+    static_target = os.path.join(BOT_DIR, 'static')
+    static_absent_marker = os.path.join(backup_dir, '.static-absent')
+    try:
+        if os.path.isdir(static_source):
+            if os.path.exists(static_target) or os.path.islink(static_target):
+                if os.path.islink(static_target) or os.path.isfile(static_target):
+                    os.unlink(static_target)
+                else:
+                    shutil.rmtree(static_target)
+            shutil.copytree(static_source, static_target)
+            restored.append('static')
+        elif os.path.exists(static_absent_marker) and (os.path.exists(static_target) or os.path.islink(static_target)):
+            if os.path.islink(static_target) or os.path.isfile(static_target):
+                os.unlink(static_target)
+            else:
+                shutil.rmtree(static_target)
+            restored.append('static')
+    except Exception as exc:
+        return f'Backup найден ({backup_dir}), но static assets не удалось восстановить: {exc}'
     fixed_targets = {
         'installer.py': ('/opt/etc/bot/installer.py', 0o755),
         'S98telegram_bot_installer': ('/opt/etc/init.d/S98telegram_bot_installer', 0o755),
@@ -2182,6 +2202,42 @@ def _read_proc_meminfo():
     return values
 
 
+def _read_ndmc_system_snapshot():
+    try:
+        result = subprocess.run(
+            ['ndmc', '-c', 'show system'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return {}
+    values = {}
+    for line in (result.stdout or '').splitlines():
+        if ':' not in line:
+            continue
+        key, value = line.split(':', 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if not key or not value:
+            continue
+        if key == 'memory' and '/' in value:
+            used_text, total_text = value.split('/', 1)
+            try:
+                values['memory_used'] = int(used_text.strip())
+                values['memory_total'] = int(total_text.strip())
+            except Exception:
+                pass
+            continue
+        try:
+            values[key] = int(value.split()[0])
+        except Exception:
+            values[key] = value
+    return values
+
+
 def _process_rss_kb(pid='self'):
     for line in _read_proc_text(f'/proc/{pid}/status').splitlines():
         if line.startswith('VmRSS:'):
@@ -2218,55 +2274,96 @@ def _router_health_snapshot():
             return dict(payload)
 
     meminfo = _read_proc_meminfo()
+    ndmc_system = _read_ndmc_system_snapshot()
     total_kb = int(meminfo.get('MemTotal') or 0)
-    available_kb = int(meminfo.get('MemAvailable') or meminfo.get('MemFree') or 0)
+    free_kb = int(meminfo.get('MemFree') or 0)
+    buffers_kb = int(meminfo.get('Buffers') or 0)
+    cached_kb = int(meminfo.get('Cached') or 0)
+    reclaimable_kb = int(meminfo.get('SReclaimable') or 0)
+    linux_cache_kb = max(0, buffers_kb + cached_kb + reclaimable_kb)
+    available_kb = int(meminfo.get('MemAvailable') or (free_kb + linux_cache_kb) or free_kb or 0)
     swap_total_kb = int(meminfo.get('SwapTotal') or 0)
     swap_free_kb = int(meminfo.get('SwapFree') or 0)
-    used_kb = max(0, total_kb - available_kb) if total_kb else 0
+    display_total_kb = int(ndmc_system.get('memory_total') or ndmc_system.get('memtotal') or total_kb or 0)
+    ndmc_free_kb = int(ndmc_system.get('memfree') or 0)
+    ndmc_buffers_kb = int(ndmc_system.get('membuffers') or 0)
+    ndmc_cache_kb = int(ndmc_system.get('memcache') or 0)
+    ndmc_cache_total_kb = max(0, ndmc_buffers_kb + ndmc_cache_kb)
+    if display_total_kb and int(ndmc_system.get('memory_used') or 0):
+        used_kb = int(ndmc_system.get('memory_used') or 0)
+        display_cache_kb = ndmc_cache_total_kb
+        display_free_kb = ndmc_free_kb
+        memory_source = 'keenetic'
+    elif display_total_kb and ndmc_free_kb:
+        used_kb = max(0, display_total_kb - ndmc_free_kb - ndmc_cache_total_kb)
+        display_cache_kb = ndmc_cache_total_kb
+        display_free_kb = ndmc_free_kb
+        memory_source = 'keenetic'
+    else:
+        display_total_kb = total_kb
+        used_kb = max(0, total_kb - free_kb - buffers_kb - cached_kb) if total_kb else 0
+        display_cache_kb = max(0, buffers_kb + cached_kb)
+        display_free_kb = free_kb
+        memory_source = 'proc'
     used_mb = int(round(used_kb / 1024.0)) if used_kb else 0
-    total_mb = int(round(total_kb / 1024.0)) if total_kb else 0
+    total_mb = int(round(display_total_kb / 1024.0)) if display_total_kb else 0
     available_mb = int(round(available_kb / 1024.0)) if available_kb else 0
-    used_percent = int(round((used_kb / float(total_kb)) * 100)) if total_kb else 0
+    free_mb = int(round(display_free_kb / 1024.0)) if display_free_kb else 0
+    cache_mb = int(round(display_cache_kb / 1024.0)) if display_cache_kb else 0
+    used_percent = int(round((used_kb / float(display_total_kb)) * 100)) if display_total_kb else 0
+    available_percent = int(round((available_kb / float(display_total_kb)) * 100)) if display_total_kb else 0
     load_text = ' / '.join((_read_proc_text('/proc/loadavg').split()[:3] or []))
     bot_rss_kb = _process_rss_kb('self')
     bot_rss_mb = int(round(bot_rss_kb / 1024.0)) if bot_rss_kb else 0
     probe_progress = _get_pool_probe_progress() if 'pool_probe_progress' in globals() else {}
     probe_running = bool(probe_progress.get('running')) and int(probe_progress.get('total') or 0) > 0
-    probe_text = (
-        f"проверка {int(probe_progress.get('checked') or 0)}/{int(probe_progress.get('total') or 0)}"
-        if probe_running else 'проверка не идёт'
-    )
+    probe_checked = int(probe_progress.get('checked') or 0)
+    probe_total = int(probe_progress.get('total') or 0)
     probe_note = str(probe_progress.get('note') or '').strip()
     temp_xray_count = _count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0
     swap_used_mb = int(round(max(0, swap_total_kb - swap_free_kb) / 1024.0)) if swap_total_kb else 0
-    memory_text = f'{used_mb} / {total_mb} MB' if total_mb else 'недоступно'
+    memory_text = f'Память: занято {used_mb} из {total_mb} MB' if total_mb else 'Память: данные недоступны'
     details = []
+    if used_mb:
+        details.append(f'Занято по данным роутера: {used_mb} MB ({used_percent}%).')
+    if free_mb:
+        details.append(f'Свободно: {free_mb} MB.')
     if available_mb:
-        details.append(f'доступно {available_mb} MB')
-    if used_percent:
-        details.append(f'{used_percent}%')
+        details.append(f'Доступно для приложений: {available_mb} MB ({available_percent}%).')
+    if cache_mb:
+        details.append(f'Кэш и буферы: {cache_mb} MB.')
     if load_text:
-        details.append(f'load {load_text}')
+        details.append(f'Нагрузка CPU за 1/5/15 мин: {load_text}.')
     if bot_rss_mb:
-        details.append(f'бот {bot_rss_mb} MB')
+        details.append(f'Бот использует {bot_rss_mb} MB RAM.')
     if swap_total_kb:
-        details.append(f'swap {swap_used_mb} MB')
-    details.append(probe_text)
+        swap_total_mb = int(round(swap_total_kb / 1024.0))
+        details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB.')
+    if probe_running:
+        details.append(f'Проверка пула: выполняется, проверено {probe_checked} из {probe_total} ключей.')
+    else:
+        details.append('Проверка пула: сейчас не запущена.')
     if temp_xray_count:
-        details.append(f'временный xray: {temp_xray_count}')
+        details.append(f'Временный xray-процессов: {temp_xray_count}.')
     if probe_note:
-        details.append(probe_note)
+        details.append(probe_note if probe_note.endswith(('.', '!', '?')) else f'{probe_note}.')
     payload = {
         'memory_text': memory_text,
-        'note': ', '.join(details),
+        'note': ' '.join(details),
         'available_kb': available_kb,
         'used_kb': used_kb,
-        'total_kb': total_kb,
+        'total_kb': display_total_kb,
+        'proc_total_kb': total_kb,
         'used_percent': used_percent,
+        'linux_cache_kb': display_cache_kb,
+        'memory_source': memory_source,
         'load_text': load_text,
         'bot_rss_kb': bot_rss_kb or 0,
         'pool_probe_running': probe_running,
-        'pool_probe_text': probe_text,
+        'pool_probe_text': (
+            f'Проверяется {probe_checked}/{probe_total}'
+            if probe_running else 'Не запущена'
+        ),
         'temporary_xray_count': temp_xray_count,
     }
     with router_health_cache_lock:

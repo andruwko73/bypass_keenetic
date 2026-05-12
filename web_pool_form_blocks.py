@@ -83,7 +83,9 @@ def render_pool_items(
         key_hash = hash_key(pool_key)
         key_id = html.escape(str(key_hash[:12]))
         safe_pool_key = html.escape(pool_key, quote=True)
-        display_name = html.escape(key_display_name(pool_key))
+        raw_display_name = str(key_display_name(pool_key) or '')
+        display_name = html.escape(raw_display_name)
+        search_text = html.escape(f'{raw_display_name} {pool_key}', quote=True)
         is_current_key = bool(current_key and pool_key == current_key)
         active_text = 'активен' if is_current_key else ''
         active_class = ' pool-row-active' if is_current_key else ''
@@ -100,7 +102,7 @@ def render_pool_items(
         yt_badge = _service_probe_badge(probe, 'yt_ok', youtube_icon_html(opacity=1.0))
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
-        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-key="{safe_pool_key}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-checked-ts="{int(checked_ts)}">
+        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-key="{safe_pool_key}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
                         <td class="pool-key-cell">
                             <form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">
                                 {csrf_input_html}
@@ -217,13 +219,21 @@ def render_protocol_panel(
             </div>
             <div class="pool-controls" data-pool-controls="{safe_key_name}">
                 <input type="search" data-pool-filter="{safe_key_name}" placeholder="Поиск по пулу">
-                <select data-pool-sort="{safe_key_name}" aria-label="Сортировка пула">
-                    <option value="original">Исходный порядок</option>
-                    <option value="active">Активный сверху</option>
-                    <option value="telegram">Telegram сначала</option>
-                    <option value="youtube">YouTube сначала</option>
-                    <option value="checked">Свежие проверки</option>
-                </select>
+                <div class="pool-sort-control" data-pool-sort-control="{safe_key_name}">
+                    <input type="hidden" data-pool-sort="{safe_key_name}" value="original">
+                    <button type="button" class="pool-sort-button" data-pool-sort-button="{safe_key_name}" aria-expanded="false">Исходный порядок</button>
+                    <div class="pool-sort-menu hidden" data-pool-sort-menu="{safe_key_name}">
+                        <button type="button" class="pool-sort-option active" data-pool-sort-value="original">Исходный порядок</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="active">Активный сверху</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="telegram">Telegram сначала</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="youtube">YouTube сначала</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="checked">Свежие проверки</button>
+                        <span class="pool-sort-divider">Фильтр</span>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="working">Работают</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="problem">Есть проблемы</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="unknown">Не проверены</button>
+                    </div>
+                </div>
             </div>
             <div class="pool-table-wrap">
                 <table class="{html.escape(pool_table_class, quote=True)}" style="--custom-col-mobile:{int(pool_mobile_custom_col_width)}px">

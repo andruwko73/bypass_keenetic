@@ -998,6 +998,31 @@ def render_web_scripts(
             return 0;
         }}
 
+        function poolStateFilterFromMode(mode) {{
+            if (mode === 'working' || mode === 'problem' || mode === 'unknown') {{
+                return mode;
+            }}
+            return 'all';
+        }}
+
+        function poolRowMatchesState(row, state) {{
+            if (!state || state === 'all') {{
+                return true;
+            }}
+            const tg = row.dataset.tgState || 'unknown';
+            const yt = row.dataset.ytState || 'unknown';
+            if (state === 'working') {{
+                return tg === 'ok' || yt === 'ok';
+            }}
+            if (state === 'problem') {{
+                return tg === 'fail' || yt === 'fail';
+            }}
+            if (state === 'unknown') {{
+                return tg === 'unknown' && yt === 'unknown';
+            }}
+            return true;
+        }}
+
         function applyPoolView(proto) {{
             if (!proto) {{
                 return;
@@ -1010,10 +1035,13 @@ def render_web_scripts(
             const sortSelect = document.querySelector('[data-pool-sort="' + proto + '"]');
             const filterText = filterInput ? filterInput.value.trim().toLowerCase() : '';
             const sortMode = sortSelect ? sortSelect.value : 'original';
+            const stateFilter = poolStateFilterFromMode(sortMode);
             const rows = Array.from(body.querySelectorAll('[data-pool-row]'));
             rows.forEach(function(row) {{
                 const haystack = String(row.dataset.search || row.dataset.key || '').toLowerCase();
-                row.classList.toggle('pool-row-hidden', !!filterText && haystack.indexOf(filterText) === -1);
+                const matchesText = !filterText || haystack.indexOf(filterText) !== -1;
+                const matchesState = poolRowMatchesState(row, stateFilter);
+                row.classList.toggle('pool-row-hidden', !(matchesText && matchesState));
             }});
             rows.sort(function(left, right) {{
                 const leftIndex = Number(left.dataset.poolIndex || 0);
@@ -1046,6 +1074,20 @@ def render_web_scripts(
             }});
         }}
 
+        function closePoolSortMenus(exceptProto) {{
+            document.querySelectorAll('[data-pool-sort-menu]').forEach(function(menu) {{
+                const proto = menu.dataset.poolSortMenu || '';
+                if (exceptProto && proto === exceptProto) {{
+                    return;
+                }}
+                menu.classList.add('hidden');
+                const button = document.querySelector('[data-pool-sort-button="' + proto + '"]');
+                if (button) {{
+                    button.setAttribute('aria-expanded', 'false');
+                }}
+            }});
+        }}
+
         function setupPoolControls(root) {{
             if (!ENABLE_KEY_POOL) {{
                 return;
@@ -1061,6 +1103,62 @@ def render_web_scripts(
                     applyPoolView(proto);
                 }});
             }});
+            scope.querySelectorAll('[data-pool-sort-button]').forEach(function(button) {{
+                if (button.dataset.poolSortReady === '1') {{
+                    return;
+                }}
+                button.dataset.poolSortReady = '1';
+                const proto = button.dataset.poolSortButton || '';
+                button.addEventListener('click', function(event) {{
+                    event.stopPropagation();
+                    const menu = document.querySelector('[data-pool-sort-menu="' + proto + '"]');
+                    if (!menu) {{
+                        return;
+                    }}
+                    const willOpen = menu.classList.contains('hidden');
+                    closePoolSortMenus(proto);
+                    menu.classList.toggle('hidden', !willOpen);
+                    button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+                }});
+            }});
+            scope.querySelectorAll('[data-pool-sort-value]').forEach(function(option) {{
+                if (option.dataset.poolSortOptionReady === '1') {{
+                    return;
+                }}
+                option.dataset.poolSortOptionReady = '1';
+                option.addEventListener('click', function(event) {{
+                    event.stopPropagation();
+                    const menu = option.closest('[data-pool-sort-menu]');
+                    const proto = menu ? menu.dataset.poolSortMenu || '' : '';
+                    const value = option.dataset.poolSortValue || 'original';
+                    const input = document.querySelector('[data-pool-sort="' + proto + '"]');
+                    const button = document.querySelector('[data-pool-sort-button="' + proto + '"]');
+                    if (input) {{
+                        input.value = value;
+                    }}
+                    if (button) {{
+                        button.textContent = option.textContent || 'Исходный порядок';
+                    }}
+                    if (menu) {{
+                        menu.querySelectorAll('[data-pool-sort-value]').forEach(function(item) {{
+                            item.classList.toggle('active', item === option);
+                        }});
+                    }}
+                    closePoolSortMenus();
+                    applyPoolView(proto);
+                }});
+            }});
+            if (document.body.dataset.poolSortDismissReady !== '1') {{
+                document.body.dataset.poolSortDismissReady = '1';
+                document.addEventListener('click', function() {{
+                    closePoolSortMenus();
+                }});
+                document.addEventListener('keydown', function(event) {{
+                    if (event.key === 'Escape') {{
+                        closePoolSortMenus();
+                    }}
+                }});
+            }}
         }}
 
         function renderPoolBody(proto, pool) {{
@@ -1139,6 +1237,7 @@ def render_web_scripts(
                 item.dataset.tgState = row.tg || 'unknown';
                 item.dataset.ytState = row.yt || 'unknown';
                 item.dataset.checkedTs = String(row.checked_ts || 0);
+                item.dataset.search = String((row.display_name || '') + ' ' + (row.key || ''));
                 const meta = item.querySelector('[data-pool-key-meta]');
                 if (meta) {{
                     meta.textContent = row.active ? 'активен' : '';
@@ -1214,6 +1313,50 @@ def render_web_scripts(
             return 'Фоновая проверка пула ключей';
         }}
 
+        function attentionItemHtml(tone, title, text) {{
+            return '<li class="attention-item attention-' + escapeHtml(tone || 'info') + '">' +
+                '<span class="attention-dot"></span>' +
+                '<div><strong>' + escapeHtml(title || '') + '</strong><span>' + escapeHtml(text || '') + '</span></div>' +
+                '</li>';
+        }}
+
+        function renderStatusAttention(snapshot) {{
+            const list = document.getElementById('status-attention-list');
+            if (!list || !snapshot) {{
+                return;
+            }}
+            const items = [];
+            const health = snapshot.router_health || {{}};
+            const usedPercent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));
+            if (usedPercent >= 85) {{
+                items.push(['danger', 'Память роутера почти заполнена', 'Сейчас занято ' + usedPercent + '%. Лучше остановить проверку пула или перезапустить сервис.']);
+            }} else if (usedPercent >= 70) {{
+                items.push(['warn', 'Память роутера под нагрузкой', 'Сейчас занято ' + usedPercent + '%. Проверку большого пула стоит запускать осторожно.']);
+            }}
+            const web = snapshot.web || {{}};
+            const apiStatus = String(web.api_status || '').trim();
+            const apiLower = apiStatus.toLowerCase();
+            const apiLooksOk = !apiStatus || ['подтверж', 'работает', 'ok', 'доступ'].some(function(marker) {{
+                return apiLower.indexOf(marker) !== -1;
+            }});
+            if (!apiLooksOk) {{
+                items.push(['warn', 'Telegram API требует внимания', apiStatus]);
+            }}
+            if (ENABLE_KEY_POOL && !!snapshot.pool_probe_running) {{
+                items.push(['info', 'Проверка пула выполняется', String(health.pool_probe_text || 'Статусы обновляются без перезагрузки страницы.')]);
+            }}
+            const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || {{}}) : {{}};
+            if (ENABLE_KEY_POOL && String(poolSummary.note || '').toLowerCase().indexOf('не работает') !== -1) {{
+                items.push(['warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и включите быстрый фильтр "Есть проблемы".']);
+            }}
+            if (!items.length) {{
+                items.push(['ok', 'Критичных проблем не найдено', 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.']);
+            }}
+            list.innerHTML = items.map(function(item) {{
+                return attentionItemHtml(item[0], item[1], item[2]);
+            }}).join('');
+        }}
+
         function updateRouterHealth(health) {{
             if (!health) {{
                 return;
@@ -1226,6 +1369,17 @@ def render_web_scripts(
             if (note) {{
                 note.textContent = health.note || '';
                 note.classList.toggle('hidden', !note.textContent);
+            }}
+            const meter = document.getElementById('router-memory-meter');
+            if (meter) {{
+                const percent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));
+                const fill = meter.querySelector('span');
+                meter.classList.toggle('warn', percent >= 70 && percent < 85);
+                meter.classList.toggle('danger', percent >= 85);
+                meter.setAttribute('title', 'Занято памяти: ' + percent + '%');
+                if (fill) {{
+                    fill.style.width = percent + '%';
+                }}
             }}
         }}
 
@@ -1291,6 +1445,7 @@ def render_web_scripts(
                 setOptionalText('pool-summary-note', summaryNote);
             }}
             updateRouterHealth(snapshot.router_health);
+            renderStatusAttention(snapshot);
             if (ENABLE_KEY_POOL) {{
                 updatePoolStatus(snapshot.pools);
             }}

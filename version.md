@@ -1,3 +1,6 @@
+*v1.572 (12 May 2026) -* main
+*Fixed pool-check resume after low-memory pauses, restored static assets during web rollback, tightened the desktop health/pool layout, themed pool sorting, and made pool search match display names immediately.*
+
 *v1.571 (12 May 2026) -* main
 *Added low-memory pool-check pausing and manual stop, a cached router health card, pool search/sort controls, Telegram-first failover ordering, update rollback from the web UI, and a Playwright UI smoke test while keeping the existing features intact.*
 

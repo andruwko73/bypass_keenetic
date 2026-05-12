@@ -334,6 +334,7 @@ def run_pool_probe_worker(
         set_checked(checked)
 
     low_memory_since = None
+    paused_remaining = False
 
     def update_note(text):
         if set_note:
@@ -364,6 +365,7 @@ def run_pool_probe_worker(
                 update_note(note)
                 if max_low_memory_wait_seconds and time_provider() - low_memory_since >= max_low_memory_wait_seconds:
                     log(note)
+                    paused_remaining = True
                     break
                 sleep(max(1.0, float(low_memory_delay_seconds or 1.0)))
                 continue
@@ -485,7 +487,7 @@ def run_pool_probe_worker(
     except Exception as exc:
         log(f'Ошибка фоновой проверки пула ключей: {exc}')
     finally:
-        if cancel_requested() and probe_tasks and on_cancelled_remaining:
+        if (cancel_requested() or paused_remaining) and probe_tasks and on_cancelled_remaining:
             try:
                 on_cancelled_remaining(list(probe_tasks))
             except Exception as exc:

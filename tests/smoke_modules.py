@@ -753,6 +753,7 @@ def test_pool_probe_runner_failover_candidate():
     stopped = []
     cleaned = []
     memory_logs = []
+    paused_remaining = []
     checked, total = pool_probe_runner.run_pool_probe_worker(
         [('vless', 'low-memory')],
         [],
@@ -776,6 +777,7 @@ def test_pool_probe_runner_failover_candidate():
         stop_xray=lambda process, config_path: stopped.append((process, config_path)),
         cleanup_runtime=lambda kill_processes=False: cleaned.append(kill_processes),
         invalidate_caches=lambda: None,
+        on_cancelled_remaining=paused_remaining.extend,
         low_memory_delay_seconds=0,
         max_low_memory_wait_seconds=1,
         sleep=lambda seconds: None,
@@ -785,6 +787,7 @@ def test_pool_probe_runner_failover_candidate():
     assert started_batches == [[('vless', 'low-memory')]]
     assert stopped == [('process', 'config.json')]
     assert cleaned == [True]
+    assert paused_remaining == [('vless', 'low-memory')]
     assert '190000' in memory_logs[-1]
 
 
@@ -1034,6 +1037,7 @@ def test_web_form_blocks_helpers():
     assert 'csrf_token' in command_buttons
     router_buttons = web_form_blocks.render_router_command_buttons('<input name="csrf_token">', dns_override_active=True)
     assert 'DNS Override ВКЛ' in router_buttons and 'success-button' in router_buttons
+    assert router_buttons.index('value="update"') < router_buttons.index('value="rollback_update"')
     tabs, panels = web_form_blocks.render_unblock_lists(
         [{'name': 'custom', 'label': 'Custom', 'content': 'one\n\n two'}],
         '<input name="csrf_token">',
@@ -1079,6 +1083,7 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
     )
     assert 'pool-row-active' in pool_rows
+    assert 'data-search="sample-key vless://sample"' in pool_rows
     assert 'csrf_token' in pool_rows
     assert 'pool-delete-icon' in pool_rows
     assert '&times;' in pool_rows
@@ -1103,6 +1108,9 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
     )
     assert 'protocol-workspace active' in panel
+    assert 'pool-sort-control' in panel
+    assert 'data-pool-sort-value="telegram"' in panel
+    assert 'data-pool-sort-value="problem"' in panel
     assert 'custom-check-form' in panel
     main_panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
@@ -1224,7 +1232,11 @@ def test_web_template_styles_helpers():
     assert '.mode-control,.theme-control{position:relative;min-width:0;}' in styles
     assert '.mode-control #mode-picker,.theme-control .theme-picker{top:calc(100% + 8px);width:min(320px,calc(100vw - 32px));min-width:260px;z-index:330;}' in styles
     assert '.mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:330;}' in styles
-    assert '.pool-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,.32fr);' in styles
+    assert '.pool-controls{display:grid;grid-template-columns:minmax(240px,520px) minmax(180px,240px);' in styles
+    assert '.pool-sort-menu.hidden{display:none;}' in styles
+    assert '.pool-sort-divider' in styles
+    assert '.health-meter.warn span' in styles
+    assert '.status-overview-head{display:grid;' in styles
     assert '.version-badge{grid-column:2;grid-row:1;justify-self:end;align-self:start;width:auto;min-width:48px;' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
@@ -1364,6 +1376,9 @@ def test_web_template_scripts_helpers():
     assert 'function setupProtocolTabs()' in scripts
     assert "fetch('/api/protocol_panel?proto='" in scripts
     assert 'function setupProtocolSubtabs(root)' in scripts
+    assert 'function renderStatusAttention(snapshot)' in scripts
+    assert 'function poolRowMatchesState(row, state)' in scripts
+    assert 'function poolStateFilterFromMode(mode)' in scripts
     assert "formData.set('confirm_switch', 'yes');" in scripts
     assert '{{' not in scripts
 
@@ -1421,10 +1436,12 @@ def test_web_form_template_smoke():
     assert 'service-command-grid' in page
     assert 'quick-start-actions' in page
     assert 'router-memory-text' in page
+    assert 'router-memory-meter' in page
+    assert 'status-attention-list' in page
+    assert 'status-overview-head' in page
+    assert 'Панель состояния' not in page
     assert '10 / 64 MB' in page
-    assert 'value="update"' in page
-    assert 'Обновить до последнего релиза' in page
-    assert 'data-confirm-title="Обновить до последнего релиза?' in page
+    assert 'value="update"' not in page
     assert 'Локальная панель управления обходом на роутере' in page
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
     assert 'Переустановка компонентов' not in page
@@ -1476,7 +1493,7 @@ def test_web_form_template_smoke():
     )
     assert 'action="/start"' not in web_only_page
     assert 'Telegram отключ' not in web_only_page
-    assert 'value="update"' in web_only_page
+    assert 'value="update"' not in web_only_page
 
 
 def test_telegram_pool_ui():

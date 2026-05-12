@@ -470,6 +470,16 @@ backup_runtime_modules() {
   done
 }
 
+backup_static_assets() {
+  static_dir="${BOT_RUNTIME_DIR}/static"
+  if [ -d "$static_dir" ]; then
+    mkdir -p "$backup_dir/static"
+    cp -a "$static_dir"/. "$backup_dir/static"/
+  else
+    : > "$backup_dir/.static-absent"
+  fi
+}
+
 activate_runtime_modules() {
   for module in "$@"; do
     activate_runtime_module "$module"
@@ -768,6 +778,7 @@ if [ "$1" = "-update" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
     backup_runtime_modules $BOT_RUNTIME_MODULES
+    backup_static_assets
     cleanup_removed_connection_artifacts
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
