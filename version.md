@@ -1,3 +1,6 @@
+*v1.577 (12 May 2026) -* main
+*Refreshed README screenshots from Advanced mode with sanitized desktop and mobile captures.*
+
 *v1.576 (12 May 2026) -* main
 *Aligned the Web only version badge with the regular header, refreshed the cache revision, and updated README screenshots for desktop and mobile.*
 
