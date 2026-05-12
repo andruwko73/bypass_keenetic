@@ -733,6 +733,41 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (0, 1)
     assert remaining == [('vless', 'left')]
 
+    memory_values = iter([999999, 1000])
+    started_batches = []
+    stopped = []
+    cleaned = []
+    memory_logs = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'low-memory')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=190000,
+        test_port='1200',
+        available_memory_kb=lambda: next(memory_values),
+        log=memory_logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: started_batches.append(list(batch)) or ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: (_ for _ in ()).throw(AssertionError('memory guard should stop before socks wait')),
+        check_pool_key=lambda proto, key, checks, proxy_url: None,
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: stopped.append((process, config_path)),
+        cleanup_runtime=lambda kill_processes=False: cleaned.append(kill_processes),
+        invalidate_caches=lambda: None,
+    )
+    assert (checked, total) == (0, 1)
+    assert started_batches == [[('vless', 'low-memory')]]
+    assert stopped == [('process', 'config.json')]
+    assert cleaned == [True]
+    assert '190000' in memory_logs[-1]
+
 
 def test_proxy_status_runtime_helpers():
     assert proxy_status.port_is_listening(

@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.568
+# ВЕРСИЯ СКРИПТА v1.569
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -12,6 +12,7 @@ fork_repo_owner = 'andruwko73'  # GitHub username вашего форка bypass
 fork_repo_name = 'bypass_keenetic'  # имя репозитория форка
 fork_button_label = 'Fork by andruwko73'  # подпись кнопки установки из вашего форка
 app_runtime_mode = 'advanced'  # simple, advanced или web_only
+pool_probe_min_available_kb = 190000  # проверка пула не запускает временный xray, если доступной памяти меньше этого порога
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять
 localportsh = '1082'  # локальный порт для shadowsocks

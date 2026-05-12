@@ -333,7 +333,7 @@ ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then
     cat > "$BOT_CONFIG_PATH" <<EOF
-# ВЕРСИЯ СКРИПТА v1.568
+# ВЕРСИЯ СКРИПТА v1.569
 
 token = '${TG_BOT_TOKEN}'
 usernames = ['${TG_USERNAME}']
@@ -347,6 +347,7 @@ fork_repo_owner = '${REPO_OWNER}'
 fork_repo_name = '${REPO_NAME}'
 fork_button_label = '${FORK_BUTTON_LABEL}'
 app_runtime_mode = 'advanced'
+pool_probe_min_available_kb = 190000
 
 localportsh = '1082'
 localportvmess = '10810'

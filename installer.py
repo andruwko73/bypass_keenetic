@@ -43,7 +43,7 @@ def build_config(form):
     web_auth_token = form.get('web_auth_token', '').strip()
     app_runtime_mode = form.get('app_runtime_mode', 'advanced').strip() or 'advanced'
 
-    return f"""# ВЕРСИЯ СКРИПТА v1.568
+    return f"""# ВЕРСИЯ СКРИПТА v1.569
 
 token = '{escape_python(form.get('token', ''))}'
 usernames = ['{escape_python(form.get('username', ''))}']
@@ -57,6 +57,7 @@ fork_repo_owner = '{escape_python(fork_repo_owner)}'
 fork_repo_name = '{escape_python(fork_repo_name)}'
 fork_button_label = '{escape_python(fork_button_label)}'
 app_runtime_mode = '{escape_python(app_runtime_mode)}'
+pool_probe_min_available_kb = 190000
 
 localportsh = '1082'
 localportvmess = '10810'

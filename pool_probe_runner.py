@@ -69,13 +69,19 @@ def start_pool_probe_xray(config_json):
     with open(config_path, 'w', encoding='utf-8') as file:
         json.dump(config_json, file, ensure_ascii=False, separators=(',', ':'))
     preexec_fn = None
-    if os.name == 'posix' and hasattr(os, 'nice'):
-        def lower_priority():
+    if os.name == 'posix':
+        def prepare_child_process():
             try:
-                os.nice(10)
+                if hasattr(os, 'setsid'):
+                    os.setsid()
             except Exception:
                 pass
-        preexec_fn = lower_priority
+            try:
+                if hasattr(os, 'nice'):
+                    os.nice(10)
+            except Exception:
+                pass
+        preexec_fn = prepare_child_process
     process = subprocess.Popen(
         [xray_binary, 'run', '-c', config_path],
         stdout=subprocess.DEVNULL,
@@ -91,12 +97,24 @@ def stop_pool_probe_xray(process, config_path):
     try:
         pid = process.pid if process else None
         if process and process.poll() is None:
-            process.terminate()
+            try:
+                if os.name == 'posix' and hasattr(os, 'getpgid') and hasattr(os, 'killpg'):
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                else:
+                    process.terminate()
+            except Exception:
+                process.terminate()
             try:
                 process.wait(timeout=3)
             except Exception:
                 try:
-                    process.kill()
+                    try:
+                        if os.name == 'posix' and hasattr(os, 'getpgid') and hasattr(os, 'killpg'):
+                            os.killpg(os.getpgid(pid), signal.SIGKILL)
+                        else:
+                            process.kill()
+                    except Exception:
+                        process.kill()
                     process.wait(timeout=2)
                 except Exception:
                     if pid:
@@ -118,37 +136,53 @@ def stop_pool_probe_xray(process, config_path):
         pass
 
 
+def _pool_probe_process_ids():
+    pids = set()
+    try:
+        output = subprocess.check_output(
+            ['pgrep', '-f', '/tmp/bypass_pool_probe_'],
+            stderr=subprocess.DEVNULL,
+        ).decode('utf-8', errors='ignore')
+        for raw_pid in output.split():
+            try:
+                pids.add(int(raw_pid))
+            except ValueError:
+                continue
+    except Exception:
+        pass
+    try:
+        for name in os.listdir('/proc'):
+            if not name.isdigit():
+                continue
+            pid = int(name)
+            if pid == os.getpid():
+                continue
+            try:
+                with open(os.path.join('/proc', name, 'cmdline'), 'rb') as file:
+                    cmdline = file.read().decode('utf-8', errors='ignore')
+                if '/tmp/bypass_pool_probe_' in cmdline:
+                    pids.add(pid)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    pids.discard(os.getpid())
+    return pids
+
+
 def cleanup_pool_probe_runtime(kill_processes=False):
     if kill_processes:
-        try:
-            output = subprocess.check_output(
-                ['pgrep', '-f', '/tmp/bypass_pool_probe_'],
-                stderr=subprocess.DEVNULL,
-            ).decode('utf-8', errors='ignore')
-            for raw_pid in output.split():
-                try:
-                    pid = int(raw_pid)
-                except ValueError:
-                    continue
-                if pid != os.getpid():
-                    os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
+        for pid in _pool_probe_process_ids():
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                pass
         time.sleep(0.2)
-        try:
-            output = subprocess.check_output(
-                ['pgrep', '-f', '/tmp/bypass_pool_probe_'],
-                stderr=subprocess.DEVNULL,
-            ).decode('utf-8', errors='ignore')
-            for raw_pid in output.split():
-                try:
-                    pid = int(raw_pid)
-                except ValueError:
-                    continue
-                if pid != os.getpid():
-                    os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
+        for pid in _pool_probe_process_ids():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
 
     try:
         for name in os.listdir('/tmp'):
@@ -294,17 +328,22 @@ def run_pool_probe_worker(
         checked += 1
         set_checked(checked)
 
+    def memory_below_limit():
+        available_kb = available_memory_kb()
+        if available_kb is not None and available_kb < min_available_kb:
+            log(
+                f'Проверка пула остановлена: доступной памяти {available_kb} KB, '
+                f'порог {min_available_kb} KB.'
+            )
+            return True
+        return False
+
     try:
         while probe_tasks:
             if cancel_requested():
                 log('Проверка пула приостановлена для применения выбранного ключа.')
                 break
-            available_kb = available_memory_kb()
-            if available_kb is not None and available_kb < min_available_kb:
-                log(
-                    f'Проверка пула остановлена: свободной памяти {available_kb} KB, '
-                    f'порог {min_available_kb} KB.'
-                )
+            if memory_below_limit():
                 break
 
             raw_batch = probe_tasks[:batch_size]
@@ -333,6 +372,8 @@ def run_pool_probe_worker(
             config_path = None
             try:
                 process, config_path = start_xray_for_batch(valid_batch)
+                if memory_below_limit():
+                    break
                 ready_batch = []
                 for offset, (proto, key_value) in enumerate(valid_batch):
                     port = str(int(test_port) + offset)

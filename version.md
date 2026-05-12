@@ -1,3 +1,6 @@
+*v1.569 (12 May 2026) -* main
+*Normalized the header-to-content spacing and made pool checks stop temporary xray probes when router memory drops below the safe threshold.*
+
 *v1.568 (12 May 2026) -* main
 *Raised the Liquid Glass lens above the compact topbar so it remains visible while moving across the header.*
 
