@@ -1,3 +1,6 @@
+*v1.576 (12 May 2026) -* main
+*Aligned the Web only version badge with the regular header, refreshed the cache revision, and updated README screenshots for desktop and mobile.*
+
 *v1.575 (12 May 2026) -* main
 *Made Web only mode hide Telegram-only header/status controls and focus copy, with a compact header centered on router health, key pool, and service commands.*
 

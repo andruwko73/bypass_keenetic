@@ -302,7 +302,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .topbar-actions.topbar-actions-web-only{grid-template-columns:minmax(0,1fr) max-content auto;}
         .topbar-actions-web-only .theme-control{justify-self:end;width:auto;}
         .topbar-actions-web-only .theme-toggle{width:auto;min-width:180px;}
-        .topbar-actions-web-only .version-badge{align-self:center;}
+        .topbar-actions-web-only .version-badge{align-self:start;}
         .mode-control,.theme-control{position:relative;min-width:0;}
         .mode-control .mode-toggle,.theme-control .theme-toggle{width:100%;justify-content:center;}
         .mode-control #mode-picker,.theme-control .theme-picker{top:calc(100% + 8px);width:min(320px,calc(100vw - 32px));min-width:260px;z-index:330;}

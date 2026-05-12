@@ -81,7 +81,7 @@ Bootstrap перед заменой файлов создает backup и rollba
 
 **Статус**
 
-Показывает доступность Telegram API, активный режим прокси, количество ключей, быстрый старт и сервисные команды.
+Показывает состояние роутера, ключей, быстрый старт и сервисные команды. В режимах с ботом дополнительно отображаются Telegram API и активный режим Telegram-бота; в **Web only** эти элементы скрыты.
 
 **Ключи**
 
@@ -134,10 +134,16 @@ Telegram-бот использует нижнюю клавиатуру и раб
   <img src="docs/screenshots/installer-setup.png" alt="Первичная настройка" width="420">
 </a>
 
-Статус и сервис:
+Статус и сервис, версия для ПК:
 
 <a href="docs/screenshots/web-ui-status.png">
-  <img src="docs/screenshots/web-ui-status.png" alt="Статус и сервис" width="520">
+  <img src="docs/screenshots/web-ui-status.png" alt="Статус и сервис для ПК" width="720">
+</a>
+
+Статус и сервис, версия для телефона:
+
+<a href="docs/screenshots/web-ui-status-mobile.png">
+  <img src="docs/screenshots/web-ui-status-mobile.png" alt="Статус и сервис для телефона" width="320">
 </a>
 
 Активный ключ:
