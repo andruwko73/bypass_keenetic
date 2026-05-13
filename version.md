@@ -1,3 +1,6 @@
+*v1.581 (13 May 2026) -* main
+*Hardened installer CSRF and password handling, fixed uninstall cleanup, synced bootstrap versioning, ignored runtime status dumps, and added CI smoke checks.*
+
 *v1.580 (13 May 2026) -* main
 *Made full key-pool checks finish the whole queue on low-memory routers by lowering the default memory guard, auto-resuming paused checks, and updating checked timestamps even for timeout/SOCKS startup failures.*
 

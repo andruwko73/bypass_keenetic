@@ -1,8 +1,12 @@
 #!/usr/bin/python3
 import html
 import os
+import re
+import secrets
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from app_version import APP_VERSION_COUNTER
 from installer_common import (
     detect_router_ip,
     escape_python,
@@ -43,7 +47,7 @@ def build_config(form):
     web_auth_token = form.get('web_auth_token', '').strip()
     app_runtime_mode = form.get('app_runtime_mode', 'advanced').strip() or 'advanced'
 
-    return f"""# ВЕРСИЯ СКРИПТА v1.580
+    return f"""# ВЕРСИЯ СКРИПТА v{APP_VERSION_COUNTER}
 
 token = '{escape_python(form.get('token', ''))}'
 usernames = ['{escape_python(form.get('username', ''))}']
@@ -114,9 +118,14 @@ def install_web_only():
     switch_to_main_bot()
 
 
-def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
+def page_html(message='', redirect_url=None, redirect_delay_seconds=3, csrf_token=''):
     router_ip = detect_router_ip()
     notice, redirect_head, redirect_script = installer_page_parts(message, redirect_url, redirect_delay_seconds)
+    csrf_input_html = (
+        f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token, quote=True)}">'
+        if csrf_token else
+        ''
+    )
     return f"""<!doctype html>
 <html lang=\"ru\">
 <head>
@@ -151,6 +160,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
             <p>Эта страница запускается до основного Telegram-бота. Заполните данные доступа, после сохранения installer запишет bot_config.py и запустит основной сервис.</p>
             {notice}
             <form method="post" action="/save">
+                {csrf_input_html}
                 <div class="grid">
                     <div class="full">
                         <label for="token">BotFather token</label>
@@ -191,6 +201,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
                 <button type="submit">Сохранить и запустить основной бот</button>
             </form>
             <form method="post" action="/install-web-only">
+                {csrf_input_html}
                 <button class="secondary-button" type="submit">Запустить режим Web only</button>
             </form>
             <div class="hint">После сохранения эта страница будет заменена основным интерфейсом бота на том же адресе.</div>
@@ -202,6 +213,10 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3):
 
 
 class InstallerHandler(BaseHTTPRequestHandler):
+    csrf_cookie_name = 'bk_installer_csrf'
+    csrf_token_re = re.compile(r'^[A-Za-z0-9_-]{32,256}$')
+    max_post_bytes = 256 * 1024
+
     def _send_file(self, file_path, content_type='image/png'):
         try:
             with open(file_path, 'rb') as f:
@@ -231,9 +246,48 @@ class InstallerHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        csrf_cookie = getattr(self, '_csrf_cookie_token', '')
+        if csrf_cookie:
+            self.send_header(
+                'Set-Cookie',
+                f'{self.csrf_cookie_name}={csrf_cookie}; Path=/; HttpOnly; SameSite=Strict',
+            )
         self.send_header('Connection', 'close')
         self.end_headers()
         self.wfile.write(body)
+
+    def _csrf_token_from_cookie(self):
+        cookie_header = self.headers.get('Cookie', '')
+        if not cookie_header:
+            return ''
+        try:
+            cookie = SimpleCookie()
+            cookie.load(cookie_header)
+            token_value = cookie.get(self.csrf_cookie_name)
+            if token_value is None:
+                return ''
+            value = token_value.value.strip()
+            return value if self.csrf_token_re.fullmatch(value) else ''
+        except Exception:
+            return ''
+
+    def _get_or_create_csrf_token(self):
+        token_value = self._csrf_token_from_cookie()
+        if not token_value:
+            token_value = secrets.token_urlsafe(32)
+        self._csrf_cookie_token = token_value
+        return token_value
+
+    def _ensure_csrf_allowed(self, data):
+        supplied = (data.get('csrf_token') or '').strip()
+        cookie_token = self._csrf_token_from_cookie()
+        if supplied and cookie_token and secrets.compare_digest(supplied, cookie_token):
+            return True
+        self._send_html('<h1>403 Forbidden</h1><p>CSRF token is missing or invalid.</p>', status=403)
+        return False
 
     def do_GET(self):
         if not self._ensure_request_allowed():
@@ -244,10 +298,17 @@ class InstallerHandler(BaseHTTPRequestHandler):
         if self.path.startswith('/static/youtube.png'):
             self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'youtube.png'))
             return
-        self._send_html(page_html())
+        self._send_html(page_html(csrf_token=self._get_or_create_csrf_token()))
 
     def do_POST(self):
         if not self._ensure_request_allowed():
+            return
+        try:
+            parsed = parse_urlencoded_request(self, max_bytes=self.max_post_bytes)
+        except ValueError as exc:
+            self._send_html(page_html(str(exc), csrf_token=self._get_or_create_csrf_token()), status=413)
+            return
+        if not self._ensure_csrf_allowed(parsed):
             return
         if self.path == '/install-web-only':
             install_web_only()
@@ -257,18 +318,17 @@ class InstallerHandler(BaseHTTPRequestHandler):
                     f'Включен режим Web only в единой версии. Через несколько секунд откроется основной web-интерфейс: {target_url}',
                     redirect_url=target_url,
                     redirect_delay_seconds=8,
+                    csrf_token=self._get_or_create_csrf_token(),
                 )
             )
             return
         if self.path != '/save':
-            self._send_html(page_html('Неизвестное действие.'), status=404)
+            self._send_html(page_html('Неизвестное действие.', csrf_token=self._get_or_create_csrf_token()), status=404)
             return
-
-        parsed = parse_urlencoded_request(self)
 
         ok, message = validate_form(parsed)
         if not ok:
-            self._send_html(page_html(message), status=400)
+            self._send_html(page_html(message, csrf_token=self._get_or_create_csrf_token()), status=400)
             return
 
         normalize_web_auth_form(parsed)
@@ -277,7 +337,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
             write_config(parsed)
             switch_to_main_bot()
         except Exception as exc:
-            self._send_html(page_html(f'Не удалось сохранить конфиг: {exc}'), status=500)
+            self._send_html(page_html(f'Не удалось сохранить конфиг: {exc}', csrf_token=self._get_or_create_csrf_token()), status=500)
             return
 
         target_url = installer_target_url(parsed, DEFAULT_BROWSER_PORT)
@@ -287,6 +347,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
                 f'Конфиг сохранён. Основной бот запускается. Основная страница: {target_url}. Логин веб-интерфейса: {web_auth_user}.{web_auth_note}',
                 redirect_url=target_url,
                 redirect_delay_seconds=12,
+                csrf_token=self._get_or_create_csrf_token(),
             )
         )
 

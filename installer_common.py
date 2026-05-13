@@ -81,7 +81,7 @@ def web_auth_summary(form, default_user='admin'):
     web_auth_user = form_value(form, 'web_auth_user', default_user) or default_user
     web_auth_token = form_value(form, 'web_auth_token')
     note = (
-        f' Пароль веб-интерфейса: {web_auth_token}.'
+        ' Пароль веб-интерфейса задан.'
         if web_auth_token else
         ' Пароль веб-интерфейса не задан; вход будет без пароля.'
     )
@@ -99,10 +99,17 @@ def validate_installer_form(form, required_fields):
     return True, ''
 
 
-def parse_urlencoded_request(handler):
-    content_length = int(handler.headers.get('Content-Length', '0') or '0')
+def parse_urlencoded_request(handler, max_bytes=1024 * 1024):
+    try:
+        content_length = int(handler.headers.get('Content-Length', '0') or '0')
+    except (TypeError, ValueError):
+        content_length = 0
+    if content_length < 0:
+        content_length = 0
+    if content_length > max_bytes:
+        raise ValueError('POST body is too large.')
     raw_body = handler.rfile.read(content_length).decode('utf-8', errors='ignore')
-    return {key: values[0] for key, values in parse_qs(raw_body).items()}
+    return {key: values[0] for key, values in parse_qs(raw_body, keep_blank_values=True).items()}
 
 
 def write_installer_config(bot_dir, config_path, config_text, legacy_config_path, bot_main_path=None, legacy_main_path=None):

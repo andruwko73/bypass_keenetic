@@ -34,6 +34,7 @@ review-before-*.png
 *-review*.json
 *-review*.txt
 router-*.json
+status-*.json
 web-ui-*-design-pass.png
 web-only-ui-*.json
 test-*.png

@@ -23,6 +23,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py router_health_runtime.py service_catalog.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -94,6 +95,7 @@ set -eu
 
 BACKUP_DIR='$BACKUP_DIR'
 ABSENT_PATHS_FILE='$ABSENT_PATHS_FILE'
+BOT_RUNTIME_MODULES='$BOT_RUNTIME_MODULES'
 
 restore_path() {
     target_path="\$1"
@@ -116,6 +118,7 @@ remove_added_path() {
 restore_path /opt/etc/bot/main.py
 restore_path /opt/etc/bot/installer.py
 restore_path /opt/etc/bot/installer.env
+restore_path /opt/etc/bot/app_version.py
 restore_path /opt/etc/bot/app_runtime_mode.py
 restore_path /opt/etc/bot/key_pool_store.py
 restore_path /opt/etc/bot/key_pool_web.py
@@ -141,6 +144,9 @@ restore_path /opt/etc/bot/proxy_protocols.py
 restore_path /opt/etc/bot/proxy_config_builder.py
 restore_path /opt/etc/bot/proxy_status.py
 restore_path /opt/etc/bot/installer_common.py
+for module in \$BOT_RUNTIME_MODULES; do
+    restore_path "/opt/etc/bot/\$module"
+done
 restore_path /opt/etc/web_bot.py
 restore_path /opt/etc/bot.py
 restore_path /opt/etc/init.d/S99telegram_bot
@@ -228,6 +234,7 @@ FORK_BUTTON_LABEL="${BYPASS_FORK_BUTTON_LABEL:-Fork by ${REPO_OWNER}}"
 backup_path "$BOT_MAIN_PATH"
 backup_path "$INSTALLER_PATH"
 backup_path "$INSTALLER_ENV_PATH"
+backup_path "$BOT_DIR/app_version.py"
 backup_path "$BOT_DIR/app_runtime_mode.py"
 backup_path "$BOT_DIR/key_pool_store.py"
 backup_path "$BOT_DIR/key_pool_web.py"
@@ -253,6 +260,9 @@ backup_path "$BOT_DIR/proxy_protocols.py"
 backup_path "$BOT_DIR/proxy_config_builder.py"
 backup_path "$BOT_DIR/proxy_status.py"
 backup_path "$BOT_DIR/installer_common.py"
+for module in $BOT_RUNTIME_MODULES; do
+    backup_path "$BOT_DIR/$module"
+done
 backup_path "/opt/etc/web_bot.py"
 backup_path "$LEGACY_MAIN_PATH"
 backup_path "$SERVICE_PATH"
@@ -278,6 +288,7 @@ write_rollback_script
 download_file "$RAW_BASE/script.sh" "$TMP_DIR/script.sh" 'if \[ "$1" = "-install" \]; then'
 download_file "$RAW_BASE/bot.py" "$TMP_DIR/main.py" 'KeyInstallHTTPRequestHandler'
 download_file "$RAW_BASE/installer.py" "$TMP_DIR/installer.py" 'ThreadingHTTPServer'
+download_file "$RAW_BASE/app_version.py" "$TMP_DIR/app_version.py" 'APP_VERSION_COUNTER'
 download_file "$RAW_BASE/app_runtime_mode.py" "$TMP_DIR/app_runtime_mode.py" 'set_app_runtime_mode'
 download_file "$RAW_BASE/key_pool_store.py" "$TMP_DIR/key_pool_store.py" 'def normalize_key_pools'
 download_file "$RAW_BASE/key_pool_web.py" "$TMP_DIR/key_pool_web.py" 'pool_status_summary'
@@ -303,11 +314,17 @@ download_file "$RAW_BASE/proxy_protocols.py" "$TMP_DIR/proxy_protocols.py" 'prox
 download_file "$RAW_BASE/proxy_config_builder.py" "$TMP_DIR/proxy_config_builder.py" 'build_proxy_core_config'
 download_file "$RAW_BASE/proxy_status.py" "$TMP_DIR/proxy_status.py" 'status_snapshot_signature'
 download_file "$RAW_BASE/installer_common.py" "$TMP_DIR/installer_common.py" 'browser_port_is_valid'
+for module in $BOT_RUNTIME_MODULES; do
+    if [ ! -f "$TMP_DIR/$module" ]; then
+        download_file "$RAW_BASE/$module" "$TMP_DIR/$module" ''
+    fi
+done
 download_file "$RAW_BASE/S99telegram_bot" "$TMP_DIR/S99telegram_bot" 'Bot started successfully'
 download_file "$RAW_BASE/S98telegram_bot_installer" "$TMP_DIR/S98telegram_bot_installer" 'Installer started successfully'
 
 cp "$TMP_DIR/main.py" "$BOT_MAIN_PATH"
 cp "$TMP_DIR/installer.py" "$INSTALLER_PATH"
+cp "$TMP_DIR/app_version.py" "$BOT_DIR/app_version.py"
 cp "$TMP_DIR/app_runtime_mode.py" "$BOT_DIR/app_runtime_mode.py"
 cp "$TMP_DIR/key_pool_store.py" "$BOT_DIR/key_pool_store.py"
 cp "$TMP_DIR/key_pool_web.py" "$BOT_DIR/key_pool_web.py"
@@ -333,31 +350,54 @@ cp "$TMP_DIR/proxy_protocols.py" "$BOT_DIR/proxy_protocols.py"
 cp "$TMP_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_config_builder.py"
 cp "$TMP_DIR/proxy_status.py" "$BOT_DIR/proxy_status.py"
 cp "$TMP_DIR/installer_common.py" "$BOT_DIR/installer_common.py"
+for module in $BOT_RUNTIME_MODULES; do
+    cp "$TMP_DIR/$module" "$BOT_DIR/$module"
+done
 cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
 cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 download_static_assets
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/app_runtime_mode.py" "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/router_health_runtime.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_template_styles.py" "$BOT_DIR/web_template_scripts.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/web_commands_runtime.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
+chmod 644 "$BOT_DIR/app_version.py" "$BOT_DIR/app_runtime_mode.py" "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/router_health_runtime.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_template_styles.py" "$BOT_DIR/web_template_scripts.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/web_commands_runtime.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
+for module in $BOT_RUNTIME_MODULES; do
+    chmod 644 "$BOT_DIR/$module"
+done
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 
 /bin/sh "$TMP_DIR/script.sh" -install
 
 if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then
-    cat > "$BOT_CONFIG_PATH" <<EOF
-# ВЕРСИЯ СКРИПТА v1.578
+    TG_WEB_AUTH_TOKEN_VALUE="${TG_WEB_AUTH_TOKEN:-}"
+    BOT_CONFIG_PATH_ENV="$BOT_CONFIG_PATH" BOT_DIR_ENV="$BOT_DIR" \
+    TG_BOT_TOKEN_ENV="$TG_BOT_TOKEN" TG_USERNAME_ENV="$TG_USERNAME" \
+    TG_WEB_AUTH_TOKEN_ENV="$TG_WEB_AUTH_TOKEN_VALUE" ROUTER_IP_ENV="$ROUTER_IP" \
+    BROWSER_PORT_ENV="$BROWSER_PORT" REPO_OWNER_ENV="$REPO_OWNER" REPO_NAME_ENV="$REPO_NAME" \
+    FORK_BUTTON_LABEL_ENV="$FORK_BUTTON_LABEL" DEFAULT_PROXY_MODE_ENV="$DEFAULT_PROXY_MODE" \
+    python3 - <<'PY'
+import os
+import sys
 
-token = '${TG_BOT_TOKEN}'
-usernames = ['${TG_USERNAME}']
+sys.path.insert(0, os.environ['BOT_DIR_ENV'])
+from app_version import APP_VERSION_COUNTER
 
-routerip = '${ROUTER_IP}'
-browser_port = '${BROWSER_PORT}'
+
+def py_string(name, default=''):
+    return repr(str(os.environ.get(name, default)))
+
+
+config_text = f"""# ВЕРСИЯ СКРИПТА v{APP_VERSION_COUNTER}
+
+token = {py_string('TG_BOT_TOKEN_ENV')}
+usernames = [{py_string('TG_USERNAME_ENV')}]
+
+routerip = {py_string('ROUTER_IP_ENV')}
+browser_port = {py_string('BROWSER_PORT_ENV')}
 web_auth_user = 'admin'
-web_auth_token = '${TG_WEB_AUTH_TOKEN:-}'
+web_auth_token = {py_string('TG_WEB_AUTH_TOKEN_ENV')}
 web_auth_disabled = False
-fork_repo_owner = '${REPO_OWNER}'
-fork_repo_name = '${REPO_NAME}'
-fork_button_label = '${FORK_BUTTON_LABEL}'
+fork_repo_owner = {py_string('REPO_OWNER_ENV')}
+fork_repo_name = {py_string('REPO_NAME_ENV')}
+fork_button_label = {py_string('FORK_BUTTON_LABEL_ENV')}
 app_runtime_mode = 'advanced'
 pool_probe_min_available_kb = 190000
 
@@ -365,10 +405,14 @@ localportsh = '1082'
 localportvmess = '10810'
 localportvless = '10811'
 localporttrojan = '10829'
-default_proxy_mode = '${DEFAULT_PROXY_MODE}'
+default_proxy_mode = {py_string('DEFAULT_PROXY_MODE_ENV')}
 dnsovertlsport = '40500'
 dnsoverhttpsport = '40508'
-EOF
+"""
+
+with open(os.environ['BOT_CONFIG_PATH_ENV'], 'w', encoding='utf-8') as file:
+    file.write(config_text)
+PY
     chmod 600 "$BOT_CONFIG_PATH"
     rm -f "$INSTALLER_ENV_PATH"
     ensure_symlink_or_copy "$BOT_CONFIG_PATH" "$LEGACY_CONFIG_PATH"

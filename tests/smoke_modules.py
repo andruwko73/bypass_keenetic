@@ -1,8 +1,12 @@
 from pathlib import Path
+from io import BytesIO
+import importlib
+import os
 import re
 import subprocess
 import sys
 import threading
+import types as py_types
 
 # ruff: noqa: E402
 
@@ -12,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 import key_pool_web
 import key_pool_store
+import app_version
 import app_runtime_mode
 import router_health_runtime
 import telegram_pool_ui
@@ -421,10 +426,15 @@ def test_codex_version_matches_commit_count():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     version_md = (ROOT / 'version.md').read_text(encoding='utf-8')
     installer = (ROOT / 'installer.py').read_text(encoding='utf-8')
-    assert f"APP_VERSION_COUNTER = '{expected}'" in source
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    example = (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert app_version.APP_VERSION_COUNTER == expected
     assert re.search(rf'Версия\s+v{re.escape(expected)}\b', source)
     assert version_md.startswith(f'*v{expected} ')
-    assert f'# ВЕРСИЯ СКРИПТА v{expected}' in installer
+    assert f'v{{APP_VERSION_COUNTER}}' in installer
+    assert 'from app_version import APP_VERSION_COUNTER' in installer
+    assert 'from app_version import APP_VERSION_COUNTER' in bootstrap
+    assert f'# ВЕРСИЯ СКРИПТА v{expected}' in example
 
 
 def test_update_script_socks_download_notice_is_not_repeated():
@@ -432,6 +442,9 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert 'Downloaded via local SOCKS port' not in script
     assert 'Downloading GitHub files via local SOCKS port ${port}.' in script
     assert 'RAW_GITHUB_SOCKS_NOTICE_SHOWN=1' in script
+    assert 'remove_path /opt/root/get-pip.py' in script
+    assert 'chmod 777 /opt/root/get-pip.py || rm' not in script
+    assert 'touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts' in script
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
@@ -449,7 +462,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
 def test_runtime_modules_are_installed_by_update_scripts():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
-    for module in ('app_runtime_mode.py', 'router_health_runtime.py', 'web_commands_runtime.py'):
+    script_modules = set(re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', script).group(1).split())
+    bootstrap_modules = set(re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', bootstrap).group(1).split())
+    assert script_modules == bootstrap_modules
+    for module in script_modules:
+        assert (ROOT / module).exists()
+    for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'web_commands_runtime.py'):
         assert module in script
         assert f'$RAW_BASE/{module}' in bootstrap
         assert f'$BOT_DIR/{module}' in bootstrap
@@ -606,6 +624,139 @@ def test_telegram_key_ui_helpers():
     assert telegram_key_ui.key_install_protocol(13, trojan_level=13) == 'trojan'
     assert telegram_key_ui.key_install_protocol(12, trojan_level=13) == 'vless2'
     assert 'http://192.168.1.1:8080/' in telegram_key_ui.browser_hint('192.168.1.1', 8080)
+
+
+def test_telegram_bot_menu_button_smoke():
+    old_worker = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER')
+    old_config = sys.modules.get('bot_config')
+    old_bot_module = sys.modules.pop('bot', None)
+    os.environ['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    sys.modules['bot_config'] = py_types.SimpleNamespace(
+        token='123456:test-token',
+        usernames=['AllowedUser'],
+        routerip='192.168.1.1',
+        browser_port='8080',
+        localportsh='1082',
+        localporttrojan='10829',
+        localportvmess='10810',
+        localportvless='10811',
+        dnsovertlsport='40500',
+        dnsoverhttpsport='40508',
+        default_proxy_mode='none',
+        app_runtime_mode='advanced',
+        fork_repo_owner='andruwko73',
+        fork_repo_name='bypass_keenetic',
+        fork_button_label='Fork by andruwko73',
+        web_auth_token='',
+        web_auth_disabled=True,
+    )
+
+    class _RecorderBot:
+        def __init__(self):
+            self.messages = []
+            self.callbacks = []
+
+        def send_message(self, chat_id, text, **kwargs):
+            self.messages.append({'chat_id': chat_id, 'text': text, 'kwargs': kwargs})
+            return py_types.SimpleNamespace(message_id=len(self.messages))
+
+        def answer_callback_query(self, call_id, text='', **kwargs):
+            self.callbacks.append({'id': call_id, 'text': text, 'kwargs': kwargs})
+
+        def edit_message_reply_markup(self, *args, **kwargs):
+            return None
+
+    def message(text, username='AllowedUser', chat_id=7001):
+        return py_types.SimpleNamespace(
+            text=text,
+            chat=py_types.SimpleNamespace(id=chat_id, type='private'),
+            from_user=py_types.SimpleNamespace(id=777000, username=username),
+        )
+
+    try:
+        bot_module = importlib.import_module('bot')
+        bot_module.types = _FakeTypes
+        recorder = _RecorderBot()
+        bot_module.bot = recorder
+        bot_module._send_telegram_readme_info = (
+            lambda msg, reply_markup: recorder.send_message(msg.chat.id, 'INFO', reply_markup=reply_markup)
+        )
+        bot_module._send_key_status_report = (
+            lambda msg, service_markup: recorder.send_message(msg.chat.id, 'STATUS', reply_markup=service_markup)
+        )
+        bot_module._send_remote_markdown_file = (
+            lambda msg, path, error_message, reply_markup=None: (
+                recorder.send_message(msg.chat.id, f'MARKDOWN:{path}', reply_markup=reply_markup) or True
+            )
+        )
+        bot_module._format_pool_summary = lambda: 'POOL SUMMARY'
+        bot_module._telegram_unblock_list_options = lambda: [
+            ('Shadowsocks', 'shadowsocks'),
+            ('Vmess', 'vmess'),
+            ('Vless 1', 'vless'),
+            ('Vless 2', 'vless-2'),
+            ('Trojan', 'trojan'),
+        ]
+
+        assert bot_module.AUTHORIZED_USERNAMES == {'alloweduser'}
+        assert bot_module.AUTHORIZED_USER_IDS == set()
+        assert bot_module._build_main_menu_markup().rows == [
+            ['🔰 Установка и удаление'],
+            ['🔑 Ключи', '📝 Списки обхода'],
+            ['📄 Информация', '⚙️ Сервис'],
+        ]
+        assert ['♻️ Перезагрузить сервисы', '‼️Перезагрузить роутер'] in bot_module._build_service_menu_markup().rows
+        assert ['Shadowsocks', 'Vmess'] in bot_module._build_keys_menu_markup().rows
+        assert ['✅ Подтвердить', 'Отмена'] in bot_module._build_telegram_confirm_markup().rows
+
+        bot_module.start(message('/start'))
+        assert recorder.messages[-1]['text'] == '✅ Добро пожаловать в меню!'
+        bot_module.start(message('/start', username='WrongUser'))
+        assert 'не являетесь' in recorder.messages[-1]['text']
+
+        for text, expected in (
+            ('🔰 Установка и удаление', '🔰 Установка и удаление'),
+            ('🔑 Ключи', '🔑 Ключи'),
+            ('📝 Списки обхода', '📝 Списки обхода'),
+            ('📄 Информация', 'INFO'),
+            ('⚙️ Сервис', '⚙️ Сервисное меню!'),
+            ('‼️DNS Override', '‼️DNS Override!'),
+            ('📊 Статус ключей', 'STATUS'),
+            ('📦 Пул ключей', 'POOL SUMMARY'),
+        ):
+            bot_module._set_chat_menu_state(7001, level=0, bypass=None)
+            bot_module.bot_message(message(text))
+            assert recorder.messages[-1]['text'] == expected
+
+        for text in ('♻️ Перезагрузить сервисы', '‼️Перезагрузить роутер', '✅ DNS Override ВКЛ', '❌ DNS Override ВЫКЛ'):
+            bot_module._set_chat_menu_state(7001, level=0, bypass=None)
+            bot_module.bot_message(message(text))
+            assert '?' in recorder.messages[-1]['text']
+            assert recorder.messages[-1]['kwargs']['reply_markup'].rows == [['✅ Подтвердить', 'Отмена'], ['🔙 Назад']]
+
+        for text in ('Shadowsocks', 'Vmess', 'Vless 1', 'Vless 2', 'Trojan'):
+            bot_module._set_chat_menu_state(7001, level=8, bypass=None)
+            bot_module.bot_message(message(text))
+            assert recorder.messages[-1]['text'] == telegram_key_ui.KEY_COPY_PROMPT
+
+        bot_module._set_chat_menu_state(7001, level=8, bypass=None)
+        bot_module.bot_message(message(telegram_key_ui.KEY_BROWSER_TEXT))
+        assert 'http://192.168.1.1:8080/' in recorder.messages[-1]['text']
+        bot_module._set_chat_menu_state(7001, level=8, bypass=None)
+        bot_module.bot_message(message(telegram_key_ui.KEY_HELP_TEXT))
+        assert recorder.messages[-1]['text'] == 'MARKDOWN:keys.md'
+    finally:
+        sys.modules.pop('bot', None)
+        if old_bot_module is not None:
+            sys.modules['bot'] = old_bot_module
+        if old_config is None:
+            sys.modules.pop('bot_config', None)
+        else:
+            sys.modules['bot_config'] = old_config
+        if old_worker is None:
+            os.environ.pop('BYPASS_KEENETIC_COMMAND_WORKER', None)
+        else:
+            os.environ['BYPASS_KEENETIC_COMMAND_WORKER'] = old_worker
 
 
 def test_telegram_info_runtime_helpers():
@@ -1049,10 +1200,19 @@ def test_web_http_common_helpers():
 
 
 def test_installer_common_helpers():
+    class _Handler:
+        def __init__(self, content_length, body=b''):
+            self.headers = {'Content-Length': content_length}
+            self.rfile = BytesIO(body)
+
     form = {'web_auth_user': ' ', 'web_auth_token': ' secret '}
     installer_common.normalize_web_auth_form(form)
     assert form['web_auth_user'] == 'admin'
     assert form['web_auth_token'] == 'secret'
+    user, note = installer_common.web_auth_summary(form)
+    assert user == 'admin'
+    assert 'secret' not in note
+    assert 'задан' in note
     assert installer_common.validate_installer_form(
         {'token': 'x', 'username': 'u', 'browser_port': '8080'},
         ['token', 'username'],
@@ -1071,17 +1231,25 @@ def test_installer_common_helpers():
     assert '&lt;ok&gt;' in notice
     assert '2;url=' in redirect_head
     assert 'window.location.replace' in redirect_script
+    assert installer_common.parse_urlencoded_request(_Handler('-1', b'token=x')) == {}
+    assert installer_common.parse_urlencoded_request(_Handler('7', b'a=1&b=')) == {'a': '1', 'b': ''}
+    try:
+        installer_common.parse_urlencoded_request(_Handler('20', b'a=1'), max_bytes=5)
+        assert False, 'oversized POST body should be rejected'
+    except ValueError as exc:
+        assert 'too large' in str(exc)
 
 
 def test_installer_page_is_bot_setup_only():
     original_detect_router_ip = installer.detect_router_ip
     try:
         installer.detect_router_ip = lambda: '192.168.1.1'
-        page = installer.page_html()
+        page = installer.page_html(csrf_token='csrf-token-for-test-123456789012345')
     finally:
         installer.detect_router_ip = original_detect_router_ip
     assert 'BotFather token' in page
     assert 'Telegram username' in page
+    assert 'name="csrf_token"' in page
     assert 'Пул ключей' not in page
     assert 'proto-select' not in page
     assert '/api/keys' not in page
@@ -1737,6 +1905,7 @@ def main():
     test_telegram_jobs_helpers()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
+    test_telegram_bot_menu_button_smoke()
     test_telegram_info_runtime_helpers()
     test_auto_failover_runtime_helpers()
     test_proxy_apply_runtime_helpers()

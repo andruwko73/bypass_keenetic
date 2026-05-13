@@ -47,6 +47,13 @@ cleanup_removed_connection_artifacts() {
   rm -rf /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh 2>/dev/null || true
 }
 
+remove_path() {
+  target="$1"
+  [ -e "$target" ] || [ -L "$target" ] || return 0
+  chmod -R u+rwx "$target" 2>/dev/null || true
+  rm -rf "$target"
+}
+
 cleanup_pool_probe_runtime() {
   for pid in $(pgrep -f "/tmp/bypass_pool_probe_" 2>/dev/null); do
     kill "$pid" >/dev/null 2>&1 || true
@@ -486,7 +493,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py router_health_runtime.py service_catalog.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py router_health_runtime.py service_catalog.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py"
 
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
@@ -499,29 +506,29 @@ if [ "$1" = "-remove" ]; then
     ipset flush unblockvless
     ipset flush unblockvless2
     ipset flush unblocktroj
-    chmod 777 /opt/root/get-pip.py || rm -Rfv /opt/root/get-pip.py
-    chmod 777 /opt/etc/crontab || rm -Rfv /opt/etc/crontab
-    chmod 777 /opt/etc/init.d/S22shadowsocks || rm -Rfv /opt/etc/init.d/S22shadowsocks
-    chmod 777 /opt/etc/init.d/S22trojan || rm -Rfv /opt/etc/init.d/S22trojan
-    chmod 777 /opt/etc/init.d/S24xray || rm -Rfv /opt/etc/init.d/S24xray
-    chmod 777 /opt/etc/init.d/S24v2ray || rm -Rfv /opt/etc/init.d/S24v2ray
-    chmod 777 /opt/etc/init.d/S35tor || rm -Rfv /opt/etc/init.d/S35tor
-    chmod 777 /opt/etc/init.d/S56dnsmasq || rm -Rfv /opt/etc/init.d/S56dnsmasq
-    chmod 777 /opt/etc/init.d/S99unblock || rm -Rfv /opt/etc/init.d/S99unblock
-    chmod 777 /opt/etc/ndm/netfilter.d/100-redirect.sh || rm -rfv /opt/etc/ndm/netfilter.d/100-redirect.sh
-    chmod 777 /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh || rm -rfv /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
-    chmod 777 /opt/etc/ndm/fs.d/100-ipset.sh || rm -rfv /opt/etc/ndm/fs.d/100-ipset.sh
-    chmod 777 /opt/bin/unblock_dnsmasq.sh || rm -rfv /opt/bin/unblock_dnsmasq.sh
-    chmod 777 /opt/bin/unblock_update.sh || rm -rfv /opt/bin/unblock_update.sh
-    chmod 777 /opt/bin/unblock_ipset.sh || rm -rfv /opt/bin/unblock_ipset.sh
-    chmod 777 /opt/etc/unblock.dnsmasq || rm -rfv /opt/etc/unblock.dnsmasq
-    chmod 777 /opt/etc/dnsmasq.conf || rm -rfv /opt/etc/dnsmasq.conf
-    chmod 777 /opt/tmp/tor || rm -Rfv /opt/tmp/tor
+    remove_path /opt/root/get-pip.py
+    remove_path /opt/etc/crontab
+    remove_path /opt/etc/init.d/S22shadowsocks
+    remove_path /opt/etc/init.d/S22trojan
+    remove_path /opt/etc/init.d/S24xray
+    remove_path /opt/etc/init.d/S24v2ray
+    remove_path /opt/etc/init.d/S35tor
+    remove_path /opt/etc/init.d/S56dnsmasq
+    remove_path /opt/etc/init.d/S99unblock
+    remove_path /opt/etc/ndm/netfilter.d/100-redirect.sh
+    remove_path /opt/etc/ndm/ifstatechanged.d/100-unblock-vpn.sh
+    remove_path /opt/etc/ndm/fs.d/100-ipset.sh
+    remove_path /opt/bin/unblock_dnsmasq.sh
+    remove_path /opt/bin/unblock_update.sh
+    remove_path /opt/bin/unblock_ipset.sh
+    remove_path /opt/etc/unblock.dnsmasq
+    remove_path /opt/etc/dnsmasq.conf
+    remove_path /opt/tmp/tor
     # chmod 777 /opt/etc/unblock || rm -Rfv /opt/etc/unblock
-    chmod 777 /opt/etc/tor || rm -Rfv /opt/etc/tor
-    chmod 777 /opt/etc/xray || rm -Rfv /opt/etc/xray
-    chmod 777 /opt/etc/v2ray || rm -Rfv /opt/etc/v2ray
-    chmod 777 /opt/etc/trojan || rm -Rfv /opt/etc/trojan
+    remove_path /opt/etc/tor
+    remove_path /opt/etc/xray
+    remove_path /opt/etc/v2ray
+    remove_path /opt/etc/trojan
     echo "Созданные папки, файлы и настройки удалены"
     echo "Если вы хотите полностью отключить DNS Override, перейдите в меню Сервис -> DNS Override -> DNS Override ВЫКЛ. После чего включится встроенный (штатный) DNS и роутер перезагрузится."
     #echo "Отключаем opkg dns-override"
@@ -580,7 +587,8 @@ if [ "$1" = "-install" ]; then
     curl -o /opt/etc/shadowsocks.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/shadowsocks.json
     echo "Установлены настройки Shadowsocks"
     sed -i "s/ss-local/${ssredir}/g" /opt/etc/init.d/S22shadowsocks
-    chmod 0755 /opt/etc/shadowsocks.json || chmod 755 /opt/etc/init.d/S22shadowsocks || chmod +x /opt/etc/init.d/S22shadowsocks
+    chmod 0644 /opt/etc/shadowsocks.json
+    chmod 755 /opt/etc/init.d/S22shadowsocks || chmod +x /opt/etc/init.d/S22shadowsocks
     echo "Установлен параметр ss-redir для Shadowsocks"
 
     # chmod 777 /opt/etc/trojan/config.json || rm -Rfv /opt/etc/trojan/config.json
@@ -589,12 +597,12 @@ if [ "$1" = "-install" ]; then
 
     # unblock folder and files
     mkdir -p /opt/etc/unblock
-    touch /opt/etc/hosts || chmod 0755 /opt/etc/hosts
-    touch /opt/etc/unblock/shadowsocks.txt || chmod 0755 /opt/etc/unblock/shadowsocks.txt
-    touch /opt/etc/unblock/trojan.txt || chmod 0755 /opt/etc/unblock/trojan.txt
-    touch /opt/etc/unblock/vmess.txt || chmod 0755 /opt/etc/unblock/vmess.txt
-    touch /opt/etc/unblock/vless.txt || chmod 0755 /opt/etc/unblock/vless.txt
-    touch /opt/etc/unblock/vless-2.txt || chmod 0755 /opt/etc/unblock/vless-2.txt
+    touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts
+    touch /opt/etc/unblock/shadowsocks.txt && chmod 0644 /opt/etc/unblock/shadowsocks.txt
+    touch /opt/etc/unblock/trojan.txt && chmod 0644 /opt/etc/unblock/trojan.txt
+    touch /opt/etc/unblock/vmess.txt && chmod 0644 /opt/etc/unblock/vmess.txt
+    touch /opt/etc/unblock/vless.txt && chmod 0644 /opt/etc/unblock/vless.txt
+    touch /opt/etc/unblock/vless-2.txt && chmod 0644 /opt/etc/unblock/vless-2.txt
     echo "Созданы файлы под сайты и ip-адреса для обхода блокировок для SS, Trojan, Vmess и Vless"
 
     # unblock_ipset.sh
@@ -641,7 +649,7 @@ if [ "$1" = "-install" ]; then
 
     # dnsmasq.conf
     #rm -rf /opt/etc/dnsmasq.conf
-    chmod 777 /opt/etc/dnsmasq.conf || rm -rfv /opt/etc/dnsmasq.conf
+    rm -f /opt/etc/dnsmasq.conf
     curl -o /opt/etc/dnsmasq.conf https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf
     chmod 755 /opt/etc/dnsmasq.conf
     sed -i "s/192.168.1.1/${lanip}/g" /opt/etc/dnsmasq.conf
@@ -651,7 +659,7 @@ if [ "$1" = "-install" ]; then
 
     # cron file
     #rm -rf /opt/etc/crontab
-    chmod 777 /opt/etc/crontab || rm -Rfv /opt/etc/crontab
+    rm -f /opt/etc/crontab
     curl -o /opt/etc/crontab https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab
     chmod 755 /opt/etc/crontab
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
@@ -783,7 +791,7 @@ if [ "$1" = "-update" ]; then
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
 
-    touch /opt/etc/hosts || chmod 0755 /opt/etc/hosts
+    touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts
     mv "$stage_dir/100-ipset.sh" /opt/etc/ndm/fs.d/100-ipset.sh
     chmod 755 /opt/etc/ndm/fs.d/100-ipset.sh || chmod +x /opt/etc/ndm/fs.d/100-ipset.sh
     mv "$stage_dir/100-redirect.sh" /opt/etc/ndm/netfilter.d/100-redirect.sh

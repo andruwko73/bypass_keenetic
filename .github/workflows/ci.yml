@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python smoke dependencies
+        run: python -m pip install --upgrade pyTelegramBotAPI requests pysocks
+
+      - name: Python compile
+        run: python -m compileall -q .
+
+      - name: Python smoke
+        run: python tests/smoke_modules.py
+
+      - name: Shell syntax
+        run: |
+          bash -n \
+            script.sh \
+            bootstrap/install.sh \
+            update_fork.sh \
+            unblock_update.sh \
+            unblock_ipset.sh \
+            100-ipset.sh \
+            100-redirect.sh \
+            S99telegram_bot \
+            S98telegram_bot_installer \
+            S99unblock
+
+      - name: JavaScript syntax
+        run: node --check tests/ui_smoke.js
