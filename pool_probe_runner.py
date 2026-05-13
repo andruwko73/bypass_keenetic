@@ -413,12 +413,19 @@ def run_pool_probe_worker(
                     port = str(int(test_port) + offset)
                     if not wait_for_socks5(port, timeout=6):
                         log(f'Тестовый SOCKS-порт {port} не поднялся для {proto_label(proto)}.')
+                        record_key_probe(
+                            proto,
+                            key_value,
+                            tg_ok=False,
+                            yt_ok=False,
+                            custom=failed_custom_results(checks),
+                        )
                         mark_checked(proto, key_value)
                         continue
                     ready_batch.append((offset, proto, key_value))
 
                 if not ready_batch:
-                    raise RuntimeError('Тестовые SOCKS-порты не поднялись.')
+                    continue
 
                 max_workers = min(concurrency, len(ready_batch))
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
@@ -460,7 +467,14 @@ def run_pool_probe_worker(
                         future.cancel()
                         log(
                             f'Проверка ключа из пула {proto_label(proto)} превысила лимит '
-                            f'{batch_timeout:g} сек.; прежний статус оставлен без изменений.'
+                            f'{batch_timeout:g} сек.; ключ отмечен как не прошедший проверку.'
+                        )
+                        record_key_probe(
+                            proto,
+                            key_value,
+                            tg_ok=False,
+                            yt_ok=False,
+                            custom=failed_custom_results(checks),
                         )
                         mark_checked(proto, key_value)
                         invalidate_caches()
@@ -473,6 +487,13 @@ def run_pool_probe_worker(
             except Exception as exc:
                 log(f'Ошибка проверки пачки ключей из пула: {exc}')
                 for proto, key_value in valid_batch:
+                    record_key_probe(
+                        proto,
+                        key_value,
+                        tg_ok=False,
+                        yt_ok=False,
+                        custom=failed_custom_results(checks),
+                    )
                     mark_checked(proto, key_value)
             finally:
                 stop_xray(process, config_path)

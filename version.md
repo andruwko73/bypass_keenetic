@@ -1,3 +1,6 @@
+*v1.580 (13 May 2026) -* main
+*Made full key-pool checks finish the whole queue on low-memory routers by lowering the default memory guard, auto-resuming paused checks, and updating checked timestamps even for timeout/SOCKS startup failures.*
+
 *v1.579 (12 May 2026) -* main
 *Reduced Web only startup overhead by skipping Telegram imports, limited Python thread stack reservations, and stopped runtime bytecode/log growth on the router flash.*
 

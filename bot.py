@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.579, последнее изменение: 12.05.2026
+#  Файл: bot.py, Версия v1.580, последнее изменение: 13.05.2026
 
 import subprocess
 import os
@@ -543,7 +543,7 @@ WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
 POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 0.8))
-POOL_PROBE_MIN_AVAILABLE_KB = int(getattr(config, 'pool_probe_min_available_kb', 190000))
+POOL_PROBE_MIN_AVAILABLE_KB = int(getattr(config, 'pool_probe_min_available_kb', 160000))
 POOL_PROBE_LOW_MEMORY_DELAY_SECONDS = float(getattr(config, 'pool_probe_low_memory_delay_seconds', 12.0))
 POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS = float(getattr(config, 'pool_probe_low_memory_max_wait_seconds', 180.0))
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
@@ -581,7 +581,7 @@ POOL_PROBE_TIMEOUTS = (
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
-APP_VERSION_COUNTER = '1.579'
+APP_VERSION_COUNTER = '1.580'
 APP_VERSION_LABEL = APP_VERSION_COUNTER
 APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
@@ -664,6 +664,7 @@ pool_probe_cancel_event = threading.Event()
 pool_probe_resume_lock = threading.Lock()
 pool_probe_resume_payload = None
 pool_probe_resume_after_cancel = True
+pool_probe_low_memory_resume_scheduled = False
 pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
 WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
@@ -3444,6 +3445,8 @@ def _store_cancelled_pool_probe(probe_tasks, checks, scope):
             'checks': list(checks or []),
             'scope': scope or 'manual',
         }
+    if not pool_probe_cancel_event.is_set():
+        _schedule_low_memory_pool_probe_resume()
 
 
 def _take_cancelled_pool_probe():
@@ -3452,6 +3455,59 @@ def _take_cancelled_pool_probe():
         payload = pool_probe_resume_payload
         pool_probe_resume_payload = None
     return payload if payload and payload.get('tasks') else None
+
+
+def _has_pool_probe_resume_payload():
+    with pool_probe_resume_lock:
+        return bool(pool_probe_resume_payload and pool_probe_resume_payload.get('tasks'))
+
+
+def _restore_pool_probe_resume_payload(payload):
+    global pool_probe_resume_payload
+    if not payload or not payload.get('tasks'):
+        return
+    with pool_probe_resume_lock:
+        if not pool_probe_resume_payload:
+            pool_probe_resume_payload = payload
+
+
+def _schedule_low_memory_pool_probe_resume():
+    global pool_probe_low_memory_resume_scheduled
+    with pool_probe_resume_lock:
+        if pool_probe_low_memory_resume_scheduled:
+            return
+        pool_probe_low_memory_resume_scheduled = True
+
+    def worker():
+        global pool_probe_low_memory_resume_scheduled
+        try:
+            while not shutdown_requested.is_set():
+                if not _has_pool_probe_resume_payload():
+                    return
+                if pool_probe_lock.locked():
+                    shutdown_requested.wait(1)
+                    continue
+                available_kb = _available_memory_kb()
+                if available_kb is None or available_kb >= POOL_PROBE_MIN_AVAILABLE_KB:
+                    started, queued = _resume_cancelled_pool_probe('ожидания свободной памяти')
+                    if started:
+                        return
+                if available_kb is None:
+                    note = 'Проверка пула приостановлена до освобождения памяти.'
+                else:
+                    note = (
+                        f'Проверка пула приостановлена до освобождения памяти: доступно {available_kb} KB, '
+                        f'порог {POOL_PROBE_MIN_AVAILABLE_KB} KB.'
+                    )
+                _set_pool_probe_progress(note=note)
+                shutdown_requested.wait(max(3.0, POOL_PROBE_LOW_MEMORY_DELAY_SECONDS))
+        finally:
+            with pool_probe_resume_lock:
+                pool_probe_low_memory_resume_scheduled = False
+            if _has_pool_probe_resume_payload() and not shutdown_requested.is_set():
+                _schedule_low_memory_pool_probe_resume()
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _start_selected_pool_probe_tasks(selected, custom_checks, scope):
@@ -3476,7 +3532,7 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope):
     )
 
 
-def _resume_cancelled_pool_probe():
+def _resume_cancelled_pool_probe(reason='применения ключа'):
     payload = _take_cancelled_pool_probe()
     if not payload:
         if pool_probe_cancel_event.is_set():
@@ -3501,8 +3557,10 @@ def _resume_cancelled_pool_probe():
         payload.get('checks') or [],
         payload.get('scope') or 'manual',
     )
+    if not started:
+        _restore_pool_probe_resume_payload(payload)
     if started:
-        _write_runtime_log(f'Проверка пула продолжена после применения ключа. Осталось в очереди: {queued}.')
+        _write_runtime_log(f'Проверка пула продолжена после {reason}. Осталось в очереди: {queued}.')
     return started, queued
 
 

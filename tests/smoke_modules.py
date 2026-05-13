@@ -441,6 +441,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'cleanup_python_bytecode' in service
     assert 'trim_runtime_logs' in service
     assert 'threading.stack_size(256 * 1024)' in source
+    assert "pool_probe_min_available_kb', 160000" in source
     assert 'not app_runtime_mode.app_mode_telegram_enabled(_runtime_mode_at_import())' in source
     assert 'class _NoopTeleBot' in source
 
@@ -936,6 +937,38 @@ def test_pool_probe_runner_failover_candidate():
     assert cleaned == [True]
     assert paused_remaining == [('vless', 'low-memory')]
     assert '190000' in memory_logs[-1]
+
+    failure_records = []
+    checked_values = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'sockless')],
+        [{'id': 'custom'}],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=checked_values.append,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {'custom': False},
+        record_key_probe=lambda proto, key, **kwargs: failure_records.append((proto, key, kwargs)),
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: False,
+        check_pool_key=lambda proto, key, checks, proxy_url: (_ for _ in ()).throw(AssertionError('not ready')),
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+    )
+    assert (checked, total) == (1, 1)
+    assert checked_values == [1]
+    assert failure_records == [
+        ('vless', 'sockless', {'tg_ok': False, 'yt_ok': False, 'custom': {'custom': False}}),
+    ]
 
 
 def test_proxy_status_runtime_helpers():
