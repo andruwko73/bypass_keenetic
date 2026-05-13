@@ -1,3 +1,6 @@
+*v1.582 (13 May 2026) -* main
+*Fixed CI history checkout for version smoke tests and added Telegram menu/button smoke coverage before GitHub update verification.*
+
 *v1.581 (13 May 2026) -* main
 *Hardened installer CSRF and password handling, fixed uninstall cleanup, synced bootstrap versioning, ignored runtime status dumps, and added CI smoke checks.*
 
