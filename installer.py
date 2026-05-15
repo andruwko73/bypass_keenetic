@@ -62,6 +62,12 @@ fork_repo_name = '{escape_python(fork_repo_name)}'
 fork_button_label = '{escape_python(fork_button_label)}'
 app_runtime_mode = '{escape_python(app_runtime_mode)}'
 pool_probe_min_available_kb = 190000
+memory_watchdog_enabled = True
+memory_watchdog_rss_soft_kb = 87040
+memory_watchdog_rss_limit_kb = 112640
+memory_watchdog_check_interval = 60.0
+memory_watchdog_min_uptime_seconds = 300.0
+memory_watchdog_restart_cooldown_seconds = 1800.0
 
 localportsh = '1082'
 localportvmess = '10810'

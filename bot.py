@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.582, последнее изменение: 13.05.2026
+#  Файл: bot.py, Версия v1.583, последнее изменение: 15.05.2026
 
 import subprocess
 import os
@@ -17,6 +17,7 @@ import signal
 import ipaddress
 import socket
 import tempfile
+import gc
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
@@ -157,15 +158,6 @@ from service_catalog import (
     CUSTOM_CHECK_PRESETS,
     SERVICE_LIST_SOURCES,
 )
-from pool_probe_runner import (
-    build_pool_probe_core_config_batch as _runner_build_pool_probe_core_config_batch,
-    cleanup_pool_probe_runtime as _runner_cleanup_pool_probe_runtime,
-    find_pool_failover_candidate as _runner_find_pool_failover_candidate,
-    pool_probe_outbound as _runner_pool_probe_outbound,
-    run_pool_probe_worker,
-    start_pool_probe_xray as _runner_start_pool_probe_xray,
-    stop_pool_probe_xray as _runner_stop_pool_probe_xray,
-)
 from web_command_state import (
     command_state_snapshot as _command_state_snapshot,
     consume_command_state_for_render as _consume_command_state_for_render_impl,
@@ -188,18 +180,10 @@ import web_get_actions
 import web_post_actions
 import web_status_runtime
 import web_commands_runtime
-from web_form_template import render_web_form, render_web_script_asset, render_web_style_asset
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
     empty_protocol_status as _status_empty_protocol_status,
-)
-from repo_update import (
-    direct_fetch_env as _repo_direct_fetch_env,
-    download_repo_script as _repo_download_script,
-    fetch_remote_text as _fetch_remote_text,
-    run_script_and_collect as _repo_run_script_and_collect,
-    write_script as _repo_write_script,
 )
 
 import shutil
@@ -210,6 +194,97 @@ import html
 import bot_config as config
 
 COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
+
+_pool_probe_runner_module = None
+_repo_update_module = None
+_web_form_template_module = None
+
+
+def _pool_probe_runner():
+    global _pool_probe_runner_module
+    if _pool_probe_runner_module is None:
+        import pool_probe_runner as module
+
+        _pool_probe_runner_module = module
+    return _pool_probe_runner_module
+
+
+def _runner_build_pool_probe_core_config_batch(*args, **kwargs):
+    return _pool_probe_runner().build_pool_probe_core_config_batch(*args, **kwargs)
+
+
+def _runner_cleanup_pool_probe_runtime(*args, **kwargs):
+    return _pool_probe_runner().cleanup_pool_probe_runtime(*args, **kwargs)
+
+
+def _runner_find_pool_failover_candidate(*args, **kwargs):
+    return _pool_probe_runner().find_pool_failover_candidate(*args, **kwargs)
+
+
+def _runner_pool_probe_outbound(*args, **kwargs):
+    return _pool_probe_runner().pool_probe_outbound(*args, **kwargs)
+
+
+def run_pool_probe_worker(*args, **kwargs):
+    return _pool_probe_runner().run_pool_probe_worker(*args, **kwargs)
+
+
+def _runner_start_pool_probe_xray(*args, **kwargs):
+    return _pool_probe_runner().start_pool_probe_xray(*args, **kwargs)
+
+
+def _runner_stop_pool_probe_xray(*args, **kwargs):
+    return _pool_probe_runner().stop_pool_probe_xray(*args, **kwargs)
+
+
+def _repo_update():
+    global _repo_update_module
+    if _repo_update_module is None:
+        import repo_update as module
+
+        _repo_update_module = module
+    return _repo_update_module
+
+
+def _repo_direct_fetch_env(*args, **kwargs):
+    return _repo_update().direct_fetch_env(*args, **kwargs)
+
+
+def _repo_download_script(*args, **kwargs):
+    return _repo_update().download_repo_script(*args, **kwargs)
+
+
+def _fetch_remote_text(*args, **kwargs):
+    return _repo_update().fetch_remote_text(*args, **kwargs)
+
+
+def _repo_run_script_and_collect(*args, **kwargs):
+    return _repo_update().run_script_and_collect(*args, **kwargs)
+
+
+def _repo_write_script(*args, **kwargs):
+    return _repo_update().write_script(*args, **kwargs)
+
+
+def _web_form_template():
+    global _web_form_template_module
+    if _web_form_template_module is None:
+        import web_form_template as module
+
+        _web_form_template_module = module
+    return _web_form_template_module
+
+
+def render_web_form(*args, **kwargs):
+    return _web_form_template().render_web_form(*args, **kwargs)
+
+
+def render_web_script_asset(*args, **kwargs):
+    return _web_form_template().render_web_script_asset(*args, **kwargs)
+
+
+def render_web_style_asset(*args, **kwargs):
+    return _web_form_template().render_web_style_asset(*args, **kwargs)
 
 
 def _runtime_mode_at_import():
@@ -581,6 +656,15 @@ POOL_PROBE_TIMEOUTS = (
     POOL_PROBE_SINGLE_TIMEOUT_SECONDS, POOL_PROBE_BATCH_TIMEOUT_SECONDS,
 )
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
+MEMORY_WATCHDOG_ENABLED = bool(getattr(config, 'memory_watchdog_enabled', True))
+MEMORY_WATCHDOG_RSS_LIMIT_KB = max(0, int(getattr(config, 'memory_watchdog_rss_limit_kb', 110 * 1024)))
+MEMORY_WATCHDOG_RSS_SOFT_KB = max(0, int(getattr(config, 'memory_watchdog_rss_soft_kb', 85 * 1024)))
+MEMORY_WATCHDOG_CHECK_INTERVAL = max(15.0, float(getattr(config, 'memory_watchdog_check_interval', 60.0)))
+MEMORY_WATCHDOG_MIN_UPTIME_SECONDS = max(30.0, float(getattr(config, 'memory_watchdog_min_uptime_seconds', 300.0)))
+MEMORY_WATCHDOG_RESTART_COOLDOWN_SECONDS = max(
+    300.0,
+    float(getattr(config, 'memory_watchdog_restart_cooldown_seconds', 1800.0)),
+)
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
 APP_MODE_LABEL = 'Режим бота'
@@ -597,6 +681,7 @@ BOT_SOURCE_PATH = os.path.abspath(__file__)
 BOT_DIR = os.path.dirname(BOT_SOURCE_PATH)
 STATIC_DIR = os.path.join(BOT_DIR, 'static')
 README_PATH = os.path.join(BOT_DIR, 'README.md')
+BOT_SERVICE_SCRIPT = '/opt/etc/init.d/S99telegram_bot'
 XRAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24xray'
 V2RAY_SERVICE_SCRIPT = '/opt/etc/init.d/S24v2ray'
 XRAY_CONFIG_DIR = '/opt/etc/xray'
@@ -667,6 +752,9 @@ pool_probe_resume_after_cancel = True
 pool_probe_low_memory_resume_scheduled = False
 pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
+memory_watchdog_lock = threading.Lock()
+memory_watchdog_restart_scheduled = False
+memory_watchdog_last_restart_at = 0.0
 WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
 web_command_lock = threading.Lock()
 web_command_state = {
@@ -740,7 +828,7 @@ def _app_mode_telegram_enabled(mode=None):
 def _schedule_app_service_restart():
     def worker():
         time.sleep(1.5)
-        os.system('/opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 &')
+        os.system(f'{BOT_SERVICE_SCRIPT} restart >/dev/null 2>&1 &')
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -838,6 +926,14 @@ def _write_runtime_log(message, mode='a'):
             continue
 
 
+def _redact_sensitive_text(text):
+    safe_text = '' if text is None else str(text)
+    token_value = str(token or '')
+    if token_value:
+        safe_text = safe_text.replace(token_value, '<redacted-token>')
+    return re.sub(r'bot[0-9]+:[A-Za-z0-9_-]+', 'bot<redacted-token>', safe_text)
+
+
 def _authorize_message(message, handler_name):
     return _telegram_authorize_message(
         message,
@@ -883,6 +979,166 @@ def _remove_file(path):
     try:
         if os.path.exists(path):
             os.remove(path)
+    except Exception:
+        pass
+
+
+def _process_rss_kb(pid='self'):
+    try:
+        with open(f'/proc/{pid}/status', 'r', encoding='utf-8', errors='ignore') as file:
+            for line in file:
+                if line.startswith('VmRSS:'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1])
+    except Exception:
+        return 0
+    return 0
+
+
+def _clear_runtime_memory_caches(clear_status=False):
+    if not clear_status:
+        return
+    status_snapshot_cache.update({'timestamp': 0, 'data': None, 'signature': None})
+    with web_status_api_cache_lock:
+        web_status_api_cache.update({'timestamp': 0, 'payload': None})
+    with active_mode_status_cache_lock:
+        active_mode_status_cache.update({'timestamp': 0, 'signature': None, 'status': None})
+    try:
+        router_health.invalidate()
+    except Exception:
+        pass
+
+
+def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
+    _clear_runtime_memory_caches(clear_status=clear_status)
+    rss_before = _process_rss_kb()
+    should_collect = bool(force or clear_status)
+    if not should_collect and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB:
+        should_collect = True
+    collected = gc.collect() if should_collect else 0
+    rss_after = _process_rss_kb()
+    if log and reason and should_collect and (force or rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB):
+        _write_runtime_log(
+            f'Memory cleanup ({reason}): rss {rss_before} -> {rss_after} KB, gc={collected}'
+        )
+    return {
+        'rss_before_kb': rss_before,
+        'rss_after_kb': rss_after,
+        'collected': collected,
+    }
+
+
+def _memory_sensitive_operation_running():
+    try:
+        if pool_probe_lock.locked() or pool_apply_lock.locked():
+            return True
+    except Exception:
+        pass
+    try:
+        if status_refresh_in_progress:
+            return True
+    except Exception:
+        pass
+    try:
+        if _shared_command_job_running():
+            return True
+    except Exception:
+        pass
+    try:
+        if _read_web_command_state_file().get('running') and _shared_command_job_running(source='web'):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _memory_restart_is_safe():
+    uptime = time.time() - process_started_at
+    if uptime < MEMORY_WATCHDOG_MIN_UPTIME_SECONDS:
+        return False
+    return not _memory_sensitive_operation_running()
+
+
+def _schedule_memory_watchdog_restart(rss_kb):
+    global memory_watchdog_restart_scheduled, memory_watchdog_last_restart_at
+    now = time.time()
+    with memory_watchdog_lock:
+        if memory_watchdog_restart_scheduled:
+            return False
+        if memory_watchdog_last_restart_at and now - memory_watchdog_last_restart_at < MEMORY_WATCHDOG_RESTART_COOLDOWN_SECONDS:
+            return False
+        memory_watchdog_restart_scheduled = True
+        memory_watchdog_last_restart_at = now
+    _write_runtime_log(f'Memory watchdog: RSS {rss_kb} KB exceeds limit, restarting bot service')
+    try:
+        subprocess.Popen(
+            ['/bin/sh', '-c', f'sleep 2; {BOT_SERVICE_SCRIPT} restart >/dev/null 2>&1'],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        return True
+    except Exception as exc:
+        with memory_watchdog_lock:
+            memory_watchdog_restart_scheduled = False
+        _write_runtime_log(f'Memory watchdog restart failed: {exc}')
+        return False
+
+
+def _start_memory_watchdog_thread():
+    if not MEMORY_WATCHDOG_ENABLED or MEMORY_WATCHDOG_RSS_LIMIT_KB <= 0:
+        return
+
+    def worker():
+        shutdown_requested.wait(min(MEMORY_WATCHDOG_CHECK_INTERVAL, MEMORY_WATCHDOG_MIN_UPTIME_SECONDS))
+        while not shutdown_requested.is_set():
+            try:
+                rss_kb = _process_rss_kb()
+                if rss_kb and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_kb >= MEMORY_WATCHDOG_RSS_SOFT_KB:
+                    _memory_cleanup('watchdog-soft', clear_status=True)
+                    rss_kb = _process_rss_kb() or rss_kb
+                if rss_kb and rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _memory_restart_is_safe():
+                    _memory_cleanup('watchdog-restart', force=True, clear_status=True)
+                    rss_kb = _process_rss_kb() or rss_kb
+                    if rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _schedule_memory_watchdog_restart(rss_kb):
+                        return
+            except Exception as exc:
+                _write_runtime_log(f'Memory watchdog error: {exc}')
+            shutdown_requested.wait(MEMORY_WATCHDOG_CHECK_INTERVAL)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _cleanup_pool_probe_runtime_light(kill_processes=False):
+    if kill_processes and os.path.isdir('/proc'):
+        for name in os.listdir('/proc'):
+            if not name.isdigit():
+                continue
+            try:
+                with open(f'/proc/{name}/cmdline', 'rb') as file:
+                    cmdline = file.read().replace(b'\x00', b' ')
+            except Exception:
+                continue
+            if b'/tmp/bypass_pool_probe_' not in cmdline:
+                continue
+            try:
+                os.kill(int(name), signal.SIGTERM)
+            except Exception:
+                pass
+    try:
+        for name in os.listdir('/tmp'):
+            if not name.startswith('bypass_pool_probe_'):
+                continue
+            path = os.path.join('/tmp', name)
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.remove(path)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -1757,6 +2013,7 @@ def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_na
         _telegram_command_result_payload(action, chat_id, menu_name, return_code, output),
     )
     _remove_file(TELEGRAM_COMMAND_JOB_FILE)
+    _memory_cleanup('telegram command finished', force=True, clear_status=True)
 
 
 def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
@@ -2272,7 +2529,7 @@ def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_ti
     except requests.exceptions.ReadTimeout:
         return False, 'Сервер Telegram не ответил вовремя через этот ключ.'
     except requests.exceptions.RequestException as exc:
-        error_text = str(exc)
+        error_text = _redact_sensitive_text(exc)
         if 'Missing dependencies for SOCKS support' in error_text:
             return False, 'Отсутствует поддержка SOCKS (PySocks) для проверки Telegram API.'
         if 'SSLEOFError' in error_text or 'UNEXPECTED_EOF' in error_text:
@@ -2412,7 +2669,8 @@ def _web_background_command_code(command):
     module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
     module_dir = os.path.dirname(BOT_SOURCE_PATH)
     return (
-        'import sys; '
+        'import os, sys; '
+        'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
         f"sys.path.insert(0, {module_dir!r}); "
         f'import {module_name} as bot_module; '
         f'bot_module._run_web_command_worker({command!r})'
@@ -2489,7 +2747,10 @@ def _execute_web_command(command):
 def _run_web_command_worker(command):
     with web_command_lock:
         web_command_state.update(_read_web_command_state_file())
-    _execute_web_command(command)
+    try:
+        _execute_web_command(command)
+    finally:
+        _memory_cleanup('web command finished', force=True, clear_status=True)
 
 
 def _start_web_command_legacy(command):
@@ -3645,6 +3906,7 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
         )
     finally:
         probe_recorder.flush()
+        _memory_cleanup('pool probe finished', force=True, clear_status=True)
 
 
 def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):
@@ -3950,6 +4212,7 @@ def _refresh_status_caches_async(current_keys):
         finally:
             with status_refresh_lock:
                 status_refresh_in_progress.discard(signature)
+            _memory_cleanup('status refresh')
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -4573,7 +4836,10 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 _refresh_status_caches_async(current_keys)
         csrf_token = self._get_or_create_csrf_token()
         csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
-        return _web_protocol_panel_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
+        try:
+            return _web_protocol_panel_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
+        finally:
+            _memory_cleanup('protocol panel render', force=True, log=False)
 
     def do_GET(self):
         if not self._ensure_request_allowed():
@@ -4596,6 +4862,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             self._send_json(action.get('payload', {}), status=action.get('status', 200))
         elif kind == 'html':
             self._send_html(action.get('html', ''))
+            _memory_cleanup('web html render')
         elif kind == 'text':
             self._send_text_asset(
                 action.get('text', ''),
@@ -4836,7 +5103,8 @@ def main():
     _daemonize_process()
     _register_signal_handlers()
     _write_runtime_log('main() entered', mode='w')
-    _runner_cleanup_pool_probe_runtime(kill_processes=True)
+    _cleanup_pool_probe_runtime_light(kill_processes=True)
+    _start_memory_watchdog_thread()
     runtime_mode = _load_app_runtime_mode()
     _write_runtime_log(f'app runtime mode: {runtime_mode}')
     start_http_server()

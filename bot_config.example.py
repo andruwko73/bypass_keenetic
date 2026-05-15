@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.582
+# ВЕРСИЯ СКРИПТА v1.583
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -13,6 +13,12 @@ fork_repo_name = 'bypass_keenetic'  # имя репозитория форка
 fork_button_label = 'Fork by andruwko73'  # подпись кнопки установки из вашего форка
 app_runtime_mode = 'advanced'  # simple, advanced или web_only
 pool_probe_min_available_kb = 190000  # проверка пула не запускает временный xray, если доступной памяти меньше этого порога
+memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
+memory_watchdog_rss_soft_kb = 87040  # при достижении порога очищаются кэши статуса и запускается gc.collect()
+memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот перезапустится, если сейчас не идёт обновление или проверка пула
+memory_watchdog_check_interval = 60.0
+memory_watchdog_min_uptime_seconds = 300.0
+memory_watchdog_restart_cooldown_seconds = 1800.0
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять
 localportsh = '1082'  # локальный порт для shadowsocks

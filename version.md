@@ -1,3 +1,6 @@
+*v1.583 (15 May 2026) -* main
+*Added a memory watchdog with guarded service restart, explicit cleanup after heavy web/pool/update operations, lazy loading for pool probing/repo updates/web template rendering, and token redaction in Telegram API diagnostics.*
+
 *v1.582 (13 May 2026) -* main
 *Fixed CI history checkout for version smoke tests and added Telegram menu/button smoke coverage before GitHub update verification.*
 

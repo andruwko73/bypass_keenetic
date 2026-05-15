@@ -434,6 +434,9 @@ def test_codex_version_matches_commit_count():
     assert f'v{{APP_VERSION_COUNTER}}' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in bootstrap
+    assert 'memory_watchdog_rss_limit_kb = 112640' in example
+    assert 'memory_watchdog_rss_limit_kb = 112640' in installer
+    assert 'memory_watchdog_rss_limit_kb = 112640' in bootstrap
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in example
 
 
@@ -455,6 +458,19 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'trim_runtime_logs' in service
     assert 'threading.stack_size(256 * 1024)' in source
     assert "pool_probe_min_available_kb', 160000" in source
+    assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
+    assert 'def _start_memory_watchdog_thread' in source
+    assert 'def _memory_cleanup' in source
+    assert 'def _redact_sensitive_text' in source
+    assert 'bot<redacted-token>' in source
+    assert 'error_text = _redact_sensitive_text(exc)' in source
+    assert "_memory_cleanup('pool probe finished'" in source
+    assert "_memory_cleanup('web command finished'" in source
+    assert "_memory_cleanup('protocol panel render'" in source
+    assert 'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"' in source
+    assert 'from pool_probe_runner import' not in source
+    assert 'from repo_update import' not in source
+    assert 'from web_form_template import' not in source
     assert 'not app_runtime_mode.app_mode_telegram_enabled(_runtime_mode_at_import())' in source
     assert 'class _NoopTeleBot' in source
 
