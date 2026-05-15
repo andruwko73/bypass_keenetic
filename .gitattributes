@@ -1,4 +1,6 @@
+.gitattributes text eol=lf
 *.sh text eol=lf
+unblock.dnsmasq text eol=lf
 S98telegram_bot_installer text eol=lf
 S99telegram_bot text eol=lf
 *.py text eol=lf

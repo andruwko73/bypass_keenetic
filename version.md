@@ -1,3 +1,6 @@
+*v1.584 (15 May 2026) -* main
+*Kept YouTube routing on Vless 2, normalized unblock list lines before generating dnsmasq rules, and prevented CRLF markers from breaking domain-to-ipset entries.*
+
 *v1.583 (15 May 2026) -* main
 *Added a memory watchdog with guarded service restart, explicit cleanup after heavy web/pool/update operations, lazy loading for pool probing/repo updates/web template rendering, and token redaction in Telegram API diagnostics.*
 

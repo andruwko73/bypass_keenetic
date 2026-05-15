@@ -442,12 +442,16 @@ def test_codex_version_matches_commit_count():
 
 def test_update_script_socks_download_notice_is_not_repeated():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    unblock_dnsmasq = (ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
     assert 'Downloaded via local SOCKS port' not in script
     assert 'Downloading GitHub files via local SOCKS port ${port}.' in script
     assert 'RAW_GITHUB_SOCKS_NOTICE_SHOWN=1' in script
     assert 'remove_path /opt/root/get-pip.py' in script
     assert 'chmod 777 /opt/root/get-pip.py || rm' not in script
     assert 'touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts' in script
+    assert "normalize_line()" in unblock_dnsmasq
+    assert "s/\\r//g" in unblock_dnsmasq
+    assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
