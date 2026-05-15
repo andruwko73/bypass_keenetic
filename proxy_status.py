@@ -19,6 +19,8 @@ TRANSIENT_STATUS_MARKERS = (
     'connection reset',
 )
 
+YOUTUBE_HEALTHCHECK_URL = 'https://www.youtube.com/generate_204'
+
 
 def wait_for_port(hosts, port, timeout=15, *, sleep=time.sleep):
     if hosts is None:
@@ -186,7 +188,7 @@ def protocol_error_status(exc):
     }
 
 
-def check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=2, read_timeout=3):
+def check_http_through_proxy(proxy_url, url=YOUTUBE_HEALTHCHECK_URL, connect_timeout=2, read_timeout=3):
     try:
         response = requests.get(
             url,

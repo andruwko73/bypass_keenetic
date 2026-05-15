@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.585, последнее изменение: 15.05.2026
+#  Файл: bot.py, Версия v1.586, последнее изменение: 15.05.2026
 
 import subprocess
 import os
@@ -2474,8 +2474,24 @@ def _invalidate_key_status_cache():
     _invalidate_status_snapshot_cache()
 
 
-def _check_http_through_proxy(proxy_url, url='https://www.youtube.com', connect_timeout=2, read_timeout=3):
+def _check_http_through_proxy(proxy_url, url='https://www.youtube.com/generate_204', connect_timeout=2, read_timeout=3):
     return _status_check_http(proxy_url, url=url, connect_timeout=connect_timeout, read_timeout=read_timeout)
+
+
+def _check_youtube_health_through_proxy(proxy_url):
+    ok, message = _check_http_through_proxy(
+        proxy_url,
+        connect_timeout=2,
+        read_timeout=3,
+    )
+    if ok or not _status_is_transient_text(message):
+        return ok, message
+    time.sleep(0.2)
+    return _check_http_through_proxy(
+        proxy_url,
+        connect_timeout=5,
+        read_timeout=8,
+    )
 
 
 def _check_custom_target_through_proxy(proxy_url, url, connect_timeout=2, read_timeout=3):
@@ -2579,12 +2595,7 @@ def _protocol_status_for_key(key_name, key_value):
         read_timeout=8,
     )
     api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
-    yt_ok, yt_message = _check_http_through_proxy(
-        proxy_url,
-        url='https://www.youtube.com',
-        connect_timeout=2,
-        read_timeout=3,
-    )
+    yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url)
     custom_checks = _load_custom_checks()
     cached_probe = _load_key_probe_cache().get(_hash_key(key_value), {})
     custom_states = key_pool_web.web_custom_probe_states(cached_probe, custom_checks)

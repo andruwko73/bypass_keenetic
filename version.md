@@ -1,3 +1,6 @@
+*v1.586 (15 May 2026) -* main
+*Switched YouTube health checks to the lightweight generate_204 endpoint so the web panel and bot status do not report false YouTube failures from a slow full homepage load.*
+
 *v1.585 (15 May 2026) -* main
 *Synchronized the tested router Vless 1 and Vless 2 domain lists, keeping YouTube domains on Vless 2 and enforcing LF line endings for text lists.*
 

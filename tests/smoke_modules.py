@@ -465,6 +465,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
+    assert 'def _check_youtube_health_through_proxy' in source
+    assert 'read_timeout=8' in source
     assert 'def _redact_sensitive_text' in source
     assert 'bot<redacted-token>' in source
     assert 'error_text = _redact_sensitive_text(exc)' in source
@@ -1155,11 +1157,18 @@ def test_proxy_status_runtime_helpers():
         def close(self):
             pass
 
+    calls = []
+
     try:
-        proxy_status.requests.get = lambda *args, **kwargs: _Response()
+        def fake_get(*args, **kwargs):
+            calls.append((args, kwargs))
+            return _Response()
+
+        proxy_status.requests.get = fake_get
         ok, message = proxy_status.check_http_through_proxy('socks5://127.0.0.1:1080')
         assert ok is True
         assert 'HTTP 204' in message
+        assert calls[-1][0][0] == 'https://www.youtube.com/generate_204'
         ok, message = proxy_status.check_custom_target_through_proxy(
             lambda value: 'https://example.com/path',
             'socks5://127.0.0.1:1080',

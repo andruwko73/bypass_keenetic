@@ -8,6 +8,8 @@ import subprocess
 import threading
 import time
 
+YOUTUBE_HEALTHCHECK_URL = 'https://www.youtube.com/generate_204'
+
 
 def pool_probe_socks_inbound(port, tag):
     return {
@@ -250,7 +252,7 @@ def find_pool_failover_candidate(
                 if service == 'youtube':
                     primary_ok, _ = check_http(
                         proxy_url,
-                        url='https://www.youtube.com',
+                        url=YOUTUBE_HEALTHCHECK_URL,
                         connect_timeout=http_connect,
                         read_timeout=http_read,
                     )
@@ -269,7 +271,7 @@ def find_pool_failover_candidate(
                     tg_ok = primary_ok
                     yt_ok, _ = check_http(
                         proxy_url,
-                        url='https://www.youtube.com',
+                        url=YOUTUBE_HEALTHCHECK_URL,
                         connect_timeout=http_connect,
                         read_timeout=http_read,
                     )
