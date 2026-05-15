@@ -1,3 +1,6 @@
+*v1.585 (15 May 2026) -* main
+*Synchronized the tested router Vless 1 and Vless 2 domain lists, keeping YouTube domains on Vless 2 and enforcing LF line endings for text lists.*
+
 *v1.584 (15 May 2026) -* main
 *Kept YouTube routing on Vless 2, normalized unblock list lines before generating dnsmasq rules, and prevented CRLF markers from breaking domain-to-ipset entries.*
 
