@@ -406,6 +406,17 @@ memory_watchdog_rss_limit_kb = 112640
 memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
+memory_post_pool_restart_enabled = True
+memory_post_pool_restart_rss_kb = 61440
+memory_post_pool_restart_delay_seconds = 20.0
+youtube_vless2_failover_enabled = True
+youtube_vless2_failover_grace_seconds = 60
+youtube_vless2_failover_poll_seconds = 60
+youtube_vless2_failover_switch_cooldown_seconds = 120
+youtube_vless2_failover_check_connect_timeout = 3
+youtube_vless2_failover_check_read_timeout = 5
+youtube_vless2_failover_confirm_retries = 2
+youtube_vless2_failover_confirm_delay_seconds = 5.0
 
 localportsh = '1082'
 localportvmess = '10810'

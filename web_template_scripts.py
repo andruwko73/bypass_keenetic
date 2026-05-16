@@ -36,6 +36,8 @@ def render_web_scripts(
         }};
         let statusPollTimer = null;
         let statusPollUntil = 0;
+        let poolProbeWasRunning = false;
+        let poolDataRefreshTimer = null;
         let commandPollTimer = null;
         let actionMessageTimer = null;
         let activeCommandName = '';
@@ -1282,6 +1284,51 @@ def render_web_scripts(
             }});
         }}
 
+        function updatePoolSummaryBlock(poolSummary, progress, running) {{
+            if (!poolSummary) {{
+                return;
+            }}
+            let summaryNote = poolSummary.note || '';
+            if (running && progress && Number(progress.total || 0) > 0) {{
+                const progressNote = progress.note ? String(progress.note) : summaryNote;
+                summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + progressNote;
+            }}
+            setOptionalText('pool-active-summary', poolSummary.active_text || '');
+            setOptionalText('pool-summary-note', summaryNote);
+        }}
+
+        function applyPoolPayload(payload) {{
+            if (!ENABLE_KEY_POOL || !payload) {{
+                return;
+            }}
+            if (ENABLE_CUSTOM_CHECKS && payload.custom_checks) {{
+                renderCustomChecks(payload.custom_checks);
+            }}
+            updatePoolSummaryBlock(payload.pool_summary || null, payload.pool_probe_progress || {{}}, !!payload.pool_probe_running);
+            updatePoolStatus(payload.pools);
+        }}
+
+        function refreshPoolData(delayMs) {{
+            if (!ENABLE_KEY_POOL) {{
+                return;
+            }}
+            if (poolDataRefreshTimer) {{
+                window.clearTimeout(poolDataRefreshTimer);
+            }}
+            poolDataRefreshTimer = window.setTimeout(function() {{
+                poolDataRefreshTimer = null;
+                fetch('/api/pools', {{
+                    headers: {{'Accept': 'application/json'}},
+                    cache: 'no-store'
+                }})
+                    .then(function(response) {{ return response.json(); }})
+                    .then(function(payload) {{
+                        applyPoolPayload(payload);
+                    }})
+                    .catch(function() {{}});
+            }}, Math.max(0, Number(delayMs || 0)));
+        }}
+
         function updateProtocolStatus(proto, status) {{
             const card = document.querySelector('[data-protocol-card="' + proto + '"]');
             if (!card || !status) {{
@@ -1426,6 +1473,8 @@ def render_web_scripts(
                 : '';
             setOptionalText('web-fallback-reason', fallbackText);
 
+            const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
+            const poolProbeActive = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
             let pending = (web.api_status || '').indexOf('Проверяется связь текущего режима') !== -1 ||
                 (web.api_status || '').indexOf('Фоновая проверка') !== -1 ||
                 (web.api_status || '').indexOf('перепроверяется') !== -1;
@@ -1437,26 +1486,18 @@ def render_web_scripts(
                     pending = true;
                 }}
             }});
-            if (ENABLE_CUSTOM_CHECKS && snapshot.custom_checks) {{
-                renderCustomChecks(snapshot.custom_checks);
-            }}
             const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || null) : null;
-            if (poolSummary) {{
-                const progress = snapshot.pool_probe_progress || {{}};
-                let summaryNote = poolSummary.note || '';
-                if (!!snapshot.pool_probe_running && Number(progress.total || 0) > 0) {{
-                    const progressNote = progress.note ? String(progress.note) : summaryNote;
-                    summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + progressNote;
-                }}
-                setOptionalText('pool-active-summary', poolSummary.active_text || '');
-                setOptionalText('pool-summary-note', summaryNote);
-            }}
+            updatePoolSummaryBlock(poolSummary, progress, poolProbeActive);
             updateRouterHealth(snapshot.router_health);
             renderStatusAttention(snapshot);
-            if (ENABLE_KEY_POOL) {{
+            if (ENABLE_KEY_POOL && snapshot.pools) {{
                 updatePoolStatus(snapshot.pools);
             }}
-            if (ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number((snapshot.pool_probe_progress || {{}}).total || 0) > 0) {{
+            if (ENABLE_KEY_POOL && poolProbeWasRunning && !poolProbeActive) {{
+                refreshPoolData(500);
+            }}
+            poolProbeWasRunning = poolProbeActive;
+            if (poolProbeActive) {{
                 pending = true;
                 statusPollUntil = Math.max(statusPollUntil, Date.now() + POOL_PROBE_POLL_EXTENSION_MS);
             }}
@@ -1790,8 +1831,8 @@ def render_web_scripts(
                             if (payload.custom_checks) {{
                                 renderCustomChecks(payload.custom_checks);
                             }}
-                            if (payload.pools) {{
-                                updatePoolStatus(payload.pools);
+                            if (payload.pools || payload.pool_summary) {{
+                                applyPoolPayload(payload);
                             }}
                             if (payload.list_name && typeof payload.list_content === 'string') {{
                                 const listPanel = document.querySelector('[data-list-panel="' + payload.list_name + '"]');
@@ -1839,6 +1880,7 @@ def render_web_scripts(
                                 }}
                             }}
                             if (action === 'pool-probe-cancel') {{
+                                refreshPoolData(1200);
                                 scheduleStatusPolling(15000);
                             }} else if (action === 'command') {{
                                 if (showCommandState(payload.command_state)) {{

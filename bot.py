@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.586, последнее изменение: 15.05.2026
+#  Файл: bot.py, Версия v1.587, последнее изменение: 16.05.2026
 
 import subprocess
 import os
@@ -381,6 +381,27 @@ auto_failover_state = {
     'last_attempt': 0.0,
     'in_progress': False,
 }
+YOUTUBE_VLESS2_FAILOVER_ENABLED = bool(getattr(config, 'youtube_vless2_failover_enabled', True))
+YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS = int(getattr(config, 'youtube_vless2_failover_grace_seconds', 60))
+YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS = max(30, int(getattr(config, 'youtube_vless2_failover_poll_seconds', 60)))
+YOUTUBE_VLESS2_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(
+    getattr(config, 'youtube_vless2_failover_switch_cooldown_seconds', 120)
+)
+YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT = float(
+    getattr(config, 'youtube_vless2_failover_check_connect_timeout', 3)
+)
+YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'youtube_vless2_failover_check_read_timeout', 5))
+YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES = max(1, int(getattr(config, 'youtube_vless2_failover_confirm_retries', 2)))
+YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
+    1.0,
+    float(getattr(config, 'youtube_vless2_failover_confirm_delay_seconds', 5.0)),
+)
+youtube_vless2_failover_state = {
+    'last_ok': 0.0,
+    'last_fail': 0.0,
+    'last_attempt': 0.0,
+    'in_progress': False,
+}
 
 def _add_custom_check(label='', url='', preset_id=''):
     checks, result = _store_add_custom_check(label=label, url=url, preset_id=preset_id)
@@ -556,7 +577,161 @@ def _attempt_auto_failover():
         check_timeouts=(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
         key_probe_cache=_load_key_probe_cache,
         hash_key=_hash_key,
+        protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER,
     )
+
+
+def _check_youtube_vless2_once():
+    return _check_http_through_proxy(
+        proxy_settings.get('vless2'),
+        url='https://www.youtube.com/generate_204',
+        connect_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+        read_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+    )
+
+
+def _confirm_youtube_vless2_key():
+    last_message = ''
+    for attempt in range(YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES):
+        ok, message = _check_youtube_vless2_once()
+        if ok:
+            return True, message
+        last_message = message
+        if attempt + 1 < YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES:
+            shutdown_requested.wait(YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS)
+            if shutdown_requested.is_set():
+                break
+    return False, last_message
+
+
+def _restore_vless2_key_after_failed_youtube_failover(original_key):
+    current_key = (_load_current_keys().get('vless2') or '').strip()
+    if not original_key or current_key == original_key:
+        return
+    try:
+        _install_key_for_protocol('vless2', original_key, verify=False)
+        _record_key_probe('vless2', original_key, yt_ok=False)
+        _write_runtime_log('YouTube Vless2 failover: restored previous Vless2 key after failed candidates.')
+    except Exception as exc:
+        _write_runtime_log(f'YouTube Vless2 failover: failed to restore previous Vless2 key: {exc}')
+
+
+def _attempt_youtube_vless2_failover():
+    state = youtube_vless2_failover_state
+    now = time.time()
+    if not YOUTUBE_VLESS2_FAILOVER_ENABLED:
+        return False
+    if state['in_progress']:
+        return False
+    if globals().get('pool_probe_lock') and pool_probe_lock.locked():
+        return False
+    if state['last_attempt'] and now - state['last_attempt'] < YOUTUBE_VLESS2_FAILOVER_SWITCH_COOLDOWN_SECONDS:
+        return False
+
+    current_keys = _load_current_keys()
+    active_key = (current_keys.get('vless2') or '').strip()
+    if not active_key:
+        state['last_fail'] = 0.0
+        return False
+
+    ok, message = _check_youtube_vless2_once()
+    if ok:
+        state['last_ok'] = now
+        state['last_fail'] = 0.0
+        _record_key_probe('vless2', active_key, yt_ok=True)
+        return False
+
+    _record_key_probe('vless2', active_key, yt_ok=False)
+    _invalidate_key_status_cache()
+    if not state['last_fail']:
+        state['last_fail'] = now
+    if now - state['last_fail'] < YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS:
+        return False
+
+    state['in_progress'] = True
+    state['last_attempt'] = now
+    original_key = active_key
+    try:
+        pools = _load_key_pools()
+        candidates = key_pool_store.failover_candidates(
+            pools,
+            'vless2',
+            active_key,
+            protocols=('vless2',),
+            key_probe_cache=_load_key_probe_cache(),
+            hash_key=_hash_key,
+            service='youtube',
+        )
+        if not candidates:
+            _write_runtime_log('YouTube Vless2 failover: no Vless2 pool candidates are available.')
+            return False
+
+        _write_runtime_log(
+            'YouTube Vless2 failover: current Vless2 key failed YouTube check; '
+            'testing Vless2 pool candidates.'
+        )
+        remaining = list(candidates)
+        while remaining and not shutdown_requested.is_set():
+            candidate = _find_pool_failover_candidate(remaining, service='youtube')
+            if not candidate:
+                _write_runtime_log('YouTube Vless2 failover: no candidate passed temporary xray checks.')
+                break
+
+            proto, key_value, tg_ok, yt_ok = candidate
+            remaining = [(item_proto, item_key) for item_proto, item_key in remaining if item_key != key_value]
+            if proto != 'vless2':
+                continue
+
+            key_hash = _hash_key(key_value)[:12]
+            try:
+                result = _install_key_for_protocol('vless2', key_value, verify=False)
+            except Exception as exc:
+                _record_key_probe('vless2', key_value, tg_ok=tg_ok, yt_ok=False)
+                _write_runtime_log(f'YouTube Vless2 failover: failed to install candidate {key_hash}: {exc}')
+                continue
+
+            confirm_ok, confirm_message = _confirm_youtube_vless2_key()
+            if not confirm_ok:
+                _record_key_probe('vless2', key_value, tg_ok=tg_ok, yt_ok=False)
+                _write_runtime_log(
+                    f'YouTube Vless2 failover: candidate {key_hash} passed temporary check '
+                    f'but failed on permanent port: {confirm_message}'
+                )
+                continue
+
+            if proxy_mode == 'vless2':
+                tg_ok, tg_message = _check_telegram_api_through_proxy(
+                    proxy_settings.get('vless2'),
+                    connect_timeout=AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT,
+                    read_timeout=AUTO_FAILOVER_CHECK_READ_TIMEOUT,
+                )
+                if not tg_ok:
+                    _record_key_probe('vless2', key_value, tg_ok=False, yt_ok=True)
+                    _write_runtime_log(
+                        f'YouTube Vless2 failover: candidate {key_hash} has YouTube, '
+                        f'but Telegram is required because bot mode is Vless 2: {tg_message}'
+                    )
+                    continue
+
+            _set_active_key('vless2', key_value)
+            _record_key_probe('vless2', key_value, tg_ok=tg_ok, yt_ok=True)
+            _invalidate_web_status_cache()
+            _invalidate_key_status_cache()
+            state['last_ok'] = time.time()
+            state['last_fail'] = 0.0
+            _write_runtime_log(
+                f'YouTube Vless2 failover: switched Vless2 to {key_hash}; '
+                f'YouTube is available on permanent port. {result}'
+            )
+            return True
+
+        _restore_vless2_key_after_failed_youtube_failover(original_key)
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+        return False
+    finally:
+        _memory_cleanup('youtube vless2 failover finished', force=True, clear_status=True)
+        state['in_progress'] = False
 
 
 def _start_auto_failover_thread():
@@ -571,6 +746,22 @@ def _start_auto_failover_thread():
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
+
+
+def _start_youtube_vless2_failover_thread():
+    if not YOUTUBE_VLESS2_FAILOVER_ENABLED:
+        return
+
+    def worker():
+        while not shutdown_requested.is_set():
+            try:
+                if _app_mode_pool_enabled():
+                    _attempt_youtube_vless2_failover()
+            except Exception as exc:
+                _write_runtime_log(f'YouTube Vless2 failover error: {exc}')
+            shutdown_requested.wait(YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 token = getattr(config, 'token', '') or '0:WEBONLY_DISABLED'
 usernames = getattr(config, 'usernames', [])
@@ -664,6 +855,12 @@ MEMORY_WATCHDOG_MIN_UPTIME_SECONDS = max(30.0, float(getattr(config, 'memory_wat
 MEMORY_WATCHDOG_RESTART_COOLDOWN_SECONDS = max(
     300.0,
     float(getattr(config, 'memory_watchdog_restart_cooldown_seconds', 1800.0)),
+)
+MEMORY_POST_POOL_RESTART_ENABLED = bool(getattr(config, 'memory_post_pool_restart_enabled', True))
+MEMORY_POST_POOL_RESTART_RSS_KB = max(0, int(getattr(config, 'memory_post_pool_restart_rss_kb', 60 * 1024)))
+MEMORY_POST_POOL_RESTART_DELAY_SECONDS = max(
+    5.0,
+    float(getattr(config, 'memory_post_pool_restart_delay_seconds', 20.0)),
 )
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
@@ -1085,6 +1282,33 @@ def _schedule_memory_watchdog_restart(rss_kb):
             memory_watchdog_restart_scheduled = False
         _write_runtime_log(f'Memory watchdog restart failed: {exc}')
         return False
+
+
+def _schedule_post_pool_memory_cleanup():
+    if not MEMORY_POST_POOL_RESTART_ENABLED or MEMORY_POST_POOL_RESTART_RSS_KB <= 0:
+        return
+
+    def worker():
+        shutdown_requested.wait(MEMORY_POST_POOL_RESTART_DELAY_SECONDS)
+        if shutdown_requested.is_set():
+            return
+        cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
+        rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
+        if not rss_kb or rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB:
+            return
+        if not _memory_restart_is_safe():
+            _write_runtime_log(
+                f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
+                f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restart postponed because another operation is active'
+            )
+            return
+        _write_runtime_log(
+            f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
+            f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restarting bot service'
+        )
+        _schedule_memory_watchdog_restart(rss_kb)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _start_memory_watchdog_thread():
@@ -2529,8 +2753,10 @@ def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_ti
     authenticated_check = _app_mode_telegram_enabled()
     url = f'https://api.telegram.org/bot{token}/getMe' if authenticated_check else 'https://api.telegram.org/'
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    session = requests.Session()
+    session.trust_env = False
     try:
-        response = requests.get(url, timeout=(connect_timeout, read_timeout), proxies=proxies)
+        response = session.get(url, timeout=(connect_timeout, read_timeout), proxies=proxies)
         if not authenticated_check:
             if response.status_code < 500:
                 return True, 'Доступ к api.telegram.org подтверждён.'
@@ -2555,6 +2781,8 @@ def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_ti
         if 'RemoteDisconnected' in error_text:
             return False, 'Удалённая сторона закрыла соединение без ответа.'
         return False, f'Проверка Telegram API завершилась ошибкой: {error_text.splitlines()[0][:240]}'
+    finally:
+        session.close()
 
 
 def _key_requires_xray(key_name, key_value):
@@ -3918,6 +4146,7 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
     finally:
         probe_recorder.flush()
         _memory_cleanup('pool probe finished', force=True, clear_status=True)
+        _schedule_post_pool_memory_cleanup()
 
 
 def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):
@@ -5124,6 +5353,7 @@ def main():
     _restore_startup_proxy_mode()
     if _app_mode_pool_enabled(runtime_mode):
         _start_auto_failover_thread()
+        _start_youtube_vless2_failover_thread()
         _ensure_current_keys_in_pools()
     if _app_mode_telegram_enabled(runtime_mode):
         _deliver_pending_telegram_command_result()

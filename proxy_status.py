@@ -189,8 +189,10 @@ def protocol_error_status(exc):
 
 
 def check_http_through_proxy(proxy_url, url=YOUTUBE_HEALTHCHECK_URL, connect_timeout=2, read_timeout=3):
+    session = requests.Session()
+    session.trust_env = False
     try:
-        response = requests.get(
+        response = session.get(
             url,
             timeout=(connect_timeout, read_timeout),
             proxies={'https': proxy_url, 'http': proxy_url},
@@ -207,12 +209,16 @@ def check_http_through_proxy(proxy_url, url=YOUTUBE_HEALTHCHECK_URL, connect_tim
         return False, 'Удалённый сервер не ответил вовремя через этот ключ.'
     except requests.exceptions.RequestException as exc:
         return False, f'Веб-проверка через ключ завершилась ошибкой: {exc}'
+    finally:
+        session.close()
 
 
 def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_timeout=2, read_timeout=3):
+    session = requests.Session()
+    session.trust_env = False
     try:
         target_url = normalize_url(url)
-        response = requests.get(
+        response = session.get(
             target_url,
             timeout=(connect_timeout, read_timeout),
             proxies={'https': proxy_url, 'http': proxy_url},
@@ -232,6 +238,8 @@ def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_tim
         return False, 'Сервис не ответил вовремя через этот ключ.'
     except requests.exceptions.RequestException as exc:
         return False, f'Проверка сервиса завершилась ошибкой: {str(exc).splitlines()[0][:180]}'
+    finally:
+        session.close()
 
 
 def probe_custom_targets(proxy_url, custom_checks, target_checker, *, connect_timeout, read_timeout, max_targets=None):

@@ -256,11 +256,7 @@ def find_pool_failover_candidate(
                         connect_timeout=http_connect,
                         read_timeout=http_read,
                     )
-                    tg_ok, _ = check_telegram_api(
-                        proxy_url,
-                        connect_timeout=tg_connect,
-                        read_timeout=tg_read,
-                    )
+                    tg_ok = None
                     yt_ok = primary_ok
                 else:
                     primary_ok, _ = check_telegram_api(
@@ -269,12 +265,7 @@ def find_pool_failover_candidate(
                         read_timeout=tg_read,
                     )
                     tg_ok = primary_ok
-                    yt_ok, _ = check_http(
-                        proxy_url,
-                        url=YOUTUBE_HEALTHCHECK_URL,
-                        connect_timeout=http_connect,
-                        read_timeout=http_read,
-                    )
+                    yt_ok = None
                 record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
                 if primary_ok:
                     return proto, key_value, tg_ok, yt_ok

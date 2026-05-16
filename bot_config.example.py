@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.586
+# ВЕРСИЯ СКРИПТА v1.587
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -19,6 +19,17 @@ memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот пере
 memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
+memory_post_pool_restart_enabled = True  # после проверки пула бот сам снизит память и перезапустится, если Python RSS остался высоким
+memory_post_pool_restart_rss_kb = 61440
+memory_post_pool_restart_delay_seconds = 20.0
+youtube_vless2_failover_enabled = True  # YouTube остается на Vless 2: если текущий Vless2 ключ перестал отвечать, бот подберет другой из пула Vless2
+youtube_vless2_failover_grace_seconds = 60
+youtube_vless2_failover_poll_seconds = 60
+youtube_vless2_failover_switch_cooldown_seconds = 120
+youtube_vless2_failover_check_connect_timeout = 3
+youtube_vless2_failover_check_read_timeout = 5
+youtube_vless2_failover_confirm_retries = 2
+youtube_vless2_failover_confirm_delay_seconds = 5.0
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять
 localportsh = '1082'  # локальный порт для shadowsocks

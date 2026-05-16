@@ -437,6 +437,12 @@ def test_codex_version_matches_commit_count():
     assert 'memory_watchdog_rss_limit_kb = 112640' in example
     assert 'memory_watchdog_rss_limit_kb = 112640' in installer
     assert 'memory_watchdog_rss_limit_kb = 112640' in bootstrap
+    assert 'memory_post_pool_restart_rss_kb = 61440' in example
+    assert 'memory_post_pool_restart_rss_kb = 61440' in installer
+    assert 'memory_post_pool_restart_rss_kb = 61440' in bootstrap
+    assert 'youtube_vless2_failover_enabled = True' in example
+    assert 'youtube_vless2_failover_enabled = True' in installer
+    assert 'youtube_vless2_failover_enabled = True' in bootstrap
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in example
 
 
@@ -465,6 +471,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
+    assert 'def _schedule_post_pool_memory_cleanup' in source
+    assert "_schedule_post_pool_memory_cleanup()" in source
+    assert 'def _attempt_youtube_vless2_failover' in source
+    assert '_start_youtube_vless2_failover_thread()' in source
+    assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
+    assert "proxy_mode == 'vless2'" in source
+    assert 'Telegram is required because bot mode is Vless 2' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
     assert 'def _redact_sensitive_text' in source
@@ -813,7 +826,7 @@ def test_auto_failover_runtime_helpers():
         load_current_keys=lambda: {'vless': 'active'},
         load_key_pools=lambda: {'vless': ['active', 'next']},
         failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
-        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, False),
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
         install_key_for_protocol=lambda proto, key, verify=True: calls.append(('install', proto, key, verify)) or 'ok',
         update_proxy=lambda proto: calls.append(('update', proto)),
         set_active_key=lambda proto, key: calls.append(('active', proto, key)),
@@ -827,7 +840,7 @@ def test_auto_failover_runtime_helpers():
     assert state['last_ok'] == 21.0
     assert state['last_fail'] == 0.0
     assert ('update', 'vless') in calls
-    assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': False} for call in calls)
+    assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': None} for call in calls)
     locked_calls = []
     locked_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
     assert auto_failover_runtime.attempt_auto_failover(
@@ -839,7 +852,7 @@ def test_auto_failover_runtime_helpers():
         load_current_keys=lambda: {'vless': 'active'},
         load_key_pools=lambda: {'vless': ['active', 'next']},
         failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
-        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, False),
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
         install_key_for_protocol=lambda proto, key, verify=True: None,
         update_proxy=lambda proto: None,
         set_active_key=lambda proto, key: None,
@@ -1017,7 +1030,7 @@ def test_pool_probe_runner_failover_candidate():
         proxy_outbound_from_key=lambda *args, **kwargs: {},
         wait_for_socks5=lambda port, timeout=6: port == '1200',
         check_telegram_api=lambda proxy, **kwargs: (True, 'ok'),
-        check_http=lambda proxy, **kwargs: (False, 'yt'),
+        check_http=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('youtube must not block telegram failover')),
         record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
         proto_label=lambda proto: proto,
         log=logs.append,
@@ -1030,11 +1043,36 @@ def test_pool_probe_runner_failover_candidate():
         cleanup_runtime=lambda kill_processes=False: cleaned.append(kill_processes),
         collect_garbage=lambda: None,
     )
-    assert result == ('vless', 'ok', True, False)
-    assert records == [('vless', 'ok', {'tg_ok': True, 'yt_ok': False})]
+    assert result == ('vless', 'ok', True, None)
+    assert records == [('vless', 'ok', {'tg_ok': True, 'yt_ok': None})]
     assert stopped == [('process', 'config.json')]
     assert cleaned == [True]
     assert 'не подготовлен' in logs[0]
+
+    youtube_records = []
+    youtube_result = pool_probe_runner.find_pool_failover_candidate(
+        [('vless2', 'yt-ok')],
+        service='youtube',
+        batch_size=1,
+        test_port='1300',
+        proxy_outbound_from_key=lambda *args, **kwargs: {},
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_telegram_api=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('telegram must not block youtube failover')),
+        check_http=lambda proxy, **kwargs: (True, 'yt ok'),
+        record_key_probe=lambda proto, key, **kwargs: youtube_records.append((proto, key, kwargs)),
+        proto_label=lambda proto: proto,
+        log=logs.append,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        validate_outbound=validate_outbound,
+        build_config_batch=lambda valid_batch, test_port, proxy_outbound_from_key: {'valid': valid_batch},
+        start_xray=lambda config: ('yt-process', 'yt-config.json'),
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        collect_garbage=lambda: None,
+    )
+    assert youtube_result == ('vless2', 'yt-ok', None, True)
+    assert youtube_records == [('vless2', 'yt-ok', {'tg_ok': None, 'yt_ok': True})]
 
     cancel_event = threading.Event()
     cancel_event.set()
@@ -1149,7 +1187,7 @@ def test_proxy_status_runtime_helpers():
         8080,
         command_runner=lambda *args, **kwargs: 'tcp 0 0 0.0.0.0:8080 0.0.0.0:* LISTEN\n',
     )
-    original_get = proxy_status.requests.get
+    original_session = proxy_status.requests.Session
 
     class _Response:
         status_code = 204
@@ -1158,17 +1196,28 @@ def test_proxy_status_runtime_helpers():
             pass
 
     calls = []
+    sessions = []
 
     try:
-        def fake_get(*args, **kwargs):
-            calls.append((args, kwargs))
-            return _Response()
+        class _Session:
+            trust_env = True
 
-        proxy_status.requests.get = fake_get
+            def __init__(self):
+                sessions.append(self)
+
+            def get(self, *args, **kwargs):
+                calls.append((args, kwargs, self.trust_env))
+                return _Response()
+
+            def close(self):
+                pass
+
+        proxy_status.requests.Session = _Session
         ok, message = proxy_status.check_http_through_proxy('socks5://127.0.0.1:1080')
         assert ok is True
         assert 'HTTP 204' in message
         assert calls[-1][0][0] == 'https://www.youtube.com/generate_204'
+        assert calls[-1][2] is False
         ok, message = proxy_status.check_custom_target_through_proxy(
             lambda value: 'https://example.com/path',
             'socks5://127.0.0.1:1080',
@@ -1176,8 +1225,9 @@ def test_proxy_status_runtime_helpers():
         )
         assert ok is True
         assert 'example.com' in message
+        assert calls[-1][2] is False
     finally:
-        proxy_status.requests.get = original_get
+        proxy_status.requests.Session = original_session
 
     custom_results = proxy_status.probe_custom_targets(
         'proxy',
@@ -1343,7 +1393,7 @@ def test_web_get_actions_helpers():
         'get_web_command_state': lambda: {'running': False},
         'pool_enabled': True,
         'get_pool_probe_progress': lambda: {'running': True, 'total': 2},
-        'web_pool_snapshot': lambda keys: {'vless': {'rows': []}},
+        'web_pool_snapshot': lambda keys, include_keys=False: {'vless': {'rows': []}},
         'pool_status_summary': lambda keys: {'active_text': '1 / 5'},
         'web_custom_checks': lambda: [{'id': 'custom'}],
         'time_provider': lambda: 123.0,
@@ -1354,7 +1404,11 @@ def test_web_get_actions_helpers():
     status = web_get_actions.dispatch(ctx, '/api/status')
     assert status['payload']['pool_probe_running'] is True
     assert status['payload']['timestamp'] == 123.0
+    assert 'pools' not in status['payload']
     assert refreshed == [current_keys]
+    pools = web_get_actions.dispatch(ctx, '/api/pools')
+    assert pools['payload']['pools'] == {'vless': {'rows': []}}
+    assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
     probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
     assert probe['payload']['status'] == 'running'
     panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'proto=vless')

@@ -74,9 +74,7 @@ def _status_payload(ctx):
         return payload
 
     payload.update({
-        'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys),
         'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
-        'custom_checks': _ctx(ctx, 'web_custom_checks')(),
         'pool_probe_running': pool_probe_running,
         'pool_probe_progress': progress,
         'timestamp': now,
@@ -85,6 +83,25 @@ def _status_payload(ctx):
     if cache_ttl > 0 and cache_store and not pool_probe_running:
         cache_store(payload, now)
     return payload
+
+
+def _pools_payload(ctx, query=''):
+    if not _ctx(ctx, 'pool_enabled', False):
+        return {
+            'pools': {},
+            'pool_summary': {'active_text': '', 'note': ''},
+            'custom_checks': [],
+            'timestamp': _ctx(ctx, 'time_provider', time.time)(),
+        }
+    params = parse_qs(query or '', keep_blank_values=True)
+    include_keys = str((params.get('include_keys') or [''])[0]).lower() in ('1', 'true', 'yes')
+    current_keys = _ctx(ctx, 'load_current_keys')()
+    return {
+        'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=include_keys),
+        'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
+        'custom_checks': _ctx(ctx, 'web_custom_checks')(),
+        'timestamp': _ctx(ctx, 'time_provider', time.time)(),
+    }
 
 
 def _pool_probe_payload(ctx):
@@ -145,6 +162,8 @@ def dispatch(ctx, path, query=''):
         }
     if path == '/api/status':
         return {'kind': 'json', 'payload': _status_payload(ctx), 'status': 200}
+    if path == '/api/pools' and _ctx(ctx, 'pool_enabled', False):
+        return {'kind': 'json', 'payload': _pools_payload(ctx, query), 'status': 200}
     if path == '/api/command_state':
         return {'kind': 'json', 'payload': _ctx(ctx, 'get_web_command_state')(), 'status': 200}
     if path == '/api/pool_probe' and _ctx(ctx, 'pool_enabled', False):
