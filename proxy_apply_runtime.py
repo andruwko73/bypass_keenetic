@@ -60,7 +60,8 @@ def apply_installed_proxy_runtime(
     youtube_timeouts=(3, 5),
 ):
     current = settings[key_type]
-    active_label = proxy_mode_label(load_proxy_mode())
+    active_mode = load_proxy_mode()
+    active_label = proxy_mode_label(active_mode)
     for command in current['restart_cmds']:
         run_command(command)
 
@@ -87,6 +88,22 @@ def apply_installed_proxy_runtime(
                 f'статус обновится без перезагрузки страницы. Текущий {app_mode_noun} {active_label} сохранён.').strip()
 
     proxy_url = proxy_url_getter(key_type)
+    if key_type == 'vless2' and active_mode != 'vless2' and check_http is not None:
+        yt_ok, yt_probe_message = check_http(
+            proxy_url,
+            url='https://www.youtube.com/generate_204',
+            connect_timeout=youtube_timeouts[0],
+            read_timeout=youtube_timeouts[1],
+        )
+        if record_key_probe is not None:
+            record_key_probe(key_type, key_value, tg_ok=None, yt_ok=yt_ok)
+        if yt_ok:
+            return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
+                    f'YouTube через этот ключ подтверждён. Telegram не проверялся, потому что текущий {app_mode_noun} {active_label}.').strip()
+        return (f'⚠️ {current["label"]} ключ сохранён. {endpoint_message} '
+                f'Но YouTube не проходит через этот ключ: {yt_probe_message} '
+                f'Текущий {app_mode_noun} {active_label} сохранён. {diagnostics}').strip()
+
     api_ok, api_probe_message = check_telegram_api(
         proxy_url,
         connect_timeout=telegram_timeouts[0],

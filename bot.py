@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.588, последнее изменение: 16.05.2026
+#  Файл: bot.py, Версия v1.589, последнее изменение: 16.05.2026
 
 import subprocess
 import os
@@ -398,7 +398,7 @@ YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
 )
 YOUTUBE_VLESS2_HEALTHCHECK_URLS = (
     'https://www.youtube.com/generate_204',
-    'https://rr1---sn-n8v7znse.googlevideo.com/generate_204',
+    'https://redirector.googlevideo.com/generate_204',
     'https://i.ytimg.com/generate_204',
 )
 youtube_vless2_failover_state = {
@@ -660,6 +660,13 @@ def _attempt_youtube_vless2_failover():
     if now - state['last_fail'] < YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS:
         return False
 
+    confirm_ok, confirm_message = _confirm_youtube_vless2_key()
+    if confirm_ok:
+        state['last_ok'] = time.time()
+        state['last_fail'] = 0.0
+        _record_key_probe('vless2', active_key, yt_ok=True)
+        return False
+
     state['in_progress'] = True
     state['last_attempt'] = now
     original_key = active_key
@@ -680,7 +687,7 @@ def _attempt_youtube_vless2_failover():
 
         _write_runtime_log(
             'YouTube Vless2 failover: current Vless2 key failed YouTube check; '
-            'testing Vless2 pool candidates.'
+            f'testing Vless2 pool candidates. Last confirmation: {confirm_message}'
         )
         remaining = list(candidates)
         while remaining and not shutdown_requested.is_set():
@@ -817,6 +824,7 @@ WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
+TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 3.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 5.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
@@ -2730,6 +2738,16 @@ def _check_youtube_health_through_proxy(proxy_url):
     )
 
 
+def _recent_probe_ok(probe, field, ttl):
+    if not isinstance(probe, dict) or probe.get(field) is not True:
+        return False
+    try:
+        checked_at = float(probe.get('ts') or 0)
+    except (TypeError, ValueError):
+        checked_at = 0.0
+    return bool(checked_at and time.time() - checked_at <= ttl)
+
+
 def _check_custom_target_through_proxy(proxy_url, url, connect_timeout=2, read_timeout=3):
     return _status_check_custom_target(
         _normalize_check_url,
@@ -2839,6 +2857,10 @@ def _protocol_status_for_key(key_name, key_value):
     custom_checks = _load_custom_checks()
     cached_probe = _load_key_probe_cache().get(_hash_key(key_value), {})
     custom_states = key_pool_web.web_custom_probe_states(cached_probe, custom_checks)
+    if api_transient and _recent_probe_ok(cached_probe, 'tg_ok', TELEGRAM_TRANSIENT_OK_CACHE_TTL):
+        api_ok = True
+        api_transient = False
+        api_message = f'Последняя успешная проверка Telegram сохранена; свежая проверка временно не ответила: {api_message}'
     if api_transient:
         _record_key_probe(key_name, key_value, yt_ok=yt_ok)
     else:

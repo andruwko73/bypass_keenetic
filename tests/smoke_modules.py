@@ -479,8 +479,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "proxy_mode == 'vless2'" in source
     assert 'Telegram is required because bot mode is Vless 2' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
+    assert 'redirector.googlevideo.com/generate_204' in source
     assert 'googlevideo.com/generate_204' in source
     assert 'i.ytimg.com/generate_204' in source
+    assert 'Last confirmation:' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
     assert 'def _redact_sensitive_text' in source
@@ -917,6 +919,26 @@ def test_proxy_apply_runtime_helpers():
         sleep=lambda seconds: None,
     )
     assert 'в фоне' in pending
+    vless2_records = []
+    vless2_result = proxy_apply_runtime.apply_installed_proxy_runtime(
+        'vless2',
+        'yt-key',
+        settings=settings,
+        app_mode_noun='режим бота',
+        load_proxy_mode=lambda: 'vless',
+        proxy_mode_label=lambda mode: 'Vless 1',
+        proxy_url_getter=lambda proto: 'proxy-url',
+        build_diagnostics=lambda proto, key: 'diag',
+        ensure_service_port=lambda port, restart_cmd, **kwargs: True,
+        check_local_endpoint=lambda proto, port: (True, 'SOCKS ok.'),
+        check_telegram_api=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('telegram must not block vless2 youtube apply')),
+        check_http=lambda proxy, **kwargs: (True, 'yt ok'),
+        record_key_probe=lambda proto, key, **kwargs: vless2_records.append((proto, key, kwargs)),
+        run_command=lambda command: None,
+        sleep=lambda seconds: None,
+    )
+    assert 'YouTube' in vless2_result
+    assert vless2_records == [('vless2', 'yt-key', {'tg_ok': None, 'yt_ok': True})]
 
 
 def test_pool_probe_controller_helpers():

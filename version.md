@@ -1,3 +1,6 @@
+*v1.589 (16 May 2026) -* main
+*Stabilized the Vless 2 YouTube monitor by using a durable googlevideo endpoint, confirming the current key before failover, and avoiding Telegram-only verification for Vless 2 while the bot mode is Vless 1.*
+
 *v1.588 (16 May 2026) -* main
 *Require Vless 2 YouTube recovery to confirm youtube.com, googlevideo.com, and ytimg.com on the permanent Vless 2 port before accepting a candidate key.*
 
