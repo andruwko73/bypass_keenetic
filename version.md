@@ -1,3 +1,6 @@
+*v1.588 (16 May 2026) -* main
+*Require Vless 2 YouTube recovery to confirm youtube.com, googlevideo.com, and ytimg.com on the permanent Vless 2 port before accepting a candidate key.*
+
 *v1.587 (16 May 2026) -* main
 *Split frequent web status polling from heavy pool row snapshots, added a dedicated pool snapshot API, added automatic post-pool memory recovery when Python RSS remains high after cleanup, and added service-specific failover that keeps Telegram on the selected bot mode while recovering YouTube on Vless 2.*
 

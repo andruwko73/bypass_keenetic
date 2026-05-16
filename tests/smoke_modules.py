@@ -478,6 +478,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
     assert "proxy_mode == 'vless2'" in source
     assert 'Telegram is required because bot mode is Vless 2' in source
+    assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
+    assert 'googlevideo.com/generate_204' in source
+    assert 'i.ytimg.com/generate_204' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
     assert 'def _redact_sensitive_text' in source

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.587, последнее изменение: 16.05.2026
+#  Файл: bot.py, Версия v1.588, последнее изменение: 16.05.2026
 
 import subprocess
 import os
@@ -396,6 +396,11 @@ YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
     1.0,
     float(getattr(config, 'youtube_vless2_failover_confirm_delay_seconds', 5.0)),
 )
+YOUTUBE_VLESS2_HEALTHCHECK_URLS = (
+    'https://www.youtube.com/generate_204',
+    'https://rr1---sn-n8v7znse.googlevideo.com/generate_204',
+    'https://i.ytimg.com/generate_204',
+)
 youtube_vless2_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
@@ -582,12 +587,19 @@ def _attempt_auto_failover():
 
 
 def _check_youtube_vless2_once():
-    return _check_http_through_proxy(
-        proxy_settings.get('vless2'),
-        url='https://www.youtube.com/generate_204',
-        connect_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
-        read_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
-    )
+    checked = []
+    for url in YOUTUBE_VLESS2_HEALTHCHECK_URLS:
+        ok, message = _check_http_through_proxy(
+            proxy_settings.get('vless2'),
+            url=url,
+            connect_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+            read_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+        )
+        host = url.split('/')[2]
+        if not ok:
+            return False, f'{host}: {message}'
+        checked.append(host)
+    return True, 'YouTube endpoints confirmed: ' + ', '.join(checked)
 
 
 def _confirm_youtube_vless2_key():
