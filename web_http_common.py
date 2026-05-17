@@ -78,8 +78,16 @@ class WebRequestMixin:
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Connection', 'close')
         self.end_headers()
-        self.wfile.write(body)
+        self._write_response_body(body)
         self.close_connection = True
+
+    def _write_response_body(self, body):
+        try:
+            self.wfile.write(body)
+            return True
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            self.close_connection = True
+            return False
 
     def _ensure_web_auth(self):
         expected_token = str(self.web_auth_token_getter() or '')
@@ -162,7 +170,7 @@ class WebRequestMixin:
             )
         self.send_header('Connection', 'close')
         self.end_headers()
-        self.wfile.write(body)
+        self._write_response_body(body)
         self.close_connection = True
 
     def _send_json(self, payload, status=200):
@@ -175,7 +183,7 @@ class WebRequestMixin:
         self.send_header('Expires', '0')
         self.send_header('Connection', 'close')
         self.end_headers()
-        self.wfile.write(body)
+        self._write_response_body(body)
         self.close_connection = True
 
     def _send_text_asset(self, text, content_type='text/plain; charset=utf-8', cache_seconds=0):
@@ -191,7 +199,7 @@ class WebRequestMixin:
             self.send_header('Expires', '0')
         self.send_header('Connection', 'close')
         self.end_headers()
-        self.wfile.write(body)
+        self._write_response_body(body)
         self.close_connection = True
 
     def _send_redirect(self, location='/'):
@@ -218,14 +226,15 @@ class WebRequestMixin:
             self.send_header('Cache-Control', 'public, max-age=86400')
             self.send_header('Connection', 'close')
             self.end_headers()
-            self.wfile.write(body)
+            self._write_response_body(body)
         except Exception:
+            body = b'Not Found'
             self.send_response(404)
-            self.send_header('Content-type', 'text/plain')
-            self.send_header('Content-Length', '9')
+            self.send_header('Content-type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
             self.send_header('Connection', 'close')
             self.end_headers()
-            self.wfile.write(b'Not Found')
+            self._write_response_body(body)
         self.close_connection = True
 
     def _wants_json(self):

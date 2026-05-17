@@ -507,6 +507,19 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'class _NoopTeleBot' in source
 
 
+def test_web_response_body_ignores_client_disconnect():
+    class BrokenWriter:
+        def write(self, _body):
+            raise ConnectionResetError('client closed')
+
+    request = object.__new__(web_http_common.WebRequestMixin)
+    request.wfile = BrokenWriter()
+    request.close_connection = False
+
+    assert request._write_response_body(b'body') is False
+    assert request.close_connection is True
+
+
 def test_runtime_modules_are_installed_by_update_scripts():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
@@ -2012,6 +2025,7 @@ def main():
     test_web_action_feature_gates()
     test_codex_version_matches_commit_count()
     test_runtime_startup_limits_router_flash_and_overhead()
+    test_web_response_body_ignores_client_disconnect()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_telegram_confirm_state_source()

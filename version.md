@@ -1,3 +1,6 @@
+*v1.591 (17 May 2026) -* main
+*Silenced harmless web response write tracebacks when a browser closes the connection during refreshes.*
+
 *v1.590 (17 May 2026) -* main
 *Added an idle memory watchdog restart for sustained Python RSS growth and made router memory text emphasize available RAM instead of treating reclaimable cache as lost memory.*
 
