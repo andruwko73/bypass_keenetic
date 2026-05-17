@@ -46,6 +46,7 @@ import auto_failover_runtime
 import proxy_apply_runtime
 import proxy_status
 import unblock_lists
+import service_catalog
 import installer_common
 import installer
 import repo_update
@@ -1341,6 +1342,35 @@ def test_unblock_list_helpers():
     assert unblock_lists.entries_from_service_text('one\n#comment\ntwo # note\none', {'skip'}) == ['one', 'two']
 
 
+def test_vless2_youtube_routes_are_scoped():
+    entries = {
+        line.strip()
+        for line in (ROOT / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
+        if line.strip() and not line.lstrip().startswith('#')
+    }
+    assert set(service_catalog.YOUTUBE_UNBLOCK_ENTRIES) <= entries
+    assert 'googleapis.com' not in entries
+    assert 'googleusercontent.com' not in entries
+    assert 'remotedesktop-pa.googleapis.com' not in entries
+    assert 'instantmessaging-pa.googleapis.com' not in entries
+    assert 'domain:remotedesktop.google.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
+    assert 'full:remotedesktop-pa.googleapis.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
+    assert 'full:instantmessaging-pa.googleapis.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
+    assert not {
+        '108.177.0.0/15',
+        '142.250.0.0/16',
+        '142.251.0.0/16',
+        '172.217.0.0/16',
+        '172.253.0.0/16',
+        '173.194.0.0/16',
+        '209.85.0.0/16',
+        '216.239.0.0/16',
+        '216.58.0.0/16',
+        '64.233.0.0/16',
+        '74.125.0.0/16',
+    } & entries
+
+
 def test_web_command_state_helpers():
     assert web_command_state.estimate_update_progress('noop', '', ('update',)) == (0, '')
     assert web_command_state.estimate_update_progress('update', 'Бэкап создан.') == (70, 'Резервная копия готова, идёт замена файлов')
@@ -2062,6 +2092,7 @@ def main():
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()
+    test_vless2_youtube_routes_are_scoped()
     test_web_command_state_helpers()
     test_web_http_common_helpers()
     test_installer_common_helpers()

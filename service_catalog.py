@@ -224,6 +224,9 @@ CONNECTIVITY_CHECK_DOMAINS = [
     'full:clients4.google.com',
     'full:www.google.com',
     'full:www.gstatic.com',
+    'domain:remotedesktop.google.com',
+    'full:remotedesktop-pa.googleapis.com',
+    'full:instantmessaging-pa.googleapis.com',
 ]
 
 TELEGRAM_UNBLOCK_ENTRIES = [

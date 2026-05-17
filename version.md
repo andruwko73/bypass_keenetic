@@ -1,3 +1,6 @@
+*v1.593 (17 May 2026) -* main
+*Narrowed the Vless 2 YouTube route from broad Google API and IP ranges to explicit YouTube domains, and routed Chrome Remote Desktop SNI directly when shared Google IPs still enter the transparent proxy.*
+
 *v1.592 (17 May 2026) -* main
 *Optimized large key-pool status updates, pool probing queues, pool API payloads, and bounded log-tail reading for lower router CPU and memory use.*
 
