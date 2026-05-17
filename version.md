@@ -1,3 +1,6 @@
+*v1.596 (18 May 2026) -* main
+*Clarified router DNS diagnostics for ndnproxy installations, removed duplicate ipset completion text from the router health note, and updated the README with the current DNS/ipset and Vless 2 YouTube routing behavior.*
+
 *v1.595 (18 May 2026) -* main
 *Translated router DNS/ipset health details to Russian, made Vless 2 YouTube checks less twitchy on slow keys, and split Vless 2 UDP rejection from broader TCP CDN routing for YouTube under ndnproxy.*
 

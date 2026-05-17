@@ -197,9 +197,10 @@ def test_router_health_runtime_dns_payload():
     assert payload['dnsmasq_state'] == 'dead'
     assert payload['ipset_counts']['unblockvless2'] == 34
     assert payload['ipset_counts']['unblockvless2udp'] == 12
-    assert 'DNS: ndnproxy' in payload['note']
-    assert 'S56dnsmasq: не запущен' in payload['note']
+    assert 'DNS: ndnproxy (S56dnsmasq не используется)' in payload['note']
+    assert 'S56dnsmasq: не запущен' not in payload['note']
     assert 'ipset обновлён: 1 мин назад (успешно)' in payload['note']
+    assert payload['note'].count('ipset обновлён') == 1
     assert 'unblockvless2=34' in payload['note']
     assert 'unblockvless2udp=12' in payload['note']
 

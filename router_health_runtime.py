@@ -235,14 +235,26 @@ def _format_age(seconds):
     return f'{hours // 24} дн назад'
 
 
+def _dns_backend_detail(backend, dnsmasq_state):
+    backend = backend or 'unknown'
+    dnsmasq_state = dnsmasq_state or 'unknown'
+    dnsmasq_label = DNSMASQ_STATE_LABELS.get(dnsmasq_state, dnsmasq_state)
+    if backend == 'ndnproxy' and dnsmasq_state in ('dead', 'unavailable', 'unknown'):
+        return 'DNS: ndnproxy (S56dnsmasq не используется)'
+    if backend == 'dnsmasq':
+        if dnsmasq_state in ('running', 'dead'):
+            return f'DNS: dnsmasq (S56dnsmasq {dnsmasq_label})'
+        return 'DNS: dnsmasq'
+    return f'DNS: {backend}; S56dnsmasq: {dnsmasq_label}'
+
+
 def dns_health_note(dns_health):
     if not dns_health:
         return ''
     dns_health = dns_health or {}
     backend = dns_health.get('backend') or 'unknown'
     dnsmasq_state = dns_health.get('dnsmasq_state') or 'unknown'
-    dnsmasq_label = DNSMASQ_STATE_LABELS.get(dnsmasq_state, dnsmasq_state)
-    details = [f'DNS: {backend}', f'S56dnsmasq: {dnsmasq_label}']
+    details = [_dns_backend_detail(backend, dnsmasq_state)]
     refresh_status = dns_health.get('ipset_refresh_status') or 'unknown'
     refresh_status_label = IPSET_REFRESH_STATUS_LABELS.get(refresh_status, refresh_status)
     updated_at = int(dns_health.get('ipset_updated_at') or 0)
@@ -254,9 +266,11 @@ def dns_health_note(dns_health):
     if counts:
         ordered = [f'{name}={int(counts.get(name) or 0)}' for name in IPSET_SET_NAMES if name in counts]
         details.append('записи ipset: ' + ', '.join(ordered))
-    message = str(dns_health.get('ipset_refresh_message') or '').strip()
-    message = IPSET_REFRESH_MESSAGE_LABELS.get(message, message)
-    if message and message not in details:
+    raw_message = str(dns_health.get('ipset_refresh_message') or '').strip()
+    message = IPSET_REFRESH_MESSAGE_LABELS.get(raw_message, raw_message)
+    already_shown = refresh_status == 'success' and raw_message == 'ipset refresh completed.'
+    detail_texts = {part.rstrip('.') for part in details}
+    if message and not already_shown and message.rstrip('.') not in detail_texts:
         details.append(message if message.endswith(('.', '!', '?')) else f'{message}.')
     note = '. '.join(part.rstrip('.') for part in details if part)
     return note + '.' if note else ''
