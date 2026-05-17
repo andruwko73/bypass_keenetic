@@ -26,6 +26,20 @@ def _pool_probe_running(progress):
     return bool((progress or {}).get('running')) and total > 0
 
 
+def _requested_protocols(params):
+    raw_values = []
+    for name in ('protocols', 'protocol', 'proto'):
+        raw_values.extend(params.get(name, []))
+    protocols = []
+    seen = set()
+    for item in ','.join(str(value or '') for value in raw_values).split(','):
+        item = item.strip()
+        if item and item not in seen:
+            seen.add(item)
+            protocols.append(item)
+    return protocols or None
+
+
 def _status_payload(ctx):
     now = _ctx(ctx, 'time_provider', time.time)()
     cache_ttl = float(_ctx(ctx, 'status_api_cache_ttl', 0) or 0)
@@ -95,9 +109,10 @@ def _pools_payload(ctx, query=''):
         }
     params = parse_qs(query or '', keep_blank_values=True)
     include_keys = str((params.get('include_keys') or [''])[0]).lower() in ('1', 'true', 'yes')
+    protocols = _requested_protocols(params)
     current_keys = _ctx(ctx, 'load_current_keys')()
     return {
-        'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=include_keys),
+        'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=include_keys, protocols=protocols),
         'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
         'custom_checks': _ctx(ctx, 'web_custom_checks')(),
         'timestamp': _ctx(ctx, 'time_provider', time.time)(),

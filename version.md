@@ -1,3 +1,6 @@
+*v1.592 (17 May 2026) -* main
+*Optimized large key-pool status updates, pool probing queues, pool API payloads, and bounded log-tail reading for lower router CPU and memory use.*
+
 *v1.591 (17 May 2026) -* main
 *Silenced harmless web response write tracebacks when a browser closes the connection during refreshes.*
 

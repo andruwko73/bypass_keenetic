@@ -89,9 +89,26 @@ def ensure_service_port(port, restart_cmd=None, retries=2, sleep_after_restart=5
 
 def read_tail(file_path, lines=12):
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
-            content = file.readlines()
-        return ''.join(content[-lines:]).strip() if content else ''
+        line_count = max(0, int(lines or 0))
+        if line_count <= 0:
+            return ''
+        chunks = []
+        newline_count = 0
+        with open(file_path, 'rb') as file:
+            file.seek(0, os.SEEK_END)
+            remaining = file.tell()
+            while remaining > 0 and newline_count <= line_count:
+                read_size = min(4096, remaining)
+                remaining -= read_size
+                file.seek(remaining)
+                chunk = file.read(read_size)
+                chunks.append(chunk)
+                newline_count += chunk.count(b'\n')
+        if not chunks:
+            return ''
+        text = b''.join(reversed(chunks)).decode('utf-8', errors='ignore')
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        return ''.join(text.splitlines(True)[-line_count:]).strip()
     except Exception as exc:
         return f'Не удалось прочитать {file_path}: {exc}'
 

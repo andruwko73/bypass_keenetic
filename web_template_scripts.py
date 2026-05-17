@@ -38,6 +38,7 @@ def render_web_scripts(
         let statusPollUntil = 0;
         let poolProbeWasRunning = false;
         let poolDataRefreshTimer = null;
+        let poolViewTimers = {{}};
         let commandPollTimer = null;
         let actionMessageTimer = null;
         let activeCommandName = '';
@@ -1027,7 +1028,37 @@ def render_web_scripts(
             return true;
         }}
 
-        function applyPoolView(proto) {{
+        function schedulePoolView(proto, delayMs) {{
+            if (!proto) {{
+                return;
+            }}
+            if (poolViewTimers[proto]) {{
+                window.clearTimeout(poolViewTimers[proto]);
+            }}
+            poolViewTimers[proto] = window.setTimeout(function() {{
+                poolViewTimers[proto] = null;
+                applyPoolView(proto, false);
+            }}, Math.max(0, Number(delayMs || 0)));
+        }}
+
+        function loadedPoolProtocolQuery() {{
+            const protocols = [];
+            document.querySelectorAll('[data-protocol-panel]').forEach(function(panel) {{
+                const proto = panel.getAttribute('data-protocol-panel') || '';
+                if (!proto || panel.dataset.protocolLoaded === '0') {{
+                    return;
+                }}
+                if (!panel.querySelector('[data-pool-body="' + proto + '"]')) {{
+                    return;
+                }}
+                if (protocols.indexOf(proto) === -1) {{
+                    protocols.push(proto);
+                }}
+            }});
+            return protocols.length ? '?protocols=' + encodeURIComponent(protocols.join(',')) : '';
+        }}
+
+        function applyPoolView(proto, forceSort) {{
             if (!proto) {{
                 return;
             }}
@@ -1047,6 +1078,9 @@ def render_web_scripts(
                 const matchesState = poolRowMatchesState(row, stateFilter);
                 row.classList.toggle('pool-row-hidden', !(matchesText && matchesState));
             }});
+            if (!forceSort && body.dataset.poolAppliedSort === sortMode) {{
+                return;
+            }}
             rows.sort(function(left, right) {{
                 const leftIndex = Number(left.dataset.poolIndex || 0);
                 const rightIndex = Number(right.dataset.poolIndex || 0);
@@ -1073,9 +1107,12 @@ def render_web_scripts(
                 }}
                 return leftIndex - rightIndex;
             }});
+            const fragment = document.createDocumentFragment();
             rows.forEach(function(row) {{
-                body.appendChild(row);
+                fragment.appendChild(row);
             }});
+            body.appendChild(fragment);
+            body.dataset.poolAppliedSort = sortMode;
         }}
 
         function closePoolSortMenus(exceptProto) {{
@@ -1104,7 +1141,11 @@ def render_web_scripts(
                 control.dataset.poolControlReady = '1';
                 const proto = control.dataset.poolFilter || control.dataset.poolSort || '';
                 control.addEventListener(control.matches('input') ? 'input' : 'change', function() {{
-                    applyPoolView(proto);
+                    if (control.matches('input')) {{
+                        schedulePoolView(proto, 120);
+                    }} else {{
+                        applyPoolView(proto, true);
+                    }}
                 }});
             }});
             scope.querySelectorAll('[data-pool-sort-button]').forEach(function(button) {{
@@ -1149,7 +1190,7 @@ def render_web_scripts(
                         }});
                     }}
                     closePoolSortMenus();
-                    applyPoolView(proto);
+                    applyPoolView(proto, true);
                 }});
             }});
             if (document.body.dataset.poolSortDismissReady !== '1') {{
@@ -1177,9 +1218,11 @@ def render_web_scripts(
             }}
             if (!rows.length) {{
                 body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите subscription.</td></tr>';
+                body.dataset.poolAppliedSort = '';
                 setupPoolControls(body.closest('[data-protocol-panel]') || document);
                 return;
             }}
+            body.dataset.poolAppliedSort = '';
             body.innerHTML = rows.map(function(row, position) {{
                 const activeClass = row.active ? ' pool-row-active' : '';
                 const activeText = row.active ? 'активен' : '';
@@ -1211,7 +1254,7 @@ def render_web_scripts(
             }}).join('');
             setupAsyncForms(body);
             setupPoolControls(body.closest('[data-protocol-panel]') || document);
-            applyPoolView(proto);
+            applyPoolView(proto, true);
         }}
 
         function updatePoolRows(proto, pool) {{
@@ -1224,15 +1267,20 @@ def render_web_scripts(
             if (tab) {{
                 tab.textContent = String(pool.count || rows.length);
             }}
-            body.querySelectorAll('[data-pool-row]').forEach(function(item) {{
+            const rowElements = Array.from(body.querySelectorAll('[data-pool-row]'));
+            const rowByKeyId = new Map();
+            rowElements.forEach(function(item) {{
                 item.classList.remove('pool-row-active');
                 const meta = item.querySelector('[data-pool-key-meta]');
                 if (meta) {{
                     meta.textContent = '';
                 }}
+                if (item.dataset.keyId) {{
+                    rowByKeyId.set(item.dataset.keyId, item);
+                }}
             }});
             rows.forEach(function(row) {{
-                const item = body.querySelector('[data-key-id="' + row.key_id + '"]');
+                const item = rowByKeyId.get(String(row.key_id || ''));
                 if (!item) {{
                     return;
                 }}
@@ -1263,7 +1311,7 @@ def render_web_scripts(
                     checked.textContent = row.checked_at || '';
                 }}
             }});
-            applyPoolView(proto);
+            applyPoolView(proto, true);
         }}
 
         function updatePoolStatus(pools) {{
@@ -1317,7 +1365,7 @@ def render_web_scripts(
             }}
             poolDataRefreshTimer = window.setTimeout(function() {{
                 poolDataRefreshTimer = null;
-                fetch('/api/pools', {{
+                fetch('/api/pools' + loadedPoolProtocolQuery(), {{
                     headers: {{'Accept': 'application/json'}},
                     cache: 'no-store'
                 }})
@@ -1683,7 +1731,7 @@ def render_web_scripts(
                     mobileMeta.textContent = meta ? meta.textContent : '';
                 }}
             }});
-            applyPoolView(proto);
+            applyPoolView(proto, true);
         }}
 
         function setButtonBusy(button, busy) {{

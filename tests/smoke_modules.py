@@ -302,6 +302,20 @@ def test_key_pool_web():
     assert row['display_name'] == 'VLESS-KEY'
     assert row['custom'] == {'custom': 'ok'}
     assert row['key'] == 'vless-key'
+    scoped_snapshot = key_pool_web.web_pool_snapshot(
+        current,
+        pools,
+        cache,
+        checks,
+        include_keys=False,
+        hash_key=_hash_key,
+        display_name=lambda value: value.upper(),
+        probe_state=lambda probe, field: 'ok' if probe.get(field) else 'fail' if field in probe else 'unknown',
+        probe_checked_at=lambda probe: str(probe.get('ts', '')),
+        protocols=['vmess'],
+    )
+    assert list(scoped_snapshot) == ['vmess']
+    assert scoped_snapshot['vmess']['rows'][0]['key_id'] == _hash_key('vmess-key')[:12]
     def icon_html(icon, alt, opacity=1.0, size=18):
         return f'<img data-icon="{icon}" alt="{alt}">'
     check_defs = [{'id': 'custom', 'label': 'Custom', 'url': 'https://example.com/path', 'icon': 'chat'}]
@@ -1227,6 +1241,37 @@ def test_pool_probe_runner_failover_candidate():
         ('vless', 'sockless', {'tg_ok': False, 'yt_ok': False, 'custom': {'custom': False}}),
     ]
 
+    ordered_tasks = [('vless', f'key-{index}') for index in range(8)]
+    processed = []
+    checked_values = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        ordered_tasks,
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=checked_values.append,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: processed.append((proto, key)),
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+    )
+    assert (checked, total) == (len(ordered_tasks), len(ordered_tasks))
+    assert processed == ordered_tasks
+    assert checked_values == list(range(1, len(ordered_tasks) + 1))
+
 
 def test_proxy_status_runtime_helpers():
     assert proxy_status.port_is_listening(
@@ -1426,7 +1471,11 @@ def test_repo_update_helpers():
 
 def test_web_get_actions_helpers():
     refreshed = []
+    pool_snapshot_calls = []
     current_keys = {'vless': 'key'}
+    def pool_snapshot(keys, include_keys=False, protocols=None):
+        pool_snapshot_calls.append((keys, include_keys, protocols))
+        return {proto: {'rows': []} for proto in (protocols or ['vless'])}
     ctx = {
         'build_form': lambda message: 'form:' + message,
         'build_protocol_panel': lambda proto: 'panel:' + proto,
@@ -1439,7 +1488,7 @@ def test_web_get_actions_helpers():
         'get_web_command_state': lambda: {'running': False},
         'pool_enabled': True,
         'get_pool_probe_progress': lambda: {'running': True, 'total': 2},
-        'web_pool_snapshot': lambda keys, include_keys=False: {'vless': {'rows': []}},
+        'web_pool_snapshot': pool_snapshot,
         'pool_status_summary': lambda keys: {'active_text': '1 / 5'},
         'web_custom_checks': lambda: [{'id': 'custom'}],
         'time_provider': lambda: 123.0,
@@ -1455,6 +1504,9 @@ def test_web_get_actions_helpers():
     pools = web_get_actions.dispatch(ctx, '/api/pools')
     assert pools['payload']['pools'] == {'vless': {'rows': []}}
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
+    scoped_pools = web_get_actions.dispatch(ctx, '/api/pools', 'protocols=vless,vmess')
+    assert scoped_pools['payload']['pools'] == {'vless': {'rows': []}, 'vmess': {'rows': []}}
+    assert pool_snapshot_calls[-1] == (current_keys, False, ['vless', 'vmess'])
     probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
     assert probe['payload']['status'] == 'running'
     panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'proto=vless')
@@ -1813,6 +1865,10 @@ def test_web_template_scripts_helpers():
     assert 'function applyLiquidAction(clientX, clientY)' in scripts
     assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
     assert 'function resetLiquidState()' in scripts
+    assert 'function loadedPoolProtocolQuery()' in scripts
+    assert 'function schedulePoolView(proto, delayMs)' in scripts
+    assert 'const rowByKeyId = new Map();' in scripts
+    assert "fetch('/api/pools' + loadedPoolProtocolQuery()" in scripts
     assert 'state.scrolled = true' in scripts
     assert "if (typeof delay === 'number' && delay <= 0)" in scripts
     assert 'if (liquidTouchState && liquidTouchState.scrolled)' in scripts

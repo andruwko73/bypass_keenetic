@@ -261,19 +261,25 @@ def web_pool_snapshot(
     display_name,
     probe_state,
     probe_checked_at,
+    protocols=None,
 ):
     current_keys = current_keys or {}
     pools = pools or {}
     cache = cache or {}
     result = {}
-    for proto in POOL_PROTOCOL_ORDER:
+    protocol_order = [
+        proto for proto in (protocols or POOL_PROTOCOL_ORDER)
+        if proto in POOL_PROTOCOL_ORDER
+    ]
+    for proto in protocol_order:
         current_key = current_keys.get(proto, '')
         rows = []
         for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
-            probe = cache.get(hash_key(key_value), {})
+            key_hash = hash_key(key_value)
+            probe = cache.get(key_hash, {})
             row = {
                 'index': index,
-                'key_id': hash_key(key_value)[:12],
+                'key_id': key_hash[:12],
                 'display_name': display_name(key_value),
                 'active': bool(current_key and key_value == current_key),
                 'tg': probe_state(probe, 'tg_ok'),

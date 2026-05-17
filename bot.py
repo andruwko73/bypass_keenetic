@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.591, последнее изменение: 17.05.2026
+#  Файл: bot.py, Версия v1.592, последнее изменение: 17.05.2026
 
 import subprocess
 import os
@@ -85,6 +85,7 @@ from unblock_lists import (
     write_unblock_list_entries as _write_unblock_list_entries,
 )
 from custom_checks_store import (
+    CUSTOM_CHECKS_PATH as _CUSTOM_CHECKS_PATH,
     add_custom_check as _store_add_custom_check,
     custom_check_presets as _custom_check_presets,
     delete_custom_check as _store_delete_custom_check,
@@ -146,6 +147,7 @@ from pool_probe_controller import (
     start_pool_probe_worker,
 )
 from probe_cache import (
+    KEY_PROBE_CACHE_PATH as _KEY_PROBE_CACHE_PATH,
     KeyProbeBatchRecorder as _KeyProbeBatchRecorder,
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
@@ -957,6 +959,10 @@ web_status_api_cache = {
     'timestamp': 0,
     'payload': None,
 }
+pool_summary_cache = {
+    'signature': None,
+    'summary': None,
+}
 router_health = router_health_runtime.RouterHealthRuntime(cache_ttl=ROUTER_HEALTH_CACHE_TTL)
 active_mode_status_cache = {
     'timestamp': 0,
@@ -965,6 +971,7 @@ active_mode_status_cache = {
 }
 active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
+pool_summary_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 key_pool_lock = threading.RLock()
@@ -2724,6 +2731,31 @@ def _invalidate_web_status_api_cache():
     with web_status_api_cache_lock:
         web_status_api_cache['timestamp'] = 0
         web_status_api_cache['payload'] = None
+    _invalidate_pool_summary_cache()
+
+
+def _invalidate_pool_summary_cache():
+    with pool_summary_cache_lock:
+        pool_summary_cache['signature'] = None
+        pool_summary_cache['summary'] = None
+
+
+def _file_cache_signature(path):
+    try:
+        stat_info = os.stat(path)
+        return (stat_info.st_mtime_ns, stat_info.st_size)
+    except Exception:
+        return None
+
+
+def _pool_summary_cache_signature(current_keys):
+    current_keys = current_keys or {}
+    return (
+        tuple((proto, current_keys.get(proto, '')) for proto in POOL_PROTOCOL_ORDER),
+        _file_cache_signature(KEY_POOLS_PATH),
+        _file_cache_signature(_KEY_PROBE_CACHE_PATH),
+        _file_cache_signature(_CUSTOM_CHECKS_PATH),
+    )
 
 
 def _get_web_status_api_cache():
@@ -3131,9 +3163,7 @@ def _last_proxy_disable_reason():
         for log_path in RUNTIME_ERROR_LOG_PATHS:
             if not os.path.exists(log_path):
                 continue
-            with open(log_path, 'r', encoding='utf-8', errors='ignore') as file:
-                lines = file.readlines()
-            for line in reversed(lines[-80:]):
+            for line in reversed(_read_tail(log_path, lines=80).splitlines()):
                 marker = 'Прокси-режим '
                 if marker not in line or ' отключён при старте: ' not in line:
                     continue
@@ -3342,16 +3372,27 @@ def _format_pool_summary():
 
 def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None, custom_checks=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
-    key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
-    key_probe_cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
-    custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    return key_pool_web.pool_status_summary(
+    can_use_cache = key_pools is None and key_probe_cache is None and custom_checks is None
+    signature = _pool_summary_cache_signature(current_keys) if can_use_cache else None
+    if can_use_cache:
+        with pool_summary_cache_lock:
+            if pool_summary_cache.get('signature') == signature and pool_summary_cache.get('summary') is not None:
+                return pool_summary_cache['summary']
+    resolved_key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
+    resolved_key_probe_cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
+    resolved_custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
+    summary = key_pool_web.pool_status_summary(
         current_keys,
-        key_pools,
-        key_probe_cache,
-        custom_checks,
+        resolved_key_pools,
+        resolved_key_probe_cache,
+        resolved_custom_checks,
         _hash_key,
     )
+    if can_use_cache:
+        with pool_summary_cache_lock:
+            pool_summary_cache['signature'] = signature
+            pool_summary_cache['summary'] = summary
+    return summary
 def _pool_page_info(proto, page=0):
     keys = _pool_keys_for_proto(proto)
     total = len(keys)
@@ -4266,7 +4307,7 @@ def _add_subscription_keys_to_pool(proto, fetched_keys):
 def _web_custom_checks():
     return key_pool_web.web_custom_checks(_load_custom_checks())
 
-def _web_pool_snapshot(current_keys=None, include_keys=False):
+def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
     return key_pool_web.web_pool_snapshot(
         current_keys,
@@ -4278,6 +4319,7 @@ def _web_pool_snapshot(current_keys=None, include_keys=False):
         display_name=_pool_key_display_name,
         probe_state=key_pool_web.web_probe_state,
         probe_checked_at=key_pool_web.web_probe_checked_at,
+        protocols=protocols,
     )
 
 

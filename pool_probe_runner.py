@@ -7,6 +7,7 @@ import signal
 import subprocess
 import threading
 import time
+from collections import deque
 
 YOUTUBE_HEALTHCHECK_URL = 'https://www.youtube.com/generate_204'
 
@@ -219,13 +220,16 @@ def find_pool_failover_candidate(
     cleanup_runtime=cleanup_pool_probe_runtime,
     collect_garbage=gc.collect,
 ):
-    probe_tasks = [(proto, (key_value or '').strip()) for proto, key_value in candidates if (key_value or '').strip()]
+    probe_tasks = deque(
+        (proto, (key_value or '').strip())
+        for proto, key_value in candidates
+        if (key_value or '').strip()
+    )
     batch_size = max(1, int(batch_size or 1))
     tg_connect, tg_read = telegram_timeouts
     http_connect, http_read = http_timeouts
     while probe_tasks:
-        raw_batch = probe_tasks[:batch_size]
-        del probe_tasks[:batch_size]
+        raw_batch = [probe_tasks.popleft() for _ in range(min(batch_size, len(probe_tasks)))]
         valid_batch = []
         for proto, key_value in raw_batch:
             try:
@@ -310,7 +314,8 @@ def run_pool_probe_worker(
     sleep=time.sleep,
     time_provider=time.time,
 ):
-    total = len(probe_tasks)
+    pending_tasks = deque(probe_tasks or [])
+    total = len(pending_tasks)
     checked = 0
     marked_tasks = set()
 
@@ -343,7 +348,7 @@ def run_pool_probe_worker(
         return None
 
     try:
-        while probe_tasks:
+        while pending_tasks:
             if cancel_requested():
                 log('Проверка пула приостановлена для применения выбранного ключа.')
                 break
@@ -365,8 +370,7 @@ def run_pool_probe_worker(
             low_memory_since = None
             update_note('')
 
-            raw_batch = probe_tasks[:batch_size]
-            del probe_tasks[:batch_size]
+            raw_batch = [pending_tasks.popleft() for _ in range(min(batch_size, len(pending_tasks)))]
             valid_batch = []
 
             for proto, key_value in raw_batch:
@@ -399,7 +403,7 @@ def run_pool_probe_worker(
                     )
                     log(note)
                     update_note(note)
-                    probe_tasks[:0] = valid_batch
+                    pending_tasks.extendleft(reversed(valid_batch))
                     continue
                 ready_batch = []
                 for offset, (proto, key_value) in enumerate(valid_batch):
@@ -496,14 +500,14 @@ def run_pool_probe_worker(
                 del valid_batch
                 gc.collect()
 
-            if checked < total and probe_tasks:
+            if checked < total and pending_tasks:
                 sleep(delay_seconds)
     except Exception as exc:
         log(f'Ошибка фоновой проверки пула ключей: {exc}')
     finally:
-        if (cancel_requested() or paused_remaining) and probe_tasks and on_cancelled_remaining:
+        if (cancel_requested() or paused_remaining) and pending_tasks and on_cancelled_remaining:
             try:
-                on_cancelled_remaining(list(probe_tasks))
+                on_cancelled_remaining(list(pending_tasks))
             except Exception as exc:
                 log(f'Не удалось сохранить очередь продолжения проверки пула: {exc}')
         invalidate_caches()
