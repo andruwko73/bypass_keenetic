@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.596, последнее изменение: 18.05.2026
+#  Файл: bot.py, Версия v1.597, последнее изменение: 18.05.2026
 
 import subprocess
 import os
@@ -858,8 +858,9 @@ POOL_PROBE_SINGLE_TIMEOUT_SECONDS = max(
     8.0,
     POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
     POOL_PROBE_HTTP_CONNECT_TIMEOUT + POOL_PROBE_HTTP_READ_TIMEOUT +
+    POOL_PROBE_RETRY_CONNECT_TIMEOUT + POOL_PROBE_RETRY_READ_TIMEOUT +
     POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
-    POOL_PROBE_HTTP_CONNECT_TIMEOUT + POOL_PROBE_HTTP_READ_TIMEOUT + 3.0,
+    POOL_PROBE_RETRY_CONNECT_TIMEOUT + POOL_PROBE_RETRY_READ_TIMEOUT + 3.0,
 )
 POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
     getattr(config, 'pool_probe_batch_timeout_seconds', POOL_PROBE_SINGLE_TIMEOUT_SECONDS + 5.0)
@@ -869,6 +870,7 @@ POOL_PROBE_TIMEOUTS = (
     POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT,
     POOL_PROBE_CUSTOM_CONNECT_TIMEOUT, POOL_PROBE_CUSTOM_READ_TIMEOUT,
     POOL_PROBE_SINGLE_TIMEOUT_SECONDS, POOL_PROBE_BATCH_TIMEOUT_SECONDS,
+    POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT,
 )
 POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 MEMORY_WATCHDOG_ENABLED = bool(getattr(config, 'memory_watchdog_enabled', True))
@@ -2790,16 +2792,16 @@ def _check_http_through_proxy(proxy_url, url='https://www.youtube.com/generate_2
 def _check_youtube_health_through_proxy(proxy_url):
     ok, message = _check_http_through_proxy(
         proxy_url,
-        connect_timeout=2,
-        read_timeout=3,
+        connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
+        read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
     )
     if ok or not _status_is_transient_text(message):
         return ok, message
     time.sleep(0.2)
     return _check_http_through_proxy(
         proxy_url,
-        connect_timeout=5,
-        read_timeout=8,
+        connect_timeout=POOL_PROBE_RETRY_CONNECT_TIMEOUT,
+        read_timeout=POOL_PROBE_RETRY_READ_TIMEOUT,
     )
 
 
@@ -3995,6 +3997,7 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
         telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
         http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
+        http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
     )
 
 

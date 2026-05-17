@@ -585,6 +585,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
     assert "getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)" in source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
+    assert 'http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT)' in source
     assert 'redirector.googlevideo.com/generate_204' in source
     assert 'googlevideo.com/generate_204' in source
     assert 'i.ytimg.com/generate_204' in source
@@ -1134,7 +1135,7 @@ def test_pool_probe_controller_helpers():
 
     records = []
     tg_results = iter([(False, ''), (False, '')])
-    yt_results = iter([(False, ''), (False, '')])
+    yt_results = iter([(False, ''), (False, ''), (False, '')])
     pool_probe_controller.check_pool_key_through_proxy(
         'vless',
         'key',
@@ -1153,6 +1154,30 @@ def test_pool_probe_controller_helpers():
         ('vless', 'key', {'tg_ok': False, 'yt_ok': False}),
         ('vless', 'key', {'custom': {'custom': False}}),
     ]
+
+    records = []
+    http_calls = []
+    yt_results = iter([(False, 'timeout'), (True, 'ok')])
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'key',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (True, ''),
+        check_http=lambda proxy, **kwargs: (http_calls.append(kwargs) or next(yt_results)),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        http_retry_timeouts=(6, 10),
+        sleep=lambda seconds: None,
+    )
+    assert http_calls == [
+        {'connect_timeout': 3, 'read_timeout': 4},
+        {'connect_timeout': 6, 'read_timeout': 10},
+    ]
+    assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': True})]
 
 
 def test_pool_probe_runner_failover_candidate():

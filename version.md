@@ -1,3 +1,6 @@
+*v1.597 (18 May 2026) -* main
+*Made pool YouTube checks retry with the longer proxy timeout budget before marking Vless keys as YouTube failures, so slow-but-working pool keys are no longer shown as broken after one short probe.*
+
 *v1.596 (18 May 2026) -* main
 *Clarified router DNS diagnostics for ndnproxy installations, removed duplicate ipset completion text from the router health note, and updated the README with the current DNS/ipset and Vless 2 YouTube routing behavior.*
 

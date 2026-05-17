@@ -56,13 +56,21 @@ def available_memory_kb(meminfo_path='/proc/meminfo'):
 
 
 def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
-    tg_connect, tg_read, http_connect, http_read, custom_connect, custom_read, single_timeout, batch_timeout = timeouts
+    tg_connect, tg_read, http_connect, http_read, custom_connect, custom_read, single_timeout, batch_timeout = timeouts[:8]
+    has_http_retry_timeouts = len(timeouts) > 9
+    retry_http_connect = timeouts[8] if has_http_retry_timeouts else 0
+    retry_http_read = timeouts[9] if has_http_retry_timeouts else 0
     custom_target_count = 0
     for check in custom_checks or []:
         targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
         custom_target_count += len([target for target in targets[:2] if target])
-    base_per_key = tg_connect + tg_read + http_connect + http_read + custom_target_count * (custom_connect + custom_read)
-    retry_per_key = tg_connect + tg_read
+    base_per_key = (
+        tg_connect + tg_read +
+        http_connect + http_read +
+        retry_http_connect + retry_http_read +
+        custom_target_count * (custom_connect + custom_read)
+    )
+    retry_per_key = tg_connect + tg_read + retry_http_connect + retry_http_read
     per_key = max(single_timeout, base_per_key + retry_per_key + 5.0)
     workers = max(1, int(workers or 1))
     task_count = max(1, int(task_count or 1))
@@ -83,19 +91,24 @@ def check_pool_key_through_proxy(
     retry_delay_seconds,
     telegram_timeouts,
     http_timeouts,
+    http_retry_timeouts=None,
     sleep=time.sleep,
 ):
     tg_connect, tg_read = telegram_timeouts
     http_connect, http_read = http_timeouts
+    retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
     tg_ok, _ = check_telegram_api(proxy_url, connect_timeout=tg_connect, read_timeout=tg_read)
     yt_ok, _ = check_http(proxy_url, connect_timeout=http_connect, read_timeout=http_read)
+    if not yt_ok and (retry_http_connect, retry_http_read) != (http_connect, http_read):
+        sleep(retry_delay_seconds)
+        yt_ok, _ = check_http(proxy_url, connect_timeout=retry_http_connect, read_timeout=retry_http_read)
     if not tg_ok and not yt_ok:
         sleep(retry_delay_seconds)
         tg_ok, _ = check_telegram_api(proxy_url, connect_timeout=tg_connect, read_timeout=tg_read)
-        yt_ok, _ = check_http(proxy_url, connect_timeout=http_connect, read_timeout=http_read)
+        yt_ok, _ = check_http(proxy_url, connect_timeout=retry_http_connect, read_timeout=retry_http_read)
     elif not yt_ok:
         sleep(retry_delay_seconds)
-        yt_ok, _ = check_http(proxy_url, connect_timeout=http_connect, read_timeout=http_read)
+        yt_ok, _ = check_http(proxy_url, connect_timeout=retry_http_connect, read_timeout=retry_http_read)
 
     record_tg_ok = tg_ok if (tg_ok or not yt_ok) else 'unknown'
     record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok)
