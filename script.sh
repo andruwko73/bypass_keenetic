@@ -721,6 +721,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock.dnsmasq" "$stage_dir/unblock_dnsmasq.sh" "#!/bin/sh" "unblock.dnsmasq" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab" "$stage_dir/crontab" "unblock_ipset.sh" "crontab" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
     for module in $BOT_RUNTIME_MODULES; do
       stage_runtime_module "$module" "" || exit 1
@@ -780,6 +781,7 @@ if [ "$1" = "-update" ]; then
     [ -f /opt/bin/unblock_dnsmasq.sh ] && mv /opt/bin/unblock_dnsmasq.sh "$backup_dir"/unblock_dnsmasq.sh
     [ -f /opt/bin/unblock_update.sh ] && mv /opt/bin/unblock_update.sh "$backup_dir"/unblock_update.sh
     [ -f /opt/etc/dnsmasq.conf ] && mv /opt/etc/dnsmasq.conf "$backup_dir"/dnsmasq.conf
+    [ -f /opt/etc/crontab ] && mv /opt/etc/crontab "$backup_dir"/crontab
     [ -f /opt/etc/ndm/fs.d/100-ipset.sh ] && mv /opt/etc/ndm/fs.d/100-ipset.sh "$backup_dir"/100-ipset.sh
     [ -f /opt/etc/ndm/netfilter.d/100-redirect.sh ] && mv /opt/etc/ndm/netfilter.d/100-redirect.sh "$backup_dir"/100-redirect.sh
     if [ -f "$BOT_MAIN_PATH" ]; then
@@ -809,6 +811,8 @@ if [ "$1" = "-update" ]; then
 
     mv "$stage_dir/dnsmasq.conf" /opt/etc/dnsmasq.conf
     chmod 755 /opt/etc/dnsmasq.conf
+    mv "$stage_dir/crontab" /opt/etc/crontab
+    chmod 755 /opt/etc/crontab
 
     configure_core_proxy_service
 
@@ -827,7 +831,8 @@ if [ "$1" = "-update" ]; then
     cleanup_update_artifacts 3
     echo "Обновления скачены, права настроены."
 
-    /opt/etc/init.d/S56dnsmasq restart > /dev/null 2>&1
+    /opt/bin/unblock_update.sh > /dev/null 2>&1 || true
+    /opt/etc/init.d/S10cron restart > /dev/null 2>&1 || /opt/etc/init.d/S10cron start > /dev/null 2>&1 || true
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
     start_preferred_core_service
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.593, последнее изменение: 17.05.2026
+#  Файл: bot.py, Версия v1.594, последнее изменение: 17.05.2026
 
 import subprocess
 import os
@@ -2435,7 +2435,7 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
 
 def _restart_router_services():
     commands = [
-        '/opt/etc/init.d/S56dnsmasq restart',
+        '/opt/bin/unblock_update.sh',
         '/opt/etc/init.d/S22shadowsocks restart',
         CORE_PROXY_SERVICE_SCRIPT + ' restart',
         '/opt/etc/init.d/S22trojan restart',

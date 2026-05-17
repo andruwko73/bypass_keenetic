@@ -2,20 +2,39 @@
 
 DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
+DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-20}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
+LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
+STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
+SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
 
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+	echo "unblock_ipset is already running."
+	exit 0
+fi
+
+start_ts="$(date +%s 2>/dev/null || echo 0)"
 tmp_dir="$(mktemp -d /tmp/unblock-ipset.XXXXXX 2>/dev/null || echo "/tmp/unblock-ipset.$$")"
-mkdir -p "$tmp_dir" || exit 1
+mkdir -p "$tmp_dir" || { rmdir "$LOCK_DIR" >/dev/null 2>&1 || true; exit 1; }
 restore_file="$tmp_dir/restore"
+sorted_restore_file="$tmp_dir/restore.sorted"
+temp_sets_file="$tmp_dir/temp_sets"
 : > "$restore_file"
+: > "$temp_sets_file"
 
 cleanup() {
+	if [ -f "$temp_sets_file" ]; then
+		while IFS= read -r tmp_set; do
+			[ -n "$tmp_set" ] && ipset destroy "$tmp_set" >/dev/null 2>&1 || true
+		done < "$temp_sets_file"
+	fi
 	rm -rf "$tmp_dir"
+	rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -27,10 +46,94 @@ trim_line() {
 	sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g;s/"/\\"/g'
+}
+
+detect_dns_backend() {
+	dns_lines="$(netstat -lnptu 2>/dev/null | grep -E ':53[[:space:]]' || true)"
+	if printf '%s\n' "$dns_lines" | grep -q 'dnsmasq'; then
+		printf '%s\n' dnsmasq
+		return 0
+	fi
+	if printf '%s\n' "$dns_lines" | grep -q 'ndnproxy'; then
+		printf '%s\n' ndnproxy
+		return 0
+	fi
+	if [ -n "$dns_lines" ]; then
+		printf '%s\n' unknown
+		return 0
+	fi
+	if pidof dnsmasq >/dev/null 2>&1; then
+		printf '%s\n' dnsmasq
+		return 0
+	fi
+	if pidof ndnproxy >/dev/null 2>&1; then
+		printf '%s\n' ndnproxy
+		return 0
+	fi
+	printf '%s\n' none
+}
+
+ipset_count() {
+	ipset list "$1" 2>/dev/null | awk '
+		/^Number of entries:/ { print $4; found_number=1; exit }
+		found_members && length($0) { count++ }
+		/^Members:/ { found_members=1 }
+		END {
+			if (!found_number) {
+				print count + 0
+			}
+		}
+	'
+}
+
+status_counts_json() {
+	first=1
+	printf '{'
+	for set_name in $SET_NAMES; do
+		count="$(ipset_count "$set_name")"
+		[ -n "$count" ] || count=0
+		if [ "$first" -eq 0 ]; then
+			printf ','
+		fi
+		first=0
+		printf '"%s":%s' "$set_name" "$count"
+	done
+	printf '}'
+}
+
+write_status() {
+	state="$1"
+	message="$2"
+	now_ts="$(date +%s 2>/dev/null || echo 0)"
+	duration=0
+	if [ "$start_ts" -gt 0 ] 2>/dev/null && [ "$now_ts" -gt "$start_ts" ] 2>/dev/null; then
+		duration=$((now_ts - start_ts))
+	fi
+	backend="$(detect_dns_backend)"
+	counts_json="$(status_counts_json)"
+	status_dir="${STATUS_FILE%/*}"
+	[ "$status_dir" = "$STATUS_FILE" ] || mkdir -p "$status_dir" >/dev/null 2>&1 || true
+	tmp_status="${STATUS_FILE}.$$"
+	escaped_message="$(json_escape "$message")"
+	printf '{"status":"%s","message":"%s","updated_at":%s,"duration_seconds":%s,"dns_host":"%s","dns_port":%s,"dns_backend":"%s","counts":%s}\n' \
+		"$state" "$escaped_message" "$now_ts" "$duration" "$DNS_HOST" "$DNS_PORT" "$backend" "$counts_json" > "$tmp_status" 2>/dev/null \
+		&& mv "$tmp_status" "$STATUS_FILE" >/dev/null 2>&1 || rm -f "$tmp_status"
+}
+
+fail_status() {
+	message="$1"
+	logger -t "$TAG" "$message"
+	write_status failure "$message"
+	echo "$message"
+	exit 1
+}
+
 append_restore() {
-	set_name="$1"
+	tmp_set="$1"
 	value="$2"
-	[ -n "$set_name" ] && [ -n "$value" ] && printf 'add %s %s\n' "$set_name" "$value" >> "$restore_file"
+	[ -n "$tmp_set" ] && [ -n "$value" ] && printf 'add %s %s\n' "$tmp_set" "$value" >> "$restore_file"
 }
 
 extract_direct_entry() {
@@ -63,9 +166,19 @@ normalize_domain() {
 }
 
 wait_for_dns() {
+	deadline=0
+	now_ts="$(date +%s 2>/dev/null || echo 0)"
+	if [ "$DNS_WAIT_SECONDS" -gt 0 ] 2>/dev/null && [ "$now_ts" -gt 0 ] 2>/dev/null; then
+		deadline=$((now_ts + DNS_WAIT_SECONDS))
+	fi
+
 	while :; do
 		if dig +short google.com @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null | grep -Eq "$IPV4_RE"; then
 			return 0
+		fi
+		now_ts="$(date +%s 2>/dev/null || echo 0)"
+		if [ "$deadline" -gt 0 ] 2>/dev/null && [ "$now_ts" -ge "$deadline" ] 2>/dev/null; then
+			return 1
 		fi
 		sleep 5
 	done
@@ -78,11 +191,11 @@ xargs_parallel_flag() {
 }
 
 resolve_domains() {
-	set_name="$1"
+	tmp_set="$1"
 	domain_file="$2"
 	[ -s "$domain_file" ] || return 0
 
-	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE set_name
+	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set
 	parallel_flag="$(xargs_parallel_flag)"
 
 	# shellcheck disable=SC2086
@@ -91,18 +204,34 @@ resolve_domains() {
 			dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
 				| grep -Eo "$IPV4_RE" \
 				| grep -vE "$LOCAL_RE" \
-				| awk -v set_name="$set_name" "{print \"add \" set_name \" \" \$1}"
+				| awk -v tmp_set="$tmp_set" "{print \"add \" tmp_set \" \" \$1}"
 		done
 	' sh >> "$restore_file"
+}
+
+prepare_temp_set() {
+	set_name="$1"
+	tmp_set="$2"
+	ipset create "$set_name" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create ipset $set_name."
+	ipset destroy "$tmp_set" >/dev/null 2>&1 || true
+	ipset create "$tmp_set" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create temporary ipset $tmp_set."
+	ipset flush "$tmp_set" >/dev/null 2>&1 || true
+	printf '%s\n' "$tmp_set" >> "$temp_sets_file"
 }
 
 load_file_to_set() {
 	list_path="$1"
 	set_name="$2"
-	[ -f "$list_path" ] || return 0
+	tmp_set="$3"
+	prepare_temp_set "$set_name" "$tmp_set"
 
-	ipset create "$set_name" hash:net -exist >/dev/null 2>&1
+	if [ ! -f "$list_path" ]; then
+		: > "$tmp_dir/${set_name}.missing"
+		return 0
+	fi
+
 	domain_file="$tmp_dir/${set_name}.domains"
+	source_file="$tmp_dir/${set_name}.source"
 	: > "$domain_file"
 
 	while IFS= read -r raw_line || [ -n "$raw_line" ]; do
@@ -112,33 +241,84 @@ load_file_to_set() {
 		esac
 
 		if direct_entry="$(extract_direct_entry "$line")"; then
-			append_restore "$set_name" "$direct_entry"
+			: > "$source_file"
+			append_restore "$tmp_set" "$direct_entry"
 			continue
 		fi
 
 		domain="$(normalize_domain "$line")"
-		[ -n "$domain" ] && printf '%s\n' "$domain" >> "$domain_file"
+		if [ -n "$domain" ]; then
+			: > "$source_file"
+			printf '%s\n' "$domain" >> "$domain_file"
+		fi
 	done < "$list_path"
 
-	resolve_domains "$set_name" "$domain_file"
+	resolve_domains "$tmp_set" "$domain_file"
 }
 
-wait_for_dns
+entry_count_for_tmp_set() {
+	tmp_set="$1"
+	awk -v tmp_set="$tmp_set" '$1 == "add" && $2 == tmp_set { count++ } END { print count + 0 }' "$sorted_restore_file"
+}
 
-load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh
-load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess
-load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless
-load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2
-load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj
+swap_or_preserve_set() {
+	set_name="$1"
+	tmp_set="$2"
+	entry_count="$(entry_count_for_tmp_set "$tmp_set")"
+	current_count="$(ipset_count "$set_name")"
+	[ -n "$current_count" ] || current_count=0
 
-if [ -s "$restore_file" ]; then
-	sort -u "$restore_file" > "$restore_file.sorted"
-	if ! ipset restore -exist < "$restore_file.sorted" >/dev/null 2>&1; then
-		logger -t "$TAG" "ipset restore failed, falling back to sequential add"
-		while read -r action set_name value; do
-			[ "$action" = "add" ] && ipset -exist add "$set_name" "$value" >/dev/null 2>&1
-		done < "$restore_file.sorted"
+	if [ -f "$tmp_dir/${set_name}.missing" ] && [ "$current_count" -gt 0 ] 2>/dev/null; then
+		printf '%s\n' "$set_name" >> "$tmp_dir/skipped_sets"
+		echo "$set_name: list file is missing, preserving $current_count existing entries."
+		return 0
 	fi
+
+	if [ -f "$tmp_dir/${set_name}.source" ] && [ "$entry_count" -eq 0 ] 2>/dev/null && [ "$current_count" -gt 0 ] 2>/dev/null; then
+		printf '%s\n' "$set_name" >> "$tmp_dir/skipped_sets"
+		echo "$set_name: resolved to zero entries, preserving $current_count existing entries."
+		return 0
+	fi
+
+	if ipset swap "$tmp_set" "$set_name" >/dev/null 2>&1; then
+		ipset destroy "$tmp_set" >/dev/null 2>&1 || true
+		return 0
+	fi
+
+	printf '%s\n' "$set_name" >> "$tmp_dir/fallback_sets"
+	awk -v from="$tmp_set" -v to="$set_name" '$1 == "add" && $2 == from { print "add " to " " $3 }' "$sorted_restore_file" > "$tmp_dir/${set_name}.fallback"
+	if [ -s "$tmp_dir/${set_name}.fallback" ]; then
+		ipset restore -exist < "$tmp_dir/${set_name}.fallback" >/dev/null 2>&1 || true
+	fi
+	echo "$set_name: ipset swap failed, added new entries without flushing old entries."
+	return 0
+}
+
+wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAIT_SECONDS}s; old ipset contents preserved."
+
+load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh "tmp_unblocksh_$$"
+load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$"
+load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$"
+load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$"
+load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$"
+
+sort -u "$restore_file" > "$sorted_restore_file"
+if [ -s "$sorted_restore_file" ]; then
+	ipset restore -exist < "$sorted_restore_file" >/dev/null 2>&1 || fail_status "ipset restore to temporary sets failed; old ipset contents preserved."
 fi
 
+swap_or_preserve_set unblocksh "tmp_unblocksh_$$"
+swap_or_preserve_set unblockvmess "tmp_unblockvmess_$$"
+swap_or_preserve_set unblockvless "tmp_unblockvless_$$"
+swap_or_preserve_set unblockvless2 "tmp_unblockvless2_$$"
+swap_or_preserve_set unblocktroj "tmp_unblocktroj_$$"
+
+if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
+	message="ipset refresh completed with preserved/fallback sets."
+	logger -t "$TAG" "$message"
+	write_status partial "$message"
+	exit 0
+fi
+
+write_status success "ipset refresh completed."
 exit 0

@@ -1,7 +1,11 @@
+import json
 import os
 import subprocess
 import threading
 import time
+
+IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
+IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvless2', 'unblocktroj')
 
 
 def read_proc_text(path, max_bytes=16384):
@@ -91,6 +95,154 @@ def count_proc_cmdline(marker, proc_root='/proc', read_text=read_proc_text):
     return count
 
 
+def run_command_text(command, timeout=2):
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception:
+        return ''
+    return result.stdout or ''
+
+
+def parse_dns_backend(netstat_text):
+    lines = [
+        line for line in (netstat_text or '').splitlines()
+        if ':53' in line or '.53' in line
+    ]
+    if any('dnsmasq' in line for line in lines):
+        return 'dnsmasq'
+    if any('ndnproxy' in line for line in lines):
+        return 'ndnproxy'
+    if lines:
+        return 'unknown'
+    return 'none'
+
+
+def read_dnsmasq_state(run_text=run_command_text):
+    text = run_text(['/opt/etc/init.d/S56dnsmasq', 'status'], timeout=2)
+    lowered = (text or '').lower()
+    if 'running' in lowered:
+        return 'running'
+    if 'dead' in lowered or 'not running' in lowered or 'stopped' in lowered:
+        return 'dead'
+    if lowered.strip():
+        return 'unknown'
+    return 'unavailable'
+
+
+def parse_ipset_member_count(ipset_text):
+    count = None
+    in_members = False
+    for raw_line in (ipset_text or '').splitlines():
+        line = raw_line.strip()
+        if line.startswith('Number of entries:'):
+            try:
+                return int(line.split(':', 1)[1].strip().split()[0])
+            except Exception:
+                return 0
+        if in_members:
+            if line:
+                count = (count or 0) + 1
+            continue
+        if line == 'Members:':
+            in_members = True
+            count = 0
+    return int(count or 0)
+
+
+def ipset_member_count(set_name, run_text=run_command_text):
+    return parse_ipset_member_count(run_text(['ipset', 'list', set_name], timeout=2))
+
+
+def load_ipset_refresh_status(status_path=IPSET_STATUS_FILE, read_text=read_proc_text):
+    try:
+        data = json.loads(read_text(status_path, max_bytes=8192) or '{}')
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def read_dns_health(
+    *,
+    run_text=run_command_text,
+    read_text=read_proc_text,
+    time_provider=time.time,
+    status_path=IPSET_STATUS_FILE,
+):
+    netstat_text = run_text(['netstat', '-lnptu'], timeout=2)
+    backend = parse_dns_backend(netstat_text)
+    status = load_ipset_refresh_status(status_path, read_text=read_text)
+    counts = {}
+    for set_name in IPSET_SET_NAMES:
+        counts[set_name] = ipset_member_count(set_name, run_text=run_text)
+    updated_at = int(status.get('updated_at') or 0)
+    age_seconds = None
+    if updated_at:
+        try:
+            age_seconds = max(0, int(time_provider()) - updated_at)
+        except Exception:
+            age_seconds = None
+    effective_backend = backend if backend not in ('none', 'unknown') else (status.get('dns_backend') or backend)
+    return {
+        'backend': effective_backend,
+        'listener_backend': backend,
+        'dnsmasq_state': read_dnsmasq_state(run_text=run_text),
+        'ipset_counts': counts,
+        'ipset_updated_at': updated_at,
+        'ipset_refresh_age_seconds': age_seconds,
+        'ipset_refresh_status': status.get('status') or '',
+        'ipset_refresh_message': status.get('message') or '',
+    }
+
+
+def _format_age(seconds):
+    if seconds is None:
+        return 'unknown age'
+    try:
+        seconds = int(seconds)
+    except Exception:
+        return 'unknown age'
+    if seconds < 60:
+        return f'{seconds}s ago'
+    minutes = seconds // 60
+    if minutes < 60:
+        return f'{minutes}m ago'
+    hours = minutes // 60
+    if hours < 48:
+        return f'{hours}h ago'
+    return f'{hours // 24}d ago'
+
+
+def dns_health_note(dns_health):
+    if not dns_health:
+        return ''
+    dns_health = dns_health or {}
+    backend = dns_health.get('backend') or 'unknown'
+    dnsmasq_state = dns_health.get('dnsmasq_state') or 'unknown'
+    details = [f'DNS backend: {backend}', f'S56dnsmasq: {dnsmasq_state}']
+    refresh_status = dns_health.get('ipset_refresh_status') or 'unknown'
+    updated_at = int(dns_health.get('ipset_updated_at') or 0)
+    if updated_at:
+        details.append(f'ipset refresh: {_format_age(dns_health.get("ipset_refresh_age_seconds"))} ({refresh_status})')
+    else:
+        details.append('ipset refresh: no status file')
+    counts = dns_health.get('ipset_counts') or {}
+    if counts:
+        ordered = [f'{name}={int(counts.get(name) or 0)}' for name in IPSET_SET_NAMES if name in counts]
+        details.append('ipset entries: ' + ', '.join(ordered))
+    message = str(dns_health.get('ipset_refresh_message') or '').strip()
+    if message and message not in details:
+        details.append(message if message.endswith(('.', '!', '?')) else f'{message}.')
+    note = '. '.join(part.rstrip('.') for part in details if part)
+    return note + '.' if note else ''
+
+
 def build_router_health_payload(
     *,
     meminfo,
@@ -99,6 +251,7 @@ def build_router_health_payload(
     bot_rss_kb,
     probe_progress,
     temp_xray_count,
+    dns_health=None,
 ):
     meminfo = meminfo or {}
     ndmc_system = ndmc_system or {}
@@ -174,6 +327,9 @@ def build_router_health_payload(
         details.append(f'Временный xray-процессов: {temp_xray_count}.')
     if probe_note:
         details.append(probe_note if probe_note.endswith(('.', '!', '?')) else f'{probe_note}.')
+    dns_note = dns_health_note(dns_health)
+    if dns_note:
+        details.append(dns_note)
     return {
         'memory_text': memory_text,
         'note': ' '.join(details),
@@ -192,6 +348,14 @@ def build_router_health_payload(
             if probe_running else 'Не запущена'
         ),
         'temporary_xray_count': temp_xray_count,
+        'dns_backend': (dns_health or {}).get('backend') or '',
+        'dns_listener_backend': (dns_health or {}).get('listener_backend') or '',
+        'dnsmasq_state': (dns_health or {}).get('dnsmasq_state') or '',
+        'ipset_counts': dict((dns_health or {}).get('ipset_counts') or {}),
+        'ipset_updated_at': int((dns_health or {}).get('ipset_updated_at') or 0),
+        'ipset_refresh_age_seconds': (dns_health or {}).get('ipset_refresh_age_seconds'),
+        'ipset_refresh_status': (dns_health or {}).get('ipset_refresh_status') or '',
+        'ipset_refresh_message': (dns_health or {}).get('ipset_refresh_message') or '',
     }
 
 
@@ -218,6 +382,7 @@ class RouterHealthRuntime:
             bot_rss_kb=process_rss_kb('self'),
             probe_progress=probe_progress,
             temp_xray_count=count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0,
+            dns_health=read_dns_health(time_provider=self.time_provider),
         )
         with self._lock:
             self._cache['timestamp'] = now

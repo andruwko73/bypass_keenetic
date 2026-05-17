@@ -1,3 +1,6 @@
+*v1.594 (17 May 2026) -* main
+*Made DNS updates aware of Keenetic ndnproxy, refreshed ipsets with a lock and temporary-set swap to avoid empty windows, scheduled 15-minute ipset refreshes, and exposed DNS/ipset health in the web status.*
+
 *v1.593 (17 May 2026) -* main
 *Narrowed the Vless 2 YouTube route from broad Google API and IP ranges to explicit YouTube domains, and routed Chrome Remote Desktop SNI directly when shared Google IPs still enter the transparent proxy.*
 

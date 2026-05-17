@@ -182,7 +182,7 @@ if [ -x /opt/etc/init.d/S99web_bot ]; then
 else
     /opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99telegram_bot start >/dev/null 2>&1 || true
 fi
-/opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || true
+/opt/bin/unblock_update.sh >/dev/null 2>&1 || true
 /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || true

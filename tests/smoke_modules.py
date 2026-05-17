@@ -174,6 +174,43 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert 'Бот использует 52 MB RAM.' in payload['note']
 
 
+def test_router_health_runtime_dns_payload():
+    payload = router_health_runtime.build_router_health_payload(
+        meminfo={'MemTotal': 64 * 1024, 'MemFree': 8 * 1024, 'MemAvailable': 32 * 1024},
+        ndmc_system={},
+        load_text='0.01 / 0.02 / 0.03',
+        bot_rss_kb=4 * 1024,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+        dns_health={
+            'backend': 'ndnproxy',
+            'listener_backend': 'ndnproxy',
+            'dnsmasq_state': 'dead',
+            'ipset_counts': {'unblockvless': 12, 'unblockvless2': 34},
+            'ipset_updated_at': 1000,
+            'ipset_refresh_age_seconds': 90,
+            'ipset_refresh_status': 'success',
+            'ipset_refresh_message': 'ipset refresh completed.',
+        },
+    )
+    assert payload['dns_backend'] == 'ndnproxy'
+    assert payload['dnsmasq_state'] == 'dead'
+    assert payload['ipset_counts']['unblockvless2'] == 34
+    assert 'DNS backend: ndnproxy' in payload['note']
+    assert 'S56dnsmasq: dead' in payload['note']
+    assert 'ipset refresh: 1m ago (success)' in payload['note']
+    assert 'unblockvless2=34' in payload['note']
+
+
+def test_router_health_runtime_dns_parsers():
+    assert router_health_runtime.parse_dns_backend('udp 0 0 0.0.0.0:53 0.0.0.0:* 759/ndnproxy') == 'ndnproxy'
+    assert router_health_runtime.parse_dns_backend('tcp 0 0 0.0.0.0:53 0.0.0.0:* LISTEN 12/dnsmasq') == 'dnsmasq'
+    assert router_health_runtime.parse_dns_backend('tcp 0 0 0.0.0.0:53 0.0.0.0:* LISTEN') == 'unknown'
+    assert router_health_runtime.parse_dns_backend('') == 'none'
+    assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nMembers:\n1.1.1.1\n2.2.2.0/24\n') == 2
+    assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nNumber of entries: 42\nMembers:\n') == 42
+
+
 def test_router_health_runtime_process_rss_parser():
     def fake_read(_path, max_bytes=16384):
         return 'Name:\tpython\nVmRSS:\t  54321 kB\n'
@@ -479,6 +516,32 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert "normalize_line()" in unblock_dnsmasq
     assert "s/\\r//g" in unblock_dnsmasq
     assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
+
+
+def test_ipset_refresh_is_backend_aware_and_atomic():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    update_script = (ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
+    ipset_script = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
+    crontab = (ROOT / 'crontab').read_text(encoding='utf-8')
+
+    assert 'flush_set' not in update_script
+    assert 'Using Keenetic ndnproxy, preloading ipset' in update_script
+    assert '/opt/bin/unblock_ipset.sh &' not in update_script
+    assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab"' in script
+    assert 'mv "$stage_dir/crontab" /opt/etc/crontab' in script
+    assert '/opt/etc/init.d/S10cron restart' in script
+    assert '/opt/bin/unblock_update.sh > /dev/null 2>&1 || true' in script
+    assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
+    assert "'/opt/bin/unblock_update.sh'" in bot_source
+
+    assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
+    assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
+    assert 'DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"' in ipset_script
+    assert 'ipset swap "$tmp_set" "$set_name"' in ipset_script
+    assert 'resolved to zero entries, preserving' in ipset_script
+    assert '*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1' in crontab
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
@@ -2089,6 +2152,11 @@ def test_telegram_pool_ui():
 
 
 def main():
+    test_app_runtime_mode_setter_callbacks()
+    test_router_health_runtime_payload_uses_keenetic_memory()
+    test_router_health_runtime_dns_payload()
+    test_router_health_runtime_dns_parsers()
+    test_router_health_runtime_process_rss_parser()
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()
@@ -2111,6 +2179,7 @@ def main():
     test_web_post_actions_helpers()
     test_web_action_feature_gates()
     test_codex_version_matches_commit_count()
+    test_ipset_refresh_is_backend_aware_and_atomic()
     test_runtime_startup_limits_router_flash_and_overhead()
     test_web_response_body_ignores_client_disconnect()
     test_entware_dns_runtime_helpers()
