@@ -1,6 +1,7 @@
 #!/bin/sh
 
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
+EXTRA_SET_NAMES="unblockvless2udp"
 
 ensure_set() {
 	ipset create "$1" hash:net -exist >/dev/null 2>&1
@@ -57,7 +58,7 @@ refresh_dns_backend() {
 
 [ -x /opt/etc/ndm/fs.d/100-ipset.sh ] && /opt/etc/ndm/fs.d/100-ipset.sh start
 
-for set_name in $SET_NAMES; do
+for set_name in $SET_NAMES $EXTRA_SET_NAMES; do
 	ensure_set "$set_name"
 done
 

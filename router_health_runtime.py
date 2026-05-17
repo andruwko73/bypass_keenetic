@@ -5,7 +5,23 @@ import threading
 import time
 
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
-IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvless2', 'unblocktroj')
+IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvless2', 'unblockvless2udp', 'unblocktroj')
+DNSMASQ_STATE_LABELS = {
+    'running': 'запущен',
+    'dead': 'не запущен',
+    'unavailable': 'недоступен',
+    'unknown': 'неизвестно',
+}
+IPSET_REFRESH_STATUS_LABELS = {
+    'success': 'успешно',
+    'failure': 'ошибка',
+    'partial': 'частично',
+    'unknown': 'неизвестно',
+}
+IPSET_REFRESH_MESSAGE_LABELS = {
+    'ipset refresh completed.': 'ipset обновлён.',
+    'ipset refresh completed with preserved/fallback sets.': 'ipset обновлён частично: часть наборов сохранена.',
+}
 
 
 def read_proc_text(path, max_bytes=16384):
@@ -203,20 +219,20 @@ def read_dns_health(
 
 def _format_age(seconds):
     if seconds is None:
-        return 'unknown age'
+        return 'возраст неизвестен'
     try:
         seconds = int(seconds)
     except Exception:
-        return 'unknown age'
+        return 'возраст неизвестен'
     if seconds < 60:
-        return f'{seconds}s ago'
+        return f'{seconds} сек назад'
     minutes = seconds // 60
     if minutes < 60:
-        return f'{minutes}m ago'
+        return f'{minutes} мин назад'
     hours = minutes // 60
     if hours < 48:
-        return f'{hours}h ago'
-    return f'{hours // 24}d ago'
+        return f'{hours} ч назад'
+    return f'{hours // 24} дн назад'
 
 
 def dns_health_note(dns_health):
@@ -225,18 +241,21 @@ def dns_health_note(dns_health):
     dns_health = dns_health or {}
     backend = dns_health.get('backend') or 'unknown'
     dnsmasq_state = dns_health.get('dnsmasq_state') or 'unknown'
-    details = [f'DNS backend: {backend}', f'S56dnsmasq: {dnsmasq_state}']
+    dnsmasq_label = DNSMASQ_STATE_LABELS.get(dnsmasq_state, dnsmasq_state)
+    details = [f'DNS: {backend}', f'S56dnsmasq: {dnsmasq_label}']
     refresh_status = dns_health.get('ipset_refresh_status') or 'unknown'
+    refresh_status_label = IPSET_REFRESH_STATUS_LABELS.get(refresh_status, refresh_status)
     updated_at = int(dns_health.get('ipset_updated_at') or 0)
     if updated_at:
-        details.append(f'ipset refresh: {_format_age(dns_health.get("ipset_refresh_age_seconds"))} ({refresh_status})')
+        details.append(f'ipset обновлён: {_format_age(dns_health.get("ipset_refresh_age_seconds"))} ({refresh_status_label})')
     else:
-        details.append('ipset refresh: no status file')
+        details.append('ipset: нет файла состояния')
     counts = dns_health.get('ipset_counts') or {}
     if counts:
         ordered = [f'{name}={int(counts.get(name) or 0)}' for name in IPSET_SET_NAMES if name in counts]
-        details.append('ipset entries: ' + ', '.join(ordered))
+        details.append('записи ipset: ' + ', '.join(ordered))
     message = str(dns_health.get('ipset_refresh_message') or '').strip()
+    message = IPSET_REFRESH_MESSAGE_LABELS.get(message, message)
     if message and message not in details:
         details.append(message if message.endswith(('.', '!', '?')) else f'{message}.')
     note = '. '.join(part.rstrip('.') for part in details if part)

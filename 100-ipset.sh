@@ -4,6 +4,7 @@ ipset create unblocksh hash:net -exist
 ipset create unblockvmess hash:net -exist
 ipset create unblockvless hash:net -exist
 ipset create unblockvless2 hash:net -exist
+ipset create unblockvless2udp hash:net -exist
 ipset create unblocktroj hash:net -exist
 
 #script0

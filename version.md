@@ -1,3 +1,6 @@
+*v1.595 (18 May 2026) -* main
+*Translated router DNS/ipset health details to Russian, made Vless 2 YouTube checks less twitchy on slow keys, and split Vless 2 UDP rejection from broader TCP CDN routing for YouTube under ndnproxy.*
+
 *v1.594 (17 May 2026) -* main
 *Made DNS updates aware of Keenetic ndnproxy, refreshed ipsets with a lock and temporary-set swap to avoid empty windows, scheduled 15-minute ipset refreshes, and exposed DNS/ipset health in the web status.*
 

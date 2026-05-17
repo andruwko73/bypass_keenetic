@@ -505,6 +505,7 @@ if [ "$1" = "-remove" ]; then
     ipset flush unblockvmess
     ipset flush unblockvless
     ipset flush unblockvless2
+    ipset flush unblockvless2udp
     ipset flush unblocktroj
     remove_path /opt/root/get-pip.py
     remove_path /opt/etc/crontab

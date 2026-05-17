@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.594, последнее изменение: 17.05.2026
+#  Файл: bot.py, Версия v1.595, последнее изменение: 18.05.2026
 
 import subprocess
 import os
@@ -384,19 +384,21 @@ auto_failover_state = {
     'in_progress': False,
 }
 YOUTUBE_VLESS2_FAILOVER_ENABLED = bool(getattr(config, 'youtube_vless2_failover_enabled', True))
-YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS = int(getattr(config, 'youtube_vless2_failover_grace_seconds', 60))
-YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS = max(30, int(getattr(config, 'youtube_vless2_failover_poll_seconds', 60)))
+YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS = max(180, int(getattr(config, 'youtube_vless2_failover_grace_seconds', 180)))
+YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS = max(120, int(getattr(config, 'youtube_vless2_failover_poll_seconds', 120)))
 YOUTUBE_VLESS2_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(
-    getattr(config, 'youtube_vless2_failover_switch_cooldown_seconds', 120)
+    max(300, int(getattr(config, 'youtube_vless2_failover_switch_cooldown_seconds', 300)))
 )
 YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT = float(
-    getattr(config, 'youtube_vless2_failover_check_connect_timeout', 3)
+    max(6.0, float(getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)))
 )
-YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'youtube_vless2_failover_check_read_timeout', 5))
-YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES = max(1, int(getattr(config, 'youtube_vless2_failover_confirm_retries', 2)))
+YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT = float(
+    max(10.0, float(getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)))
+)
+YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES = max(3, int(getattr(config, 'youtube_vless2_failover_confirm_retries', 3)))
 YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
-    1.0,
-    float(getattr(config, 'youtube_vless2_failover_confirm_delay_seconds', 5.0)),
+    8.0,
+    float(getattr(config, 'youtube_vless2_failover_confirm_delay_seconds', 8.0)),
 )
 YOUTUBE_VLESS2_HEALTHCHECK_URLS = (
     'https://www.youtube.com/generate_204',
@@ -4002,6 +4004,11 @@ def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
 
 def _find_pool_failover_candidate(candidates, service='telegram'):
     """Find one working pool key through a temporary xray before touching the active proxy."""
+    http_timeouts = (
+        (YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)
+        if service == 'youtube'
+        else (POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT)
+    )
     return _runner_find_pool_failover_candidate(
         candidates,
         service=service,
@@ -4015,7 +4022,7 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
         proto_label=_pool_proto_label,
         log=_write_runtime_log,
         telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
-        http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
+        http_timeouts=http_timeouts,
     )
 
 
@@ -4355,6 +4362,7 @@ def _apply_installed_proxy(key_type, key_value, verify=True):
         check_telegram_api=_check_telegram_api_through_proxy,
         check_http=_check_http_through_proxy,
         record_key_probe=_record_key_probe,
+        youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
         verify=verify,
     )
 

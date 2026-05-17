@@ -186,7 +186,7 @@ def test_router_health_runtime_dns_payload():
             'backend': 'ndnproxy',
             'listener_backend': 'ndnproxy',
             'dnsmasq_state': 'dead',
-            'ipset_counts': {'unblockvless': 12, 'unblockvless2': 34},
+            'ipset_counts': {'unblockvless': 12, 'unblockvless2': 34, 'unblockvless2udp': 12},
             'ipset_updated_at': 1000,
             'ipset_refresh_age_seconds': 90,
             'ipset_refresh_status': 'success',
@@ -196,10 +196,12 @@ def test_router_health_runtime_dns_payload():
     assert payload['dns_backend'] == 'ndnproxy'
     assert payload['dnsmasq_state'] == 'dead'
     assert payload['ipset_counts']['unblockvless2'] == 34
-    assert 'DNS backend: ndnproxy' in payload['note']
-    assert 'S56dnsmasq: dead' in payload['note']
-    assert 'ipset refresh: 1m ago (success)' in payload['note']
+    assert payload['ipset_counts']['unblockvless2udp'] == 12
+    assert 'DNS: ndnproxy' in payload['note']
+    assert 'S56dnsmasq: не запущен' in payload['note']
+    assert 'ipset обновлён: 1 мин назад (успешно)' in payload['note']
     assert 'unblockvless2=34' in payload['note']
+    assert 'unblockvless2udp=12' in payload['note']
 
 
 def test_router_health_runtime_dns_parsers():
@@ -501,6 +503,12 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_vless2_failover_enabled = True' in example
     assert 'youtube_vless2_failover_enabled = True' in installer
     assert 'youtube_vless2_failover_enabled = True' in bootstrap
+    assert 'youtube_vless2_failover_check_connect_timeout = 6' in example
+    assert 'youtube_vless2_failover_check_connect_timeout = 6' in installer
+    assert 'youtube_vless2_failover_check_connect_timeout = 6' in bootstrap
+    assert 'youtube_vless2_failover_check_read_timeout = 10' in example
+    assert 'youtube_vless2_failover_check_read_timeout = 10' in installer
+    assert 'youtube_vless2_failover_check_read_timeout = 10' in bootstrap
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in example
 
 
@@ -516,6 +524,7 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert "normalize_line()" in unblock_dnsmasq
     assert "s/\\r//g" in unblock_dnsmasq
     assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
+    assert 'ipset=/$line/unblockvless2,unblockvless2udp' in unblock_dnsmasq
 
 
 def test_ipset_refresh_is_backend_aware_and_atomic():
@@ -524,6 +533,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     update_script = (ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
     ipset_script = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
+    ipset_boot_script = (ROOT / '100-ipset.sh').read_text(encoding='utf-8')
+    redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     crontab = (ROOT / 'crontab').read_text(encoding='utf-8')
 
     assert 'flush_set' not in update_script
@@ -539,7 +550,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
     assert 'DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"' in ipset_script
-    assert 'ipset swap "$tmp_set" "$set_name"' in ipset_script
+    assert 'for set_name in $SET_NAMES $EXTRA_SET_NAMES; do' in ipset_script
+    assert 'ipset swap "$swap_tmp_set" "$set_name"' in ipset_script
+    assert 'unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
+    assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
+    assert '--match-set unblockvless2udp dst --dport 443 -j REJECT' in redirect_script
+    assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT' not in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
     assert '*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1' in crontab
 
@@ -565,6 +581,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "proxy_mode == 'vless2'" in source
     assert 'Telegram is required because bot mode is Vless 2' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
+    assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
+    assert "getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)" in source
+    assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
     assert 'redirector.googlevideo.com/generate_204' in source
     assert 'googlevideo.com/generate_204' in source
     assert 'i.ytimg.com/generate_204' in source
@@ -1416,21 +1435,18 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'googleusercontent.com' not in entries
     assert 'remotedesktop-pa.googleapis.com' not in entries
     assert 'instantmessaging-pa.googleapis.com' not in entries
+    assert 'redirector.googlevideo.com' in entries
+    assert set(service_catalog.YOUTUBE_CDN_IP_RANGES) <= entries
     assert 'domain:remotedesktop.google.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:remotedesktop-pa.googleapis.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:instantmessaging-pa.googleapis.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert not {
-        '108.177.0.0/15',
-        '142.250.0.0/16',
-        '142.251.0.0/16',
-        '172.217.0.0/16',
-        '172.253.0.0/16',
-        '173.194.0.0/16',
-        '209.85.0.0/16',
+        '34.0.0.0/10',
+        '34.64.0.0/10',
+        '35.184.0.0/13',
         '216.239.0.0/16',
         '216.58.0.0/16',
-        '64.233.0.0/16',
-        '74.125.0.0/16',
+        '8.8.8.0/24',
     } & entries
 
 

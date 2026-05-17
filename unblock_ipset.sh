@@ -9,6 +9,7 @@ TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
+EXTRA_SET_NAMES="unblockvless2udp"
 
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
@@ -91,7 +92,7 @@ ipset_count() {
 status_counts_json() {
 	first=1
 	printf '{'
-	for set_name in $SET_NAMES; do
+	for set_name in $SET_NAMES $EXTRA_SET_NAMES; do
 		count="$(ipset_count "$set_name")"
 		[ -n "$count" ] || count=0
 		if [ "$first" -eq 0 ]; then
@@ -193,9 +194,10 @@ xargs_parallel_flag() {
 resolve_domains() {
 	tmp_set="$1"
 	domain_file="$2"
+	mirror_tmp_set="$3"
 	[ -s "$domain_file" ] || return 0
 
-	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set
+	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set mirror_tmp_set
 	parallel_flag="$(xargs_parallel_flag)"
 
 	# shellcheck disable=SC2086
@@ -204,34 +206,44 @@ resolve_domains() {
 			dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
 				| grep -Eo "$IPV4_RE" \
 				| grep -vE "$LOCAL_RE" \
-				| awk -v tmp_set="$tmp_set" "{print \"add \" tmp_set \" \" \$1}"
+				| awk -v tmp_set="$tmp_set" -v mirror_tmp_set="$mirror_tmp_set" "{
+					print \"add \" tmp_set \" \" \$1;
+					if (mirror_tmp_set != \"\") print \"add \" mirror_tmp_set \" \" \$1;
+				}"
 		done
 	' sh >> "$restore_file"
 }
 
 prepare_temp_set() {
-	set_name="$1"
-	tmp_set="$2"
-	ipset create "$set_name" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create ipset $set_name."
-	ipset destroy "$tmp_set" >/dev/null 2>&1 || true
-	ipset create "$tmp_set" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create temporary ipset $tmp_set."
-	ipset flush "$tmp_set" >/dev/null 2>&1 || true
-	printf '%s\n' "$tmp_set" >> "$temp_sets_file"
+	prepare_set_name="$1"
+	prepare_tmp_set="$2"
+	ipset create "$prepare_set_name" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create ipset $prepare_set_name."
+	ipset destroy "$prepare_tmp_set" >/dev/null 2>&1 || true
+	ipset create "$prepare_tmp_set" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create temporary ipset $prepare_tmp_set."
+	ipset flush "$prepare_tmp_set" >/dev/null 2>&1 || true
+	printf '%s\n' "$prepare_tmp_set" >> "$temp_sets_file"
 }
 
 load_file_to_set() {
 	list_path="$1"
 	set_name="$2"
-	tmp_set="$3"
-	prepare_temp_set "$set_name" "$tmp_set"
+	main_tmp_set="$3"
+	mirror_set_name="$4"
+	mirror_tmp_set="$5"
+	prepare_temp_set "$set_name" "$main_tmp_set"
+	if [ -n "$mirror_set_name" ] && [ -n "$mirror_tmp_set" ]; then
+		prepare_temp_set "$mirror_set_name" "$mirror_tmp_set"
+	fi
 
 	if [ ! -f "$list_path" ]; then
 		: > "$tmp_dir/${set_name}.missing"
+		[ -n "$mirror_set_name" ] && : > "$tmp_dir/${mirror_set_name}.missing"
 		return 0
 	fi
 
 	domain_file="$tmp_dir/${set_name}.domains"
 	source_file="$tmp_dir/${set_name}.source"
+	mirror_source_file="$tmp_dir/${mirror_set_name}.source"
 	: > "$domain_file"
 
 	while IFS= read -r raw_line || [ -n "$raw_line" ]; do
@@ -242,18 +254,19 @@ load_file_to_set() {
 
 		if direct_entry="$(extract_direct_entry "$line")"; then
 			: > "$source_file"
-			append_restore "$tmp_set" "$direct_entry"
+			append_restore "$main_tmp_set" "$direct_entry"
 			continue
 		fi
 
 		domain="$(normalize_domain "$line")"
 		if [ -n "$domain" ]; then
 			: > "$source_file"
+			[ -n "$mirror_set_name" ] && : > "$mirror_source_file"
 			printf '%s\n' "$domain" >> "$domain_file"
 		fi
 	done < "$list_path"
 
-	resolve_domains "$tmp_set" "$domain_file"
+	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set"
 }
 
 entry_count_for_tmp_set() {
@@ -263,8 +276,8 @@ entry_count_for_tmp_set() {
 
 swap_or_preserve_set() {
 	set_name="$1"
-	tmp_set="$2"
-	entry_count="$(entry_count_for_tmp_set "$tmp_set")"
+	swap_tmp_set="$2"
+	entry_count="$(entry_count_for_tmp_set "$swap_tmp_set")"
 	current_count="$(ipset_count "$set_name")"
 	[ -n "$current_count" ] || current_count=0
 
@@ -280,13 +293,13 @@ swap_or_preserve_set() {
 		return 0
 	fi
 
-	if ipset swap "$tmp_set" "$set_name" >/dev/null 2>&1; then
-		ipset destroy "$tmp_set" >/dev/null 2>&1 || true
+	if ipset swap "$swap_tmp_set" "$set_name" >/dev/null 2>&1; then
+		ipset destroy "$swap_tmp_set" >/dev/null 2>&1 || true
 		return 0
 	fi
 
 	printf '%s\n' "$set_name" >> "$tmp_dir/fallback_sets"
-	awk -v from="$tmp_set" -v to="$set_name" '$1 == "add" && $2 == from { print "add " to " " $3 }' "$sorted_restore_file" > "$tmp_dir/${set_name}.fallback"
+	awk -v from="$swap_tmp_set" -v to="$set_name" '$1 == "add" && $2 == from { print "add " to " " $3 }' "$sorted_restore_file" > "$tmp_dir/${set_name}.fallback"
 	if [ -s "$tmp_dir/${set_name}.fallback" ]; then
 		ipset restore -exist < "$tmp_dir/${set_name}.fallback" >/dev/null 2>&1 || true
 	fi
@@ -299,7 +312,7 @@ wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAI
 load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh "tmp_unblocksh_$$"
 load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$"
 load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$"
-load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$"
+load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$" unblockvless2udp "tmp_unblockvless2udp_$$"
 load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$"
 
 sort -u "$restore_file" > "$sorted_restore_file"
@@ -311,6 +324,7 @@ swap_or_preserve_set unblocksh "tmp_unblocksh_$$"
 swap_or_preserve_set unblockvmess "tmp_unblockvmess_$$"
 swap_or_preserve_set unblockvless "tmp_unblockvless_$$"
 swap_or_preserve_set unblockvless2 "tmp_unblockvless2_$$"
+swap_or_preserve_set unblockvless2udp "tmp_unblockvless2udp_$$"
 swap_or_preserve_set unblocktroj "tmp_unblocktroj_$$"
 
 if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
