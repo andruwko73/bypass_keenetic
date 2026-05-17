@@ -1,3 +1,6 @@
+*v1.590 (17 May 2026) -* main
+*Added an idle memory watchdog restart for sustained Python RSS growth and made router memory text emphasize available RAM instead of treating reclaimable cache as lost memory.*
+
 *v1.589 (16 May 2026) -* main
 *Stabilized the Vless 2 YouTube monitor by using a durable googlevideo endpoint, confirming the current key before failover, and avoiding Telegram-only verification for Vless 2 while the bot mode is Vless 1.*
 

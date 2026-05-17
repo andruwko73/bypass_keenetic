@@ -146,7 +146,10 @@ def build_router_health_payload(
     probe_total = int(probe_progress.get('total') or 0)
     probe_note = str(probe_progress.get('note') or '').strip()
     swap_used_mb = int(round(max(0, swap_total_kb - swap_free_kb) / 1024.0)) if swap_total_kb else 0
-    memory_text = f'Память: занято {used_mb} из {total_mb} MB' if total_mb else 'Память: данные недоступны'
+    if total_mb:
+        memory_text = f'Память: доступно {available_mb} MB, занято {used_mb} из {total_mb} MB'
+    else:
+        memory_text = 'Память: данные недоступны'
     details = []
     if used_mb:
         details.append(f'Занято по данным роутера: {used_mb} MB ({used_percent}%).')

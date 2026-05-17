@@ -167,7 +167,7 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
         temp_xray_count=0,
     )
     assert payload['memory_source'] == 'keenetic'
-    assert payload['memory_text'] == 'Память: занято 281 из 512 MB'
+    assert payload['memory_text'] == 'Память: доступно 201 MB, занято 281 из 512 MB'
     assert payload['used_percent'] == 55
     assert payload['pool_probe_text'] == 'Не запущена'
     assert 'Бот использует 52 MB RAM.' in payload['note']
@@ -437,6 +437,12 @@ def test_codex_version_matches_commit_count():
     assert 'memory_watchdog_rss_limit_kb = 112640' in example
     assert 'memory_watchdog_rss_limit_kb = 112640' in installer
     assert 'memory_watchdog_rss_limit_kb = 112640' in bootstrap
+    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in example
+    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in installer
+    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in bootstrap
+    assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in example
+    assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in installer
+    assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in bootstrap
     assert 'memory_post_pool_restart_rss_kb = 61440' in example
     assert 'memory_post_pool_restart_rss_kb = 61440' in installer
     assert 'memory_post_pool_restart_rss_kb = 61440' in bootstrap
@@ -469,6 +475,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'threading.stack_size(256 * 1024)' in source
     assert "pool_probe_min_available_kb', 160000" in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
+    assert "memory_watchdog_idle_restart_rss_kb', 64 * 1024" in source
+    assert 'memory_watchdog_high_rss_since' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source

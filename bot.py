@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.589, последнее изменение: 16.05.2026
+#  Файл: bot.py, Версия v1.590, последнее изменение: 17.05.2026
 
 import subprocess
 import os
@@ -876,6 +876,14 @@ MEMORY_WATCHDOG_RESTART_COOLDOWN_SECONDS = max(
     300.0,
     float(getattr(config, 'memory_watchdog_restart_cooldown_seconds', 1800.0)),
 )
+MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = max(
+    0,
+    int(getattr(config, 'memory_watchdog_idle_restart_rss_kb', 64 * 1024)),
+)
+MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = max(
+    300.0,
+    float(getattr(config, 'memory_watchdog_idle_restart_hold_seconds', 600.0)),
+)
 MEMORY_POST_POOL_RESTART_ENABLED = bool(getattr(config, 'memory_post_pool_restart_enabled', True))
 MEMORY_POST_POOL_RESTART_RSS_KB = max(0, int(getattr(config, 'memory_post_pool_restart_rss_kb', 60 * 1024)))
 MEMORY_POST_POOL_RESTART_DELAY_SECONDS = max(
@@ -972,6 +980,7 @@ process_started_at = time.time()
 memory_watchdog_lock = threading.Lock()
 memory_watchdog_restart_scheduled = False
 memory_watchdog_last_restart_at = 0.0
+memory_watchdog_high_rss_since = 0.0
 WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
 web_command_lock = threading.Lock()
 web_command_state = {
@@ -1336,6 +1345,7 @@ def _start_memory_watchdog_thread():
         return
 
     def worker():
+        global memory_watchdog_high_rss_since
         shutdown_requested.wait(min(MEMORY_WATCHDOG_CHECK_INTERVAL, MEMORY_WATCHDOG_MIN_UPTIME_SECONDS))
         while not shutdown_requested.is_set():
             try:
@@ -1343,6 +1353,27 @@ def _start_memory_watchdog_thread():
                 if rss_kb and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_kb >= MEMORY_WATCHDOG_RSS_SOFT_KB:
                     _memory_cleanup('watchdog-soft', clear_status=True)
                     rss_kb = _process_rss_kb() or rss_kb
+                if rss_kb and MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 and rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
+                    now = time.time()
+                    if not memory_watchdog_high_rss_since:
+                        memory_watchdog_high_rss_since = now
+                    elif (
+                        now - memory_watchdog_high_rss_since >= MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS and
+                        _memory_restart_is_safe()
+                    ):
+                        _memory_cleanup('watchdog-idle-restart', force=True, clear_status=True)
+                        rss_kb = _process_rss_kb() or rss_kb
+                        if rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
+                            _write_runtime_log(
+                                f'Memory watchdog: RSS {rss_kb} KB stayed above '
+                                f'{MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB} KB for '
+                                f'{int(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS)}s, restarting bot service'
+                            )
+                            if _schedule_memory_watchdog_restart(rss_kb):
+                                return
+                        memory_watchdog_high_rss_since = 0.0
+                else:
+                    memory_watchdog_high_rss_since = 0.0
                 if rss_kb and rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _memory_restart_is_safe():
                     _memory_cleanup('watchdog-restart', force=True, clear_status=True)
                     rss_kb = _process_rss_kb() or rss_kb
