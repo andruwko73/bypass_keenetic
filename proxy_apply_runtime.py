@@ -1,6 +1,34 @@
 import os
 import time
 
+YOUTUBE_HEALTHCHECK_URLS = (
+    'https://www.youtube.com/generate_204',
+    'https://redirector.googlevideo.com/generate_204',
+    'https://i.ytimg.com/generate_204',
+    'https://www.youtube.com',
+)
+YOUTUBE_HEALTHCHECK_MIN_OK = 2
+
+
+def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
+    ok_count = 0
+    last_message = ''
+    connect_timeout, read_timeout = timeouts
+    for url in urls:
+        ok, message = check_http(
+            proxy_url,
+            url=url,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
+        if ok:
+            ok_count += 1
+            if ok_count >= max(1, int(min_ok or 1)):
+                return True, 'YouTube endpoints confirmed'
+        else:
+            last_message = message
+    return False, last_message or 'YouTube endpoints did not respond through this key.'
+
 
 def proxy_apply_settings(core_service_script, ports):
     core_restart = core_service_script + ' restart'
@@ -89,11 +117,10 @@ def apply_installed_proxy_runtime(
 
     proxy_url = proxy_url_getter(key_type)
     if key_type == 'vless2' and active_mode != 'vless2' and check_http is not None:
-        yt_ok, yt_probe_message = check_http(
+        yt_ok, yt_probe_message = check_youtube_health(
+            check_http,
             proxy_url,
-            url='https://www.youtube.com/generate_204',
-            connect_timeout=youtube_timeouts[0],
-            read_timeout=youtube_timeouts[1],
+            timeouts=youtube_timeouts,
         )
         if record_key_probe is not None:
             record_key_probe(key_type, key_value, tg_ok=None, yt_ok=yt_ok)
@@ -110,11 +137,10 @@ def apply_installed_proxy_runtime(
         read_timeout=telegram_timeouts[1],
     )
     if check_http is not None and record_key_probe is not None:
-        yt_ok, _ = check_http(
+        yt_ok, _ = check_youtube_health(
+            check_http,
             proxy_url,
-            url='https://www.youtube.com',
-            connect_timeout=youtube_timeouts[0],
-            read_timeout=youtube_timeouts[1],
+            timeouts=youtube_timeouts,
         )
         record_key_probe(key_type, key_value, tg_ok=api_ok, yt_ok=yt_ok)
     elif record_key_probe is not None:

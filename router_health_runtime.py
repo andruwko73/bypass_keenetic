@@ -361,11 +361,10 @@ def build_router_health_payload(
     if probe_note:
         details.append(probe_note if probe_note.endswith(('.', '!', '?')) else f'{probe_note}.')
     dns_note = dns_health_note(dns_health)
-    if dns_note:
-        details.append(dns_note)
     return {
         'memory_text': memory_text,
         'note': ' '.join(details),
+        'dns_note': dns_note,
         'available_kb': available_kb,
         'used_kb': used_kb,
         'total_kb': display_total_kb,

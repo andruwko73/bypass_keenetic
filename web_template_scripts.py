@@ -1490,6 +1490,11 @@ def render_web_scripts(
                 note.textContent = health.note || '';
                 note.classList.toggle('hidden', !note.textContent);
             }}
+            const dnsNote = document.getElementById('active-mode-dns-note');
+            if (dnsNote) {{
+                dnsNote.textContent = health.dns_note || '';
+                dnsNote.classList.toggle('hidden', !dnsNote.textContent);
+            }}
             const meter = document.getElementById('router-memory-meter');
             if (meter) {{
                 const percent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));

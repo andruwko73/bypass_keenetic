@@ -357,6 +357,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .status-card-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:auto;}
         .key-pool-actions{grid-template-columns:repeat(2,minmax(0,1fr));}
         .quick-start-actions{grid-template-columns:repeat(auto-fit,minmax(180px,1fr));}
+        .active-mode-actions{grid-template-columns:1fr;}
+        .active-mode-control{position:relative;width:100%;min-width:0;}
+        .active-mode-control #mode-picker{top:calc(100% + 8px);left:0;right:auto;width:min(320px,calc(100vw - 32px));min-width:260px;z-index:330;}
         .status-card-actions form{display:block;margin:0;}
         .status-card-actions button{width:100%;min-width:0;margin-top:0;}
         .overview-service-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px;}
@@ -612,8 +615,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .app-branch{font-size:10.5px;line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:clip;overflow-wrap:normal;word-break:normal;}
             .section-subtitle,.status-note,.status-value{overflow-wrap:anywhere;}
             .api-pill{grid-column:1 / -1;grid-row:2;}
-            .mode-control{grid-column:1;grid-row:3;}
-            .theme-control{grid-column:2;grid-row:3;}
+            .theme-control{grid-column:1 / -1;grid-row:3;}
             .topbar-actions-web-only .theme-control{grid-column:1 / -1;grid-row:2;}
             .topbar-actions-web-only .theme-toggle{width:100%;min-width:0;}
             .mode-control,.theme-control{width:100%;}

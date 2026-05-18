@@ -199,13 +199,14 @@ def test_router_health_runtime_dns_payload():
     assert payload['ipset_counts']['unblockvless2'] == 34
     assert payload['ipset_counts']['unblockvlessudp'] == 5
     assert payload['ipset_counts']['unblockvless2udp'] == 12
-    assert 'DNS: ndnproxy (S56dnsmasq не используется)' in payload['note']
+    assert 'DNS: ndnproxy (S56dnsmasq не используется)' in payload['dns_note']
+    assert 'DNS: ndnproxy' not in payload['note']
     assert 'S56dnsmasq: не запущен' not in payload['note']
-    assert 'ipset обновлён: 1 мин назад (успешно)' in payload['note']
-    assert payload['note'].count('ipset обновлён') == 1
-    assert 'unblockvless2=34' in payload['note']
-    assert 'unblockvlessudp=5' in payload['note']
-    assert 'unblockvless2udp=12' in payload['note']
+    assert 'ipset обновлён: 1 мин назад (успешно)' in payload['dns_note']
+    assert payload['dns_note'].count('ipset обновлён') == 1
+    assert 'unblockvless2=34' in payload['dns_note']
+    assert 'unblockvlessudp=5' in payload['dns_note']
+    assert 'unblockvless2udp=12' in payload['dns_note']
 
 
 def test_router_health_runtime_dns_parsers():
@@ -507,9 +508,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_watchdog_idle_restart_rss_kb = 61440' in example
     assert 'memory_watchdog_idle_restart_rss_kb = 61440' in installer
     assert 'memory_watchdog_idle_restart_rss_kb = 61440' in bootstrap
-    assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in example
-    assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in installer
-    assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in bootstrap
+    assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in example
+    assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in installer
+    assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in bootstrap
     assert 'memory_post_pool_restart_rss_kb = 61440' in example
     assert 'memory_post_pool_restart_rss_kb = 61440' in installer
     assert 'memory_post_pool_restart_rss_kb = 61440' in bootstrap
@@ -594,6 +595,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 def test_runtime_startup_limits_router_flash_and_overhead():
     service = (ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    pool_controller_source = (ROOT / 'pool_probe_controller.py').read_text(encoding='utf-8')
+    pool_runner_source = (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    proxy_apply_source = (ROOT / 'proxy_apply_runtime.py').read_text(encoding='utf-8')
+    youtube_source = source + pool_controller_source + pool_runner_source + proxy_apply_source
     assert 'PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT"' in service
     assert 'cleanup_python_bytecode' in service
     assert 'trim_runtime_logs' in service
@@ -601,6 +606,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "pool_probe_min_available_kb', 160000" in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert "memory_watchdog_idle_restart_rss_kb', 60 * 1024" in source
+    assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert 'def _sync_udp_policy_config' in source
     assert 'memory_watchdog_high_rss_since' in source
     assert 'def _start_memory_watchdog_thread' in source
@@ -618,9 +624,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)" in source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
     assert 'http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT)' in source
-    assert 'redirector.googlevideo.com/generate_204' in source
-    assert 'googlevideo.com/generate_204' in source
-    assert 'i.ytimg.com/generate_204' in source
+    assert 'redirector.googlevideo.com/generate_204' in youtube_source
+    assert 'googlevideo.com/generate_204' in youtube_source
+    assert 'i.ytimg.com/generate_204' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 2' in youtube_source
     assert 'Last confirmation:' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
@@ -1167,7 +1174,7 @@ def test_pool_probe_controller_helpers():
 
     records = []
     tg_results = iter([(False, ''), (False, '')])
-    yt_results = iter([(False, ''), (False, ''), (False, '')])
+    yt_results = iter([(False, '')] * 8)
     pool_probe_controller.check_pool_key_through_proxy(
         'vless',
         'key',
@@ -1189,7 +1196,7 @@ def test_pool_probe_controller_helpers():
 
     records = []
     http_calls = []
-    yt_results = iter([(False, 'timeout'), (True, 'ok')])
+    yt_results = iter([(False, 'timeout'), (True, 'ok'), (True, 'ok')])
     pool_probe_controller.check_pool_key_through_proxy(
         'vless',
         'key',
@@ -1206,8 +1213,9 @@ def test_pool_probe_controller_helpers():
         sleep=lambda seconds: None,
     )
     assert http_calls == [
-        {'connect_timeout': 3, 'read_timeout': 4},
-        {'connect_timeout': 6, 'read_timeout': 10},
+        {'url': 'https://www.youtube.com/generate_204', 'connect_timeout': 3, 'read_timeout': 4},
+        {'url': 'https://redirector.googlevideo.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
+        {'url': 'https://i.ytimg.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
     ]
     assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': True})]
 
@@ -2242,7 +2250,7 @@ def test_web_form_template_smoke():
         quick_key_proto='vless',
         quick_key_value='',
         quick_start_note='note',
-        router_health={'memory_text': '10 / 64 MB', 'note': 'load 0.01'},
+        router_health={'memory_text': '10 / 64 MB', 'note': 'load 0.01', 'dns_note': 'DNS: ndnproxy'},
         socks_block='',
         start_button_label='start',
         status={'api_status': 'ok'},
@@ -2256,7 +2264,8 @@ def test_web_form_template_smoke():
     assert '/static/app.js?v=' in page
     assert 'class="app-shell"' in page
     assert 'app-mode-toggle-button' in page
-    assert 'class="mode-control"' in page
+    assert 'active-mode-control' in page
+    assert 'active-mode-dns-note' in page
     assert 'theme-picker' in page
     assert 'data-theme-choice="glass"' in page
     assert 'Liquid Glass' in page
@@ -2268,6 +2277,7 @@ def test_web_form_template_smoke():
     assert 'status-overview-head' in page
     assert 'Панель состояния' not in page
     assert '10 / 64 MB' in page
+    assert 'DNS: ndnproxy' in page
     assert 'value="update"' not in page
     assert 'Локальная панель управления обходом на роутере' in page
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
@@ -2358,7 +2368,8 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     assert "key_name == 'vless2'" in source
     assert "probe.get('yt_ok') is not True" in source
     assert "def _schedule_vless2_youtube_cache_confirm" in source
-    assert "if ok_count >= 2:" in source
+    assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
+    assert "_controller_check_youtube_through_proxy" in source
     assert "_record_key_probe('vless2', key_value, yt_ok=True)" in source
     assert "_invalidate_key_status_cache()" in source
 

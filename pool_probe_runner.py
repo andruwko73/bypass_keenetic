@@ -10,6 +10,13 @@ import time
 from collections import deque
 
 YOUTUBE_HEALTHCHECK_URL = 'https://www.youtube.com/generate_204'
+YOUTUBE_HEALTHCHECK_URLS = (
+    YOUTUBE_HEALTHCHECK_URL,
+    'https://redirector.googlevideo.com/generate_204',
+    'https://i.ytimg.com/generate_204',
+    'https://www.youtube.com',
+)
+YOUTUBE_HEALTHCHECK_MIN_OK = 2
 
 
 def pool_probe_socks_inbound(port, tag):
@@ -25,6 +32,26 @@ def pool_probe_socks_inbound(port, tag):
 
 def pool_probe_outbound(proto, key_value, tag, proxy_outbound_from_key, email='pool-probe@local'):
     return proxy_outbound_from_key(proto, key_value, tag, email=email)
+
+
+def check_youtube_through_proxy(check_http, proxy_url, *, http_timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
+    ok_count = 0
+    last_message = ''
+    connect_timeout, read_timeout = http_timeouts
+    for url in urls:
+        ok, message = check_http(
+            proxy_url,
+            url=url,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
+        if ok:
+            ok_count += 1
+            if ok_count >= max(1, int(min_ok or 1)):
+                return True, 'YouTube endpoints confirmed'
+        else:
+            last_message = message
+    return False, last_message or 'YouTube endpoints did not respond through this key.'
 
 
 def build_pool_probe_core_config_batch(probe_tasks, test_port, proxy_outbound_from_key):
@@ -254,11 +281,10 @@ def find_pool_failover_candidate(
                     continue
                 proxy_url = f'socks5h://127.0.0.1:{port}'
                 if service == 'youtube':
-                    primary_ok, _ = check_http(
+                    primary_ok, _ = check_youtube_through_proxy(
+                        check_http,
                         proxy_url,
-                        url=YOUTUBE_HEALTHCHECK_URL,
-                        connect_timeout=http_connect,
-                        read_timeout=http_read,
+                        http_timeouts=(http_connect, http_read),
                     )
                     tg_ok = None
                     yt_ok = primary_ok

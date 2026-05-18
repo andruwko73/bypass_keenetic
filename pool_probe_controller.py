@@ -2,6 +2,14 @@ import gc
 import threading
 import time
 
+YOUTUBE_HEALTHCHECK_URLS = (
+    'https://www.youtube.com/generate_204',
+    'https://redirector.googlevideo.com/generate_204',
+    'https://i.ytimg.com/generate_204',
+    'https://www.youtube.com',
+)
+YOUTUBE_HEALTHCHECK_MIN_OK = 2
+
 
 def initial_pool_probe_progress():
     return {
@@ -78,6 +86,42 @@ def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
     return max(batch_timeout, per_key * waves + 5.0)
 
 
+def check_youtube_through_proxy(
+    check_http,
+    proxy_url,
+    *,
+    urls=YOUTUBE_HEALTHCHECK_URLS,
+    min_ok=YOUTUBE_HEALTHCHECK_MIN_OK,
+    http_timeouts,
+    http_retry_timeouts=None,
+    retry_delay_seconds=0,
+    sleep=time.sleep,
+):
+    retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
+    ok_hosts = []
+    failed = []
+    for index, url in enumerate(urls or YOUTUBE_HEALTHCHECK_URLS):
+        connect_timeout, read_timeout = http_timeouts if index == 0 else (retry_http_connect, retry_http_read)
+        ok, message = check_http(
+            proxy_url,
+            url=url,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
+        host = url.split('/')[2] if '://' in url else url
+        if ok:
+            ok_hosts.append(host)
+            if len(ok_hosts) >= max(1, int(min_ok or 1)):
+                return True, 'YouTube endpoints confirmed: ' + ', '.join(ok_hosts)
+        else:
+            failed.append(f'{host}: {message}')
+            if retry_delay_seconds and index == 0:
+                sleep(retry_delay_seconds)
+    if ok_hosts and min_ok <= 1:
+        return True, 'YouTube endpoint confirmed: ' + ', '.join(ok_hosts)
+    return False, '; '.join(failed[-2:]) or 'YouTube endpoints did not respond through this key.'
+
+
 def check_pool_key_through_proxy(
     proto,
     key_value,
@@ -98,17 +142,35 @@ def check_pool_key_through_proxy(
     http_connect, http_read = http_timeouts
     retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
     tg_ok, _ = check_telegram_api(proxy_url, connect_timeout=tg_connect, read_timeout=tg_read)
-    yt_ok, _ = check_http(proxy_url, connect_timeout=http_connect, read_timeout=http_read)
-    if not yt_ok and (retry_http_connect, retry_http_read) != (http_connect, http_read):
-        sleep(retry_delay_seconds)
-        yt_ok, _ = check_http(proxy_url, connect_timeout=retry_http_connect, read_timeout=retry_http_read)
+    yt_ok, _ = check_youtube_through_proxy(
+        check_http,
+        proxy_url,
+        http_timeouts=(http_connect, http_read),
+        http_retry_timeouts=(retry_http_connect, retry_http_read),
+        retry_delay_seconds=retry_delay_seconds,
+        sleep=sleep,
+    )
     if not tg_ok and not yt_ok:
         sleep(retry_delay_seconds)
         tg_ok, _ = check_telegram_api(proxy_url, connect_timeout=tg_connect, read_timeout=tg_read)
-        yt_ok, _ = check_http(proxy_url, connect_timeout=retry_http_connect, read_timeout=retry_http_read)
+        yt_ok, _ = check_youtube_through_proxy(
+            check_http,
+            proxy_url,
+            http_timeouts=(retry_http_connect, retry_http_read),
+            http_retry_timeouts=(retry_http_connect, retry_http_read),
+            retry_delay_seconds=retry_delay_seconds,
+            sleep=sleep,
+        )
     elif not yt_ok:
         sleep(retry_delay_seconds)
-        yt_ok, _ = check_http(proxy_url, connect_timeout=retry_http_connect, read_timeout=retry_http_read)
+        yt_ok, _ = check_youtube_through_proxy(
+            check_http,
+            proxy_url,
+            http_timeouts=(retry_http_connect, retry_http_read),
+            http_retry_timeouts=(retry_http_connect, retry_http_read),
+            retry_delay_seconds=retry_delay_seconds,
+            sleep=sleep,
+        )
 
     record_tg_ok = tg_ok if (tg_ok or not yt_ok) else 'unknown'
     record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok)

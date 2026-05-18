@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'status-layout-14'
+ASSET_CACHE_REVISION = 'status-layout-15'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -131,6 +131,7 @@ def render_web_form(
     router_health = router_health or {}
     router_memory_text = html.escape(str(router_health.get('memory_text') or 'недоступно'))
     router_health_note = html.escape(str(router_health.get('note') or 'данные обновляются из /proc с коротким кэшем'))
+    router_dns_note = html.escape(str(router_health.get('dns_note') or ''))
     router_memory_percent = _safe_percent(router_health.get('used_percent'))
     router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
     attention_html = ''.join(
@@ -195,6 +196,16 @@ def render_web_form(
                                         <span class="status-label">Активный режим Telegram-бота</span>
                                         <span class="status-value" id="current-mode-label">{html.escape(current_mode_label)}</span>
                                         <p class="status-note">Списки обхода: <span id="list-route-label">{html.escape(list_route_label)}</span></p>
+                                        <p class="status-note" id="active-mode-dns-note">{router_dns_note}</p>
+                                    </div>
+                                </div>
+                                <div class="status-card-actions active-mode-actions">
+                                    <div class="mode-control active-mode-control">
+                                        <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
+                                            <span>{html.escape(mode_toggle_label)}</span>
+                                            <span>{html.escape(current_mode_label)}</span>
+                                        </button>
+                                        {mode_picker_block}
                                     </div>
                                 </div>
                             </div>'''
@@ -211,15 +222,6 @@ def render_web_form(
         ''
     )
     bot_mode_control_block = ''
-    if enable_telegram:
-        bot_mode_control_block = f'''
-                <div class="mode-control">
-                    <button type="button" id="mode-toggle-button" class="mode-toggle" onclick="toggleModePicker()">
-                        <span>{html.escape(mode_toggle_label)}</span>
-                        <span>{html.escape(current_mode_label)}</span>
-                    </button>
-                    {mode_picker_block}
-                </div>'''
     asset_version = html.escape(f'{APP_VERSION_LABEL or "1"}-{ASSET_CACHE_REVISION}')
     try:
         custom_checks = json.loads(custom_checks_json or '[]') if enable_custom_checks else []

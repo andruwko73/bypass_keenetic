@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.605, последнее изменение: 18.05.2026
+#  Файл: bot.py, Версия v1.606, последнее изменение: 18.05.2026
 
 import subprocess
 import os
@@ -137,8 +137,11 @@ from telegram_install_ui import (
 )
 from pool_probe_controller import (
     PoolProbeProgress,
+    YOUTUBE_HEALTHCHECK_MIN_OK as _POOL_YOUTUBE_HEALTHCHECK_MIN_OK,
+    YOUTUBE_HEALTHCHECK_URLS as _POOL_YOUTUBE_HEALTHCHECK_URLS,
     available_memory_kb as _available_memory_kb,
     check_pool_key_through_proxy as _controller_check_pool_key_through_proxy,
+    check_youtube_through_proxy as _controller_check_youtube_through_proxy,
     failed_custom_probe_results as _failed_custom_probe_results,
     filter_active_probe_tasks as _controller_filter_active_probe_tasks,
     pool_probe_progress_label as _controller_pool_probe_progress_label,
@@ -400,11 +403,8 @@ YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
     8.0,
     float(getattr(config, 'youtube_vless2_failover_confirm_delay_seconds', 8.0)),
 )
-YOUTUBE_VLESS2_HEALTHCHECK_URLS = (
-    'https://www.youtube.com/generate_204',
-    'https://redirector.googlevideo.com/generate_204',
-    'https://i.ytimg.com/generate_204',
-)
+YOUTUBE_VLESS2_HEALTHCHECK_URLS = tuple(getattr(config, 'youtube_vless2_healthcheck_urls', _POOL_YOUTUBE_HEALTHCHECK_URLS))
+YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK = max(1, int(getattr(config, 'youtube_vless2_healthcheck_min_ok', _POOL_YOUTUBE_HEALTHCHECK_MIN_OK)))
 youtube_vless2_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
@@ -591,19 +591,16 @@ def _attempt_auto_failover():
 
 
 def _check_youtube_vless2_once():
-    checked = []
-    for url in YOUTUBE_VLESS2_HEALTHCHECK_URLS:
-        ok, message = _check_http_through_proxy(
-            proxy_settings.get('vless2'),
-            url=url,
-            connect_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
-            read_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
-        )
-        host = url.split('/')[2]
-        if not ok:
-            return False, f'{host}: {message}'
-        checked.append(host)
-    return True, 'YouTube endpoints confirmed: ' + ', '.join(checked)
+    return _controller_check_youtube_through_proxy(
+        _check_http_through_proxy,
+        proxy_settings.get('vless2'),
+        urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
+        min_ok=YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK,
+        http_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
+        http_retry_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
+        retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+        sleep=shutdown_requested.wait,
+    )
 
 
 def _schedule_vless2_youtube_cache_confirm(key_value):
@@ -611,22 +608,22 @@ def _schedule_vless2_youtube_cache_confirm(key_value):
         return
 
     def worker():
-        ok_count = 0
         try:
             with vless2_youtube_cache_confirm_lock:
                 proxy_url = proxy_settings.get('vless2')
                 if not proxy_url:
                     return
-                for url in YOUTUBE_VLESS2_HEALTHCHECK_URLS:
-                    ok, _message = _check_http_through_proxy(
-                        proxy_url,
-                        url=url,
-                        connect_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
-                        read_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
-                    )
-                    if ok:
-                        ok_count += 1
-                if ok_count >= 2:
+                ok, _message = _controller_check_youtube_through_proxy(
+                    _check_http_through_proxy,
+                    proxy_url,
+                    urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
+                    min_ok=YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK,
+                    http_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
+                    http_retry_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
+                    retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+                    sleep=shutdown_requested.wait,
+                )
+                if ok:
                     _record_key_probe('vless2', key_value, yt_ok=True)
                     _invalidate_key_status_cache()
         finally:
@@ -921,9 +918,10 @@ MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = max(
     int(getattr(config, 'memory_watchdog_idle_restart_rss_kb', 60 * 1024)),
 )
 MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = max(
-    300.0,
-    float(getattr(config, 'memory_watchdog_idle_restart_hold_seconds', 600.0)),
+    60.0,
+    float(getattr(config, 'memory_watchdog_idle_restart_hold_seconds', 120.0)),
 )
+MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = min(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS, 120.0)
 MEMORY_POST_POOL_RESTART_ENABLED = bool(getattr(config, 'memory_post_pool_restart_enabled', True))
 MEMORY_POST_POOL_RESTART_RSS_KB = max(0, int(getattr(config, 'memory_post_pool_restart_rss_kb', 60 * 1024)))
 MEMORY_POST_POOL_RESTART_DELAY_SECONDS = max(
@@ -2910,18 +2908,14 @@ def _check_http_through_proxy(proxy_url, url='https://www.youtube.com/generate_2
 
 
 def _check_youtube_health_through_proxy(proxy_url):
-    ok, message = _check_http_through_proxy(
+    return _controller_check_youtube_through_proxy(
+        _check_http_through_proxy,
         proxy_url,
-        connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-        read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
-    )
-    if ok or not _status_is_transient_text(message):
-        return ok, message
-    time.sleep(0.2)
-    return _check_http_through_proxy(
-        proxy_url,
-        connect_timeout=POOL_PROBE_RETRY_CONNECT_TIMEOUT,
-        read_timeout=POOL_PROBE_RETRY_READ_TIMEOUT,
+        urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
+        min_ok=YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK,
+        http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
+        http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
+        retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
     )
 
 
