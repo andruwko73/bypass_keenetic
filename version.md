@@ -1,3 +1,6 @@
+*v1.604 (18 May 2026) -* main
+*Moved stale Vless2 YouTube confirmation to a background check that accepts 2 of 3 YouTube endpoints, keeping the web status responsive while correcting missing pool cache results.*
+
 *v1.603 (18 May 2026) -* main
 *Confirmed the current Vless2 YouTube port when its pool cache is missing or stale, so the interface can show a working YouTube key immediately after updates.*
 

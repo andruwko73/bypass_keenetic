@@ -2343,9 +2343,10 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "key_name == 'vless2'" in source
     assert "probe.get('yt_ok') is not True" in source
-    assert "_check_http_through_proxy(\n            proxy_settings[key_name]," in source
-    assert "_record_key_probe(key_name, key_value, yt_ok=True)" in source
-    assert "_invalidate_pool_summary_cache()" in source
+    assert "def _schedule_vless2_youtube_cache_confirm" in source
+    assert "if ok_count >= 2:" in source
+    assert "_record_key_probe('vless2', key_value, yt_ok=True)" in source
+    assert "_invalidate_key_status_cache()" in source
 
 
 def main():

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.603, последнее изменение: 18.05.2026
+#  Файл: bot.py, Версия v1.604, последнее изменение: 18.05.2026
 
 import subprocess
 import os
@@ -606,6 +606,35 @@ def _check_youtube_vless2_once():
     return True, 'YouTube endpoints confirmed: ' + ', '.join(checked)
 
 
+def _schedule_vless2_youtube_cache_confirm(key_value):
+    if not key_value or vless2_youtube_cache_confirm_lock.locked():
+        return
+
+    def worker():
+        ok_count = 0
+        try:
+            with vless2_youtube_cache_confirm_lock:
+                proxy_url = proxy_settings.get('vless2')
+                if not proxy_url:
+                    return
+                for url in YOUTUBE_VLESS2_HEALTHCHECK_URLS:
+                    ok, _message = _check_http_through_proxy(
+                        proxy_url,
+                        url=url,
+                        connect_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+                        read_timeout=YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+                    )
+                    if ok:
+                        ok_count += 1
+                if ok_count >= 2:
+                    _record_key_probe('vless2', key_value, yt_ok=True)
+                    _invalidate_key_status_cache()
+        finally:
+            _memory_cleanup('vless2 youtube cache confirm')
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def _confirm_youtube_vless2_key():
     last_message = ''
     for attempt in range(YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES):
@@ -991,6 +1020,7 @@ pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_cancel_event = threading.Event()
 pool_probe_resume_lock = threading.Lock()
+vless2_youtube_cache_confirm_lock = threading.Lock()
 pool_probe_resume_payload = None
 pool_probe_resume_after_cancel = True
 pool_probe_low_memory_resume_scheduled = False
@@ -3041,18 +3071,8 @@ def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     probe = cache.get(_hash_key(key_value), {})
-    if key_name == 'vless2' and (not isinstance(probe, dict) or probe.get('yt_ok') is not True) and proxy_settings.get(key_name):
-        yt_ok, _ = _check_http_through_proxy(
-            proxy_settings[key_name],
-            connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-            read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
-        )
-        if yt_ok:
-            probe = dict(probe) if isinstance(probe, dict) else {}
-            probe['yt_ok'] = True
-            probe['ts'] = time.time()
-            _record_key_probe(key_name, key_value, yt_ok=True)
-            _invalidate_pool_summary_cache()
+    if key_name == 'vless2' and (not isinstance(probe, dict) or probe.get('yt_ok') is not True):
+        _schedule_vless2_youtube_cache_confirm(key_value)
     custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
     return _status_cached_protocol_status(key_value, probe, custom_checks, custom_states)
 
