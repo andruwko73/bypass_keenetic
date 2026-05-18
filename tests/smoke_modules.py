@@ -1891,7 +1891,8 @@ def test_web_pool_form_blocks_helpers():
         lambda data: 'Проверка',
         'ok',
     )
-    assert progress == 'ok'
+    assert '1/2' in progress
+    assert progress != 'ok'
     assert web_pool_form_blocks.pool_summary_note_with_progress(
         'note',
         True,
@@ -2224,7 +2225,8 @@ def test_web_template_scripts_helpers():
     assert 'function renderStatusAttention(snapshot)' in scripts
     assert "items.push(['info', 'Проверка пула выполняется'" not in scripts
     assert 'проверка пула сейчас не мешает работе' not in scripts
-    assert 'poolProbeVisible' not in scripts
+    assert 'poolProbeVisible' in scripts
+    assert "apiPill.textContent = poolProbeVisible" in scripts
     assert 'function updatePoolProbeControls(active)' in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'function poolRowMatchesState(row, state)' in scripts

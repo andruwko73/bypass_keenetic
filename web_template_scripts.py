@@ -1528,7 +1528,14 @@ def render_web_scripts(
             }}
             const apiPill = document.getElementById('web-api-pill');
             if (apiPill) {{
-                apiPill.textContent = web.api_status || '';
+                const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
+                const poolProbeVisible = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
+                const progressLabel = poolProbeProgressLabel(progress.scope || '');
+                const progressNote = progress.note ? String(progress.note) : '';
+                const progressText = '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + (progress.total || 0);
+                apiPill.textContent = poolProbeVisible
+                    ? (progressNote ? progressText + '. ' + progressNote : progressText)
+                    : (web.api_status || '');
             }}
             setOptionalText('web-socks-details', web.socks_details || '');
             const fallbackText = web.fallback_reason && web.proxy_mode === 'none'

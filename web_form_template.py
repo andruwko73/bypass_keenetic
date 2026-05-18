@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'telegram-status-icon-21'
+ASSET_CACHE_REVISION = 'pool-topbar-22'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):

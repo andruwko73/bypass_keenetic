@@ -1,6 +1,6 @@
-*v1.612 (18 May 2026) -* main
+*v1.613 (18 May 2026) -* main
 
-*Kept the Telegram status icon inline before the Telegram API health text.*
+*Restored concise pool-check progress in the header while keeping detailed progress in the key-pool card.*
 
 *v1.605 (18 May 2026) -* main
 
