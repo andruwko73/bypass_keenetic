@@ -28,6 +28,17 @@ config_get() {
   printf '%s' "$default_value"
 }
 
+detect_ipset_type() {
+  set_type="hash:net"
+  ipset create testset hash:net -exist > /dev/null 2>&1
+  retVal=$?
+  ipset destroy testset > /dev/null 2>&1 || true
+  if [ $retVal -ne 0 ]; then
+    set_type="hash:ip"
+  fi
+  printf '%s' "$set_type"
+}
+
 cleanup_update_artifacts() {
   keep_count="${1:-3}"
   ls -dt /opt/root/update-* 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
@@ -568,12 +579,7 @@ if [ "$1" = "-install" ]; then
     #ipset flush testset
 
     # есть поддержка множества hash:net или нет, если нет, то при этом вы потеряете возможность разблокировки по диапазону и CIDR
-    set_type="hash:net"
-    ipset create testset hash:net -exist > /dev/null 2>&1
-    retVal=$?
-    if [ $retVal -ne 0 ]; then
-        set_type="hash:ip"
-    fi
+    set_type="$(detect_ipset_type)"
 
     echo "Переменные роутера найдены"
     # создания множеств IP-адресов unblock
@@ -754,6 +760,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S98telegram_bot_installer" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99telegram_bot" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
 
+    set_type="$(detect_ipset_type)"
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/1082/${localportsh}/g" "$stage_dir/100-redirect.sh"

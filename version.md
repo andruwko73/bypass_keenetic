@@ -1,3 +1,6 @@
+*v1.599 (18 May 2026) -* main
+*Fixed GitHub update preparation so the router keeps the detected ipset type in 100-redirect.sh during self-update.*
+
 *v1.598 (18 May 2026) -* main
 *Added smart QUIC/UDP sets for both Vless lists, throttled full pool checks when router CPU is high, lowered the idle memory restart threshold to match post-pool cleanup, disabled inactive pool probe controls, and covered web Basic auth checks in smoke tests.*
 

@@ -567,6 +567,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '/opt/bin/unblock_update.sh > /dev/null 2>&1 || true' in script
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source
+    assert 'detect_ipset_type()' in script
+    assert script.count('set_type="$(detect_ipset_type)"') == 2
+    assert 'sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"' in script
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
