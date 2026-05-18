@@ -1457,18 +1457,15 @@ def render_web_scripts(
             if (ENABLE_TELEGRAM && !apiLooksOk) {{
                 items.push(['warn', 'Telegram API требует внимания', apiStatus]);
             }}
-            if (ENABLE_KEY_POOL && !!snapshot.pool_probe_running) {{
-                items.push(['info', 'Проверка пула выполняется', String(health.pool_probe_text || 'Статусы обновляются без перезагрузки страницы.')]);
-            }}
             const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || {{}}) : {{}};
             if (ENABLE_KEY_POOL && String(poolSummary.note || '').toLowerCase().indexOf('не работает') !== -1) {{
                 items.push(['warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и включите быстрый фильтр "Есть проблемы".']);
             }}
             if (!items.length) {{
                 const okText = ENABLE_TELEGRAM
-                    ? 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.'
+                    ? 'Telegram API отвечает, память роутера в норме.'
                     : ENABLE_KEY_POOL
-                    ? 'Память роутера в норме, проверка пула сейчас не мешает работе.'
+                    ? 'Память роутера в норме.'
                     : 'Память роутера в норме, веб-интерфейс готов к работе.';
                 items.push(['ok', 'Проблем не найдено', okText]);
             }}

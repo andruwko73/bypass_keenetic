@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'header-layout-16'
+ASSET_CACHE_REVISION = 'pool-dedupe-17'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -45,18 +45,15 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool, 
     if enable_telegram and api_status and not any(marker in api_status_lower for marker in ('подтверж', 'работает', 'ok', 'доступ')):
         items.append(('warn', 'Telegram API требует внимания', api_status))
 
-    if enable_key_pool and router_health.get('pool_probe_running'):
-        items.append(('info', 'Проверка пула выполняется', str(router_health.get('pool_probe_text') or 'Статусы обновляются без перезагрузки страницы.')))
-
     pool_note_lower = str(pool_summary_note or '').lower()
     if enable_key_pool and 'не работает' in pool_note_lower:
         items.append(('warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и отфильтруйте строки с проблемами.'))
 
     if not items:
         if enable_telegram:
-            text = 'Telegram API отвечает, память роутера в норме, проверка пула сейчас не мешает работе.'
+            text = 'Telegram API отвечает, память роутера в норме.'
         elif enable_key_pool:
-            text = 'Память роутера в норме, проверка пула сейчас не мешает работе.'
+            text = 'Память роутера в норме.'
         else:
             text = 'Память роутера в норме, веб-интерфейс готов к работе.'
         items.append(('ok', 'Проблем не найдено', text))

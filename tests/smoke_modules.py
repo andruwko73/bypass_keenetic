@@ -173,6 +173,7 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['used_percent'] == 55
     assert payload['pool_probe_text'] == 'Не запущена'
     assert 'Бот использует 52 MB RAM.' in payload['note']
+    assert 'Проверка пула' not in payload['note']
 
 
 def test_router_health_runtime_dns_payload():
@@ -2215,6 +2216,8 @@ def test_web_template_scripts_helpers():
     assert "fetch('/api/protocol_panel?proto='" in scripts
     assert 'function setupProtocolSubtabs(root)' in scripts
     assert 'function renderStatusAttention(snapshot)' in scripts
+    assert "items.push(['info', 'Проверка пула выполняется'" not in scripts
+    assert 'проверка пула сейчас не мешает работе' not in scripts
     assert 'function updatePoolProbeControls(active)' in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'function poolRowMatchesState(row, state)' in scripts

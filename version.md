@@ -1,6 +1,6 @@
-*v1.608 (18 May 2026) -* main
+*v1.609 (18 May 2026) -* main
 
-*Restored the theme control to the right side of the header and widened the live status area.*
+*Removed duplicated pool-check progress from the status and router cards while keeping it in the header and key-pool card.*
 
 *v1.605 (18 May 2026) -* main
 

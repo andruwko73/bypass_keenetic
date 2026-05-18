@@ -352,14 +352,6 @@ def build_router_health_payload(
     if swap_total_kb:
         swap_total_mb = int(round(swap_total_kb / 1024.0))
         details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB.')
-    if probe_running:
-        details.append(f'Проверка пула: выполняется, проверено {probe_checked} из {probe_total} ключей.')
-    else:
-        details.append('Проверка пула: сейчас не запущена.')
-    if temp_xray_count:
-        details.append(f'Временный xray-процессов: {temp_xray_count}.')
-    if probe_note:
-        details.append(probe_note if probe_note.endswith(('.', '!', '?')) else f'{probe_note}.')
     dns_note = dns_health_note(dns_health)
     return {
         'memory_text': memory_text,
