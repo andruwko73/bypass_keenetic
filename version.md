@@ -1,3 +1,6 @@
+*v1.601 (18 May 2026) -* main
+*Pinned GitHub updates to the resolved commit SHA so all router files are downloaded from one fresh immutable revision instead of a potentially cached main branch.*
+
 *v1.600 (18 May 2026) -* main
 *Kept the detected ipset type synchronized for both 100-ipset.sh and 100-redirect.sh during GitHub updates.*
 

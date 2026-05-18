@@ -1713,6 +1713,33 @@ def test_repo_update_helpers():
     assert any('raw.githubusercontent.com' in call for call in session.calls)
     assert any('codeload.github.com' in call for call in session.calls)
     assert any('/refs/tags/branch/name' in call for call in session.calls)
+
+    class _ScriptSession:
+        def __init__(self):
+            self.calls = []
+            self.trust_env = True
+
+        def get(self, url, **_kwargs):
+            self.calls.append(url)
+            if '/commits/' in url:
+                return _Response(url, payload={'sha': 'abc123def456'})
+            return _Response(url, text='#!/bin/sh\necho update\n')
+
+    original_session_factory = repo_update.requests.Session
+    script_session = _ScriptSession()
+    try:
+        repo_update.requests.Session = lambda: script_session
+        script_url, script_text, repo_ref = repo_update.download_repo_script('owner', 'repo', branch='main')
+    finally:
+        repo_update.requests.Session = original_session_factory
+    assert repo_ref == 'abc123def456'
+    assert script_text.startswith('#!/bin/sh')
+    assert '/abc123def456/script.sh' in script_url
+    assert script_session.trust_env is False
+
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "direct_env['REPO_REF'] = repo_ref" in bot_source
+    assert "direct_env['REPO_REF'] = branch" not in bot_source
     assert repo_update.download_repo_script.__defaults__ == ('main',)
     assert telegram_jobs.start_background_command.__kwdefaults__['branch'] == 'main'
     assert repo_update.direct_fetch_env(('HTTP_PROXY',), {'HTTP_PROXY': 'x', 'keep': 'y'}) == {'keep': 'y'}

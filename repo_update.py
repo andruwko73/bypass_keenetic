@@ -78,13 +78,27 @@ def download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
     return response.url, base64.b64decode(content).decode('utf-8')
 
 
+def resolve_repo_ref(session, repo_owner, repo_name, repo_ref):
+    headers = {'Accept': 'application/vnd.github+json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
+    api_url = f'https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{quote(repo_ref, safe="")}'
+    try:
+        response = session.get(api_url, headers=headers, timeout=(5, 12))
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException:
+        return repo_ref
+    sha = str(payload.get('sha') or '').strip()
+    return sha or repo_ref
+
+
 def download_repo_script(repo_owner, repo_name, branch='main'):
     session = requests.Session()
     session.trust_env = False
-    url, script_text = download_repo_file_text(session, repo_owner, repo_name, branch, 'script.sh')
+    repo_ref = resolve_repo_ref(session, repo_owner, repo_name, branch)
+    url, script_text = download_repo_file_text(session, repo_owner, repo_name, repo_ref, 'script.sh')
     if '#!/bin/sh' not in script_text:
         raise ValueError('GitHub returned invalid script.sh')
-    return url, script_text, branch
+    return url, script_text, repo_ref
 
 
 def write_script(script_text, script_path=SCRIPT_PATH, mode=SCRIPT_MODE):

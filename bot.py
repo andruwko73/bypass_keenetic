@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.600, последнее изменение: 18.05.2026
+#  Файл: bot.py, Версия v1.601, последнее изменение: 18.05.2026
 
 import subprocess
 import os
@@ -2506,7 +2506,7 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
         progress_callback('\n'.join(logs))
     if repo_owner and repo_name:
         url, script_text, repo_ref = _repo_download_script(repo_owner, repo_name, branch=branch)
-        direct_env['REPO_REF'] = branch
+        direct_env['REPO_REF'] = repo_ref
         logs.append(f'Скрипт загружен из {url}')
         logs.append(f'Коммит обновления: {repo_ref[:12]}')
         if repo_owner == fork_repo_owner and 'BOT_CONFIG_PATH' not in script_text:
