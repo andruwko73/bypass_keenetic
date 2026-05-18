@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.606, последнее изменение: 18.05.2026
+#  Файл: bot.py, Версия v1.607, последнее изменение: 18.05.2026
 
 import subprocess
 import os
@@ -3059,13 +3059,13 @@ def _protocol_status_for_key(key_name, key_value):
     )
 
 
-def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key_probe_cache=None):
+def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key_probe_cache=None, allow_youtube_confirm=True):
     if not key_value.strip():
         return _status_empty_protocol_status()
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     probe = cache.get(_hash_key(key_value), {})
-    if key_name == 'vless2' and (not isinstance(probe, dict) or probe.get('yt_ok') is not True):
+    if allow_youtube_confirm and key_name == 'vless2' and (not isinstance(probe, dict) or probe.get('yt_ok') is not True):
         _schedule_vless2_youtube_cache_confirm(key_value)
     custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
     return _status_cached_protocol_status(key_value, probe, custom_checks, custom_states)
@@ -4601,6 +4601,7 @@ def _build_status_snapshot(current_keys, force_refresh=False):
 
 
 def _active_mode_status_snapshot(current_keys):
+    pool_locked = pool_probe_lock.locked()
     cached = _cached_status_snapshot(current_keys)
     if cached is not None and isinstance(cached, dict):
         protocols = dict(cached.get('protocols') or {})
@@ -4609,9 +4610,15 @@ def _active_mode_status_snapshot(current_keys):
 
     if proxy_mode in current_keys:
         try:
-            cached_active = _cached_active_mode_protocol_status(current_keys) if pool_probe_lock.locked() else None
+            cached_active = _cached_active_mode_protocol_status(current_keys) if pool_locked else None
             if cached_active is not None:
                 protocols[proxy_mode] = cached_active
+            elif pool_locked:
+                protocols[proxy_mode] = _cached_protocol_status_for_key(
+                    proxy_mode,
+                    current_keys.get(proxy_mode, ''),
+                    allow_youtube_confirm=False,
+                )
             else:
                 protocols[proxy_mode] = _protocol_status_for_key(proxy_mode, current_keys.get(proxy_mode, ''))
                 _store_active_mode_protocol_status(current_keys, protocols[proxy_mode])

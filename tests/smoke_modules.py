@@ -614,6 +614,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _pool_probe_cpu_busy_percent' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source
     assert "_schedule_post_pool_memory_cleanup()" in source
+    assert "allow_youtube_confirm=True" in source
+    assert "allow_youtube_confirm=False" in source
+    assert "elif pool_locked:" in source
     assert 'def _attempt_youtube_vless2_failover' in source
     assert '_start_youtube_vless2_failover_thread()' in source
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source

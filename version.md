@@ -1,6 +1,6 @@
-*v1.606 (18 May 2026) -* main
+*v1.607 (18 May 2026) -* main
 
-*Made YouTube pool checks use multiple endpoints, moved DNS/ipset details into the active Telegram mode card, and shortened idle memory restart hold time.*
+*Prevented web status from doing live Telegram/YouTube checks during a full pool probe so the interface stays responsive under router load.*
 
 *v1.605 (18 May 2026) -* main
 
