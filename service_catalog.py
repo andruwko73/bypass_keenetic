@@ -126,10 +126,20 @@ DISCORD_ROUTE_ENTRIES = [
     'images-ext-1.discordapp.net',
 ]
 
+CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES = [
+    'remotedesktop.google.com',
+    'remotedesktop-pa.googleapis.com',
+    'instantmessaging-pa.googleapis.com',
+    'www.gstatic.com',
+    'clients3.google.com',
+    'clients4.google.com',
+    '74.125.247.128',
+]
+
 CUSTOM_CHECK_PRESETS = [
     {
         'id': 'chatgpt_services',
-        'label': 'ChatGPT',
+        'label': 'ChatGPT / Codex',
         'url': 'https://chatgpt.com',
         'urls': [
             'https://chatgpt.com',
@@ -139,20 +149,6 @@ CUSTOM_CHECK_PRESETS = [
         ],
         'routes': CHATGPT_ROUTE_ENTRIES,
         'badge': 'GPT',
-        'icon': 'chatgpt',
-    },
-    {
-        'id': 'openai_codex',
-        'label': 'Codex',
-        'url': 'https://chatgpt.com/codex',
-        'urls': [
-            'https://chatgpt.com/codex',
-            'https://chatgpt.com',
-            'https://api.openai.com',
-            'https://platform.openai.com',
-        ],
-        'routes': CHATGPT_ROUTE_ENTRIES,
-        'badge': 'CDX',
         'icon': 'chatgpt',
     },
     {
@@ -222,6 +218,18 @@ CUSTOM_CHECK_PRESETS = [
         'icon': 'discord',
     },
     {
+        'id': 'chrome_remote_desktop',
+        'label': 'Chrome Remote Desktop',
+        'url': 'https://remotedesktop.google.com',
+        'urls': [
+            'https://remotedesktop.google.com',
+            'https://remotedesktop-pa.googleapis.com',
+            'https://instantmessaging-pa.googleapis.com',
+        ],
+        'routes': CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
+        'badge': 'CRD',
+    },
+    {
         'id': 'meta_ai',
         'label': 'Meta AI',
         'url': 'https://www.meta.ai',
@@ -259,6 +267,7 @@ CONNECTIVITY_CHECK_DOMAINS = [
     'domain:remotedesktop.google.com',
     'full:remotedesktop-pa.googleapis.com',
     'full:instantmessaging-pa.googleapis.com',
+    'full:74.125.247.128',
 ]
 
 TELEGRAM_UNBLOCK_ENTRIES = [
@@ -350,6 +359,12 @@ SERVICE_LIST_SOURCES = {
         'label': 'Discord',
         'aliases': ['discord', 'дискорд'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst',
+    },
+    'chrome_remote_desktop': {
+        'label': 'Chrome Remote Desktop',
+        'aliases': ['chrome remote desktop', 'crd', 'chromoting', 'remote desktop', 'удаленный рабочий стол chrome'],
+        'url': '',
+        'entries': CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
     },
     'tiktok': {
         'label': 'TikTok',

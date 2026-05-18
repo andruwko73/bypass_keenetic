@@ -1,3 +1,7 @@
+*v1.614 (19 May 2026) -* main
+*Объединены дополнительные проверки ChatGPT и Codex в один сервис ChatGPT / Codex; старая отдельная проверка Codex автоматически мигрирует в объединённую*
+*Добавлен Chrome Remote Desktop в список обхода Vless 1, пресеты дополнительных проверок и кнопки добавления сервисов в списки*
+
 *v1.613 (18 May 2026) -* main
 
 *Restored concise pool-check progress in the header while keeping detailed progress in the key-pool card.*

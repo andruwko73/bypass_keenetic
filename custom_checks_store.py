@@ -12,6 +12,7 @@ from probe_cache import hash_key
 CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
 CUSTOM_CHECK_MAX = 12
 CUSTOM_CHECK_REMOVED_IDS = {'mistral'}
+CUSTOM_CHECK_CHATGPT_MERGED_IDS = {'chatgpt', 'codex', 'openai_api', 'openai_codex'}
 
 
 def custom_check_preset(preset_id):
@@ -118,6 +119,30 @@ def sanitize_custom_check(item):
     return result
 
 
+def merge_chatgpt_custom_checks(checks):
+    preset = sanitize_custom_check(custom_check_preset('chatgpt_services'))
+    if not preset:
+        return checks or []
+    result = []
+    inserted = False
+    found_openai_check = False
+    for item in checks or []:
+        check_id = item.get('id')
+        if check_id in CUSTOM_CHECK_CHATGPT_MERGED_IDS:
+            found_openai_check = True
+            continue
+        if check_id == 'chatgpt_services':
+            found_openai_check = True
+            if not inserted:
+                result.append(preset)
+                inserted = True
+            continue
+        result.append(item)
+    if found_openai_check and not inserted:
+        result.insert(0, preset)
+    return result
+
+
 def load_custom_checks():
     try:
         with open(CUSTOM_CHECKS_PATH, 'r', encoding='utf-8') as file:
@@ -142,14 +167,7 @@ def load_custom_checks():
         result.append(check)
         if len(result) >= CUSTOM_CHECK_MAX:
             break
-    legacy_chatgpt_ids = {'chatgpt', 'codex', 'openai_api'}
-    if any(item.get('id') in legacy_chatgpt_ids for item in result):
-        result = [item for item in result if item.get('id') not in legacy_chatgpt_ids]
-        if not any(item.get('id') == 'chatgpt_services' for item in result):
-            preset = sanitize_custom_check(custom_check_preset('chatgpt_services'))
-            if preset:
-                result.insert(0, preset)
-    return result
+    return merge_chatgpt_custom_checks(result)
 
 
 def save_custom_checks(checks):
@@ -170,6 +188,7 @@ def save_custom_checks(checks):
         result.append(check)
         if len(result) >= CUSTOM_CHECK_MAX:
             break
+    result = merge_chatgpt_custom_checks(result)[:CUSTOM_CHECK_MAX]
     os.makedirs(os.path.dirname(CUSTOM_CHECKS_PATH), exist_ok=True)
     directory = os.path.dirname(CUSTOM_CHECKS_PATH)
     fd, temp_path = tempfile.mkstemp(prefix='.custom_checks_', suffix='.json', dir=directory)

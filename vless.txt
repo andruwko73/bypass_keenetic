@@ -13,6 +13,7 @@
 91.108.56.0/22
 91.108.8.0/22
 95.161.64.0/20
+74.125.247.128
 ads-twitter.com
 android.chat.openai.com
 anistar.me
@@ -37,6 +38,8 @@ challenges.cloudflare.com
 chat.deepseek.com
 chat.openai.com
 chatgpt.com
+clients3.google.com
+clients4.google.com
 circlecrewpinkcrowd.com
 cms-twdigitalassets.com
 comments.app
@@ -89,6 +92,7 @@ ig.me
 images-ext-1.discordapp.net
 images.workoscdn.com
 instagram.com
+instantmessaging-pa.googleapis.com
 intercom.io
 intercomcdn.com
 internalfb.com
@@ -117,6 +121,8 @@ platform.openai.com
 prodregistryv2.org
 pscp.tv
 quiz.directory
+remotedesktop-pa.googleapis.com
+remotedesktop.google.com
 rum.browser-intake-datadoghq.com
 rutor.info
 rutor.is
@@ -218,5 +224,6 @@ whatsapp.biz
 whatsapp.com
 whatsapp.net
 ws.chatgpt.com
+www.gstatic.com
 www.vscode-unpkg.net
 x.com

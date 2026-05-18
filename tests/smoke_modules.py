@@ -48,6 +48,7 @@ import proxy_apply_runtime
 import proxy_status
 import unblock_lists
 import service_catalog
+import custom_checks_store
 import installer_common
 import installer
 import repo_update
@@ -1570,9 +1571,50 @@ def test_chatgpt_codex_routes_are_synced():
     assert set(service_catalog.CHATGPT_ROUTE_ENTRIES) <= entries
 
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
-    assert set(['chatgpt_services', 'openai_codex']) <= set(presets)
+    assert 'chatgpt_services' in presets
+    assert 'openai_codex' not in presets
+    assert presets['chatgpt_services']['label'] == 'ChatGPT / Codex'
+    assert 'https://chatgpt.com/codex' in presets['chatgpt_services']['urls']
     assert 'https://platform.openai.com' in presets['chatgpt_services']['urls']
-    assert presets['openai_codex']['routes'] == service_catalog.CHATGPT_ROUTE_ENTRIES
+    assert presets['chatgpt_services']['routes'] == service_catalog.CHATGPT_ROUTE_ENTRIES
+
+
+def test_chatgpt_codex_custom_check_migration():
+    checks = custom_checks_store.merge_chatgpt_custom_checks([
+        {
+            'id': 'chatgpt_services',
+            'label': 'ChatGPT',
+            'url': 'https://chatgpt.com',
+            'urls': ['https://chatgpt.com'],
+            'badge': 'GPT',
+            'icon': 'chatgpt',
+        },
+        {
+            'id': 'openai_codex',
+            'label': 'Codex',
+            'url': 'https://chatgpt.com/codex',
+            'badge': 'CDX',
+            'icon': 'chatgpt',
+        },
+        {'id': 'discord', 'label': 'Discord', 'url': 'https://discord.com'},
+    ])
+    assert [item['id'] for item in checks] == ['chatgpt_services', 'discord']
+    assert checks[0]['label'] == 'ChatGPT / Codex'
+    assert 'https://chatgpt.com/codex' in checks[0]['urls']
+
+
+def test_chrome_remote_desktop_routes_are_in_vless():
+    entries = {
+        line.split('#', 1)[0].strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    assert set(service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES) <= entries
+    assert service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']['entries'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
+    presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
+    assert presets['chrome_remote_desktop']['routes'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "'chrome_remote_desktop'" in bot_source
 
 
 def test_web_command_state_helpers():
@@ -2402,6 +2444,8 @@ def main():
     test_unblock_list_helpers()
     test_vless2_youtube_routes_are_scoped()
     test_chatgpt_codex_routes_are_synced()
+    test_chatgpt_codex_custom_check_migration()
+    test_chrome_remote_desktop_routes_are_in_vless()
     test_web_command_state_helpers()
     test_web_http_common_helpers()
     test_web_http_basic_auth_accepts_and_rejects_credentials()
