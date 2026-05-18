@@ -1,7 +1,7 @@
 #!/bin/sh
 
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
-EXTRA_SET_NAMES="unblockvless2udp"
+EXTRA_SET_NAMES="unblockvlessudp unblockvless2udp"
 
 ensure_set() {
 	ipset create "$1" hash:net -exist >/dev/null 2>&1

@@ -1345,6 +1345,21 @@ def render_web_scripts(
             setOptionalText('pool-summary-note', summaryNote);
         }}
 
+        function updatePoolProbeControls(active) {{
+            if (!ENABLE_KEY_POOL) {{
+                return;
+            }}
+            const running = !!active;
+            document.querySelectorAll('[data-pool-probe-start-button]').forEach(function(button) {{
+                button.disabled = running;
+                button.setAttribute('aria-disabled', running ? 'true' : 'false');
+            }});
+            document.querySelectorAll('[data-pool-probe-cancel-button]').forEach(function(button) {{
+                button.disabled = !running;
+                button.setAttribute('aria-disabled', running ? 'false' : 'true');
+            }});
+        }}
+
         function applyPoolPayload(payload) {{
             if (!ENABLE_KEY_POOL || !payload) {{
                 return;
@@ -1352,7 +1367,10 @@ def render_web_scripts(
             if (ENABLE_CUSTOM_CHECKS && payload.custom_checks) {{
                 renderCustomChecks(payload.custom_checks);
             }}
-            updatePoolSummaryBlock(payload.pool_summary || null, payload.pool_probe_progress || {{}}, !!payload.pool_probe_running);
+            const progress = payload.pool_probe_progress || {{}};
+            const poolProbeActive = !!payload.pool_probe_running && Number(progress.total || 0) > 0;
+            updatePoolSummaryBlock(payload.pool_summary || null, progress, poolProbeActive);
+            updatePoolProbeControls(poolProbeActive);
             updatePoolStatus(payload.pools);
         }}
 
@@ -1523,6 +1541,7 @@ def render_web_scripts(
 
             const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
             const poolProbeActive = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
+            updatePoolProbeControls(poolProbeActive);
             let pending = (web.api_status || '').indexOf('Проверяется связь текущего режима') !== -1 ||
                 (web.api_status || '').indexOf('Фоновая проверка') !== -1 ||
                 (web.api_status || '').indexOf('перепроверяется') !== -1;

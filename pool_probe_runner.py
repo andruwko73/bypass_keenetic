@@ -309,6 +309,10 @@ def run_pool_probe_worker(
     cancel_event=None,
     on_cancelled_remaining=None,
     set_note=None,
+    cpu_busy_percent=None,
+    max_cpu_percent=0,
+    high_cpu_delay_seconds=5.0,
+    max_high_cpu_wait_seconds=45.0,
     low_memory_delay_seconds=15.0,
     max_low_memory_wait_seconds=180.0,
     sleep=time.sleep,
@@ -332,6 +336,7 @@ def run_pool_probe_worker(
         set_checked(checked)
 
     low_memory_since = None
+    high_cpu_since = None
     paused_remaining = False
 
     def update_note(text):
@@ -347,11 +352,39 @@ def run_pool_probe_worker(
             return available_kb
         return None
 
+    def cpu_above_limit():
+        if not cpu_busy_percent or not max_cpu_percent or max_cpu_percent <= 0:
+            return None
+        try:
+            busy = cpu_busy_percent()
+        except Exception:
+            return None
+        if busy is not None and busy >= max_cpu_percent:
+            return busy
+        return None
+
     try:
         while pending_tasks:
             if cancel_requested():
                 log('Проверка пула приостановлена для применения выбранного ключа.')
                 break
+            high_cpu_percent = cpu_above_limit()
+            if high_cpu_percent is not None:
+                if high_cpu_since is None:
+                    high_cpu_since = time_provider()
+                note = (
+                    f'Проверка ждёт снижения нагрузки CPU: сейчас {int(round(high_cpu_percent))}%, '
+                    f'порог {int(round(max_cpu_percent))}%.'
+                )
+                update_note(note)
+                if (
+                    not max_high_cpu_wait_seconds or
+                    time_provider() - high_cpu_since < max_high_cpu_wait_seconds
+                ):
+                    sleep(max(1.0, float(high_cpu_delay_seconds or 1.0)))
+                    continue
+                log(note + ' Продолжаю один ключ с низким приоритетом.')
+            high_cpu_since = None
             low_memory_kb = memory_below_limit()
             if low_memory_kb is not None:
                 if low_memory_since is None:

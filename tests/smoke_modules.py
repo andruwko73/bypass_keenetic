@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO
+import base64
 import importlib
 import os
 import re
@@ -186,7 +187,7 @@ def test_router_health_runtime_dns_payload():
             'backend': 'ndnproxy',
             'listener_backend': 'ndnproxy',
             'dnsmasq_state': 'dead',
-            'ipset_counts': {'unblockvless': 12, 'unblockvless2': 34, 'unblockvless2udp': 12},
+            'ipset_counts': {'unblockvless': 12, 'unblockvlessudp': 5, 'unblockvless2': 34, 'unblockvless2udp': 12},
             'ipset_updated_at': 1000,
             'ipset_refresh_age_seconds': 90,
             'ipset_refresh_status': 'success',
@@ -196,12 +197,14 @@ def test_router_health_runtime_dns_payload():
     assert payload['dns_backend'] == 'ndnproxy'
     assert payload['dnsmasq_state'] == 'dead'
     assert payload['ipset_counts']['unblockvless2'] == 34
+    assert payload['ipset_counts']['unblockvlessudp'] == 5
     assert payload['ipset_counts']['unblockvless2udp'] == 12
     assert 'DNS: ndnproxy (S56dnsmasq не используется)' in payload['note']
     assert 'S56dnsmasq: не запущен' not in payload['note']
     assert 'ipset обновлён: 1 мин назад (успешно)' in payload['note']
     assert payload['note'].count('ipset обновлён') == 1
     assert 'unblockvless2=34' in payload['note']
+    assert 'unblockvlessudp=5' in payload['note']
     assert 'unblockvless2udp=12' in payload['note']
 
 
@@ -492,15 +495,30 @@ def test_codex_version_matches_commit_count():
     assert 'memory_watchdog_rss_limit_kb = 112640' in example
     assert 'memory_watchdog_rss_limit_kb = 112640' in installer
     assert 'memory_watchdog_rss_limit_kb = 112640' in bootstrap
-    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in example
-    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in installer
-    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in bootstrap
+    assert 'pool_probe_delay_seconds = 1.5' in example
+    assert 'pool_probe_delay_seconds = 1.5' in installer
+    assert 'pool_probe_delay_seconds = 1.5' in bootstrap
+    assert 'pool_probe_cpu_guard_enabled = True' in example
+    assert 'pool_probe_cpu_guard_enabled = True' in installer
+    assert 'pool_probe_cpu_guard_enabled = True' in bootstrap
+    assert 'pool_probe_max_cpu_percent = 70.0' in example
+    assert 'pool_probe_max_cpu_percent = 70.0' in installer
+    assert 'pool_probe_max_cpu_percent = 70.0' in bootstrap
+    assert 'memory_watchdog_idle_restart_rss_kb = 61440' in example
+    assert 'memory_watchdog_idle_restart_rss_kb = 61440' in installer
+    assert 'memory_watchdog_idle_restart_rss_kb = 61440' in bootstrap
     assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in example
     assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in installer
     assert 'memory_watchdog_idle_restart_hold_seconds = 600.0' in bootstrap
     assert 'memory_post_pool_restart_rss_kb = 61440' in example
     assert 'memory_post_pool_restart_rss_kb = 61440' in installer
     assert 'memory_post_pool_restart_rss_kb = 61440' in bootstrap
+    assert 'udp_quic_block_vless_enabled = True' in example
+    assert 'udp_quic_block_vless_enabled = True' in installer
+    assert 'udp_quic_block_vless_enabled = True' in bootstrap
+    assert 'udp_quic_block_vless2_enabled = True' in example
+    assert 'udp_quic_block_vless2_enabled = True' in installer
+    assert 'udp_quic_block_vless2_enabled = True' in bootstrap
     assert 'youtube_vless2_failover_enabled = True' in example
     assert 'youtube_vless2_failover_enabled = True' in installer
     assert 'youtube_vless2_failover_enabled = True' in bootstrap
@@ -525,7 +543,9 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert "normalize_line()" in unblock_dnsmasq
     assert "s/\\r//g" in unblock_dnsmasq
     assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
-    assert 'ipset=/$line/unblockvless2,unblockvless2udp' in unblock_dnsmasq
+    assert 'udp_quic_domain()' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblockvless unblockvlessudp' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblockvless2 unblockvless2udp' in unblock_dnsmasq
 
 
 def test_ipset_refresh_is_backend_aware_and_atomic():
@@ -553,9 +573,15 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"' in ipset_script
     assert 'for set_name in $SET_NAMES $EXTRA_SET_NAMES; do' in ipset_script
     assert 'ipset swap "$swap_tmp_set" "$set_name"' in ipset_script
+    assert 'unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
     assert 'unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
+    assert 'udp_quic_domain "$domain"' in ipset_script
+    assert 'swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
+    assert 'ipset create unblockvlessudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
+    assert '--match-set unblockvlessudp dst --dport 443 -j REJECT' in redirect_script
     assert '--match-set unblockvless2udp dst --dport 443 -j REJECT' in redirect_script
+    assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless dst --dport 443 -j REJECT' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT' not in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
     assert '*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1' in crontab
@@ -570,10 +596,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'threading.stack_size(256 * 1024)' in source
     assert "pool_probe_min_available_kb', 160000" in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
-    assert "memory_watchdog_idle_restart_rss_kb', 64 * 1024" in source
+    assert "memory_watchdog_idle_restart_rss_kb', 60 * 1024" in source
+    assert 'def _sync_udp_policy_config' in source
     assert 'memory_watchdog_high_rss_since' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
+    assert 'def _pool_probe_cpu_busy_percent' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source
     assert "_schedule_post_pool_memory_cleanup()" in source
     assert 'def _attempt_youtube_vless2_failover' in source
@@ -1318,6 +1346,47 @@ def test_pool_probe_runner_failover_candidate():
     assert paused_remaining == [('vless', 'low-memory')]
     assert '190000' in memory_logs[-1]
 
+    cpu_values = iter([92.0, 20.0])
+    time_values = iter([0.0, 1.0])
+    cpu_notes = []
+    cpu_sleeps = []
+    cpu_processed = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'cpu-guard')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: cpu_processed.append((proto, key)),
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+        set_note=cpu_notes.append,
+        cpu_busy_percent=lambda: next(cpu_values),
+        max_cpu_percent=70.0,
+        high_cpu_delay_seconds=5.0,
+        max_high_cpu_wait_seconds=45.0,
+        sleep=cpu_sleeps.append,
+        time_provider=lambda: next(time_values),
+    )
+    assert (checked, total) == (1, 1)
+    assert cpu_processed == [('vless', 'cpu-guard')]
+    assert cpu_sleeps == [5.0]
+    assert any('CPU' in note and '70' in note for note in cpu_notes)
+
     failure_records = []
     checked_values = []
     checked, total = pool_probe_runner.run_pool_probe_worker(
@@ -1502,6 +1571,47 @@ def test_web_http_common_helpers():
     assert web_http_common.config_web_auth_user(_Config) == 'root'
     _Config.web_auth_disabled = True
     assert web_http_common.config_web_auth_token(_Config) == ''
+
+
+def test_web_http_basic_auth_accepts_and_rejects_credentials():
+    class _Request(web_http_common.WebRequestMixin):
+        web_auth_token_getter = staticmethod(lambda: 'secret')
+        web_auth_user_getter = staticmethod(lambda: 'root')
+
+        def __init__(self, header=''):
+            self.headers = {'Authorization': header} if header else {}
+            self.wfile = BytesIO()
+            self.status_code = None
+            self.sent_headers = []
+            self.close_connection = False
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.sent_headers.append((name, value))
+
+        def end_headers(self):
+            pass
+
+    good = base64.b64encode(b'root:secret').decode('ascii')
+    bad = base64.b64encode(b'root:bad').decode('ascii')
+    assert _Request('Basic ' + good)._ensure_web_auth() is True
+
+    bad_request = _Request('Basic ' + bad)
+    assert bad_request._ensure_web_auth() is False
+    assert bad_request.status_code == 401
+    assert bad_request.close_connection is True
+    assert b'Authentication required' in bad_request.wfile.getvalue()
+
+    missing_request = _Request()
+    assert missing_request._ensure_web_auth() is False
+    assert missing_request.status_code == 401
+
+    class _NoAuthRequest(_Request):
+        web_auth_token_getter = staticmethod(lambda: '')
+
+    assert _NoAuthRequest()._ensure_web_auth() is True
 
 
 def test_installer_common_helpers():
@@ -1776,6 +1886,8 @@ def test_web_pool_form_blocks_helpers():
     assert 'data-pool-sort-value="telegram"' in panel
     assert 'data-pool-sort-value="problem"' in panel
     assert 'custom-check-form' in panel
+    assert 'data-pool-probe-start-button aria-disabled="false"' in panel
+    assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in panel
     main_panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
         title='Vless 1',
@@ -2045,6 +2157,8 @@ def test_web_template_scripts_helpers():
     assert "fetch('/api/protocol_panel?proto='" in scripts
     assert 'function setupProtocolSubtabs(root)' in scripts
     assert 'function renderStatusAttention(snapshot)' in scripts
+    assert 'function updatePoolProbeControls(active)' in scripts
+    assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'function poolRowMatchesState(row, state)' in scripts
     assert 'function poolStateFilterFromMode(mode)' in scripts
     assert "formData.set('confirm_switch', 'yes');" in scripts
@@ -2166,6 +2280,7 @@ def test_web_form_template_smoke():
     assert 'web-api-pill' not in web_only_page
     assert 'id="mode-toggle-button"' not in web_only_page
     assert 'active-mode-card' not in web_only_page
+    assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in web_only_page
     assert 'Telegram API отвечает' not in web_only_page
     assert 'Веб-интерфейс, состояние роутера' in web_only_page
     assert '"enableTelegram":false' in web_only_page
@@ -2205,6 +2320,7 @@ def main():
     test_vless2_youtube_routes_are_scoped()
     test_web_command_state_helpers()
     test_web_http_common_helpers()
+    test_web_http_basic_auth_accepts_and_rejects_credentials()
     test_installer_common_helpers()
     test_installer_page_is_bot_setup_only()
     test_repo_update_helpers()

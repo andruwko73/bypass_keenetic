@@ -172,6 +172,7 @@ def render_protocol_panel(
     csrf_input_html='',
     enable_key_pool=True,
     enable_custom_checks=True,
+    pool_probe_pending=False,
 ):
     active_class = ' active' if active else ''
     safe_key_name = html.escape(key_name, quote=True)
@@ -181,6 +182,8 @@ def render_protocol_panel(
     safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
     safe_label = html.escape(status_info.get('label', ''))
     safe_details = html.escape(status_info.get('details', ''))
+    pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_pending else ' aria-disabled="false"'
+    pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_pending else ' disabled aria-disabled="true"'
     subtabs = [('key', 'Ключ')]
     if enable_key_pool:
         subtabs.extend([
@@ -205,11 +208,11 @@ def render_protocol_panel(
                 <form method="post" action="/pool_probe" data-async-action="pool-probe">
                     {csrf_input_html}
                     <input type="hidden" name="type" value="{safe_key_name}">
-                    <button type="submit" class="secondary-button">Проверить пул</button>
+                    <button type="submit" class="secondary-button" data-pool-probe-start-button{pool_probe_start_disabled}>Проверить пул</button>
                 </form>
                 <form method="post" action="/pool_probe_cancel" data-async-action="pool-probe-cancel">
                     {csrf_input_html}
-                    <button type="submit" class="secondary-button">Остановить проверку</button>
+                    <button type="submit" class="secondary-button" data-pool-probe-cancel-button{pool_probe_cancel_disabled}>Остановить проверку</button>
                 </form>
                 <form method="post" action="/pool_clear" data-async-action="pool-clear" data-confirm-title="Очистить пул?" data-confirm-message="Очистить весь пул ключей для {safe_title}?">
                     {csrf_input_html}
@@ -294,7 +297,7 @@ def render_protocol_panel(
             <form method="post" action="/pool_probe" data-async-action="pool-probe">
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
-                <button type="submit">Проверить пул {safe_title}</button>
+                <button type="submit" data-pool-probe-start-button{pool_probe_start_disabled}>Проверить пул {safe_title}</button>
             </form>'''
     check_subview_html = ''
     if enable_key_pool or enable_custom_checks:
@@ -362,6 +365,7 @@ def render_protocol_tabs_and_panels(
     custom_checks_html='',
     active_protocol=None,
     lazy_protocol_panels=False,
+    pool_probe_pending=False,
 ):
     current_keys = current_keys or {}
     protocol_statuses = protocol_statuses or {}
@@ -457,6 +461,7 @@ def render_protocol_tabs_and_panels(
                 csrf_input_html=csrf_input_html,
                 enable_key_pool=enable_key_pool,
                 enable_custom_checks=enable_custom_checks,
+                pool_probe_pending=pool_probe_pending,
             )
         )
     return ''.join(tabs), ''.join(panels)

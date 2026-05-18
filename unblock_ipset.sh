@@ -9,7 +9,7 @@ TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
-EXTRA_SET_NAMES="unblockvless2udp"
+EXTRA_SET_NAMES="unblockvlessudp unblockvless2udp"
 
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
@@ -166,6 +166,16 @@ normalize_domain() {
 		| trim_line
 }
 
+udp_quic_domain() {
+	domain="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
+	case "$domain" in
+		youtube.com|*.youtube.com|youtu.be|*.youtu.be|yt.be|*.yt.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube-nocookie.com|*.youtube-nocookie.com|youtube.googleapis.com|*.youtube.googleapis.com|youtubei.googleapis.com|*.youtubei.googleapis.com|youtubeembeddedplayer.googleapis.com|*.youtubeembeddedplayer.googleapis.com|googleusercontent.com|*.googleusercontent.com|gvt1.com|*.gvt1.com|gvt2.com|*.gvt2.com|video.google.com|*.video.google.com|youtubeeducation.com|*.youtubeeducation.com|youtubekids.com|*.youtubekids.com)
+			return 0
+			;;
+	esac
+	return 1
+}
+
 wait_for_dns() {
 	deadline=0
 	now_ts="$(date +%s 2>/dev/null || echo 0)"
@@ -195,18 +205,23 @@ resolve_domains() {
 	tmp_set="$1"
 	domain_file="$2"
 	mirror_tmp_set="$3"
+	mirror_domain_file="$4"
 	[ -s "$domain_file" ] || return 0
 
-	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set mirror_tmp_set
+	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set mirror_tmp_set mirror_domain_file
 	parallel_flag="$(xargs_parallel_flag)"
 
 	# shellcheck disable=SC2086
 	sort -u "$domain_file" | xargs -n 1 $parallel_flag sh -c '
 		for domain do
+			mirror_for_domain=""
+			if [ -n "$mirror_tmp_set" ] && [ -s "$mirror_domain_file" ] && grep -Fx "$domain" "$mirror_domain_file" >/dev/null 2>&1; then
+				mirror_for_domain="$mirror_tmp_set"
+			fi
 			dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
 				| grep -Eo "$IPV4_RE" \
 				| grep -vE "$LOCAL_RE" \
-				| awk -v tmp_set="$tmp_set" -v mirror_tmp_set="$mirror_tmp_set" "{
+				| awk -v tmp_set="$tmp_set" -v mirror_tmp_set="$mirror_for_domain" "{
 					print \"add \" tmp_set \" \" \$1;
 					if (mirror_tmp_set != \"\") print \"add \" mirror_tmp_set \" \" \$1;
 				}"
@@ -244,7 +259,9 @@ load_file_to_set() {
 	domain_file="$tmp_dir/${set_name}.domains"
 	source_file="$tmp_dir/${set_name}.source"
 	mirror_source_file="$tmp_dir/${mirror_set_name}.source"
+	mirror_domain_file="$tmp_dir/${mirror_set_name}.domains"
 	: > "$domain_file"
+	[ -n "$mirror_set_name" ] && : > "$mirror_domain_file"
 
 	while IFS= read -r raw_line || [ -n "$raw_line" ]; do
 		line="$(printf '%s\n' "$raw_line" | trim_line)"
@@ -261,12 +278,15 @@ load_file_to_set() {
 		domain="$(normalize_domain "$line")"
 		if [ -n "$domain" ]; then
 			: > "$source_file"
-			[ -n "$mirror_set_name" ] && : > "$mirror_source_file"
 			printf '%s\n' "$domain" >> "$domain_file"
+			if [ -n "$mirror_set_name" ] && udp_quic_domain "$domain"; then
+				: > "$mirror_source_file"
+				printf '%s\n' "$domain" >> "$mirror_domain_file"
+			fi
 		fi
 	done < "$list_path"
 
-	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set"
+	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set" "$mirror_domain_file"
 }
 
 entry_count_for_tmp_set() {
@@ -311,7 +331,7 @@ wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAI
 
 load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh "tmp_unblocksh_$$"
 load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$"
-load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$"
+load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$" unblockvlessudp "tmp_unblockvlessudp_$$"
 load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$" unblockvless2udp "tmp_unblockvless2udp_$$"
 load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$"
 
@@ -323,6 +343,7 @@ fi
 swap_or_preserve_set unblocksh "tmp_unblocksh_$$"
 swap_or_preserve_set unblockvmess "tmp_unblockvmess_$$"
 swap_or_preserve_set unblockvless "tmp_unblockvless_$$"
+swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"
 swap_or_preserve_set unblockvless2 "tmp_unblockvless2_$$"
 swap_or_preserve_set unblockvless2udp "tmp_unblockvless2udp_$$"
 swap_or_preserve_set unblocktroj "tmp_unblocktroj_$$"

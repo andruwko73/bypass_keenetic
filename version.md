@@ -1,3 +1,6 @@
+*v1.598 (18 May 2026) -* main
+*Added smart QUIC/UDP sets for both Vless lists, throttled full pool checks when router CPU is high, lowered the idle memory restart threshold to match post-pool cleanup, disabled inactive pool probe controls, and covered web Basic auth checks in smoke tests.*
+
 *v1.597 (18 May 2026) -* main
 *Made pool YouTube checks retry with the longer proxy timeout budget before marking Vless keys as YouTube failures, so slow-but-working pool keys are no longer shown as broken after one short probe.*
 

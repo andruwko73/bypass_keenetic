@@ -155,6 +155,9 @@ def render_web_form(
     if not enable_telegram:
         dashboard_classes.append('status-dashboard-no-bot')
     dashboard_class = ' '.join(dashboard_classes)
+    pool_probe_running = enable_key_pool and bool(router_health.get('pool_probe_running'))
+    pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_running else ' aria-disabled="false"'
+    pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_running else ' disabled aria-disabled="true"'
     status_overview_subtitle = (
         'Связь, активный режим и сервисные действия собраны в одном месте.'
         if enable_telegram else
@@ -174,11 +177,11 @@ def render_web_form(
                             <div class="status-card-actions key-pool-actions">
                                 <form method="post" action="/pool_probe"{pool_probe_async_attr}>
                                     {csrf_input_html}
-                                    <button type="submit" class="outline-button">Проверить все ключи</button>
+                                    <button type="submit" class="outline-button" data-pool-probe-start-button{pool_probe_start_disabled}>Проверить все ключи</button>
                                 </form>
                                 <form method="post" action="/pool_probe_cancel"{pool_probe_cancel_async_attr}>
                                     {csrf_input_html}
-                                    <button type="submit" class="outline-button">Остановить проверку</button>
+                                    <button type="submit" class="outline-button" data-pool-probe-cancel-button{pool_probe_cancel_disabled}>Остановить проверку</button>
                                 </form>
                             </div>
                         </div>'''

@@ -504,6 +504,7 @@ if [ "$1" = "-remove" ]; then
     ipset flush unblocksh
     ipset flush unblockvmess
     ipset flush unblockvless
+    ipset flush unblockvlessudp
     ipset flush unblockvless2
     ipset flush unblockvless2udp
     ipset flush unblocktroj

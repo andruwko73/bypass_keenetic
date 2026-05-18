@@ -5,7 +5,7 @@ import threading
 import time
 
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
-IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvless2', 'unblockvless2udp', 'unblocktroj')
+IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvlessudp', 'unblockvless2', 'unblockvless2udp', 'unblocktroj')
 DNSMASQ_STATE_LABELS = {
     'running': 'запущен',
     'dead': 'не запущен',
