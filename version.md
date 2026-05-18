@@ -1,6 +1,6 @@
-*v1.609 (18 May 2026) -* main
+*v1.610 (18 May 2026) -* main
 
-*Removed duplicated pool-check progress from the status and router cards while keeping it in the header and key-pool card.*
+*Kept pool-check progress only in the key-pool card and restored the header pill to Telegram/API status.*
 
 *v1.605 (18 May 2026) -* main
 

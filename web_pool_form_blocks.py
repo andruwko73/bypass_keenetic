@@ -9,19 +9,7 @@ POOL_EMPTY_ROW_HTML = (
 
 
 def pool_probe_topbar_text(pool_probe_pending, progress, progress_label_func, fallback_text):
-    if not pool_probe_pending:
-        return fallback_text
-    progress = progress or {}
-    progress_total = int(progress.get('total') or 0)
-    progress_checked = int(progress.get('checked') or 0)
-    progress_label = progress_label_func(progress)
-    progress_note = str(progress.get('note') or '').strip()
-    if progress_note:
-        return f'⏳ {progress_label}: {progress_checked}/{progress_total}. {progress_note}'
-    return (
-        f'⏳ {progress_label}: {progress_checked}/{progress_total}. '
-        'Статусы обновятся без перезагрузки страницы.'
-    )
+    return fallback_text
 
 
 def pool_summary_note_with_progress(pool_summary_note, pool_probe_pending, progress, progress_label_func):
