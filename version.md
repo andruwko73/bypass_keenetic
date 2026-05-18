@@ -1,6 +1,6 @@
-*v1.610 (18 May 2026) -* main
+*v1.611 (18 May 2026) -* main
 
-*Kept pool-check progress only in the key-pool card and restored the header pill to Telegram/API status.*
+*Moved the Telegram icon from the header to the status card and removed the green dot from the healthy status item.*
 
 *v1.605 (18 May 2026) -* main
 

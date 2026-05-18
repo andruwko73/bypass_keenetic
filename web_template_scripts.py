@@ -1429,9 +1429,13 @@ def render_web_scripts(
         }}
 
         function attentionItemHtml(tone, title, text) {{
+            const rawText = String(text || '');
+            const telegramIcon = rawText.indexOf('Telegram API') === 0
+                ? '<span class="attention-telegram-icon" aria-hidden="true"></span>'
+                : '';
             return '<li class="attention-item attention-' + escapeHtml(tone || 'info') + '">' +
                 '<span class="attention-dot"></span>' +
-                '<div><strong>' + escapeHtml(title || '') + '</strong><span>' + escapeHtml(text || '') + '</span></div>' +
+                '<div><strong>' + escapeHtml(title || '') + '</strong><span>' + telegramIcon + escapeHtml(rawText) + '</span></div>' +
                 '</li>';
         }}
 

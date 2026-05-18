@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'pool-dedupe-18'
+ASSET_CACHE_REVISION = 'telegram-status-icon-20'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -28,6 +28,13 @@ def _safe_percent(value):
         return max(0, min(100, int(round(float(value)))))
     except Exception:
         return 0
+
+
+def _attention_text_html(text):
+    safe_text = html.escape(text)
+    if str(text or '').startswith('Telegram API'):
+        return f'<span class="attention-telegram-icon" aria-hidden="true"></span>{safe_text}'
+    return safe_text
 
 
 def _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram=True):
@@ -136,7 +143,7 @@ def render_web_form(
                                 <span class="attention-dot"></span>
                                 <div>
                                     <strong>{html.escape(title)}</strong>
-                                    <span>{html.escape(text)}</span>
+                                    <span>{_attention_text_html(text)}</span>
                                 </div>
                             </li>'''
         for tone, title, text in _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram)
