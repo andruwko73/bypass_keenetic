@@ -14,6 +14,13 @@ CUSTOM_CHECK_MAX = 12
 CUSTOM_CHECK_REMOVED_IDS = {'mistral'}
 
 
+def custom_check_preset(preset_id):
+    for preset in CUSTOM_CHECK_PRESETS:
+        if preset.get('id') == preset_id:
+            return preset
+    return None
+
+
 def normalize_check_url(value):
     url = (value or '').strip()
     if not url:
@@ -139,7 +146,7 @@ def load_custom_checks():
     if any(item.get('id') in legacy_chatgpt_ids for item in result):
         result = [item for item in result if item.get('id') not in legacy_chatgpt_ids]
         if not any(item.get('id') == 'chatgpt_services' for item in result):
-            preset = sanitize_custom_check(CUSTOM_CHECK_PRESETS[0])
+            preset = sanitize_custom_check(custom_check_preset('chatgpt_services'))
             if preset:
                 result.insert(0, preset)
     return result

@@ -1549,6 +1549,20 @@ def test_vless2_youtube_routes_are_scoped():
     } & entries
 
 
+def test_chatgpt_codex_routes_are_synced():
+    entries = {
+        line.split('#', 1)[0].strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    assert set(service_catalog.CHATGPT_ROUTE_ENTRIES) <= entries
+
+    presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
+    assert set(['chatgpt_services', 'openai_codex']) <= set(presets)
+    assert 'https://platform.openai.com' in presets['chatgpt_services']['urls']
+    assert presets['openai_codex']['routes'] == service_catalog.CHATGPT_ROUTE_ENTRIES
+
+
 def test_web_command_state_helpers():
     assert web_command_state.estimate_update_progress('noop', '', ('update',)) == (0, '')
     assert web_command_state.estimate_update_progress('update', 'Бэкап создан.') == (70, 'Резервная копия готова, идёт замена файлов')
@@ -2359,6 +2373,7 @@ def main():
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()
     test_vless2_youtube_routes_are_scoped()
+    test_chatgpt_codex_routes_are_synced()
     test_web_command_state_helpers()
     test_web_http_common_helpers()
     test_web_http_basic_auth_accepts_and_rejects_credentials()

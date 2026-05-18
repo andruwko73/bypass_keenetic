@@ -1,3 +1,7 @@
+*v1.605 (18 May 2026) -* main
+
+*Synced ChatGPT/Codex route lists with Vless1 and added a separate Codex custom service check.*
+
 *v1.604 (18 May 2026) -* main
 *Moved stale Vless2 YouTube confirmation to a background check that accepts 2 of 3 YouTube endpoints, keeping the web status responsive while correcting missing pool cache results.*
 
