@@ -2060,6 +2060,8 @@ def test_web_template_styles_helpers():
     assert '.attention-telegram-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;' in styles
     assert '.attention-ok{grid-template-columns:minmax(0,1fr);}' in styles
     assert '.attention-ok .attention-dot{display:none;}' in styles
+    assert '.attention-item > div > span{display:block;' in styles
+    assert '.attention-item span:last-child{display:block;' not in styles
     assert '.api-pill::before' not in styles
     assert 'grid-template-columns:minmax(420px,.85fr) minmax(520px,1.4fr) minmax(176px,220px) auto;' in styles
     assert '.theme-control{justify-self:end;width:100%;}' in styles

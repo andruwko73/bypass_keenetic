@@ -199,7 +199,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .attention-item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:flex-start;min-width:0;padding:7px 9px;border-radius:8px;border:1px solid rgba(91,124,150,.28);background:rgba(255,255,255,.025);}
         .attention-dot{width:8px;height:8px;margin-top:5px;border-radius:50%;background:#7fd8ff;box-shadow:0 0 0 3px rgba(127,216,255,.12);}
         .attention-item strong{display:block;margin-bottom:2px;font-size:12px;line-height:1.25;color:var(--text);}
-        .attention-item span:last-child{display:block;font-size:12px;line-height:1.35;color:var(--muted);overflow-wrap:anywhere;}
+        .attention-item > div > span{display:block;font-size:12px;line-height:1.35;color:var(--muted);overflow-wrap:anywhere;}
         .attention-ok{grid-template-columns:minmax(0,1fr);}
         .attention-ok .attention-dot{display:none;}
         .attention-warn .attention-dot{background:#d3a557;box-shadow:0 0 0 3px rgba(211,165,87,.12);}

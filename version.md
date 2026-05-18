@@ -1,6 +1,6 @@
-*v1.611 (18 May 2026) -* main
+*v1.612 (18 May 2026) -* main
 
-*Moved the Telegram icon from the header to the status card and removed the green dot from the healthy status item.*
+*Kept the Telegram status icon inline before the Telegram API health text.*
 
 *v1.605 (18 May 2026) -* main
 
