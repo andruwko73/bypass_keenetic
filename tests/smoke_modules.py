@@ -2342,7 +2342,7 @@ def test_telegram_pool_ui():
 def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "key_name == 'vless2'" in source
-    assert "probe.get('yt_ok') is False" in source
+    assert "probe.get('yt_ok') is not True" in source
     assert "_check_http_through_proxy(\n            proxy_settings[key_name]," in source
     assert "_record_key_probe(key_name, key_value, yt_ok=True)" in source
     assert "_invalidate_pool_summary_cache()" in source

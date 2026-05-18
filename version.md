@@ -1,3 +1,6 @@
+*v1.603 (18 May 2026) -* main
+*Confirmed the current Vless2 YouTube port when its pool cache is missing or stale, so the interface can show a working YouTube key immediately after updates.*
+
 *v1.602 (18 May 2026) -* main
 *Rechecked the permanent Vless2 YouTube port before showing a cached pool failure, preventing stale pool results from marking a working YouTube key as broken.*
 
