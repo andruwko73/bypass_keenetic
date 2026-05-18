@@ -761,6 +761,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99telegram_bot" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
 
     set_type="$(detect_ipset_type)"
+    sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-ipset.sh"
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/1082/${localportsh}/g" "$stage_dir/100-redirect.sh"

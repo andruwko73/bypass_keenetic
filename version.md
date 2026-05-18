@@ -1,3 +1,6 @@
+*v1.600 (18 May 2026) -* main
+*Kept the detected ipset type synchronized for both 100-ipset.sh and 100-redirect.sh during GitHub updates.*
+
 *v1.599 (18 May 2026) -* main
 *Fixed GitHub update preparation so the router keeps the detected ipset type in 100-redirect.sh during self-update.*
 
