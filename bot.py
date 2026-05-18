@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.601, последнее изменение: 18.05.2026
+#  Файл: bot.py, Версия v1.602, последнее изменение: 18.05.2026
 
 import subprocess
 import os
@@ -3041,6 +3041,23 @@ def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     probe = cache.get(_hash_key(key_value), {})
+    if (
+        key_name == 'vless2' and
+        isinstance(probe, dict) and
+        probe.get('yt_ok') is False and
+        proxy_settings.get(key_name)
+    ):
+        yt_ok, _ = _check_http_through_proxy(
+            proxy_settings[key_name],
+            connect_timeout=POOL_PROBE_HTTP_CONNECT_TIMEOUT,
+            read_timeout=POOL_PROBE_HTTP_READ_TIMEOUT,
+        )
+        if yt_ok:
+            probe = dict(probe)
+            probe['yt_ok'] = True
+            probe['ts'] = time.time()
+            _record_key_probe(key_name, key_value, yt_ok=True)
+            _invalidate_pool_summary_cache()
     custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
     return _status_cached_protocol_status(key_value, probe, custom_checks, custom_states)
 

@@ -2339,6 +2339,15 @@ def test_telegram_pool_ui():
     assert 'TG\u2705 YT\u274c' in label
 
 
+def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
+    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "key_name == 'vless2'" in source
+    assert "probe.get('yt_ok') is False" in source
+    assert "_check_http_through_proxy(\n            proxy_settings[key_name]," in source
+    assert "_record_key_probe(key_name, key_value, yt_ok=True)" in source
+    assert "_invalidate_pool_summary_cache()" in source
+
+
 def main():
     test_app_runtime_mode_setter_callbacks()
     test_router_health_runtime_payload_uses_keenetic_memory()
@@ -2385,6 +2394,7 @@ def main():
     test_auto_failover_runtime_helpers()
     test_proxy_apply_runtime_helpers()
     test_pool_probe_controller_helpers()
+    test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
 

@@ -1,3 +1,6 @@
+*v1.602 (18 May 2026) -* main
+*Rechecked the permanent Vless2 YouTube port before showing a cached pool failure, preventing stale pool results from marking a working YouTube key as broken.*
+
 *v1.601 (18 May 2026) -* main
 *Pinned GitHub updates to the resolved commit SHA so all router files are downloaded from one fresh immutable revision instead of a potentially cached main branch.*
 
