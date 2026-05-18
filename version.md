@@ -1,6 +1,6 @@
-*v1.607 (18 May 2026) -* main
+*v1.608 (18 May 2026) -* main
 
-*Prevented web status from doing live Telegram/YouTube checks during a full pool probe so the interface stays responsive under router load.*
+*Restored the theme control to the right side of the header and widened the live status area.*
 
 *v1.605 (18 May 2026) -* main
 

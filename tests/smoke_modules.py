@@ -2056,6 +2056,8 @@ def test_web_template_styles_helpers():
     assert 'z-index:300;' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
     assert '.api-pill{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:center;width:100%;height:auto;min-height:calc(var(--control-height) + 8px);' in styles
+    assert 'grid-template-columns:minmax(420px,.85fr) minmax(520px,1.4fr) minmax(176px,220px) auto;' in styles
+    assert '.theme-control{justify-self:end;width:100%;}' in styles
     assert '.app-caption strong{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;white-space:normal;overflow:visible;text-overflow:clip;' in styles
     assert '.topbar-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch;gap:8px;}' in styles
     assert '.app-caption strong{max-width:none;padding-right:60px;font-size:14px;line-height:1.18;white-space:normal;}' in styles

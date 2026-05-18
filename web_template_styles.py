@@ -298,8 +298,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         h1{font-size:18px;font-weight:700;}
         h2{font-size:19px;font-weight:700;line-height:1.22;}
         .brand p,.section-subtitle,.status-note,.key-status-note{color:#b9c6d3;}
-        .topbar-actions{width:100%;display:grid;grid-template-columns:minmax(430px,1fr) minmax(240px,.82fr) minmax(142px,.34fr) minmax(142px,.34fr) auto;align-items:center;justify-content:stretch;gap:8px;min-height:0;max-width:100%;}
+        .topbar-actions{width:100%;display:grid;grid-template-columns:minmax(420px,.85fr) minmax(520px,1.4fr) minmax(176px,220px) auto;align-items:center;justify-content:stretch;gap:8px;min-height:0;max-width:100%;}
         .topbar-actions.topbar-actions-web-only{grid-template-columns:minmax(0,1fr) max-content auto;}
+        .theme-control{justify-self:end;width:100%;}
         .topbar-actions-web-only .theme-control{justify-self:end;width:auto;}
         .topbar-actions-web-only .theme-toggle{width:auto;min-width:180px;}
         .topbar-actions-web-only .version-badge{align-self:start;}
@@ -504,7 +505,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             body{padding:8px;}
             .app-shell{height:calc(100vh - 16px);display:flex;flex-direction:column;min-height:0;}
             .topbar{position:relative;z-index:260;top:0;flex:none;margin-bottom:12px;padding:8px 10px;}
-            .topbar-actions{grid-template-columns:minmax(430px,1fr) minmax(240px,.82fr) minmax(142px,.34fr) minmax(142px,.34fr) auto;}
+            .topbar-actions{grid-template-columns:minmax(420px,.85fr) minmax(520px,1.4fr) minmax(176px,220px) auto;}
             .workspace-layout{flex:1;min-height:0;align-items:stretch;}
             .side-nav{position:static;align-self:start;}
             .app-main{height:100%;min-height:0;overflow:hidden;}
@@ -555,7 +556,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         @media (min-width: 761px) and (max-width: 1180px){
             body{padding:8px;}
             .app-shell{max-width:none;}
-            .topbar-actions{grid-template-columns:minmax(390px,1fr) minmax(210px,.72fr) minmax(118px,.31fr) minmax(118px,.31fr) auto;gap:7px;}
+            .topbar-actions{grid-template-columns:minmax(360px,.8fr) minmax(360px,1.3fr) minmax(140px,180px) auto;gap:7px;}
             .topbar-actions.topbar-actions-web-only{grid-template-columns:minmax(0,1fr) max-content auto;}
             .app-caption strong{font-size:14px;line-height:1.16;}
             .app-branch{font-size:10px;line-height:1.18;}
@@ -568,7 +569,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .nav-item{padding-left:8px;padding-right:8px;}
         }
         @media (min-width: 761px) and (max-width: 920px){
-            .topbar-actions{grid-template-columns:minmax(320px,1fr) minmax(0,.78fr) minmax(78px,.3fr) minmax(78px,.3fr) auto;gap:6px;}
+            .topbar-actions{grid-template-columns:minmax(260px,.78fr) minmax(0,1.22fr) minmax(92px,130px) auto;gap:6px;}
             .topbar-actions.topbar-actions-web-only{grid-template-columns:minmax(0,1fr) max-content auto;}
             #mode-toggle-button span:first-child,
             #theme-toggle-button span:first-child{display:none;}
