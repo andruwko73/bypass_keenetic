@@ -1,3 +1,6 @@
+*v1.615 (19 May 2026) -* main
+*Fixed Chrome Remote Desktop routing by keeping CRD signaling on Vless 1 instead of xray direct exceptions, and expanded the CRD route list with auth, gstatic, mtalk, and talkgadget endpoints.*
+
 *v1.614 (19 May 2026) -* main
 *Объединены дополнительные проверки ChatGPT и Codex в один сервис ChatGPT / Codex; старая отдельная проверка Codex автоматически мигрирует в объединённую*
 *Добавлен Chrome Remote Desktop в список обхода Vless 1, пресеты дополнительных проверок и кнопки добавления сервисов в списки*

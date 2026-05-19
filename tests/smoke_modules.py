@@ -1549,9 +1549,9 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'instantmessaging-pa.googleapis.com' not in entries
     assert 'redirector.googlevideo.com' in entries
     assert set(service_catalog.YOUTUBE_CDN_IP_RANGES) <= entries
-    assert 'domain:remotedesktop.google.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
-    assert 'full:remotedesktop-pa.googleapis.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
-    assert 'full:instantmessaging-pa.googleapis.com' in service_catalog.CONNECTIVITY_CHECK_DOMAINS
+    assert 'domain:remotedesktop.google.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
+    assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
+    assert 'full:instantmessaging-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert not {
         '34.0.0.0/10',
         '34.64.0.0/10',
@@ -1560,6 +1560,17 @@ def test_vless2_youtube_routes_are_scoped():
         '216.58.0.0/16',
         '8.8.8.0/24',
     } & entries
+
+
+def test_chrome_remote_desktop_routes_stay_on_vless():
+    entries = {
+        line.split('#', 1)[0].strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    assert set(service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES) <= entries
+    assert 'full:instantmessaging-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
+    assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
 
 
 def test_chatgpt_codex_routes_are_synced():
