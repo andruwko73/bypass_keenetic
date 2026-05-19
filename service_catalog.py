@@ -39,6 +39,7 @@ YOUTUBE_UNBLOCK_ENTRIES = [
     's.ytimg.com',
     'yt3.ggpht.com',
     'yt3.googleusercontent.com',
+    'yt4.ggpht.com',
     'ggpht.com',
     'googlevideo.com',
     'redirector.googlevideo.com',
@@ -126,6 +127,43 @@ DISCORD_ROUTE_ENTRIES = [
     'images-ext-1.discordapp.net',
 ]
 
+CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES = [
+    '64.233.161.95',
+    '64.233.161.189',
+    '64.233.162.95',
+    '64.233.162.188',
+    '64.233.163.95',
+    '64.233.164.95',
+    '64.233.165.95',
+    '74.125.131.95',
+    '74.125.131.100',
+    '74.125.131.101',
+    '74.125.131.102',
+    '74.125.131.113',
+    '74.125.131.138',
+    '74.125.131.139',
+    '74.125.205.95',
+    '108.177.14.95',
+    '108.177.125.188',
+    '142.250.101.188',
+    '142.250.150.95',
+    '142.251.1.95',
+    '172.217.78.188',
+    '172.217.221.188',
+    '172.253.152.95',
+    '172.253.158.188',
+    '173.194.43.188',
+    '173.194.73.95',
+    '173.194.221.95',
+    '173.194.222.95',
+    '192.178.128.188',
+    '209.85.233.95',
+    '216.239.32.223',
+    '216.239.34.223',
+    '216.239.36.223',
+    '216.239.38.223',
+]
+
 CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES = [
     'remotedesktop.google.com',
     'remotedesktop-pa.googleapis.com',
@@ -153,6 +191,7 @@ CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES = [
     'chromoting-client.talkgadget.google.com',
     'talkgadget.google.com',
     '74.125.247.128',
+    *CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES,
 ]
 
 CUSTOM_CHECK_PRESETS = [

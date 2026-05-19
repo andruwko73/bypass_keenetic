@@ -1,3 +1,6 @@
+*v1.616 (20 May 2026) -* main
+*Prioritized Vless 1 transparent TCP redirects ahead of Vless 2 when the same Google IP appears in both sets, added CRD/mtalk fallback IPs to Vless 1, and cleaned the Vless 2 default list down to YouTube routes.*
+
 *v1.615 (19 May 2026) -* main
 *Fixed Chrome Remote Desktop routing by keeping CRD signaling on Vless 1 instead of xray direct exceptions, and expanded the CRD route list with auth, gstatic, mtalk, and talkgadget endpoints.*
 

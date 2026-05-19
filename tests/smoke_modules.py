@@ -594,6 +594,22 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1' in crontab
 
 
+def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
+    redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
+    assert 'refresh_vless_tcp_priority()' in redirect_script
+    assert 'CRD/Telegram-style service routes do not get captured by the YouTube key' in redirect_script
+    vless2_insert = (
+        'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
+        'unblockvless2 dst -j REDIRECT --to-port 10814'
+    )
+    vless1_insert = (
+        'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
+        'unblockvless dst -j REDIRECT --to-port 10812'
+    )
+    priority_block = redirect_script.split('refresh_vless_tcp_priority() {', 1)[1].split('\n}', 1)[0]
+    assert priority_block.index(vless2_insert) < priority_block.index(vless1_insert)
+
+
 def test_runtime_startup_limits_router_flash_and_overhead():
     service = (ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
@@ -1542,12 +1558,17 @@ def test_vless2_youtube_routes_are_scoped():
         for line in (ROOT / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
+    assert entries == set(service_catalog.YOUTUBE_UNBLOCK_ENTRIES)
     assert set(service_catalog.YOUTUBE_UNBLOCK_ENTRIES) <= entries
     assert 'googleapis.com' not in entries
     assert 'googleusercontent.com' not in entries
     assert 'remotedesktop-pa.googleapis.com' not in entries
     assert 'instantmessaging-pa.googleapis.com' not in entries
+    assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
+    assert 'rutracker.org' not in entries
+    assert 'thepiratebay.org' not in entries
     assert 'redirector.googlevideo.com' in entries
+    assert 'yt4.ggpht.com' in entries
     assert set(service_catalog.YOUTUBE_CDN_IP_RANGES) <= entries
     assert 'domain:remotedesktop.google.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
@@ -1569,6 +1590,7 @@ def test_chrome_remote_desktop_routes_stay_on_vless():
         if line.split('#', 1)[0].strip()
     }
     assert set(service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES) <= entries
+    assert set(service_catalog.CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES) <= entries
     assert 'full:instantmessaging-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
 

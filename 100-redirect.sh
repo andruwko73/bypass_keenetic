@@ -173,6 +173,23 @@ if [ -n "$vless2_key_path" ]; then
 	fi
 fi
 
+refresh_vless_tcp_priority() {
+	# Shared Google IPs can land in both Vless sets. Keep Vless 1 first so
+	# CRD/Telegram-style service routes do not get captured by the YouTube key.
+	while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-port 10812 2>/dev/null; do
+		iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-port 10812
+	done
+	while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814 2>/dev/null; do
+		iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814
+	done
+	if [ -n "$vless2_key_path" ]; then
+		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814
+	fi
+	iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-port 10812
+}
+
+refresh_vless_tcp_priority
+
 
 if [ -z "$(iptables-save 2>/dev/null | grep unblocktroj)" ]; then
   ipset create unblocktroj hash:net -exist 2>/dev/null
