@@ -1558,15 +1558,15 @@ def test_vless2_youtube_routes_are_scoped():
         for line in (ROOT / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
-    assert entries == set(service_catalog.YOUTUBE_UNBLOCK_ENTRIES)
     assert set(service_catalog.YOUTUBE_UNBLOCK_ENTRIES) <= entries
     assert 'googleapis.com' not in entries
     assert 'googleusercontent.com' not in entries
     assert 'remotedesktop-pa.googleapis.com' not in entries
     assert 'instantmessaging-pa.googleapis.com' not in entries
-    assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
-    assert 'rutracker.org' not in entries
-    assert 'thepiratebay.org' not in entries
+    assert 'rutracker.org' in entries
+    assert 'rutracker.wiki' in entries
+    assert 'thepiratebay.org' in entries
+    assert 'discord-attachments-uploads-prd.storage.googleapis.com' in entries
     assert 'redirector.googlevideo.com' in entries
     assert 'yt4.ggpht.com' in entries
     assert set(service_catalog.YOUTUBE_CDN_IP_RANGES) <= entries

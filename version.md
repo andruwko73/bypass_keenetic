@@ -1,3 +1,6 @@
+*v1.617 (20 May 2026) -* main
+*Restored the existing manual Vless 2 bypass list entries, including Rutracker, while keeping the Vless 1 priority and CRD fallback IP fixes from v1.616.*
+
 *v1.616 (20 May 2026) -* main
 *Prioritized Vless 1 transparent TCP redirects ahead of Vless 2 when the same Google IP appears in both sets, added CRD/mtalk fallback IPs to Vless 1, and cleaned the Vless 2 default list down to YouTube routes.*
 
