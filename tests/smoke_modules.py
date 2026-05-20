@@ -556,6 +556,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     update_script = (ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
+    unblock_dnsmasq = (ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
     ipset_script = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
     ipset_boot_script = (ROOT / '100-ipset.sh').read_text(encoding='utf-8')
     redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
@@ -583,6 +584,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
     assert 'unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
     assert 'udp_quic_domain "$domain"' in ipset_script
+    assert 'udp_quic_direct_entry "$direct_entry"' in ipset_script
+    assert 'chatgpt.com|*.chatgpt.com' in ipset_script
+    assert 'chatgpt.com|*.chatgpt.com' in unblock_dnsmasq
+    assert '8.6.112.6|8.47.69.6|35.190.80.1|64.239.109.65' in ipset_script
     assert 'swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
     assert 'ipset create unblockvlessudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
@@ -1602,6 +1607,8 @@ def test_chatgpt_codex_routes_are_synced():
         if line.split('#', 1)[0].strip()
     }
     assert set(service_catalog.CHATGPT_ROUTE_ENTRIES) <= entries
+    assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= entries
+    assert {'ab.chatgpt.com', 'api.chatgpt.com', 'api.statsig.com', 'browser-intake-datadoghq.com'} <= entries
 
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
     assert 'chatgpt_services' in presets

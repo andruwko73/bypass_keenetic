@@ -1,3 +1,6 @@
+*v1.618 (20 May 2026) -* main
+*Added ChatGPT/Codex edge domains and observed edge IPs to Vless 1, and mirrored OpenAI/Codex QUIC targets into the UDP block set so the desktop app falls back to TCP through the proxy for usage-limit requests.*
+
 *v1.617 (20 May 2026) -* main
 *Restored the existing manual Vless 2 bypass list entries, including Rutracker, while keeping the Vless 1 priority and CRD fallback IP fixes from v1.616.*
 

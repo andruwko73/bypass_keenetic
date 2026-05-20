@@ -169,7 +169,16 @@ normalize_domain() {
 udp_quic_domain() {
 	domain="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
 	case "$domain" in
-		youtube.com|*.youtube.com|youtu.be|*.youtu.be|yt.be|*.yt.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube-nocookie.com|*.youtube-nocookie.com|youtube.googleapis.com|*.youtube.googleapis.com|youtubei.googleapis.com|*.youtubei.googleapis.com|youtubeembeddedplayer.googleapis.com|*.youtubeembeddedplayer.googleapis.com|googleusercontent.com|*.googleusercontent.com|gvt1.com|*.gvt1.com|gvt2.com|*.gvt2.com|video.google.com|*.video.google.com|youtubeeducation.com|*.youtubeeducation.com|youtubekids.com|*.youtubekids.com)
+		youtube.com|*.youtube.com|youtu.be|*.youtu.be|yt.be|*.yt.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube-nocookie.com|*.youtube-nocookie.com|youtube.googleapis.com|*.youtube.googleapis.com|youtubei.googleapis.com|*.youtubei.googleapis.com|youtubeembeddedplayer.googleapis.com|*.youtubeembeddedplayer.googleapis.com|googleusercontent.com|*.googleusercontent.com|gvt1.com|*.gvt1.com|gvt2.com|*.gvt2.com|video.google.com|*.video.google.com|youtubeeducation.com|*.youtubeeducation.com|youtubekids.com|*.youtubekids.com|chatgpt.com|*.chatgpt.com|openai.com|*.openai.com|oaistatic.com|*.oaistatic.com|oaiusercontent.com|*.oaiusercontent.com|statsig.com|*.statsig.com|statsigapi.net|*.statsigapi.net|featuregates.org|*.featuregates.org|featureassets.org|*.featureassets.org|datadoghq.com|*.datadoghq.com|sentry.io|*.sentry.io|workos.com|*.workos.com|challenges.cloudflare.com|gateway.ai.cloudflare.com|*.gateway.ai.cloudflare.com)
+			return 0
+			;;
+	esac
+	return 1
+}
+
+udp_quic_direct_entry() {
+	case "$1" in
+		8.6.112.6|8.47.69.6|35.190.80.1|64.239.109.65|104.18.32.47|172.64.155.209)
 			return 0
 			;;
 	esac
@@ -272,6 +281,10 @@ load_file_to_set() {
 		if direct_entry="$(extract_direct_entry "$line")"; then
 			: > "$source_file"
 			append_restore "$main_tmp_set" "$direct_entry"
+			if [ -n "$mirror_set_name" ] && [ -n "$mirror_tmp_set" ] && udp_quic_direct_entry "$direct_entry"; then
+				: > "$mirror_source_file"
+				append_restore "$mirror_tmp_set" "$direct_entry"
+			fi
 			continue
 		fi
 

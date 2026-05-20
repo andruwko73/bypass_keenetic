@@ -52,6 +52,8 @@ YOUTUBE_UNBLOCK_ENTRIES = [
 
 CHATGPT_ROUTE_ENTRIES = [
     'chatgpt.com',
+    'ab.chatgpt.com',
+    'api.chatgpt.com',
     'chat.openai.com',
     'ws.chatgpt.com',
     'ios.chat.openai.com',
@@ -74,6 +76,7 @@ CHATGPT_ROUTE_ENTRIES = [
     'featuregates.org',
     'featureassets.org',
     'statsig.com',
+    'api.statsig.com',
     'events.statsigapi.net',
     'intercom.io',
     'intercomcdn.com',
@@ -83,12 +86,25 @@ CHATGPT_ROUTE_ENTRIES = [
     'images.workoscdn.com',
     'setup.workos.com',
     'challenges.cloudflare.com',
+    'gateway.ai.cloudflare.com',
     'js.stripe.com',
     'prodregistryv2.org',
+    'browser-intake-datadoghq.com',
     'rum.browser-intake-datadoghq.com',
     'o207216.ingest.sentry.io',
     'o33249.ingest.sentry.io',
 ]
+
+CHATGPT_EDGE_IP_ENTRIES = [
+    '8.6.112.6',
+    '8.47.69.6',
+    '35.190.80.1',
+    '64.239.109.65',
+    '104.18.32.47',
+    '172.64.155.209',
+]
+
+CHATGPT_ROUTE_ENTRIES.extend(CHATGPT_EDGE_IP_ENTRIES)
 
 CLAUDE_ROUTE_ENTRIES = [
     'claude.ai',
