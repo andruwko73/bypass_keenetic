@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.626, последнее изменение: 21.05.2026
+#  Файл: bot.py, Версия v1.627, последнее изменение: 21.05.2026
 
 import subprocess
 import os
@@ -1101,6 +1101,7 @@ web_command_state = {
 web_flash_lock = threading.Lock()
 web_flash_state = {'message': ''}
 DIRECT_FETCH_ENV_KEYS = [
+    'BYPASS_KEENETIC_COMMAND_WORKER',
     'HTTPS_PROXY',
     'HTTP_PROXY',
     'https_proxy',

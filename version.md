@@ -1,3 +1,6 @@
+*v1.627 (21 May 2026) -* main
+*Prevented GitHub update workers from leaking command-worker mode into the restarted Telegram bot service.*
+
 *v1.626 (21 May 2026) -* main
 *Protected active YouTube Vless2 streams from background switching while still allowing dead-key failover, made Vless2 status match the selected bot mode, and kept the active pool row pinned above the real source order.*
 

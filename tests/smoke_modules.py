@@ -682,6 +682,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT"' in service
     assert 'cleanup_python_bytecode' in service
     assert 'trim_runtime_logs' in service
+    assert 'unset BYPASS_KEENETIC_COMMAND_WORKER' in service
     assert 'threading.stack_size(256 * 1024)' in source
     assert "pool_probe_min_available_kb', 160000" in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
@@ -718,6 +719,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'read_timeout=8' in source
     assert 'def _redact_sensitive_text' in source
     assert 'bot<redacted-token>' in source
+    assert "'BYPASS_KEENETIC_COMMAND_WORKER'" in source
     assert 'error_text = _redact_sensitive_text(exc)' in source
     assert "_memory_cleanup('pool probe finished'" in source
     assert "_memory_cleanup('web command finished'" in source
