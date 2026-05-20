@@ -1,3 +1,6 @@
+*v1.624 (20 May 2026) -* main
+*Restored Playwright Linux dependency installation for CI after confirming Chromium needs system libraries such as libnspr4 on Ubuntu.*
+
 *v1.623 (20 May 2026) -* main
 *Pinned CI UI smoke to current Playwright 1.60.0 and removed the apt dependency install from the workflow so Chromium smoke can run reliably on ubuntu-latest.*
 
