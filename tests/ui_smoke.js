@@ -2,6 +2,34 @@ const { chromium, devices } = require('playwright');
 
 const targetUrl = process.env.BYPASS_UI_URL || 'http://192.168.1.1:8080/';
 const chromeExecutable = process.env.CHROME_EXECUTABLE || undefined;
+const leakedFixtureKeys = [
+  'vless://fixture-backup-vless',
+  'vless://fixture-backup-vless2',
+];
+
+function watchPage(page, label) {
+  const failures = [];
+  page.on('pageerror', (error) => failures.push(`${label}: page error: ${error.message}`));
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      failures.push(`${label}: console error: ${message.text()}`);
+    }
+  });
+  page.on('response', (response) => {
+    const url = response.url();
+    const watched = url.includes('/api/') || url.includes('/static/app.');
+    if (watched && !response.ok()) {
+      failures.push(`${label}: ${response.status()} ${url}`);
+    }
+  });
+  return failures;
+}
+
+function assertNoPageFailures(failures) {
+  if (failures.length) {
+    throw new Error(failures.join('\n'));
+  }
+}
 
 async function assertNoHorizontalOverflow(page, label) {
   const overflow = await page.evaluate(() => ({
@@ -31,6 +59,32 @@ async function assertVisibleBox(page, selector, label) {
   return box;
 }
 
+async function assertPoolKeysAreMasked(page, label) {
+  const leakage = await page.evaluate((needles) => ({
+    dataKeyCount: document.querySelectorAll('[data-key]').length,
+    poolLegacyKeyInputs: document.querySelectorAll('[data-pool-row] input[name="key"]').length,
+    leakedNeedles: needles.filter((needle) => document.documentElement.outerHTML.includes(needle)),
+  }), leakedFixtureKeys);
+  if (leakage.dataKeyCount || leakage.poolLegacyKeyInputs || leakage.leakedNeedles.length) {
+    throw new Error(`${label}: pool key leakage ${JSON.stringify(leakage)}`);
+  }
+}
+
+async function clickLazyProtocol(page, protocol, label) {
+  const tab = page.locator(`.protocol-tab[data-protocol-target="${protocol}"]`);
+  if (await tab.count() !== 1) {
+    throw new Error(`${label}: expected one ${protocol} protocol tab`);
+  }
+  await tab.click();
+  const panel = page.locator(`[data-protocol-panel="${protocol}"].active`);
+  await panel.waitFor({ state: 'visible', timeout: 10000 });
+  const errorText = await panel.locator('[data-protocol-retry]').count();
+  if (errorText) {
+    throw new Error(`${label}: lazy protocol panel failed to load`);
+  }
+  await assertVisibleBox(page, `[data-protocol-panel="${protocol}"].active`, `${label} ${protocol} panel`);
+}
+
 async function runViewport(browser, name, viewport, isMobile = false) {
   const context = await browser.newContext({
     viewport,
@@ -39,6 +93,7 @@ async function runViewport(browser, name, viewport, isMobile = false) {
     deviceScaleFactor: isMobile ? 2 : 1,
   });
   const page = await context.newPage();
+  const failures = watchPage(page, name);
   await page.addInitScript(() => localStorage.setItem('router-theme', 'glass'));
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
@@ -64,6 +119,7 @@ async function runViewport(browser, name, viewport, isMobile = false) {
 
   await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);
+  await assertPoolKeysAreMasked(page, `${name} initial keys`);
   await page.locator('[data-protocol-panel].active [data-subview-target="pool"]').click();
   if (await page.locator('[data-pool-filter]').count()) {
     await assertVisibleBox(page, '[data-pool-filter]', `${name} pool filter`);
@@ -71,7 +127,12 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   if (await page.locator('.pool-delete-btn').count()) {
     await assertVisibleBox(page, '[data-protocol-panel].active [data-pool-body] tr:first-child .pool-delete-btn', `${name} delete button`);
   }
+  await clickLazyProtocol(page, 'vless2', name);
+  await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();
+  await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);
+  await assertPoolKeysAreMasked(page, `${name} lazy keys`);
   await assertNoHorizontalOverflow(page, `${name} keys`);
+  assertNoPageFailures(failures);
 
   await context.close();
 }

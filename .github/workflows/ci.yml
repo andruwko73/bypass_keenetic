@@ -48,3 +48,22 @@ jobs:
 
       - name: JavaScript syntax
         run: node --check tests/ui_smoke.js
+
+      - name: Install UI smoke dependencies
+        run: |
+          npm install --no-save playwright@1.44.1
+          npx playwright install --with-deps chromium
+
+      - name: UI smoke
+        run: |
+          python -u tests/ui_fixture_server.py --host 127.0.0.1 --port 8765 > /tmp/ui-fixture.log 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" || true; cat /tmp/ui-fixture.log' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8765/ > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8765/ > /dev/null
+          BYPASS_UI_URL=http://127.0.0.1:8765/ node tests/ui_smoke.js

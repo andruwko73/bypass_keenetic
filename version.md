@@ -1,3 +1,6 @@
+*v1.622 (20 May 2026) -* main
+*Added a real Playwright UI smoke run to CI using a local fixture server, covering desktop, compact, mobile, lazy protocol panels, and pool key masking.*
+
 *v1.621 (20 May 2026) -* main
 *Reduced Vless pool panel payloads by using short `key_id` form actions instead of embedding full pool keys, accepted both `proto` and `protocol` API aliases, and added deterministic post-pool memory cleanup restart retries.*
 
