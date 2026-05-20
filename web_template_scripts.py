@@ -1226,14 +1226,14 @@ def render_web_scripts(
             body.innerHTML = rows.map(function(row, position) {{
                 const activeClass = row.active ? ' pool-row-active' : '';
                 const activeText = row.active ? 'активен' : '';
-                const key = escapeHtml(row.key || '');
+                const keyId = escapeHtml(row.key_id || '');
                 const rowIndex = Number(row.index || (position + 1)) - 1;
                 const displayName = escapeHtml(row.display_name || '');
-                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + escapeHtml(row.key_id) + '" data-key="' + key + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + key + '">' +
+                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + keyId + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + keyId + '">' +
                     '<td class="pool-key-cell">' +
                         '<form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">' +
                             '<input type="hidden" name="type" value="' + proto + '">' +
-                            '<input type="hidden" name="key" value="' + key + '">' +
+                            '<input type="hidden" name="key_id" value="' + keyId + '">' +
                             '<button type="submit" class="pool-apply-btn" title="Применить этот ключ">' + displayName + '</button>' +
                         '</form>' +
                         '<span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>' + activeText + '</span>' +
@@ -1246,7 +1246,7 @@ def render_web_scripts(
                     '<td class="pool-actions-cell">' +
                         '<form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула?">' +
                             '<input type="hidden" name="type" value="' + proto + '">' +
-                            '<input type="hidden" name="key" value="' + key + '">' +
+                            '<input type="hidden" name="key_id" value="' + keyId + '">' +
                             '<button type="submit" class="pool-delete-btn" title="Удалить ключ из пула"><span class="pool-delete-icon" aria-hidden="true">&times;</span><span class="pool-delete-label">Удалить</span></button>' +
                         '</form>' +
                     '</td>' +
@@ -1289,7 +1289,7 @@ def render_web_scripts(
                 item.dataset.tgState = row.tg || 'unknown';
                 item.dataset.ytState = row.yt || 'unknown';
                 item.dataset.checkedTs = String(row.checked_ts || 0);
-                item.dataset.search = String((row.display_name || '') + ' ' + (row.key || ''));
+                item.dataset.search = String((row.display_name || '') + ' ' + (row.key_id || ''));
                 const meta = item.querySelector('[data-pool-key-meta]');
                 if (meta) {{
                     meta.textContent = row.active ? 'активен' : '';
@@ -1323,8 +1323,13 @@ def render_web_scripts(
             }}
             Object.keys(pools).forEach(function(proto) {{
                 const rows = (pools[proto] && pools[proto].rows) || [];
-                const hasFullKeys = rows.some(function(row) {{ return !!row.key; }});
-                if (hasFullKeys || rows.length === 0) {{
+                const body = document.querySelector('[data-pool-body="' + proto + '"]');
+                const currentRows = body ? Array.from(body.querySelectorAll('[data-pool-row]')) : [];
+                const currentIds = new Set(currentRows.map(function(item) {{ return String(item.dataset.keyId || ''); }}));
+                const needsRender = rows.length === 0 || currentRows.length !== rows.length || rows.some(function(row) {{
+                    return !currentIds.has(String(row.key_id || ''));
+                }});
+                if (needsRender) {{
                     renderPoolBody(proto, pools[proto]);
                 }} else {{
                     updatePoolRows(proto, pools[proto]);
@@ -1737,12 +1742,12 @@ def render_web_scripts(
             }}
         }}
 
-        function markPoolKeyActive(proto, key) {{
+        function markPoolKeyActive(proto, keyId) {{
             document.querySelectorAll('[data-pool-row]').forEach(function(item) {{
                 if (item.dataset.protocol !== proto) {{
                     return;
                 }}
-                const isActive = item.dataset.key === key;
+                const isActive = item.dataset.keyId === keyId;
                 item.classList.toggle('pool-row-active', isActive);
                 item.dataset.active = isActive ? '1' : '0';
                 const meta = item.querySelector('[data-pool-key-meta]');
@@ -1839,6 +1844,7 @@ def render_web_scripts(
                     const action = form.dataset.asyncAction || '';
                     const proto = formData.get('type') || '';
                     const key = formData.get('key') || '';
+                    const keyId = formData.get('key_id') || '';
                     const confirmTitle = (button && button.dataset.confirmTitle) || form.dataset.confirmTitle || '';
                     const confirmMessage = (button && button.dataset.confirmMessage) || form.dataset.confirmMessage || '';
                     const actionUrl = (button && button.getAttribute('formaction')) || form.getAttribute('action');
@@ -1892,11 +1898,11 @@ def render_web_scripts(
                                 }}
                             }}
                             if (ok && proto && action === 'pool-apply') {{
-                                markPoolKeyActive(proto, key);
+                                markPoolKeyActive(proto, String(payload.key_id || keyId || ''));
                                 const card = form.closest('[data-protocol-card]');
                                 const textarea = card ? card.querySelector('[data-key-textarea]') : null;
-                                if (textarea) {{
-                                    textarea.value = key;
+                                if (textarea && payload.key) {{
+                                    textarea.value = payload.key;
                                 }}
                             }}
                             if (payload.custom_checks) {{

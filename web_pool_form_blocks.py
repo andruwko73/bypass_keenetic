@@ -77,11 +77,10 @@ def render_pool_items(
     current_key = current_key or ''
     for index, pool_key in enumerate(pool_keys or []):
         key_hash = hash_key(pool_key)
-        key_id = html.escape(str(key_hash[:12]))
-        safe_pool_key = html.escape(pool_key, quote=True)
+        key_id = html.escape(str(key_hash[:12]), quote=True)
         raw_display_name = str(key_display_name(pool_key) or '')
         display_name = html.escape(raw_display_name)
-        search_text = html.escape(f'{raw_display_name} {pool_key}', quote=True)
+        search_text = html.escape(f'{raw_display_name} {key_hash[:12]}', quote=True)
         is_current_key = bool(current_key and pool_key == current_key)
         active_text = 'активен' if is_current_key else ''
         active_class = ' pool-row-active' if is_current_key else ''
@@ -98,12 +97,12 @@ def render_pool_items(
         yt_badge = _service_probe_badge(probe, 'yt_ok', youtube_icon_html(opacity=1.0))
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
-        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-key="{safe_pool_key}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
+        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
                         <td class="pool-key-cell">
                             <form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">
                                 {csrf_input_html}
                                 <input type="hidden" name="type" value="{safe_key_name}">
-                                <input type="hidden" name="key" value="{safe_pool_key}">
+                                <input type="hidden" name="key_id" value="{key_id}">
                                 <button type="submit" class="pool-apply-btn" title="Применить этот ключ">{display_name}</button>
                             </form>
                             <span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>{active_text}</span>
@@ -117,7 +116,7 @@ def render_pool_items(
                             <form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула {safe_title}?">
                                 {csrf_input_html}
                                 <input type="hidden" name="type" value="{safe_key_name}">
-                                <input type="hidden" name="key" value="{safe_pool_key}">
+                                <input type="hidden" name="key_id" value="{key_id}">
                                 <button type="submit" class="pool-delete-btn" title="Удалить ключ из пула"><span class="pool-delete-icon" aria-hidden="true">&times;</span><span class="pool-delete-label">Удалить</span></button>
                             </form>
                         </td>

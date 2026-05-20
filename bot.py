@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.620, последнее изменение: 20.05.2026
+#  Файл: bot.py, Версия v1.621, последнее изменение: 20.05.2026
 
 import subprocess
 import os
@@ -928,6 +928,14 @@ MEMORY_POST_POOL_RESTART_DELAY_SECONDS = max(
     5.0,
     float(getattr(config, 'memory_post_pool_restart_delay_seconds', 20.0)),
 )
+MEMORY_POST_POOL_RESTART_RETRY_SECONDS = max(
+    10.0,
+    float(getattr(config, 'memory_post_pool_restart_retry_seconds', 30.0)),
+)
+MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS = max(
+    MEMORY_POST_POOL_RESTART_RETRY_SECONDS,
+    float(getattr(config, 'memory_post_pool_restart_max_wait_seconds', 300.0)),
+)
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
 APP_MODE_LABEL = 'Режим бота'
@@ -1028,6 +1036,15 @@ memory_watchdog_lock = threading.Lock()
 memory_watchdog_restart_scheduled = False
 memory_watchdog_last_restart_at = 0.0
 memory_watchdog_high_rss_since = 0.0
+post_pool_memory_cleanup_lock = threading.Lock()
+post_pool_memory_cleanup_state = {
+    'scheduled': False,
+    'attempts': 0,
+    'rss_kb': 0,
+    'next_retry_at': 0.0,
+    'deadline_at': 0.0,
+    'last_message': '',
+}
 WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
 web_command_lock = threading.Lock()
 web_command_state = {
@@ -1433,29 +1450,102 @@ def _schedule_memory_watchdog_restart(rss_kb):
         return False
 
 
+def _set_post_pool_memory_cleanup_state(**updates):
+    with post_pool_memory_cleanup_lock:
+        post_pool_memory_cleanup_state.update(updates)
+        if updates.get('scheduled') is False:
+            post_pool_memory_cleanup_state['next_retry_at'] = 0.0
+            post_pool_memory_cleanup_state['deadline_at'] = 0.0
+
+
+def _post_pool_memory_cleanup_snapshot():
+    with post_pool_memory_cleanup_lock:
+        return dict(post_pool_memory_cleanup_state)
+
+
 def _schedule_post_pool_memory_cleanup():
     if not MEMORY_POST_POOL_RESTART_ENABLED or MEMORY_POST_POOL_RESTART_RSS_KB <= 0:
         return
+    now = time.time()
+    with post_pool_memory_cleanup_lock:
+        if post_pool_memory_cleanup_state.get('scheduled'):
+            return
+        post_pool_memory_cleanup_state.update({
+            'scheduled': True,
+            'attempts': 0,
+            'rss_kb': 0,
+            'next_retry_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS,
+            'deadline_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS + MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS,
+            'last_message': 'post-pool memory cleanup scheduled',
+        })
 
     def worker():
-        shutdown_requested.wait(MEMORY_POST_POOL_RESTART_DELAY_SECONDS)
-        if shutdown_requested.is_set():
-            return
-        cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
-        rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
-        if not rss_kb or rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB:
-            return
-        if not _memory_restart_is_safe():
-            _write_runtime_log(
-                f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
-                f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restart postponed because another operation is active'
-            )
-            return
-        _write_runtime_log(
-            f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
-            f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restarting bot service'
-        )
-        _schedule_memory_watchdog_restart(rss_kb)
+        next_wait = MEMORY_POST_POOL_RESTART_DELAY_SECONDS
+        deadline_at = time.time() + next_wait + MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS
+        attempts = 0
+        try:
+            while not shutdown_requested.is_set():
+                shutdown_requested.wait(max(0.0, next_wait))
+                if shutdown_requested.is_set():
+                    return
+                attempts += 1
+                cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
+                rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
+                if not rss_kb or rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB:
+                    _set_post_pool_memory_cleanup_state(
+                        scheduled=False,
+                        attempts=attempts,
+                        rss_kb=int(rss_kb or 0),
+                        last_message='post-pool memory cleanup completed without restart',
+                    )
+                    return
+                if _memory_restart_is_safe():
+                    _write_runtime_log(
+                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
+                        f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, requesting bot service restart'
+                    )
+                    if _schedule_memory_watchdog_restart(rss_kb):
+                        _set_post_pool_memory_cleanup_state(
+                            scheduled=False,
+                            attempts=attempts,
+                            rss_kb=int(rss_kb),
+                            last_message='post-pool memory restart requested',
+                        )
+                        return
+                    _write_runtime_log(
+                        f'Post-pool memory cleanup: restart request for RSS {rss_kb} KB was deferred, retrying'
+                    )
+                now_inner = time.time()
+                remaining = deadline_at - now_inner
+                if remaining <= 0:
+                    _write_runtime_log(
+                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
+                        f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB after retry window; idle watchdog will continue monitoring'
+                    )
+                    _set_post_pool_memory_cleanup_state(
+                        scheduled=False,
+                        attempts=attempts,
+                        rss_kb=int(rss_kb),
+                        last_message='post-pool memory restart retry window expired',
+                    )
+                    return
+                next_wait = min(MEMORY_POST_POOL_RESTART_RETRY_SECONDS, remaining)
+                retry_at = now_inner + next_wait
+                _set_post_pool_memory_cleanup_state(
+                    scheduled=True,
+                    attempts=attempts,
+                    rss_kb=int(rss_kb),
+                    next_retry_at=retry_at,
+                    deadline_at=deadline_at,
+                    last_message='post-pool memory restart pending',
+                )
+                _write_runtime_log(
+                    f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
+                    f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restart postponed; retry in {int(round(next_wait))} seconds'
+                )
+        finally:
+            if shutdown_requested.is_set():
+                _set_post_pool_memory_cleanup_state(scheduled=False, last_message='shutdown requested')
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -2894,11 +2984,21 @@ def _router_health_snapshot():
     payload = router_health.snapshot(_get_pool_probe_progress)
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
     payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
+    post_pool_state = _post_pool_memory_cleanup_snapshot()
+    payload['post_pool_restart_pending'] = bool(post_pool_state.get('scheduled'))
+    payload['post_pool_restart_rss_kb'] = int(post_pool_state.get('rss_kb') or 0)
+    payload['post_pool_restart_next_retry_at'] = float(post_pool_state.get('next_retry_at') or 0.0)
     if MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 and payload.get('bot_rss_kb'):
         threshold_mb = int(round(MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB / 1024.0))
         note = str(payload.get('note') or '').strip()
         threshold_note = f'Автоперезапуск бота в простое: порог {threshold_mb} MB RSS.'
         payload['note'] = f'{note} {threshold_note}'.strip()
+    if post_pool_state.get('scheduled'):
+        rss_mb = int(round((post_pool_state.get('rss_kb') or 0) / 1024.0))
+        retry_in = max(0, int(round((post_pool_state.get('next_retry_at') or 0.0) - time.time())))
+        note = str(payload.get('note') or '').strip()
+        retry_note = f'После проверки пула ожидается повторная очистка памяти: RSS бота {rss_mb} MB, попытка через {retry_in} с.'
+        payload['note'] = f'{note} {retry_note}'.strip()
     return payload
 
 
@@ -4986,6 +5086,7 @@ def _web_action_context():
         add_keys_to_pool=_add_keys_to_pool,
         delete_pool_key=_delete_pool_key,
         load_key_pools=_load_key_pools,
+        hash_key=_hash_key,
         set_active_key=_set_active_key,
         clear_pool=_clear_pool,
         fetch_keys_from_subscription=_fetch_keys_from_subscription,

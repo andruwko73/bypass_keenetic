@@ -145,7 +145,7 @@ def _static_file(ctx, path):
 
 def _protocol_panel_payload(ctx, query):
     params = parse_qs(query or '', keep_blank_values=True)
-    protocol = (params.get('proto') or [''])[0]
+    protocol = (params.get('proto') or params.get('protocol') or [''])[0]
     build_protocol_panel = _ctx(ctx, 'build_protocol_panel')
     if not protocol or not build_protocol_panel:
         return {'ok': False, 'error': 'Неизвестный протокол'}

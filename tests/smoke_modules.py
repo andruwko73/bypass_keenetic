@@ -459,6 +459,31 @@ def test_web_post_actions_helpers():
     )
     assert pool_ctx['pool_actions_enabled'] is True
     assert pool_ctx['custom_checks_enabled'] is True
+    deleted = []
+    active = []
+    snapshots = []
+    pool_ctx.update(
+        load_current_keys=lambda: {'vless': 'vless://one'},
+        web_pool_snapshot=lambda keys, include_keys=False: snapshots.append(include_keys) or {'vless': {'rows': []}},
+        load_key_pools=lambda: {'vless': ['vless://one', 'vless://two']},
+        hash_key=lambda key: 'id-one-1234' if key == 'vless://one' else 'id-two-1234',
+        delete_pool_key=lambda proto, key: deleted.append((proto, key)),
+        set_active_key=lambda proto, key: active.append((proto, key)),
+        install_key_for_protocol=lambda proto, key, verify=True: 'installed',
+        invalidate_web_status_cache=lambda: None,
+        invalidate_key_status_cache=lambda: None,
+    )
+    delete_result = web_post_actions.dispatch(pool_ctx, '/pool_delete', {'type': ['vless'], 'key_id': ['id-two-1234']})
+    assert delete_result['success'] is True
+    assert deleted == [('vless', 'vless://two')]
+    assert delete_result['extra']['key_id'] == 'id-two-1234'
+    assert snapshots[-1] is False
+    apply_result = web_post_actions.dispatch(pool_ctx, '/pool_apply', {'type': ['vless'], 'key_id': ['id-one-1234']})
+    assert apply_result['success'] is True
+    assert active == [('vless', 'vless://one')]
+    assert apply_result['extra']['key_id'] == 'id-one-1234'
+    assert apply_result['extra']['key'] == 'vless://one'
+    assert snapshots[-1] is False
 
 
 def test_web_action_feature_gates():
@@ -517,6 +542,12 @@ def test_codex_version_matches_commit_count():
     assert 'memory_post_pool_restart_rss_kb = 61440' in example
     assert 'memory_post_pool_restart_rss_kb = 61440' in installer
     assert 'memory_post_pool_restart_rss_kb = 61440' in bootstrap
+    assert 'memory_post_pool_restart_retry_seconds = 30.0' in example
+    assert 'memory_post_pool_restart_retry_seconds = 30.0' in installer
+    assert 'memory_post_pool_restart_retry_seconds = 30.0' in bootstrap
+    assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in example
+    assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in installer
+    assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in bootstrap
     assert 'udp_quic_block_vless_enabled = True' in example
     assert 'udp_quic_block_vless_enabled = True' in installer
     assert 'udp_quic_block_vless_enabled = True' in bootstrap
@@ -1958,6 +1989,8 @@ def test_web_get_actions_helpers():
     assert probe['payload']['status'] == 'running'
     panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'proto=vless')
     assert panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'panel:vless'}
+    alias_panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'protocol=vless2')
+    assert alias_panel['payload'] == {'ok': True, 'protocol': 'vless2', 'html': 'panel:vless2'}
     script_asset = web_get_actions.dispatch({'build_script_asset': lambda: 'js'}, '/static/app.js')
     assert script_asset['cache_seconds'] == 86400
     static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
@@ -2060,7 +2093,11 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
     )
     assert 'pool-row-active' in pool_rows
-    assert 'data-search="sample-key vless://sample"' in pool_rows
+    assert 'data-search="sample-key hash-vless"' in pool_rows
+    assert 'data-key=' not in pool_rows
+    assert 'name="key_id" value="hash-vless"' in pool_rows
+    assert 'name="key" value=' not in pool_rows
+    assert 'vless://sample' not in pool_rows
     assert 'csrf_token' in pool_rows
     assert 'pool-delete-icon' in pool_rows
     assert '&times;' in pool_rows
@@ -2378,6 +2415,8 @@ def test_web_template_scripts_helpers():
     assert 'function setupAsyncForms' in scripts
     assert 'function setupProtocolTabs()' in scripts
     assert "fetch('/api/protocol_panel?proto='" in scripts
+    assert 'data-key="' not in scripts
+    assert 'name="key_id"' in scripts
     assert 'function setupProtocolSubtabs(root)' in scripts
     assert 'function renderStatusAttention(snapshot)' in scripts
     assert "items.push(['info', 'Проверка пула выполняется'" not in scripts

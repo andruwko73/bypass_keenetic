@@ -1,3 +1,6 @@
+*v1.621 (20 May 2026) -* main
+*Reduced Vless pool panel payloads by using short `key_id` form actions instead of embedding full pool keys, accepted both `proto` and `protocol` API aliases, and added deterministic post-pool memory cleanup restart retries.*
+
 *v1.620 (20 May 2026) -* main
 *Prevented timed-out pool probes from recording false failures or overwriting newer successful probe results, refreshed the legacy `/opt/etc/bot/bot.py` path as a link to `main.py`, and moved QUIC/UDP mirror policy generation into `service_catalog.py`.*
 

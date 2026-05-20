@@ -79,7 +79,7 @@ def _pool_payload(ctx):
     load_current_keys = _ctx(ctx, 'load_current_keys')
     if not web_pool_snapshot or not load_current_keys:
         return {}
-    return {'pools': web_pool_snapshot(load_current_keys(), include_keys=True)}
+    return {'pools': web_pool_snapshot(load_current_keys(), include_keys=False)}
 
 
 def _custom_check_payload(ctx):
@@ -284,13 +284,17 @@ def _pool_add(ctx, data):
 def _pool_delete(ctx, data):
     proto = form_value(data, 'type')
     success = True
+    key_id = form_value(data, 'key_id').strip()
     try:
-        _ctx(ctx, 'delete_pool_key')(proto, form_value(data, 'key'))
+        key_to_delete, key_id, _ = _resolve_pool_key(ctx, proto, data)
+        _ctx(ctx, 'delete_pool_key')(proto, key_to_delete)
         result = f'Ключ удалён из пула {proto}'
     except Exception as exc:
         success = False
         result = f'Ошибка удаления из пула: {exc}'
-    return _result(result, success=success, extra=_pool_payload(ctx))
+    extra = {'protocol': proto, 'key_id': key_id}
+    extra.update(_pool_payload(ctx))
+    return _result(result, success=success, extra=extra)
 
 
 def _acquire_pool_lock(ctx):
@@ -302,9 +306,39 @@ def _acquire_pool_lock(ctx):
     return lock
 
 
+def _resolve_pool_key(ctx, proto, data):
+    if proto not in PROXY_PROTOCOLS:
+        raise ValueError('Неизвестный протокол')
+    load_key_pools = _ctx(ctx, 'load_key_pools')
+    if not load_key_pools:
+        raise ValueError('Пул ключей недоступен')
+    pools = load_key_pools() or {}
+    proto_keys = pools.get(proto, []) or []
+    key_id = form_value(data, 'key_id').strip()
+    legacy_key = form_value(data, 'key')
+    if key_id:
+        hash_key = _ctx(ctx, 'hash_key')
+        if not hash_key:
+            raise ValueError('Поиск ключа по key_id недоступен')
+        matches = [key for key in proto_keys if str(hash_key(key))[:12] == key_id]
+        if len(matches) == 1:
+            return matches[0], key_id, pools
+        if len(matches) > 1:
+            raise ValueError('Найдено несколько ключей с одинаковым key_id. Обновите пул или используйте ручную установку.')
+        raise ValueError('Ключ не найден в пуле. Обновите страницу и попробуйте снова.')
+    if legacy_key:
+        if legacy_key not in proto_keys:
+            raise ValueError('Ключ не найден в пуле')
+        hash_key = _ctx(ctx, 'hash_key')
+        resolved_id = str(hash_key(legacy_key))[:12] if hash_key else ''
+        return legacy_key, resolved_id, pools
+    raise ValueError('Не указан ключ пула')
+
+
 def _pool_apply(ctx, data):
     proto = form_value(data, 'type')
-    key_to_apply = form_value(data, 'key')
+    key_to_apply = ''
+    key_id = form_value(data, 'key_id').strip()
     success = True
     lock = None
     pause_note = ''
@@ -314,11 +348,7 @@ def _pool_apply(ctx, data):
         pause_pool_probe = _ctx(ctx, 'pause_pool_probe_for_apply')
         if pause_pool_probe:
             should_resume_probe, pause_note = pause_pool_probe()
-        pools = _ctx(ctx, 'load_key_pools')()
-        if proto not in PROXY_PROTOCOLS:
-            raise ValueError('Неизвестный протокол')
-        if key_to_apply not in (pools.get(proto, []) or []):
-            raise ValueError('Ключ не найден в пуле')
+        key_to_apply, key_id, _ = _resolve_pool_key(ctx, proto, data)
         result = _ctx(ctx, 'install_key_for_protocol')(proto, key_to_apply, verify=True)
         _ctx(ctx, 'set_active_key')(proto, key_to_apply)
         _invalidate_status(ctx)
@@ -333,7 +363,7 @@ def _pool_apply(ctx, data):
             lock.release()
         if should_resume_probe:
             _call(ctx, 'resume_cancelled_pool_probe')
-    extra = {'protocol': proto, 'key': key_to_apply}
+    extra = {'protocol': proto, 'key': key_to_apply, 'key_id': key_id}
     extra.update(_pool_payload(ctx))
     return _result(result, success=success, extra=extra)
 
