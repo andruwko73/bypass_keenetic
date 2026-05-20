@@ -407,6 +407,12 @@ TELEGRAM_UNBLOCK_ENTRIES = [
 ]
 
 SERVICE_LIST_SOURCES = {
+    'chatgpt_services': {
+        'label': 'ChatGPT / Codex',
+        'aliases': ['chatgpt', 'codex', 'openai', 'gpt', 'chatgpt codex'],
+        'url': '',
+        'entries': CHATGPT_ROUTE_ENTRIES,
+    },
     'youtube': {
         'label': 'YouTube',
         'aliases': ['youtube', 'yt', 'ютуб'],

@@ -1,3 +1,6 @@
+*v1.619 (20 May 2026) -* main
+*Exposed ChatGPT / Codex in the service-add buttons and `/getlist` source catalog, using the same updated route list as the custom service check preset.*
+
 *v1.618 (20 May 2026) -* main
 *Added ChatGPT/Codex edge domains and observed edge IPs to Vless 1, and mirrored OpenAI/Codex QUIC targets into the UDP block set so the desktop app falls back to TCP through the proxy for usage-limit requests.*
 

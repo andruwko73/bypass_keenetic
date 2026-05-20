@@ -1617,6 +1617,12 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'https://chatgpt.com/codex' in presets['chatgpt_services']['urls']
     assert 'https://platform.openai.com' in presets['chatgpt_services']['urls']
     assert presets['chatgpt_services']['routes'] == service_catalog.CHATGPT_ROUTE_ENTRIES
+    source = service_catalog.SERVICE_LIST_SOURCES['chatgpt_services']
+    assert source['label'] == 'ChatGPT / Codex'
+    assert source['entries'] == service_catalog.CHATGPT_ROUTE_ENTRIES
+    assert 'codex' in source['aliases']
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "('chatgpt_services', 'youtube'" in bot_source
 
 
 def test_chatgpt_codex_custom_check_migration():
