@@ -50,8 +50,8 @@ POOLS = {
         "vless://fixture-backup-vless@example.test:443#backup-vless",
     ],
     "vless2": [
-        CURRENT_KEYS["vless2"],
         "vless://fixture-backup-vless2@example.test:443#backup-vless2",
+        CURRENT_KEYS["vless2"],
     ],
     "vmess": [],
     "trojan": [],

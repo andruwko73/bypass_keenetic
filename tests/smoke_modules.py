@@ -389,6 +389,22 @@ def test_key_pool_subscription_helpers():
     pools, added = key_pool_store.add_subscription_keys_to_pool({'vless2': []}, 'vless2', classified)
     assert added == ['vless://uuid@example.com:443?security=tls#sample']
     assert pools['vless2'] == added
+    ensured, changed = key_pool_store.ensure_current_keys_in_pools(
+        {'vless': ['first', 'active', 'last']},
+        {'vless': 'active'},
+    )
+    assert changed is False
+    assert ensured['vless'] == ['first', 'active', 'last']
+    ensured_missing, changed_missing = key_pool_store.ensure_current_keys_in_pools(
+        {'vless': ['first', 'last']},
+        {'vless': 'active'},
+    )
+    assert changed_missing is True
+    assert ensured_missing['vless'] == ['first', 'last', 'active']
+    selected = key_pool_store.set_active_key({'vless': ['first', 'active', 'last']}, 'vless', 'active')
+    assert selected['vless'] == ['first', 'active', 'last']
+    selected_missing = key_pool_store.set_active_key({'vless': ['first', 'last']}, 'vless', 'active')
+    assert selected_missing['vless'] == ['first', 'last', 'active']
     candidates = key_pool_store.failover_candidates(
         {'vless': ['active', 'next'], 'vmess': ['vmess-key']},
         'vless',
@@ -687,6 +703,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "proxy_mode == 'vless2'" in source
     assert 'Telegram is required because bot mode is Vless 2' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
+    assert "youtube_stream_guard_failover_hold_seconds" in source
+    assert "cached_fail_since or now" in source
     assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
     assert "getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)" in source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
@@ -2206,6 +2224,15 @@ def test_web_status_builder_helpers():
     )
     assert cached['tone'] == 'warn'
     assert 'YouTube: работает' in cached['details']
+    youtube_only = web_status_builder.cached_protocol_status(
+        'key',
+        {'tg_ok': False, 'yt_ok': True},
+        [],
+        {},
+        api_required=False,
+    )
+    assert youtube_only['tone'] == 'ok'
+    assert 'не требуется для текущего режима' in youtube_only['details']
 
 
 def test_web_template_styles_helpers():

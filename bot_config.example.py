@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.625
+# ВЕРСИЯ СКРИПТА v1.626
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -42,6 +42,7 @@ youtube_vless2_failover_check_connect_timeout = 6
 youtube_vless2_failover_check_read_timeout = 10
 youtube_vless2_failover_confirm_retries = 3
 youtube_vless2_failover_confirm_delay_seconds = 8.0
+youtube_stream_guard_failover_hold_seconds = 45  # Если при просмотре YouTube трафик пропал, автозамена Vless2 сможет продолжиться после этой паузы
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять
 localportsh = '1082'  # локальный порт для shadowsocks

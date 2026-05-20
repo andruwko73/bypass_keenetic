@@ -65,9 +65,8 @@ def ensure_current_keys_in_pools(pools, current_keys):
         key_value = str((current_keys or {}).get(proto) or '').strip()
         keys = dedupe_key_list(pools.get(proto, []) or [])
         original_keys = list(keys)
-        if key_value:
-            keys = [candidate for candidate in keys if candidate != key_value]
-            keys.insert(0, key_value)
+        if key_value and key_value not in keys:
+            keys.append(key_value)
         pools[proto] = keys
         if keys != original_keys:
             changed = True
@@ -79,8 +78,9 @@ def set_active_key(pools, proto, key):
     key = str(key or '').strip()
     if proto not in pools or not key:
         return pools
-    keys = [candidate for candidate in dedupe_key_list(pools.get(proto, []) or []) if candidate != key]
-    keys.insert(0, key)
+    keys = dedupe_key_list(pools.get(proto, []) or [])
+    if key not in keys:
+        keys.append(key)
     pools[proto] = keys
     return pools
 

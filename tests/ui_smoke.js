@@ -70,6 +70,22 @@ async function assertPoolKeysAreMasked(page, label) {
   }
 }
 
+async function assertActivePoolRowPinned(page, protocol, label) {
+  const rows = await page.locator(`[data-protocol-panel="${protocol}"].active [data-pool-body="${protocol}"]`).evaluate((body) => (
+    Array.from(body.querySelectorAll('[data-pool-row]')).slice(0, 3).map((row) => ({
+      active: row.dataset.active,
+      poolIndex: Number(row.dataset.poolIndex || 0),
+      text: (row.textContent || '').trim().slice(0, 80),
+    }))
+  ));
+  if (!rows.length || rows[0].active !== '1') {
+    throw new Error(`${label}: active pool row is not pinned first: ${JSON.stringify(rows)}`);
+  }
+  if (rows[0].poolIndex === 0 || (rows[1] && rows[1].poolIndex !== 0)) {
+    throw new Error(`${label}: original pool order after active row is wrong: ${JSON.stringify(rows)}`);
+  }
+}
+
 async function clickLazyProtocol(page, protocol, label) {
   const tab = page.locator(`.protocol-tab[data-protocol-target="${protocol}"]`);
   if (await tab.count() !== 1) {
@@ -130,6 +146,7 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await clickLazyProtocol(page, 'vless2', name);
   await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();
   await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);
+  await assertActivePoolRowPinned(page, 'vless2', `${name} original pool order`);
   await assertPoolKeysAreMasked(page, `${name} lazy keys`);
   await assertNoHorizontalOverflow(page, `${name} keys`);
   assertNoPageFailures(failures);

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.625, последнее изменение: 20.05.2026
+#  Файл: bot.py, Версия v1.626, последнее изменение: 21.05.2026
 
 import subprocess
 import os
@@ -405,11 +405,23 @@ YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
 )
 YOUTUBE_VLESS2_HEALTHCHECK_URLS = tuple(getattr(config, 'youtube_vless2_healthcheck_urls', _POOL_YOUTUBE_HEALTHCHECK_URLS))
 YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK = max(1, int(getattr(config, 'youtube_vless2_healthcheck_min_ok', _POOL_YOUTUBE_HEALTHCHECK_MIN_OK)))
+YOUTUBE_STREAM_GUARD_ENABLED = bool(getattr(config, 'youtube_stream_guard_enabled', True))
+YOUTUBE_STREAM_GUARD_HOLD_SECONDS = max(60, int(getattr(config, 'youtube_stream_guard_hold_seconds', 300)))
+YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS = max(15, int(getattr(config, 'youtube_stream_guard_failover_hold_seconds', 45)))
+YOUTUBE_STREAM_GUARD_MIN_BYTES = max(1024, int(getattr(config, 'youtube_stream_guard_min_bytes', 8192)))
+YOUTUBE_STREAM_GUARD_MIN_PACKETS = max(1, int(getattr(config, 'youtube_stream_guard_min_packets', 8)))
+YOUTUBE_STREAM_GUARD_LOG_INTERVAL = max(60, int(getattr(config, 'youtube_stream_guard_log_interval_seconds', 180)))
 youtube_vless2_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
     'last_attempt': 0.0,
     'in_progress': False,
+}
+youtube_stream_guard_state = {
+    'last_active': 0.0,
+    'last_log': 0.0,
+    'last_count': 0,
+    'conntrack': {},
 }
 
 def _add_custom_check(label='', url='', preset_id=''):
@@ -606,10 +618,14 @@ def _check_youtube_vless2_once():
 def _schedule_vless2_youtube_cache_confirm(key_value):
     if not key_value or vless2_youtube_cache_confirm_lock.locked():
         return
+    if _youtube_vless2_stream_guard_active('Vless2 YouTube cache confirmation', log=True):
+        return
 
     def worker():
         try:
             with vless2_youtube_cache_confirm_lock:
+                if _youtube_vless2_stream_guard_active('Vless2 YouTube cache confirmation', log=True):
+                    return
                 proxy_url = proxy_settings.get('vless2')
                 if not proxy_url:
                     return
@@ -669,12 +685,25 @@ def _attempt_youtube_vless2_failover():
         return False
     if state['last_attempt'] and now - state['last_attempt'] < YOUTUBE_VLESS2_FAILOVER_SWITCH_COOLDOWN_SECONDS:
         return False
+    if _youtube_vless2_stream_guard_active(
+        'YouTube Vless2 failover',
+        log=True,
+        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+    ):
+        return False
 
     current_keys = _load_current_keys()
     active_key = (current_keys.get('vless2') or '').strip()
     if not active_key:
         state['last_fail'] = 0.0
         return False
+    cached_active_probe = _load_key_probe_cache().get(_hash_key(active_key), {})
+    cached_fail_since = 0.0
+    if isinstance(cached_active_probe, dict) and cached_active_probe.get('yt_ok') is False:
+        try:
+            cached_fail_since = float(cached_active_probe.get('ts') or 0.0)
+        except Exception:
+            cached_fail_since = 0.0
 
     ok, message = _check_youtube_vless2_once()
     if ok:
@@ -686,7 +715,7 @@ def _attempt_youtube_vless2_failover():
     _record_key_probe('vless2', active_key, yt_ok=False)
     _invalidate_key_status_cache()
     if not state['last_fail']:
-        state['last_fail'] = now
+        state['last_fail'] = cached_fail_since or now
     if now - state['last_fail'] < YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS:
         return False
 
@@ -732,6 +761,17 @@ def _attempt_youtube_vless2_failover():
                 continue
 
             key_hash = _hash_key(key_value)[:12]
+            if _youtube_vless2_stream_guard_active(
+                'Vless2 key switch',
+                log=True,
+                hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+            ):
+                state['last_attempt'] = 0.0
+                _write_runtime_log(
+                    f'YouTube Vless2 failover: candidate {key_hash} is ready, '
+                    'but switching is deferred because Vless2 traffic is active.'
+                )
+                return False
             try:
                 result = _install_key_for_protocol('vless2', key_value, verify=False)
             except Exception as exc:
@@ -1357,6 +1397,118 @@ def _pool_probe_cpu_busy_percent():
     if total_delta <= 0:
         return None
     return max(0.0, min(100.0, 100.0 * (total_delta - idle_delta) / float(total_delta)))
+
+
+def _youtube_vless2_conntrack_ports():
+    ports = set()
+    for value in (globals().get('localportvless2'), globals().get('localportvless2_transparent')):
+        try:
+            port = int(str(value).strip())
+        except Exception:
+            continue
+        if port > 0:
+            ports.add(str(port))
+    return ports
+
+
+def _conntrack_packets_bytes(line):
+    packets = 0
+    bytes_count = 0
+    try:
+        for value in re.findall(r'\bpackets=(\d+)', line or ''):
+            packets += int(value)
+        for value in re.findall(r'\bbytes=(\d+)', line or ''):
+            bytes_count += int(value)
+    except Exception:
+        return 0, 0
+    return packets, bytes_count
+
+
+def _conntrack_identity(line):
+    fields = re.findall(r'\b(src|dst|sport|dport)=([^ ]+)', line or '')
+    if not fields:
+        return ''
+    # The first two 4-tuples describe original and reply directions; timeouts and counters change often.
+    return '|'.join(f'{name}={value}' for name, value in fields[:8])
+
+
+def _youtube_vless2_active_connection_count():
+    if not YOUTUBE_STREAM_GUARD_ENABLED:
+        return 0
+    ports = _youtube_vless2_conntrack_ports()
+    if not ports:
+        return 0
+    try:
+        with open('/proc/net/nf_conntrack', 'r', encoding='utf-8', errors='ignore') as file:
+            lines = file.readlines()
+    except Exception:
+        return 0
+    active = 0
+    now = time.time()
+    previous = youtube_stream_guard_state.get('conntrack')
+    if not isinstance(previous, dict):
+        previous = {}
+    current = {}
+    for line in lines:
+        if ' dport=443 ' not in line and ' dport=443\n' not in line:
+            continue
+        if 'TIME_WAIT' in line or 'CLOSE' in line:
+            continue
+        if not any(f' sport={port} ' in line or line.rstrip().endswith(f' sport={port}') for port in ports):
+            continue
+        packets, bytes_count = _conntrack_packets_bytes(line)
+        identity = _conntrack_identity(line)
+        if not identity:
+            continue
+        current[identity] = {
+            'packets': packets,
+            'bytes': bytes_count,
+            'seen': now,
+        }
+        old = previous.get(identity, {})
+        try:
+            packet_delta = packets - int(old.get('packets') or 0)
+            byte_delta = bytes_count - int(old.get('bytes') or 0)
+        except Exception:
+            packet_delta = packets
+            byte_delta = bytes_count
+        # On first observation protect already established streams; after that require fresh traffic.
+        first_seen = identity not in previous
+        if (
+            (first_seen and (packets >= YOUTUBE_STREAM_GUARD_MIN_PACKETS or bytes_count >= YOUTUBE_STREAM_GUARD_MIN_BYTES)) or
+            packet_delta >= YOUTUBE_STREAM_GUARD_MIN_PACKETS or
+            byte_delta >= YOUTUBE_STREAM_GUARD_MIN_BYTES
+        ):
+            active += 1
+    youtube_stream_guard_state['conntrack'] = current
+    return active
+
+
+def _youtube_vless2_stream_guard_active(reason='', log=False, hold_seconds=None):
+    if not YOUTUBE_STREAM_GUARD_ENABLED:
+        return False
+    now = time.time()
+    active_count = _youtube_vless2_active_connection_count()
+    if active_count > 0:
+        youtube_stream_guard_state['last_active'] = now
+        youtube_stream_guard_state['last_count'] = active_count
+    last_active = float(youtube_stream_guard_state.get('last_active') or 0.0)
+    try:
+        hold = float(hold_seconds if hold_seconds is not None else YOUTUBE_STREAM_GUARD_HOLD_SECONDS)
+    except Exception:
+        hold = float(YOUTUBE_STREAM_GUARD_HOLD_SECONDS)
+    guarded = bool(last_active and now - last_active < max(1.0, hold))
+    if guarded and log:
+        last_log = float(youtube_stream_guard_state.get('last_log') or 0.0)
+        if now - last_log >= YOUTUBE_STREAM_GUARD_LOG_INTERVAL:
+            youtube_stream_guard_state['last_log'] = now
+            age = max(0, int(now - last_active))
+            count = int(youtube_stream_guard_state.get('last_count') or active_count or 0)
+            _write_runtime_log(
+                f'YouTube stream guard: deferred {reason or "operation"}; '
+                f'active Vless2 connections={count}, last activity {age}s ago.'
+            )
+    return guarded
 
 
 def _clear_runtime_memory_caches(clear_status=False):
@@ -3111,6 +3263,10 @@ def _key_requires_xray(key_name, key_value):
     return security == 'reality' or flow == 'xtls-rprx-vision'
 
 
+def _telegram_required_for_protocol(key_name):
+    return bool(key_name and key_name == proxy_mode)
+
+
 def _core_proxy_runtime_name():
     if os.path.exists(XRAY_SERVICE_SCRIPT):
         return 'xray'
@@ -3159,6 +3315,7 @@ def _protocol_status_for_key(key_name, key_value):
         yt_message=yt_message,
         custom_states=custom_states,
         custom_checks=custom_checks,
+        api_required=_telegram_required_for_protocol(key_name),
     )
 
 
@@ -3171,7 +3328,13 @@ def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key
     if allow_youtube_confirm and key_name == 'vless2' and (not isinstance(probe, dict) or probe.get('yt_ok') is not True):
         _schedule_vless2_youtube_cache_confirm(key_value)
     custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
-    return _status_cached_protocol_status(key_value, probe, custom_checks, custom_states)
+    return _status_cached_protocol_status(
+        key_value,
+        probe,
+        custom_checks,
+        custom_states,
+        api_required=_telegram_required_for_protocol(key_name),
+    )
 
 
 def _placeholder_protocol_statuses(current_keys):

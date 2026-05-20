@@ -1,5 +1,5 @@
-*v1.625 (20 May 2026) -* main
-*Made the UI smoke wait for a fully loaded lazy protocol panel before measuring it and moved the CI fixture server to a less collision-prone port.*
+*v1.626 (21 May 2026) -* main
+*Protected active YouTube Vless2 streams from background switching while still allowing dead-key failover, made Vless2 status match the selected bot mode, and kept the active pool row pinned above the real source order.*
 
 *v1.624 (20 May 2026) -* main
 *Restored Playwright Linux dependency installation for CI after confirming Chromium needs system libraries such as libnspr4 on Ubuntu.*

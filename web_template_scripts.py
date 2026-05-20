@@ -1084,7 +1084,7 @@ def render_web_scripts(
             rows.sort(function(left, right) {{
                 const leftIndex = Number(left.dataset.poolIndex || 0);
                 const rightIndex = Number(right.dataset.poolIndex || 0);
-                if (sortMode === 'active') {{
+                if (sortMode === 'original' || sortMode === 'active') {{
                     const activeDelta = Number(right.dataset.active || 0) - Number(left.dataset.active || 0);
                     if (activeDelta) {{
                         return activeDelta;
@@ -1204,6 +1204,9 @@ def render_web_scripts(
                     }}
                 }});
             }}
+            scope.querySelectorAll('[data-pool-body]').forEach(function(body) {{
+                applyPoolView(body.dataset.poolBody || '', true);
+            }});
         }}
 
         function renderPoolBody(proto, pool) {{

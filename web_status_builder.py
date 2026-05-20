@@ -6,11 +6,15 @@ def empty_protocol_status():
     }
 
 
-def service_status_parts(api_ok, yt_ok, custom_states, custom_checks, *, api_transient=False):
+def service_status_parts(api_ok, yt_ok, custom_states, custom_checks, *, api_transient=False, api_required=True):
     parts = [
-        f'Telegram: {"работает" if api_ok else ("перепроверяется" if api_transient else "не работает")}',
         f'YouTube: {"работает" if yt_ok else "не работает"}',
     ]
+    if api_required:
+        telegram_state = 'работает' if api_ok else ('перепроверяется' if api_transient else 'не работает')
+    else:
+        telegram_state = 'работает' if api_ok else 'не требуется для текущего режима'
+    parts.insert(0, f'Telegram: {telegram_state}')
     for check in custom_checks or []:
         check_id = check.get('id')
         state = custom_states.get(check_id)
@@ -19,8 +23,10 @@ def service_status_parts(api_ok, yt_ok, custom_states, custom_checks, *, api_tra
     return parts
 
 
-def tone_label(api_ok, yt_ok, custom_states):
+def tone_label(api_ok, yt_ok, custom_states, *, api_required=True):
     any_ok = api_ok or yt_ok or any(state == 'ok' for state in custom_states.values())
+    if not api_required and any_ok:
+        return 'ok', 'Работает'
     return (
         'ok' if api_ok else ('warn' if any_ok else 'fail'),
         'Работает' if api_ok else ('Частично работает' if any_ok else 'Не работает'),
@@ -38,6 +44,7 @@ def active_protocol_status(
     yt_message,
     custom_states,
     custom_checks,
+    api_required=True,
 ):
     if endpoint_ok and api_transient:
         return {
@@ -60,8 +67,9 @@ def active_protocol_status(
         custom_states,
         custom_checks,
         api_transient=api_transient,
+        api_required=api_required,
     )
-    tone, label = tone_label(api_ok, yt_ok, custom_states)
+    tone, label = tone_label(api_ok, yt_ok, custom_states, api_required=api_required)
     return {
         'tone': tone,
         'label': label,
@@ -76,7 +84,7 @@ def active_protocol_status(
     }
 
 
-def cached_protocol_status(key_value, probe, custom_checks, custom_states):
+def cached_protocol_status(key_value, probe, custom_checks, custom_states, *, api_required=True):
     if not str(key_value or '').strip():
         return empty_protocol_status()
     has_probe_result = (
@@ -101,7 +109,8 @@ def cached_protocol_status(key_value, probe, custom_checks, custom_states):
     yt_ok = bool(probe.get('yt_ok')) if 'yt_ok' in probe else False
     service_parts = []
     if 'tg_ok' in probe:
-        service_parts.append(f'Telegram: {"работает" if api_ok else "не работает"}')
+        telegram_state = 'работает' if api_ok else ('не работает' if api_required else 'не требуется для текущего режима')
+        service_parts.append(f'Telegram: {telegram_state}')
     if 'yt_ok' in probe:
         service_parts.append(f'YouTube: {"работает" if yt_ok else "не работает"}')
     for check in custom_checks or []:
@@ -112,7 +121,7 @@ def cached_protocol_status(key_value, probe, custom_checks, custom_states):
     details = 'Показан последний результат проверки пула.'
     if service_parts:
         details += ' ' + ', '.join(service_parts) + '.'
-    tone, label = tone_label(api_ok, yt_ok, custom_states)
+    tone, label = tone_label(api_ok, yt_ok, custom_states, api_required=api_required)
     return {
         'tone': tone,
         'label': label,
