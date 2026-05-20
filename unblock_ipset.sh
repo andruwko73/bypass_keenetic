@@ -10,6 +10,7 @@ LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockvlessudp unblockvless2udp"
+UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"
 
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
@@ -166,23 +167,58 @@ normalize_domain() {
 		| trim_line
 }
 
-udp_quic_domain() {
-	domain="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
-	case "$domain" in
-		youtube.com|*.youtube.com|youtu.be|*.youtu.be|yt.be|*.yt.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube-nocookie.com|*.youtube-nocookie.com|youtube.googleapis.com|*.youtube.googleapis.com|youtubei.googleapis.com|*.youtubei.googleapis.com|youtubeembeddedplayer.googleapis.com|*.youtubeembeddedplayer.googleapis.com|googleusercontent.com|*.googleusercontent.com|gvt1.com|*.gvt1.com|gvt2.com|*.gvt2.com|video.google.com|*.video.google.com|youtubeeducation.com|*.youtubeeducation.com|youtubekids.com|*.youtubekids.com|chatgpt.com|*.chatgpt.com|openai.com|*.openai.com|oaistatic.com|*.oaistatic.com|oaiusercontent.com|*.oaiusercontent.com|statsig.com|*.statsig.com|statsigapi.net|*.statsigapi.net|featuregates.org|*.featuregates.org|featureassets.org|*.featureassets.org|datadoghq.com|*.datadoghq.com|sentry.io|*.sentry.io|workos.com|*.workos.com|challenges.cloudflare.com|gateway.ai.cloudflare.com|*.gateway.ai.cloudflare.com)
-			return 0
-			;;
-	esac
+udp_quic_policy_source() {
+	if [ -s "$UDP_QUIC_POLICY_FILE" ]; then
+		printf '%s\n' "$UDP_QUIC_POLICY_FILE"
+		return 0
+	fi
+	python_bin="/opt/bin/python3"
+	[ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+	[ -n "$python_bin" ] || return 1
+	generated_policy_file="$tmp_dir/udp_quic_routes.generated"
+	if PYTHONPATH="/opt/etc/bot" "$python_bin" - <<'PY' > "$generated_policy_file" 2>/dev/null; then
+from service_catalog import UDP_QUIC_ROUTE_ENTRIES
+for entry in UDP_QUIC_ROUTE_ENTRIES:
+    print(entry)
+PY
+		[ -s "$generated_policy_file" ] && printf '%s\n' "$generated_policy_file" && return 0
+	fi
 	return 1
 }
 
+udp_quic_domain() {
+	domain="$(normalize_domain "$1" | tr '[:upper:]' '[:lower:]')"
+	[ -n "$domain" ] || return 1
+	[ -s "$UDP_QUIC_POLICY_SOURCE" ] || return 1
+	awk -v domain="$domain" '
+		function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
+		function norm(s) {
+			s=tolower(s); sub(/\r/, "", s); sub(/#.*/, "", s); s=trim(s)
+			sub(/^domain-suffix,/, "", s); sub(/^domain,/, "", s); sub(/^host-suffix,/, "", s)
+			sub(/^\+\./, "", s); sub(/^\*\./, "", s); sub(/\/$/, "", s)
+			return s
+		}
+		{
+			entry=norm($0)
+			if (entry == "" || entry ~ /[:\/]/ || entry ~ /^[0-9.]+$/) next
+			if (domain == entry || domain ~ ("\\." entry "$")) found=1
+		}
+		END { exit found ? 0 : 1 }
+	' "$UDP_QUIC_POLICY_SOURCE"
+}
+
 udp_quic_direct_entry() {
-	case "$1" in
-		8.6.112.6|8.47.69.6|35.190.80.1|64.239.109.65|104.18.32.47|172.64.155.209)
-			return 0
-			;;
-	esac
-	return 1
+	direct_entry="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
+	[ -n "$direct_entry" ] || return 1
+	[ -s "$UDP_QUIC_POLICY_SOURCE" ] || return 1
+	awk -v direct_entry="$direct_entry" '
+		function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
+		{
+			entry=tolower($0); sub(/\r/, "", entry); sub(/#.*/, "", entry); entry=trim(entry)
+			if (entry == direct_entry && entry !~ /[\/:-]/) found=1
+		}
+		END { exit found ? 0 : 1 }
+	' "$UDP_QUIC_POLICY_SOURCE"
 }
 
 wait_for_dns() {
@@ -339,6 +375,8 @@ swap_or_preserve_set() {
 	echo "$set_name: ipset swap failed, added new entries without flushing old entries."
 	return 0
 }
+
+UDP_QUIC_POLICY_SOURCE="$(udp_quic_policy_source || true)"
 
 wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAIT_SECONDS}s; old ipset contents preserved."
 

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.619, последнее изменение: 20.05.2026
+#  Файл: bot.py, Версия v1.620, последнее изменение: 20.05.2026
 
 import subprocess
 import os
@@ -1675,11 +1675,12 @@ def _prepare_entware_dns():
 
 def _ensure_legacy_bot_paths():
     mappings = [
-        ('/opt/etc/bot/bot_config.py', '/opt/etc/bot_config.py'),
-        ('/opt/etc/bot/main.py', '/opt/etc/bot.py'),
+        ('/opt/etc/bot/bot_config.py', '/opt/etc/bot_config.py', False),
+        ('/opt/etc/bot/main.py', '/opt/etc/bot.py', False),
+        ('/opt/etc/bot/main.py', '/opt/etc/bot/bot.py', True),
     ]
     notes = []
-    for source_path, legacy_path in mappings:
+    for source_path, legacy_path, replace_existing in mappings:
         try:
             if not os.path.exists(source_path):
                 continue
@@ -1688,7 +1689,9 @@ def _ensure_legacy_bot_paths():
                     continue
                 os.remove(legacy_path)
             elif os.path.exists(legacy_path):
-                continue
+                if not replace_existing:
+                    continue
+                os.remove(legacy_path)
             os.symlink(source_path, legacy_path)
             notes.append(f'{legacy_path} -> {source_path}')
         except Exception:
@@ -4100,7 +4103,7 @@ def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
     return _controller_pool_probe_timeout_budget(custom_checks, task_count, workers, POOL_PROBE_TIMEOUTS)
 
 
-def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None):
+def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None, record_key_probe=None):
     return _controller_check_pool_key_through_proxy(
         proto,
         key_value,
@@ -4108,7 +4111,7 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         proxy_url or proxy_settings.get(proto),
         check_telegram_api=_check_telegram_api_through_proxy,
         check_http=_check_http_through_proxy,
-        record_key_probe=_record_key_probe,
+        record_key_probe=record_key_probe or _record_key_probe,
         probe_custom_targets=_probe_custom_targets_for_pool,
         retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
         telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),

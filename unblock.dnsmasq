@@ -9,19 +9,65 @@
 # Доработал: NetworK (https://github.com/znetworkx)
 
 cat /dev/null > /opt/etc/unblock.dnsmasq
+UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"
+UDP_QUIC_POLICY_TEMP=""
+
+cleanup_udp_quic_policy_temp() {
+  [ -n "$UDP_QUIC_POLICY_TEMP" ] && rm -f "$UDP_QUIC_POLICY_TEMP" 2>/dev/null || true
+}
+trap cleanup_udp_quic_policy_temp EXIT INT TERM
 
 normalize_line() {
   printf '%s' "$1" | sed 's/\r//g;s/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-udp_quic_domain() {
-  domain=$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')
-  case "$domain" in
-    youtube.com|*.youtube.com|youtu.be|*.youtu.be|yt.be|*.yt.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube-nocookie.com|*.youtube-nocookie.com|youtube.googleapis.com|*.youtube.googleapis.com|youtubei.googleapis.com|*.youtubei.googleapis.com|youtubeembeddedplayer.googleapis.com|*.youtubeembeddedplayer.googleapis.com|googleusercontent.com|*.googleusercontent.com|gvt1.com|*.gvt1.com|gvt2.com|*.gvt2.com|video.google.com|*.video.google.com|youtubeeducation.com|*.youtubeeducation.com|youtubekids.com|*.youtubekids.com|chatgpt.com|*.chatgpt.com|openai.com|*.openai.com|oaistatic.com|*.oaistatic.com|oaiusercontent.com|*.oaiusercontent.com|statsig.com|*.statsig.com|statsigapi.net|*.statsigapi.net|featuregates.org|*.featuregates.org|featureassets.org|*.featureassets.org|datadoghq.com|*.datadoghq.com|sentry.io|*.sentry.io|workos.com|*.workos.com|challenges.cloudflare.com|gateway.ai.cloudflare.com|*.gateway.ai.cloudflare.com)
-      return 0
-      ;;
-  esac
+normalize_domain() {
+  printf '%s\n' "$1" \
+    | sed 's/\r//g;s/^DOMAIN-SUFFIX,//;s/^DOMAIN,//;s/^HOST-SUFFIX,//;s/^+\.//;s/^\*\.//;s/[[:space:]].*$//;s/,.*$//;s#^/##;s#/$##' \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+udp_quic_policy_source() {
+  if [ -s "$UDP_QUIC_POLICY_FILE" ]; then
+    printf '%s\n' "$UDP_QUIC_POLICY_FILE"
+    return 0
+  fi
+  python_bin="/opt/bin/python3"
+  [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+  [ -n "$python_bin" ] || return 1
+  UDP_QUIC_POLICY_TEMP="/tmp/bypass_udp_quic_routes.$$"
+  if PYTHONPATH="/opt/etc/bot" "$python_bin" - <<'PY' > "$UDP_QUIC_POLICY_TEMP" 2>/dev/null; then
+from service_catalog import UDP_QUIC_ROUTE_ENTRIES
+for entry in UDP_QUIC_ROUTE_ENTRIES:
+    print(entry)
+PY
+    [ -s "$UDP_QUIC_POLICY_TEMP" ] && printf '%s\n' "$UDP_QUIC_POLICY_TEMP" && return 0
+  fi
   return 1
+}
+
+UDP_QUIC_POLICY_SOURCE="$(udp_quic_policy_source || true)"
+
+udp_quic_domain() {
+  domain=$(normalize_domain "$1")
+  [ -n "$domain" ] || return 1
+  [ -s "$UDP_QUIC_POLICY_SOURCE" ] || return 1
+  awk -v domain="$domain" '
+    function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
+    function norm(s) {
+      s=tolower(s); sub(/\r/, "", s); sub(/#.*/, "", s); s=trim(s)
+      sub(/^domain-suffix,/, "", s); sub(/^domain,/, "", s); sub(/^host-suffix,/, "", s)
+      sub(/^\+\./, "", s); sub(/^\*\./, "", s); sub(/\/$/, "", s)
+      return s
+    }
+    {
+      entry=norm($0)
+      if (entry == "" || entry ~ /[:\/]/ || entry ~ /^[0-9.]+$/) next
+      if (domain == entry || domain ~ ("\\." entry "$")) found=1
+    }
+    END { exit found ? 0 : 1 }
+  ' "$UDP_QUIC_POLICY_SOURCE"
 }
 
 ipset_targets() {

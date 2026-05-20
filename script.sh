@@ -506,6 +506,35 @@ activate_runtime_modules() {
 
 BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py router_health_runtime.py service_catalog.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py"
 
+ensure_runtime_legacy_paths() {
+  if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
+    rm -f /opt/etc/bot/bot.py
+    ln -s main.py /opt/etc/bot/bot.py 2>/dev/null || cp "$BOT_MAIN_PATH" /opt/etc/bot/bot.py
+  fi
+  if [ "$BOT_MAIN_PATH" != "/opt/etc/bot.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
+    rm -f /opt/etc/bot.py
+    ln -s "$BOT_MAIN_PATH" /opt/etc/bot.py 2>/dev/null || cp "$BOT_MAIN_PATH" /opt/etc/bot.py
+  fi
+}
+
+generate_udp_quic_policy_file() {
+  python_bin="/opt/bin/python3"
+  [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+  [ -n "$python_bin" ] || return 0
+  mkdir -p "$BOT_RUNTIME_DIR"
+  policy_tmp="$BOT_RUNTIME_DIR/udp_quic_routes.txt.$$"
+  if PYTHONPATH="$BOT_RUNTIME_DIR" "$python_bin" - <<'PY' > "$policy_tmp" 2>/dev/null; then
+from service_catalog import UDP_QUIC_ROUTE_ENTRIES
+for entry in UDP_QUIC_ROUTE_ENTRIES:
+    print(entry)
+PY
+    mv "$policy_tmp" "$BOT_RUNTIME_DIR/udp_quic_routes.txt"
+    chmod 644 "$BOT_RUNTIME_DIR/udp_quic_routes.txt" 2>/dev/null || true
+  else
+    rm -f "$policy_tmp"
+  fi
+}
+
 if [ "$1" = "-remove" ]; then
     echo "Начинаем удаление"
     opkg remove tor tor-geoip obfs4 bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config xray-core xray v2ray trojan
@@ -674,6 +703,8 @@ if [ "$1" = "-install" ]; then
     mkdir -p "$BOT_RUNTIME_DIR"
     install_runtime_modules $BOT_RUNTIME_MODULES
     install_static_assets
+    ensure_runtime_legacy_paths
+    generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
 
@@ -830,6 +861,8 @@ if [ "$1" = "-update" ]; then
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
     activate_runtime_modules $BOT_RUNTIME_MODULES
+    ensure_runtime_legacy_paths
+    generate_udp_quic_policy_file
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"

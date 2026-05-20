@@ -1,3 +1,6 @@
+*v1.620 (20 May 2026) -* main
+*Prevented timed-out pool probes from recording false failures or overwriting newer successful probe results, refreshed the legacy `/opt/etc/bot/bot.py` path as a link to `main.py`, and moved QUIC/UDP mirror policy generation into `service_catalog.py`.*
+
 *v1.619 (20 May 2026) -* main
 *Exposed ChatGPT / Codex in the service-add buttons and `/getlist` source catalog, using the same updated route list as the custom service check preset.*
 

@@ -412,12 +412,14 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['chatgpt', 'codex', 'openai', 'gpt', 'chatgpt codex'],
         'url': '',
         'entries': CHATGPT_ROUTE_ENTRIES,
+        'udp_quic': True,
     },
     'youtube': {
         'label': 'YouTube',
         'aliases': ['youtube', 'yt', 'ютуб'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/youtube.lst',
         'entries': YOUTUBE_UNBLOCK_ENTRIES,
+        'udp_quic': True,
     },
     'telegram': {
         'label': 'Telegram',
@@ -452,3 +454,33 @@ SERVICE_LIST_SOURCES = {
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/twitter.lst',
     },
 }
+
+YOUTUBE_UDP_QUIC_EXTRA_ENTRIES = [
+    'yt.be',
+    'youtubekids.com',
+]
+
+
+def _dedupe_policy_entries(values):
+    result = []
+    seen = set()
+    for value in values or []:
+        entry = str(value or '').strip().lower()
+        if not entry or entry.startswith('#') or entry in seen:
+            continue
+        seen.add(entry)
+        result.append(entry)
+    return result
+
+
+def udp_quic_policy_entries(service_sources=None):
+    sources = service_sources or SERVICE_LIST_SOURCES
+    entries = []
+    for source in sources.values():
+        if source.get('udp_quic'):
+            entries.extend(source.get('entries') or [])
+    entries.extend(YOUTUBE_UDP_QUIC_EXTRA_ENTRIES)
+    return _dedupe_policy_entries(entries)
+
+
+UDP_QUIC_ROUTE_ENTRIES = udp_quic_policy_entries()

@@ -348,18 +348,65 @@ def run_pool_probe_worker(
     total = len(pending_tasks)
     checked = 0
     marked_tasks = set()
+    ignored_result_tasks = set()
+    result_deadlines = {}
+    ignored_result_lock = threading.Lock()
+
+    def task_id(proto, key_value):
+        return (proto, hash_key(key_value))
 
     def cancel_requested():
         return bool(cancel_event is not None and cancel_event.is_set())
 
     def mark_checked(proto, key_value):
         nonlocal checked
-        task_key = (proto, hash_key(key_value))
-        if task_key in marked_tasks:
+        checked_task_id = task_id(proto, key_value)
+        if checked_task_id in marked_tasks:
             return
-        marked_tasks.add(task_key)
+        marked_tasks.add(checked_task_id)
         checked += 1
         set_checked(checked)
+
+    def ignore_late_result(proto, key_value):
+        with ignored_result_lock:
+            ignored_task_id = task_id(proto, key_value)
+            ignored_result_tasks.add(ignored_task_id)
+            result_deadlines.pop(ignored_task_id, None)
+
+    def set_result_deadline(proto, key_value, deadline):
+        with ignored_result_lock:
+            result_deadlines[task_id(proto, key_value)] = deadline
+
+    def clear_result_deadline(proto, key_value):
+        with ignored_result_lock:
+            result_deadlines.pop(task_id(proto, key_value), None)
+
+    def result_is_ignored(proto, key_value):
+        with ignored_result_lock:
+            current_task_id = task_id(proto, key_value)
+            if current_task_id in ignored_result_tasks:
+                return True
+            deadline = result_deadlines.get(current_task_id)
+        return bool(deadline is not None and time.monotonic() > deadline)
+
+    def record_key_probe_if_current(proto, key_value, **kwargs):
+        if result_is_ignored(proto, key_value):
+            return
+        record_key_probe(proto, key_value, **kwargs)
+
+    def run_check_pool_key(proto, key_value, checks, proxy_url):
+        try:
+            return check_pool_key(
+                proto,
+                key_value,
+                checks,
+                proxy_url,
+                record_key_probe=record_key_probe_if_current,
+            )
+        except TypeError as exc:
+            if 'record_key_probe' not in str(exc) and 'unexpected keyword' not in str(exc):
+                raise
+            return check_pool_key(proto, key_value, checks, proxy_url)
 
     low_memory_since = None
     high_cpu_since = None
@@ -487,17 +534,19 @@ def run_pool_probe_worker(
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
                 future_map = {}
                 try:
-                    for offset, proto, key_value in ready_batch:
-                        port = str(int(test_port) + offset)
-                        proxy_url = f'socks5h://127.0.0.1:{port}'
-                        future = executor.submit(check_pool_key, proto, key_value, checks, proxy_url)
-                        future_map[future] = (proto, key_value)
-
                     batch_timeout = timeout_budget(
                         checks,
                         task_count=len(ready_batch),
                         workers=max_workers,
                     )
+                    batch_deadline = time.monotonic() + float(batch_timeout or 0)
+                    for offset, proto, key_value in ready_batch:
+                        port = str(int(test_port) + offset)
+                        proxy_url = f'socks5h://127.0.0.1:{port}'
+                        set_result_deadline(proto, key_value, batch_deadline)
+                        future = executor.submit(run_check_pool_key, proto, key_value, checks, proxy_url)
+                        future_map[future] = (proto, key_value)
+
                     done, pending = concurrent.futures.wait(future_map, timeout=batch_timeout)
 
                     for future in done:
@@ -514,6 +563,7 @@ def run_pool_probe_worker(
                                 custom=failed_custom_results(checks),
                             )
                         finally:
+                            clear_result_deadline(proto, key_value)
                             mark_checked(proto, key_value)
                             invalidate_caches()
                             gc.collect()
@@ -523,15 +573,9 @@ def run_pool_probe_worker(
                         future.cancel()
                         log(
                             f'Проверка ключа из пула {proto_label(proto)} превысила лимит '
-                            f'{batch_timeout:g} сек.; ключ отмечен как не прошедший проверку.'
+                            f'{batch_timeout:g} сек.; результат не сохранён и ключ будет перепроверен позже.'
                         )
-                        record_key_probe(
-                            proto,
-                            key_value,
-                            tg_ok=False,
-                            yt_ok=False,
-                            custom=failed_custom_results(checks),
-                        )
+                        ignore_late_result(proto, key_value)
                         mark_checked(proto, key_value)
                         invalidate_caches()
                         gc.collect()

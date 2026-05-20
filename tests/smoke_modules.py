@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import types as py_types
 
 # ruff: noqa: E402
@@ -575,6 +576,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert script.count('set_type="$(detect_ipset_type)"') == 2
     assert 'sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-ipset.sh"' in script
     assert 'sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-redirect.sh"' in script
+    assert 'ensure_runtime_legacy_paths' in script
+    assert 'rm -f /opt/etc/bot/bot.py' in script
+    assert 'ln -s main.py /opt/etc/bot/bot.py' in script
+    assert 'ensure_symlink_or_copy "$BOT_MAIN_PATH" "$BOT_DIR/bot.py"' in bootstrap
+    assert 'generate_udp_quic_policy_file' in script
+    assert 'generate_udp_quic_policy_file' in bootstrap
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
@@ -585,9 +592,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
     assert 'udp_quic_domain "$domain"' in ipset_script
     assert 'udp_quic_direct_entry "$direct_entry"' in ipset_script
-    assert 'chatgpt.com|*.chatgpt.com' in ipset_script
-    assert 'chatgpt.com|*.chatgpt.com' in unblock_dnsmasq
-    assert '8.6.112.6|8.47.69.6|35.190.80.1|64.239.109.65' in ipset_script
+    assert 'UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"' in ipset_script
+    assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in ipset_script
+    assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq
+    assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
+    assert 'chatgpt.com|*.chatgpt.com' not in unblock_dnsmasq
+    assert '8.6.112.6|8.47.69.6|35.190.80.1|64.239.109.65' not in ipset_script
     assert 'swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
     assert 'ipset create unblockvlessudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
@@ -1457,6 +1467,48 @@ def test_pool_probe_runner_failover_candidate():
         ('vless', 'sockless', {'tg_ok': False, 'yt_ok': False, 'custom': {'custom': False}}),
     ]
 
+    timeout_records = []
+    timeout_logs = []
+    timeout_started = threading.Event()
+    timeout_release = threading.Event()
+
+    def slow_check(proto, key, checks, proxy_url, record_key_probe=None):
+        timeout_started.set()
+        timeout_release.wait(timeout=1)
+        if record_key_probe:
+            record_key_probe(proto, key, tg_ok=False, yt_ok=False)
+
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'late-timeout')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=timeout_logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: timeout_records.append((proto, key, kwargs)),
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=slow_check,
+        timeout_budget=lambda checks, task_count, workers: 0.01,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+    )
+    assert timeout_started.wait(timeout=1)
+    assert (checked, total) == (1, 1)
+    timeout_release.set()
+    time.sleep(0.05)
+    assert timeout_records == []
+    assert any('результат не сохран' in message for message in timeout_logs)
+
     ordered_tasks = [('vless', f'key-{index}') for index in range(8)]
     processed = []
     checked_values = []
@@ -1621,6 +1673,11 @@ def test_chatgpt_codex_routes_are_synced():
     assert source['label'] == 'ChatGPT / Codex'
     assert source['entries'] == service_catalog.CHATGPT_ROUTE_ENTRIES
     assert 'codex' in source['aliases']
+    assert source['udp_quic'] is True
+    assert service_catalog.SERVICE_LIST_SOURCES['youtube']['udp_quic'] is True
+    assert 'chatgpt.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
+    assert 'youtube.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
+    assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= set(service_catalog.UDP_QUIC_ROUTE_ENTRIES)
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "('chatgpt_services', 'youtube'" in bot_source
 
@@ -2229,6 +2286,18 @@ def test_probe_cache_update_entry_min_interval():
     )
     assert cache[key_id]['ts'] == 152
 
+    assert not probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok=False,
+        yt_ok=True,
+        now=151,
+        min_write_interval=0,
+    )
+    assert cache[key_id]['ts'] == 152
+    assert cache[key_id]['tg_ok'] is None
+
 
 def test_web_template_scripts_helpers():
     scripts = web_template_scripts.render_web_scripts(
@@ -2506,6 +2575,7 @@ def main():
     test_web_pool_form_blocks_helpers()
     test_web_status_builder_helpers()
     test_web_template_styles_helpers()
+    test_probe_cache_update_entry_min_interval()
     test_web_template_scripts_helpers()
     test_web_form_template_smoke()
     test_web_post_actions_helpers()

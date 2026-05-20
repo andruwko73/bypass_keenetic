@@ -69,6 +69,9 @@ def update_key_probe_cache_entry(
         entry = dict(entry)
 
     now = time.time() if now is None else now
+    previous_ts = _entry_timestamp(entry)
+    if previous_ts and now < previous_ts:
+        return False
     changed = False
     if entry.get('proto') != proto:
         entry['proto'] = proto
@@ -99,7 +102,6 @@ def update_key_probe_cache_entry(
             entry['custom'] = existing_custom
             changed = True
 
-    previous_ts = _entry_timestamp(entry)
     if changed or not previous_ts or now - previous_ts >= float(min_write_interval or 0):
         entry['ts'] = now
         changed = True

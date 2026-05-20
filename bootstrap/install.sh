@@ -77,6 +77,23 @@ ensure_symlink_or_copy() {
     fi
 }
 
+generate_udp_quic_policy_file() {
+    python_bin="/opt/bin/python3"
+    [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+    [ -n "$python_bin" ] || return 0
+    policy_tmp="$BOT_DIR/udp_quic_routes.txt.$$"
+    if PYTHONPATH="$BOT_DIR" "$python_bin" - <<'PY' > "$policy_tmp" 2>/dev/null; then
+from service_catalog import UDP_QUIC_ROUTE_ENTRIES
+for entry in UDP_QUIC_ROUTE_ENTRIES:
+    print(entry)
+PY
+        mv "$policy_tmp" "$BOT_DIR/udp_quic_routes.txt"
+        chmod 644 "$BOT_DIR/udp_quic_routes.txt" 2>/dev/null || true
+    else
+        rm -f "$policy_tmp"
+    fi
+}
+
 backup_path() {
     source_path="$1"
 
@@ -363,6 +380,8 @@ for module in $BOT_RUNTIME_MODULES; do
     chmod 644 "$BOT_DIR/$module"
 done
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
+ensure_symlink_or_copy "$BOT_MAIN_PATH" "$BOT_DIR/bot.py"
+generate_udp_quic_policy_file
 
 /bin/sh "$TMP_DIR/script.sh" -install
 
