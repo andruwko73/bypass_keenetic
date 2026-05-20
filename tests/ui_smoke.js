@@ -76,13 +76,13 @@ async function clickLazyProtocol(page, protocol, label) {
     throw new Error(`${label}: expected one ${protocol} protocol tab`);
   }
   await tab.click();
-  const panel = page.locator(`[data-protocol-panel="${protocol}"].active`);
+  const panel = page.locator(`[data-protocol-panel="${protocol}"].active:not([data-protocol-panel-lazy="1"])`);
   await panel.waitFor({ state: 'visible', timeout: 10000 });
-  const errorText = await panel.locator('[data-protocol-retry]').count();
+  const errorText = await page.locator(`[data-protocol-panel="${protocol}"].active [data-protocol-retry]`).count();
   if (errorText) {
     throw new Error(`${label}: lazy protocol panel failed to load`);
   }
-  await assertVisibleBox(page, `[data-protocol-panel="${protocol}"].active`, `${label} ${protocol} panel`);
+  await assertVisibleBox(page, `[data-protocol-panel="${protocol}"].active:not([data-protocol-panel-lazy="1"])`, `${label} ${protocol} panel`);
 }
 
 async function runViewport(browser, name, viewport, isMobile = false) {

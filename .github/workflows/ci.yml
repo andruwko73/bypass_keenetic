@@ -56,14 +56,14 @@ jobs:
 
       - name: UI smoke
         run: |
-          python -u tests/ui_fixture_server.py --host 127.0.0.1 --port 8765 > /tmp/ui-fixture.log 2>&1 &
+          python -u tests/ui_fixture_server.py --host 127.0.0.1 --port 18765 > /tmp/ui-fixture.log 2>&1 &
           fixture_pid=$!
           trap 'kill "$fixture_pid" || true; cat /tmp/ui-fixture.log' EXIT
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8765/ > /dev/null; then
+            if curl -fsS http://127.0.0.1:18765/ > /dev/null; then
               break
             fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8765/ > /dev/null
-          BYPASS_UI_URL=http://127.0.0.1:8765/ node tests/ui_smoke.js
+          curl -fsS http://127.0.0.1:18765/ > /dev/null
+          BYPASS_UI_URL=http://127.0.0.1:18765/ node tests/ui_smoke.js

@@ -1,3 +1,6 @@
+*v1.625 (20 May 2026) -* main
+*Made the UI smoke wait for a fully loaded lazy protocol panel before measuring it and moved the CI fixture server to a less collision-prone port.*
+
 *v1.624 (20 May 2026) -* main
 *Restored Playwright Linux dependency installation for CI after confirming Chromium needs system libraries such as libnspr4 on Ubuntu.*
 
