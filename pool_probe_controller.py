@@ -136,6 +136,7 @@ def check_pool_key_through_proxy(
     telegram_timeouts,
     http_timeouts,
     http_retry_timeouts=None,
+    telegram_required=False,
     sleep=time.sleep,
 ):
     tg_connect, tg_read = telegram_timeouts
@@ -172,7 +173,7 @@ def check_pool_key_through_proxy(
             sleep=sleep,
         )
 
-    record_tg_ok = tg_ok if (tg_ok or not yt_ok) else 'unknown'
+    record_tg_ok = tg_ok if (telegram_required or tg_ok or not yt_ok) else 'unknown'
     record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok)
     if custom_checks and not tg_ok and not yt_ok:
         record_key_probe(proto, key_value, custom=failed_custom_probe_results(custom_checks))

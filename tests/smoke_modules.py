@@ -690,6 +690,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert 'def _sync_udp_policy_config' in source
     assert 'memory_watchdog_high_rss_since' in source
+    assert 'memory_watchdog_idle_restart_pending' in source
+    assert 'memory_watchdog_idle_restart_in_seconds' in source
+    assert 'Автоперезапуск бота уже запрошен' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert 'def _pool_probe_cpu_busy_percent' in source
@@ -700,6 +703,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "elif pool_locked:" in source
     assert 'def _attempt_youtube_vless2_failover' in source
     assert '_start_youtube_vless2_failover_thread()' in source
+    assert 'def _probe_applied_pool_key_services' in source
+    assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
+    assert "telegram_required=_telegram_required_for_protocol(proto)" in source
+    assert "'probe_applied_pool_key_services'" in (ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
     assert "proxy_mode == 'vless2'" in source
     assert 'Telegram is required because bot mode is Vless 2' in source
@@ -1305,6 +1312,43 @@ def test_pool_probe_controller_helpers():
         {'url': 'https://i.ytimg.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
     ]
     assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': True})]
+
+    records = []
+    yt_results = iter([(True, 'ok'), (True, 'ok')])
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless2',
+        'youtube-only',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'telegram fail'),
+        check_http=lambda proxy, **kwargs: next(yt_results),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        sleep=lambda seconds: None,
+    )
+    assert records == [('vless2', 'youtube-only', {'tg_ok': 'unknown', 'yt_ok': True})]
+
+    records = []
+    yt_results = iter([(True, 'ok'), (True, 'ok')])
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless2',
+        'bot-mode-vless2',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'telegram fail'),
+        check_http=lambda proxy, **kwargs: next(yt_results),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        telegram_required=True,
+        sleep=lambda seconds: None,
+    )
+    assert records == [('vless2', 'bot-mode-vless2', {'tg_ok': False, 'yt_ok': True})]
 
 
 def test_pool_probe_runner_failover_candidate():

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.627, последнее изменение: 21.05.2026
+#  Файл: bot.py, Версия v1.628, последнее изменение: 22.05.2026
 
 import subprocess
 import os
@@ -1586,6 +1586,10 @@ def _schedule_memory_watchdog_restart(rss_kb):
             return False
         memory_watchdog_restart_scheduled = True
         memory_watchdog_last_restart_at = now
+    try:
+        router_health.invalidate()
+    except Exception:
+        pass
     _write_runtime_log(f'Memory watchdog: RSS {rss_kb} KB exceeds limit, restarting bot service')
     try:
         subprocess.Popen(
@@ -1601,6 +1605,38 @@ def _schedule_memory_watchdog_restart(rss_kb):
             memory_watchdog_restart_scheduled = False
         _write_runtime_log(f'Memory watchdog restart failed: {exc}')
         return False
+
+
+def _memory_watchdog_idle_snapshot(payload=None):
+    payload = payload or {}
+    rss_kb = int(payload.get('bot_rss_kb') or _process_rss_kb() or 0)
+    if MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB <= 0:
+        return {
+            'memory_watchdog_idle_restart_pending': False,
+            'memory_watchdog_idle_restart_since': 0.0,
+            'memory_watchdog_idle_restart_in_seconds': 0,
+            'memory_watchdog_idle_restart_hold_seconds': int(round(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS)),
+            'memory_watchdog_restart_scheduled': False,
+        }
+
+    with memory_watchdog_lock:
+        restart_scheduled = bool(memory_watchdog_restart_scheduled)
+    since = float(memory_watchdog_high_rss_since or 0.0)
+    pending = bool(rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB)
+    remaining = 0
+    if pending:
+        if since:
+            elapsed = max(0.0, time.time() - since)
+            remaining = max(0, int(round(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS - elapsed)))
+        else:
+            remaining = int(round(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS))
+    return {
+        'memory_watchdog_idle_restart_pending': pending,
+        'memory_watchdog_idle_restart_since': since if pending else 0.0,
+        'memory_watchdog_idle_restart_in_seconds': remaining,
+        'memory_watchdog_idle_restart_hold_seconds': int(round(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS)),
+        'memory_watchdog_restart_scheduled': restart_scheduled,
+    }
 
 
 def _set_post_pool_memory_cleanup_state(**updates):
@@ -1720,6 +1756,10 @@ def _start_memory_watchdog_thread():
                     now = time.time()
                     if not memory_watchdog_high_rss_since:
                         memory_watchdog_high_rss_since = now
+                        try:
+                            router_health.invalidate()
+                        except Exception:
+                            pass
                     elif (
                         now - memory_watchdog_high_rss_since >= MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS and
                         _memory_restart_is_safe()
@@ -1735,8 +1775,17 @@ def _start_memory_watchdog_thread():
                             if _schedule_memory_watchdog_restart(rss_kb):
                                 return
                         memory_watchdog_high_rss_since = 0.0
+                        try:
+                            router_health.invalidate()
+                        except Exception:
+                            pass
                 else:
-                    memory_watchdog_high_rss_since = 0.0
+                    if memory_watchdog_high_rss_since:
+                        memory_watchdog_high_rss_since = 0.0
+                        try:
+                            router_health.invalidate()
+                        except Exception:
+                            pass
                 if rss_kb and rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _memory_restart_is_safe():
                     _memory_cleanup('watchdog-restart', force=True, clear_status=True)
                     rss_kb = _process_rss_kb() or rss_kb
@@ -3137,6 +3186,8 @@ def _router_health_snapshot():
     payload = router_health.snapshot(_get_pool_probe_progress)
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
     payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
+    idle_memory_state = _memory_watchdog_idle_snapshot(payload)
+    payload.update(idle_memory_state)
     post_pool_state = _post_pool_memory_cleanup_snapshot()
     payload['post_pool_restart_pending'] = bool(post_pool_state.get('scheduled'))
     payload['post_pool_restart_rss_kb'] = int(post_pool_state.get('rss_kb') or 0)
@@ -3146,6 +3197,19 @@ def _router_health_snapshot():
         note = str(payload.get('note') or '').strip()
         threshold_note = f'Автоперезапуск бота в простое: порог {threshold_mb} MB RSS.'
         payload['note'] = f'{note} {threshold_note}'.strip()
+    if idle_memory_state.get('memory_watchdog_restart_scheduled'):
+        note = str(payload.get('note') or '').strip()
+        payload['note'] = f'{note} Автоперезапуск бота уже запрошен.'.strip()
+    elif idle_memory_state.get('memory_watchdog_idle_restart_pending'):
+        retry_in = int(idle_memory_state.get('memory_watchdog_idle_restart_in_seconds') or 0)
+        if _memory_sensitive_operation_running():
+            idle_note = 'RSS бота выше порога; автоперезапуск ждёт завершения фоновых операций.'
+        elif retry_in > 0:
+            idle_note = f'RSS бота выше порога; автоперезапуск в простое примерно через {retry_in} с, если память не освободится.'
+        else:
+            idle_note = 'RSS бота выше порога; watchdog выполнит очистку и перезапуск на ближайшем цикле.'
+        note = str(payload.get('note') or '').strip()
+        payload['note'] = f'{note} {idle_note}'.strip()
     if post_pool_state.get('scheduled'):
         rss_mb = int(round((post_pool_state.get('rss_kb') or 0) / 1024.0))
         retry_in = max(0, int(round((post_pool_state.get('next_retry_at') or 0.0) - time.time())))
@@ -4214,8 +4278,11 @@ def _pool_key_by_callback_id(proto, key_id):
 def _apply_pool_key(proto, key_value):
     result = _install_key_for_protocol(proto, key_value)
     _set_active_key(proto, key_value)
+    refreshed_status = _probe_applied_pool_key_services(proto, key_value)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
+    if refreshed_status:
+        result = f'{result}\n{refreshed_status}'
     return result
 
 
@@ -4381,7 +4448,50 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
         http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
         http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
+        telegram_required=_telegram_required_for_protocol(proto),
     )
+
+
+def _probe_state_text(value, *, optional=False):
+    if value is None:
+        return 'не требуется' if optional else 'не определён'
+    return 'работает' if bool(value) else 'не работает'
+
+
+def _probe_applied_pool_key_services(proto, key_value):
+    proxy_url = proxy_settings.get(proto)
+    if not proxy_url or not key_value:
+        return ''
+    custom_checks = _load_custom_checks()
+    try:
+        _check_pool_key_through_proxy(proto, key_value, custom_checks=custom_checks, proxy_url=proxy_url)
+        cache = _load_key_probe_cache()
+        probe = cache.get(_hash_key(key_value), {})
+        if not isinstance(probe, dict):
+            probe = {}
+        parts = []
+        telegram_optional = not _telegram_required_for_protocol(proto)
+        if 'tg_ok' in probe:
+            parts.append(f'Telegram: {_probe_state_text(probe.get("tg_ok"), optional=telegram_optional)}')
+        if 'yt_ok' in probe:
+            parts.append(f'YouTube: {_probe_state_text(probe.get("yt_ok"))}')
+        custom = probe.get('custom', {})
+        if not isinstance(custom, dict):
+            custom = {}
+        for check in custom_checks or []:
+            check_id = check.get('id')
+            if not check_id or check_id not in custom:
+                continue
+            label = str(check.get('label') or check_id).strip() or str(check_id)
+            parts.append(f'{label}: {_probe_state_text(custom.get(check_id))}')
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+        if not parts:
+            return 'Статусы выбранного ключа будут обновлены фоновой проверкой.'
+        return 'Статусы выбранного ключа обновлены: ' + ', '.join(parts) + '.'
+    except Exception as exc:
+        _write_runtime_log(f'Applied pool key service probe failed for {proto}: {exc}')
+        return f'⚠️ Ключ применён, но статусы сервисов не удалось обновить: {exc}'
 
 
 def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
@@ -5245,6 +5355,7 @@ def _web_action_context():
         pool_keys_for_proto=_pool_keys_for_proto,
         probe_pool_keys_background=_probe_pool_keys_background,
         pause_pool_probe_for_apply=_pause_pool_probe_for_apply,
+        probe_applied_pool_key_services=_probe_applied_pool_key_services,
         cancel_pool_probe=_cancel_pool_probe,
         resume_cancelled_pool_probe=_resume_cancelled_pool_probe,
         add_keys_to_pool=_add_keys_to_pool,

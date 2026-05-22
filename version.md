@@ -1,3 +1,6 @@
+*v1.628 (22 May 2026) -* main
+*Shows the pending idle memory watchdog restart in router health and refreshes pool service statuses immediately after a key is selected.*
+
 *v1.627 (21 May 2026) -* main
 *Prevented GitHub update workers from leaking command-worker mode into the restarted Telegram bot service.*
 

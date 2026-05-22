@@ -81,7 +81,12 @@ async function assertActivePoolRowPinned(page, protocol, label) {
   if (!rows.length || rows[0].active !== '1') {
     throw new Error(`${label}: active pool row is not pinned first: ${JSON.stringify(rows)}`);
   }
-  if (rows[0].poolIndex === 0 || (rows[1] && rows[1].poolIndex !== 0)) {
+  const activeIndex = rows[0].poolIndex;
+  const expectedTail = Array.from({ length: rows.length + 1 }, (_, index) => index)
+    .filter((index) => index !== activeIndex)
+    .slice(0, Math.max(0, rows.length - 1));
+  const actualTail = rows.slice(1).map((row) => row.poolIndex);
+  if (actualTail.some((index, offset) => index !== expectedTail[offset])) {
     throw new Error(`${label}: original pool order after active row is wrong: ${JSON.stringify(rows)}`);
   }
 }
