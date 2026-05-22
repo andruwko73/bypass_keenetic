@@ -1,3 +1,6 @@
+*v1.629 (22 May 2026) -* main
+*Deduplicates router memory watchdog text so the idle restart threshold and active countdown are not shown as two separate warnings, and restores the README note that the bot/bootstrap does not replace Entware installation.*
+
 *v1.628 (22 May 2026) -* main
 *Shows the pending idle memory watchdog restart in router health and refreshes pool service statuses immediately after a key is selected.*
 

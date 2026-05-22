@@ -692,7 +692,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_watchdog_high_rss_since' in source
     assert 'memory_watchdog_idle_restart_pending' in source
     assert 'memory_watchdog_idle_restart_in_seconds' in source
-    assert 'Автоперезапуск бота уже запрошен' in source
+    assert 'автоперезапуск уже запрошен' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert 'def _pool_probe_cpu_busy_percent' in source

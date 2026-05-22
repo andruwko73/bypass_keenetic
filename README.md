@@ -37,6 +37,8 @@
 - `aarch64`: [aarch64-installer.tar.gz](https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz)
 - `mipsel`: [mipsel-installer.tar.gz](https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz)
 
+Важно: бот и bootstrap не заменяют подготовку накопителя и установку Entware. На Keenetic Entware живёт в `/opt` и обычно требует внешнее хранилище.
+
 После Entware подключитесь к роутеру по SSH и выполните:
 
 ```sh
