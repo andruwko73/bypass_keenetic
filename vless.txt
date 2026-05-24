@@ -50,6 +50,7 @@
 216.239.38.223
 8.6.112.6
 8.47.69.6
+194.221.250.50
 35.190.80.1
 64.239.109.65
 104.18.32.47
@@ -66,7 +67,11 @@ api.githubcopilot.com
 api.openai.com
 api.statsig.com
 api.telegram.org
+api.dedust.io
+api.ston.fi
 api.twitter.com
+app.ston.fi
+acdn.tinkoff.ru
 auth.openai.com
 auth0.openai.com
 browser-intake-datadoghq.com
@@ -92,6 +97,7 @@ copilot-proxy.githubusercontent.com
 ct.sendgrid.net
 dc.services.visualstudio.com
 deepseek.com
+dedust.io
 default.exp-external-v8.env.microsoft.com
 desktop.chat.openai.com
 dis.gd
@@ -126,6 +132,7 @@ files.oaiusercontent.com
 forwarder.workos.com
 fragment.com
 gateway.ai.cloudflare.com
+getgems.io
 github.com
 githubassets.com
 githubcopilot.com
@@ -134,6 +141,7 @@ githubusercontent.com
 graph.org
 humb.apple.com
 ibytedtos.com
+id.t-bank-app.ru
 ig.me
 images-ext-1.discordapp.net
 images.workoscdn.com
@@ -180,7 +188,9 @@ static.ads-twitter.com
 statsig.com
 statsigapi.net
 t.co
+t-bank-app.ru
 t.me
+tbank.ru
 tcr9i.chat.openai.com
 tdesktop.com
 teleg.xyz
@@ -226,6 +236,13 @@ tg.dev
 tg.org
 tgram.org
 threads.net
+tonapi.io
+toncenter.com
+toncenter.walletbot.me
+tonkeeper.com
+tonscan.org
+tonviewer.com
+p2p.walletbot.me
 tik-tokapi.com
 tiktok.com
 tiktokcdn-eu.com
@@ -239,9 +256,11 @@ tiktokv.us
 tiktokw.us
 ton.org
 torg.org
+ston.fi
 ttwstatic.com
 tweetdeck.com
 twimg.com
+tinkoff.ru
 twitpic.com
 twitter.biz
 twitter.com
@@ -266,6 +285,7 @@ vo.msecnd.net
 vscode-auth.github.com
 vscode-unpkg.net
 wa.me
+walletbot.me
 web.telegram.org
 web.usagi.one
 whatsapp.biz
@@ -273,6 +293,7 @@ whatsapp.com
 whatsapp.net
 ws.chatgpt.com
 workos.imgix.net
+www.tbank.ru
 www.gstatic.com
 ssl.gstatic.com
 oauth2.googleapis.com

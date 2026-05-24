@@ -1803,7 +1803,11 @@ def test_telegram_routes_include_mini_app_dependencies():
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
-    expected = {'ton.org', 'usercontent.dev', 'fragment.com', 'telegram.org', 'web.telegram.org'}
+    expected = {
+        'ton.org', 'usercontent.dev', 'fragment.com', 'telegram.org', 'web.telegram.org',
+        'walletbot.me', 'toncenter.walletbot.me', 'ston.fi', 't-bank-app.ru',
+        'acdn.tinkoff.ru', '194.221.250.50',
+    }
     assert expected <= set(service_catalog.TELEGRAM_UNBLOCK_ENTRIES)
     assert expected <= entries
 

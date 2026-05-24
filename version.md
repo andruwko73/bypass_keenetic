@@ -1,3 +1,6 @@
+*v1.631 (24 May 2026) -* main
+*Expands Telegram Mini Apps routing with observed WebView/CDN dependencies and keeps the Telegram service button in sync with the shipped Vless list.*
+
 *v1.630 (24 May 2026) -* main
 *Adds missing Telegram Mini Apps and ChatGPT/Codex route dependencies, keeps shared Telegram/TON edge IPs out of the UDP/QUIC reject mirror, and adds IPv6 fallback sets so ndnproxy clients quickly return to proxied IPv4 for bypass domains.*
 
