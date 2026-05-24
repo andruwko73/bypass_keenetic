@@ -1,3 +1,6 @@
+*v1.632 (24 May 2026) -* main
+*Adds observed Telegram Mini Apps CDN edges to Vless1 and enables QUIC fallback for the Telegram route set so WebView traffic returns to proxied TCP faster.*
+
 *v1.631 (24 May 2026) -* main
 *Expands Telegram Mini Apps routing with observed WebView/CDN dependencies and keeps the Telegram service button in sync with the shipped Vless list.*
 

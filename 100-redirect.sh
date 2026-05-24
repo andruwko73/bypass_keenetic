@@ -216,6 +216,19 @@ refresh_vless_tcp_priority() {
 
 refresh_vless_tcp_priority
 
+install_vless_tcp_forward_guard() {
+	for guard_set in unblockvless unblockvless2; do
+		while iptables -C FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset 2>/dev/null; do
+			iptables -D FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset
+		done
+		if ! iptables -C FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset 2>/dev/null; then
+			iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset
+		fi
+	done
+}
+
+install_vless_tcp_forward_guard
+
 install_ipv6_fallback_rules
 
 

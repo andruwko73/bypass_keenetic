@@ -33,6 +33,22 @@
 93.184.220.0/22
 95.161.64.0/20
 194.221.250.50
+23.216.134.15
+104.21.72.109
+151.101.129.91
+151.101.193.91
+212.188.32.34
+18.165.122.105
+13.33.235.84
+104.103.64.59
+80.239.150.25
+54.76.177.33
+104.17.79.30
+3.248.1.23
+13.33.235.64
+87.240.137.130
+95.213.56.4
+90.156.232.26
 ads-twitter.com
 api.telegram.org
 api.dedust.io
@@ -84,6 +100,7 @@ ibytedtos.com
 id.t-bank-app.ru
 ig.me
 instagram.com
+internal.api.vk.ru
 internalfb.com
 meta.com
 mobile.twitter.com
@@ -94,6 +111,7 @@ oculus.com
 periscope.tv
 pscp.tv
 quiz.directory
+queuev4.vk.ru
 static.ads-twitter.com
 T.co
 t-bank-app.ru
@@ -156,6 +174,7 @@ twvid.com
 tx.me
 usercontent.dev
 vine.co
+vk-analytics.ru
 wa.me
 walletbot.me
 web.telegram.org
@@ -163,4 +182,7 @@ whatsapp.biz
 whatsapp.com
 whatsapp.net
 www.tbank.ru
+tracker-api.vk-analytics.ru
+ip4.tracker-api.vk-analytics.ru
+ts.tracker-api.vk-analytics.ru
 x.com

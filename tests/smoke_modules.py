@@ -675,6 +675,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     assert 'refresh_vless_tcp_priority()' in redirect_script
+    assert 'install_vless_tcp_forward_guard()' in redirect_script
+    assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' in redirect_script
     assert 'CRD/Telegram-style service routes do not get captured by the YouTube key' in redirect_script
     vless2_insert = (
         'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
@@ -1787,8 +1789,10 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'codex' in source['aliases']
     assert source['udp_quic'] is True
     assert service_catalog.SERVICE_LIST_SOURCES['youtube']['udp_quic'] is True
+    assert service_catalog.SERVICE_LIST_SOURCES['telegram']['udp_quic'] is True
     assert 'chatgpt.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     assert 'youtube.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
+    assert '23.216.134.15' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     udp_routes = set(service_catalog.UDP_QUIC_ROUTE_ENTRIES)
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) - set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) <= udp_routes
     assert not set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) & udp_routes
@@ -1806,7 +1810,9 @@ def test_telegram_routes_include_mini_app_dependencies():
     expected = {
         'ton.org', 'usercontent.dev', 'fragment.com', 'telegram.org', 'web.telegram.org',
         'walletbot.me', 'toncenter.walletbot.me', 'ston.fi', 't-bank-app.ru',
-        'acdn.tinkoff.ru', '194.221.250.50',
+        'acdn.tinkoff.ru', '194.221.250.50', '23.216.134.15',
+        '104.21.72.109', '151.101.129.91', 'internal.api.vk.ru',
+        'queuev4.vk.ru', 'tracker-api.vk-analytics.ru',
     }
     assert expected <= set(service_catalog.TELEGRAM_UNBLOCK_ENTRIES)
     assert expected <= entries

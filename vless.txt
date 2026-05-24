@@ -51,6 +51,22 @@
 8.6.112.6
 8.47.69.6
 194.221.250.50
+23.216.134.15
+104.21.72.109
+151.101.129.91
+151.101.193.91
+212.188.32.34
+18.165.122.105
+13.33.235.84
+104.103.64.59
+80.239.150.25
+54.76.177.33
+104.17.79.30
+3.248.1.23
+13.33.235.64
+87.240.137.130
+95.213.56.4
+90.156.232.26
 35.190.80.1
 64.239.109.65
 104.18.32.47
@@ -146,6 +162,7 @@ ig.me
 images-ext-1.discordapp.net
 images.workoscdn.com
 instagram.com
+internal.api.vk.ru
 instantmessaging-pa.googleapis.com
 instantmessaging-pa.clients6.google.com
 intercom.io
@@ -176,6 +193,7 @@ platform.openai.com
 prodregistryv2.org
 pscp.tv
 quiz.directory
+queuev4.vk.ru
 remotedesktop-pa.googleapis.com
 remotedesktop.google.com
 rum.browser-intake-datadoghq.com
@@ -281,6 +299,7 @@ usercontent.dev
 v3.astar.bz
 vine.co
 visualstudio.microsoft.com
+vk-analytics.ru
 vo.msecnd.net
 vscode-auth.github.com
 vscode-unpkg.net
@@ -294,6 +313,9 @@ whatsapp.net
 ws.chatgpt.com
 workos.imgix.net
 www.tbank.ru
+tracker-api.vk-analytics.ru
+ip4.tracker-api.vk-analytics.ru
+ts.tracker-api.vk-analytics.ru
 www.gstatic.com
 ssl.gstatic.com
 oauth2.googleapis.com
