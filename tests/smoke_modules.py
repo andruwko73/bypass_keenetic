@@ -1861,6 +1861,8 @@ def test_telegram_routes_include_mini_app_dependencies():
     expected = {
         'ton.org', 'usercontent.dev', 'fragment.com', 'telegram.org', 'web.telegram.org',
         'walletbot.me', 'toncenter.walletbot.me', 'ston.fi', 't-bank-app.ru',
+        'wallet.tg', 'app.tonkeeper.com', 'bridge.tonapi.io', 'ton-connect.github.io',
+        'mytonwallet.io', 'tonhub.com', 'connect.tonhubapi.com',
         'acdn.tinkoff.ru', '194.221.250.50', '23.216.134.15',
         '104.21.72.109', '151.101.129.91', 'internal.api.vk.ru',
         'queuev4.vk.ru', 'tracker-api.vk-analytics.ru',
