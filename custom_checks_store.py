@@ -119,28 +119,43 @@ def sanitize_custom_check(item):
     return result
 
 
-def merge_chatgpt_custom_checks(checks):
-    preset = sanitize_custom_check(custom_check_preset('chatgpt_services'))
-    if not preset:
+def _current_preset_checks():
+    result = {}
+    for preset in CUSTOM_CHECK_PRESETS:
+        check = sanitize_custom_check(preset)
+        if check:
+            result[check['id']] = check
+    return result
+
+
+def merge_preset_custom_checks(checks):
+    presets = _current_preset_checks()
+    chatgpt_preset = presets.get('chatgpt_services')
+    if not chatgpt_preset:
         return checks or []
     result = []
-    inserted = False
+    inserted_ids = set()
     found_openai_check = False
     for item in checks or []:
         check_id = item.get('id')
         if check_id in CUSTOM_CHECK_CHATGPT_MERGED_IDS:
             found_openai_check = True
             continue
-        if check_id == 'chatgpt_services':
-            found_openai_check = True
-            if not inserted:
-                result.append(preset)
-                inserted = True
+        if check_id in presets:
+            if check_id == 'chatgpt_services':
+                found_openai_check = True
+            if check_id not in inserted_ids:
+                result.append(presets[check_id])
+                inserted_ids.add(check_id)
             continue
         result.append(item)
-    if found_openai_check and not inserted:
-        result.insert(0, preset)
+    if found_openai_check and 'chatgpt_services' not in inserted_ids:
+        result.insert(0, chatgpt_preset)
     return result
+
+
+def merge_chatgpt_custom_checks(checks):
+    return merge_preset_custom_checks(checks)
 
 
 def load_custom_checks():

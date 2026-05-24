@@ -1798,7 +1798,37 @@ def test_chatgpt_codex_routes_are_synced():
     assert not set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) & udp_routes
     assert set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) <= set(service_catalog.UDP_QUIC_EXCLUDE_ENTRIES)
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
-    assert "('chatgpt_services', 'youtube'" in bot_source
+    assert "'chatgpt_services'" in bot_source
+    assert "'youtube'" in bot_source
+
+
+def test_ai_assistant_custom_routes_are_synced():
+    entries = {
+        line.split('#', 1)[0].strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
+
+    assert set(service_catalog.CLAUDE_ROUTE_ENTRIES) <= entries
+    assert set(service_catalog.GEMINI_ROUTE_ENTRIES) <= entries
+    assert presets['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
+    assert presets['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
+    assert 'https://a-api.anthropic.com' in presets['claude']['urls']
+    assert 'https://aistudio.google.com' in presets['gemini']['urls']
+    assert service_catalog.SERVICE_LIST_SOURCES['claude']['entries'] == service_catalog.CLAUDE_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['gemini']['entries'] == service_catalog.GEMINI_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['claude']['udp_quic'] is True
+    assert service_catalog.SERVICE_LIST_SOURCES['gemini']['udp_quic'] is True
+    assert 'claude.ai' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
+    assert 'gemini.google.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
+    assert 'generativelanguage.googleapis.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
+    assert {'www.youtube.com', 'i.ytimg.com', 'yt3.ggpht.com', 'jnn-pa.googleapis.com'}.isdisjoint(
+        service_catalog.GEMINI_ROUTE_ENTRIES
+    )
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "'claude'" in bot_source
+    assert "'gemini'" in bot_source
 
 
 def test_telegram_routes_include_mini_app_dependencies():
@@ -1840,6 +1870,28 @@ def test_chatgpt_codex_custom_check_migration():
     assert [item['id'] for item in checks] == ['chatgpt_services', 'discord']
     assert checks[0]['label'] == 'ChatGPT / Codex'
     assert 'https://chatgpt.com/codex' in checks[0]['urls']
+
+
+def test_preset_custom_checks_are_hydrated_from_catalog():
+    checks = custom_checks_store.merge_preset_custom_checks([
+        {'id': 'claude', 'label': 'Claude', 'url': 'https://claude.ai'},
+        {'id': 'gemini', 'label': 'Gemini', 'url': 'https://gemini.google.com'},
+    ])
+    by_id = {item['id']: item for item in checks}
+    assert by_id['claude']['urls'] == [
+        'https://claude.ai',
+        'https://console.anthropic.com',
+        'https://api.anthropic.com',
+        'https://a-api.anthropic.com',
+    ]
+    assert by_id['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
+    assert by_id['gemini']['urls'] == [
+        'https://gemini.google.com',
+        'https://aistudio.google.com',
+        'https://ai.google.dev',
+        'https://generativelanguage.googleapis.com',
+    ]
+    assert by_id['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
 
 
 def test_chrome_remote_desktop_routes_are_in_vless():
@@ -2712,7 +2764,9 @@ def main():
     test_unblock_list_helpers()
     test_vless2_youtube_routes_are_scoped()
     test_chatgpt_codex_routes_are_synced()
+    test_ai_assistant_custom_routes_are_synced()
     test_chatgpt_codex_custom_check_migration()
+    test_preset_custom_checks_are_hydrated_from_catalog()
     test_chrome_remote_desktop_routes_are_in_vless()
     test_web_command_state_helpers()
     test_web_http_common_helpers()
