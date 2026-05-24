@@ -1,3 +1,6 @@
+*v1.634 (24 May 2026) -* main
+*Keeps transient protocol placeholders from being shown as Telegram API failures and makes the status attention card treat explicit failure text as a warning.*
+
 *v1.633 (24 May 2026) -* main
 *Expands Claude and Gemini service routes, wires them into the service-add catalog and QUIC fallback policy, and keeps their custom checks, Vless list entries, and tests synchronized.*
 

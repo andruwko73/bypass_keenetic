@@ -812,6 +812,18 @@ def test_web_status_runtime_helpers():
     )
     assert pending['api_status'].startswith('⏳ Telegram API')
     assert pending['socks_details'] == 'SOCKS ok.'
+    placeholder = web_status_runtime.build_web_status_snapshot(
+        state_label='state',
+        proxy_mode='vless',
+        protocols={'vless': {'tone': 'warn', 'label': 'Проверяется', 'details': 'Фоновая проверка ключа выполняется.'}},
+        ports={'vless': 10811},
+        check_socks5=lambda port: False,
+        check_telegram_api=lambda **kwargs: 'unused',
+        is_transient=lambda text: False,
+        fallback_reason='',
+    )
+    assert placeholder['api_status'].startswith('⏳ Telegram API')
+    assert 'не проходит:' not in placeholder['api_status']
     fallback = web_status_runtime.build_web_status_snapshot(
         state_label='state',
         proxy_mode='vless',
@@ -824,6 +836,13 @@ def test_web_status_runtime_helpers():
     )
     assert fallback['socks_details'].endswith('доступен')
     assert fallback['api_status'].startswith('⏳ Telegram API')
+    attention = web_form_template._attention_items(
+        {'api_status': '❌ Доступ к Telegram API через режим vless не проходит:'},
+        {'used_percent': 0},
+        '',
+        True,
+    )
+    assert attention[0][0] == 'warn'
 
 
 def test_telegram_confirm_state_source():

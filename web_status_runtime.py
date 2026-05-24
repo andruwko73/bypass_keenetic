@@ -13,6 +13,20 @@ def telegram_api_pending_message():
     )
 
 
+def protocol_status_is_pending(protocol_status):
+    status = protocol_status or {}
+    if status.get('api_pending'):
+        return True
+    label = str(status.get('label') or '').casefold()
+    details = str(status.get('details') or '').casefold()
+    pending_markers = (
+        'проверяется',
+        'фоновая проверка',
+        'статус обновится',
+    )
+    return any(marker in label or marker in details for marker in pending_markers)
+
+
 def protocol_preflight_status(key_value, endpoint_ok, endpoint_message, *, proxy_user_label='Бот', xray_required=False):
     if not str(key_value or '').strip():
         return {
@@ -37,12 +51,17 @@ def protocol_preflight_status(key_value, endpoint_ok, endpoint_message, *, proxy
 
 
 def api_status_from_protocol(proxy_mode, protocol_status, socks_ok, is_transient):
+    if protocol_status_is_pending(protocol_status):
+        return telegram_api_pending_message()
+    has_api_result = 'api_ok' in (protocol_status or {}) or 'api_message' in (protocol_status or {})
     api_ok = bool((protocol_status or {}).get('api_ok'))
     api_message = str((protocol_status or {}).get('api_message', '') or '')
     if api_ok:
         return telegram_api_success_message()
     if socks_ok and is_transient(api_message):
         return telegram_api_pending_message()
+    if not has_api_result:
+        api_message = str((protocol_status or {}).get('details') or '').strip() or 'нет результата проверки'
     if proxy_mode == 'none':
         return f'❌ Прямой доступ к api.telegram.org не проходит: {api_message}'
     return f'❌ Доступ к Telegram API через режим {proxy_mode} не проходит: {api_message}'

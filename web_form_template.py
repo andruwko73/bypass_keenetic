@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'pool-order-youtube-1'
+ASSET_CACHE_REVISION = 'status-placeholder-1'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -37,6 +37,27 @@ def _attention_text_html(text):
     return safe_text
 
 
+def _api_status_requires_attention(api_status):
+    text = str(api_status or '').strip()
+    if not text:
+        return False
+    lowered = text.casefold()
+    failure_markers = (
+        '❌',
+        'не проходит',
+        'не отвечает',
+        'ошибка',
+        'failed',
+        'error',
+        'timeout',
+        'таймаут',
+    )
+    if any(marker in lowered for marker in failure_markers):
+        return True
+    ok_markers = ('подтверж', 'работает', 'ok', 'доступ')
+    return not any(marker in lowered for marker in ok_markers)
+
+
 def _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram=True):
     items = []
     status = status or {}
@@ -48,8 +69,7 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool, 
         items.append(('warn', 'Память роутера под нагрузкой', f'Сейчас занято {used_percent}%. Проверку большого пула стоит запускать осторожно.'))
 
     api_status = str(status.get('api_status') or '').strip()
-    api_status_lower = api_status.lower()
-    if enable_telegram and api_status and not any(marker in api_status_lower for marker in ('подтверж', 'работает', 'ok', 'доступ')):
+    if enable_telegram and _api_status_requires_attention(api_status):
         items.append(('warn', 'Telegram API требует внимания', api_status))
 
     pool_note_lower = str(pool_summary_note or '').lower()

@@ -1463,9 +1463,12 @@ def render_web_scripts(
             const web = snapshot.web || {{}};
             const apiStatus = String(web.api_status || '').trim();
             const apiLower = apiStatus.toLowerCase();
-            const apiLooksOk = !apiStatus || ['подтверж', 'работает', 'ok', 'доступ'].some(function(marker) {{
+            const apiLooksFailed = ['❌', 'не проходит', 'не отвечает', 'ошибка', 'failed', 'error', 'timeout', 'таймаут'].some(function(marker) {{
                 return apiLower.indexOf(marker) !== -1;
             }});
+            const apiLooksOk = !apiStatus || (!apiLooksFailed && ['подтверж', 'работает', 'ok', 'доступ'].some(function(marker) {{
+                return apiLower.indexOf(marker) !== -1;
+            }}));
             if (ENABLE_TELEGRAM && !apiLooksOk) {{
                 items.push(['warn', 'Telegram API требует внимания', apiStatus]);
             }}
