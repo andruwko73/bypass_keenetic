@@ -10,10 +10,6 @@
 
 #!/bin/sh
 
-# shellcheck disable=SC2154
-[ "$type" = "ip6tables" ] && exit 0
-[ "$table" != "mangle" ] && [ "$table" != "nat" ] && exit 0
-
 ip4t() {
 	if ! iptables -C "$@" &>/dev/null; then
 		 iptables -A "$@" || exit 0
@@ -24,6 +20,36 @@ UDP_POLICY_CONFIG="${UDP_POLICY_CONFIG:-/opt/etc/bot/udp_policy.conf}"
 [ -r "$UDP_POLICY_CONFIG" ] && . "$UDP_POLICY_CONFIG"
 BYPASS_UDP_QUIC_BLOCK_VLESS="${BYPASS_UDP_QUIC_BLOCK_VLESS:-1}"
 BYPASS_UDP_QUIC_BLOCK_VLESS2="${BYPASS_UDP_QUIC_BLOCK_VLESS2:-1}"
+BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"
+
+install_ipv6_fallback_rules() {
+	command -v ip6tables >/dev/null 2>&1 || return 0
+
+	for set_name in unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6; do
+		ipset list "$set_name" >/dev/null 2>&1 || continue
+		for protocol in tcp udp; do
+			while ip6tables -C FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT 2>/dev/null; do
+				ip6tables -D FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT
+			done
+			while ip6tables -C FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j DROP 2>/dev/null; do
+				ip6tables -D FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j DROP
+			done
+			if [ "$BYPASS_IPV6_FALLBACK_ENABLED" != "0" ]; then
+				ip6tables -I FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT 2>/dev/null \
+					|| ip6tables -I FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j DROP 2>/dev/null \
+					|| true
+			fi
+		done
+	done
+}
+
+# shellcheck disable=SC2154
+if [ "$type" = "ip6tables" ]; then
+	[ "$table" = "filter" ] || [ -z "$table" ] || exit 0
+	install_ipv6_fallback_rules
+	exit 0
+fi
+[ "$table" != "mangle" ] && [ "$table" != "nat" ] && exit 0
 
 cleanup_legacy_redirect_set() {
 	set_name="$1"
@@ -189,6 +215,8 @@ refresh_vless_tcp_priority() {
 }
 
 refresh_vless_tcp_priority
+
+install_ipv6_fallback_rules
 
 
 if [ -z "$(iptables-save 2>/dev/null | grep unblocktroj)" ]; then

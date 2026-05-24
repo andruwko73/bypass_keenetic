@@ -70,6 +70,9 @@ fbcdn.net
 fbsbx.com
 fragment.com
 graph.org
+humb.apple.com
+statsigapi.net
+workos.imgix.net
 ibytedtos.com
 ig.me
 instagram.com

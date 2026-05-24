@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.629
+# ВЕРСИЯ СКРИПТА v1.630
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -34,6 +34,7 @@ memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
 udp_quic_block_vless_enabled = True  # умная блокировка QUIC/UDP 443 для YouTube-доменов из списка Vless 1
 udp_quic_block_vless2_enabled = True  # умная блокировка QUIC/UDP 443 для YouTube-доменов из списка Vless 2
+ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси
 youtube_vless2_failover_enabled = True  # YouTube остается на Vless 2: если текущий Vless2 ключ перестал отвечать, бот подберет другой из пула Vless2
 youtube_vless2_failover_grace_seconds = 180
 youtube_vless2_failover_poll_seconds = 120

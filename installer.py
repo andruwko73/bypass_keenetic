@@ -83,6 +83,7 @@ memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
 udp_quic_block_vless_enabled = True
 udp_quic_block_vless2_enabled = True
+ipv6_bypass_fallback_enabled = True
 youtube_vless2_failover_enabled = True
 youtube_vless2_failover_grace_seconds = 180
 youtube_vless2_failover_poll_seconds = 120

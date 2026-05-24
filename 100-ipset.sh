@@ -7,6 +7,11 @@ ipset create unblockvlessudp hash:net -exist
 ipset create unblockvless2 hash:net -exist
 ipset create unblockvless2udp hash:net -exist
 ipset create unblocktroj hash:net -exist
+ipset create unblocksh6 hash:net family inet6 -exist
+ipset create unblockvmess6 hash:net family inet6 -exist
+ipset create unblockvless6 hash:net family inet6 -exist
+ipset create unblockvless2v6 hash:net family inet6 -exist
+ipset create unblocktroj6 hash:net family inet6 -exist
 
 #script0
 #script1

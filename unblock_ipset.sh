@@ -10,7 +10,9 @@ LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockvlessudp unblockvless2udp"
+IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6"
 UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"
+UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"
 
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
@@ -186,6 +188,32 @@ PY
 	return 1
 }
 
+udp_quic_exclude_source() {
+	if [ -s "$UDP_QUIC_EXCLUDE_FILE" ]; then
+		printf '%s\n' "$UDP_QUIC_EXCLUDE_FILE"
+		return 0
+	fi
+	python_bin="/opt/bin/python3"
+	[ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+	[ -n "$python_bin" ] || return 1
+	generated_exclude_file="$tmp_dir/udp_quic_exclude.generated"
+	if PYTHONPATH="/opt/etc/bot" "$python_bin" - <<'PY' > "$generated_exclude_file" 2>/dev/null; then
+from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES
+for entry in UDP_QUIC_EXCLUDE_ENTRIES:
+    print(entry)
+PY
+		[ -s "$generated_exclude_file" ] && printf '%s\n' "$generated_exclude_file" && return 0
+	fi
+	return 1
+}
+
+udp_quic_excluded_direct_entry() {
+	direct_entry="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
+	[ -n "$direct_entry" ] || return 1
+	[ -s "$UDP_QUIC_EXCLUDE_SOURCE" ] || return 1
+	grep -Fx "$direct_entry" "$UDP_QUIC_EXCLUDE_SOURCE" >/dev/null 2>&1
+}
+
 udp_quic_domain() {
 	domain="$(normalize_domain "$1" | tr '[:upper:]' '[:lower:]')"
 	[ -n "$domain" ] || return 1
@@ -211,6 +239,7 @@ udp_quic_direct_entry() {
 	direct_entry="$(printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]')"
 	[ -n "$direct_entry" ] || return 1
 	[ -s "$UDP_QUIC_POLICY_SOURCE" ] || return 1
+	udp_quic_excluded_direct_entry "$direct_entry" && return 1
 	awk -v direct_entry="$direct_entry" '
 		function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
 		{
@@ -253,7 +282,7 @@ resolve_domains() {
 	mirror_domain_file="$4"
 	[ -s "$domain_file" ] || return 0
 
-	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set mirror_tmp_set mirror_domain_file
+	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set mirror_tmp_set mirror_domain_file UDP_QUIC_EXCLUDE_SOURCE
 	parallel_flag="$(xargs_parallel_flag)"
 
 	# shellcheck disable=SC2086
@@ -266,10 +295,38 @@ resolve_domains() {
 			dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
 				| grep -Eo "$IPV4_RE" \
 				| grep -vE "$LOCAL_RE" \
-				| awk -v tmp_set="$tmp_set" -v mirror_tmp_set="$mirror_for_domain" "{
+				| awk -v tmp_set="$tmp_set" -v mirror_tmp_set="$mirror_for_domain" -v exclude_file="$UDP_QUIC_EXCLUDE_SOURCE" "
+					BEGIN {
+						if (exclude_file != \"\") {
+							while ((getline excluded < exclude_file) > 0) excluded_ip[excluded]=1;
+							close(exclude_file);
+						}
+					}
+					{
 					print \"add \" tmp_set \" \" \$1;
-					if (mirror_tmp_set != \"\") print \"add \" mirror_tmp_set \" \" \$1;
+					if (mirror_tmp_set != \"\" && !(\$1 in excluded_ip)) print \"add \" mirror_tmp_set \" \" \$1;
 				}"
+		done
+	' sh >> "$restore_file"
+}
+
+resolve_ipv6_domains() {
+	ipv6_tmp_set="$1"
+	domain_file="$2"
+	[ -n "$ipv6_tmp_set" ] || return 0
+	[ -s "$domain_file" ] || return 0
+
+	export DNS_HOST DNS_PORT LOCAL_RE ipv6_tmp_set
+	parallel_flag="$(xargs_parallel_flag)"
+
+	# shellcheck disable=SC2086
+	sort -u "$domain_file" | xargs -n 1 $parallel_flag sh -c '
+		for domain do
+			dig +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
+				| grep -E "^[0-9A-Fa-f:]+$" \
+				| grep ":" \
+				| grep -vE "$LOCAL_RE" \
+				| awk -v tmp_set="$ipv6_tmp_set" "{ print \"add \" tmp_set \" \" \$1 }"
 		done
 	' sh >> "$restore_file"
 }
@@ -277,9 +334,18 @@ resolve_domains() {
 prepare_temp_set() {
 	prepare_set_name="$1"
 	prepare_tmp_set="$2"
-	ipset create "$prepare_set_name" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create ipset $prepare_set_name."
+	prepare_family="$3"
+	if [ -n "$prepare_family" ]; then
+		ipset create "$prepare_set_name" hash:net family "$prepare_family" -exist >/dev/null 2>&1 || fail_status "Cannot create ipset $prepare_set_name."
+	else
+		ipset create "$prepare_set_name" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create ipset $prepare_set_name."
+	fi
 	ipset destroy "$prepare_tmp_set" >/dev/null 2>&1 || true
-	ipset create "$prepare_tmp_set" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create temporary ipset $prepare_tmp_set."
+	if [ -n "$prepare_family" ]; then
+		ipset create "$prepare_tmp_set" hash:net family "$prepare_family" -exist >/dev/null 2>&1 || fail_status "Cannot create temporary ipset $prepare_tmp_set."
+	else
+		ipset create "$prepare_tmp_set" hash:net -exist >/dev/null 2>&1 || fail_status "Cannot create temporary ipset $prepare_tmp_set."
+	fi
 	ipset flush "$prepare_tmp_set" >/dev/null 2>&1 || true
 	printf '%s\n' "$prepare_tmp_set" >> "$temp_sets_file"
 }
@@ -290,14 +356,20 @@ load_file_to_set() {
 	main_tmp_set="$3"
 	mirror_set_name="$4"
 	mirror_tmp_set="$5"
+	ipv6_set_name="$6"
+	ipv6_tmp_set="$7"
 	prepare_temp_set "$set_name" "$main_tmp_set"
 	if [ -n "$mirror_set_name" ] && [ -n "$mirror_tmp_set" ]; then
 		prepare_temp_set "$mirror_set_name" "$mirror_tmp_set"
+	fi
+	if [ -n "$ipv6_set_name" ] && [ -n "$ipv6_tmp_set" ]; then
+		prepare_temp_set "$ipv6_set_name" "$ipv6_tmp_set" inet6
 	fi
 
 	if [ ! -f "$list_path" ]; then
 		: > "$tmp_dir/${set_name}.missing"
 		[ -n "$mirror_set_name" ] && : > "$tmp_dir/${mirror_set_name}.missing"
+		[ -n "$ipv6_set_name" ] && : > "$tmp_dir/${ipv6_set_name}.missing"
 		return 0
 	fi
 
@@ -305,6 +377,7 @@ load_file_to_set() {
 	source_file="$tmp_dir/${set_name}.source"
 	mirror_source_file="$tmp_dir/${mirror_set_name}.source"
 	mirror_domain_file="$tmp_dir/${mirror_set_name}.domains"
+	ipv6_source_file="$tmp_dir/${ipv6_set_name}.source"
 	: > "$domain_file"
 	[ -n "$mirror_set_name" ] && : > "$mirror_domain_file"
 
@@ -328,6 +401,7 @@ load_file_to_set() {
 		if [ -n "$domain" ]; then
 			: > "$source_file"
 			printf '%s\n' "$domain" >> "$domain_file"
+			[ -n "$ipv6_set_name" ] && : > "$ipv6_source_file"
 			if [ -n "$mirror_set_name" ] && udp_quic_domain "$domain"; then
 				: > "$mirror_source_file"
 				printf '%s\n' "$domain" >> "$mirror_domain_file"
@@ -336,6 +410,7 @@ load_file_to_set() {
 	done < "$list_path"
 
 	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set" "$mirror_domain_file"
+	resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"
 }
 
 entry_count_for_tmp_set() {
@@ -377,14 +452,15 @@ swap_or_preserve_set() {
 }
 
 UDP_QUIC_POLICY_SOURCE="$(udp_quic_policy_source || true)"
+UDP_QUIC_EXCLUDE_SOURCE="$(udp_quic_exclude_source || true)"
 
 wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAIT_SECONDS}s; old ipset contents preserved."
 
-load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh "tmp_unblocksh_$$"
-load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$"
-load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$" unblockvlessudp "tmp_unblockvlessudp_$$"
-load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$" unblockvless2udp "tmp_unblockvless2udp_$$"
-load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$"
+load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh "tmp_unblocksh_$$" "" "" unblocksh6 "tmp_unblocksh6_$$"
+load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$" "" "" unblockvmess6 "tmp_unblockvmess6_$$"
+load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$" unblockvlessudp "tmp_unblockvlessudp_$$" unblockvless6 "tmp_unblockvless6_$$"
+load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$" unblockvless2udp "tmp_unblockvless2udp_$$" unblockvless2v6 "tmp_unblockvless2v6_$$"
+load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$" "" "" unblocktroj6 "tmp_unblocktroj6_$$"
 
 sort -u "$restore_file" > "$sorted_restore_file"
 if [ -s "$sorted_restore_file" ]; then
@@ -398,6 +474,11 @@ swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"
 swap_or_preserve_set unblockvless2 "tmp_unblockvless2_$$"
 swap_or_preserve_set unblockvless2udp "tmp_unblockvless2udp_$$"
 swap_or_preserve_set unblocktroj "tmp_unblocktroj_$$"
+swap_or_preserve_set unblocksh6 "tmp_unblocksh6_$$"
+swap_or_preserve_set unblockvmess6 "tmp_unblockvmess6_$$"
+swap_or_preserve_set unblockvless6 "tmp_unblockvless6_$$"
+swap_or_preserve_set unblockvless2v6 "tmp_unblockvless2v6_$$"
+swap_or_preserve_set unblocktroj6 "tmp_unblocktroj6_$$"
 
 if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
 	message="ipset refresh completed with preserved/fallback sets."

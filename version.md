@@ -1,3 +1,6 @@
+*v1.630 (24 May 2026) -* main
+*Adds missing Telegram Mini Apps and ChatGPT/Codex route dependencies, keeps shared Telegram/TON edge IPs out of the UDP/QUIC reject mirror, and adds IPv6 fallback sets so ndnproxy clients quickly return to proxied IPv4 for bypass domains.*
+
 *v1.629 (22 May 2026) -* main
 *Deduplicates router memory watchdog text so the idle restart threshold and active countdown are not shown as two separate warnings, and restores the README note that the bot/bootstrap does not replace Entware installation.*
 

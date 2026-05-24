@@ -92,6 +92,17 @@ PY
     else
         rm -f "$policy_tmp"
     fi
+    exclude_tmp="$BOT_DIR/udp_quic_exclude.txt.$$"
+    if PYTHONPATH="$BOT_DIR" "$python_bin" - <<'PY' > "$exclude_tmp" 2>/dev/null; then
+from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES
+for entry in UDP_QUIC_EXCLUDE_ENTRIES:
+    print(entry)
+PY
+        mv "$exclude_tmp" "$BOT_DIR/udp_quic_exclude.txt"
+        chmod 644 "$BOT_DIR/udp_quic_exclude.txt" 2>/dev/null || true
+    else
+        rm -f "$exclude_tmp"
+    fi
 }
 
 backup_path() {
@@ -440,6 +451,7 @@ memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
 udp_quic_block_vless_enabled = True
 udp_quic_block_vless2_enabled = True
+ipv6_bypass_fallback_enabled = True
 youtube_vless2_failover_enabled = True
 youtube_vless2_failover_grace_seconds = 180
 youtube_vless2_failover_poll_seconds = 120

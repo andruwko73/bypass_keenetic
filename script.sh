@@ -533,6 +533,17 @@ PY
   else
     rm -f "$policy_tmp"
   fi
+  exclude_tmp="$BOT_RUNTIME_DIR/udp_quic_exclude.txt.$$"
+  if PYTHONPATH="$BOT_RUNTIME_DIR" "$python_bin" - <<'PY' > "$exclude_tmp" 2>/dev/null; then
+from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES
+for entry in UDP_QUIC_EXCLUDE_ENTRIES:
+    print(entry)
+PY
+    mv "$exclude_tmp" "$BOT_RUNTIME_DIR/udp_quic_exclude.txt"
+    chmod 644 "$BOT_RUNTIME_DIR/udp_quic_exclude.txt" 2>/dev/null || true
+  else
+    rm -f "$exclude_tmp"
+  fi
 }
 
 if [ "$1" = "-remove" ]; then

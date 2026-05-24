@@ -570,6 +570,9 @@ def test_codex_version_matches_commit_count():
     assert 'udp_quic_block_vless2_enabled = True' in example
     assert 'udp_quic_block_vless2_enabled = True' in installer
     assert 'udp_quic_block_vless2_enabled = True' in bootstrap
+    assert 'ipv6_bypass_fallback_enabled = True' in example
+    assert 'ipv6_bypass_fallback_enabled = True' in installer
+    assert 'ipv6_bypass_fallback_enabled = True' in bootstrap
     assert 'youtube_vless2_failover_enabled = True' in example
     assert 'youtube_vless2_failover_enabled = True' in installer
     assert 'youtube_vless2_failover_enabled = True' in bootstrap
@@ -629,6 +632,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ensure_symlink_or_copy "$BOT_MAIN_PATH" "$BOT_DIR/bot.py"' in bootstrap
     assert 'generate_udp_quic_policy_file' in script
     assert 'generate_udp_quic_policy_file' in bootstrap
+    assert 'UDP_QUIC_EXCLUDE_ENTRIES' in script
+    assert 'UDP_QUIC_EXCLUDE_ENTRIES' in bootstrap
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
@@ -637,10 +642,16 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ipset swap "$swap_tmp_set" "$set_name"' in ipset_script
     assert 'unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
     assert 'unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
+    assert 'resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"' in ipset_script
+    assert 'dig +short AAAA "$domain"' in ipset_script
+    assert 'unblockvless6 "tmp_unblockvless6_$$"' in ipset_script
+    assert 'unblockvless2v6 "tmp_unblockvless2v6_$$"' in ipset_script
     assert 'udp_quic_domain "$domain"' in ipset_script
     assert 'udp_quic_direct_entry "$direct_entry"' in ipset_script
     assert 'UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"' in ipset_script
+    assert 'UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in ipset_script
+    assert 'from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq
     assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
     assert 'chatgpt.com|*.chatgpt.com' not in unblock_dnsmasq
@@ -648,8 +659,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
     assert 'ipset create unblockvlessudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
+    assert 'ipset create unblockvless6 hash:net family inet6 -exist' in ipset_boot_script
+    assert 'ipset create unblockvless2v6 hash:net family inet6 -exist' in ipset_boot_script
     assert '--match-set unblockvlessudp dst --dport 443 -j REJECT' in redirect_script
     assert '--match-set unblockvless2udp dst --dport 443 -j REJECT' in redirect_script
+    assert 'install_ipv6_fallback_rules()' in redirect_script
+    assert 'BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"' in redirect_script
+    assert 'ip6tables -I FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT' in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless dst --dport 443 -j REJECT' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT' not in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
@@ -1756,6 +1772,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert set(service_catalog.CHATGPT_ROUTE_ENTRIES) <= entries
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= entries
     assert {'ab.chatgpt.com', 'api.chatgpt.com', 'api.statsig.com', 'browser-intake-datadoghq.com'} <= entries
+    assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
 
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
     assert 'chatgpt_services' in presets
@@ -1772,9 +1789,23 @@ def test_chatgpt_codex_routes_are_synced():
     assert service_catalog.SERVICE_LIST_SOURCES['youtube']['udp_quic'] is True
     assert 'chatgpt.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     assert 'youtube.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
-    assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= set(service_catalog.UDP_QUIC_ROUTE_ENTRIES)
+    udp_routes = set(service_catalog.UDP_QUIC_ROUTE_ENTRIES)
+    assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) - set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) <= udp_routes
+    assert not set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) & udp_routes
+    assert set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) <= set(service_catalog.UDP_QUIC_EXCLUDE_ENTRIES)
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "('chatgpt_services', 'youtube'" in bot_source
+
+
+def test_telegram_routes_include_mini_app_dependencies():
+    entries = {
+        line.split('#', 1)[0].strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    expected = {'ton.org', 'usercontent.dev', 'fragment.com', 'telegram.org', 'web.telegram.org'}
+    assert expected <= set(service_catalog.TELEGRAM_UNBLOCK_ENTRIES)
+    assert expected <= entries
 
 
 def test_chatgpt_codex_custom_check_migration():

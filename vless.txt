@@ -132,6 +132,7 @@ githubcopilot.com
 githubcopilotusercontent.com
 githubusercontent.com
 graph.org
+humb.apple.com
 ibytedtos.com
 ig.me
 images-ext-1.discordapp.net
@@ -177,6 +178,7 @@ setup.workos.com
 stable.dl2.discordapp.net
 static.ads-twitter.com
 statsig.com
+statsigapi.net
 t.co
 t.me
 tcr9i.chat.openai.com
@@ -270,6 +272,7 @@ whatsapp.biz
 whatsapp.com
 whatsapp.net
 ws.chatgpt.com
+workos.imgix.net
 www.gstatic.com
 ssl.gstatic.com
 oauth2.googleapis.com

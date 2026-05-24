@@ -76,6 +76,7 @@ CHATGPT_ROUTE_ENTRIES = [
     'featuregates.org',
     'featureassets.org',
     'statsig.com',
+    'statsigapi.net',
     'api.statsig.com',
     'events.statsigapi.net',
     'intercom.io',
@@ -84,10 +85,12 @@ CHATGPT_ROUTE_ENTRIES = [
     'cdn.workos.com',
     'forwarder.workos.com',
     'images.workoscdn.com',
+    'workos.imgix.net',
     'setup.workos.com',
     'challenges.cloudflare.com',
     'gateway.ai.cloudflare.com',
     'js.stripe.com',
+    'humb.apple.com',
     'prodregistryv2.org',
     'browser-intake-datadoghq.com',
     'rum.browser-intake-datadoghq.com',
@@ -105,6 +108,13 @@ CHATGPT_EDGE_IP_ENTRIES = [
 ]
 
 CHATGPT_ROUTE_ENTRIES.extend(CHATGPT_EDGE_IP_ENTRIES)
+
+TELEGRAM_SHARED_EDGE_IP_ENTRIES = [
+    # fragment.com and ton.org currently resolve here. Keep these IPs routed,
+    # but do not mirror them into the UDP/QUIC reject set.
+    '8.6.112.6',
+    '8.47.69.6',
+]
 
 CLAUDE_ROUTE_ENTRIES = [
     'claude.ai',
@@ -404,6 +414,8 @@ TELEGRAM_UNBLOCK_ENTRIES = [
     'tdesktop.com',
     'teleg.xyz',
     'telega.one',
+    'ton.org',
+    'usercontent.dev',
 ]
 
 SERVICE_LIST_SOURCES = {
@@ -413,6 +425,7 @@ SERVICE_LIST_SOURCES = {
         'url': '',
         'entries': CHATGPT_ROUTE_ENTRIES,
         'udp_quic': True,
+        'udp_quic_exclude': TELEGRAM_SHARED_EDGE_IP_ENTRIES,
     },
     'youtube': {
         'label': 'YouTube',
@@ -478,9 +491,25 @@ def udp_quic_policy_entries(service_sources=None):
     entries = []
     for source in sources.values():
         if source.get('udp_quic'):
-            entries.extend(source.get('entries') or [])
+            excluded = {
+                str(value or '').strip().lower()
+                for value in source.get('udp_quic_exclude') or []
+            }
+            entries.extend(
+                entry for entry in source.get('entries') or []
+                if str(entry or '').strip().lower() not in excluded
+            )
     entries.extend(YOUTUBE_UDP_QUIC_EXTRA_ENTRIES)
     return _dedupe_policy_entries(entries)
 
 
+def udp_quic_exclude_entries(service_sources=None):
+    sources = service_sources or SERVICE_LIST_SOURCES
+    entries = []
+    for source in sources.values():
+        entries.extend(source.get('udp_quic_exclude') or [])
+    return _dedupe_policy_entries(entries)
+
+
 UDP_QUIC_ROUTE_ENTRIES = udp_quic_policy_entries()
+UDP_QUIC_EXCLUDE_ENTRIES = udp_quic_exclude_entries()
