@@ -1,3 +1,6 @@
+*v1.635 (24 May 2026) -* main
+*Adds observed Codex/ChatGPT asset and feature-flag endpoints to the shared route catalog, Vless list, and service-check tests so Codex UI metadata can load through the bypass.*
+
 *v1.634 (24 May 2026) -* main
 *Keeps transient protocol placeholders from being shown as Telegram API failures and makes the status attention card treat explicit failure text as a warning.*
 

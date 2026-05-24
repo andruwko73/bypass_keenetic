@@ -54,12 +54,14 @@ api.telegram.org
 api.dedust.io
 api.ston.fi
 api.twitter.com
+api.statsigcdn.com
 app.ston.fi
 acdn.tinkoff.ru
 byteoversea.com
 cdnfacebook.com
 cdninstagram.com
 cdn-telegram.org
+cloudflare-dns.com
 circlecrewpinkcrowd.com
 cms-twdigitalassets.com
 comments.app
@@ -92,8 +94,10 @@ fbcdn.net
 fbsbx.com
 fragment.com
 getgems.io
+google.com
 graph.org
 humb.apple.com
+images.ctfassets.net
 statsigapi.net
 workos.imgix.net
 ibytedtos.com
@@ -108,7 +112,9 @@ muscdn.com
 musical.ly
 my.telegram.org
 oculus.com
+openaiassets.blob.core.windows.net
 periscope.tv
+persistent.oaistatic.com
 pscp.tv
 quiz.directory
 queuev4.vk.ru

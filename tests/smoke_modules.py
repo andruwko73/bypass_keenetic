@@ -1794,6 +1794,8 @@ def test_chatgpt_codex_routes_are_synced():
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= entries
     assert {'ab.chatgpt.com', 'api.chatgpt.com', 'api.statsig.com', 'browser-intake-datadoghq.com'} <= entries
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
+    assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
+    assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com', 'google.com'} <= entries
 
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
     assert 'chatgpt_services' in presets

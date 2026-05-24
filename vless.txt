@@ -82,6 +82,7 @@ api.github.com
 api.githubcopilot.com
 api.openai.com
 api.statsig.com
+api.statsigcdn.com
 api.telegram.org
 api.dedust.io
 api.ston.fi
@@ -103,6 +104,7 @@ challenges.cloudflare.com
 chat.deepseek.com
 chat.openai.com
 chatgpt.com
+cloudflare-dns.com
 clients3.google.com
 clients4.google.com
 circlecrewpinkcrowd.com
@@ -154,6 +156,8 @@ githubassets.com
 githubcopilot.com
 githubcopilotusercontent.com
 githubusercontent.com
+google.com
+images.ctfassets.net
 graph.org
 humb.apple.com
 ibytedtos.com
@@ -187,7 +191,9 @@ oaistatic.com
 oaiusercontent.com
 oculus.com
 openai.com
+openaiassets.blob.core.windows.net
 periscope.tv
+persistent.oaistatic.com
 platform.deepseek.com
 platform.openai.com
 prodregistryv2.org
