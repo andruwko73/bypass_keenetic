@@ -2,6 +2,7 @@ from pathlib import Path
 from io import BytesIO
 import base64
 import importlib
+import json
 import os
 import re
 import subprocess
@@ -2547,6 +2548,7 @@ def test_probe_cache_update_entry_min_interval():
         min_write_interval=30,
     )
     key_id = probe_cache.hash_key('key-1')
+    assert cache[key_id]['schema'] == probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION
     assert cache[key_id]['ts'] == 100
     assert cache[key_id]['tg_ok'] is True
     assert cache[key_id]['yt_ok'] is False
@@ -2595,6 +2597,42 @@ def test_probe_cache_update_entry_min_interval():
     )
     assert cache[key_id]['ts'] == 152
     assert cache[key_id]['tg_ok'] is None
+
+
+def test_probe_cache_ignores_stale_schema(tmp_path):
+    cache_path = tmp_path / 'key_probe_cache.json'
+    old_path = probe_cache.KEY_PROBE_CACHE_PATH
+    probe_cache.KEY_PROBE_CACHE_PATH = str(cache_path)
+    try:
+        fresh_key = probe_cache.hash_key('fresh')
+        stale_key = probe_cache.hash_key('stale')
+        cache_path.write_text(
+            json.dumps({
+                fresh_key: {
+                    'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+                    'proto': 'vless',
+                    'tg_ok': True,
+                    'yt_ok': True,
+                    'ts': 100,
+                },
+                stale_key: {
+                    'proto': 'vless',
+                    'tg_ok': True,
+                    'yt_ok': True,
+                    'custom': {'chatgpt_services': True, 'claude': True},
+                    'ts': 100,
+                },
+            }),
+            encoding='utf-8',
+        )
+        loaded = probe_cache.load_key_probe_cache()
+    finally:
+        probe_cache.KEY_PROBE_CACHE_PATH = old_path
+
+    assert fresh_key in loaded
+    assert stale_key not in loaded
+    assert not probe_cache.key_probe_is_fresh({'ts': 100}, now=101)
+    assert not probe_cache.key_probe_has_required_results({'tg_ok': True, 'yt_ok': True})
 
 
 def test_web_template_scripts_helpers():

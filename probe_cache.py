@@ -8,6 +8,7 @@ import time
 KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 KEY_PROBE_CACHE_TTL = 3600
 KEY_PROBE_MIN_WRITE_INTERVAL = 30
+KEY_PROBE_CACHE_SCHEMA_VERSION = 2
 
 _cache_lock = threading.Lock()
 
@@ -20,7 +21,13 @@ def load_key_probe_cache():
     try:
         with open(KEY_PROBE_CACHE_PATH, 'r', encoding='utf-8') as file:
             value = json.load(file)
-        return value if isinstance(value, dict) else {}
+        if not isinstance(value, dict):
+            return {}
+        return {
+            key: entry
+            for key, entry in value.items()
+            if isinstance(entry, dict) and entry.get('schema') == KEY_PROBE_CACHE_SCHEMA_VERSION
+        }
     except Exception:
         return {}
 
@@ -73,6 +80,9 @@ def update_key_probe_cache_entry(
     if previous_ts and now < previous_ts:
         return False
     changed = False
+    if entry.get('schema') != KEY_PROBE_CACHE_SCHEMA_VERSION:
+        entry['schema'] = KEY_PROBE_CACHE_SCHEMA_VERSION
+        changed = True
     if entry.get('proto') != proto:
         entry['proto'] = proto
         changed = True
@@ -186,6 +196,8 @@ def record_key_probe(proto, key_value, tg_ok=None, yt_ok=None, custom=None, *, m
 def key_probe_is_fresh(entry, now=None, custom_checks=None):
     if not isinstance(entry, dict):
         return False
+    if entry.get('schema') != KEY_PROBE_CACHE_SCHEMA_VERSION:
+        return False
     try:
         ts = float(entry.get('ts', 0))
     except (TypeError, ValueError):
@@ -203,6 +215,8 @@ def key_probe_is_fresh(entry, now=None, custom_checks=None):
 
 def key_probe_has_required_results(entry, custom_checks=None):
     if not isinstance(entry, dict):
+        return False
+    if entry.get('schema') != KEY_PROBE_CACHE_SCHEMA_VERSION:
         return False
     if 'tg_ok' not in entry or 'yt_ok' not in entry:
         return False

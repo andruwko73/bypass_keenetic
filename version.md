@@ -1,3 +1,6 @@
+*v1.641 (25 May 2026) -* main
+*Versions the key-pool probe cache so stale ChatGPT/Codex and Claude results from older probe logic cannot keep marking region-blocked keys as working.*
+
 *v1.640 (25 May 2026) -* main
 *Includes the release history file in router GitHub updates so installed diagnostics show the same latest version notes as the repository.*
 
