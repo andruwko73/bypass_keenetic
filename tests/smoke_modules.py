@@ -2635,6 +2635,21 @@ def test_probe_cache_ignores_stale_schema(tmp_path):
     assert not probe_cache.key_probe_has_required_results({'tg_ok': True, 'yt_ok': True})
 
 
+def test_pool_probe_config_does_not_pin_telegram_api_ip():
+    config = pool_probe_runner.build_pool_probe_core_config_batch(
+        [('vless', 'vless://id@example.com:443?security=tls#sample')],
+        29000,
+        lambda proto, key, tag, email='pool-probe@local': {
+            'protocol': 'freedom',
+            'tag': tag,
+            'settings': {},
+        },
+    )
+    assert config['dns']['queryStrategy'] == 'UseIPv4'
+    assert 'api.telegram.org' not in config['dns'].get('hosts', {})
+    assert '149.154.167.220' not in json.dumps(config)
+
+
 def test_web_template_scripts_helpers():
     scripts = web_template_scripts.render_web_scripts(
         POOL_PROBE_UI_POLL_EXTENSION_MS=1000,

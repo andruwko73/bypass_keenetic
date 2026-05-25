@@ -1,3 +1,6 @@
+*v1.642 (25 May 2026) -* main
+*Stops temporary pool probes from pinning api.telegram.org to an outdated Telegram IP, preventing working keys from being marked as Telegram failures.*
+
 *v1.641 (25 May 2026) -* main
 *Versions the key-pool probe cache so stale ChatGPT/Codex and Claude results from older probe logic cannot keep marking region-blocked keys as working.*
 

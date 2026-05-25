@@ -106,9 +106,6 @@ def build_pool_probe_core_config_batch(probe_tasks, test_port, proxy_outbound_fr
             'loglevel': 'warning',
         },
         'dns': {
-            'hosts': {
-                'api.telegram.org': '149.154.167.220',
-            },
             'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
             'queryStrategy': 'UseIPv4',
         },
