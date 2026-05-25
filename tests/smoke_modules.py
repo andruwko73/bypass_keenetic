@@ -1959,6 +1959,40 @@ def test_ai_assistant_custom_routes_are_synced():
     assert "'gemini'" in bot_source
 
 
+def test_custom_check_service_sources_are_synced():
+    entries = {
+        line.split('#', 1)[0].strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    keys_match = re.search(r'SOCIALNET_SERVICE_KEYS\s*=\s*\((.*?)\)', bot_source, re.S)
+    assert keys_match
+    button_keys = set(re.findall(r"'([^']+)'", keys_match.group(1)))
+    preset_ids = {preset['id'] for preset in service_catalog.CUSTOM_CHECK_PRESETS}
+
+    assert preset_ids <= set(service_catalog.SERVICE_LIST_SOURCES)
+    assert preset_ids <= button_keys
+    assert button_keys <= set(service_catalog.SERVICE_LIST_SOURCES)
+
+    for preset in service_catalog.CUSTOM_CHECK_PRESETS:
+        source = service_catalog.SERVICE_LIST_SOURCES[preset['id']]
+        source_entries = set(source.get('entries') or [])
+        preset_routes = set(preset.get('routes') or [])
+        assert source_entries
+        assert preset_routes <= source_entries
+        assert preset_routes <= entries
+
+    assert service_catalog.SERVICE_LIST_SOURCES['discord']['entries'] == service_catalog.DISCORD_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['copilot']['entries'] == service_catalog.COPILOT_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['perplexity']['entries'] == service_catalog.PERPLEXITY_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['grok']['entries'] == service_catalog.GROK_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['deepseek']['entries'] == service_catalog.DEEPSEEK_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['meta_ai']['entries'] == service_catalog.META_AI_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['instagram']['entries'] == service_catalog.INSTAGRAM_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['facebook']['entries'] == service_catalog.FACEBOOK_ROUTE_ENTRIES
+
+
 def test_telegram_routes_include_mini_app_dependencies():
     entries = {
         line.split('#', 1)[0].strip()
@@ -2944,6 +2978,7 @@ def main():
     test_vless2_youtube_routes_are_scoped()
     test_chatgpt_codex_routes_are_synced()
     test_ai_assistant_custom_routes_are_synced()
+    test_custom_check_service_sources_are_synced()
     test_chatgpt_codex_custom_check_migration()
     test_preset_custom_checks_are_hydrated_from_catalog()
     test_chrome_remote_desktop_routes_are_in_vless()

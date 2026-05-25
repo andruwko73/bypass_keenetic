@@ -190,6 +190,7 @@ GEMINI_ROUTE_ENTRIES = [
 GROK_ROUTE_ENTRIES = [
     'grok.com',
     'x.ai',
+    'api.x.ai',
     'x.com',
     'api.x.com',
     'twitter.com',
@@ -202,15 +203,99 @@ GROK_ROUTE_ENTRIES = [
     'ton.twimg.com',
 ]
 
+COPILOT_ROUTE_ENTRIES = [
+    'copilot.microsoft.com',
+    'bing.com',
+    'www.bing.com',
+    'edgeservices.bing.com',
+    'sydney.bing.com',
+    'login.microsoftonline.com',
+    'api.githubcopilot.com',
+    'githubcopilot.com',
+    'githubcopilotusercontent.com',
+    'copilot-proxy.githubusercontent.com',
+    'default.exp-external-v8.env.microsoft.com',
+]
+
+PERPLEXITY_ROUTE_ENTRIES = [
+    'perplexity.ai',
+    'www.perplexity.ai',
+    'api.perplexity.ai',
+]
+
+DEEPSEEK_ROUTE_ENTRIES = [
+    'deepseek.com',
+    'chat.deepseek.com',
+    'api.deepseek.com',
+    'platform.deepseek.com',
+]
+
 DISCORD_ROUTE_ENTRIES = [
+    'dis.gd',
+    'discord.co',
     'discord.com',
+    'discord.design',
+    'discord.dev',
+    'discord.gift',
+    'discord.gifts',
     'discordapp.com',
+    'discordapp.net',
     'discord.gg',
+    'discord.media',
+    'discord.new',
+    'discord.store',
+    'discord.tools',
     'gateway.discord.gg',
     'cdn.discordapp.com',
     'cdn.discordapp.net',
     'media.discordapp.net',
     'images-ext-1.discordapp.net',
+    'stable.dl2.discordapp.net',
+    'discord-activities.com',
+    'discordactivities.com',
+    'discord-attachments-uploads-prd.storage.googleapis.com',
+    'discordmerch.com',
+    'discordpartygames.com',
+    'discordsays.com',
+    'discordstatus.com',
+]
+
+META_AI_ROUTE_ENTRIES = [
+    'meta.ai',
+    'www.meta.ai',
+    'ai.meta.com',
+    'meta.com',
+]
+
+INSTAGRAM_ROUTE_ENTRIES = [
+    'instagram.com',
+    'www.instagram.com',
+    'cdninstagram.com',
+    'ig.me',
+]
+
+FACEBOOK_ROUTE_ENTRIES = [
+    'facebook.com',
+    'www.facebook.com',
+    'graph.facebook.com',
+    'fbcdn.net',
+    'facebook.net',
+    'fb.com',
+    'fbsbx.com',
+    'cdnfacebook.com',
+]
+
+META_PLATFORM_ROUTE_ENTRIES = [
+    *META_AI_ROUTE_ENTRIES,
+    *INSTAGRAM_ROUTE_ENTRIES,
+    *FACEBOOK_ROUTE_ENTRIES,
+    'internalfb.com',
+    'threads.net',
+    'wa.me',
+    'whatsapp.biz',
+    'whatsapp.com',
+    'whatsapp.net',
+    'oculus.com',
 ]
 
 CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES = [
@@ -321,7 +406,7 @@ CUSTOM_CHECK_PRESETS = [
         'id': 'copilot',
         'label': 'Copilot',
         'url': 'https://copilot.microsoft.com',
-        'routes': ['copilot.microsoft.com', 'bing.com', 'www.bing.com', 'edgeservices.bing.com', 'sydney.bing.com'],
+        'routes': COPILOT_ROUTE_ENTRIES,
         'badge': 'CP',
         'icon': 'copilot',
     },
@@ -329,7 +414,7 @@ CUSTOM_CHECK_PRESETS = [
         'id': 'perplexity',
         'label': 'Perplexity',
         'url': 'https://www.perplexity.ai',
-        'routes': ['perplexity.ai', 'www.perplexity.ai', 'api.perplexity.ai'],
+        'routes': PERPLEXITY_ROUTE_ENTRIES,
         'badge': 'PX',
         'icon': 'perplexity',
     },
@@ -347,7 +432,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'DeepSeek',
         'url': 'https://chat.deepseek.com',
         'urls': ['https://chat.deepseek.com', 'https://api.deepseek.com'],
-        'routes': ['deepseek.com', 'chat.deepseek.com', 'api.deepseek.com'],
+        'routes': DEEPSEEK_ROUTE_ENTRIES,
         'badge': 'DS',
         'icon': 'deepseek',
     },
@@ -379,7 +464,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'Meta AI',
         'url': 'https://www.meta.ai',
         'urls': ['https://www.meta.ai', 'https://ai.meta.com'],
-        'routes': ['meta.ai', 'www.meta.ai', 'ai.meta.com', 'meta.com'],
+        'routes': META_AI_ROUTE_ENTRIES,
         'badge': 'MA',
         'icon': 'meta',
     },
@@ -387,7 +472,7 @@ CUSTOM_CHECK_PRESETS = [
         'id': 'instagram',
         'label': 'Instagram',
         'url': 'https://www.instagram.com',
-        'routes': ['instagram.com', 'www.instagram.com', 'cdninstagram.com'],
+        'routes': INSTAGRAM_ROUTE_ENTRIES,
         'badge': 'IG',
         'icon': 'instagram',
     },
@@ -396,7 +481,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'Facebook',
         'url': 'https://www.facebook.com',
         'urls': ['https://www.facebook.com', 'https://graph.facebook.com'],
-        'routes': ['facebook.com', 'www.facebook.com', 'graph.facebook.com', 'fbcdn.net'],
+        'routes': FACEBOOK_ROUTE_ENTRIES,
         'badge': 'FB',
         'icon': 'facebook',
     },
@@ -563,6 +648,34 @@ SERVICE_LIST_SOURCES = {
         'entries': GEMINI_ROUTE_ENTRIES,
         'udp_quic': True,
     },
+    'copilot': {
+        'label': 'Copilot',
+        'aliases': ['copilot', 'microsoft copilot', 'github copilot'],
+        'url': '',
+        'entries': COPILOT_ROUTE_ENTRIES,
+        'udp_quic': True,
+    },
+    'perplexity': {
+        'label': 'Perplexity',
+        'aliases': ['perplexity', 'pplx'],
+        'url': '',
+        'entries': PERPLEXITY_ROUTE_ENTRIES,
+        'udp_quic': True,
+    },
+    'grok': {
+        'label': 'Grok',
+        'aliases': ['grok', 'xai', 'x ai'],
+        'url': '',
+        'entries': GROK_ROUTE_ENTRIES,
+        'udp_quic': True,
+    },
+    'deepseek': {
+        'label': 'DeepSeek',
+        'aliases': ['deepseek', 'deep seek'],
+        'url': '',
+        'entries': DEEPSEEK_ROUTE_ENTRIES,
+        'udp_quic': True,
+    },
     'youtube': {
         'label': 'YouTube',
         'aliases': ['youtube', 'yt', 'ютуб'],
@@ -580,18 +693,42 @@ SERVICE_LIST_SOURCES = {
     'meta': {
         'label': 'Instagram / Meta',
         'aliases': ['meta', 'instagram', 'insta', 'facebook', 'whatsapp', 'threads', 'инстаграм'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/meta.lst',
+        'url': '',
+        'entries': META_PLATFORM_ROUTE_ENTRIES,
+        'udp_quic': True,
     },
     'discord': {
         'label': 'Discord',
         'aliases': ['discord', 'дискорд'],
-        'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/discord.lst',
+        'url': '',
+        'entries': DISCORD_ROUTE_ENTRIES,
     },
     'chrome_remote_desktop': {
         'label': 'Chrome Remote Desktop',
         'aliases': ['chrome remote desktop', 'crd', 'chromoting', 'remote desktop', 'удаленный рабочий стол chrome'],
         'url': '',
         'entries': CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
+    },
+    'meta_ai': {
+        'label': 'Meta AI',
+        'aliases': ['meta', 'meta ai', 'metaai'],
+        'url': '',
+        'entries': META_AI_ROUTE_ENTRIES,
+        'udp_quic': True,
+    },
+    'instagram': {
+        'label': 'Instagram',
+        'aliases': ['instagram', 'insta'],
+        'url': '',
+        'entries': INSTAGRAM_ROUTE_ENTRIES,
+        'udp_quic': True,
+    },
+    'facebook': {
+        'label': 'Facebook',
+        'aliases': ['facebook', 'fb'],
+        'url': '',
+        'entries': FACEBOOK_ROUTE_ENTRIES,
+        'udp_quic': True,
     },
     'tiktok': {
         'label': 'TikTok',

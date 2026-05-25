@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.645, последнее изменение: 25.05.2026
+#  Файл: bot.py, Версия v1.646, последнее изменение: 25.05.2026
 
 import subprocess
 import os
@@ -1194,7 +1194,24 @@ SOCIALNET_LOCAL_PATHS = [
 
 
 
-SOCIALNET_SERVICE_KEYS = ('chatgpt_services', 'claude', 'gemini', 'youtube', 'telegram', 'chrome_remote_desktop', 'meta', 'discord', 'tiktok', 'twitter')
+SOCIALNET_SERVICE_KEYS = (
+    'chatgpt_services',
+    'claude',
+    'gemini',
+    'copilot',
+    'perplexity',
+    'grok',
+    'deepseek',
+    'youtube',
+    'telegram',
+    'discord',
+    'chrome_remote_desktop',
+    'meta_ai',
+    'instagram',
+    'facebook',
+    'tiktok',
+    'twitter',
+)
 SOCIALNET_ALL_KEY = 'all'
 SOCIALNET_EXCLUDED_ENTRIES = set()
 
