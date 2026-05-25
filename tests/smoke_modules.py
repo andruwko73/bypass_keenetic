@@ -521,7 +521,11 @@ def test_web_action_feature_gates():
 
 def _expected_codex_version_counter():
     count = int(subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=ROOT, text=True).strip())
-    dirty = subprocess.check_output(['git', 'status', '--short'], cwd=ROOT, text=True).strip()
+    dirty = subprocess.check_output(
+        ['git', 'status', '--short', '--untracked-files=no'],
+        cwd=ROOT,
+        text=True,
+    ).strip()
     return f'1.{count + (1 if dirty else 0)}'
 
 
