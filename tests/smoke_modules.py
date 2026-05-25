@@ -747,6 +747,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bot<redacted-token>' in source
     assert "'BYPASS_KEENETIC_COMMAND_WORKER'" in source
     assert 'error_text = _redact_sensitive_text(exc)' in source
+    assert 'def _telegram_send_error_is_transient' in source
+    assert 'def _install_telegram_send_retry_wrapper' in source
+    assert "_reset_telegram_http_session('send_message retry')" in source
+    assert 'redact_text=_redact_sensitive_text' in source
     assert "_memory_cleanup('pool probe finished'" in source
     assert "_memory_cleanup('web command finished'" in source
     assert "_memory_cleanup('protocol panel render'" in source
@@ -945,6 +949,31 @@ def test_telegram_install_ui_helpers():
     assert telegram_install_ui.install_action_for_text('♻️ Установка и переустановка', include_web_only=True) == 'update_main'
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (ветка independent)', include_web_only=True) is None
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (без Telegram бота)', include_web_only=True) is None
+
+
+def test_telegram_recovery_redacts_bot_api_token():
+    messages = []
+    logs = []
+    message = py_types.SimpleNamespace(chat=py_types.SimpleNamespace(id=7001, type='private'))
+
+    try:
+        raise RuntimeError('https://api.telegram.org/bot123456:secret-token/sendMessage failed')
+    except RuntimeError as exc:
+        telegram_message_flow.recover_private_message_error(
+            message,
+            exc,
+            write_log=lambda text, mode='a': logs.append(text),
+            reset_state=lambda chat_id: None,
+            send_message=lambda chat_id, text, **kwargs: messages.append(text),
+            main_markup=lambda: None,
+            redact_text=lambda value: str(value).replace('123456:secret-token', '<redacted-token>'),
+        )
+
+    assert messages
+    assert '<redacted-token>' in messages[-1]
+    assert '123456:secret-token' not in messages[-1]
+    assert logs
+    assert '123456:secret-token' not in logs[-1]
 
 
 def test_telegram_key_ui_helpers():

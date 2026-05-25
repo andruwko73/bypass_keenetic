@@ -51,9 +51,12 @@ def recover_private_message_error(
     reset_state,
     send_message,
     main_markup,
+    redact_text=None,
     error_log_path='/opt/etc/error.log',
 ):
-    write_log(traceback.format_exc(), mode='w')
+    redact = redact_text if callable(redact_text) else (lambda value: '' if value is None else str(value))
+    safe_error = redact(error)
+    write_log(redact(traceback.format_exc()), mode='w')
     try:
         os.chmod(error_log_path, 0o0755)
     except Exception:
@@ -65,7 +68,7 @@ def recover_private_message_error(
         reply_markup = main_markup() if callable(main_markup) else main_markup
         send_message(
             message.chat.id,
-            f'⚠️ Команда не выполнена из-за внутренней ошибки: {error}',
+            f'⚠️ Команда не выполнена из-за внутренней ошибки: {safe_error}',
             reply_markup=reply_markup,
         )
     except Exception:

@@ -1,3 +1,6 @@
+*v1.644 (25 May 2026) -* main
+*Retries transient Telegram sendMessage failures after resetting the Bot API HTTP session and redacts Bot API tokens from surfaced send errors.*
+
 *v1.643 (25 May 2026) -* main
 *Invalidates pool probe cache entries written before the Telegram API DNS pin was removed, so old false Telegram failures are recalculated.*
 

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.643, последнее изменение: 25.05.2026
+#  Файл: bot.py, Версия v1.644, последнее изменение: 25.05.2026
 
 import subprocess
 import os
@@ -1266,6 +1266,46 @@ def _redact_sensitive_text(text):
     return re.sub(r'bot[0-9]+:[A-Za-z0-9_-]+', 'bot<redacted-token>', safe_text)
 
 
+def _telegram_send_error_is_transient(error):
+    error_text = _redact_sensitive_text(error).lower()
+    transient_markers = (
+        'ssleoferror',
+        'unexpected_eof',
+        'max retries exceeded',
+        'connection aborted',
+        'remote disconnected',
+        'connection reset',
+        'read timed out',
+        'connect timeout',
+    )
+    return any(marker in error_text for marker in transient_markers)
+
+
+def _install_telegram_send_retry_wrapper():
+    original_send_message = getattr(bot, 'send_message', None)
+    if not callable(original_send_message) or getattr(original_send_message, '_bypass_retry_wrapper', False):
+        return
+
+    def send_message_with_retry(*args, **kwargs):
+        try:
+            return original_send_message(*args, **kwargs)
+        except Exception as exc:
+            if not _telegram_send_error_is_transient(exc):
+                raise RuntimeError(_redact_sensitive_text(exc)) from exc
+            _write_runtime_log(
+                'Telegram send_message failed, resetting HTTP session and retrying: '
+                + _redact_sensitive_text(exc)
+            )
+            _reset_telegram_http_session('send_message retry')
+            try:
+                return original_send_message(*args, **kwargs)
+            except Exception as retry_exc:
+                raise RuntimeError(_redact_sensitive_text(retry_exc)) from retry_exc
+
+    send_message_with_retry._bypass_retry_wrapper = True
+    bot.send_message = send_message_with_retry
+
+
 def _authorize_message(message, handler_name):
     return _telegram_authorize_message(
         message,
@@ -1854,6 +1894,9 @@ def _reset_telegram_http_session(reason=''):
     except Exception as exc:
         if reason:
             _write_runtime_log(f'Не удалось сбросить Telegram HTTP-сессию ({reason}): {exc}')
+
+
+_install_telegram_send_retry_wrapper()
 
 
 def _daemonize_process():
@@ -5305,6 +5348,7 @@ def bot_message(message):
             reset_state=lambda chat_id: _set_chat_menu_state(chat_id, level=0, bypass=None),
             send_message=bot.send_message,
             main_markup=_build_main_menu_markup,
+            redact_text=_redact_sensitive_text,
         )
 
 
