@@ -291,7 +291,20 @@ def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_tim
         session.close()
 
 
-def probe_custom_targets(proxy_url, custom_checks, target_checker, *, connect_timeout, read_timeout, max_targets=None):
+def probe_custom_targets(
+    proxy_url,
+    custom_checks,
+    target_checker,
+    *,
+    connect_timeout,
+    read_timeout,
+    max_targets=None,
+    retries=0,
+    retry_connect_timeout=None,
+    retry_read_timeout=None,
+    retry_delay_seconds=0,
+    sleep=time.sleep,
+):
     results = {}
     for check in custom_checks or []:
         check_id = check.get('id')
@@ -302,12 +315,21 @@ def probe_custom_targets(proxy_url, custom_checks, target_checker, *, connect_ti
             targets = targets[:max_targets]
         target_results = []
         for target in targets:
-            ok, _ = target_checker(
-                proxy_url,
-                target,
-                connect_timeout=connect_timeout,
-                read_timeout=read_timeout,
-            )
+            attempt = 0
+            while True:
+                attempt_connect = connect_timeout if attempt == 0 else (retry_connect_timeout or connect_timeout)
+                attempt_read = read_timeout if attempt == 0 else (retry_read_timeout or read_timeout)
+                ok, message = target_checker(
+                    proxy_url,
+                    target,
+                    connect_timeout=attempt_connect,
+                    read_timeout=attempt_read,
+                )
+                if ok or attempt >= int(retries or 0) or not is_transient_status_text(message):
+                    break
+                attempt += 1
+                if retry_delay_seconds:
+                    sleep(retry_delay_seconds)
             target_results.append(ok)
             if ok:
                 break

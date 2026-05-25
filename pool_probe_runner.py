@@ -16,7 +16,7 @@ YOUTUBE_HEALTHCHECK_URLS = (
     'https://i.ytimg.com/generate_204',
     'https://www.youtube.com',
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 2
+YOUTUBE_HEALTHCHECK_MIN_OK = 1
 TELEGRAM_HEALTHCHECK_URLS = (
     'https://web.telegram.org/',
     'https://t.me/',

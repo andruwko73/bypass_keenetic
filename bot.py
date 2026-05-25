@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.646, последнее изменение: 25.05.2026
+#  Файл: bot.py, Версия v1.647, последнее изменение: 25.05.2026
 
 import subprocess
 import os
@@ -3339,6 +3339,10 @@ def _probe_custom_targets_for_pool(proxy_url, custom_checks=None):
         _check_custom_target_through_proxy,
         connect_timeout=POOL_PROBE_CUSTOM_CONNECT_TIMEOUT,
         read_timeout=POOL_PROBE_CUSTOM_READ_TIMEOUT,
+        retries=1,
+        retry_connect_timeout=POOL_PROBE_RETRY_CONNECT_TIMEOUT,
+        retry_read_timeout=POOL_PROBE_RETRY_READ_TIMEOUT,
+        retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
     )
 
 

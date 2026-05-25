@@ -1,3 +1,6 @@
+*v1.647 (25 May 2026) -* main
+*Refreshes pool probe cache semantics, retries transient custom-service probe errors, and treats one confirmed YouTube endpoint as enough for noisy keys.*
+
 *v1.646 (25 May 2026) -* main
 *Synchronizes custom service checks with add-to-bypass buttons and local service route lists so every checked preset can be added consistently.*
 

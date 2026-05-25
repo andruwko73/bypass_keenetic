@@ -739,7 +739,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'redirector.googlevideo.com/generate_204' in youtube_source
     assert 'googlevideo.com/generate_204' in youtube_source
     assert 'i.ytimg.com/generate_204' in youtube_source
-    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 2' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 1' in youtube_source
     assert 'Last confirmation:' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
@@ -1274,6 +1274,12 @@ def test_pool_probe_controller_helpers():
         1,
         (1, 2, 3, 4, 5, 6, 10, 20),
     ) == 113.0
+    assert pool_probe_controller.pool_probe_timeout_budget(
+        [{'urls': ['https://a', 'https://b']}],
+        1,
+        1,
+        (1, 2, 3, 4, 5, 6, 10, 20, 7, 8),
+    ) == 119.0
     meminfo_path = ROOT / 'tests' / '_meminfo.tmp'
     try:
         meminfo_path.write_text('MemAvailable:        12345 kB\n', encoding='utf-8')
@@ -1335,14 +1341,13 @@ def test_pool_probe_controller_helpers():
 
     records = []
     tg_results = iter([(False, ''), (False, '')])
-    yt_results = iter([(False, '')] * 8)
     pool_probe_controller.check_pool_key_through_proxy(
         'vless',
         'key',
         [{'id': 'custom'}],
         'proxy',
         check_telegram_api=lambda proxy, **kwargs: next(tg_results),
-        check_http=lambda proxy, **kwargs: next(yt_results),
+        check_http=lambda proxy, **kwargs: (False, ''),
         record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
         probe_custom_targets=lambda proxy, custom_checks=None: {'custom': True},
         retry_delay_seconds=0,
@@ -1352,7 +1357,7 @@ def test_pool_probe_controller_helpers():
     )
     assert records == [
         ('vless', 'key', {'tg_ok': False, 'yt_ok': False}),
-        ('vless', 'key', {'custom': {'custom': False}}),
+        ('vless', 'key', {'custom': {'custom': False}, 'custom_checks': [{'id': 'custom'}]}),
     ]
 
     records = []
@@ -1383,19 +1388,51 @@ def test_pool_probe_controller_helpers():
         {'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4},
         {'url': 'https://www.youtube.com/generate_204', 'connect_timeout': 3, 'read_timeout': 4},
         {'url': 'https://redirector.googlevideo.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
-        {'url': 'https://i.ytimg.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
     ]
     assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': True})]
 
     records = []
+    http_calls = []
+
+    def check_http_with_app_telegram(proxy, **kwargs):
+        http_calls.append(kwargs)
+        url = kwargs.get('url')
+        if url == 'https://web.telegram.org/':
+            return True, 'telegram app ok'
+        return True, 'ok'
+
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'app-telegram-key',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'bot api failed'),
+        check_http=check_http_with_app_telegram,
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        sleep=lambda seconds: None,
+    )
+    assert http_calls[:1] == [{'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4}]
+    assert records == [('vless', 'app-telegram-key', {'tg_ok': True, 'yt_ok': True})]
+
+    records = []
     yt_results = iter([(True, 'ok'), (True, 'ok')])
+
+    def check_http_without_app_telegram(proxy, **kwargs):
+        if kwargs.get('url') in pool_probe_controller.TELEGRAM_HEALTHCHECK_URLS:
+            return False, 'telegram app fail'
+        return next(yt_results)
+
     pool_probe_controller.check_pool_key_through_proxy(
         'vless2',
         'youtube-only',
         [],
         'proxy',
         check_telegram_api=lambda proxy, **kwargs: (False, 'telegram fail'),
-        check_http=lambda proxy, **kwargs: next(yt_results),
+        check_http=check_http_without_app_telegram,
         record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
         probe_custom_targets=lambda proxy, custom_checks=None: {},
         retry_delay_seconds=0,
@@ -1413,7 +1450,7 @@ def test_pool_probe_controller_helpers():
         [],
         'proxy',
         check_telegram_api=lambda proxy, **kwargs: (False, 'telegram fail'),
-        check_http=lambda proxy, **kwargs: next(yt_results),
+        check_http=check_http_without_app_telegram,
         record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
         probe_custom_targets=lambda proxy, custom_checks=None: {},
         retry_delay_seconds=0,
@@ -1423,6 +1460,41 @@ def test_pool_probe_controller_helpers():
         sleep=lambda seconds: None,
     )
     assert records == [('vless2', 'bot-mode-vless2', {'tg_ok': False, 'yt_ok': True})]
+
+    records = []
+    yt_results = iter([(True, 'ok'), (True, 'ok')])
+    telegram_web_attempts = []
+
+    def check_http_retry_required_telegram(proxy, **kwargs):
+        url = kwargs.get('url')
+        if url == 'https://web.telegram.org/':
+            telegram_web_attempts.append(kwargs)
+            return len(telegram_web_attempts) >= 2, 'telegram app retry'
+        if url in pool_probe_controller.TELEGRAM_HEALTHCHECK_URLS:
+            return False, 'telegram app fail'
+        return next(yt_results)
+
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'bot-mode-retry',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'telegram api fail'),
+        check_http=check_http_retry_required_telegram,
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        http_retry_timeouts=(6, 10),
+        telegram_required=True,
+        sleep=lambda seconds: None,
+    )
+    assert records == [('vless', 'bot-mode-retry', {'tg_ok': True, 'yt_ok': True})]
+    assert telegram_web_attempts == [
+        {'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4},
+        {'url': 'https://web.telegram.org/', 'connect_timeout': 6, 'read_timeout': 10},
+    ]
 
 
 def test_pool_probe_runner_failover_candidate():
@@ -1834,6 +1906,30 @@ def test_proxy_status_runtime_helpers():
         read_timeout=1,
     )
     assert custom_results == {'custom': True}
+    retry_calls = []
+
+    def custom_retry_checker(proxy, target, **kwargs):
+        retry_calls.append((target, kwargs))
+        if len(retry_calls) == 1:
+            return False, 'Max retries exceeded with url'
+        return True, 'HTTP 401'
+
+    custom_results = proxy_status.probe_custom_targets(
+        'proxy',
+        [{'id': 'custom', 'url': 'retry'}],
+        custom_retry_checker,
+        connect_timeout=1,
+        read_timeout=2,
+        retries=1,
+        retry_connect_timeout=6,
+        retry_read_timeout=10,
+        retry_delay_seconds=0,
+    )
+    assert custom_results == {'custom': True}
+    assert retry_calls == [
+        ('retry', {'connect_timeout': 1, 'read_timeout': 2}),
+        ('retry', {'connect_timeout': 6, 'read_timeout': 10}),
+    ]
     tail_path = ROOT / 'tests' / '_tail.tmp'
     try:
         tail_path.write_text('one\ntwo\nthree\n', encoding='utf-8')
@@ -2700,6 +2796,75 @@ def test_probe_cache_ignores_stale_schema(tmp_path):
     assert not probe_cache.key_probe_has_required_results({'tg_ok': True, 'yt_ok': True})
 
 
+def test_probe_cache_invalidates_changed_custom_check_targets():
+    cache = {}
+    old_checks = [{'id': 'chatgpt_services', 'urls': ['https://old.example.test']}]
+    new_checks = [{'id': 'chatgpt_services', 'urls': ['https://api.openai.com/v1/models']}]
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok=True,
+        yt_ok=True,
+        custom={'chatgpt_services': True},
+        custom_checks=old_checks,
+        now=100,
+    )
+    entry = cache[probe_cache.hash_key('key-1')]
+    assert probe_cache.key_probe_is_fresh(entry, now=101, custom_checks=old_checks)
+    assert probe_cache.key_probe_has_required_results(entry, custom_checks=old_checks)
+    assert not probe_cache.key_probe_is_fresh(entry, now=101, custom_checks=new_checks)
+    assert not probe_cache.key_probe_has_required_results(entry, custom_checks=new_checks)
+
+
+def test_probe_cache_keeps_recent_success_on_transient_downgrade():
+    cache = {}
+    checks = [{'id': 'chatgpt_services', 'urls': ['https://api.openai.com/v1/models']}]
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok=True,
+        yt_ok=True,
+        custom={'chatgpt_services': True},
+        custom_checks=checks,
+        now=100,
+    )
+    entry = cache[probe_cache.hash_key('key-1')]
+    assert not probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok=False,
+        yt_ok=False,
+        custom={'chatgpt_services': False},
+        custom_checks=checks,
+        now=120,
+        min_write_interval=0,
+    )
+    assert entry['tg_ok'] is True
+    assert entry['yt_ok'] is True
+    assert entry['custom']['chatgpt_services'] is True
+    assert entry['ts'] == 100
+
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok=False,
+        yt_ok=False,
+        custom={'chatgpt_services': False},
+        custom_checks=checks,
+        now=500,
+        min_write_interval=0,
+    )
+    entry = cache[probe_cache.hash_key('key-1')]
+    assert entry['tg_ok'] is False
+    assert entry['yt_ok'] is False
+    assert entry['custom']['chatgpt_services'] is False
+    assert entry['ts'] == 500
+
+
 def test_pool_probe_config_does_not_pin_telegram_api_ip():
     config = pool_probe_runner.build_pool_probe_core_config_batch(
         [('vless', 'vless://id@example.com:443?security=tls#sample')],
@@ -2997,6 +3162,8 @@ def main():
     test_web_status_builder_helpers()
     test_web_template_styles_helpers()
     test_probe_cache_update_entry_min_interval()
+    test_probe_cache_invalidates_changed_custom_check_targets()
+    test_probe_cache_keeps_recent_success_on_transient_downgrade()
     test_web_template_scripts_helpers()
     test_web_form_template_smoke()
     test_web_post_actions_helpers()

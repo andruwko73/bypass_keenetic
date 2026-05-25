@@ -8,7 +8,7 @@ YOUTUBE_HEALTHCHECK_URLS = (
     'https://i.ytimg.com/generate_204',
     'https://www.youtube.com',
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 2
+YOUTUBE_HEALTHCHECK_MIN_OK = 1
 TELEGRAM_HEALTHCHECK_URLS = (
     'https://web.telegram.org/',
     'https://t.me/',
@@ -73,6 +73,7 @@ def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
     has_http_retry_timeouts = len(timeouts) > 9
     retry_http_connect = timeouts[8] if has_http_retry_timeouts else 0
     retry_http_read = timeouts[9] if has_http_retry_timeouts else 0
+    custom_retry_budget = retry_http_connect + retry_http_read if has_http_retry_timeouts else 0
     custom_target_count = 0
     for check in custom_checks or []:
         targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
@@ -82,7 +83,7 @@ def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
         len(TELEGRAM_HEALTHCHECK_URLS) * (http_connect + http_read) +
         http_connect + http_read +
         retry_http_connect + retry_http_read +
-        custom_target_count * (custom_connect + custom_read)
+        custom_target_count * (custom_connect + custom_read + custom_retry_budget)
     )
     retry_per_key = tg_connect + tg_read + retry_http_connect + retry_http_read
     per_key = max(single_timeout, base_per_key + retry_per_key + 5.0)
@@ -108,8 +109,6 @@ def check_telegram_service_through_proxy(
         connect_timeout=tg_connect,
         read_timeout=tg_read,
     )
-    if not api_ok:
-        return False, api_message
 
     connect_timeout, read_timeout = http_timeouts
     ok_hosts = []
@@ -125,9 +124,13 @@ def check_telegram_service_through_proxy(
         if ok:
             ok_hosts.append(host)
             if len(ok_hosts) >= max(1, int(min_ok or 1)):
+                if not api_ok:
+                    return True, 'Telegram app endpoints confirmed: ' + ', '.join(ok_hosts)
                 return True, 'Telegram endpoints confirmed: ' + ', '.join(ok_hosts)
         else:
             failed.append(f'{host}: {message}')
+    if not api_ok:
+        return False, api_message
     return False, '; '.join(failed[-2:]) or 'Telegram web endpoints did not respond through this key.'
 
 
@@ -219,6 +222,15 @@ def check_pool_key_through_proxy(
             retry_delay_seconds=retry_delay_seconds,
             sleep=sleep,
         )
+    elif not tg_ok and telegram_required:
+        sleep(retry_delay_seconds)
+        tg_ok, _ = check_telegram_service_through_proxy(
+            check_telegram_api,
+            check_http,
+            proxy_url,
+            telegram_timeouts=(tg_connect, tg_read),
+            http_timeouts=(retry_http_connect, retry_http_read),
+        )
     elif not yt_ok:
         sleep(retry_delay_seconds)
         yt_ok, _ = check_youtube_through_proxy(
@@ -233,13 +245,19 @@ def check_pool_key_through_proxy(
     record_tg_ok = tg_ok if (telegram_required or tg_ok or not yt_ok) else 'unknown'
     record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok)
     if custom_checks and not tg_ok and not yt_ok:
-        record_key_probe(proto, key_value, custom=failed_custom_probe_results(custom_checks))
+        record_key_probe(
+            proto,
+            key_value,
+            custom=failed_custom_probe_results(custom_checks),
+            custom_checks=custom_checks,
+        )
         return
     if custom_checks:
         record_key_probe(
             proto,
             key_value,
             custom=probe_custom_targets(proxy_url, custom_checks=custom_checks),
+            custom_checks=custom_checks,
         )
 
 
