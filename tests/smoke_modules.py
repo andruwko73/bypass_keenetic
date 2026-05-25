@@ -1339,6 +1339,38 @@ def test_pool_probe_controller_helpers():
     assert invalidated == ['cache', 'cache']
     assert collected == ['gc']
 
+    state = {}
+    checked_updates = []
+    times = iter([30.0, 40.0])
+
+    def set_resumed_progress(**updates):
+        state.update(updates)
+        if 'checked' in updates:
+            checked_updates.append(updates['checked'])
+
+    started, count = pool_probe_controller.start_pool_probe_worker(
+        [('vless', 'remaining-1'), ('vless', 'remaining-2')],
+        [],
+        scope='manual_all',
+        lock=threading.Lock(),
+        set_progress=set_resumed_progress,
+        run_worker=lambda tasks, checks, set_checked, invalidate_caches: (
+            set_checked(1) or set_checked(2) or (2, len(tasks))
+        ),
+        invalidate_caches=lambda: None,
+        time_provider=lambda: next(times),
+        thread_factory=_InlineThread,
+        initial_checked=37,
+        total_count=139,
+        started_at=12.0,
+    )
+    assert started is True
+    assert count == 2
+    assert checked_updates == [37, 38, 39, 39]
+    assert state['checked'] == 39
+    assert state['total'] == 139
+    assert state['started_at'] == 12.0
+
     records = []
     tg_results = iter([(False, ''), (False, '')])
     pool_probe_controller.check_pool_key_through_proxy(
@@ -2396,6 +2428,8 @@ def test_web_get_actions_helpers():
     pools = web_get_actions.dispatch(ctx, '/api/pools')
     assert pools['payload']['pools'] == {'vless': {'rows': []}}
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
+    assert pools['payload']['pool_probe_running'] is True
+    assert pools['payload']['pool_probe_progress'] == {'running': True, 'total': 2}
     scoped_pools = web_get_actions.dispatch(ctx, '/api/pools', 'protocols=vless,vmess')
     assert scoped_pools['payload']['pools'] == {'vless': {'rows': []}, 'vmess': {'rows': []}}
     assert pool_snapshot_calls[-1] == (current_keys, False, ['vless', 'vmess'])
@@ -2969,6 +3003,8 @@ def test_web_template_scripts_helpers():
     assert "apiPill.textContent = poolProbeVisible" in scripts
     assert 'function updatePoolProbeControls(active)' in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
+    assert 'if (poolProbeActive && !document.hidden)' in scripts
+    assert 'refreshPoolData(2500)' in scripts
     assert 'function poolRowMatchesState(row, state)' in scripts
     assert 'function poolStateFilterFromMode(mode)' in scripts
     assert "formData.set('confirm_switch', 'yes');" in scripts

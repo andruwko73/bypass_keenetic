@@ -111,9 +111,13 @@ def _pools_payload(ctx, query=''):
     include_keys = str((params.get('include_keys') or [''])[0]).lower() in ('1', 'true', 'yes')
     protocols = _requested_protocols(params)
     current_keys = _ctx(ctx, 'load_current_keys')()
+    progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})()
+    pool_probe_running = _pool_probe_running(progress)
     return {
         'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=include_keys, protocols=protocols),
         'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
+        'pool_probe_running': pool_probe_running,
+        'pool_probe_progress': progress,
         'custom_checks': _ctx(ctx, 'web_custom_checks')(),
         'timestamp': _ctx(ctx, 'time_provider', time.time)(),
     }

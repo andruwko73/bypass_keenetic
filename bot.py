@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.647, последнее изменение: 25.05.2026
+#  Файл: bot.py, Версия v1.649, последнее изменение: 25.05.2026
 
 import subprocess
 import os
@@ -4614,11 +4614,26 @@ def _store_cancelled_pool_probe(probe_tasks, checks, scope):
         return
     if not pool_probe_resume_after_cancel:
         return
+    progress = _get_pool_probe_progress()
+    try:
+        original_total = int(progress.get('total') or 0)
+    except Exception:
+        original_total = 0
+    if original_total <= 0:
+        original_total = len(remaining)
+    try:
+        checked = int(progress.get('checked') or 0)
+    except Exception:
+        checked = 0
+    checked = max(checked, original_total - len(remaining))
     with pool_probe_resume_lock:
         pool_probe_resume_payload = {
             'tasks': remaining,
             'checks': list(checks or []),
             'scope': scope or 'manual',
+            'checked': max(0, min(checked, original_total)),
+            'total': original_total,
+            'started_at': float(progress.get('started_at') or 0) or time.time(),
         }
     if not pool_probe_cancel_event.is_set():
         _schedule_low_memory_pool_probe_resume()
@@ -4685,7 +4700,7 @@ def _schedule_low_memory_pool_probe_resume():
     threading.Thread(target=worker, daemon=True).start()
 
 
-def _start_selected_pool_probe_tasks(selected, custom_checks, scope):
+def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_checked=0, total_count=None, started_at=None):
     global pool_probe_resume_after_cancel
     pool_probe_resume_after_cancel = True
     return start_pool_probe_worker(
@@ -4704,6 +4719,9 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope):
         ),
         invalidate_caches=_invalidate_probe_status_caches,
         cancel_event=pool_probe_cancel_event,
+        initial_checked=initial_checked,
+        total_count=total_count,
+        started_at=started_at,
     )
 
 
@@ -4721,6 +4739,9 @@ def _resume_cancelled_pool_probe(reason='применения ключа'):
                         delayed_payload.get('tasks') or [],
                         delayed_payload.get('checks') or [],
                         delayed_payload.get('scope') or 'manual',
+                        initial_checked=delayed_payload.get('checked') or 0,
+                        total_count=delayed_payload.get('total'),
+                        started_at=delayed_payload.get('started_at') or None,
                     )
                 elif not pool_probe_lock.locked():
                     pool_probe_cancel_event.clear()
@@ -4731,6 +4752,9 @@ def _resume_cancelled_pool_probe(reason='применения ключа'):
         payload.get('tasks') or [],
         payload.get('checks') or [],
         payload.get('scope') or 'manual',
+        initial_checked=payload.get('checked') or 0,
+        total_count=payload.get('total'),
+        started_at=payload.get('started_at') or None,
     )
     if not started:
         _restore_pool_probe_resume_payload(payload)

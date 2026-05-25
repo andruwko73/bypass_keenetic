@@ -1380,6 +1380,9 @@ def render_web_scripts(
             updatePoolSummaryBlock(payload.pool_summary || null, progress, poolProbeActive);
             updatePoolProbeControls(poolProbeActive);
             updatePoolStatus(payload.pools);
+            if (poolProbeActive && !document.hidden) {{
+                refreshPoolData(2500);
+            }}
         }}
 
         function refreshPoolData(delayMs) {{

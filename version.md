@@ -1,3 +1,6 @@
+*v1.649 (25 May 2026) -* main
+*Keeps pool-check progress when a key apply pauses and resumes the queue, and refreshes pool rows live while checks are running.*
+
 *v1.647 (25 May 2026) -* main
 *Refreshes pool probe cache semantics, retries transient custom-service probe errors, and treats one confirmed YouTube endpoint as enough for noisy keys.*
 
