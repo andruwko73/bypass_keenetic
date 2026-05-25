@@ -1,3 +1,6 @@
+*v1.637 (25 May 2026) -* main
+*Hardens Telegram pool checks and failover so API-only keys are not treated as working Telegram keys unless web.telegram.org or t.me also responds through the proxy.*
+
 *v1.636 (24 May 2026) -* main
 *Adds exact Telegram Mini App wallet and TON Connect endpoints, including wallet.tg, Tonkeeper, TonAPI bridge, and wallet registry routes, so ndnproxy/static ipset mode does not miss required subdomains.*
 

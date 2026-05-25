@@ -17,6 +17,11 @@ YOUTUBE_HEALTHCHECK_URLS = (
     'https://www.youtube.com',
 )
 YOUTUBE_HEALTHCHECK_MIN_OK = 2
+TELEGRAM_HEALTHCHECK_URLS = (
+    'https://web.telegram.org/',
+    'https://t.me/',
+)
+TELEGRAM_HEALTHCHECK_MIN_OK = 1
 
 
 def pool_probe_socks_inbound(port, tag):
@@ -52,6 +57,45 @@ def check_youtube_through_proxy(check_http, proxy_url, *, http_timeouts, urls=YO
         else:
             last_message = message
     return False, last_message or 'YouTube endpoints did not respond through this key.'
+
+
+def check_telegram_service_through_proxy(
+    check_telegram_api,
+    check_http,
+    proxy_url,
+    *,
+    telegram_timeouts,
+    http_timeouts,
+    urls=TELEGRAM_HEALTHCHECK_URLS,
+    min_ok=TELEGRAM_HEALTHCHECK_MIN_OK,
+):
+    tg_connect, tg_read = telegram_timeouts
+    api_ok, api_message = check_telegram_api(
+        proxy_url,
+        connect_timeout=tg_connect,
+        read_timeout=tg_read,
+    )
+    if not api_ok:
+        return False, api_message
+
+    connect_timeout, read_timeout = http_timeouts
+    ok_hosts = []
+    failed = []
+    for url in urls or TELEGRAM_HEALTHCHECK_URLS:
+        host = url.split('/')[2] if '://' in url else url
+        ok, message = check_http(
+            proxy_url,
+            url=url,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+        )
+        if ok:
+            ok_hosts.append(host)
+            if len(ok_hosts) >= max(1, int(min_ok or 1)):
+                return True, 'Telegram endpoints confirmed: ' + ', '.join(ok_hosts)
+        else:
+            failed.append(f'{host}: {message}')
+    return False, '; '.join(failed[-2:]) or 'Telegram web endpoints did not respond through this key.'
 
 
 def build_pool_probe_core_config_batch(probe_tasks, test_port, proxy_outbound_from_key):
@@ -289,10 +333,12 @@ def find_pool_failover_candidate(
                     tg_ok = None
                     yt_ok = primary_ok
                 else:
-                    primary_ok, _ = check_telegram_api(
+                    primary_ok, _ = check_telegram_service_through_proxy(
+                        check_telegram_api,
+                        check_http,
                         proxy_url,
-                        connect_timeout=tg_connect,
-                        read_timeout=tg_read,
+                        telegram_timeouts=(tg_connect, tg_read),
+                        http_timeouts=(http_connect, http_read),
                     )
                     tg_ok = primary_ok
                     yt_ok = None

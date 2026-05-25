@@ -1243,7 +1243,7 @@ def test_pool_probe_controller_helpers():
         2,
         1,
         (1, 2, 3, 4, 5, 6, 10, 20),
-    ) == 85.0
+    ) == 113.0
     meminfo_path = ROOT / 'tests' / '_meminfo.tmp'
     try:
         meminfo_path.write_text('MemAvailable:        12345 kB\n', encoding='utf-8')
@@ -1328,13 +1328,19 @@ def test_pool_probe_controller_helpers():
     records = []
     http_calls = []
     yt_results = iter([(False, 'timeout'), (True, 'ok'), (True, 'ok')])
+    def check_http_for_pool_key(proxy, **kwargs):
+        http_calls.append(kwargs)
+        if kwargs.get('url') == 'https://web.telegram.org/':
+            return True, 'telegram ok'
+        return next(yt_results)
+
     pool_probe_controller.check_pool_key_through_proxy(
         'vless',
         'key',
         [],
         'proxy',
         check_telegram_api=lambda proxy, **kwargs: (True, ''),
-        check_http=lambda proxy, **kwargs: (http_calls.append(kwargs) or next(yt_results)),
+        check_http=check_http_for_pool_key,
         record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
         probe_custom_targets=lambda proxy, custom_checks=None: {},
         retry_delay_seconds=0,
@@ -1344,6 +1350,7 @@ def test_pool_probe_controller_helpers():
         sleep=lambda seconds: None,
     )
     assert http_calls == [
+        {'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4},
         {'url': 'https://www.youtube.com/generate_204', 'connect_timeout': 3, 'read_timeout': 4},
         {'url': 'https://redirector.googlevideo.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
         {'url': 'https://i.ytimg.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
@@ -1399,6 +1406,7 @@ def test_pool_probe_runner_failover_candidate():
         if key_value == 'bad':
             raise ValueError('bad key')
 
+    failover_http_calls = []
     result = pool_probe_runner.find_pool_failover_candidate(
         [('vless', 'bad'), ('vless', 'ok')],
         service='telegram',
@@ -1407,7 +1415,7 @@ def test_pool_probe_runner_failover_candidate():
         proxy_outbound_from_key=lambda *args, **kwargs: {},
         wait_for_socks5=lambda port, timeout=6: port == '1200',
         check_telegram_api=lambda proxy, **kwargs: (True, 'ok'),
-        check_http=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('youtube must not block telegram failover')),
+        check_http=lambda proxy, **kwargs: failover_http_calls.append(kwargs) or (True, 'telegram ok'),
         record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
         proto_label=lambda proto: proto,
         log=logs.append,
@@ -1422,9 +1430,35 @@ def test_pool_probe_runner_failover_candidate():
     )
     assert result == ('vless', 'ok', True, None)
     assert records == [('vless', 'ok', {'tg_ok': True, 'yt_ok': None})]
+    assert failover_http_calls == [{'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4}]
     assert stopped == [('process', 'config.json')]
     assert cleaned == [True]
     assert 'не подготовлен' in logs[0]
+
+    api_only_records = []
+    api_only_result = pool_probe_runner.find_pool_failover_candidate(
+        [('vless', 'api-only')],
+        service='telegram',
+        batch_size=1,
+        test_port='1250',
+        proxy_outbound_from_key=lambda *args, **kwargs: {},
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_telegram_api=lambda proxy, **kwargs: (True, 'api ok'),
+        check_http=lambda proxy, **kwargs: (False, 'web timeout'),
+        record_key_probe=lambda proto, key, **kwargs: api_only_records.append((proto, key, kwargs)),
+        proto_label=lambda proto: proto,
+        log=logs.append,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        validate_outbound=validate_outbound,
+        build_config_batch=lambda valid_batch, test_port, proxy_outbound_from_key: {'valid': valid_batch},
+        start_xray=lambda config: ('api-process', 'api-config.json'),
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        collect_garbage=lambda: None,
+    )
+    assert api_only_result is None
+    assert api_only_records == [('vless', 'api-only', {'tg_ok': False, 'yt_ok': None})]
 
     youtube_records = []
     youtube_result = pool_probe_runner.find_pool_failover_candidate(
