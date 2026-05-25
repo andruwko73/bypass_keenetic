@@ -1,3 +1,6 @@
+*v1.640 (25 May 2026) -* main
+*Includes the release history file in router GitHub updates so installed diagnostics show the same latest version notes as the repository.*
+
 *v1.639 (25 May 2026) -* main
 *Makes ChatGPT/Codex and Claude pool statuses depend on their primary API reachability checks so auxiliary domains cannot make region-blocked keys look healthy.*
 
