@@ -1,3 +1,6 @@
+*v1.639 (25 May 2026) -* main
+*Makes ChatGPT/Codex and Claude pool statuses depend on their primary API reachability checks so auxiliary domains cannot make region-blocked keys look healthy.*
+
 *v1.638 (25 May 2026) -* main
 *Tightens ChatGPT/Codex and Claude service probes so regional 403 responses and unavailable-region pages are treated as failures, while unauthenticated API 401 responses still confirm reachability.*
 

@@ -287,9 +287,6 @@ CUSTOM_CHECK_PRESETS = [
         'url': 'https://chatgpt.com',
         'urls': [
             'https://api.openai.com/v1/models',
-            'https://platform.openai.com',
-            'https://chatgpt.com/codex',
-            'https://chatgpt.com',
         ],
         'routes': CHATGPT_ROUTE_ENTRIES,
         'badge': 'GPT',
@@ -301,10 +298,6 @@ CUSTOM_CHECK_PRESETS = [
         'url': 'https://claude.ai',
         'urls': [
             'https://api.anthropic.com/v1/models',
-            'https://a-api.anthropic.com',
-            'https://claude.ai/api/bootstrap',
-            'https://console.anthropic.com',
-            'https://claude.ai',
         ],
         'routes': CLAUDE_ROUTE_ENTRIES,
         'badge': 'CL',

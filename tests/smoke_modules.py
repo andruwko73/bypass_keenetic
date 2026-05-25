@@ -1877,9 +1877,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'chatgpt_services' in presets
     assert 'openai_codex' not in presets
     assert presets['chatgpt_services']['label'] == 'ChatGPT / Codex'
-    assert presets['chatgpt_services']['urls'][0] == 'https://api.openai.com/v1/models'
-    assert 'https://chatgpt.com/codex' in presets['chatgpt_services']['urls']
-    assert 'https://platform.openai.com' in presets['chatgpt_services']['urls']
+    assert presets['chatgpt_services']['urls'] == ['https://api.openai.com/v1/models']
     assert presets['chatgpt_services']['routes'] == service_catalog.CHATGPT_ROUTE_ENTRIES
     source = service_catalog.SERVICE_LIST_SOURCES['chatgpt_services']
     assert source['label'] == 'ChatGPT / Codex'
@@ -1912,9 +1910,7 @@ def test_ai_assistant_custom_routes_are_synced():
     assert set(service_catalog.GEMINI_ROUTE_ENTRIES) <= entries
     assert presets['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert presets['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
-    assert presets['claude']['urls'][0] == 'https://api.anthropic.com/v1/models'
-    assert 'https://a-api.anthropic.com' in presets['claude']['urls']
-    assert 'https://claude.ai/api/bootstrap' in presets['claude']['urls']
+    assert presets['claude']['urls'] == ['https://api.anthropic.com/v1/models']
     assert 'https://aistudio.google.com' in presets['gemini']['urls']
     assert service_catalog.SERVICE_LIST_SOURCES['claude']['entries'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['gemini']['entries'] == service_catalog.GEMINI_ROUTE_ENTRIES
@@ -1971,7 +1967,8 @@ def test_chatgpt_codex_custom_check_migration():
     ])
     assert [item['id'] for item in checks] == ['chatgpt_services', 'discord']
     assert checks[0]['label'] == 'ChatGPT / Codex'
-    assert 'https://chatgpt.com/codex' in checks[0]['urls']
+    assert checks[0]['url'] == 'https://api.openai.com/v1/models'
+    assert 'urls' not in checks[0]
 
 
 def test_preset_custom_checks_are_hydrated_from_catalog():
@@ -1980,12 +1977,8 @@ def test_preset_custom_checks_are_hydrated_from_catalog():
         {'id': 'gemini', 'label': 'Gemini', 'url': 'https://gemini.google.com'},
     ])
     by_id = {item['id']: item for item in checks}
-    assert by_id['claude']['urls'] == [
-        'https://api.anthropic.com/v1/models',
-        'https://a-api.anthropic.com',
-        'https://claude.ai/api/bootstrap',
-        'https://console.anthropic.com',
-    ]
+    assert by_id['claude']['url'] == 'https://api.anthropic.com/v1/models'
+    assert 'urls' not in by_id['claude']
     assert by_id['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert by_id['gemini']['urls'] == [
         'https://gemini.google.com',
