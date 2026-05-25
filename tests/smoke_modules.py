@@ -1717,6 +1717,9 @@ def test_proxy_status_runtime_helpers():
     class _Response:
         status_code = 204
 
+        def iter_content(self, chunk_size=4096):
+            return iter(())
+
         def close(self):
             pass
 
@@ -1751,6 +1754,45 @@ def test_proxy_status_runtime_helpers():
         assert ok is True
         assert 'example.com' in message
         assert calls[-1][2] is False
+
+        class _ForbiddenResponse:
+            status_code = 403
+            url = 'https://api.openai.com/v1/models'
+
+            def iter_content(self, chunk_size=4096):
+                return iter([b'{"error":{"code":"unsupported_country_region_territory"}}'])
+
+            def close(self):
+                pass
+
+        class _RegionPageResponse:
+            status_code = 200
+            url = 'https://claude.com/app-unavailable-in-region'
+
+            def iter_content(self, chunk_size=4096):
+                return iter([b'not available in your region'])
+
+            def close(self):
+                pass
+
+        class _AuthResponse:
+            status_code = 401
+            url = 'https://api.anthropic.com/v1/models'
+
+            def iter_content(self, chunk_size=4096):
+                return iter([b'{"error":{"type":"authentication_error"}}'])
+
+            def close(self):
+                pass
+
+        responses = iter([_ForbiddenResponse(), _RegionPageResponse(), _AuthResponse()])
+        _Session.get = lambda self, *args, **kwargs: next(responses)
+        ok, _ = proxy_status.check_custom_target_through_proxy(lambda value: value, 'proxy', 'https://api.openai.com/v1/models')
+        assert ok is False
+        ok, _ = proxy_status.check_custom_target_through_proxy(lambda value: value, 'proxy', 'https://claude.ai')
+        assert ok is False
+        ok, _ = proxy_status.check_custom_target_through_proxy(lambda value: value, 'proxy', 'https://api.anthropic.com/v1/models')
+        assert ok is True
     finally:
         proxy_status.requests.Session = original_session
 
@@ -1835,6 +1877,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'chatgpt_services' in presets
     assert 'openai_codex' not in presets
     assert presets['chatgpt_services']['label'] == 'ChatGPT / Codex'
+    assert presets['chatgpt_services']['urls'][0] == 'https://api.openai.com/v1/models'
     assert 'https://chatgpt.com/codex' in presets['chatgpt_services']['urls']
     assert 'https://platform.openai.com' in presets['chatgpt_services']['urls']
     assert presets['chatgpt_services']['routes'] == service_catalog.CHATGPT_ROUTE_ENTRIES
@@ -1869,7 +1912,9 @@ def test_ai_assistant_custom_routes_are_synced():
     assert set(service_catalog.GEMINI_ROUTE_ENTRIES) <= entries
     assert presets['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert presets['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
+    assert presets['claude']['urls'][0] == 'https://api.anthropic.com/v1/models'
     assert 'https://a-api.anthropic.com' in presets['claude']['urls']
+    assert 'https://claude.ai/api/bootstrap' in presets['claude']['urls']
     assert 'https://aistudio.google.com' in presets['gemini']['urls']
     assert service_catalog.SERVICE_LIST_SOURCES['claude']['entries'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['gemini']['entries'] == service_catalog.GEMINI_ROUTE_ENTRIES
@@ -1936,10 +1981,10 @@ def test_preset_custom_checks_are_hydrated_from_catalog():
     ])
     by_id = {item['id']: item for item in checks}
     assert by_id['claude']['urls'] == [
-        'https://claude.ai',
-        'https://console.anthropic.com',
-        'https://api.anthropic.com',
+        'https://api.anthropic.com/v1/models',
         'https://a-api.anthropic.com',
+        'https://claude.ai/api/bootstrap',
+        'https://console.anthropic.com',
     ]
     assert by_id['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert by_id['gemini']['urls'] == [

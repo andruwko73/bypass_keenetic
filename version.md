@@ -1,3 +1,6 @@
+*v1.638 (25 May 2026) -* main
+*Tightens ChatGPT/Codex and Claude service probes so regional 403 responses and unavailable-region pages are treated as failures, while unauthenticated API 401 responses still confirm reachability.*
+
 *v1.637 (25 May 2026) -* main
 *Hardens Telegram pool checks and failover so API-only keys are not treated as working Telegram keys unless web.telegram.org or t.me also responds through the proxy.*
 

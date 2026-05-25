@@ -230,6 +230,33 @@ def check_http_through_proxy(proxy_url, url=YOUTUBE_HEALTHCHECK_URL, connect_tim
         session.close()
 
 
+CUSTOM_TARGET_DENY_MARKERS = (
+    'unsupported_country_region_territory',
+    'country, region, or territory not supported',
+    'app-unavailable-in-region',
+    'unavailable in region',
+    'unavailable-in-region',
+    'not available in your region',
+    'request not allowed',
+)
+
+
+def _custom_target_denied(response):
+    final_url = str(getattr(response, 'url', '') or '').lower()
+    if any(marker in final_url for marker in CUSTOM_TARGET_DENY_MARKERS):
+        return True
+    try:
+        chunks = response.iter_content(chunk_size=4096)
+        first_chunk = next(chunks, b'')
+    except Exception:
+        first_chunk = b''
+    if isinstance(first_chunk, bytes):
+        text = first_chunk.decode('utf-8', errors='ignore').lower()
+    else:
+        text = str(first_chunk or '').lower()
+    return any(marker in text for marker in CUSTOM_TARGET_DENY_MARKERS)
+
+
 def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_timeout=2, read_timeout=3):
     session = requests.Session()
     session.trust_env = False
@@ -243,7 +270,12 @@ def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_tim
             stream=True,
         )
         status_code = response.status_code
+        denied = _custom_target_denied(response) if status_code < 500 else False
         response.close()
+        if denied:
+            return False, f'{urlparse(target_url).netloc} вернул страницу ограничения региона (HTTP {status_code}).'
+        if status_code in (403, 451):
+            return False, f'{urlparse(target_url).netloc} вернул HTTP {status_code}.'
         if status_code < 500:
             return True, f'Доступ к {urlparse(target_url).netloc} подтверждён (HTTP {status_code}).'
         return False, f'{urlparse(target_url).netloc} вернул HTTP {status_code}.'
