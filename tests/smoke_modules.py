@@ -1941,6 +1941,8 @@ def test_ai_assistant_custom_routes_are_synced():
     assert presets['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert presets['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
     assert presets['claude']['urls'] == ['https://api.anthropic.com/v1/models']
+    assert presets['discord']['urls'] == ['https://discord.com/api/v10/gateway']
+    assert presets['discord']['routes'] == service_catalog.DISCORD_ROUTE_ENTRIES
     assert 'https://aistudio.google.com' in presets['gemini']['urls']
     assert service_catalog.SERVICE_LIST_SOURCES['claude']['entries'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['gemini']['entries'] == service_catalog.GEMINI_ROUTE_ENTRIES

@@ -1,3 +1,6 @@
+*v1.645 (25 May 2026) -* main
+*Makes Discord pool status depend on the primary Discord gateway API probe and invalidates older lenient Discord check results.*
+
 *v1.644 (25 May 2026) -* main
 *Retries transient Telegram sendMessage failures after resetting the Bot API HTTP session and redacts Bot API tokens from surfaced send errors.*
 

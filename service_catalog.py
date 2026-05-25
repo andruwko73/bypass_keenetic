@@ -356,10 +356,7 @@ CUSTOM_CHECK_PRESETS = [
         'label': 'Discord',
         'url': 'https://discord.com',
         'urls': [
-            'https://discord.com',
-            'https://discordapp.com',
-            'https://gateway.discord.gg',
-            'https://cdn.discordapp.com',
+            'https://discord.com/api/v10/gateway',
         ],
         'routes': DISCORD_ROUTE_ENTRIES,
         'badge': 'DC',

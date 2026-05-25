@@ -8,7 +8,7 @@ import time
 KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 KEY_PROBE_CACHE_TTL = 3600
 KEY_PROBE_MIN_WRITE_INTERVAL = 30
-KEY_PROBE_CACHE_SCHEMA_VERSION = 3
+KEY_PROBE_CACHE_SCHEMA_VERSION = 4
 
 _cache_lock = threading.Lock()
 
