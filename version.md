@@ -1,3 +1,6 @@
+*v1.643 (25 May 2026) -* main
+*Invalidates pool probe cache entries written before the Telegram API DNS pin was removed, so old false Telegram failures are recalculated.*
+
 *v1.642 (25 May 2026) -* main
 *Stops temporary pool probes from pinning api.telegram.org to an outdated Telegram IP, preventing working keys from being marked as Telegram failures.*
 
