@@ -1,3 +1,6 @@
+*v1.650 (25 May 2026) -* main
+*Persists paused pool-check queues across memory-watchdog bot restarts so a full check can resume instead of disappearing.*
+
 *v1.649 (25 May 2026) -* main
 *Keeps pool-check progress when a key apply pauses and resumes the queue, and refreshes pool rows live while checks are running.*
 

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.649, последнее изменение: 25.05.2026
+#  Файл: bot.py, Версия v1.650, последнее изменение: 25.05.2026
 
 import subprocess
 import os
@@ -887,6 +887,7 @@ BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
 TELEGRAM_COMMAND_JOB_FILE = '/opt/etc/bot/telegram_command_job.json'
 TELEGRAM_COMMAND_RESULT_FILE = '/opt/etc/bot/telegram_command_result.json'
 WEB_COMMAND_STATE_FILE = '/opt/etc/bot/web_command_state.json'
+POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'
 COMMAND_JOB_STALE_AFTER = 1800
 TELEGRAM_RESULT_RETRY_INTERVAL = 30
 
@@ -4607,6 +4608,80 @@ def _invalidate_probe_status_caches():
     _invalidate_key_status_cache()
 
 
+def _delete_pool_probe_resume_file():
+    try:
+        os.remove(POOL_PROBE_RESUME_FILE)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        _write_runtime_log(f'Failed to remove pool probe resume file: {exc}')
+
+
+def _normalize_pool_probe_resume_payload(payload):
+    if not isinstance(payload, dict):
+        return None
+    tasks = []
+    valid_protocols = set(POOL_PROTOCOL_ORDER)
+    for item in payload.get('tasks') or []:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        proto = str(item[0] or '').strip()
+        key_value = str(item[1] or '').strip()
+        if proto not in valid_protocols or not key_value:
+            continue
+        tasks.append((proto, key_value))
+    if not tasks:
+        return None
+
+    checks = []
+    for check in payload.get('checks') or []:
+        if isinstance(check, dict):
+            checks.append(dict(check))
+    try:
+        checked = int(payload.get('checked') or 0)
+    except Exception:
+        checked = 0
+    try:
+        total = int(payload.get('total') or 0)
+    except Exception:
+        total = 0
+    checked = max(0, checked)
+    total = max(total, checked + len(tasks), len(tasks))
+    checked = min(checked, total)
+    try:
+        started_at = float(payload.get('started_at') or 0)
+    except Exception:
+        started_at = 0.0
+    if started_at <= 0:
+        started_at = time.time()
+    return {
+        'tasks': tasks,
+        'checks': checks,
+        'scope': str(payload.get('scope') or 'manual'),
+        'checked': checked,
+        'total': total,
+        'started_at': started_at,
+    }
+
+
+def _persist_pool_probe_resume_payload(payload):
+    normalized = _normalize_pool_probe_resume_payload(payload)
+    if not normalized:
+        _delete_pool_probe_resume_file()
+        return None
+    serializable = dict(normalized)
+    serializable['tasks'] = [[proto, key_value] for proto, key_value in normalized['tasks']]
+    try:
+        _write_json_file(POOL_PROBE_RESUME_FILE, serializable)
+        try:
+            os.chmod(POOL_PROBE_RESUME_FILE, 0o600)
+        except Exception:
+            pass
+    except Exception as exc:
+        _write_runtime_log(f'Failed to persist pool probe resume queue: {exc}')
+    return normalized
+
+
 def _store_cancelled_pool_probe(probe_tasks, checks, scope):
     global pool_probe_resume_payload
     remaining = list(probe_tasks or [])
@@ -4626,15 +4701,18 @@ def _store_cancelled_pool_probe(probe_tasks, checks, scope):
     except Exception:
         checked = 0
     checked = max(checked, original_total - len(remaining))
+    payload = _persist_pool_probe_resume_payload({
+        'tasks': remaining,
+        'checks': list(checks or []),
+        'scope': scope or 'manual',
+        'checked': max(0, min(checked, original_total)),
+        'total': original_total,
+        'started_at': float(progress.get('started_at') or 0) or time.time(),
+    })
+    if not payload:
+        return
     with pool_probe_resume_lock:
-        pool_probe_resume_payload = {
-            'tasks': remaining,
-            'checks': list(checks or []),
-            'scope': scope or 'manual',
-            'checked': max(0, min(checked, original_total)),
-            'total': original_total,
-            'started_at': float(progress.get('started_at') or 0) or time.time(),
-        }
+        pool_probe_resume_payload = payload
     if not pool_probe_cancel_event.is_set():
         _schedule_low_memory_pool_probe_resume()
 
@@ -4644,21 +4722,51 @@ def _take_cancelled_pool_probe():
     with pool_probe_resume_lock:
         payload = pool_probe_resume_payload
         pool_probe_resume_payload = None
+    if not payload:
+        payload = _normalize_pool_probe_resume_payload(_read_json_file(POOL_PROBE_RESUME_FILE, {}))
+    _delete_pool_probe_resume_file()
     return payload if payload and payload.get('tasks') else None
 
 
 def _has_pool_probe_resume_payload():
     with pool_probe_resume_lock:
-        return bool(pool_probe_resume_payload and pool_probe_resume_payload.get('tasks'))
+        if pool_probe_resume_payload and pool_probe_resume_payload.get('tasks'):
+            return True
+    if os.path.exists(POOL_PROBE_RESUME_FILE):
+        return bool(_normalize_pool_probe_resume_payload(_read_json_file(POOL_PROBE_RESUME_FILE, {})))
+    return False
 
 
 def _restore_pool_probe_resume_payload(payload):
     global pool_probe_resume_payload
-    if not payload or not payload.get('tasks'):
+    payload = _persist_pool_probe_resume_payload(payload)
+    if not payload:
         return
     with pool_probe_resume_lock:
         if not pool_probe_resume_payload:
             pool_probe_resume_payload = payload
+
+
+def _load_persisted_pool_probe_resume():
+    global pool_probe_resume_payload
+    payload = _normalize_pool_probe_resume_payload(_read_json_file(POOL_PROBE_RESUME_FILE, {}))
+    if not payload:
+        _delete_pool_probe_resume_file()
+        return False
+    with pool_probe_resume_lock:
+        if not pool_probe_resume_payload:
+            pool_probe_resume_payload = payload
+    _set_pool_probe_progress(
+        running=False,
+        checked=payload['checked'],
+        total=payload['total'],
+        scope=payload['scope'],
+        note='Проверка пула восстановлена после перезапуска бота и продолжится после освобождения памяти.',
+        started_at=payload['started_at'],
+        finished_at=0,
+    )
+    _schedule_low_memory_pool_probe_resume()
+    return True
 
 
 def _schedule_low_memory_pool_probe_resume():
@@ -4780,10 +4888,12 @@ def _pause_pool_probe_for_apply(timeout=12.0):
 def _cancel_pool_probe(timeout=2.0):
     global pool_probe_resume_after_cancel, pool_probe_resume_payload
     if not pool_probe_lock.locked():
+        _delete_pool_probe_resume_file()
         return False, 'Проверка пула сейчас не выполняется.'
     pool_probe_resume_after_cancel = False
     with pool_probe_resume_lock:
         pool_probe_resume_payload = None
+    _delete_pool_probe_resume_file()
     pool_probe_cancel_event.set()
     _set_pool_probe_progress(note='Остановка проверки пула после текущего ключа.')
     deadline = time.time() + max(0.2, float(timeout or 0))
@@ -6073,6 +6183,7 @@ def main():
         _start_auto_failover_thread()
         _start_youtube_vless2_failover_thread()
         _ensure_current_keys_in_pools()
+        _load_persisted_pool_probe_resume()
     if _app_mode_telegram_enabled(runtime_mode):
         _deliver_pending_telegram_command_result()
         _start_telegram_result_retry_worker()

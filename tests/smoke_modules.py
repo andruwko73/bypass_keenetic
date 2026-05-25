@@ -716,6 +716,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _memory_cleanup' in source
     assert 'def _pool_probe_cpu_busy_percent' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source
+    assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
+    assert 'def _persist_pool_probe_resume_payload' in source
+    assert 'def _load_persisted_pool_probe_resume' in source
+    assert '_load_persisted_pool_probe_resume()' in source
     assert "_schedule_post_pool_memory_cleanup()" in source
     assert "allow_youtube_confirm=True" in source
     assert "allow_youtube_confirm=False" in source
