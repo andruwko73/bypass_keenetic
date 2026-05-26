@@ -2056,9 +2056,10 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'youtube.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     assert '23.216.134.15' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     udp_routes = set(service_catalog.UDP_QUIC_ROUTE_ENTRIES)
-    assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) - set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) <= udp_routes
-    assert not set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) & udp_routes
-    assert set(service_catalog.TELEGRAM_SHARED_EDGE_IP_ENTRIES) <= set(service_catalog.UDP_QUIC_EXCLUDE_ENTRIES)
+    assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= udp_routes
+    assert '8.6.112.6' in udp_routes
+    assert '8.47.69.6' in udp_routes
+    assert not set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) & set(service_catalog.UDP_QUIC_EXCLUDE_ENTRIES)
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "'chatgpt_services'" in bot_source
     assert "'youtube'" in bot_source

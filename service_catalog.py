@@ -117,10 +117,8 @@ CHATGPT_EDGE_IP_ENTRIES = [
 CHATGPT_ROUTE_ENTRIES.extend(CHATGPT_EDGE_IP_ENTRIES)
 
 TELEGRAM_SHARED_EDGE_IP_ENTRIES = [
-    # fragment.com and ton.org currently resolve here. Keep these IPs routed,
-    # but do not mirror them into the UDP/QUIC reject set.
-    '8.6.112.6',
-    '8.47.69.6',
+    # Keep this list empty for now: chatgpt.com can resolve to the same
+    # Cloudflare edges, and excluding them lets browser QUIC leak directly.
 ]
 
 CLAUDE_ROUTE_ENTRIES = [
