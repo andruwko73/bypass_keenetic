@@ -1240,6 +1240,7 @@ def render_web_scripts(
                             '<button type="submit" class="pool-apply-btn" title="Применить этот ключ">' + displayName + '</button>' +
                         '</form>' +
                         '<span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>' + activeText + '</span>' +
+                        '<span class="pool-mobile-checked" data-pool-mobile-checked>' + escapeHtml(row.checked_at || '') + '</span>' +
                         '<span class="pool-hash">' + escapeHtml(row.key_id) + '</span>' +
                     '</td>' +
                     '<td class="pool-service-cell" data-pool-tg>' + probeBadge(row.tg, 'tg') + '</td>' +
@@ -1312,6 +1313,10 @@ def render_web_scripts(
                 const checked = item.querySelector('[data-pool-checked]');
                 if (checked) {{
                     checked.textContent = row.checked_at || '';
+                }}
+                const mobileChecked = item.querySelector('[data-pool-mobile-checked]');
+                if (mobileChecked) {{
+                    mobileChecked.textContent = row.checked_at || '';
                 }}
             }});
             applyPoolView(proto, true);

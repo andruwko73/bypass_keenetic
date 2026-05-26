@@ -1,3 +1,6 @@
+*v1.657 (26 May 2026) -* main
+*Removes the redundant active-first pool sort option and shows pool check timestamps in mobile key rows.*
+
 *v1.656 (26 May 2026) -* main
 *Restores the Telegram Information button by parsing the current README sections and shipping README.md with router installs and updates for offline fallback.*
 

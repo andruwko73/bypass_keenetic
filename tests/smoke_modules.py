@@ -2623,6 +2623,8 @@ def test_web_pool_form_blocks_helpers():
     assert 'csrf_token' in pool_rows
     assert 'pool-delete-icon' in pool_rows
     assert '&times;' in pool_rows
+    assert 'data-pool-mobile-checked' in pool_rows
+    assert '>now</span>' in pool_rows
     panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
         title='Vless 1',
@@ -2646,6 +2648,7 @@ def test_web_pool_form_blocks_helpers():
     assert 'protocol-workspace active' in panel
     assert 'pool-sort-control' in panel
     assert 'data-pool-sort-value="telegram"' in panel
+    assert 'data-pool-sort-value="active"' not in panel
     assert 'data-pool-sort-value="problem"' in panel
     assert 'custom-check-form' in panel
     assert 'data-pool-probe-start-button aria-disabled="false"' in panel

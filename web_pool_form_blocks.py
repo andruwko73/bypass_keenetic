@@ -106,6 +106,7 @@ def render_pool_items(
                                 <button type="submit" class="pool-apply-btn" title="Применить этот ключ">{display_name}</button>
                             </form>
                             <span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>{active_text}</span>
+                            <span class="pool-mobile-checked" data-pool-mobile-checked>{checked_at}</span>
                             <span class="pool-hash">{key_id}</span>
                         </td>
                         <td class="pool-service-cell" data-pool-tg>{tg_badge}</td>
@@ -222,7 +223,6 @@ def render_protocol_panel(
                     <button type="button" class="pool-sort-button" data-pool-sort-button="{safe_key_name}" aria-expanded="false">Исходный порядок</button>
                     <div class="pool-sort-menu hidden" data-pool-sort-menu="{safe_key_name}">
                         <button type="button" class="pool-sort-option active" data-pool-sort-value="original">Исходный порядок</button>
-                        <button type="button" class="pool-sort-option" data-pool-sort-value="active">Активный сверху</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="telegram">Telegram сначала</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="youtube">YouTube сначала</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="checked">Свежие проверки</button>
