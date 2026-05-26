@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.653, последнее изменение: 26.05.2026
+#  Файл: bot.py, Версия v1.654, последнее изменение: 26.05.2026
 
 import subprocess
 import os
@@ -598,6 +598,8 @@ def _attempt_auto_failover():
         check_timeouts=(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
         key_probe_cache=_load_key_probe_cache,
         hash_key=_hash_key,
+        is_transient_failure=_is_transient_telegram_api_failure,
+        transient_success_ttl=TELEGRAM_TRANSIENT_OK_CACHE_TTL,
         protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER,
     )
 

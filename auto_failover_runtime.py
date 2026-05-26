@@ -26,6 +26,8 @@ def attempt_auto_failover(
     protocols=POOL_PROTOCOLS,
     key_probe_cache=None,
     hash_key=None,
+    is_transient_failure=None,
+    transient_success_ttl=0,
     time_provider=time.time,
 ):
     now = time_provider()
@@ -37,11 +39,30 @@ def attempt_auto_failover(
         return False
 
     connect_timeout, read_timeout = check_timeouts
-    ok, _ = check_telegram_api(proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout)
+    ok, failure_message = check_telegram_api(proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout)
     if ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0
         return False
+
+    current_keys = None
+    if callable(is_transient_failure) and is_transient_failure(failure_message):
+        current_keys = load_current_keys()
+        active_key = (current_keys.get(proxy_mode) or '').strip()
+        probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
+        active_probe = probe_cache.get(hash_key(active_key), {}) if probe_cache and hash_key and active_key else {}
+        try:
+            checked_ts = float(active_probe.get('ts') or 0)
+        except (TypeError, ValueError):
+            checked_ts = 0.0
+        if (
+            active_probe.get('tg_ok') is True and
+            checked_ts and
+            now - checked_ts <= float(transient_success_ttl or 0)
+        ):
+            state['last_fail'] = 0.0
+            log('Auto-failover: временный сбой Telegram API, активный ключ недавно проверялся успешно; переключение пропущено.')
+            return False
 
     if not state['last_fail']:
         state['last_fail'] = now
@@ -51,7 +72,7 @@ def attempt_auto_failover(
     state['in_progress'] = True
     state['last_attempt'] = now
     try:
-        current_keys = load_current_keys()
+        current_keys = current_keys if current_keys is not None else load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
         probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
         candidates = failover_candidates(

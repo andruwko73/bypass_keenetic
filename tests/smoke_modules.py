@@ -1176,6 +1176,34 @@ def test_auto_failover_runtime_helpers():
     assert state['last_fail'] == 0.0
     assert ('update', 'vless') in calls
     assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': None} for call in calls)
+    transient_calls = []
+    transient_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=transient_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'SSLEOFError: UNEXPECTED_EOF_WHILE_READING'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: transient_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: transient_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: transient_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: transient_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: transient_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        key_probe_cache={'active-hash': {'tg_ok': True, 'ts': 19.0}},
+        hash_key=lambda key: f'{key}-hash',
+        is_transient_failure=lambda text: 'SSLEOFError' in text,
+        transient_success_ttl=60,
+        time_provider=lambda: 20.0,
+    ) is False
+    assert transient_state['last_fail'] == 0.0
+    assert not any(call[0] == 'install' for call in transient_calls)
+    assert any(call[0] == 'log' and 'временный сбой' in call[1] for call in transient_calls)
     locked_calls = []
     locked_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
     assert auto_failover_runtime.attempt_auto_failover(

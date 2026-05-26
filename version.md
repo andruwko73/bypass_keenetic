@@ -1,3 +1,6 @@
+*v1.654 (26 May 2026) -* main
+*Prevents Telegram auto-failover from switching away from a recently healthy active key after a transient TLS EOF or timeout probe.*
+
 *v1.653 (26 May 2026) -* main
 *Treats Telegram Bot API TLS EOF responses as transient status checks so a recent successful active-key result is not overwritten by one flaky probe.*
 
