@@ -1,3 +1,6 @@
+*v1.656 (26 May 2026) -* main
+*Restores the Telegram Information button by parsing the current README sections and shipping README.md with router installs and updates for offline fallback.*
+
 *v1.655 (26 May 2026) -* main
 *Also uses the Telegram auto-failover's own recent-success timestamp to skip transient switches even when the UI probe cache is stale.*
 

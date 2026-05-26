@@ -1146,6 +1146,13 @@ def test_telegram_info_runtime_helpers():
     assert '<a href="https://example.com">ссылкой</a>' in text
     assert 'screen.png' not in text
     assert 'Не показывать' not in text
+    current_readme_text = telegram_info_runtime.telegram_info_html((ROOT / 'README.md').read_text(encoding='utf-8'))
+    assert '<b>Возможности</b>' in current_readme_text
+    assert 'Telegram-бот' in current_readme_text
+    script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    bootstrap_source = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    assert 'README.md' in script_source.split('BOT_RUNTIME_MODULES=', 1)[1].split('\n', 1)[0]
+    assert 'README.md' in bootstrap_source.split('BOT_RUNTIME_MODULES=', 1)[1].split('\n', 1)[0]
     assert telegram_info_runtime.telegram_info_html('').startswith('Информация временно недоступна')
 
 
