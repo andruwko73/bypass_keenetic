@@ -7,6 +7,9 @@ from urllib.parse import urlparse
 
 
 TRANSIENT_STATUS_MARKERS = (
+    'ssleoferror',
+    'unexpected_eof',
+    'unexpected eof',
     'network is unreachable',
     'timed out',
     'timeout',
@@ -17,6 +20,12 @@ TRANSIENT_STATUS_MARKERS = (
     'max retries exceeded',
     'failed to establish a new connection',
     'connection reset',
+    'connection aborted',
+    'remote disconnected',
+    'удалённая сторона закрыла',
+    'удаленная сторона закрыла',
+    'разорвал tls-соединение',
+    'разорвал tls соединение',
 )
 
 YOUTUBE_HEALTHCHECK_URL = 'https://www.youtube.com/generate_204'

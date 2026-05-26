@@ -813,6 +813,8 @@ def test_web_status_runtime_helpers():
     failed = web_status_runtime.protocol_preflight_status('key', False, 'SOCKS fail', proxy_user_label='Web')
     assert failed['tone'] == 'fail' and 'Web' in failed['details']
     assert web_status_runtime.protocol_preflight_status('key', True, 'SOCKS ok', xray_required=True)['label'] == 'Требует Xray'
+    assert proxy_status.is_transient_status_text('SSLEOFError: UNEXPECTED_EOF_WHILE_READING')
+    assert proxy_status.is_transient_status_text('Прокси-сервер разорвал TLS-соединение с api.telegram.org.')
     pending = web_status_runtime.build_web_status_snapshot(
         state_label='state',
         proxy_mode='vless',

@@ -1,3 +1,6 @@
+*v1.653 (26 May 2026) -* main
+*Treats Telegram Bot API TLS EOF responses as transient status checks so a recent successful active-key result is not overwritten by one flaky probe.*
+
 *v1.652 (26 May 2026) -* main
 *Adds ChatGPT registration/auth challenge dependencies to the Vless service routes.*
 
