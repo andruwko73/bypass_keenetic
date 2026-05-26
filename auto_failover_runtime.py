@@ -47,6 +47,15 @@ def attempt_auto_failover(
 
     current_keys = None
     if callable(is_transient_failure) and is_transient_failure(failure_message):
+        ttl = float(transient_success_ttl or 0)
+        try:
+            last_ok = float(state.get('last_ok') or 0)
+        except (TypeError, ValueError):
+            last_ok = 0.0
+        if last_ok and now - last_ok <= ttl:
+            state['last_fail'] = 0.0
+            log('Auto-failover: временный сбой Telegram API после недавнего успешного ответа; переключение пропущено.')
+            return False
         current_keys = load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
         probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
@@ -58,7 +67,7 @@ def attempt_auto_failover(
         if (
             active_probe.get('tg_ok') is True and
             checked_ts and
-            now - checked_ts <= float(transient_success_ttl or 0)
+            now - checked_ts <= ttl
         ):
             state['last_fail'] = 0.0
             log('Auto-failover: временный сбой Telegram API, активный ключ недавно проверялся успешно; переключение пропущено.')

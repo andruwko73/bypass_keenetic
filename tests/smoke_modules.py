@@ -1204,6 +1204,31 @@ def test_auto_failover_runtime_helpers():
     assert transient_state['last_fail'] == 0.0
     assert not any(call[0] == 'install' for call in transient_calls)
     assert any(call[0] == 'log' and 'временный сбой' in call[1] for call in transient_calls)
+    last_ok_calls = []
+    last_ok_state = {'last_ok': 19.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=last_ok_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'Read timed out'),
+        load_current_keys=lambda: (_ for _ in ()).throw(AssertionError('recent last_ok should skip key lookup')),
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: last_ok_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: last_ok_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: last_ok_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: last_ok_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: last_ok_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        is_transient_failure=lambda text: 'timed out' in text,
+        transient_success_ttl=60,
+        time_provider=lambda: 20.0,
+    ) is False
+    assert last_ok_state['last_fail'] == 0.0
+    assert not any(call[0] == 'install' for call in last_ok_calls)
     locked_calls = []
     locked_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
     assert auto_failover_runtime.attempt_auto_failover(

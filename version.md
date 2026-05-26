@@ -1,3 +1,6 @@
+*v1.655 (26 May 2026) -* main
+*Also uses the Telegram auto-failover's own recent-success timestamp to skip transient switches even when the UI probe cache is stale.*
+
 *v1.654 (26 May 2026) -* main
 *Prevents Telegram auto-failover from switching away from a recently healthy active key after a transient TLS EOF or timeout probe.*
 
