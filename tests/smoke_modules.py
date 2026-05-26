@@ -2038,6 +2038,9 @@ def test_chatgpt_codex_routes_are_synced():
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
     assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
     assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com', 'google.com'} <= entries
+    assert {'cdn.auth0.com', 'assets.auth0.com', 'static.auth0.com', 'login.openai.com'} <= entries
+    assert {'js.hcaptcha.com', 'client-api.arkoselabs.com', 'openai-api.arkoselabs.com'} <= entries
+    assert {'q.stripe.com', 'm.stripe.network', 'turnstile.cloudflare.com'} <= entries
 
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
     assert 'chatgpt_services' in presets

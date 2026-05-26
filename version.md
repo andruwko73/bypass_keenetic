@@ -1,3 +1,6 @@
+*v1.652 (26 May 2026) -* main
+*Adds ChatGPT registration/auth challenge dependencies to the Vless service routes.*
+
 *v1.651 (26 May 2026) -* main
 *Blocks ChatGPT/Codex Cloudflare edge QUIC leaks so browser traffic falls back to TCP through the selected Vless route.*
 
