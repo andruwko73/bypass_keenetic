@@ -351,6 +351,7 @@ def _pool_apply(ctx, data):
         key_to_apply, key_id, _ = _resolve_pool_key(ctx, proto, data)
         result = _ctx(ctx, 'install_key_for_protocol')(proto, key_to_apply, verify=True)
         _ctx(ctx, 'set_active_key')(proto, key_to_apply)
+        _call(ctx, 'audit_key_switch', 'web_pool_apply', proto, key_to_apply, 'manual pool apply')
         refreshed_status = _call(ctx, 'probe_applied_pool_key_services', proto, key_to_apply)
         if refreshed_status:
             result = f'{result}\n{refreshed_status}'
@@ -433,6 +434,7 @@ def _install(ctx, data):
         if success and key_type in PROXY_PROTOCOLS:
             if _ctx(ctx, 'set_active_key'):
                 _ctx(ctx, 'set_active_key')(key_type, key_value)
+                _call(ctx, 'audit_key_switch', 'web_manual_install', key_type, key_value, 'manual install')
                 _refresh_pool_status(ctx)
             _invalidate_status(ctx)
     finally:

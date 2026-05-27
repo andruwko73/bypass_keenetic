@@ -517,6 +517,16 @@ ensure_runtime_legacy_paths() {
   fi
 }
 
+migrate_runtime_config_defaults() {
+  [ -f "$BOT_CONFIG_PATH" ] || return 0
+  if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(61440|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^memory_watchdog_idle_restart_rss_kb[[:space:]]*=.*/memory_watchdog_idle_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
+  fi
+  if grep -Eq '^memory_post_pool_restart_rss_kb[[:space:]]*=[[:space:]]*(61440|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^memory_post_pool_restart_rss_kb[[:space:]]*=.*/memory_post_pool_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
+  fi
+}
+
 generate_udp_quic_policy_file() {
   python_bin="/opt/bin/python3"
   [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
@@ -873,6 +883,7 @@ if [ "$1" = "-update" ]; then
     chmod 755 "$BOT_MAIN_PATH"
     activate_runtime_modules $BOT_RUNTIME_MODULES
     ensure_runtime_legacy_paths
+    migrate_runtime_config_defaults
     generate_udp_quic_policy_file
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"

@@ -48,6 +48,7 @@ import probe_cache
 import auto_failover_runtime
 import proxy_apply_runtime
 import proxy_status
+import proxy_protocols
 import unblock_lists
 import service_catalog
 import custom_checks_store
@@ -312,6 +313,23 @@ def test_proxy_config_builder():
     ]
     assert transparent_inbounds
     assert all(inbound['settings']['network'] == 'tcp,udp' for inbound in transparent_inbounds)
+    assert all(inbound['streamSettings']['sockopt']['tproxy'] == 'redirect' for inbound in transparent_inbounds)
+    assert all(inbound['sniffing']['enabled'] is False for inbound in transparent_inbounds)
+    reality_outbound = proxy_protocols.proxy_outbound_from_key(
+        'vless',
+        'vless://00000000-0000-0000-0000-000000000000@example.com:443'
+        '?security=reality&flow=xtls-rprx-vision&pbk=pub&sid=short&fp=firefox&type=tcp#sample',
+        'proxy-vless',
+    )
+    assert reality_outbound['streamSettings']['realitySettings']['fingerprint'] == 'firefox'
+    assert reality_outbound['streamSettings']['realitySettings']['spiderX'] == '/'
+    default_reality_outbound = proxy_protocols.proxy_outbound_from_key(
+        'vless',
+        'vless://00000000-0000-0000-0000-000000000000@example.com:443'
+        '?security=reality&flow=xtls-rprx-vision&pbk=pub&sid=short&type=tcp#sample',
+        'proxy-vless',
+    )
+    assert default_reality_outbound['streamSettings']['realitySettings']['fingerprint'] == 'chrome'
 
 
 def test_key_pool_web():
@@ -554,15 +572,15 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_max_cpu_percent = 70.0' in example
     assert 'pool_probe_max_cpu_percent = 70.0' in installer
     assert 'pool_probe_max_cpu_percent = 70.0' in bootstrap
-    assert 'memory_watchdog_idle_restart_rss_kb = 61440' in example
-    assert 'memory_watchdog_idle_restart_rss_kb = 61440' in installer
-    assert 'memory_watchdog_idle_restart_rss_kb = 61440' in bootstrap
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in example
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in installer
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in bootstrap
-    assert 'memory_post_pool_restart_rss_kb = 61440' in example
-    assert 'memory_post_pool_restart_rss_kb = 61440' in installer
-    assert 'memory_post_pool_restart_rss_kb = 61440' in bootstrap
+    assert 'memory_post_pool_restart_rss_kb = 71680' in example
+    assert 'memory_post_pool_restart_rss_kb = 71680' in installer
+    assert 'memory_post_pool_restart_rss_kb = 71680' in bootstrap
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in example
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in installer
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in bootstrap
@@ -578,6 +596,9 @@ def test_codex_version_matches_commit_count():
     assert 'ipv6_bypass_fallback_enabled = True' in example
     assert 'ipv6_bypass_fallback_enabled = True' in installer
     assert 'ipv6_bypass_fallback_enabled = True' in bootstrap
+    assert 'reality_endpoint_overrides = {}' in example
+    assert 'reality_endpoint_overrides = {{}}' in installer
+    assert 'reality_endpoint_overrides = {}' in bootstrap
     assert 'youtube_vless2_failover_enabled = True' in example
     assert 'youtube_vless2_failover_enabled = True' in installer
     assert 'youtube_vless2_failover_enabled = True' in bootstrap
@@ -666,8 +687,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless6 hash:net family inet6 -exist' in ipset_boot_script
     assert 'ipset create unblockvless2v6 hash:net family inet6 -exist' in ipset_boot_script
-    assert '--match-set unblockvlessudp dst --dport 443 -j REJECT' in redirect_script
-    assert '--match-set unblockvless2udp dst --dport 443 -j REJECT' in redirect_script
+    assert '--match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-port 10812' in redirect_script
+    assert '--match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814' in redirect_script
+    assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT' not in redirect_script
+    assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT' not in redirect_script
     assert 'install_ipv6_fallback_rules()' in redirect_script
     assert 'BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"' in redirect_script
     assert 'ip6tables -I FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT' in redirect_script
@@ -680,8 +703,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     assert 'refresh_vless_tcp_priority()' in redirect_script
-    assert 'install_vless_tcp_forward_guard()' in redirect_script
-    assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' in redirect_script
+    assert 'remove_vless_tcp_forward_guard()' in redirect_script
+    assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' not in redirect_script
     assert 'CRD/Telegram-style service routes do not get captured by the YouTube key' in redirect_script
     vless2_insert = (
         'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
@@ -709,15 +732,30 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'threading.stack_size(256 * 1024)' in source
     assert "pool_probe_min_available_kb', 160000" in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
-    assert "memory_watchdog_idle_restart_rss_kb', 60 * 1024" in source
+    assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert 'def _sync_udp_policy_config' in source
+    assert 'def _apply_reality_endpoint_override' in source
+    assert 'REALITY_ENDPOINT_OVERRIDES' in source
+    assert 'authenticated=False' in source
+    assert 'def _start_udp_quic_drift_watchdog_thread' in source
+    assert 'UDP_QUIC_DRIFT_SENTINEL_DOMAINS' in source
+    assert "subprocess.run(\n            ['/opt/bin/unblock_ipset.sh']" in source
     assert 'memory_watchdog_high_rss_since' in source
     assert 'memory_watchdog_idle_restart_pending' in source
     assert 'memory_watchdog_idle_restart_in_seconds' in source
     assert 'автоперезапуск уже запрошен' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
+    assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
+    script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'migrate_runtime_config_defaults' in script_source
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
+    assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
+    assert 'def _placeholder_status_snapshot' in source
+    assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
+    assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source
+    assert 'allow_youtube_confirm=False' in source
     assert 'def _pool_probe_cpu_busy_percent' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source
     assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
@@ -735,8 +773,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
     assert "'probe_applied_pool_key_services'" in (ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
-    assert "proxy_mode == 'vless2'" in source
-    assert 'Telegram is required because bot mode is Vless 2' in source
+    assert "auto_failover_recent_success_ttl', 300" in source
+    assert "youtube_vless2_failover_recent_success_ttl', 300" in source
+    assert 'def _youtube_route_protocol' in source
+    assert "YOUTUBE_ROUTE_PROTOCOLS = ('vless', 'vless2')" in source
+    assert "proxy_mode == route_proto" in source
+    assert 'Telegram is required because bot mode is' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
     assert "youtube_stream_guard_failover_hold_seconds" in source
     assert "cached_fail_since or now" in source
@@ -1236,6 +1278,62 @@ def test_auto_failover_runtime_helpers():
     ) is False
     assert last_ok_state['last_fail'] == 0.0
     assert not any(call[0] == 'install' for call in last_ok_calls)
+    recent_probe_calls = []
+    recent_probe_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=recent_probe_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'TLS EOF'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: recent_probe_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: recent_probe_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: recent_probe_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: recent_probe_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: recent_probe_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        key_probe_cache={'active-hash': {'tg_ok': True, 'ts': 19.0}},
+        hash_key=lambda key: f'{key}-hash',
+        recent_success_ttl=60,
+        time_provider=lambda: 20.0,
+    ) is False
+    assert recent_probe_state['last_fail'] == 0.0
+    assert not any(call[0] == 'install' for call in recent_probe_calls)
+    assert any(call[0] == 'log' and 'recently marked working' in call[1] for call in recent_probe_calls)
+    confirm_calls = []
+    confirm_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    confirm_results = iter([(False, 'first fail'), (True, 'confirm ok')])
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=confirm_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: confirm_calls.append(('check', kwargs)) or next(confirm_results),
+        load_current_keys=lambda: (_ for _ in ()).throw(AssertionError('confirmed active key should skip key lookup')),
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: confirm_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: confirm_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: confirm_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: confirm_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: confirm_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        check_timeouts=(2, 3),
+        time_provider=lambda: 20.0,
+    ) is False
+    assert confirm_state['last_fail'] == 0.0
+    assert confirm_calls[:2] == [
+        ('check', {'connect_timeout': 2, 'read_timeout': 3}),
+        ('check', {'connect_timeout': 5.0, 'read_timeout': 8.0}),
+    ]
+    assert not any(call[0] == 'install' for call in confirm_calls)
     locked_calls = []
     locked_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
     assert auto_failover_runtime.attempt_auto_failover(
@@ -1268,6 +1366,14 @@ def test_proxy_apply_runtime_helpers():
         'vless2': 10813,
         'trojan': 10816,
     })
+    youtube_calls = []
+    youtube_ok, _ = proxy_apply_runtime.check_youtube_health(
+        lambda proxy, **kwargs: youtube_calls.append(kwargs['url']) or (len(youtube_calls) == 3, 'probe'),
+        'proxy-url',
+        timeouts=(1, 1),
+    )
+    assert youtube_ok is True
+    assert youtube_calls == list(proxy_apply_runtime.YOUTUBE_HEALTHCHECK_URLS[:3])
     commands = []
     sleeps = []
     records = []
@@ -1329,6 +1435,28 @@ def test_proxy_apply_runtime_helpers():
     )
     assert 'YouTube' in vless2_result
     assert vless2_records == [('vless2', 'yt-key', {'tg_ok': None, 'yt_ok': True})]
+
+    routed_vless_records = []
+    routed_vless_result = proxy_apply_runtime.apply_installed_proxy_runtime(
+        'vless',
+        'yt-on-vless1',
+        settings=settings,
+        app_mode_noun='СЂРµР¶РёРј Р±РѕС‚Р°',
+        load_proxy_mode=lambda: 'vless2',
+        proxy_mode_label=lambda mode: 'Vless 2',
+        proxy_url_getter=lambda proto: 'proxy-url',
+        build_diagnostics=lambda proto, key: 'diag',
+        ensure_service_port=lambda port, restart_cmd, **kwargs: True,
+        check_local_endpoint=lambda proto, port: (True, 'SOCKS ok.'),
+        check_telegram_api=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('telegram must not block selected youtube route')),
+        check_http=lambda proxy, **kwargs: (True, 'yt ok'),
+        record_key_probe=lambda proto, key, **kwargs: routed_vless_records.append((proto, key, kwargs)),
+        youtube_route_protocol_getter=lambda: 'vless',
+        run_command=lambda command: None,
+        sleep=lambda seconds: None,
+    )
+    assert 'YouTube' in routed_vless_result
+    assert routed_vless_records == [('vless', 'yt-on-vless1', {'tg_ok': None, 'yt_ok': True})]
 
 
 def test_pool_probe_controller_helpers():
@@ -2499,6 +2627,17 @@ def test_web_get_actions_helpers():
     assert status['payload']['timestamp'] == 123.0
     assert 'pools' not in status['payload']
     assert refreshed == [current_keys]
+    placeholder_refreshed = []
+    placeholder_ctx = dict(ctx)
+    placeholder_ctx.update({
+        'placeholder_status_snapshot': lambda keys: {'web': {'state': 'placeholder'}, 'protocols': {'vless': {'label': 'pending'}}},
+        'active_mode_status_snapshot': lambda keys: (_ for _ in ()).throw(AssertionError('status API must not block on active checks')),
+        'refresh_status_caches_async': lambda keys: placeholder_refreshed.append(keys),
+        'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
+    })
+    placeholder_status = web_get_actions.dispatch(placeholder_ctx, '/api/status')
+    assert placeholder_status['payload']['web'] == {'state': 'placeholder'}
+    assert placeholder_refreshed == [current_keys]
     pools = web_get_actions.dispatch(ctx, '/api/pools')
     assert pools['payload']['pools'] == {'vless': {'rows': []}}
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
@@ -3235,12 +3374,13 @@ def test_telegram_pool_ui():
 
 def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
-    assert "key_name == 'vless2'" in source
+    assert 'key_name == _youtube_route_protocol()' in source
     assert "probe.get('yt_ok') is not True" in source
+    assert "def _schedule_youtube_cache_confirm" in source
     assert "def _schedule_vless2_youtube_cache_confirm" in source
     assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
     assert "_controller_check_youtube_through_proxy" in source
-    assert "_record_key_probe('vless2', key_value, yt_ok=True)" in source
+    assert "_record_key_probe(proto, key_value, yt_ok=True)" in source
     assert "_invalidate_key_status_cache()" in source
 
 

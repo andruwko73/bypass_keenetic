@@ -51,7 +51,7 @@ def parse_vless_key(key):
     public_key = params.get('pbk', params.get('publicKey', ['']))[0]
     short_id = params.get('sid', params.get('shortId', ['']))[0]
     fingerprint = params.get('fp', params.get('fingerprint', ['']))[0]
-    spider_x = params.get('spx', params.get('spiderX', ['']))[0]
+    spider_x = params.get('spx', params.get('spiderX', ['']))[0] or '/'
     alpn = params.get('alpn', [''])[0]
     if not service_name and (network == 'grpc' or security == 'reality'):
         service_name = address
@@ -73,6 +73,13 @@ def parse_vless_key(key):
         'spiderX': spider_x,
         'alpn': alpn,
     }
+
+
+def reality_fingerprint(value):
+    fingerprint = str(value or '').strip().lower()
+    if not fingerprint:
+        return 'chrome'
+    return fingerprint
 
 
 def parse_trojan_key(key):
@@ -206,8 +213,8 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
                 'serverName': data.get('sni', '') or data.get('host', '') or data.get('address', ''),
                 'publicKey': data.get('publicKey', ''),
                 'shortId': data.get('shortId', ''),
-                'fingerprint': data.get('fingerprint', 'chrome'),
-                'spiderX': data.get('spiderX', '/'),
+                'fingerprint': reality_fingerprint(data.get('fingerprint')),
+                'spiderX': data.get('spiderX') or '/',
             }
             if data.get('alpn'):
                 stream_settings['realitySettings']['alpn'] = [item.strip() for item in data['alpn'].split(',') if item.strip()]

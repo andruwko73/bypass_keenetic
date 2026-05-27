@@ -59,17 +59,24 @@ def _status_payload(ctx):
     current_keys = _ctx(ctx, 'load_current_keys')()
     snapshot = _ctx(ctx, 'cached_status_snapshot')(current_keys)
     if snapshot is None:
-        active_snapshot = _ctx(ctx, 'active_mode_status_snapshot')
-        if active_snapshot:
-            snapshot = active_snapshot(current_keys)
+        placeholder_snapshot = _ctx(ctx, 'placeholder_status_snapshot')
+        if placeholder_snapshot:
+            snapshot = placeholder_snapshot(current_keys)
             pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
             if not pool_probe_locked():
                 _call(ctx, 'refresh_status_caches_async', current_keys)
         else:
-            snapshot = {
-                'web': _ctx(ctx, 'placeholder_web_status_snapshot')(),
-                'protocols': _ctx(ctx, 'placeholder_protocol_statuses')(current_keys),
-            }
+            active_snapshot = _ctx(ctx, 'active_mode_status_snapshot')
+            if active_snapshot:
+                snapshot = active_snapshot(current_keys)
+                pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
+                if not pool_probe_locked():
+                    _call(ctx, 'refresh_status_caches_async', current_keys)
+            else:
+                snapshot = {
+                    'web': _ctx(ctx, 'placeholder_web_status_snapshot')(),
+                    'protocols': _ctx(ctx, 'placeholder_protocol_statuses')(current_keys),
+                }
     if _ctx(ctx, 'refresh_status_on_api', False):
         _call(ctx, 'refresh_status_caches_async', current_keys)
 

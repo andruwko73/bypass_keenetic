@@ -7,7 +7,7 @@ YOUTUBE_HEALTHCHECK_URLS = (
     'https://i.ytimg.com/generate_204',
     'https://www.youtube.com',
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 2
+YOUTUBE_HEALTHCHECK_MIN_OK = 1
 
 
 def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
@@ -81,6 +81,7 @@ def apply_installed_proxy_runtime(
     check_telegram_api,
     check_http=None,
     record_key_probe=None,
+    youtube_route_protocol_getter=None,
     verify=True,
     run_command=os.system,
     sleep=time.sleep,
@@ -116,7 +117,8 @@ def apply_installed_proxy_runtime(
                 f'статус обновится без перезагрузки страницы. Текущий {app_mode_noun} {active_label} сохранён.').strip()
 
     proxy_url = proxy_url_getter(key_type)
-    if key_type == 'vless2' and active_mode != 'vless2' and check_http is not None:
+    youtube_route_proto = youtube_route_protocol_getter() if callable(youtube_route_protocol_getter) else 'vless2'
+    if key_type == youtube_route_proto and active_mode != key_type and check_http is not None:
         yt_ok, yt_probe_message = check_youtube_health(
             check_http,
             proxy_url,

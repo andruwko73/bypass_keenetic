@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.657
+# ВЕРСИЯ СКРИПТА v1.658
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -22,19 +22,20 @@ pool_probe_high_cpu_max_wait_seconds = 45.0
 memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
 memory_watchdog_rss_soft_kb = 87040  # при достижении порога очищаются кэши статуса и запускается gc.collect()
 memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот перезапустится, если сейчас не идёт обновление или проверка пула
-memory_watchdog_idle_restart_rss_kb = 61440  # если бот долго держит RSS выше этого уровня в простое, сервис будет мягко перезапущен
+memory_watchdog_idle_restart_rss_kb = 71680  # если бот долго держит RSS выше этого уровня в простое, сервис будет мягко перезапущен
 memory_watchdog_idle_restart_hold_seconds = 120.0
 memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
 memory_post_pool_restart_enabled = True  # после проверки пула бот сам снизит память и перезапустится, если Python RSS остался высоким
-memory_post_pool_restart_rss_kb = 61440
+memory_post_pool_restart_rss_kb = 71680
 memory_post_pool_restart_delay_seconds = 20.0
 memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
 udp_quic_block_vless_enabled = True  # умная блокировка QUIC/UDP 443 для YouTube-доменов из списка Vless 1
 udp_quic_block_vless2_enabled = True  # умная блокировка QUIC/UDP 443 для YouTube-доменов из списка Vless 2
 ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси
+reality_endpoint_overrides = {}  # необязательно: {'server.example.com': '203.0.113.10'} для Reality-доменов с нестабильным DNS-бэкендом
 youtube_vless2_failover_enabled = True  # YouTube остается на Vless 2: если текущий Vless2 ключ перестал отвечать, бот подберет другой из пула Vless2
 youtube_vless2_failover_grace_seconds = 180
 youtube_vless2_failover_poll_seconds = 120
@@ -43,6 +44,9 @@ youtube_vless2_failover_check_connect_timeout = 6
 youtube_vless2_failover_check_read_timeout = 10
 youtube_vless2_failover_confirm_retries = 3
 youtube_vless2_failover_confirm_delay_seconds = 8.0
+youtube_vless2_restart_recheck_enabled = True
+youtube_vless2_restart_recheck_cooldown_seconds = 300
+youtube_vless2_failover_consecutive_failures = 3
 youtube_stream_guard_failover_hold_seconds = 45  # Если при просмотре YouTube трафик пропал, автозамена Vless2 сможет продолжиться после этой паузы
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять

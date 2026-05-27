@@ -146,15 +146,21 @@ done
 while iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvless dst -j REDIRECT --to-port 10812 2>/dev/null; do
 	iptables -t nat -D PREROUTING -w -p udp -m set --match-set unblockvless dst -j REDIRECT --to-port 10812
 done
+while iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-port 10812 2>/dev/null; do
+	iptables -t nat -D PREROUTING -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-port 10812
+done
 while iptables -C FORWARD -w -p udp -m set --match-set unblockvless dst --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
 	iptables -D FORWARD -w -p udp -m set --match-set unblockvless dst --dport 443 -j REJECT --reject-with icmp-port-unreachable
 done
 while iptables -C FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
 	iptables -D FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable
 done
+while iptables -C FORWARD -w -p udp -m set --match-set unblockvlessudp dst -m udp --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
+	iptables -D FORWARD -w -p udp -m set --match-set unblockvlessudp dst -m udp --dport 443 -j REJECT --reject-with icmp-port-unreachable
+done
 if [ "$BYPASS_UDP_QUIC_BLOCK_VLESS" != "0" ]; then
-	if ! iptables -C FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; then
-		iptables -I FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable
+	if ! iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-port 10812 2>/dev/null; then
+		iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-port 10812
 	fi
 fi
 
@@ -173,11 +179,17 @@ done
 while iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814 2>/dev/null; do
 	iptables -t nat -D PREROUTING -w -p udp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814
 done
+while iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814 2>/dev/null; do
+	iptables -t nat -D PREROUTING -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814
+done
 while iptables -C FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
 	iptables -D FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT --reject-with icmp-port-unreachable
 done
 while iptables -C FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
 	iptables -D FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable
+done
+while iptables -C FORWARD -w -p udp -m set --match-set unblockvless2udp dst -m udp --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
+	iptables -D FORWARD -w -p udp -m set --match-set unblockvless2udp dst -m udp --dport 443 -j REJECT --reject-with icmp-port-unreachable
 done
 
 vless2_key_path=""
@@ -193,8 +205,8 @@ if [ -n "$vless2_key_path" ]; then
 		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814
 	fi
 	if [ "$BYPASS_UDP_QUIC_BLOCK_VLESS2" != "0" ]; then
-		if ! iptables -C FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; then
-			iptables -I FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT --reject-with icmp-port-unreachable
+		if ! iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814 2>/dev/null; then
+			iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814
 		fi
 	fi
 fi
@@ -216,18 +228,15 @@ refresh_vless_tcp_priority() {
 
 refresh_vless_tcp_priority
 
-install_vless_tcp_forward_guard() {
+remove_vless_tcp_forward_guard() {
 	for guard_set in unblockvless unblockvless2; do
 		while iptables -C FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset 2>/dev/null; do
 			iptables -D FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset
 		done
-		if ! iptables -C FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset 2>/dev/null; then
-			iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset
-		fi
 	done
 }
 
-install_vless_tcp_forward_guard
+remove_vless_tcp_forward_guard
 
 install_ipv6_fallback_rules
 
