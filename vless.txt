@@ -457,6 +457,7 @@ cdn.discordapp.net
 copilot.microsoft.com
 discord-attachments-uploads-prd.storage.googleapis.com
 edgeservices.bing.com
+feed.rutracker.cc
 gateway.discord.gg
 graph.facebook.com
 grok.com
@@ -466,6 +467,7 @@ pbs.twimg.com
 perplexity.ai
 rutracker.org
 rutracker.wiki
+static.rutracker.cc
 sydney.bing.com
 ton.twimg.com
 video.twimg.com

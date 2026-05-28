@@ -2210,8 +2210,12 @@ def test_vless2_youtube_routes_are_scoped():
     }
     assert 'rutracker.org' not in entries
     assert 'rutracker.wiki' not in entries
+    assert 'static.rutracker.cc' not in entries
+    assert 'feed.rutracker.cc' not in entries
     assert 'rutracker.org' in vless_entries
     assert 'rutracker.wiki' in vless_entries
+    assert 'static.rutracker.cc' in vless_entries
+    assert 'feed.rutracker.cc' in vless_entries
     assert 'thepiratebay.org' in entries
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' in entries
     assert 'redirector.googlevideo.com' in entries

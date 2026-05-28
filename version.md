@@ -1,3 +1,7 @@
+*v1.663 (28 May 2026) -* main
+
+*Adds the tracker static asset hosts to the primary Vless list so the page loads styles, scripts, logos, and feed assets through the same working route as the main tracker domain.*
+
 *v1.662 (28 May 2026) -* main
 
 *Moves the torrent tracker route from the YouTube Vless list to the primary Vless list after live checks showed the current primary key opens it while the current YouTube key times out.*
