@@ -7,13 +7,16 @@ YOUTUBE_HEALTHCHECK_URLS = (
     'https://i.ytimg.com/generate_204',
     'https://www.youtube.com',
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 1
+YOUTUBE_HEALTHCHECK_MIN_OK = 2
+YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (YOUTUBE_HEALTHCHECK_URLS[0],)
 
 
 def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
     ok_count = 0
+    ok_urls = set()
     last_message = ''
     connect_timeout, read_timeout = timeouts
+    required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS)
     for url in urls:
         ok, message = check_http(
             proxy_url,
@@ -23,10 +26,14 @@ def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTH
         )
         if ok:
             ok_count += 1
-            if ok_count >= max(1, int(min_ok or 1)):
+            ok_urls.add(url)
+            if required_urls <= ok_urls and ok_count >= max(1, int(min_ok or 1)):
                 return True, 'YouTube endpoints confirmed'
         else:
             last_message = message
+    missing_required = required_urls - ok_urls
+    if missing_required:
+        return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
     return False, last_message or 'YouTube endpoints did not respond through this key.'
 
 

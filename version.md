@@ -1,4 +1,7 @@
-*v1.660 (28 May 2026) -* main
+*v1.661 (28 May 2026) -* main
+
+*Keeps failed pool probe results short-lived so transient YouTube or service check failures are automatically rechecked instead of staying red for a full cache hour.*
+*Requires the primary YouTube connectivity check plus a second YouTube endpoint before a key is cached as YouTube-working, preventing partial keys from staying marked `yt=ok`.*
 *Makes YouTube monitoring follow the Vless list that currently contains YouTube routes, preserves the Reality fingerprint and spiderX defaults from Vless keys, treats one confirmed YouTube endpoint as enough during key apply, restarts and rechecks xray before replacing a YouTube key, requires repeated YouTube failures before failover, skips candidates already active in the other Vless slot, fixes dokodemo-door REDIRECT sockopt and disables transparent inbound sniffing for Vless traffic, supports local Reality endpoint overrides for unstable DNS backends, routes UDP/QUIC mirror sets through transparent Vless ports, stops first web loads from blocking on live Telegram checks, uses public Telegram reachability for web status, audits key switches, raises the idle/post-pool RSS restart threshold to 70 MB, skips auto-failover after recent successful checks, and refreshes ipset when UDP/QUIC mirrors drift from the active service lists.*
 
 *v1.657 (26 May 2026) -* main

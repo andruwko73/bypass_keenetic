@@ -8,7 +8,8 @@ YOUTUBE_HEALTHCHECK_URLS = (
     'https://i.ytimg.com/generate_204',
     'https://www.youtube.com',
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 1
+YOUTUBE_HEALTHCHECK_MIN_OK = 2
+YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (YOUTUBE_HEALTHCHECK_URLS[0],)
 TELEGRAM_HEALTHCHECK_URLS = (
     'https://web.telegram.org/',
     'https://t.me/',
@@ -147,7 +148,9 @@ def check_youtube_through_proxy(
 ):
     retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
     ok_hosts = []
+    ok_urls = set()
     failed = []
+    required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS)
     for index, url in enumerate(urls or YOUTUBE_HEALTHCHECK_URLS):
         connect_timeout, read_timeout = http_timeouts if index == 0 else (retry_http_connect, retry_http_read)
         ok, message = check_http(
@@ -159,14 +162,16 @@ def check_youtube_through_proxy(
         host = url.split('/')[2] if '://' in url else url
         if ok:
             ok_hosts.append(host)
-            if len(ok_hosts) >= max(1, int(min_ok or 1)):
+            ok_urls.add(url)
+            if required_urls <= ok_urls and len(ok_hosts) >= max(1, int(min_ok or 1)):
                 return True, 'YouTube endpoints confirmed: ' + ', '.join(ok_hosts)
         else:
             failed.append(f'{host}: {message}')
             if retry_delay_seconds and index == 0:
                 sleep(retry_delay_seconds)
-    if ok_hosts and min_ok <= 1:
-        return True, 'YouTube endpoint confirmed: ' + ', '.join(ok_hosts)
+    missing_required = required_urls - ok_urls
+    if missing_required:
+        return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
     return False, '; '.join(failed[-2:]) or 'YouTube endpoints did not respond through this key.'
 
 

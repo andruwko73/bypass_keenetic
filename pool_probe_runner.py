@@ -16,7 +16,8 @@ YOUTUBE_HEALTHCHECK_URLS = (
     'https://i.ytimg.com/generate_204',
     'https://www.youtube.com',
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 1
+YOUTUBE_HEALTHCHECK_MIN_OK = 2
+YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (YOUTUBE_HEALTHCHECK_URL,)
 TELEGRAM_HEALTHCHECK_URLS = (
     'https://web.telegram.org/',
     'https://t.me/',
@@ -41,8 +42,10 @@ def pool_probe_outbound(proto, key_value, tag, proxy_outbound_from_key, email='p
 
 def check_youtube_through_proxy(check_http, proxy_url, *, http_timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
     ok_count = 0
+    ok_urls = set()
     last_message = ''
     connect_timeout, read_timeout = http_timeouts
+    required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS)
     for url in urls:
         ok, message = check_http(
             proxy_url,
@@ -52,10 +55,14 @@ def check_youtube_through_proxy(check_http, proxy_url, *, http_timeouts, urls=YO
         )
         if ok:
             ok_count += 1
-            if ok_count >= max(1, int(min_ok or 1)):
+            ok_urls.add(url)
+            if required_urls <= ok_urls and ok_count >= max(1, int(min_ok or 1)):
                 return True, 'YouTube endpoints confirmed'
         else:
             last_message = message
+    missing_required = required_urls - ok_urls
+    if missing_required:
+        return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
     return False, last_message or 'YouTube endpoints did not respond through this key.'
 
 

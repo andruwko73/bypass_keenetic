@@ -799,7 +799,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'redirector.googlevideo.com/generate_204' in youtube_source
     assert 'googlevideo.com/generate_204' in youtube_source
     assert 'i.ytimg.com/generate_204' in youtube_source
-    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 1' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 2' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_REQUIRED_URLS' in youtube_source
     assert 'Last confirmation:' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
@@ -1377,8 +1378,15 @@ def test_proxy_apply_runtime_helpers():
         'trojan': 10816,
     })
     youtube_calls = []
+    def proxy_apply_youtube_check(proxy, **kwargs):
+        youtube_calls.append(kwargs['url'])
+        return kwargs['url'] in (
+            'https://www.youtube.com/generate_204',
+            'https://i.ytimg.com/generate_204',
+        ), 'probe'
+
     youtube_ok, _ = proxy_apply_runtime.check_youtube_health(
-        lambda proxy, **kwargs: youtube_calls.append(kwargs['url']) or (len(youtube_calls) == 3, 'probe'),
+        proxy_apply_youtube_check,
         'proxy-url',
         timeouts=(1, 1),
     )
@@ -1602,7 +1610,7 @@ def test_pool_probe_controller_helpers():
 
     records = []
     http_calls = []
-    yt_results = iter([(False, 'timeout'), (True, 'ok'), (True, 'ok')])
+    yt_results = iter([(True, 'ok'), (False, 'timeout'), (True, 'ok')])
     def check_http_for_pool_key(proxy, **kwargs):
         http_calls.append(kwargs)
         if kwargs.get('url') == 'https://web.telegram.org/':
@@ -1628,6 +1636,7 @@ def test_pool_probe_controller_helpers():
         {'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4},
         {'url': 'https://www.youtube.com/generate_204', 'connect_timeout': 3, 'read_timeout': 4},
         {'url': 'https://redirector.googlevideo.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
+        {'url': 'https://i.ytimg.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
     ]
     assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': True})]
 
@@ -3079,6 +3088,29 @@ def test_probe_cache_invalidates_changed_custom_check_targets():
     assert not probe_cache.key_probe_has_required_results(entry, custom_checks=new_checks)
 
 
+def test_probe_cache_failed_results_expire_quickly():
+    checks = [{'id': 'discord', 'urls': ['https://discord.com']}]
+    entry = {
+        'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+        'proto': 'vless2',
+        'tg_ok': 'unknown',
+        'yt_ok': False,
+        'custom': {'discord': True},
+        'custom_sig': probe_cache.custom_checks_signature(checks),
+        'ts': 100,
+    }
+    assert probe_cache.key_probe_is_fresh(
+        entry,
+        now=100 + probe_cache.KEY_PROBE_FAILURE_TTL - 1,
+        custom_checks=checks,
+    )
+    assert not probe_cache.key_probe_is_fresh(
+        entry,
+        now=100 + probe_cache.KEY_PROBE_FAILURE_TTL,
+        custom_checks=checks,
+    )
+
+
 def test_probe_cache_keeps_recent_success_on_transient_downgrade():
     cache = {}
     checks = [{'id': 'chatgpt_services', 'urls': ['https://api.openai.com/v1/models']}]
@@ -3428,6 +3460,7 @@ def main():
     test_web_template_styles_helpers()
     test_probe_cache_update_entry_min_interval()
     test_probe_cache_invalidates_changed_custom_check_targets()
+    test_probe_cache_failed_results_expire_quickly()
     test_probe_cache_keeps_recent_success_on_transient_downgrade()
     test_web_template_scripts_helpers()
     test_web_form_template_smoke()

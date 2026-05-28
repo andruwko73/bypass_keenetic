@@ -7,6 +7,7 @@ import time
 
 KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 KEY_PROBE_CACHE_TTL = 3600
+KEY_PROBE_FAILURE_TTL = 300
 KEY_PROBE_MIN_WRITE_INTERVAL = 30
 KEY_PROBE_CACHE_SCHEMA_VERSION = 6
 KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
@@ -259,7 +260,17 @@ def key_probe_is_fresh(entry, now=None, custom_checks=None):
         ts = float(entry.get('ts', 0))
     except (TypeError, ValueError):
         return False
-    if (now or time.time()) - ts >= KEY_PROBE_CACHE_TTL:
+    age = (now or time.time()) - ts
+    if age >= KEY_PROBE_CACHE_TTL:
+        return False
+    if (
+        age >= KEY_PROBE_FAILURE_TTL and
+        (
+            entry.get('tg_ok') is False or
+            entry.get('yt_ok') is False or
+            any(value is False for value in (entry.get('custom') or {}).values())
+        )
+    ):
         return False
     custom_checks = custom_checks or []
     if custom_checks:
