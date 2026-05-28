@@ -1,4 +1,4 @@
-*v1.658 (27 May 2026) -* main
+*v1.659 (28 May 2026) -* main
 *Makes YouTube monitoring follow the Vless list that currently contains YouTube routes, preserves the Reality fingerprint and spiderX defaults from Vless keys, treats one confirmed YouTube endpoint as enough during key apply, restarts and rechecks xray before replacing a YouTube key, requires repeated YouTube failures before failover, skips candidates already active in the other Vless slot, fixes dokodemo-door REDIRECT sockopt and disables transparent inbound sniffing for Vless traffic, supports local Reality endpoint overrides for unstable DNS backends, routes UDP/QUIC mirror sets through transparent Vless ports, stops first web loads from blocking on live Telegram checks, uses public Telegram reachability for web status, audits key switches, raises the idle/post-pool RSS restart threshold to 70 MB, skips auto-failover after recent successful checks, and refreshes ipset when UDP/QUIC mirrors drift from the active service lists.*
 
 *v1.657 (26 May 2026) -* main

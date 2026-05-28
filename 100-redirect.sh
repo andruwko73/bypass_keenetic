@@ -228,6 +228,21 @@ refresh_vless_tcp_priority() {
 
 refresh_vless_tcp_priority
 
+refresh_android_push_priority() {
+	# Android FCM/mtalk uses TCP 5228-5230; iOS APNs keeps a persistent TCP 5223
+	# connection and can fall back to 443. YouTube's broad Google IP ranges can
+	# capture shared push IPs in Vless 2, so pin push signaling ports to Vless 1
+	# without moving YouTube HTTPS traffic away from Vless 2.
+	for push_port in 5223 5228 5229 5230; do
+		while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvless2 dst --dport "$push_port" -j REDIRECT --to-port 10812 2>/dev/null; do
+			iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockvless2 dst --dport "$push_port" -j REDIRECT --to-port 10812
+		done
+		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless2 dst --dport "$push_port" -j REDIRECT --to-port 10812
+	done
+}
+
+refresh_android_push_priority
+
 remove_vless_tcp_forward_guard() {
 	for guard_set in unblockvless unblockvless2; do
 		while iptables -C FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset 2>/dev/null; do

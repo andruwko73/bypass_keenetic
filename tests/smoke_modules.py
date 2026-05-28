@@ -703,6 +703,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     assert 'refresh_vless_tcp_priority()' in redirect_script
+    assert 'refresh_android_push_priority()' in redirect_script
     assert 'remove_vless_tcp_forward_guard()' in redirect_script
     assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' not in redirect_script
     assert 'CRD/Telegram-style service routes do not get captured by the YouTube key' in redirect_script
@@ -716,6 +717,9 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     )
     priority_block = redirect_script.split('refresh_vless_tcp_priority() {', 1)[1].split('\n}', 1)[0]
     assert priority_block.index(vless2_insert) < priority_block.index(vless1_insert)
+    push_block = redirect_script.split('refresh_android_push_priority() {', 1)[1].split('\n}', 1)[0]
+    assert 'for push_port in 5223 5228 5229 5230' in push_block
+    assert '--dport "$push_port" -j REDIRECT --to-port 10812' in push_block
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
@@ -2337,6 +2341,8 @@ def test_telegram_routes_include_mini_app_dependencies():
         'acdn.tinkoff.ru', '194.221.250.50', '23.216.134.15',
         '104.21.72.109', '151.101.129.91', 'internal.api.vk.ru',
         'queuev4.vk.ru', 'tracker-api.vk-analytics.ru',
+        '17.249.0.0/16', '17.252.0.0/16', '17.188.128.0/18',
+        '64.233.164.188', '142.251.169.188', '172.253.145.188',
     }
     assert expected <= set(service_catalog.TELEGRAM_UNBLOCK_ENTRIES)
     assert expected <= entries
