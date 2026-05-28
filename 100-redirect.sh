@@ -18,6 +18,7 @@ ip4t() {
 
 UDP_POLICY_CONFIG="${UDP_POLICY_CONFIG:-/opt/etc/bot/udp_policy.conf}"
 [ -r "$UDP_POLICY_CONFIG" ] && . "$UDP_POLICY_CONFIG"
+UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 BYPASS_UDP_QUIC_BLOCK_VLESS="${BYPASS_UDP_QUIC_BLOCK_VLESS:-1}"
 BYPASS_UDP_QUIC_BLOCK_VLESS2="${BYPASS_UDP_QUIC_BLOCK_VLESS2:-1}"
 BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"
@@ -228,20 +229,38 @@ refresh_vless_tcp_priority() {
 
 refresh_vless_tcp_priority
 
-refresh_android_push_priority() {
+telegram_route_protocol() {
+	telegram_markers="api.telegram.org 149.154.160.0/20 mtalk.google.com 17.249.0.0/16"
+	for marker in $telegram_markers; do
+		if grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt" >/dev/null 2>&1; then
+			printf '%s\n' "vless2"
+			return
+		fi
+	done
+	printf '%s\n' "vless"
+}
+
+refresh_mobile_push_priority() {
 	# Android FCM/mtalk uses TCP 5228-5230; iOS APNs keeps a persistent TCP 5223
 	# connection and can fall back to 443. YouTube's broad Google IP ranges can
-	# capture shared push IPs in Vless 2, so pin push signaling ports to Vless 1
-	# without moving YouTube HTTPS traffic away from Vless 2.
+	# capture shared push IPs in the other Vless list, so pin push signaling
+	# ports to whichever Vless list currently carries Telegram routes.
+	telegram_route="$(telegram_route_protocol)"
+	target_port=10812
+	[ "$telegram_route" = "vless2" ] && [ -n "$vless2_key_path" ] && target_port=10814
 	for push_port in 5223 5228 5229 5230; do
-		while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvless2 dst --dport "$push_port" -j REDIRECT --to-port 10812 2>/dev/null; do
-			iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockvless2 dst --dport "$push_port" -j REDIRECT --to-port 10812
+		for push_set in unblockvless unblockvless2; do
+			for stale_port in 10812 10814; do
+				while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set "$push_set" dst --dport "$push_port" -j REDIRECT --to-port "$stale_port" 2>/dev/null; do
+					iptables -t nat -D PREROUTING -w -p tcp -m set --match-set "$push_set" dst --dport "$push_port" -j REDIRECT --to-port "$stale_port"
+				done
+			done
+			iptables -I PREROUTING -w -t nat -p tcp -m set --match-set "$push_set" dst --dport "$push_port" -j REDIRECT --to-port "$target_port"
 		done
-		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless2 dst --dport "$push_port" -j REDIRECT --to-port 10812
 	done
 }
 
-refresh_android_push_priority
+refresh_mobile_push_priority
 
 remove_vless_tcp_forward_guard() {
 	for guard_set in unblockvless unblockvless2; do

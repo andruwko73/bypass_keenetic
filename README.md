@@ -22,10 +22,10 @@
 - Веб-интерфейс на `http://192.168.1.1:8080/` для ПК и телефона.
 - Разделы **Статус**, **Ключи**, **Списки**.
 - Telegram-бот для режимов **Простой** и **Сложный**.
-- Поддержка `Vless 1`, `Vless 2`, `Vmess`, `Trojan`, `Shadowsocks`.
+- Поддержка двух протоколов `Vless`, `Vmess`, `Trojan`, `Shadowsocks`.
 - Пул ключей для каждого протокола: ручное добавление, удаление, применение, импорт subscription.
 - Проверка ключей через Telegram API, YouTube и дополнительные сервисы.
-- Готовые проверки: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Meta AI, Instagram, Facebook.
+- Готовые проверки: ChatGPT/OpenAI/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Meta AI/Instagram/Facebook.
 - Добавление доменов выбранных проверок в список обхода текущего протокола.
 - Диагностика роутера в блоке **Статус**: память, нагрузка, состояние DNS, время последнего обновления `ipset` и количество записей в наборах обхода.
 - Подтверждение опасных действий: смена режима, обновление, удаление компонентов, DNS Override, перезагрузка роутера, очистка пула.
@@ -78,7 +78,7 @@ Bootstrap перед заменой файлов создает backup и rollba
 - списки обхода;
 - выбранный режим работы программы.
 
-Устаревшие артефакты старых вариантов очищаются: отдельный `web_bot.py`, старый web-only init-скрипт, tor/vpn пути и лишние runtime-файлы. Остаются только поддерживаемые протоколы: `Vless 1`, `Vless 2`, `Vmess`, `Trojan`, `Shadowsocks`.
+Устаревшие артефакты старых вариантов очищаются: отдельный `web_bot.py`, старый web-only init-скрипт, tor/vpn пути и лишние runtime-файлы. Остаются только поддерживаемые протоколы: два `Vless`, `Vmess`, `Trojan`, `Shadowsocks`.
 
 ## Веб-интерфейс
 
@@ -88,7 +88,7 @@ Bootstrap перед заменой файлов создает backup и rollba
 
 В блоке роутера DNS-часть отображается как диагностическая строка. Если DNS обслуживает штатный Keenetic `ndnproxy`, то `S56dnsmasq` не считается сломанным сервисом: он помечается как неиспользуемый, потому что порт `53` уже занят `ndnproxy`. В этом режиме домены из списков обхода заранее резолвятся в `ipset` скриптом `/opt/bin/unblock_ipset.sh`, а актуальность наборов поддерживается cron-задачей каждые 15 минут.
 
-Для `Vless 1` и `Vless 2` UDP/443 обрабатывается умно: основные наборы `unblockvless` и `unblockvless2` отвечают за TCP-маршрутизацию через прозрачный прокси, а `unblockvlessudp` и `unblockvless2udp` наполняются только YouTube/QUIC-доменами из соответствующего списка. Поэтому YouTube может лежать в любом из двух Vless-списков, а Telegram-домены не получают широкую UDP-блокировку и не должны ждать fallback на телефоне. При необходимости QUIC-блокировку можно отключить в `bot_config.py` флагами `udp_quic_block_vless_enabled` и `udp_quic_block_vless2_enabled`.
+Для двух `Vless`-маршрутов UDP/443 обрабатывается умно: основные наборы `unblockvless` и `unblockvless2` отвечают за TCP-маршрутизацию через прозрачный прокси, а `unblockvlessudp` и `unblockvless2udp` наполняются только YouTube/QUIC-доменами из соответствующего списка. Поэтому YouTube может лежать в любом из двух Vless-списков, а Telegram-домены не получают широкую UDP-блокировку и не должны ждать fallback на телефоне. TCP-порты мобильных push-сервисов Android/iOS (`5223`, `5228`, `5229`, `5230`) автоматически направляются в тот Vless-маршрут, где находится Telegram. При необходимости QUIC-блокировку можно отключить в `bot_config.py` флагами `udp_quic_block_vless_enabled` и `udp_quic_block_vless2_enabled`.
 
 **Ключи**
 
@@ -96,7 +96,7 @@ Bootstrap перед заменой файлов создает backup и rollba
 
 **Списки**
 
-Редактирование списков обхода для каждого протокола. Готовые наборы можно добавлять кнопками: Telegram, YouTube, Instagram/Meta, Discord, TikTok, X/Twitter или все сервисы сразу.
+Редактирование списков обхода для каждого протокола. Готовые наборы можно добавлять кнопками: Telegram, YouTube, ChatGPT/Codex, Claude, Gemini, Copilot, Perplexity, Grok, DeepSeek, Discord, Chrome Remote Desktop, Meta AI/Instagram/Facebook или все сервисы сразу.
 
 ## Telegram-бот
 

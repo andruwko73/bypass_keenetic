@@ -703,7 +703,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     assert 'refresh_vless_tcp_priority()' in redirect_script
-    assert 'refresh_android_push_priority()' in redirect_script
+    assert 'telegram_route_protocol()' in redirect_script
+    assert 'refresh_mobile_push_priority()' in redirect_script
     assert 'remove_vless_tcp_forward_guard()' in redirect_script
     assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' not in redirect_script
     assert 'CRD/Telegram-style service routes do not get captured by the YouTube key' in redirect_script
@@ -717,9 +718,14 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     )
     priority_block = redirect_script.split('refresh_vless_tcp_priority() {', 1)[1].split('\n}', 1)[0]
     assert priority_block.index(vless2_insert) < priority_block.index(vless1_insert)
-    push_block = redirect_script.split('refresh_android_push_priority() {', 1)[1].split('\n}', 1)[0]
+    assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in redirect_script
+    assert 'grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt"' in redirect_script
+    push_block = redirect_script.split('refresh_mobile_push_priority() {', 1)[1].split('\n}', 1)[0]
     assert 'for push_port in 5223 5228 5229 5230' in push_block
-    assert '--dport "$push_port" -j REDIRECT --to-port 10812' in push_block
+    assert 'telegram_route="$(telegram_route_protocol)"' in push_block
+    assert '[ "$telegram_route" = "vless2" ] && [ -n "$vless2_key_path" ] && target_port=10814' in push_block
+    assert 'for push_set in unblockvless unblockvless2' in push_block
+    assert '--dport "$push_port" -j REDIRECT --to-port "$target_port"' in push_block
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
