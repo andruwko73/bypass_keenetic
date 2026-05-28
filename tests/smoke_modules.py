@@ -2203,8 +2203,15 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'googleusercontent.com' not in entries
     assert 'remotedesktop-pa.googleapis.com' not in entries
     assert 'instantmessaging-pa.googleapis.com' not in entries
-    assert 'rutracker.org' in entries
-    assert 'rutracker.wiki' in entries
+    vless_entries = {
+        line.strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.strip() and not line.lstrip().startswith('#')
+    }
+    assert 'rutracker.org' not in entries
+    assert 'rutracker.wiki' not in entries
+    assert 'rutracker.org' in vless_entries
+    assert 'rutracker.wiki' in vless_entries
     assert 'thepiratebay.org' in entries
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' in entries
     assert 'redirector.googlevideo.com' in entries

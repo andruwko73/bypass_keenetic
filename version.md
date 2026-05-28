@@ -1,3 +1,7 @@
+*v1.662 (28 May 2026) -* main
+
+*Moves the torrent tracker route from the YouTube Vless list to the primary Vless list after live checks showed the current primary key opens it while the current YouTube key times out.*
+
 *v1.661 (28 May 2026) -* main
 
 *Keeps failed pool probe results short-lived so transient YouTube or service check failures are automatically rechecked instead of staying red for a full cache hour.*

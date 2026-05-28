@@ -464,6 +464,8 @@ media.discordapp.net
 meta.ai
 pbs.twimg.com
 perplexity.ai
+rutracker.org
+rutracker.wiki
 sydney.bing.com
 ton.twimg.com
 video.twimg.com

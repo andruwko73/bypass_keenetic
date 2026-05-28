@@ -107,8 +107,6 @@ nhacmp3youtube.com
 play-fe.googleapis.com
 returnyoutubedislikeapi.com
 redirector.googlevideo.com
-rutracker.org
-rutracker.wiki
 s.ytimg.com
 studio.youtube.com
 thepiratebay.org
