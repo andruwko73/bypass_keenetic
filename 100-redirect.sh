@@ -78,6 +78,22 @@ for protocol in udp tcp; do
 	iptables -I PREROUTING -w -t nat -p "$protocol" --dport 53 -j DNAT --to "$local_ip"; fi
 done
 
+refresh_transparent_udp_quic_reject() {
+	reject_port="$1"
+	reject_enabled="$2"
+	while iptables -C INPUT -w -p udp --dport "$reject_port" -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
+		iptables -D INPUT -w -p udp --dport "$reject_port" -j REJECT --reject-with icmp-port-unreachable
+	done
+	while iptables -C INPUT -w -p udp --dport "$reject_port" -j DROP 2>/dev/null; do
+		iptables -D INPUT -w -p udp --dport "$reject_port" -j DROP
+	done
+	if [ "$reject_enabled" != "0" ]; then
+		iptables -I INPUT -w -p udp --dport "$reject_port" -j REJECT --reject-with icmp-port-unreachable 2>/dev/null \
+			|| iptables -I INPUT -w -p udp --dport "$reject_port" -j DROP 2>/dev/null \
+			|| true
+	fi
+}
+
 
 #if [ -z "$(iptables-save 2>/dev/null | grep "--dport 53 -j DNAT")" ]; then
 #    iptables -w -t nat -I PREROUTING -p udp --dport 53 -j DNAT --to 192.168.1.1
@@ -164,6 +180,7 @@ if [ "$BYPASS_UDP_QUIC_BLOCK_VLESS" != "0" ]; then
 		iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-port 10812
 	fi
 fi
+refresh_transparent_udp_quic_reject 10812 "$BYPASS_UDP_QUIC_BLOCK_VLESS"
 
 
 ipset create unblockvless2 hash:net -exist 2>/dev/null
@@ -210,6 +227,7 @@ if [ -n "$vless2_key_path" ]; then
 			iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814
 		fi
 	fi
+	refresh_transparent_udp_quic_reject 10814 "$BYPASS_UDP_QUIC_BLOCK_VLESS2"
 fi
 
 refresh_vless_tcp_priority() {

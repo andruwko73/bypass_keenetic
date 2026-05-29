@@ -692,6 +692,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '--match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814' in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT' not in redirect_script
+    assert 'refresh_transparent_udp_quic_reject 10812 "$BYPASS_UDP_QUIC_BLOCK_VLESS"' in redirect_script
+    assert 'refresh_transparent_udp_quic_reject 10814 "$BYPASS_UDP_QUIC_BLOCK_VLESS2"' in redirect_script
+    assert '-p udp --dport "$reject_port" -j REJECT --reject-with icmp-port-unreachable' in redirect_script
     assert 'install_ipv6_fallback_rules()' in redirect_script
     assert 'BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"' in redirect_script
     assert 'ip6tables -I FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT' in redirect_script

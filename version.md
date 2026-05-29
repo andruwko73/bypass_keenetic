@@ -1,3 +1,7 @@
+*v1.666 (29 May 2026) -* main
+
+*Rejects redirected Vless UDP/443 QUIC traffic at the transparent port so YouTube and other browser services fall back to proxied TCP immediately instead of waiting on unanswered UDP attempts.*
+
 *v1.665 (29 May 2026) -* main
 
 *Combines the Meta AI, Instagram, and Facebook service buttons into one shared Meta platform preset and keeps the Telegram route button available from the same service-add menu.*
