@@ -1,3 +1,7 @@
+*v1.664 (29 May 2026) -* main
+
+*Hides legacy helper lists such as socialnet.txt and backup .txt files from the web list editor so only real routed bypass lists are shown.*
+
 *v1.663 (28 May 2026) -* main
 
 *Adds the tracker static asset hosts to the primary Vless list so the page loads styles, scripts, logos, and feed assets through the same working route as the main tracker domain.*

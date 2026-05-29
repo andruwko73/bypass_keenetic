@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import types as py_types
@@ -2192,6 +2193,27 @@ def test_unblock_list_helpers():
     assert unblock_lists.entries_from_service_text('one\n#comment\ntwo # note\none', {'skip'}) == ['one', 'two']
 
 
+def test_unblock_lists_hide_legacy_txt_files():
+    old_dir = unblock_lists.UNBLOCK_DIR
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        try:
+            unblock_lists.UNBLOCK_DIR = str(tmp_path)
+            for name in (
+                'socialnet.txt',
+                'vless.txt.20260505.backup',
+                'vless.txt',
+                'vless-2.txt',
+                'vmess.txt',
+            ):
+                (tmp_path / name).write_text('example.org\n', encoding='utf-8')
+            lists = unblock_lists.load_unblock_lists(with_content=False)
+        finally:
+            unblock_lists.UNBLOCK_DIR = old_dir
+
+    assert [entry['name'] for entry in lists] == ['vless.txt', 'vless-2.txt', 'vmess.txt']
+
+
 def test_vless2_youtube_routes_are_scoped():
     entries = {
         line.strip()
@@ -3448,6 +3470,7 @@ def main():
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()
+    test_unblock_lists_hide_legacy_txt_files()
     test_vless2_youtube_routes_are_scoped()
     test_chatgpt_codex_routes_are_synced()
     test_ai_assistant_custom_routes_are_synced()

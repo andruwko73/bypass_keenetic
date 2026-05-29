@@ -15,6 +15,7 @@ BASE_LABELS = {
 }
 
 DEFAULT_ORDER = ['vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt']
+VISIBLE_UNBLOCK_LISTS = set(DEFAULT_ORDER)
 
 
 def normalize_unblock_list(text):
@@ -96,10 +97,7 @@ def load_unblock_lists(with_content=True, read_text_file=None, include_vpn=False
         file_names = sorted(name for name in os.listdir(UNBLOCK_DIR) if name.endswith('.txt'))
     except Exception:
         file_names = []
-    file_names = [
-        name for name in file_names
-        if name not in ['vpn.txt', 'tor.txt'] and not name.startswith('vpn-')
-    ]
+    file_names = [name for name in file_names if name in VISIBLE_UNBLOCK_LISTS]
     preferred_order = DEFAULT_ORDER
     ordered = []
     for item in preferred_order:
