@@ -13,6 +13,7 @@ CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
 CUSTOM_CHECK_MAX = 12
 CUSTOM_CHECK_REMOVED_IDS = {'mistral'}
 CUSTOM_CHECK_CHATGPT_MERGED_IDS = {'chatgpt', 'codex', 'openai_api', 'openai_codex'}
+CUSTOM_CHECK_META_MERGED_IDS = {'meta_ai', 'instagram', 'facebook'}
 
 
 def custom_check_preset(preset_id):
@@ -133,6 +134,7 @@ def merge_preset_custom_checks(checks):
     chatgpt_preset = presets.get('chatgpt_services')
     if not chatgpt_preset:
         return checks or []
+    meta_preset = presets.get('meta')
     result = []
     inserted_ids = set()
     found_openai_check = False
@@ -140,6 +142,11 @@ def merge_preset_custom_checks(checks):
         check_id = item.get('id')
         if check_id in CUSTOM_CHECK_CHATGPT_MERGED_IDS:
             found_openai_check = True
+            continue
+        if check_id in CUSTOM_CHECK_META_MERGED_IDS:
+            if meta_preset and 'meta' not in inserted_ids:
+                result.append(meta_preset)
+                inserted_ids.add('meta')
             continue
         if check_id in presets:
             if check_id == 'chatgpt_services':

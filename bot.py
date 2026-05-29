@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.664, последнее изменение: 29.05.2026
+#  Файл: bot.py, Версия v1.665, последнее изменение: 29.05.2026
 
 import subprocess
 import os
@@ -1417,9 +1417,7 @@ SOCIALNET_SERVICE_KEYS = (
     'telegram',
     'discord',
     'chrome_remote_desktop',
-    'meta_ai',
-    'instagram',
-    'facebook',
+    'meta',
     'tiktok',
     'twitter',
 )

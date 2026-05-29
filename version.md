@@ -1,3 +1,7 @@
+*v1.665 (29 May 2026) -* main
+
+*Combines the Meta AI, Instagram, and Facebook service buttons into one shared Meta platform preset and keeps the Telegram route button available from the same service-add menu.*
+
 *v1.664 (29 May 2026) -* main
 
 *Hides legacy helper lists such as socialnet.txt and backup .txt files from the web list editor so only real routed bypass lists are shown.*

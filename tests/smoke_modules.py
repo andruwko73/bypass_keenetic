@@ -2351,6 +2351,7 @@ def test_custom_check_service_sources_are_synced():
     keys_match = re.search(r'SOCIALNET_SERVICE_KEYS\s*=\s*\((.*?)\)', bot_source, re.S)
     assert keys_match
     button_keys = set(re.findall(r"'([^']+)'", keys_match.group(1)))
+    presets = {preset['id']: preset for preset in service_catalog.CUSTOM_CHECK_PRESETS}
     preset_ids = {preset['id'] for preset in service_catalog.CUSTOM_CHECK_PRESETS}
 
     assert preset_ids <= set(service_catalog.SERVICE_LIST_SOURCES)
@@ -2370,9 +2371,20 @@ def test_custom_check_service_sources_are_synced():
     assert service_catalog.SERVICE_LIST_SOURCES['perplexity']['entries'] == service_catalog.PERPLEXITY_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['grok']['entries'] == service_catalog.GROK_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['deepseek']['entries'] == service_catalog.DEEPSEEK_ROUTE_ENTRIES
-    assert service_catalog.SERVICE_LIST_SOURCES['meta_ai']['entries'] == service_catalog.META_AI_ROUTE_ENTRIES
-    assert service_catalog.SERVICE_LIST_SOURCES['instagram']['entries'] == service_catalog.INSTAGRAM_ROUTE_ENTRIES
-    assert service_catalog.SERVICE_LIST_SOURCES['facebook']['entries'] == service_catalog.FACEBOOK_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['telegram']['entries'] == service_catalog.TELEGRAM_UNBLOCK_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['meta']['entries'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['meta']['label'] == 'Meta AI / Instagram / Facebook'
+    assert 'telegram' in button_keys
+    assert 'meta' in button_keys
+    assert {'meta_ai', 'instagram', 'facebook'}.isdisjoint(button_keys)
+    assert {'meta_ai', 'instagram', 'facebook'}.isdisjoint(preset_ids)
+    assert presets['meta']['routes'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
+    assert presets['meta']['urls'] == [
+        'https://www.meta.ai',
+        'https://www.instagram.com',
+        'https://www.facebook.com',
+        'https://graph.facebook.com',
+    ]
 
 
 def test_telegram_routes_include_mini_app_dependencies():
@@ -2437,6 +2449,17 @@ def test_preset_custom_checks_are_hydrated_from_catalog():
         'https://generativelanguage.googleapis.com',
     ]
     assert by_id['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
+
+
+def test_meta_custom_check_migration():
+    checks = custom_checks_store.merge_preset_custom_checks([
+        {'id': 'instagram', 'label': 'Instagram', 'url': 'https://www.instagram.com'},
+        {'id': 'facebook', 'label': 'Facebook', 'url': 'https://www.facebook.com'},
+        {'id': 'meta_ai', 'label': 'Meta AI', 'url': 'https://www.meta.ai'},
+    ])
+    assert [item['id'] for item in checks] == ['meta']
+    assert checks[0]['label'] == 'Meta AI / Instagram / Facebook'
+    assert checks[0]['routes'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
 
 
 def test_chrome_remote_desktop_routes_are_in_vless():
@@ -3477,6 +3500,7 @@ def main():
     test_custom_check_service_sources_are_synced()
     test_chatgpt_codex_custom_check_migration()
     test_preset_custom_checks_are_hydrated_from_catalog()
+    test_meta_custom_check_migration()
     test_chrome_remote_desktop_routes_are_in_vless()
     test_web_command_state_helpers()
     test_web_http_common_helpers()
