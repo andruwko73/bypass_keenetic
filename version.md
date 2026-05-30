@@ -1,3 +1,7 @@
+*v1.668 (30 May 2026) -* main
+
+*Removes Gmail/Google Mail domains from the primary Vless list because overlapping Google IPs can capture YouTube traffic away from Vless 2.*
+
 *v1.667 (30 May 2026) -* main
 
 *Routes Gmail/Google Mail domains through the primary Vless list so mail.google.com no longer depends on overlapping YouTube IPs in Vless 2.*

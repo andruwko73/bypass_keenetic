@@ -379,17 +379,8 @@ oauth2.googleapis.com
 www.googleapis.com
 accounts.google.com
 apis.google.com
-client-channel.google.com
-clients1.google.com
 clients2.google.com
-clients5.google.com
 clients6.google.com
-contacts.google.com
-gmail.com
-googlemail.com
-mail-attachment.google.com
-mail-attachment.googleusercontent.com
-mail.google.com
 mtalk.google.com
 alt1-mtalk.google.com
 alt2-mtalk.google.com
@@ -401,8 +392,6 @@ alt7-mtalk.google.com
 alt8-mtalk.google.com
 chromoting-client.talkgadget.google.com
 talkgadget.google.com
-www.gmail.com
-www.googlemail.com
 www.vscode-unpkg.net
 x.com
 160.79.104.0/23
