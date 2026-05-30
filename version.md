@@ -1,3 +1,7 @@
+*v1.667 (30 May 2026) -* main
+
+*Routes Gmail/Google Mail domains through the primary Vless list so mail.google.com no longer depends on overlapping YouTube IPs in Vless 2.*
+
 *v1.666 (29 May 2026) -* main
 
 *Rejects redirected Vless UDP/443 QUIC traffic at the transparent port so YouTube and other browser services fall back to proxied TCP immediately instead of waiting on unanswered UDP attempts.*

@@ -2344,6 +2344,32 @@ def test_ai_assistant_custom_routes_are_synced():
     assert "'gemini'" in bot_source
 
 
+def test_primary_vless_routes_gmail_domains():
+    entries = {
+        line.split('#', 1)[0].strip()
+        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    assert {
+        'mail.google.com',
+        'gmail.com',
+        'www.gmail.com',
+        'googlemail.com',
+        'www.googlemail.com',
+        'mail-attachment.google.com',
+        'mail-attachment.googleusercontent.com',
+        'accounts.google.com',
+        'client-channel.google.com',
+        'clients1.google.com',
+        'clients2.google.com',
+        'clients3.google.com',
+        'clients4.google.com',
+        'clients5.google.com',
+        'clients6.google.com',
+        'contacts.google.com',
+    } <= entries
+
+
 def test_custom_check_service_sources_are_synced():
     entries = {
         line.split('#', 1)[0].strip()
@@ -3500,6 +3526,7 @@ def main():
     test_vless2_youtube_routes_are_scoped()
     test_chatgpt_codex_routes_are_synced()
     test_ai_assistant_custom_routes_are_synced()
+    test_primary_vless_routes_gmail_domains()
     test_custom_check_service_sources_are_synced()
     test_chatgpt_codex_custom_check_migration()
     test_preset_custom_checks_are_hydrated_from_catalog()
