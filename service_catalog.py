@@ -1,17 +1,6 @@
 # Shared route and check presets for the web panel and Telegram bot.
 
-YOUTUBE_CDN_IP_RANGES = [
-    '64.233.0.0/16',
-    '72.14.0.0/16',
-    '74.125.0.0/16',
-    '108.177.0.0/16',
-    '142.250.0.0/15',
-    '172.217.0.0/16',
-    '172.253.0.0/16',
-    '173.194.0.0/16',
-    '209.85.0.0/16',
-    '216.58.192.0/18',
-]
+YOUTUBE_CDN_IP_RANGES = []
 
 YOUTUBE_UNBLOCK_ENTRIES = [
     *YOUTUBE_CDN_IP_RANGES,
@@ -24,10 +13,12 @@ YOUTUBE_UNBLOCK_ENTRIES = [
     'kids.youtube.com',
     'gaming.youtube.com',
     'youtu.be',
+    'yt.be',
     'youtube-nocookie.com',
     'www.youtube-nocookie.com',
     'youtubeeducation.com',
     'www.youtubeeducation.com',
+    'youtubekids.com',
     'youtubei.googleapis.com',
     'youtube.googleapis.com',
     'youtubeembeddedplayer.googleapis.com',
@@ -40,12 +31,16 @@ YOUTUBE_UNBLOCK_ENTRIES = [
     'yt3.ggpht.com',
     'yt3.googleusercontent.com',
     'yt4.ggpht.com',
+    'ytimg.l.google.com',
     'ggpht.com',
     'googlevideo.com',
     'redirector.googlevideo.com',
     'video.google.com',
     'jnn-pa.googleapis.com',
     'play-fe.googleapis.com',
+    'nhacmp3youtube.com',
+    'returnyoutubedislikeapi.com',
+    'yting.com',
     'gvt1.com',
     'gvt2.com',
 ]

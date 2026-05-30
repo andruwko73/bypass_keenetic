@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import json
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -80,6 +81,22 @@ def reality_fingerprint(value):
     if not fingerprint:
         return 'chrome'
     return fingerprint
+
+
+def _is_ip_address(value):
+    try:
+        ipaddress.ip_address(str(value or ''))
+    except ValueError:
+        return False
+    return True
+
+
+def vless_outbound_address(data):
+    address = data.get('address') or data.get('host', '')
+    server_name = data.get('sni') or data.get('host', '')
+    if data.get('security') == 'reality' and _is_ip_address(address) and server_name and not _is_ip_address(server_name):
+        return server_name
+    return address
 
 
 def parse_trojan_key(key):
@@ -233,7 +250,7 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
             'protocol': 'vless',
             'settings': {
                 'vnext': [{
-                    'address': data.get('address', data.get('host', '')),
+                    'address': vless_outbound_address(data),
                     'port': int(data['port']),
                     'users': [{
                         'id': data['id'],

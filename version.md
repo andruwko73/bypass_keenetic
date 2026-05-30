@@ -1,3 +1,6 @@
+*v1.669 (30 May 2026) -* main
+*Scoped the Vless 2 bypass list back to YouTube-specific routes and moved the old non-YouTube Vless 2 entries to the primary Vless list so broad service ranges no longer overload the YouTube key.*
+
 *v1.668 (30 May 2026) -* main
 
 *Removes Gmail/Google Mail domains from the primary Vless list because overlapping Google IPs can capture YouTube traffic away from Vless 2.*

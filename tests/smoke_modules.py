@@ -324,6 +324,13 @@ def test_proxy_config_builder():
     )
     assert reality_outbound['streamSettings']['realitySettings']['fingerprint'] == 'firefox'
     assert reality_outbound['streamSettings']['realitySettings']['spiderX'] == '/'
+    stale_ip_reality_outbound = proxy_protocols.proxy_outbound_from_key(
+        'vless',
+        'vless://00000000-0000-0000-0000-000000000000@198.51.100.10:443'
+        '?security=reality&sni=alive.example.com&flow=xtls-rprx-vision&pbk=pub&sid=short&type=tcp#sample',
+        'proxy-vless',
+    )
+    assert stale_ip_reality_outbound['settings']['vnext'][0]['address'] == 'alive.example.com'
     default_reality_outbound = proxy_protocols.proxy_outbound_from_key(
         'vless',
         'vless://00000000-0000-0000-0000-000000000000@example.com:443'
@@ -2241,11 +2248,28 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'rutracker.wiki' in vless_entries
     assert 'static.rutracker.cc' in vless_entries
     assert 'feed.rutracker.cc' in vless_entries
-    assert 'thepiratebay.org' in entries
-    assert 'discord-attachments-uploads-prd.storage.googleapis.com' in entries
+    assert 'thepiratebay.org' not in entries
+    assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
     assert 'redirector.googlevideo.com' in entries
     assert 'yt4.ggpht.com' in entries
-    assert set(service_catalog.YOUTUBE_CDN_IP_RANGES) <= entries
+    assert {
+        '104.21.0.0/16',
+        '157.240.0.0/16',
+        'thepiratebay.org',
+        'discord-attachments-uploads-prd.storage.googleapis.com',
+    } <= vless_entries
+    assert not {
+        '64.233.0.0/16',
+        '72.14.0.0/16',
+        '74.125.0.0/16',
+        '108.177.0.0/16',
+        '142.250.0.0/15',
+        '172.217.0.0/16',
+        '172.253.0.0/16',
+        '173.194.0.0/16',
+        '209.85.0.0/16',
+        '216.58.192.0/18',
+    } & (entries | vless_entries)
     assert 'domain:remotedesktop.google.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:instantmessaging-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
