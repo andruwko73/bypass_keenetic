@@ -1,3 +1,9 @@
+<a name="1.672"></a>
+# [1.672] - 01 Jun 2026
+
+- Added service route profiles, route intersection repair, event history for all protocols, persistent update progress, UI smoke checks for route controls, and CI secret scanning.
+- Kept YouTube checks at the existing availability level; no real video playback probe was added.
+
 <a name="2.2.0"></a>
 # [2.2.0 - Поддержка KeenOS 4+](https://github.com/znetworkx/bypass_keenetic/releases/tag/2.2.0) - 01 Oct 2023
 

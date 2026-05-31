@@ -1970,6 +1970,11 @@ def render_web_scripts(
                                     }}, Number(payload.reload_after_ms) || 1500);
                                 }}
                             }}
+                            if (action !== 'set-app-mode' && payload.reload_after_ms) {{
+                                window.setTimeout(function() {{
+                                    window.location.reload();
+                                }}, Number(payload.reload_after_ms) || 900);
+                            }}
                             if (action === 'pool-probe-cancel') {{
                                 refreshPoolData(1200);
                                 scheduleStatusPolling(15000);

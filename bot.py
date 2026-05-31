@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.671, последнее изменение: 31.05.2026
+#  Файл: bot.py, Версия v1.672, последнее изменение: 01.06.2026
 
 import subprocess
 import os
@@ -186,6 +186,10 @@ import web_get_actions
 import web_post_actions
 import web_status_runtime
 import web_commands_runtime
+import event_history
+import route_intersections
+import service_routes
+import update_status
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
@@ -1484,6 +1488,19 @@ def _write_runtime_log(message, mode='a'):
             continue
 
 
+def _record_event(action, message='', level='info', source='system', protocol='system', service='', key_hash='', details=None):
+    return event_history.record_event(
+        action=action,
+        message=message,
+        level=level,
+        source=source,
+        protocol=protocol,
+        service=service,
+        key_hash=key_hash,
+        details=details,
+    )
+
+
 def _audit_key_switch(source, proto, key_value, reason=''):
     key_value = (key_value or '').strip()
     key_id = _hash_key(key_value)[:12] if key_value else ''
@@ -1503,6 +1520,13 @@ def _audit_key_switch(source, proto, key_value, reason=''):
             file.write(line)
     except Exception:
         pass
+    _record_event(
+        action='key_switch',
+        source=source,
+        protocol=proto,
+        key_hash=key_id,
+        message=f'{display_name} {reason}'.strip(),
+    )
 
 
 def _redact_sensitive_text(text):
@@ -1510,7 +1534,7 @@ def _redact_sensitive_text(text):
     token_value = str(token or '')
     if token_value:
         safe_text = safe_text.replace(token_value, '<redacted-token>')
-    return re.sub(r'bot[0-9]+:[A-Za-z0-9_-]+', 'bot<redacted-token>', safe_text)
+    return re.sub(r'bot[0-9]+:[A-Za-z0-9_-]+', 'bot<redacted-token>', event_history.redact_sensitive_text(safe_text))
 
 
 def _telegram_send_error_is_transient(error):
@@ -3292,6 +3316,7 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
 
 def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main'):
     logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
+    _record_event('script_action_start', f'{action} {repo_owner or ""}/{repo_name or ""}'.strip(), source='update', protocol='system')
     direct_env = _repo_direct_fetch_env(DIRECT_FETCH_ENV_KEYS)
     progress_callback = None
     if progress_command:
@@ -3309,7 +3334,15 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
             progress_callback('\n'.join(logs))
         _repo_write_script(script_text)
 
-    return _repo_run_script_and_collect(action, direct_env, logs, progress_callback)
+    return_code, output = _repo_run_script_and_collect(action, direct_env, logs, progress_callback)
+    _record_event(
+        'script_action_finish',
+        f'{action}: return_code={return_code}',
+        level='info' if return_code == 0 else 'warn',
+        source='update',
+        protocol='system',
+    )
+    return return_code, output
 
 
 def _restart_router_services():
@@ -3526,6 +3559,75 @@ def _save_unblock_list(list_name, text):
         raise ValueError('Список должен быть .txt файлом')
     safe_name = _save_unblock_list_file(list_name, text)
     return f'✅ Список {safe_name} сохранён и применён.'
+
+
+def _service_route_items():
+    return service_routes.route_service_items(presets=_custom_check_presets())
+
+
+def _service_route_summary():
+    return service_routes.service_route_summary(_service_route_items())
+
+
+def _route_intersections_snapshot():
+    return route_intersections.analyze_route_intersections()
+
+
+def _apply_service_route(service_key, target_protocol):
+    result = service_routes.apply_service_route(service_key, target_protocol)
+    _sync_udp_policy_config()
+    _invalidate_web_status_cache()
+    return result
+
+
+def _apply_service_profile(profile_id):
+    result = service_routes.apply_service_profile(profile_id, service_items=_service_route_items())
+    _sync_udp_policy_config()
+    _invalidate_web_status_cache()
+    return result
+
+
+def _resolve_route_intersections(target_route):
+    result = route_intersections.resolve_route_intersections(target_route)
+    _sync_udp_policy_config()
+    _invalidate_web_status_cache()
+    return result
+
+
+def _event_history_snapshot(limit=40):
+    return event_history.load_events(limit=limit)
+
+
+def _update_status_snapshot():
+    state = update_status.read_update_status()
+    command_state = _get_web_command_state()
+    if command_state.get('running') and command_state.get('command') in WEB_UPDATE_COMMANDS:
+        state.update({
+            'running': True,
+            'command': command_state.get('command'),
+            'progress': command_state.get('progress', 0),
+            'progress_label': command_state.get('progress_label', ''),
+            'message': command_state.get('result', ''),
+            'started_at': command_state.get('started_at', 0),
+        })
+    return state
+
+
+def _route_tools_html(csrf_input_html):
+    service_items = _service_route_items()
+    route_states = service_routes.service_route_summary(service_items)
+    protocol_options = service_routes.protocol_options()
+    return ''.join([
+        key_pool_web.web_route_profiles_html(service_routes.ROUTE_PROFILES, csrf_input_html=csrf_input_html),
+        key_pool_web.web_route_intersections_html(_route_intersections_snapshot(), protocol_options, csrf_input_html=csrf_input_html),
+        key_pool_web.web_service_route_tools_html(
+            service_items,
+            route_states,
+            protocol_options,
+            _service_icon_html,
+            csrf_input_html=csrf_input_html,
+        ),
+    ])
 
 
 def _append_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
@@ -3977,6 +4079,15 @@ def _set_web_command_progress(command, result_text):
         _estimate_web_command_progress,
     )
     _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
+    if command in WEB_UPDATE_COMMANDS:
+        snapshot = _command_state_snapshot(web_command_lock, web_command_state)
+        update_status.write_update_status(
+            command=command,
+            running=True,
+            progress=snapshot.get('progress', 0),
+            progress_label=snapshot.get('progress_label', ''),
+            message=result_text,
+        )
 
 
 def _set_web_flash_message(message):
@@ -3998,6 +4109,17 @@ def _finish_web_command(command, result):
         finished_progress_label='Завершено',
     )
     _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
+    if command in WEB_UPDATE_COMMANDS:
+        snapshot = _command_state_snapshot(web_command_lock, web_command_state)
+        update_status.finish_update_status(command, result, progress=snapshot.get('progress', 100))
+        _record_event(
+            'web_command_finish',
+            result,
+            level='info',
+            source='web',
+            protocol='system',
+            service=command,
+        )
     job_state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
     if job_state.get('source') == 'web':
         _remove_file(TELEGRAM_COMMAND_JOB_FILE)
@@ -4060,6 +4182,15 @@ def _start_web_command(command):
     with web_command_lock:
         web_command_state.update(state)
     _write_web_command_state_file(state)
+    if command in WEB_UPDATE_COMMANDS:
+        update_status.write_update_status(
+            command=command,
+            running=True,
+            progress=state.get('progress', 0),
+            progress_label=state.get('progress_label', ''),
+            message='Команда запущена',
+        )
+        _record_event('web_command_start', label, source='web', protocol='system', service=command)
     _write_json_file(TELEGRAM_COMMAND_JOB_FILE, {
         'running': True,
         'source': 'web',
@@ -5979,6 +6110,10 @@ def _web_action_context():
         socialnet_all_key=SOCIALNET_ALL_KEY,
         normalize_unblock_route_name=_normalize_unblock_route_name,
         install_key_for_protocol=_install_key_for_protocol,
+        apply_service_route=_apply_service_route,
+        apply_service_profile=_apply_service_profile,
+        resolve_route_intersections=_resolve_route_intersections,
+        record_event=_record_event,
         install_verify=False,
     )
     context.update(web_post_actions.pool_action_context(
@@ -6033,6 +6168,9 @@ def _web_get_context(handler):
         'store_status_api_cache': _store_web_status_api_cache,
         'status_api_cache_ttl': WEB_STATUS_API_CACHE_TTL,
         'get_web_command_state': _get_web_command_state,
+        'update_status_snapshot': _update_status_snapshot,
+        'event_history_snapshot': _event_history_snapshot,
+        'route_intersections_snapshot': _route_intersections_snapshot,
         'router_health_snapshot': _router_health_snapshot,
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
@@ -6064,12 +6202,15 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         _service_icon_html,
         csrf_input_html=csrf_input_html,
     )
+    route_states = _service_route_summary()
     custom_presets_html = key_pool_web.web_custom_presets_html(
         custom_checks,
         _custom_check_presets(),
         _service_icon_html,
         csrf_input_html=csrf_input_html,
+        route_states=route_states,
     )
+    route_tools_html = _route_tools_html(csrf_input_html)
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
@@ -6095,6 +6236,7 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
+        route_tools_html=route_tools_html,
         active_protocol=protocol,
         pool_probe_pending=bool(_get_pool_probe_progress().get('running')),
     )
@@ -6110,12 +6252,15 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         _service_icon_html,
         csrf_input_html=csrf_input_html,
     )
+    route_states = _service_route_summary()
     custom_presets_html = key_pool_web.web_custom_presets_html(
         custom_checks,
         _custom_check_presets(),
         _service_icon_html,
         csrf_input_html=csrf_input_html,
+        route_states=route_states,
     )
+    route_tools_html = _route_tools_html(csrf_input_html)
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
@@ -6141,6 +6286,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
+        route_tools_html=route_tools_html,
         active_protocol=_default_web_protocol(),
         lazy_protocol_panels=True,
         pool_probe_pending=pool_probe_pending,
@@ -6187,7 +6333,15 @@ def _web_simple_form_context(current_keys, protocol_statuses, csrf_input_html, s
 
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
-    quiet_log_prefixes = ('/api/status', '/api/pool_probe', '/api/command_state', '/static/')
+    quiet_log_prefixes = (
+        '/api/status',
+        '/api/pool_probe',
+        '/api/command_state',
+        '/api/update_status',
+        '/api/event_history',
+        '/api/route_intersections',
+        '/static/',
+    )
     local_client_checker = staticmethod(_web_is_local_client)
     web_auth_token_getter = staticmethod(lambda: _web_config_auth_token(config))
     web_auth_user_getter = staticmethod(lambda: _web_config_auth_user(config))
@@ -6288,6 +6442,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         )
 
 
+        event_history_html = key_pool_web.web_event_history_html(_event_history_snapshot())
+
         return render_web_form(
             APP_BRANCH_DESCRIPTION=APP_BRANCH_DESCRIPTION,
             APP_BRANCH_LABEL=APP_BRANCH_LABEL,
@@ -6304,6 +6460,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             command_buttons_html=command_buttons_html,
             current_mode_label=current_mode_label,
             custom_checks_json=pool_view['custom_checks_json'],
+            event_history_html=event_history_html,
             fallback_block=form_basics['fallback_block'],
             initial_command_running=initial_command_running,
             initial_status_pending=initial_status_pending,

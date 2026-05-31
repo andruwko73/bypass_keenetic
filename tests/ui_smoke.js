@@ -141,6 +141,16 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);
   await assertPoolKeysAreMasked(page, `${name} initial keys`);
+  await page.locator('[data-protocol-panel].active [data-subview-target="check"]').click();
+  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
+  await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
+  await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
+  const routeTextFits = await page.locator('[data-protocol-panel].active .service-route-card').evaluateAll((nodes) => (
+    nodes.every((node) => node.scrollWidth <= node.clientWidth + 2)
+  ));
+  if (!routeTextFits) {
+    throw new Error(`${name}: service route cards overflow`);
+  }
   await page.locator('[data-protocol-panel].active [data-subview-target="pool"]').click();
   if (await page.locator('[data-pool-filter]').count()) {
     await assertVisibleBox(page, '[data-pool-filter]', `${name} pool filter`);

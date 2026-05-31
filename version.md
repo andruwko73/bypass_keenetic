@@ -1,3 +1,6 @@
+*v1.672 (01 Jun 2026) -* main
+*Adds service route profiles, list intersection repair, all-protocol event history, persistent update progress, UI smoke coverage for route controls, and a CI secret scan without adding a real YouTube video playback probe.*
+
 *v1.671 (31 May 2026) -* main
 *Replaces the broad `google.com` ChatGPT/Codex route with `www.google.com` so primary Vless service routes no longer overlap YouTube `*.l.google.com` domains from the Vless 2 list.*
 

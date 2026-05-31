@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import key_pool_web  # noqa: E402
+import service_routes  # noqa: E402
 import web_form_blocks  # noqa: E402
 import web_form_template  # noqa: E402
 import web_pool_form_blocks  # noqa: E402
@@ -69,6 +70,18 @@ CUSTOM_CHECKS = [
         "icon": "",
     }
 ]
+
+ROUTE_SERVICE_ITEMS = [
+    {"id": "telegram", "label": "Telegram", "badge": "TG", "icon": ""},
+    {"id": "youtube", "label": "YouTube", "badge": "YT", "icon": ""},
+    {"id": "chatgpt_services", "label": "ChatGPT / Codex", "badge": "AI", "icon": ""},
+]
+
+ROUTE_STATES = {
+    "telegram": {"label": "Vless 1"},
+    "youtube": {"label": "Vless 2"},
+    "chatgpt_services": {"label": "частично: Vless 1 / Vless 2"},
+}
 
 
 def _hash_key(key_value):
@@ -209,6 +222,36 @@ def _pool_snapshot(protocols=None):
     )
 
 
+def _route_tools_html(csrf_input_html):
+    return "".join(
+        [
+            key_pool_web.web_route_profiles_html(
+                service_routes.ROUTE_PROFILES,
+                csrf_input_html=csrf_input_html,
+            ),
+            key_pool_web.web_route_intersections_html(
+                {
+                    "count": 1,
+                    "issues": [
+                        {
+                            "message": "chatgpt.com пересекается с api.chatgpt.com",
+                        }
+                    ],
+                },
+                service_routes.protocol_options(),
+                csrf_input_html=csrf_input_html,
+            ),
+            key_pool_web.web_service_route_tools_html(
+                ROUTE_SERVICE_ITEMS,
+                ROUTE_STATES,
+                service_routes.protocol_options(),
+                _service_icon_html,
+                csrf_input_html=csrf_input_html,
+            ),
+        ]
+    )
+
+
 def _protocol_panel(protocol):
     protocol_sections = [section for section in web_form_blocks.PROTOCOL_SECTIONS if section[0] == protocol]
     if not protocol_sections:
@@ -226,6 +269,7 @@ def _protocol_panel(protocol):
         _service_icon_html,
         csrf_input_html,
     )
+    route_tools_html = _route_tools_html(csrf_input_html)
     table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
     _tabs, panels = web_pool_form_blocks.render_protocol_tabs_and_panels(
         protocol_sections,
@@ -253,6 +297,7 @@ def _protocol_panel(protocol):
         custom_header_icons=key_pool_web.custom_check_header_icons(CUSTOM_CHECKS, _service_icon_html),
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
+        route_tools_html=route_tools_html,
         active_protocol=protocol,
         pool_probe_pending=False,
     )
@@ -283,6 +328,7 @@ def _page_html():
         _service_icon_html,
         csrf_input_html,
     )
+    route_tools_html = _route_tools_html(csrf_input_html)
     table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
     protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         web_form_blocks.PROTOCOL_SECTIONS,
@@ -310,6 +356,7 @@ def _page_html():
         custom_header_icons=key_pool_web.custom_check_header_icons(CUSTOM_CHECKS, _service_icon_html),
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
+        route_tools_html=route_tools_html,
         active_protocol="vless",
         lazy_protocol_panels=True,
         pool_probe_pending=False,
@@ -357,6 +404,18 @@ def _page_html():
         ),
         current_mode_label=current_mode_label,
         custom_checks_json=json.dumps(key_pool_web.web_custom_checks(CUSTOM_CHECKS), ensure_ascii=False),
+        event_history_html=key_pool_web.web_event_history_html(
+            [
+                {
+                    "ts": int(time.time()),
+                    "action": "key_switch",
+                    "protocol_label": "Vless 1",
+                    "service": "telegram",
+                    "message": "fixture active key",
+                    "level": "info",
+                }
+            ]
+        ),
         fallback_block=form_basics["fallback_block"],
         initial_command_running=form_basics["initial_command_running"],
         initial_status_pending="false",

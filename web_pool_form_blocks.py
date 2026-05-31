@@ -164,6 +164,7 @@ def render_protocol_panel(
     custom_checks_html,
     telegram_icon_html,
     youtube_icon_html,
+    route_tools_html='',
     active=False,
     csrf_input_html='',
     enable_key_pool=True,
@@ -275,6 +276,7 @@ def render_protocol_panel(
                         <small>Проверяются через выбранный прокси вместе с Telegram и YouTube.</small>
                     </span>
                 </div>
+                {route_tools_html}
                 <div class="service-preset-grid">{custom_presets_html}</div>
                 <div class="custom-check-list" data-custom-check-list>{custom_checks_html}</div>
                 <form method="post" action="/custom_check_add" class="custom-check-form" data-async-action="custom-check-add">
@@ -358,6 +360,7 @@ def render_protocol_tabs_and_panels(
     custom_header_icons='',
     custom_presets_html='',
     custom_checks_html='',
+    route_tools_html='',
     active_protocol=None,
     lazy_protocol_panels=False,
     pool_probe_pending=False,
@@ -450,6 +453,7 @@ def render_protocol_tabs_and_panels(
                 custom_header_icons=custom_header_icons,
                 custom_presets_html=custom_presets_html,
                 custom_checks_html=custom_checks_html,
+                route_tools_html=route_tools_html,
                 telegram_icon_html=telegram_icon_html,
                 youtube_icon_html=youtube_icon_html,
                 active=tab_active,

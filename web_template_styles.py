@@ -431,6 +431,37 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .custom-check-head{display:flex;justify-content:space-between;gap:10px;align-items:center;}
         .custom-check-head strong{display:block;font-size:13px;color:#edf5fb;}
         .custom-check-head small{display:block;margin-top:2px;color:#9fb0c8;font-size:11px;line-height:1.25;}
+        .route-section-head{display:grid;gap:2px;min-width:0;}
+        .route-section-head strong{font-size:13px;color:#edf5fb;}
+        .route-section-head small{font-size:11px;line-height:1.25;color:#9fb0c8;}
+        .route-profile-panel,.service-route-tools,.route-intersection-card{display:grid;gap:8px;padding:8px;border-radius:8px;border:1px solid rgba(91,124,150,.28);background:rgba(255,255,255,.025);}
+        .route-profile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px;}
+        .route-profile-grid form,.service-route-form,.route-intersection-actions form{margin:0;}
+        .route-profile-btn{width:100%;min-height:34px;padding:6px 8px;border-radius:8px;font-size:11px;line-height:1.2;white-space:normal;text-align:center;}
+        .route-intersection-card{grid-template-columns:minmax(0,1fr) auto;align-items:center;}
+        .route-intersection-ok{border-color:rgba(74,222,128,.24);background:rgba(34,197,94,.055);}
+        .route-intersection-warn{border-color:rgba(250,204,21,.28);background:rgba(250,204,21,.055);}
+        .route-intersection-card strong{display:block;font-size:12px;color:#edf5fb;}
+        .route-intersection-card small{display:block;margin-top:2px;color:#9fb0c8;font-size:11px;line-height:1.25;}
+        .route-intersection-card ul{margin:6px 0 0 16px;padding:0;color:#9fb0c8;font-size:10.5px;line-height:1.25;}
+        .route-intersection-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;}
+        .route-intersection-actions button{min-width:78px;min-height:30px;padding:5px 8px;font-size:10.5px;}
+        .service-route-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:6px;}
+        .service-route-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;min-width:0;padding:7px;border-radius:8px;border:1px solid rgba(91,124,150,.24);background:rgba(255,255,255,.025);}
+        .service-route-title{display:flex;align-items:center;gap:7px;min-width:0;}
+        .service-route-title span:last-child{display:grid;gap:1px;min-width:0;}
+        .service-route-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#edf5fb;}
+        .service-route-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fb0c8;font-size:10.5px;}
+        .service-route-form{display:grid;grid-template-columns:minmax(98px,1fr) auto;gap:6px;align-items:center;min-width:210px;}
+        .service-route-form select{height:34px;min-height:34px;padding:0 8px;font-size:11px;}
+        .service-route-form button{height:34px;min-height:34px;padding:0 9px;font-size:11px;white-space:nowrap;}
+        .event-history-panel{margin-top:12px;display:grid;gap:8px;}
+        .event-history-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px;}
+        .event-history-item{display:grid;grid-template-columns:52px minmax(0,1fr);gap:7px;align-items:start;padding:7px;border-radius:8px;border:1px solid rgba(91,124,150,.28);background:rgba(255,255,255,.025);}
+        .event-time{font-size:10px;color:#9fb0c8;white-space:nowrap;}
+        .event-main{display:grid;gap:1px;min-width:0;}
+        .event-main strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#edf5fb;}
+        .event-main small,.event-main em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:normal;font-size:10px;color:#9fb0c8;}
         .service-preset-grid{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;}
         .service-preset-grid form{margin:0;flex:0 0 86px;min-width:0;}
         .service-preset-btn{width:86px;min-width:0;display:flex;align-items:center;justify-content:center;gap:4px;height:var(--control-height);min-height:var(--control-height);padding:0 5px;background:rgba(34,67,73,.28);}
@@ -719,6 +750,12 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .pool-actions-cell .pool-delete-icon{display:inline-flex;align-items:center;justify-content:center;font-size:13px;line-height:1;}
             .pool-actions-cell .pool-delete-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
             .service-preset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}
+            .route-profile-grid,.service-route-grid,.event-history-list{grid-template-columns:1fr;}
+            .route-intersection-card,.service-route-card{grid-template-columns:1fr;}
+            .route-intersection-actions{justify-content:stretch;}
+            .route-intersection-actions form{flex:1 1 92px;}
+            .route-intersection-actions button{width:100%;}
+            .service-route-form{grid-template-columns:1fr auto;min-width:0;}
             .service-preset-grid form{min-width:0;}
             .service-preset-btn{width:100%;min-width:0;gap:3px;padding:0 3px;}
             .service-preset-btn span:last-child{font-size:10px;}
@@ -818,7 +855,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .app-caption strong,
         [data-theme="light"] .status-label,
         [data-theme="light"] .custom-check-head strong,
-        [data-theme="light"] .custom-check-copy strong{color:var(--text);}
+        [data-theme="light"] .custom-check-copy strong,
+        [data-theme="light"] .route-section-head strong,
+        [data-theme="light"] .route-intersection-card strong,
+        [data-theme="light"] .service-route-title strong,
+        [data-theme="light"] .event-main strong{color:var(--text);}
         [data-theme="light"] .brand p,
         [data-theme="light"] .section-subtitle,
         [data-theme="light"] .status-note,
@@ -827,6 +868,13 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .custom-check-head small,
         [data-theme="light"] .custom-check-copy small,
         [data-theme="light"] .custom-check-empty,
+        [data-theme="light"] .route-section-head small,
+        [data-theme="light"] .route-intersection-card small,
+        [data-theme="light"] .route-intersection-card ul,
+        [data-theme="light"] .service-route-title small,
+        [data-theme="light"] .event-time,
+        [data-theme="light"] .event-main small,
+        [data-theme="light"] .event-main em,
         [data-theme="light"] .pool-hash,
         [data-theme="light"] .pool-checked-cell{color:var(--muted);}
         [data-theme="light"] .status-value,
@@ -871,7 +919,12 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .pool-table-wrap,
         [data-theme="light"] .protocol-subview-import .pool-add-form,
         [data-theme="light"] .protocol-subview-import .pool-subscribe-form,
-        [data-theme="light"] .custom-check-card{background:rgba(255,255,255,.78);border-color:var(--border);}
+        [data-theme="light"] .custom-check-card,
+        [data-theme="light"] .route-profile-panel,
+        [data-theme="light"] .service-route-tools,
+        [data-theme="light"] .route-intersection-card,
+        [data-theme="light"] .service-route-card,
+        [data-theme="light"] .event-history-item{background:rgba(255,255,255,.78);border-color:var(--border);}
         [data-theme="light"] .seg-tab,
         [data-theme="light"] .subtab,
         [data-theme="light"] .nav-item{color:#536274;}

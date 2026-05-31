@@ -57,6 +57,10 @@ import installer_common
 import installer
 import repo_update
 import entware_dns_runtime
+import event_history
+import route_intersections
+import service_routes
+import update_status
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -3540,6 +3544,91 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     assert "_invalidate_key_status_cache()" in source
 
 
+def test_event_history_helpers():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'events.jsonl'
+        assert event_history.record_event(
+            action='route',
+            message='installed vless://secret@example.test:443#name',
+            protocol='vless',
+            service='telegram',
+            event_path=str(path),
+        )
+        events = event_history.load_events(event_path=str(path))
+    assert events[0]['protocol_label'] == 'Vless 1'
+    assert '<proxy-key-hidden>' in events[0]['message']
+    assert 'vless://' not in events[0]['message']
+
+
+def test_update_status_helpers():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'update.json'
+        status = update_status.write_update_status(
+            command='update',
+            running=True,
+            progress=42,
+            progress_label='Downloading',
+            message='step',
+            path=str(path),
+        )
+        assert status['running'] is True
+        assert update_status.read_update_status(str(path))['progress'] == 42
+        finished = update_status.finish_update_status('update', 'done', path=str(path))
+        assert finished['running'] is False
+        assert finished['progress'] == 100
+
+
+def test_service_routes_apply_and_profile():
+    with tempfile.TemporaryDirectory() as tmp:
+        discord_entries = service_catalog.SERVICE_LIST_SOURCES['discord']['entries']
+        (Path(tmp) / 'vless.txt').write_text(discord_entries[0] + '\n', encoding='utf-8')
+        (Path(tmp) / 'vless-2.txt').write_text('\n'.join(discord_entries[:2]) + '\n', encoding='utf-8')
+        result = service_routes.apply_service_route('discord', 'vless', unblock_dir=tmp, update_script='')
+        assert result['target_label'] == 'Vless 1'
+        vless_entries = (Path(tmp) / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        vless2_entries = (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
+        assert set(discord_entries) <= set(vless_entries)
+        assert not (set(discord_entries) & set(vless2_entries))
+        profile = service_routes.apply_service_profile(
+            'youtube_vless2_rest_vless',
+            service_items=[{'id': 'youtube'}, {'id': 'telegram'}],
+            unblock_dir=tmp,
+            update_script='',
+        )
+        assert profile['services'] == 2
+        assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
+        assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
+
+
+def test_route_intersections_helpers():
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / 'vless.txt').write_text('example.com\n198.51.100.0/24\n', encoding='utf-8')
+        (Path(tmp) / 'vless-2.txt').write_text('api.example.com\n198.51.100.10\n', encoding='utf-8')
+        report = route_intersections.analyze_route_intersections(unblock_dir=tmp)
+        assert report['count'] >= 2
+        result = route_intersections.resolve_route_intersections('vless-2', unblock_dir=tmp, update_script='')
+        assert result['moved'] >= 2
+        assert 'example.com' in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
+        assert 'example.com' not in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
+
+
+def test_service_route_ui_helpers():
+    service_items = service_routes.route_service_items(presets=service_catalog.CUSTOM_CHECK_PRESETS)
+    assert any(item['id'] == 'telegram' for item in service_items)
+    assert any(item['id'] == 'youtube' for item in service_items)
+    route_states = {item['id']: {'label': 'Vless 1'} for item in service_items[:2]}
+    html_text = key_pool_web.web_service_route_tools_html(
+        service_items[:2],
+        route_states,
+        service_routes.protocol_options(),
+        lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+        csrf_input_html='<input type="hidden" name="csrf_token" value="x">',
+    )
+    assert '/service_route_apply' in html_text
+    assert 'Маршруты сервисов' in html_text
+    assert key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
+
+
 def main():
     test_app_runtime_mode_setter_callbacks()
     test_router_health_runtime_payload_uses_keenetic_memory()
@@ -3600,6 +3689,11 @@ def main():
     test_proxy_apply_runtime_helpers()
     test_pool_probe_controller_helpers()
     test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port()
+    test_event_history_helpers()
+    test_update_status_helpers()
+    test_service_routes_apply_and_profile()
+    test_route_intersections_helpers()
+    test_service_route_ui_helpers()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
 

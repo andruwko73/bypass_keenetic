@@ -32,6 +32,9 @@ jobs:
       - name: Python smoke
         run: python tests/smoke_modules.py
 
+      - name: Secret scan
+        run: python tests/secret_scan.py
+
       - name: Shell syntax
         run: |
           bash -n \

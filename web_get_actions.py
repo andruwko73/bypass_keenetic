@@ -192,6 +192,12 @@ def dispatch(ctx, path, query=''):
         return {'kind': 'json', 'payload': _pools_payload(ctx, query), 'status': 200}
     if path == '/api/command_state':
         return {'kind': 'json', 'payload': _ctx(ctx, 'get_web_command_state')(), 'status': 200}
+    if path == '/api/update_status':
+        return {'kind': 'json', 'payload': _ctx(ctx, 'update_status_snapshot', lambda: {})(), 'status': 200}
+    if path == '/api/event_history':
+        return {'kind': 'json', 'payload': {'events': _ctx(ctx, 'event_history_snapshot', lambda: [])()}, 'status': 200}
+    if path == '/api/route_intersections' and _ctx(ctx, 'pool_enabled', False):
+        return {'kind': 'json', 'payload': _ctx(ctx, 'route_intersections_snapshot', lambda: {})(), 'status': 200}
     if path == '/api/pool_probe' and _ctx(ctx, 'pool_enabled', False):
         return {'kind': 'json', 'payload': _pool_probe_payload(ctx), 'status': 200}
     if path == '/api/protocol_panel' and _ctx(ctx, 'pool_enabled', False):

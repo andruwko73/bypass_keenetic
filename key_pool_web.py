@@ -23,6 +23,38 @@ def pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
 
 
+def web_event_history_html(events):
+    events = events or []
+    if not events:
+        return '''<section class="panel event-history-panel">
+            <h3>История событий</h3>
+            <p class="section-subtitle">Пока нет записей о переключениях, маршрутах и обновлениях.</p>
+        </section>'''
+    rows = []
+    for event in events[:12]:
+        try:
+            stamp = time.strftime('%d.%m %H:%M', time.localtime(float(event.get('ts') or 0)))
+        except Exception:
+            stamp = ''
+        level = html.escape(event.get('level') or 'info', quote=True)
+        action = html.escape(event.get('action') or '')
+        protocol = html.escape(event.get('protocol_label') or event.get('protocol') or '')
+        service = html.escape(event.get('service') or '')
+        message = html.escape(event.get('message') or '')
+        meta = ' · '.join(item for item in (protocol, service) if item)
+        rows.append(f'''<li class="event-history-item event-{level}">
+            <span class="event-time">{html.escape(stamp)}</span>
+            <span class="event-main"><strong>{action}</strong><small>{html.escape(meta)}</small><em>{message}</em></span>
+        </li>''')
+    return f'''<section class="panel event-history-panel">
+        <div class="route-section-head">
+            <strong>История событий</strong>
+            <small>Последние переключения ключей, обновления и изменения маршрутов по всем протоколам.</small>
+        </div>
+        <ul class="event-history-list">{"".join(rows)}</ul>
+    </section>'''
+
+
 def _service_counter(custom_checks):
     services = [
         {'label': 'Telegram', 'field': 'tg_ok', 'id': None, 'count': 0},
@@ -228,8 +260,9 @@ def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html='')
     return ''.join(items)
 
 
-def web_custom_presets_html(custom_checks, presets, service_icon_html, csrf_input_html=''):
+def web_custom_presets_html(custom_checks, presets, service_icon_html, csrf_input_html='', route_states=None):
     active_ids = {check.get('id') for check in custom_checks or []}
+    route_states = route_states or {}
     items = []
     for preset in presets or []:
         safe_id = html.escape(preset['id'])
@@ -248,6 +281,112 @@ def web_custom_presets_html(custom_checks, presets, service_icon_html, csrf_inpu
             </button>
         </form>''')
     return ''.join(items)
+
+
+def web_service_route_tools_html(service_items, route_states, protocol_options, service_icon_html, csrf_input_html=''):
+    service_items = service_items or []
+    if not service_items:
+        return ''
+    protocol_options = protocol_options or []
+    cards = []
+    for service in service_items:
+        service_id = str(service.get('id') or '')
+        safe_id = html.escape(service_id, quote=True)
+        safe_label = html.escape(service.get('label') or service_id)
+        state = route_states.get(service_id) or {}
+        route_label = html.escape(state.get('label') or 'не добавлен')
+        selected_protocol = ''
+        for field in ('complete_protocols', 'partial_protocols'):
+            values = state.get(field) if isinstance(state.get(field), list) else []
+            if values:
+                selected_protocol = values[0]
+                break
+        options_html = ''.join(
+            (
+                f'<option value="{html.escape(item["value"], quote=True)}"'
+                f'{" selected" if item["value"] == selected_protocol else ""}>'
+                f'{html.escape(item["label"])}</option>'
+            )
+            for item in protocol_options
+        )
+        cards.append(f'''<div class="service-route-card">
+            <div class="service-route-title">
+                {custom_check_icon_html(service, service_icon_html)}
+                <span><strong>{safe_label}</strong><small>Маршрут: {route_label}</small></span>
+            </div>
+            <form method="post" action="/service_route_apply" class="service-route-form" data-async-action="service-route">
+                {csrf_input_html}
+                <input type="hidden" name="service_key" value="{safe_id}">
+                <select name="target_protocol" aria-label="Куда перенести {safe_label}">
+                    {options_html}
+                </select>
+                <button type="submit" class="secondary-button">Перенести</button>
+            </form>
+        </div>''')
+    return f'''<div class="service-route-tools">
+        <div class="route-section-head">
+            <strong>Маршруты сервисов</strong>
+            <small>Адреса сервиса переносятся в выбранный список обхода без дублирования в других списках.</small>
+        </div>
+        <div class="service-route-grid">{''.join(cards)}</div>
+    </div>'''
+
+
+def web_route_profiles_html(profiles, csrf_input_html=''):
+    profiles = profiles or []
+    if not profiles:
+        return ''
+    buttons = []
+    for profile in profiles:
+        safe_id = html.escape(profile.get('id', ''), quote=True)
+        safe_label = html.escape(profile.get('label', 'Профиль'))
+        safe_description = html.escape(profile.get('description', ''))
+        buttons.append(f'''<form method="post" action="/service_profile_apply" data-async-action="service-route">
+            {csrf_input_html}
+            <input type="hidden" name="profile_id" value="{safe_id}">
+            <button type="submit" class="route-profile-btn" title="{safe_description}">
+                <span>{safe_label}</span>
+            </button>
+        </form>''')
+    return f'''<div class="route-profile-panel">
+        <div class="route-section-head">
+            <strong>Быстрые сценарии маршрутов</strong>
+            <small>Профиль переносит только известные адреса сервисов из каталога.</small>
+        </div>
+        <div class="route-profile-grid">{''.join(buttons)}</div>
+    </div>'''
+
+
+def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
+    report = report or {}
+    count = int(report.get('count') or 0)
+    if count <= 0:
+        return '''<div class="route-intersection-card route-intersection-ok">
+            <strong>Пересечений в списках не найдено</strong>
+            <small>Файлы обхода не содержат одинаковых доменов, вложенных доменов или пересекающихся IP-сетей.</small>
+        </div>'''
+    examples = []
+    for issue in (report.get('issues') or [])[:3]:
+        examples.append(f'<li>{html.escape(issue.get("message") or issue.get("entry") or "")}</li>')
+    examples_html = f'<ul>{"".join(examples)}</ul>' if examples else ''
+    buttons = []
+    for item in protocol_options or []:
+        route_value = 'vless-2' if item['value'] == 'vless2' else item['value']
+        buttons.append(f'''<form method="post" action="/route_intersections_resolve" data-async-action="service-route" data-confirm-title="Перенести пересечения?" data-confirm-message="Все найденные пересекающиеся адреса будут оставлены только в списке {html.escape(item['label'])}.">
+            {csrf_input_html}
+            <input type="hidden" name="target_route" value="{html.escape(route_value, quote=True)}">
+            <button type="submit" class="outline-button">{html.escape(item['label'])}</button>
+        </form>''')
+    return f'''<div class="route-intersection-card route-intersection-warn">
+        <div>
+            <strong>Найдены пересечения списков: {count}</strong>
+            <small>Это может отправлять один сервис через разные ключи и вызывать обрывы.</small>
+            {examples_html}
+        </div>
+        <div class="route-intersection-actions">
+            {''.join(buttons)}
+        </div>
+    </div>'''
 
 
 def web_pool_snapshot(

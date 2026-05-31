@@ -190,6 +190,87 @@ def _custom_checks_to_list(ctx, data):
     )
 
 
+def _service_route_apply(ctx, data):
+    service_key = form_value(data, 'service_key')
+    target_protocol = form_value(data, 'target_protocol')
+    success = True
+    try:
+        result_data = _ctx(ctx, 'apply_service_route')(service_key, target_protocol)
+        result = (
+            f"Сервис {result_data.get('service_label')} перенесён в {result_data.get('target_label')}. "
+            f"Адресов: {result_data.get('entries', 0)}."
+        )
+        _call(
+            ctx,
+            'record_event',
+            action='service_route_apply',
+            message=result,
+            protocol=target_protocol,
+            service=service_key,
+            source='web',
+        )
+        _invalidate_status(ctx)
+    except Exception as exc:
+        success = False
+        result = f'Ошибка переноса маршрута сервиса: {exc}'
+    extra = {'reload_after_ms': 900}
+    extra.update(_pool_payload(ctx))
+    return _result(result, success=success, extra=extra)
+
+
+def _service_profile_apply(ctx, data):
+    profile_id = form_value(data, 'profile_id')
+    success = True
+    try:
+        result_data = _ctx(ctx, 'apply_service_profile')(profile_id)
+        result = (
+            f"Профиль маршрутов применён: {result_data.get('profile_label')}. "
+            f"Сервисов: {result_data.get('services', 0)}, адресов: {result_data.get('entries', 0)}."
+        )
+        _call(
+            ctx,
+            'record_event',
+            action='service_profile_apply',
+            message=result,
+            protocol='system',
+            service=profile_id,
+            source='web',
+        )
+        _invalidate_status(ctx)
+    except Exception as exc:
+        success = False
+        result = f'Ошибка применения профиля маршрутов: {exc}'
+    extra = {'reload_after_ms': 900}
+    extra.update(_pool_payload(ctx))
+    return _result(result, success=success, extra=extra)
+
+
+def _route_intersections_resolve(ctx, data):
+    target_route = form_value(data, 'target_route')
+    success = True
+    try:
+        result_data = _ctx(ctx, 'resolve_route_intersections')(target_route)
+        result = (
+            f"Пересечения перенесены в {result_data.get('target_route')}. "
+            f"Адресов: {result_data.get('moved', 0)}."
+        )
+        _call(
+            ctx,
+            'record_event',
+            action='route_intersections_resolve',
+            message=result,
+            protocol=result_data.get('target_route') or 'system',
+            source='web',
+        )
+        _invalidate_status(ctx)
+    except Exception as exc:
+        success = False
+        result = f'Ошибка переноса пересечений: {exc}'
+    extra = {'reload_after_ms': 900}
+    extra.update(_pool_payload(ctx))
+    return _result(result, success=success, extra=extra)
+
+
 def _custom_check_add(ctx, data):
     success = True
     try:
@@ -448,7 +529,14 @@ def _install(ctx, data):
 
 
 def dispatch(ctx, path, data):
-    custom_actions = {'/custom_checks_to_list', '/custom_check_add', '/custom_check_delete'}
+    custom_actions = {
+        '/custom_checks_to_list',
+        '/custom_check_add',
+        '/custom_check_delete',
+        '/service_route_apply',
+        '/service_profile_apply',
+        '/route_intersections_resolve',
+    }
     pool_actions = {'/pool_probe', '/pool_probe_cancel', '/pool_add', '/pool_delete', '/pool_apply', '/pool_clear', '/pool_subscribe'}
     if path in custom_actions and not _ctx(ctx, 'custom_checks_enabled', False):
         return None
@@ -473,6 +561,9 @@ def dispatch(ctx, path, data):
             error_text=_ctx(context, 'remove_service_error', 'Ошибка удаления сервисов'),
         ),
         '/custom_checks_to_list': _custom_checks_to_list,
+        '/service_route_apply': _service_route_apply,
+        '/service_profile_apply': _service_profile_apply,
+        '/route_intersections_resolve': _route_intersections_resolve,
         '/custom_check_add': _custom_check_add,
         '/custom_check_delete': _custom_check_delete,
         '/pool_probe': _pool_probe,

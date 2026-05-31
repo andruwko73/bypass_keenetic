@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'status-placeholder-1'
+ASSET_CACHE_REVISION = 'routes-history-1'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -125,6 +125,7 @@ def render_web_form(
     topbar_status_text,
     unblock_panels_html,
     unblock_tabs_html,
+    event_history_html='',
     enable_async_forms=True,
     enable_custom_checks=True,
     enable_key_pool=True,
@@ -375,6 +376,7 @@ def render_web_form(
                             </div>
                         </section>
                     </div>
+                    {event_history_html}
                     <section class="panel overview-key-panel">
                         <div class="workspace-head">
                             <div>
