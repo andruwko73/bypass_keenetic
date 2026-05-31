@@ -3616,16 +3616,22 @@ def test_service_route_ui_helpers():
     service_items = service_routes.route_service_items(presets=service_catalog.CUSTOM_CHECK_PRESETS)
     assert any(item['id'] == 'telegram' for item in service_items)
     assert any(item['id'] == 'youtube' for item in service_items)
-    route_states = {item['id']: {'label': 'Vless 1'} for item in service_items[:2]}
+    route_states = {item['id']: {'label': 'Vless 1', 'complete_protocols': ['vless']} for item in service_items[:2]}
     html_text = key_pool_web.web_service_route_tools_html(
         service_items[:2],
         route_states,
         service_routes.protocol_options(),
         lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
         csrf_input_html='<input type="hidden" name="csrf_token" value="x">',
+        core_icon_html={'telegram': 'TG', 'youtube': 'YT'},
     )
     assert '/service_route_apply' in html_text
-    assert 'Маршруты сервисов' in html_text
+    assert 'Сервисы и маршруты' in html_text
+    assert 'service-route-choice active' in html_text
+    assert 'service-route-telegram-icon' in html_text
+    assert 'service-route-youtube-icon' in html_text
+    assert '<select' not in html_text
+    assert 'Перенести</button>' not in html_text
     assert key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
 
 

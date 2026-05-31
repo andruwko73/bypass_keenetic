@@ -247,6 +247,11 @@ def _route_tools_html(csrf_input_html):
                 service_routes.protocol_options(),
                 _service_icon_html,
                 csrf_input_html=csrf_input_html,
+                active_check_ids={item["id"] for item in CUSTOM_CHECKS},
+                core_icon_html={
+                    "telegram": _telegram_icon_html(opacity=1.0),
+                    "youtube": _youtube_icon_html(opacity=1.0),
+                },
             ),
         ]
     )

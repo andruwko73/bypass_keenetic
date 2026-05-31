@@ -71,6 +71,8 @@ def route_service_items(*, include_core=True, presets=None):
             'label': source.get('label') or preset.get('label') or service_key,
             'icon': preset.get('icon') or source.get('icon') or '',
             'badge': preset.get('badge') or '',
+            'url': preset.get('url') or source.get('url') or '',
+            'routes': preset.get('routes') or source.get('entries') or [],
             'is_custom_check': bool(preset),
         }
         if service_key == 'telegram':

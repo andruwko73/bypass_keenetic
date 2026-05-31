@@ -143,6 +143,8 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await assertPoolKeysAreMasked(page, `${name} initial keys`);
   await page.locator('[data-protocol-panel].active [data-subview-target="check"]').click();
   await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
+  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-telegram-icon', `${name} Telegram route icon`);
+  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-youtube-icon', `${name} YouTube route icon`);
   await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
   await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
   const routeTextFits = await page.locator('[data-protocol-panel].active .service-route-card').evaluateAll((nodes) => (

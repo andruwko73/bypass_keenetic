@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.672, последнее изменение: 01.06.2026
+#  Файл: bot.py, Версия v1.673, последнее изменение: 01.06.2026
 
 import subprocess
 import os
@@ -3613,10 +3613,11 @@ def _update_status_snapshot():
     return state
 
 
-def _route_tools_html(csrf_input_html):
+def _route_tools_html(csrf_input_html, custom_checks=None):
     service_items = _service_route_items()
     route_states = service_routes.service_route_summary(service_items)
     protocol_options = service_routes.protocol_options()
+    active_check_ids = {check.get('id') for check in custom_checks or []}
     return ''.join([
         key_pool_web.web_route_profiles_html(service_routes.ROUTE_PROFILES, csrf_input_html=csrf_input_html),
         key_pool_web.web_route_intersections_html(_route_intersections_snapshot(), protocol_options, csrf_input_html=csrf_input_html),
@@ -3626,6 +3627,11 @@ def _route_tools_html(csrf_input_html):
             protocol_options,
             _service_icon_html,
             csrf_input_html=csrf_input_html,
+            active_check_ids=active_check_ids,
+            core_icon_html={
+                'telegram': _telegram_icon_html(opacity=1.0),
+                'youtube': _youtube_icon_html(opacity=1.0),
+            },
         ),
     ])
 
@@ -6210,7 +6216,7 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         csrf_input_html=csrf_input_html,
         route_states=route_states,
     )
-    route_tools_html = _route_tools_html(csrf_input_html)
+    route_tools_html = _route_tools_html(csrf_input_html, custom_checks)
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
@@ -6260,7 +6266,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         csrf_input_html=csrf_input_html,
         route_states=route_states,
     )
-    route_tools_html = _route_tools_html(csrf_input_html)
+    route_tools_html = _route_tools_html(csrf_input_html, custom_checks)
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )

@@ -1,3 +1,8 @@
+<a name="1.673"></a>
+# [1.673] - 01 Jun 2026
+
+- Refined service route cards into menu-style protocol buttons and restored real Telegram/YouTube icons in the route catalog.
+
 <a name="1.672"></a>
 # [1.672] - 01 Jun 2026
 

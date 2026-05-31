@@ -11,6 +11,13 @@ POOL_PROTOCOL_LABELS = {
     'trojan': 'Trojan',
     'shadowsocks': 'Shadowsocks',
 }
+COMPACT_PROTOCOL_LABELS = {
+    'vless': 'V1',
+    'vless2': 'V2',
+    'vmess': 'VM',
+    'trojan': 'TR',
+    'shadowsocks': 'SS',
+}
 
 _ACTIVE_KEYS_TEXT = '\u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043a\u043b\u044e\u0447\u0435\u0439'
 _POOL_TOTAL_TEXT = '\u0412 \u043f\u0443\u043b\u0430\u0445'
@@ -283,10 +290,20 @@ def web_custom_presets_html(custom_checks, presets, service_icon_html, csrf_inpu
     return ''.join(items)
 
 
-def web_service_route_tools_html(service_items, route_states, protocol_options, service_icon_html, csrf_input_html=''):
+def web_service_route_tools_html(
+    service_items,
+    route_states,
+    protocol_options,
+    service_icon_html,
+    csrf_input_html='',
+    active_check_ids=None,
+    core_icon_html=None,
+):
     service_items = service_items or []
     if not service_items:
         return ''
+    active_check_ids = set(active_check_ids or [])
+    core_icon_html = core_icon_html or {}
     protocol_options = protocol_options or []
     cards = []
     for service in service_items:
@@ -295,38 +312,64 @@ def web_service_route_tools_html(service_items, route_states, protocol_options, 
         safe_label = html.escape(service.get('label') or service_id)
         state = route_states.get(service_id) or {}
         route_label = html.escape(state.get('label') or 'не добавлен')
+        safe_url = html.escape(service.get('url') or '', quote=True)
+        if service_id in core_icon_html:
+            service_icon = (
+                f'<span class="service-route-core-icon service-route-{html.escape(service_id, quote=True)}-icon">'
+                f'{core_icon_html[service_id]}</span>'
+            )
+        else:
+            service_icon = custom_check_icon_html(service, service_icon_html)
         selected_protocol = ''
         for field in ('complete_protocols', 'partial_protocols'):
             values = state.get(field) if isinstance(state.get(field), list) else []
             if values:
                 selected_protocol = values[0]
                 break
-        options_html = ''.join(
-            (
-                f'<option value="{html.escape(item["value"], quote=True)}"'
-                f'{" selected" if item["value"] == selected_protocol else ""}>'
-                f'{html.escape(item["label"])}</option>'
+        route_buttons = []
+        for item in protocol_options:
+            value = html.escape(item['value'], quote=True)
+            label = html.escape(item['label'])
+            compact_label = html.escape(COMPACT_PROTOCOL_LABELS.get(item['value'], item['label']))
+            is_active = item['value'] == selected_protocol
+            route_buttons.append(
+                f'''<form method="post" action="/service_route_apply" class="service-route-form" data-async-action="service-route">
+                    {csrf_input_html}
+                    <input type="hidden" name="service_key" value="{safe_id}">
+                    <button type="submit" name="target_protocol" value="{value}" class="service-route-choice{' active' if is_active else ''}" title="Перенести {safe_label} в {label}">
+                        {compact_label}
+                    </button>
+                </form>'''
             )
-            for item in protocol_options
-        )
+        if service.get('is_custom_check'):
+            if service_id in active_check_ids:
+                check_action = '<span class="service-check-state">Проверка добавлена</span>'
+            else:
+                check_action = f'''<form method="post" action="/custom_check_add" class="service-check-form" data-async-action="custom-check-add">
+                    {csrf_input_html}
+                    <input type="hidden" name="preset" value="{safe_id}">
+                    <input type="hidden" name="label" value="{safe_label}">
+                    <input type="hidden" name="url" value="{safe_url}">
+                    <button type="submit" class="secondary-button">Добавить проверку</button>
+                </form>'''
+        else:
+            check_action = '<span class="service-check-state">Базовая проверка</span>'
         cards.append(f'''<div class="service-route-card">
             <div class="service-route-title">
-                {custom_check_icon_html(service, service_icon_html)}
+                {service_icon}
                 <span><strong>{safe_label}</strong><small>Маршрут: {route_label}</small></span>
             </div>
-            <form method="post" action="/service_route_apply" class="service-route-form" data-async-action="service-route">
-                {csrf_input_html}
-                <input type="hidden" name="service_key" value="{safe_id}">
-                <select name="target_protocol" aria-label="Куда перенести {safe_label}">
-                    {options_html}
-                </select>
-                <button type="submit" class="secondary-button">Перенести</button>
-            </form>
+            <div class="service-route-actions">
+                <div class="service-route-protocols" role="group" aria-label="Маршрут {safe_label}">
+                    {''.join(route_buttons)}
+                </div>
+                {check_action}
+            </div>
         </div>''')
     return f'''<div class="service-route-tools">
         <div class="route-section-head">
-            <strong>Маршруты сервисов</strong>
-            <small>Адреса сервиса переносятся в выбранный список обхода без дублирования в других списках.</small>
+            <strong>Сервисы и маршруты</strong>
+            <small>В одной карточке видно, через какой список идёт сервис, и добавлена ли его проверка в пул.</small>
         </div>
         <div class="service-route-grid">{''.join(cards)}</div>
     </div>'''

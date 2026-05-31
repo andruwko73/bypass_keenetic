@@ -446,15 +446,20 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .route-intersection-card ul{margin:6px 0 0 16px;padding:0;color:#9fb0c8;font-size:10.5px;line-height:1.25;}
         .route-intersection-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;}
         .route-intersection-actions button{min-width:78px;min-height:30px;padding:5px 8px;font-size:10.5px;}
-        .service-route-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:6px;}
-        .service-route-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;min-width:0;padding:7px;border-radius:8px;border:1px solid rgba(91,124,150,.24);background:rgba(255,255,255,.025);}
+        .service-route-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:6px;}
+        .service-route-card{display:grid;gap:7px;align-items:start;min-width:0;padding:8px;border-radius:8px;border:1px solid rgba(91,124,150,.24);background:rgba(255,255,255,.025);}
         .service-route-title{display:flex;align-items:center;gap:7px;min-width:0;}
+        .service-route-title .service-route-core-icon,.service-route-title .preset-icon,.service-route-title .custom-service-badge{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;}
         .service-route-title span:last-child{display:grid;gap:1px;min-width:0;}
         .service-route-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#edf5fb;}
         .service-route-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fb0c8;font-size:10.5px;}
-        .service-route-form{display:grid;grid-template-columns:minmax(98px,1fr) auto;gap:6px;align-items:center;min-width:210px;}
-        .service-route-form select{height:34px;min-height:34px;padding:0 8px;font-size:11px;}
-        .service-route-form button{height:34px;min-height:34px;padding:0 9px;font-size:11px;white-space:nowrap;}
+        .service-route-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;min-width:0;}
+        .service-route-protocols{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;min-width:0;}
+        .service-route-form,.service-check-form{display:block;margin:0;min-width:0;}
+        .service-route-choice{width:100%;height:30px;min-height:30px;min-width:0;padding:0 5px;border-radius:7px;font-size:10px;line-height:1.05;white-space:nowrap;text-align:center;}
+        .service-route-choice.active{background:rgba(78,216,205,.18);border-color:rgba(78,216,205,.62);color:#9ff8ef;}
+        .service-check-form button{height:30px;min-height:30px;padding:0 9px;font-size:10.5px;white-space:nowrap;}
+        .service-check-state{display:flex;align-items:center;justify-content:center;min-height:34px;padding:0 9px;border-radius:8px;border:1px solid rgba(91,124,150,.24);color:#9fb0c8;font-size:10.5px;line-height:1.15;text-align:center;}
         .event-history-panel{margin-top:12px;display:grid;gap:8px;}
         .event-history-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px;}
         .event-history-item{display:grid;grid-template-columns:52px minmax(0,1fr);gap:7px;align-items:start;padding:7px;border-radius:8px;border:1px solid rgba(91,124,150,.28);background:rgba(255,255,255,.025);}
@@ -751,11 +756,13 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .pool-actions-cell .pool-delete-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
             .service-preset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;}
             .route-profile-grid,.service-route-grid,.event-history-list{grid-template-columns:1fr;}
-            .route-intersection-card,.service-route-card{grid-template-columns:1fr;}
+            .route-intersection-card{grid-template-columns:1fr;}
             .route-intersection-actions{justify-content:stretch;}
             .route-intersection-actions form{flex:1 1 92px;}
             .route-intersection-actions button{width:100%;}
-            .service-route-form{grid-template-columns:1fr auto;min-width:0;}
+            .service-route-actions{grid-template-columns:1fr;}
+            .service-route-protocols{grid-template-columns:repeat(2,minmax(0,1fr));}
+            .service-check-form button,.service-check-state{width:100%;}
             .service-preset-grid form{min-width:0;}
             .service-preset-btn{width:100%;min-width:0;gap:3px;padding:0 3px;}
             .service-preset-btn span:last-child{font-size:10px;}
@@ -875,6 +882,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .event-time,
         [data-theme="light"] .event-main small,
         [data-theme="light"] .event-main em,
+        [data-theme="light"] .service-check-state,
         [data-theme="light"] .pool-hash,
         [data-theme="light"] .pool-checked-cell{color:var(--muted);}
         [data-theme="light"] .status-value,
@@ -898,7 +906,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .secondary-button,
         [data-theme="light"] .success-button,
         [data-theme="light"] .outline-button,
-        [data-theme="light"] .service-preset-btn{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
+        [data-theme="light"] .service-preset-btn,
+        [data-theme="light"] .service-route-choice{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
+        [data-theme="light"] .service-route-choice.active{background:rgba(31,122,106,.16);border-color:rgba(31,122,106,.44);color:#174f48;}
         [data-theme="light"] .mode-toggle,
         [data-theme="light"] .theme-toggle{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
         [data-theme="light"] button.danger{background:#f7dedb;border-color:#d79891;color:#8e2f28;}

@@ -1,3 +1,6 @@
+*v1.673 (01 Jun 2026) -* main
+*Refines the service route catalog UI into one menu-style card per service with protocol buttons and real Telegram/YouTube icons, removing the duplicate select-plus-transfer control.*
+
 *v1.672 (01 Jun 2026) -* main
 *Adds service route profiles, list intersection repair, all-protocol event history, persistent update progress, UI smoke coverage for route controls, and a CI secret scan without adding a real YouTube video playback probe.*
 
