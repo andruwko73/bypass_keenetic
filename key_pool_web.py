@@ -11,14 +11,6 @@ POOL_PROTOCOL_LABELS = {
     'trojan': 'Trojan',
     'shadowsocks': 'Shadowsocks',
 }
-COMPACT_PROTOCOL_LABELS = {
-    'vless': 'V1',
-    'vless2': 'V2',
-    'vmess': 'VM',
-    'trojan': 'TR',
-    'shadowsocks': 'SS',
-}
-
 _ACTIVE_KEYS_TEXT = '\u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043a\u043b\u044e\u0447\u0435\u0439'
 _POOL_TOTAL_TEXT = '\u0412 \u043f\u0443\u043b\u0430\u0445'
 _CHECKED_TEXT = '\u041f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043e'
@@ -247,9 +239,11 @@ def web_custom_check_badges(probe, custom_checks, service_icon_html):
     return ''.join(badges)
 
 
-def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html=''):
+def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html='', empty_message='Дополнительные проверки пока не добавлены.'):
     if not custom_checks:
-        return '<div class="custom-check-empty">\u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u044b.</div>'
+        if not empty_message:
+            return ''
+        return f'<div class="custom-check-empty">{html.escape(empty_message)}</div>'
     items = []
     for check in custom_checks:
         safe_id = html.escape(check.get('id', ''))
@@ -312,7 +306,6 @@ def web_service_route_tools_html(
         safe_label = html.escape(service.get('label') or service_id)
         state = route_states.get(service_id) or {}
         route_label = html.escape(state.get('label') or 'не добавлен')
-        safe_url = html.escape(service.get('url') or '', quote=True)
         if service_id in core_icon_html:
             service_icon = (
                 f'<span class="service-route-core-icon service-route-{html.escape(service_id, quote=True)}-icon">'
@@ -326,45 +319,57 @@ def web_service_route_tools_html(
             if values:
                 selected_protocol = values[0]
                 break
-        route_buttons = []
+        add_check_input = ''
+        is_custom_check = bool(service.get('is_custom_check'))
+        check_is_active = service_id in active_check_ids
+        if is_custom_check:
+            check_status = 'Добавлена' if check_is_active else 'Добавится при выборе'
+            if not check_is_active:
+                add_check_input = '<input type="hidden" name="add_check" value="1">'
+        else:
+            check_status = 'Базовая'
+        safe_check_status = html.escape(check_status)
+        menu_items = []
         for item in protocol_options:
             value = html.escape(item['value'], quote=True)
             label = html.escape(item['label'])
-            compact_label = html.escape(COMPACT_PROTOCOL_LABELS.get(item['value'], item['label']))
             is_active = item['value'] == selected_protocol
-            route_buttons.append(
+            status_label = 'текущий маршрут' if is_active else 'перенести сюда'
+            menu_items.append(
                 f'''<form method="post" action="/service_route_apply" class="service-route-form" data-async-action="service-route">
                     {csrf_input_html}
                     <input type="hidden" name="service_key" value="{safe_id}">
-                    <button type="submit" name="target_protocol" value="{value}" class="service-route-choice{' active' if is_active else ''}" title="Перенести {safe_label} в {label}">
-                        {compact_label}
+                    {add_check_input}
+                    <button type="submit" name="target_protocol" value="{value}" class="service-route-menu-item{' active' if is_active else ''}" role="menuitem" title="Перенести {safe_label} в {label}">
+                        <span>{label}</span>
+                        <small>{status_label}</small>
                     </button>
                 </form>'''
             )
-        if service.get('is_custom_check'):
-            if service_id in active_check_ids:
-                check_action = '<span class="service-check-state">Проверка добавлена</span>'
-            else:
-                check_action = f'''<form method="post" action="/custom_check_add" class="service-check-form" data-async-action="custom-check-add">
+        check_menu_action = ''
+        if is_custom_check and check_is_active:
+            check_menu_action = f'''<form method="post" action="/custom_check_delete" class="service-route-form" data-async-action="custom-check-delete" data-confirm-title="Удалить проверку?" data-confirm-message="Удалить дополнительную проверку {safe_label}?">
                     {csrf_input_html}
-                    <input type="hidden" name="preset" value="{safe_id}">
-                    <input type="hidden" name="label" value="{safe_label}">
-                    <input type="hidden" name="url" value="{safe_url}">
-                    <button type="submit" class="secondary-button">Добавить проверку</button>
+                    <input type="hidden" name="id" value="{safe_id}">
+                    <button type="submit" class="service-route-menu-item danger" role="menuitem" title="Удалить проверку {safe_label}">
+                        <span>Удалить проверку</span>
+                        <small>только из пула проверок</small>
+                    </button>
                 </form>'''
-        else:
-            check_action = '<span class="service-check-state">Базовая проверка</span>'
         cards.append(f'''<div class="service-route-card">
-            <div class="service-route-title">
-                {service_icon}
-                <span><strong>{safe_label}</strong><small>Маршрут: {route_label}</small></span>
-            </div>
-            <div class="service-route-actions">
-                <div class="service-route-protocols" role="group" aria-label="Маршрут {safe_label}">
-                    {''.join(route_buttons)}
+            <details class="service-route-menu">
+                <summary class="service-route-trigger" aria-label="Выбрать список обхода для {safe_label}">
+                    <span class="service-route-title">
+                        {service_icon}
+                        <span><strong>{safe_label}</strong><small>Маршрут: {route_label} · {safe_check_status}</small></span>
+                    </span>
+                    <span class="service-route-caret" aria-hidden="true">v</span>
+                </summary>
+                <div class="service-route-menu-list" role="menu" aria-label="Списки обхода для {safe_label}">
+                    {''.join(menu_items)}
+                    {check_menu_action}
                 </div>
-                {check_action}
-            </div>
+            </details>
         </div>''')
     return f'''<div class="service-route-tools">
         <div class="route-section-head">

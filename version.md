@@ -1,3 +1,6 @@
+*v1.674 (01 Jun 2026) -* main
+*Turns the service route catalog into one button per service: opening a service chooses the target protocol, adds its pool check when needed, and keeps removal next to the same service control instead of duplicating controls below.*
+
 *v1.673 (01 Jun 2026) -* main
 *Refines the service route catalog UI into one menu-style card per service with protocol buttons and real Telegram/YouTube icons, removing the duplicate select-plus-transfer control.*
 

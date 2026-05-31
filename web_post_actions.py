@@ -83,7 +83,7 @@ def _pool_payload(ctx):
 
 
 def _custom_check_payload(ctx):
-    payload = {}
+    payload = {'reload_after_ms': 900}
     web_custom_checks = _ctx(ctx, 'web_custom_checks')
     if web_custom_checks:
         payload['custom_checks'] = web_custom_checks()
@@ -200,6 +200,13 @@ def _service_route_apply(ctx, data):
             f"Сервис {result_data.get('service_label')} перенесён в {result_data.get('target_label')}. "
             f"Адресов: {result_data.get('entries', 0)}."
         )
+        if form_value(data, 'add_check') == '1':
+            try:
+                _, check_result = _ctx(ctx, 'add_custom_check')(preset_id=service_key)
+                _call(ctx, 'probe_all_pool_keys_async', stale_only=False)
+                result += f' {check_result} Фоновая проверка пула запущена.'
+            except Exception as exc:
+                result += f' Проверку добавить не удалось: {exc}'
         _call(
             ctx,
             'record_event',

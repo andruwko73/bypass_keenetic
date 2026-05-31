@@ -446,18 +446,26 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .route-intersection-card ul{margin:6px 0 0 16px;padding:0;color:#9fb0c8;font-size:10.5px;line-height:1.25;}
         .route-intersection-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;}
         .route-intersection-actions button{min-width:78px;min-height:30px;padding:5px 8px;font-size:10.5px;}
-        .service-route-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:6px;}
-        .service-route-card{display:grid;gap:7px;align-items:start;min-width:0;padding:8px;border-radius:8px;border:1px solid rgba(91,124,150,.24);background:rgba(255,255,255,.025);}
+        .service-route-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:6px;align-items:start;}
+        .service-route-card{min-width:0;border-radius:8px;border:1px solid rgba(91,124,150,.24);background:rgba(255,255,255,.025);overflow:visible;}
+        .service-route-menu{position:relative;min-width:0;}
+        .service-route-menu summary{list-style:none;}
+        .service-route-menu summary::-webkit-details-marker{display:none;}
+        .service-route-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:46px;padding:8px;border-radius:8px;cursor:pointer;border:1px solid transparent;background:transparent;}
+        .service-route-trigger:hover,.service-route-menu[open] .service-route-trigger{background:rgba(34,67,73,.28);border-color:rgba(78,216,205,.34);}
         .service-route-title{display:flex;align-items:center;gap:7px;min-width:0;}
         .service-route-title .service-route-core-icon,.service-route-title .preset-icon,.service-route-title .custom-service-badge{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;}
-        .service-route-title span:last-child{display:grid;gap:1px;min-width:0;}
+        .service-route-title span:last-child{display:grid;gap:1px;min-width:0;text-align:left;}
         .service-route-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#edf5fb;}
         .service-route-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fb0c8;font-size:10.5px;}
-        .service-route-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;min-width:0;}
-        .service-route-protocols{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;min-width:0;}
+        .service-route-caret{flex:0 0 auto;color:#9ff8ef;font-size:12px;font-weight:800;line-height:1;transition:transform .16s ease;}
+        .service-route-menu[open] .service-route-caret{transform:rotate(180deg);}
+        .service-route-menu-list{display:grid;gap:4px;padding:0 8px 8px;}
         .service-route-form,.service-check-form{display:block;margin:0;min-width:0;}
-        .service-route-choice{width:100%;height:30px;min-height:30px;min-width:0;padding:0 5px;border-radius:7px;font-size:10px;line-height:1.05;white-space:nowrap;text-align:center;}
-        .service-route-choice.active{background:rgba(78,216,205,.18);border-color:rgba(78,216,205,.62);color:#9ff8ef;}
+        .service-route-menu-item{width:100%;min-height:34px;padding:6px 8px;border-radius:7px;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;font-size:11px;line-height:1.15;white-space:normal;}
+        .service-route-menu-item small{color:#9fb0c8;font-size:10px;white-space:nowrap;}
+        .service-route-menu-item.active{background:rgba(78,216,205,.18);border-color:rgba(78,216,205,.62);color:#9ff8ef;}
+        .service-route-menu-item.danger{border-color:rgba(201,90,71,.38);background:rgba(201,90,71,.12);color:#ffc0b8;}
         .service-check-form button{height:30px;min-height:30px;padding:0 9px;font-size:10.5px;white-space:nowrap;}
         .service-check-state{display:flex;align-items:center;justify-content:center;min-height:34px;padding:0 9px;border-radius:8px;border:1px solid rgba(91,124,150,.24);color:#9fb0c8;font-size:10.5px;line-height:1.15;text-align:center;}
         .event-history-panel{margin-top:12px;display:grid;gap:8px;}
@@ -760,8 +768,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .route-intersection-actions{justify-content:stretch;}
             .route-intersection-actions form{flex:1 1 92px;}
             .route-intersection-actions button{width:100%;}
-            .service-route-actions{grid-template-columns:1fr;}
-            .service-route-protocols{grid-template-columns:repeat(2,minmax(0,1fr));}
+            .service-route-grid{grid-template-columns:1fr;}
+            .service-route-trigger{min-height:44px;}
+            .service-route-menu-item{min-height:36px;}
             .service-check-form button,.service-check-state{width:100%;}
             .service-preset-grid form{min-width:0;}
             .service-preset-btn{width:100%;min-width:0;gap:3px;padding:0 3px;}
@@ -907,8 +916,10 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .success-button,
         [data-theme="light"] .outline-button,
         [data-theme="light"] .service-preset-btn,
-        [data-theme="light"] .service-route-choice{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
-        [data-theme="light"] .service-route-choice.active{background:rgba(31,122,106,.16);border-color:rgba(31,122,106,.44);color:#174f48;}
+        [data-theme="light"] .service-route-trigger:hover,
+        [data-theme="light"] .service-route-menu[open] .service-route-trigger,
+        [data-theme="light"] .service-route-menu-item{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
+        [data-theme="light"] .service-route-menu-item.active{background:rgba(31,122,106,.16);border-color:rgba(31,122,106,.44);color:#174f48;}
         [data-theme="light"] .mode-toggle,
         [data-theme="light"] .theme-toggle{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
         [data-theme="light"] button.danger{background:#f7dedb;border-color:#d79891;color:#8e2f28;}

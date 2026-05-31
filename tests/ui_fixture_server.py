@@ -61,7 +61,7 @@ POOLS = {
 
 CUSTOM_CHECKS = [
     {
-        "id": "openai",
+        "id": "chatgpt_services",
         "label": "ChatGPT / Codex",
         "url": "https://chatgpt.com/backend-api/models",
         "urls": ["https://chatgpt.com/backend-api/models"],
@@ -76,6 +76,7 @@ ROUTE_SERVICE_ITEMS = [
     {"id": "youtube", "label": "YouTube", "badge": "YT", "icon": ""},
     {"id": "chatgpt_services", "label": "ChatGPT / Codex", "badge": "AI", "icon": ""},
 ]
+ROUTE_SERVICE_IDS = {item["id"] for item in ROUTE_SERVICE_ITEMS}
 
 ROUTE_STATES = {
     "telegram": {"label": "Vless 1"},
@@ -101,7 +102,7 @@ def _probe_cache():
             cache[_hash_key(key_value)] = {
                 "tg_ok": proto == "vless" or index == 0,
                 "yt_ok": proto == "vless2" or index == 0,
-                "custom": {"openai": index == 0},
+                "custom": {"chatgpt_services": index == 0},
                 "ts": now - (index * 60),
             }
     return cache
@@ -150,7 +151,7 @@ def _protocol_statuses():
             "details": "Telegram and service checks pass on Vless 1.",
             "api_ok": True,
             "yt_ok": False,
-            "custom": {"openai": "ok"},
+            "custom": {"chatgpt_services": "ok"},
         },
         "vless2": {
             "tone": "ok",
@@ -158,7 +159,7 @@ def _protocol_statuses():
             "details": "YouTube checks pass on Vless 2.",
             "api_ok": False,
             "yt_ok": True,
-            "custom": {"openai": "ok"},
+            "custom": {"chatgpt_services": "ok"},
         },
         "vmess": {
             "tone": "empty",
@@ -166,7 +167,7 @@ def _protocol_statuses():
             "details": "No active key in fixture.",
             "api_ok": False,
             "yt_ok": False,
-            "custom": {"openai": "unknown"},
+            "custom": {"chatgpt_services": "unknown"},
         },
         "trojan": {
             "tone": "empty",
@@ -174,7 +175,7 @@ def _protocol_statuses():
             "details": "No active key in fixture.",
             "api_ok": False,
             "yt_ok": False,
-            "custom": {"openai": "unknown"},
+            "custom": {"chatgpt_services": "unknown"},
         },
         "shadowsocks": {
             "tone": "empty",
@@ -182,7 +183,7 @@ def _protocol_statuses():
             "details": "No active key in fixture.",
             "api_ok": False,
             "yt_ok": False,
-            "custom": {"openai": "unknown"},
+            "custom": {"chatgpt_services": "unknown"},
         },
     }
 
@@ -270,9 +271,10 @@ def _protocol_panel(protocol):
         csrf_input_html,
     )
     custom_checks_html = key_pool_web.web_custom_checks_html(
-        CUSTOM_CHECKS,
+        [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
         _service_icon_html,
         csrf_input_html,
+        empty_message="",
     )
     route_tools_html = _route_tools_html(csrf_input_html)
     table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
@@ -329,9 +331,10 @@ def _page_html():
         csrf_input_html,
     )
     custom_checks_html = key_pool_web.web_custom_checks_html(
-        CUSTOM_CHECKS,
+        [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
         _service_icon_html,
         csrf_input_html,
+        empty_message="",
     )
     route_tools_html = _route_tools_html(csrf_input_html)
     table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)

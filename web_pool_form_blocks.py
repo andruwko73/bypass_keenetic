@@ -272,6 +272,10 @@ def render_protocol_panel(
             f'<div class="service-preset-grid">{custom_presets_html}</div>'
             if custom_presets_html and not route_tools_html else ''
         )
+        custom_checks_list_html = (
+            f'<div class="custom-check-list" data-custom-check-list>{custom_checks_html}</div>'
+            if custom_checks_html else ''
+        )
         custom_check_card_html = f'''
             <div class="custom-check-card">
                 <div class="custom-check-head">
@@ -282,7 +286,7 @@ def render_protocol_panel(
                 </div>
                 {route_tools_html}
                 {preset_grid_html}
-                <div class="custom-check-list" data-custom-check-list>{custom_checks_html}</div>
+                {custom_checks_list_html}
                 <form method="post" action="/custom_check_add" class="custom-check-form" data-async-action="custom-check-add">
                     {csrf_input_html}
                     <input type="hidden" name="type" value="{safe_key_name}">

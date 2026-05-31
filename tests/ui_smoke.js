@@ -145,6 +145,13 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
   await assertVisibleBox(page, '[data-protocol-panel].active .service-route-telegram-icon', `${name} Telegram route icon`);
   await assertVisibleBox(page, '[data-protocol-panel].active .service-route-youtube-icon', `${name} YouTube route icon`);
+  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-card:first-child .service-route-trigger', `${name} service route trigger`);
+  await page.locator('[data-protocol-panel].active .service-route-trigger').first().click();
+  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-menu[open] .service-route-form:first-child .service-route-menu-item', `${name} service route menu`);
+  const oldRouteChoiceCount = await page.locator('[data-protocol-panel].active .service-route-choice').count();
+  if (oldRouteChoiceCount) {
+    throw new Error(`${name}: old service route choice buttons are still rendered`);
+  }
   await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
   await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
   const routeTextFits = await page.locator('[data-protocol-panel].active .service-route-card').evaluateAll((nodes) => (

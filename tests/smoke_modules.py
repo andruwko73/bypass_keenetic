@@ -549,6 +549,32 @@ def test_web_action_feature_gates():
     assert calls == []
 
 
+def test_service_route_apply_can_add_check():
+    calls = []
+    ctx = {
+        'custom_checks_enabled': True,
+        'apply_service_route': lambda service_key, proto: {
+            'service_label': service_key,
+            'target_label': proto,
+            'entries': 5,
+        },
+        'add_custom_check': lambda **kwargs: calls.append(('add', kwargs)) or ([], 'Проверка добавлена.'),
+        'probe_all_pool_keys_async': lambda **kwargs: calls.append(('probe', kwargs)),
+        'record_event': lambda **kwargs: calls.append(('event', kwargs)),
+        'invalidate_web_status_cache': lambda: calls.append(('invalidate-web', {})),
+        'invalidate_key_status_cache': lambda: calls.append(('invalidate-key', {})),
+    }
+    result = web_post_actions.dispatch(
+        ctx,
+        '/service_route_apply',
+        {'service_key': ['gemini'], 'target_protocol': ['vless'], 'add_check': ['1']},
+    )
+    assert result['success'] is True
+    assert ('add', {'preset_id': 'gemini'}) in calls
+    assert any(item[0] == 'probe' for item in calls)
+    assert 'Проверка добавлена' in result['result']
+
+
 def _expected_codex_version_counter():
     count = int(subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=ROOT, text=True).strip())
     dirty = subprocess.check_output(
@@ -3617,19 +3643,24 @@ def test_service_route_ui_helpers():
     assert any(item['id'] == 'telegram' for item in service_items)
     assert any(item['id'] == 'youtube' for item in service_items)
     route_states = {item['id']: {'label': 'Vless 1', 'complete_protocols': ['vless']} for item in service_items[:2]}
+    route_items = service_items[:3]
     html_text = key_pool_web.web_service_route_tools_html(
-        service_items[:2],
+        route_items,
         route_states,
         service_routes.protocol_options(),
         lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
         csrf_input_html='<input type="hidden" name="csrf_token" value="x">',
+        active_check_ids={route_items[2]['id']},
         core_icon_html={'telegram': 'TG', 'youtube': 'YT'},
     )
     assert '/service_route_apply' in html_text
     assert 'Сервисы и маршруты' in html_text
-    assert 'service-route-choice active' in html_text
+    assert 'service-route-trigger' in html_text
+    assert 'service-route-menu-item active' in html_text
     assert 'service-route-telegram-icon' in html_text
     assert 'service-route-youtube-icon' in html_text
+    assert 'service-route-choice' not in html_text
+    assert '/custom_check_delete' in html_text
     assert '<select' not in html_text
     assert 'Перенести</button>' not in html_text
     assert key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
@@ -3676,6 +3707,7 @@ def main():
     test_web_form_template_smoke()
     test_web_post_actions_helpers()
     test_web_action_feature_gates()
+    test_service_route_apply_can_add_check()
     test_codex_version_matches_commit_count()
     test_ipset_refresh_is_backend_aware_and_atomic()
     test_runtime_startup_limits_router_flash_and_overhead()

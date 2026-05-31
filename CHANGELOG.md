@@ -1,3 +1,10 @@
+<a name="1.674"></a>
+# [1.674] - 01 Jun 2026
+
+- Changed service route cards into one service button with a protocol menu.
+- Selecting a protocol now adds the preset pool check when it is not already enabled.
+- Moved preset check removal into the same service menu and hid duplicate preset delete cards below the route catalog.
+
 <a name="1.673"></a>
 # [1.673] - 01 Jun 2026
 

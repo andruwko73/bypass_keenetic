@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.673, последнее изменение: 01.06.2026
+#  Файл: bot.py, Версия v1.674, последнее изменение: 01.06.2026
 
 import subprocess
 import os
@@ -3569,6 +3569,14 @@ def _service_route_summary():
     return service_routes.service_route_summary(_service_route_items())
 
 
+def _standalone_custom_checks(custom_checks):
+    route_service_ids = {item.get('id') for item in _service_route_items()}
+    return [
+        check for check in (custom_checks or [])
+        if check.get('id') not in route_service_ids
+    ]
+
+
 def _route_intersections_snapshot():
     return route_intersections.analyze_route_intersections()
 
@@ -6204,9 +6212,10 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     custom_checks_html = key_pool_web.web_custom_checks_html(
-        custom_checks,
+        _standalone_custom_checks(custom_checks),
         _service_icon_html,
         csrf_input_html=csrf_input_html,
+        empty_message='',
     )
     route_states = _service_route_summary()
     custom_presets_html = key_pool_web.web_custom_presets_html(
@@ -6254,9 +6263,10 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     custom_checks_html = key_pool_web.web_custom_checks_html(
-        custom_checks,
+        _standalone_custom_checks(custom_checks),
         _service_icon_html,
         csrf_input_html=csrf_input_html,
+        empty_message='',
     )
     route_states = _service_route_summary()
     custom_presets_html = key_pool_web.web_custom_presets_html(
