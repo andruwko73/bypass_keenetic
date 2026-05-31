@@ -1,3 +1,6 @@
+*v1.670 (31 May 2026) -* main
+*Preloads currently advertised YouTube video CDN hosts into the selected Vless ipset so `*.googlevideo.com` streams follow the YouTube route under ndnproxy without broadly routing all Google networks.*
+
 *v1.669 (30 May 2026) -* main
 *Scoped the Vless 2 bypass list back to YouTube-specific routes and moved the old non-YouTube Vless 2 entries to the primary Vless list so broad service ranges no longer overload the YouTube key.*
 

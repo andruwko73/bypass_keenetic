@@ -686,6 +686,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in ipset_script
     assert 'from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES' in ipset_script
+    assert 'YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"' in ipset_script
+    assert 'preload_youtube_video_hosts()' in ipset_script
+    assert '--socks5-hostname "127.0.0.1:$socks_port"' in ipset_script
+    assert "grep -Eo '[A-Za-z0-9.-]+\\.googlevideo\\.com'" in ipset_script
+    assert 'function cidr24(ip)' in ipset_script
+    assert 'print "add " tmp_set " " cidr24($1);' in ipset_script
+    assert 'preload_youtube_video_hosts "$set_name" "$main_tmp_set" "$mirror_tmp_set" "$domain_file"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq
     assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
     assert 'chatgpt.com|*.chatgpt.com' not in unblock_dnsmasq

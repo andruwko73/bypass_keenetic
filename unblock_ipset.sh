@@ -8,6 +8,11 @@ UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
+YOUTUBE_VIDEO_PRELOAD_ENABLED="${YOUTUBE_VIDEO_PRELOAD_ENABLED:-1}"
+YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"
+YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT="${YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT:-6}"
+YOUTUBE_VIDEO_PRELOAD_MAX_TIME="${YOUTUBE_VIDEO_PRELOAD_MAX_TIME:-18}"
+YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT="${YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT:-80}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockvlessudp unblockvless2udp"
 IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6"
@@ -331,6 +336,88 @@ resolve_ipv6_domains() {
 	' sh >> "$restore_file"
 }
 
+youtube_socks_port_for_set() {
+	case "$1" in
+		unblockvless) printf '%s\n' 10811 ;;
+		unblockvless2) printf '%s\n' 10813 ;;
+		*) return 1 ;;
+	esac
+}
+
+domain_file_has_googlevideo() {
+	[ -s "$1" ] || return 1
+	awk '
+		function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
+		{
+			entry=tolower($0); sub(/\r/, "", entry); sub(/#.*/, "", entry); entry=trim(entry)
+			if (entry == "googlevideo.com" || entry ~ /\.googlevideo\.com$/) found=1
+		}
+		END { exit found ? 0 : 1 }
+	' "$1"
+}
+
+preload_youtube_video_hosts() {
+	set_name="$1"
+	tmp_set="$2"
+	mirror_tmp_set="$3"
+	domain_file="$4"
+	[ "$YOUTUBE_VIDEO_PRELOAD_ENABLED" = "0" ] && return 0
+	domain_file_has_googlevideo "$domain_file" || return 0
+	socks_port="$(youtube_socks_port_for_set "$set_name" 2>/dev/null || true)"
+	[ -n "$socks_port" ] || return 0
+	curl_bin="/opt/bin/curl"
+	[ -x "$curl_bin" ] || curl_bin="$(command -v curl 2>/dev/null || true)"
+	[ -n "$curl_bin" ] || return 0
+
+	page_file="$tmp_dir/${set_name}.youtube_video.html"
+	hosts_file="$tmp_dir/${set_name}.youtube_video.hosts"
+	if ! "$curl_bin" -k -L -sS \
+		--socks5-hostname "127.0.0.1:$socks_port" \
+		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36" \
+		--connect-timeout "$YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT" \
+		--max-time "$YOUTUBE_VIDEO_PRELOAD_MAX_TIME" \
+		"$YOUTUBE_VIDEO_PRELOAD_URL" -o "$page_file" >/dev/null 2>&1; then
+		return 0
+	fi
+
+	grep -Eo '[A-Za-z0-9.-]+\.googlevideo\.com' "$page_file" 2>/dev/null \
+		| tr '[:upper:]' '[:lower:]' \
+		| sort -u \
+		| head -n "$YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT" > "$hosts_file"
+	[ -s "$hosts_file" ] || return 0
+
+	mirror_for_video=""
+	if [ -n "$mirror_tmp_set" ] && udp_quic_domain "googlevideo.com"; then
+		mirror_for_video="$mirror_tmp_set"
+	fi
+
+	while IFS= read -r video_host || [ -n "$video_host" ]; do
+		[ -n "$video_host" ] || continue
+		dig +short A "$video_host" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+	done < "$hosts_file" \
+		| grep -Eo "$IPV4_RE" \
+		| grep -vE "$LOCAL_RE" \
+		| sort -u \
+		| awk -v tmp_set="$tmp_set" -v mirror_tmp_set="$mirror_for_video" -v exclude_file="$UDP_QUIC_EXCLUDE_SOURCE" '
+			function cidr24(ip) {
+				sub(/\.[0-9]+$/, ".0/24", ip)
+				return ip
+			}
+			BEGIN {
+				if (exclude_file != "") {
+					while ((getline excluded < exclude_file) > 0) excluded_ip[excluded]=1;
+					close(exclude_file);
+				}
+			}
+			{
+				print "add " tmp_set " " $1;
+				print "add " tmp_set " " cidr24($1);
+				if (mirror_tmp_set != "" && !($1 in excluded_ip)) print "add " mirror_tmp_set " " $1;
+				if (mirror_tmp_set != "" && !($1 in excluded_ip)) print "add " mirror_tmp_set " " cidr24($1);
+			}
+		' >> "$restore_file"
+}
+
 prepare_temp_set() {
 	prepare_set_name="$1"
 	prepare_tmp_set="$2"
@@ -410,6 +497,7 @@ load_file_to_set() {
 	done < "$list_path"
 
 	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set" "$mirror_domain_file"
+	preload_youtube_video_hosts "$set_name" "$main_tmp_set" "$mirror_tmp_set" "$domain_file"
 	resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"
 }
 
