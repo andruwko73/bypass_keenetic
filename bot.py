@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.674, последнее изменение: 01.06.2026
+#  Файл: bot.py, Версия v1.675, последнее изменение: 01.06.2026
 
 import subprocess
 import os
@@ -187,9 +187,8 @@ import web_post_actions
 import web_status_runtime
 import web_commands_runtime
 import event_history
-import route_intersections
-import service_routes
 import update_status
+from web_route_tools_runtime import ServiceRouteToolsRuntime
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
@@ -208,6 +207,7 @@ COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
 _pool_probe_runner_module = None
 _repo_update_module = None
 _web_form_template_module = None
+_web_route_tools_runtime = None
 
 
 def _pool_probe_runner():
@@ -3561,45 +3561,46 @@ def _save_unblock_list(list_name, text):
     return f'✅ Список {safe_name} сохранён и применён.'
 
 
+def _route_tools_runtime():
+    global _web_route_tools_runtime
+    if _web_route_tools_runtime is None:
+        _web_route_tools_runtime = ServiceRouteToolsRuntime(
+            custom_check_presets_getter=_custom_check_presets,
+            service_icon_html=_service_icon_html,
+            telegram_icon_html=_telegram_icon_html,
+            youtube_icon_html=_youtube_icon_html,
+            sync_udp_policy_config=_sync_udp_policy_config,
+            invalidate_web_status_cache=_invalidate_web_status_cache,
+        )
+    return _web_route_tools_runtime
+
+
 def _service_route_items():
-    return service_routes.route_service_items(presets=_custom_check_presets())
+    return _route_tools_runtime().service_items()
 
 
 def _service_route_summary():
-    return service_routes.service_route_summary(_service_route_items())
+    return _route_tools_runtime().summary()
 
 
 def _standalone_custom_checks(custom_checks):
-    route_service_ids = {item.get('id') for item in _service_route_items()}
-    return [
-        check for check in (custom_checks or [])
-        if check.get('id') not in route_service_ids
-    ]
+    return _route_tools_runtime().standalone_custom_checks(custom_checks)
 
 
 def _route_intersections_snapshot():
-    return route_intersections.analyze_route_intersections()
+    return _route_tools_runtime().intersections_snapshot()
 
 
 def _apply_service_route(service_key, target_protocol):
-    result = service_routes.apply_service_route(service_key, target_protocol)
-    _sync_udp_policy_config()
-    _invalidate_web_status_cache()
-    return result
+    return _route_tools_runtime().apply_service_route(service_key, target_protocol)
 
 
 def _apply_service_profile(profile_id):
-    result = service_routes.apply_service_profile(profile_id, service_items=_service_route_items())
-    _sync_udp_policy_config()
-    _invalidate_web_status_cache()
-    return result
+    return _route_tools_runtime().apply_service_profile(profile_id)
 
 
 def _resolve_route_intersections(target_route):
-    result = route_intersections.resolve_route_intersections(target_route)
-    _sync_udp_policy_config()
-    _invalidate_web_status_cache()
-    return result
+    return _route_tools_runtime().resolve_route_intersections(target_route)
 
 
 def _event_history_snapshot(limit=40):
@@ -3622,26 +3623,14 @@ def _update_status_snapshot():
 
 
 def _route_tools_html(csrf_input_html, custom_checks=None):
-    service_items = _service_route_items()
-    route_states = service_routes.service_route_summary(service_items)
-    protocol_options = service_routes.protocol_options()
-    active_check_ids = {check.get('id') for check in custom_checks or []}
-    return ''.join([
-        key_pool_web.web_route_profiles_html(service_routes.ROUTE_PROFILES, csrf_input_html=csrf_input_html),
-        key_pool_web.web_route_intersections_html(_route_intersections_snapshot(), protocol_options, csrf_input_html=csrf_input_html),
-        key_pool_web.web_service_route_tools_html(
-            service_items,
-            route_states,
-            protocol_options,
-            _service_icon_html,
-            csrf_input_html=csrf_input_html,
-            active_check_ids=active_check_ids,
-            core_icon_html={
-                'telegram': _telegram_icon_html(opacity=1.0),
-                'youtube': _youtube_icon_html(opacity=1.0),
-            },
-        ),
-    ])
+    return _route_tools_runtime().tools_html(csrf_input_html, custom_checks)
+
+
+def _web_service_routes_payload():
+    custom_checks = _load_custom_checks()
+    return {
+        'route_tools_html': _route_tools_html('', custom_checks),
+    }
 
 
 def _append_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
@@ -6127,6 +6116,7 @@ def _web_action_context():
         apply_service_route=_apply_service_route,
         apply_service_profile=_apply_service_profile,
         resolve_route_intersections=_resolve_route_intersections,
+        service_routes_payload=_web_service_routes_payload,
         record_event=_record_event,
         install_verify=False,
     )
@@ -6185,6 +6175,7 @@ def _web_get_context(handler):
         'update_status_snapshot': _update_status_snapshot,
         'event_history_snapshot': _event_history_snapshot,
         'route_intersections_snapshot': _route_intersections_snapshot,
+        'service_routes_payload': _web_service_routes_payload,
         'router_health_snapshot': _router_health_snapshot,
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,

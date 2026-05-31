@@ -148,9 +148,31 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await assertVisibleBox(page, '[data-protocol-panel].active .service-route-card:first-child .service-route-trigger', `${name} service route trigger`);
   await page.locator('[data-protocol-panel].active .service-route-trigger').first().click();
   await assertVisibleBox(page, '[data-protocol-panel].active .service-route-menu[open] .service-route-form:first-child .service-route-menu-item', `${name} service route menu`);
+  const routeMenuPosition = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => getComputedStyle(node).position);
+  if (!isMobile && routeMenuPosition !== 'absolute') {
+    throw new Error(`${name}: service route menu should be a desktop popover, got ${routeMenuPosition}`);
+  }
+  if (isMobile && routeMenuPosition === 'absolute') {
+    throw new Error(`${name}: service route menu should stay in-flow on mobile`);
+  }
+  const routeMenuViewport = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, height: window.innerHeight };
+  });
+  if (!isMobile && (routeMenuViewport.top < -2 || routeMenuViewport.bottom > routeMenuViewport.height + 2)) {
+    throw new Error(`${name}: service route popover is clipped by viewport ${JSON.stringify(routeMenuViewport)}`);
+  }
   const oldRouteChoiceCount = await page.locator('[data-protocol-panel].active .service-route-choice').count();
   if (oldRouteChoiceCount) {
     throw new Error(`${name}: old service route choice buttons are still rendered`);
+  }
+  const routeApi = await page.evaluate(async () => {
+    const response = await fetch('/api/service_routes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const payload = await response.json();
+    return { ok: response.ok, hasHtml: String(payload.route_tools_html || '').includes('service-route-trigger') };
+  });
+  if (!routeApi.ok || !routeApi.hasHtml) {
+    throw new Error(`${name}: service route fragment API failed`);
   }
   await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
   await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);

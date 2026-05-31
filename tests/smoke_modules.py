@@ -31,6 +31,7 @@ import web_form_blocks
 import web_form_template
 import web_http_common
 import web_pool_form_blocks
+import web_route_tools_runtime
 import web_status_builder
 import web_template_styles
 import web_template_scripts
@@ -563,6 +564,8 @@ def test_service_route_apply_can_add_check():
         'record_event': lambda **kwargs: calls.append(('event', kwargs)),
         'invalidate_web_status_cache': lambda: calls.append(('invalidate-web', {})),
         'invalidate_key_status_cache': lambda: calls.append(('invalidate-key', {})),
+        'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
+        'web_custom_checks': lambda: [{'id': 'gemini'}],
     }
     result = web_post_actions.dispatch(
         ctx,
@@ -573,6 +576,9 @@ def test_service_route_apply_can_add_check():
     assert ('add', {'preset_id': 'gemini'}) in calls
     assert any(item[0] == 'probe' for item in calls)
     assert 'Проверка добавлена' in result['result']
+    assert result['extra']['route_tools_html'] == '<div>routes</div>'
+    assert result['extra']['custom_checks'] == [{'id': 'gemini'}]
+    assert 'reload_after_ms' not in result['extra']
 
 
 def _expected_codex_version_counter():
@@ -2780,6 +2786,7 @@ def test_web_get_actions_helpers():
         'web_pool_snapshot': pool_snapshot,
         'pool_status_summary': lambda keys: {'active_text': '1 / 5'},
         'web_custom_checks': lambda: [{'id': 'custom'}],
+        'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
         'time_provider': lambda: 123.0,
         'static_dir': '/tmp/static',
         'service_icons_enabled': True,
@@ -2806,6 +2813,8 @@ def test_web_get_actions_helpers():
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
     assert pools['payload']['pool_probe_running'] is True
     assert pools['payload']['pool_probe_progress'] == {'running': True, 'total': 2}
+    service_routes_payload = web_get_actions.dispatch(ctx, '/api/service_routes')
+    assert service_routes_payload['payload'] == {'route_tools_html': '<div>routes</div>'}
     scoped_pools = web_get_actions.dispatch(ctx, '/api/pools', 'protocols=vless,vmess')
     assert scoped_pools['payload']['pools'] == {'vless': {'rows': []}, 'vmess': {'rows': []}}
     assert pool_snapshot_calls[-1] == (current_keys, False, ['vless', 'vmess'])
@@ -3666,6 +3675,30 @@ def test_service_route_ui_helpers():
     assert key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
 
 
+def test_service_route_runtime_helpers():
+    runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
+        custom_check_presets_getter=lambda: service_catalog.CUSTOM_CHECK_PRESETS,
+        service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+    )
+    items = runtime.service_items()
+    item_ids = {item['id'] for item in items}
+    assert {'telegram', 'youtube', 'chatgpt_services'} <= item_ids
+    standalone = runtime.standalone_custom_checks([
+        {'id': 'chatgpt_services'},
+        {'id': 'manual_check'},
+    ])
+    assert standalone == [{'id': 'manual_check'}]
+    html_text = runtime.tools_html(
+        '<input type="hidden" name="csrf_token" value="x">',
+        custom_checks=[{'id': 'chatgpt_services'}],
+    )
+    assert 'service-route-trigger' in html_text
+    assert 'service-route-telegram-icon' in html_text
+    assert 'service-route-youtube-icon' in html_text
+
+
 def main():
     test_app_runtime_mode_setter_callbacks()
     test_router_health_runtime_payload_uses_keenetic_memory()
@@ -3732,6 +3765,7 @@ def main():
     test_service_routes_apply_and_profile()
     test_route_intersections_helpers()
     test_service_route_ui_helpers()
+    test_service_route_runtime_helpers()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
 

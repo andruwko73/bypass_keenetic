@@ -1,3 +1,10 @@
+<a name="1.675"></a>
+# [1.675] - 01 Jun 2026
+
+- Moved service route web glue into `web_route_tools_runtime.py` to reduce `bot.py` coupling.
+- Changed desktop service route menus into popover layers while keeping mobile menus in-flow.
+- Added a service-route fragment API and refreshed route/check changes without a full page reload.
+
 <a name="1.674"></a>
 # [1.674] - 01 Jun 2026
 

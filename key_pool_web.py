@@ -356,7 +356,7 @@ def web_service_route_tools_html(
                         <small>только из пула проверок</small>
                     </button>
                 </form>'''
-        cards.append(f'''<div class="service-route-card">
+        cards.append(f'''<div class="service-route-card" data-service-route-id="{safe_id}">
             <details class="service-route-menu">
                 <summary class="service-route-trigger" aria-label="Выбрать список обхода для {safe_label}">
                     <span class="service-route-title">

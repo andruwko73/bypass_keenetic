@@ -82,8 +82,16 @@ def _pool_payload(ctx):
     return {'pools': web_pool_snapshot(load_current_keys(), include_keys=False)}
 
 
+def _route_tools_payload(ctx):
+    payload = {}
+    service_routes_payload = _ctx(ctx, 'service_routes_payload')
+    if service_routes_payload:
+        payload.update(service_routes_payload())
+    return payload
+
+
 def _custom_check_payload(ctx):
-    payload = {'reload_after_ms': 900}
+    payload = _route_tools_payload(ctx)
     web_custom_checks = _ctx(ctx, 'web_custom_checks')
     if web_custom_checks:
         payload['custom_checks'] = web_custom_checks()
@@ -220,8 +228,7 @@ def _service_route_apply(ctx, data):
     except Exception as exc:
         success = False
         result = f'Ошибка переноса маршрута сервиса: {exc}'
-    extra = {'reload_after_ms': 900}
-    extra.update(_pool_payload(ctx))
+    extra = _custom_check_payload(ctx)
     return _result(result, success=success, extra=extra)
 
 
@@ -247,7 +254,7 @@ def _service_profile_apply(ctx, data):
     except Exception as exc:
         success = False
         result = f'Ошибка применения профиля маршрутов: {exc}'
-    extra = {'reload_after_ms': 900}
+    extra = _route_tools_payload(ctx)
     extra.update(_pool_payload(ctx))
     return _result(result, success=success, extra=extra)
 
@@ -273,7 +280,7 @@ def _route_intersections_resolve(ctx, data):
     except Exception as exc:
         success = False
         result = f'Ошибка переноса пересечений: {exc}'
-    extra = {'reload_after_ms': 900}
+    extra = _route_tools_payload(ctx)
     extra.update(_pool_payload(ctx))
     return _result(result, success=success, extra=extra)
 

@@ -468,6 +468,25 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .service-route-menu-item.danger{border-color:rgba(201,90,71,.38);background:rgba(201,90,71,.12);color:#ffc0b8;}
         .service-check-form button{height:30px;min-height:30px;padding:0 9px;font-size:10.5px;white-space:nowrap;}
         .service-check-state{display:flex;align-items:center;justify-content:center;min-height:34px;padding:0 9px;border-radius:8px;border:1px solid rgba(91,124,150,.24);color:#9fb0c8;font-size:10.5px;line-height:1.15;text-align:center;}
+        @media (min-width:721px){
+            .service-route-card{position:relative;}
+            .service-route-menu[open]{z-index:32;}
+            .service-route-menu-list{
+                position:absolute;
+                top:calc(100% + 5px);
+                left:7px;
+                right:7px;
+                padding:6px;
+                border-radius:8px;
+                border:1px solid rgba(78,216,205,.34);
+                background:#121922;
+                box-shadow:0 16px 34px rgba(2,6,23,.36);
+            }
+            .service-route-menu.drop-up .service-route-menu-list{
+                top:auto;
+                bottom:calc(100% + 5px);
+            }
+        }
         .event-history-panel{margin-top:12px;display:grid;gap:8px;}
         .event-history-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px;}
         .event-history-item{display:grid;grid-template-columns:52px minmax(0,1fr);gap:7px;align-items:start;padding:7px;border-radius:8px;border:1px solid rgba(91,124,150,.28);background:rgba(255,255,255,.025);}
@@ -770,6 +789,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .route-intersection-actions button{width:100%;}
             .service-route-grid{grid-template-columns:1fr;}
             .service-route-trigger{min-height:44px;}
+            .service-route-menu-list{position:static;padding:0 8px 8px;border:0;background:transparent;box-shadow:none;}
             .service-route-menu-item{min-height:36px;}
             .service-check-form button,.service-check-state{width:100%;}
             .service-preset-grid form{min-width:0;}
@@ -919,6 +939,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .service-route-trigger:hover,
         [data-theme="light"] .service-route-menu[open] .service-route-trigger,
         [data-theme="light"] .service-route-menu-item{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
+        [data-theme="light"] .service-route-menu-list{background:#fff;border-color:#c8d5e1;box-shadow:0 16px 34px rgba(76,58,36,.16);}
         [data-theme="light"] .service-route-menu-item.active{background:rgba(31,122,106,.16);border-color:rgba(31,122,106,.44);color:#174f48;}
         [data-theme="light"] .mode-toggle,
         [data-theme="light"] .theme-toggle{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}

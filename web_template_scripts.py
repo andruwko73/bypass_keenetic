@@ -755,6 +755,7 @@ def render_web_scripts(
                         panel.replaceWith(loadedPanel);
                         setupProtocolSubtabs(loadedPanel);
                         setupPoolControls(loadedPanel);
+                        setupServiceRouteMenus(loadedPanel);
                         setupAsyncForms(loadedPanel);
                     }})
                     .catch(function(error) {{
@@ -959,12 +960,22 @@ def render_web_scripts(
             }});
         }}
 
+        function routeServiceIds() {{
+            return Array.from(document.querySelectorAll('[data-service-route-id]')).map(function(item) {{
+                return item.dataset.serviceRouteId || '';
+            }}).filter(Boolean);
+        }}
+
         function renderCustomChecks(checks) {{
             if (!ENABLE_CUSTOM_CHECKS) {{
                 return;
             }}
             customChecks = Array.isArray(checks) ? checks : [];
-            const html = customChecks.length ? customChecks.map(function(check) {{
+            const routeIds = routeServiceIds();
+            const visibleChecks = customChecks.filter(function(check) {{
+                return routeIds.indexOf(check.id || '') === -1;
+            }});
+            const html = visibleChecks.length ? visibleChecks.map(function(check) {{
                 return '<div class="custom-check-item">' +
                     customIconHtml(check) +
                     '<span class="custom-check-copy"><strong>' + escapeHtml(check.label || 'Проверка') + '</strong><small>' + escapeHtml(customUrlText(check)) + '</small></span>' +
@@ -973,8 +984,26 @@ def render_web_scripts(
                         '<button type="submit" class="pool-delete-btn" title="Удалить проверку">Удалить</button>' +
                     '</form>' +
                 '</div>';
-            }}).join('') : '<div class="custom-check-empty">Дополнительные проверки пока не добавлены.</div>';
-            document.querySelectorAll('[data-custom-check-list]').forEach(function(list) {{
+            }}).join('') : '';
+            document.querySelectorAll('.custom-check-card').forEach(function(card) {{
+                let list = card.querySelector('[data-custom-check-list]');
+                if (!html) {{
+                    if (list) {{
+                        list.remove();
+                    }}
+                    return;
+                }}
+                if (!list) {{
+                    list = document.createElement('div');
+                    list.className = 'custom-check-list';
+                    list.setAttribute('data-custom-check-list', '');
+                    const form = card.querySelector('.custom-check-form');
+                    if (form) {{
+                        card.insertBefore(list, form);
+                    }} else {{
+                        card.appendChild(list);
+                    }}
+                }}
                 list.innerHTML = html;
                 setupAsyncForms(list);
             }});
@@ -1829,6 +1858,62 @@ def render_web_scripts(
             }});
         }}
 
+        function closeServiceRouteMenus(exceptMenu) {{
+            document.querySelectorAll('.service-route-menu[open]').forEach(function(menu) {{
+                if (menu !== exceptMenu) {{
+                    menu.open = false;
+                    menu.classList.remove('drop-up');
+                }}
+            }});
+        }}
+
+        function positionServiceRouteMenu(menu) {{
+            if (!menu || !menu.open) {{
+                return;
+            }}
+            menu.classList.remove('drop-up');
+            if (window.matchMedia && window.matchMedia('(max-width: 720px)').matches) {{
+                return;
+            }}
+            const list = menu.querySelector('.service-route-menu-list');
+            if (!list) {{
+                return;
+            }}
+            const rect = list.getBoundingClientRect();
+            if (rect.bottom > window.innerHeight - 12) {{
+                menu.classList.add('drop-up');
+            }}
+        }}
+
+        function setupServiceRouteMenus(root) {{
+            const scope = root || document;
+            scope.querySelectorAll('.service-route-menu').forEach(function(menu) {{
+                if (menu.dataset.routeMenuBound === '1') {{
+                    return;
+                }}
+                menu.dataset.routeMenuBound = '1';
+                menu.addEventListener('toggle', function() {{
+                    if (menu.open) {{
+                        closeServiceRouteMenus(menu);
+                        positionServiceRouteMenu(menu);
+                    }} else {{
+                        menu.classList.remove('drop-up');
+                    }}
+                }});
+            }});
+        }}
+
+        function updateServiceRouteTools(html) {{
+            if (typeof html !== 'string') {{
+                return;
+            }}
+            document.querySelectorAll('[data-route-tools-root]').forEach(function(root) {{
+                root.innerHTML = html;
+                setupServiceRouteMenus(root);
+                setupAsyncForms(root);
+            }});
+        }}
+
         function setupAsyncForms(root) {{
             if (!ENABLE_ASYNC_FORMS) {{
                 return;
@@ -1904,6 +1989,12 @@ def render_web_scripts(
                                 autoHide: ok,
                                 delayMs: action === 'command' ? 5000 : 9000
                             }});
+                            if (ok && (action === 'service-route' || action === 'custom-check-delete' || action === 'custom-check-add')) {{
+                                const routeMenu = form.closest('.service-route-menu');
+                                if (routeMenu) {{
+                                    routeMenu.open = false;
+                                }}
+                            }}
                             if (ok && proto && action === 'install') {{
                                 const card = form.closest('[data-protocol-card]');
                                 const textarea = card ? card.querySelector('[data-key-textarea]') : null;
@@ -1918,6 +2009,9 @@ def render_web_scripts(
                                 if (textarea && payload.key) {{
                                     textarea.value = payload.key;
                                 }}
+                            }}
+                            if (payload.route_tools_html) {{
+                                updateServiceRouteTools(payload.route_tools_html);
                             }}
                             if (payload.custom_checks) {{
                                 renderCustomChecks(payload.custom_checks);
@@ -2022,6 +2116,17 @@ def render_web_scripts(
                 if (themePicker && themeToggle && !themePicker.classList.contains('hidden') && !themePicker.contains(event.target) && !themeToggle.contains(event.target)) {{
                     themePicker.classList.add('hidden');
                 }}
+                document.querySelectorAll('.service-route-menu[open]').forEach(function(menu) {{
+                    if (!menu.contains(event.target)) {{
+                        menu.open = false;
+                        menu.classList.remove('drop-up');
+                    }}
+                }});
+            }});
+            document.addEventListener('keydown', function(event) {{
+                if (event.key === 'Escape') {{
+                    closeServiceRouteMenus();
+                }}
             }});
             document.addEventListener('visibilitychange', function() {{
                 if (!document.hidden) {{
@@ -2033,6 +2138,7 @@ def render_web_scripts(
             setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
             setupProtocolSubtabs();
             setupPoolControls();
+            setupServiceRouteMenus();
             setupLiquidPointer();
             setupAsyncForms();
             const actionBlock = document.getElementById('web-action-message');

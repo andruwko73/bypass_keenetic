@@ -1,3 +1,6 @@
+*v1.675 (01 Jun 2026) -* main
+*Moves service route web glue out of bot.py, makes route service menus pop over the desktop grid while staying in-flow on mobile, and refreshes the route-tools fragment after route/check changes without reloading the whole page.*
+
 *v1.674 (01 Jun 2026) -* main
 *Turns the service route catalog into one button per service: opening a service chooses the target protocol, adds its pool check when needed, and keeps removal next to the same service control instead of duplicating controls below.*
 
