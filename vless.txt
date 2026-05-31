@@ -179,7 +179,6 @@ githubassets.com
 githubcopilot.com
 githubcopilotusercontent.com
 githubusercontent.com
-google.com
 help.wallet.tg
 hcaptcha.com
 images.ctfassets.net

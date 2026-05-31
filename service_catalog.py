@@ -120,7 +120,7 @@ CHATGPT_ROUTE_ENTRIES = [
     'o207216.ingest.sentry.io',
     'o33249.ingest.sentry.io',
     'accounts.google.com',
-    'google.com',
+    'www.google.com',
 ]
 
 CHATGPT_EDGE_IP_ENTRIES = [

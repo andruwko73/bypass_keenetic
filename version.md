@@ -1,3 +1,6 @@
+*v1.671 (31 May 2026) -* main
+*Replaces the broad `google.com` ChatGPT/Codex route with `www.google.com` so primary Vless service routes no longer overlap YouTube `*.l.google.com` domains from the Vless 2 list.*
+
 *v1.670 (31 May 2026) -* main
 *Preloads currently advertised YouTube video CDN hosts into the selected Vless ipset so `*.googlevideo.com` streams follow the YouTube route under ndnproxy without broadly routing all Google networks.*
 

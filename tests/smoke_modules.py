@@ -2313,7 +2313,8 @@ def test_chatgpt_codex_routes_are_synced():
     assert {'ab.chatgpt.com', 'api.chatgpt.com', 'api.statsig.com', 'browser-intake-datadoghq.com'} <= entries
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
     assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
-    assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com', 'google.com'} <= entries
+    assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com', 'www.google.com'} <= entries
+    assert 'google.com' not in entries
     assert {'cdn.auth0.com', 'assets.auth0.com', 'static.auth0.com', 'login.openai.com'} <= entries
     assert {'js.hcaptcha.com', 'client-api.arkoselabs.com', 'openai-api.arkoselabs.com'} <= entries
     assert {'q.stripe.com', 'm.stripe.network', 'turnstile.cloudflare.com'} <= entries
