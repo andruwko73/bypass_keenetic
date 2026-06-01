@@ -1,3 +1,8 @@
+<a name="1.680"></a>
+# [1.680] - 02 Jun 2026
+
+- Scheduled rollback/app-mode restarts directly as detached shell processes so they survive web command workers.
+
 <a name="1.679"></a>
 # [1.679] - 02 Jun 2026
 

@@ -1,3 +1,6 @@
+*v1.680 (02 Jun 2026) -* main
+*Schedules rollback and app-mode restarts directly as detached shell processes, so the restart survives web command workers and restored files take effect.*
+
 *v1.679 (02 Jun 2026) -* main
 *Makes rollback and app-mode restarts detached from the running bot process so restored files actually take effect after rollback.*
 
