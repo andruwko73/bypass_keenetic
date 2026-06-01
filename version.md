@@ -1,3 +1,6 @@
+*v1.679 (02 Jun 2026) -* main
+*Makes rollback and app-mode restarts detached from the running bot process so restored files actually take effect after rollback.*
+
 *v1.678 (02 Jun 2026) -* main
 *Keeps Xray health validation compatible with older updater scripts that do not yet download the new helper module, preventing bot startup failures during GitHub updates from 1.676/1.677.*
 

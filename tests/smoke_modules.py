@@ -856,6 +856,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'trim_runtime_logs' in service
     assert 'unset BYPASS_KEENETIC_COMMAND_WORKER' in service
     assert 'threading.stack_size(256 * 1024)' in source
+    assert 'subprocess.Popen(' in source
+    assert 'bypass-bot-service-restart.log' in source
     assert "pool_probe_min_available_kb', 160000" in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source

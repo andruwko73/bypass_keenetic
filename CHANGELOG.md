@@ -1,3 +1,8 @@
+<a name="1.679"></a>
+# [1.679] - 02 Jun 2026
+
+- Made rollback/app-mode restarts detached from the running bot process so restored files actually take effect after rollback.
+
 <a name="1.678"></a>
 # [1.678] - 02 Jun 2026
 

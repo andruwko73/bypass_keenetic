@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.678, последнее изменение: 02.06.2026
+#  Файл: bot.py, Версия v1.679, последнее изменение: 02.06.2026
 
 import subprocess
 import os
@@ -14,6 +14,7 @@ import sys
 import time
 import threading
 import signal
+import shlex
 import ipaddress
 import socket
 import tempfile
@@ -1379,7 +1380,17 @@ def _app_mode_telegram_enabled(mode=None):
 def _schedule_app_service_restart():
     def worker():
         time.sleep(1.5)
-        os.system(f'{BOT_SERVICE_SCRIPT} restart >/dev/null 2>&1 &')
+        command = f'sleep 0.2; {BOT_SERVICE_SCRIPT} restart >/tmp/bypass-bot-service-restart.log 2>&1'
+        try:
+            subprocess.Popen(
+                ['/bin/sh', '-c', command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            _write_runtime_log(f'Failed to schedule detached bot restart: {exc}')
+            os.system(f'nohup /bin/sh -c {shlex.quote(command)} >/dev/null 2>&1 &')
 
     threading.Thread(target=worker, daemon=True).start()
 
