@@ -48,7 +48,7 @@ def save_key_probe_cache(cache):
 
 
 def _stored_probe_value(value):
-    return None if value == 'unknown' else bool(value)
+    return None if value is None or value == 'unknown' else bool(value)
 
 
 def custom_checks_signature(custom_checks):
@@ -93,6 +93,8 @@ def update_key_probe_cache_entry(
     now=None,
     min_write_interval=0,
     custom_checks=None,
+    timeout=False,
+    timeout_reason='',
 ):
     cache = cache if isinstance(cache, dict) else {}
     key_id = hash_key(key_value)
@@ -114,18 +116,34 @@ def update_key_probe_cache_entry(
     if entry.get('proto') != proto:
         entry['proto'] = proto
         changed = True
+    has_probe_value = tg_ok is not None or yt_ok is not None or custom is not None
+    timeout = bool(timeout)
+    if timeout:
+        reason = str(timeout_reason or 'timeout').strip() or 'timeout'
+        if entry.get('timeout') is not True:
+            entry['timeout'] = True
+            changed = True
+        if entry.get('timeout_reason') != reason:
+            entry['timeout_reason'] = reason
+            changed = True
+    elif has_probe_value:
+        for marker in ('timeout', 'timeout_reason'):
+            if marker in entry:
+                entry.pop(marker, None)
+                changed = True
+
     if tg_ok is not None:
         value = _stored_probe_value(tg_ok)
         if _skip_recent_success_downgrade(entry, 'tg_ok', value, now, previous_ts):
             skipped_downgrade = True
-        elif entry.get('tg_ok') is not value:
+        elif 'tg_ok' not in entry or entry.get('tg_ok') is not value:
             entry['tg_ok'] = value
             changed = True
     if yt_ok is not None:
         value = _stored_probe_value(yt_ok)
         if _skip_recent_success_downgrade(entry, 'yt_ok', value, now, previous_ts):
             skipped_downgrade = True
-        elif entry.get('yt_ok') is not value:
+        elif 'yt_ok' not in entry or entry.get('yt_ok') is not value:
             entry['yt_ok'] = value
             changed = True
     if custom is not None:
@@ -136,7 +154,7 @@ def update_key_probe_cache_entry(
             existing_custom = dict(existing_custom)
         for check_id, ok in (custom or {}).items():
             check_key = str(check_id)
-            value = bool(ok)
+            value = _stored_probe_value(ok)
             if (
                 value is False and
                 previous_ts and
@@ -145,7 +163,7 @@ def update_key_probe_cache_entry(
             ):
                 skipped_downgrade = True
                 continue
-            if existing_custom.get(check_key) is not value:
+            if check_key not in existing_custom or existing_custom.get(check_key) is not value:
                 existing_custom[check_key] = value
                 changed = True
         if entry.get('custom') != existing_custom:
@@ -176,10 +194,30 @@ class KeyProbeBatchRecorder:
         self._last_flush = time.time()
         self._lock = threading.Lock()
 
-    def record(self, proto, key_value, tg_ok=None, yt_ok=None, custom=None, custom_checks=None):
+    def record(
+        self,
+        proto,
+        key_value,
+        tg_ok=None,
+        yt_ok=None,
+        custom=None,
+        custom_checks=None,
+        timeout=False,
+        timeout_reason='',
+    ):
         should_flush = False
         with self._lock:
-            self._pending.append((proto, key_value, tg_ok, yt_ok, custom, custom_checks, time.time()))
+            self._pending.append((
+                proto,
+                key_value,
+                tg_ok,
+                yt_ok,
+                custom,
+                custom_checks,
+                bool(timeout),
+                timeout_reason,
+                time.time(),
+            ))
             if len(self._pending) >= self.flush_every or time.time() - self._last_flush >= self.flush_interval:
                 should_flush = True
         if should_flush:
@@ -195,7 +233,7 @@ class KeyProbeBatchRecorder:
         with _cache_lock:
             cache = load_key_probe_cache()
             changed = False
-            for proto, key_value, tg_ok, yt_ok, custom, custom_checks, ts in pending:
+            for proto, key_value, tg_ok, yt_ok, custom, custom_checks, timeout, timeout_reason, ts in pending:
                 changed = update_key_probe_cache_entry(
                     cache,
                     proto,
@@ -206,6 +244,8 @@ class KeyProbeBatchRecorder:
                     now=ts,
                     min_write_interval=0,
                     custom_checks=custom_checks,
+                    timeout=timeout,
+                    timeout_reason=timeout_reason,
                 ) or changed
             if changed:
                 save_key_probe_cache(cache)
@@ -235,6 +275,8 @@ def record_key_probe(
     *,
     min_write_interval=KEY_PROBE_MIN_WRITE_INTERVAL,
     custom_checks=None,
+    timeout=False,
+    timeout_reason='',
 ):
     with _cache_lock:
         cache = load_key_probe_cache()
@@ -247,6 +289,8 @@ def record_key_probe(
             custom=custom,
             min_write_interval=min_write_interval,
             custom_checks=custom_checks,
+            timeout=timeout,
+            timeout_reason=timeout_reason,
         ):
             save_key_probe_cache(cache)
 
@@ -262,6 +306,8 @@ def key_probe_is_fresh(entry, now=None, custom_checks=None):
         return False
     age = (now or time.time()) - ts
     if age >= KEY_PROBE_CACHE_TTL:
+        return False
+    if entry.get('timeout'):
         return False
     if (
         age >= KEY_PROBE_FAILURE_TTL and
@@ -288,7 +334,9 @@ def key_probe_has_required_results(entry, custom_checks=None):
         return False
     if entry.get('schema') != KEY_PROBE_CACHE_SCHEMA_VERSION:
         return False
-    if 'tg_ok' not in entry or 'yt_ok' not in entry:
+    if entry.get('timeout'):
+        return False
+    if not isinstance(entry.get('tg_ok'), bool) or not isinstance(entry.get('yt_ok'), bool):
         return False
     custom_checks = custom_checks or []
     if custom_checks:
@@ -297,5 +345,5 @@ def key_probe_has_required_results(entry, custom_checks=None):
             return False
         if entry.get('custom_sig') != custom_checks_signature(custom_checks):
             return False
-        return all(check.get('id') in custom for check in custom_checks)
+        return all(isinstance(custom.get(check.get('id')), bool) for check in custom_checks)
     return True

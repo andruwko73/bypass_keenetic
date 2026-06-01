@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.676, последнее изменение: 01.06.2026
+#  Файл: bot.py, Версия v1.677, последнее изменение: 02.06.2026
 
 import subprocess
 import os
@@ -103,6 +103,7 @@ import telegram_info_runtime
 import auto_failover_runtime
 import app_runtime_mode
 import router_health_runtime
+import xray_compat_runtime
 from telegram_auth_state import (
     MENU_STATE_UNSET,
     authorize_message as _telegram_authorize_message,
@@ -3463,48 +3464,42 @@ def _restore_backup_file(source, target, mode=None):
     return True
 
 
-def _drop_xray_removed_options(value):
-    if isinstance(value, dict):
-        value.pop('allowInsecure', None)
-        for child in value.values():
-            _drop_xray_removed_options(child)
-    elif isinstance(value, list):
-        for child in value:
-            _drop_xray_removed_options(child)
-
-
 def _sanitize_xray26_compat_files():
-    changed = []
-    try:
-        if os.path.isfile(CORE_PROXY_CONFIG_PATH):
-            with open(CORE_PROXY_CONFIG_PATH, 'r', encoding='utf-8') as file:
-                config_data = json.load(file)
-            before = json.dumps(config_data, sort_keys=True)
-            _drop_xray_removed_options(config_data)
-            after = json.dumps(config_data, sort_keys=True)
-            if before != after:
-                with open(CORE_PROXY_CONFIG_PATH, 'w', encoding='utf-8') as file:
-                    json.dump(config_data, file, ensure_ascii=False, indent=2)
-                changed.append('xray config')
-    except Exception as exc:
-        _write_runtime_log(f'Xray 26 migration failed for config: {exc}')
+    return xray_compat_runtime.sanitize_xray26_compat_files(
+        config_paths=(CORE_PROXY_CONFIG_PATH,),
+        protocols_path=os.path.join(BOT_DIR, 'proxy_protocols.py'),
+        logger=_write_runtime_log,
+    )
 
-    protocols_path = os.path.join(BOT_DIR, 'proxy_protocols.py')
-    try:
-        if os.path.isfile(protocols_path):
-            with open(protocols_path, 'r', encoding='utf-8', errors='ignore') as file:
-                text = file.read()
-            if 'allowInsecure' in text:
-                filtered = ''.join(
-                    line for line in text.splitlines(True)
-                    if 'allowInsecure' not in line
-                )
-                with open(protocols_path, 'w', encoding='utf-8') as file:
-                    file.write(filtered)
-                changed.append('proxy_protocols.py')
-    except Exception as exc:
-        _write_runtime_log(f'Xray 26 migration failed for proxy_protocols.py: {exc}')
-    return changed
+
+def _validate_xray_core_config():
+    if os.path.basename(CORE_PROXY_SERVICE_SCRIPT) != 'S24xray':
+        return {'ok': True, 'message': 'non-xray core validation skipped', 'returncode': 0}
+    validation = xray_compat_runtime.validate_xray_config(CORE_PROXY_CONFIG_PATH, timeout=8)
+    if not validation.get('ok'):
+        message = str(validation.get('message') or '').strip()
+        _write_runtime_log(f'Xray config validation failed: {message}')
+    return validation
+
+
+def _restart_core_proxy_after_validation():
+    validation = _validate_xray_core_config()
+    if not validation.get('ok'):
+        return False, f'Xray config error: {str(validation.get("message") or "").strip()}'
+    result = xray_compat_runtime.restart_service(CORE_PROXY_SERVICE_SCRIPT, timeout=20)
+    if not result.get('ok'):
+        message = str(result.get('message') or '').strip()
+        _write_runtime_log(f'Core proxy restart failed: {message}')
+        return False, f'Core proxy restart failed: {message}'
+    time.sleep(2)
+    health = xray_compat_runtime.core_proxy_health(
+        xray_config_path=CORE_PROXY_CONFIG_PATH,
+        xray_service_path=CORE_PROXY_SERVICE_SCRIPT,
+    )
+    note = xray_compat_runtime.core_proxy_note(health)
+    if not health.get('ok'):
+        _write_runtime_log(f'Core proxy health warning: {note}')
+    return bool(health.get('ok')), note
 
 
 def _rollback_last_update():
@@ -3555,13 +3550,18 @@ def _rollback_last_update():
         if _restore_backup_file(os.path.join(backup_dir, name), target, mode):
             restored.append(name)
     restored.extend(_sanitize_xray26_compat_files())
+    core_ok, core_message = _restart_core_proxy_after_validation()
     if not restored:
         return f'Backup найден ({backup_dir}), но в нём нет файлов для восстановления.'
     _invalidate_web_status_cache()
     _schedule_app_service_restart()
+    core_tail = f' Core proxy: {core_message}'
+    if not core_ok:
+        core_tail = f' Внимание: {core_message}'
     return (
         f'Откат выполнен из {backup_dir}. Восстановлено файлов: {len(restored)}. '
         'Сервис бота будет перезапущен через несколько секунд.'
+        f'{core_tail}'
     )
 
 
@@ -6770,7 +6770,9 @@ def _restart_core_proxy_at_startup():
     try:
         _write_all_proxy_core_config()
         _sanitize_xray26_compat_files()
-        os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
+        ok, message = _restart_core_proxy_after_validation()
+        if not ok:
+            _write_runtime_log(f'Core proxy startup validation failed: {message}')
     except Exception as exc:
         _write_runtime_log(f'Не удалось пересобрать core proxy config при старте: {exc}')
 

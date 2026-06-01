@@ -1,3 +1,11 @@
+<a name="1.677"></a>
+# [1.677] - 02 Jun 2026
+
+- Added Xray config validation before core proxy restarts during updates/startup.
+- Made rollback report core proxy validation and service health instead of only restoring files.
+- Recorded pool-probe timeouts as `unknown/timeout` so stale HTTP requests cannot mark working keys as failed.
+- Added core proxy health to the router status card in the web UI.
+
 <a name="1.676"></a>
 # [1.676] - 01 Jun 2026
 

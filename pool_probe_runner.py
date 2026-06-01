@@ -469,6 +469,13 @@ def run_pool_probe_worker(
             except Exception:
                 pass
 
+    def unknown_custom_results(custom_checks):
+        return {
+            str(check.get('id')): 'unknown'
+            for check in custom_checks or []
+            if check.get('id')
+        }
+
     def memory_below_limit():
         available_kb = available_memory_kb()
         if available_kb is not None and available_kb < min_available_kb:
@@ -621,9 +628,19 @@ def run_pool_probe_worker(
                     for future in pending:
                         proto, key_value = future_map[future]
                         future.cancel()
+                        record_key_probe(
+                            proto,
+                            key_value,
+                            tg_ok='unknown',
+                            yt_ok='unknown',
+                            custom=unknown_custom_results(checks),
+                            custom_checks=checks,
+                            timeout=True,
+                            timeout_reason=f'batch timeout {batch_timeout:g}s',
+                        )
                         log(
                             f'Проверка ключа из пула {proto_label(proto)} превысила лимит '
-                            f'{batch_timeout:g} сек.; результат не сохранён и ключ будет перепроверен позже.'
+                            f'{batch_timeout:g} сек.; в кеш записан timeout/unknown и ключ будет перепроверен позже.'
                         )
                         ignore_late_result(proto, key_value)
                         mark_checked(proto, key_value)

@@ -23,6 +23,7 @@ import key_pool_store
 import app_version
 import app_runtime_mode
 import router_health_runtime
+import xray_compat_runtime
 import telegram_pool_ui
 import web_get_actions
 import web_command_state
@@ -220,6 +221,26 @@ def test_router_health_runtime_dns_payload():
     assert 'unblockvless2udp=12' in payload['dns_note']
 
 
+def test_router_health_runtime_core_proxy_payload():
+    payload = router_health_runtime.build_router_health_payload(
+        meminfo={'MemTotal': 64 * 1024, 'MemFree': 8 * 1024, 'MemAvailable': 32 * 1024},
+        ndmc_system={},
+        load_text='0.01 / 0.02 / 0.03',
+        bot_rss_kb=4 * 1024,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+        core_proxy_health={
+            'ok': True,
+            'xray_state': 'alive',
+            'xray_config_ok': True,
+            'ports': {10811: True, 10812: True, 10813: True, 10814: True},
+        },
+    )
+    assert payload['core_proxy_health']['ok'] is True
+    assert 'Xray: alive' in payload['core_proxy_note']
+    assert '10813:ok' in payload['core_proxy_note']
+
+
 def test_router_health_runtime_dns_parsers():
     assert router_health_runtime.parse_dns_backend('udp 0 0 0.0.0.0:53 0.0.0.0:* 759/ndnproxy') == 'ndnproxy'
     assert router_health_runtime.parse_dns_backend('tcp 0 0 0.0.0.0:53 0.0.0.0:* LISTEN 12/dnsmasq') == 'dnsmasq'
@@ -227,6 +248,29 @@ def test_router_health_runtime_dns_parsers():
     assert router_health_runtime.parse_dns_backend('') == 'none'
     assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nMembers:\n1.1.1.1\n2.2.2.0/24\n') == 2
     assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nNumber of entries: 42\nMembers:\n') == 42
+
+
+def test_xray_compat_runtime_helpers():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config_path = Path(tmp_dir) / 'config.json'
+        config_path.write_text(
+            json.dumps({
+                'outbounds': [
+                    {'streamSettings': {'security': 'tls', 'tlsSettings': {'allowInsecure': True}}},
+                    {'settings': {'nested': [{'allowInsecure': False, 'value': 1}]}},
+                ],
+            }),
+            encoding='utf-8',
+        )
+        assert xray_compat_runtime.sanitize_xray_config_file(str(config_path))
+        sanitized = json.loads(config_path.read_text(encoding='utf-8'))
+    assert 'allowInsecure' not in json.dumps(sanitized)
+    netstat_text = (
+        'tcp 0 0 127.0.0.1:10811 0.0.0.0:* LISTEN 1/xray\n'
+        'tcp 0 0 127.0.0.1:10813 0.0.0.0:* LISTEN 1/xray\n'
+    )
+    ports = xray_compat_runtime.listening_ports((10811, 10812, 10813), netstat_text=netstat_text)
+    assert ports == {10811: True, 10812: False, 10813: True}
 
 
 def test_router_health_runtime_process_rss_parser():
@@ -352,6 +396,7 @@ def test_key_pool_web():
     pools = {'vless': ['vless-key', 'unused-key'], 'vmess': ['vmess-key']}
     cache = {
         _hash_key('vless-key'): {'tg_ok': True, 'yt_ok': False, 'custom': {'custom': True}, 'ts': 1},
+        _hash_key('unused-key'): {'tg_ok': None, 'yt_ok': None, 'custom': {'custom': None}, 'timeout': True, 'ts': 3},
         _hash_key('vmess-key'): {'tg_ok': True, 'yt_ok': True, 'custom': {'custom': True}, 'ts': 2},
     }
 
@@ -406,6 +451,7 @@ def test_key_pool_web():
     assert 'custom-service-ok' in key_pool_web.web_custom_check_badges({'custom': {'custom': True}}, check_defs, icon_html)
     assert key_pool_web.web_probe_state({'tg_ok': True}, 'tg_ok') == 'ok'
     assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
+    assert key_pool_web.web_custom_probe_states({'custom': {'custom': None}}, checks)['custom'] == 'unknown'
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
 
 def test_key_pool_subscription_helpers():
@@ -2078,8 +2124,22 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (1, 1)
     timeout_release.set()
     time.sleep(0.05)
-    assert timeout_records == []
-    assert any('результат не сохран' in message for message in timeout_logs)
+    assert timeout_records == [
+        (
+            'vless',
+            'late-timeout',
+            {
+                'tg_ok': 'unknown',
+                'yt_ok': 'unknown',
+                'custom': {},
+                'custom_checks': [],
+                'timeout': True,
+                'timeout_reason': 'batch timeout 0.01s',
+            },
+        )
+    ]
+    assert not any(record[2].get('tg_ok') is False or record[2].get('yt_ok') is False for record in timeout_records)
+    assert any('timeout/unknown' in message for message in timeout_logs)
 
     ordered_tasks = [('vless', f'key-{index}') for index in range(8)]
     processed = []
@@ -3182,6 +3242,34 @@ def test_probe_cache_update_entry_min_interval():
     assert cache[key_id]['ts'] == 152
     assert cache[key_id]['tg_ok'] is None
 
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-1',
+        tg_ok='unknown',
+        yt_ok='unknown',
+        custom={'custom': 'unknown'},
+        custom_checks=[{'id': 'custom', 'urls': ['https://example.test']}],
+        timeout=True,
+        timeout_reason='batch timeout 1s',
+        now=200,
+        min_write_interval=0,
+    )
+    assert cache[key_id]['timeout'] is True
+    assert cache[key_id]['timeout_reason'] == 'batch timeout 1s'
+    assert cache[key_id]['tg_ok'] is None
+    assert cache[key_id]['yt_ok'] is None
+    assert cache[key_id]['custom']['custom'] is None
+    assert not probe_cache.key_probe_is_fresh(
+        cache[key_id],
+        now=201,
+        custom_checks=[{'id': 'custom', 'urls': ['https://example.test']}],
+    )
+    assert not probe_cache.key_probe_has_required_results(
+        cache[key_id],
+        custom_checks=[{'id': 'custom', 'urls': ['https://example.test']}],
+    )
+
 
 def test_probe_cache_ignores_stale_schema(tmp_path):
     cache_path = tmp_path / 'key_probe_cache.json'
@@ -3714,7 +3802,9 @@ def main():
     test_app_runtime_mode_setter_callbacks()
     test_router_health_runtime_payload_uses_keenetic_memory()
     test_router_health_runtime_dns_payload()
+    test_router_health_runtime_core_proxy_payload()
     test_router_health_runtime_dns_parsers()
+    test_xray_compat_runtime_helpers()
     test_router_health_runtime_process_rss_parser()
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()

@@ -1,3 +1,6 @@
+*v1.677 (02 Jun 2026) -* main
+*Validates Xray before core proxy restarts, reports core proxy health after rollback, records pool probe timeouts as unknown instead of failed, and shows Xray health in the router status card.*
+
 *v1.676 (01 Jun 2026) -* main
 *Restores compatibility with Xray 26 by removing the deprecated allowInsecure field from generated configs, and shows “перенести сюда” for preset services that will be added to checks on selection.*
 

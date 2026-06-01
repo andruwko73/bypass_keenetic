@@ -23,7 +23,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py version.md README.md"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -205,6 +205,14 @@ fi
 
 /opt/etc/init.d/S98telegram_bot_installer stop >/dev/null 2>&1 || true
 sed -i '/allowInsecure/d' /opt/etc/xray/config.json /opt/etc/v2ray/config.json /opt/etc/bot/proxy_protocols.py 2>/dev/null || true
+if [ -x /opt/sbin/xray ] && [ -f /opt/etc/xray/config.json ]; then
+    if /opt/sbin/xray run -test -c /opt/etc/xray/config.json >/tmp/bypass-xray-rollback-test.log 2>&1; then
+        echo "Xray config OK after rollback."
+    else
+        echo "Warning: Xray config failed after rollback:"
+        tail -n 12 /tmp/bypass-xray-rollback-test.log 2>/dev/null || true
+    fi
+fi
 if [ -x /opt/etc/init.d/S99web_bot ]; then
     /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
     /opt/etc/init.d/S99web_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99web_bot start >/dev/null 2>&1 || true
@@ -215,6 +223,7 @@ fi
 /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || true
+/opt/etc/init.d/S24xray status 2>/dev/null || true
 /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
 

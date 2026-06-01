@@ -4,6 +4,8 @@ import subprocess
 import threading
 import time
 
+import xray_compat_runtime
+
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
 IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvlessudp', 'unblockvless2', 'unblockvless2udp', 'unblocktroj')
 DNSMASQ_STATE_LABELS = {
@@ -285,6 +287,7 @@ def build_router_health_payload(
     probe_progress,
     temp_xray_count,
     dns_health=None,
+    core_proxy_health=None,
 ):
     meminfo = meminfo or {}
     ndmc_system = ndmc_system or {}
@@ -353,10 +356,13 @@ def build_router_health_payload(
         swap_total_mb = int(round(swap_total_kb / 1024.0))
         details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB.')
     dns_note = dns_health_note(dns_health)
+    core_proxy_note = xray_compat_runtime.core_proxy_note(core_proxy_health) if core_proxy_health else ''
     return {
         'memory_text': memory_text,
         'note': ' '.join(details),
         'dns_note': dns_note,
+        'core_proxy_note': core_proxy_note,
+        'core_proxy_health': dict(core_proxy_health or {}),
         'available_kb': available_kb,
         'used_kb': used_kb,
         'total_kb': display_total_kb,
@@ -384,11 +390,30 @@ def build_router_health_payload(
 
 
 class RouterHealthRuntime:
-    def __init__(self, cache_ttl=5.0, time_provider=time.time):
+    def __init__(self, cache_ttl=5.0, time_provider=time.time, core_proxy_cache_ttl=60.0):
         self.cache_ttl = float(cache_ttl or 0)
+        self.core_proxy_cache_ttl = float(core_proxy_cache_ttl or 0)
         self.time_provider = time_provider
         self._lock = threading.Lock()
         self._cache = {'timestamp': 0, 'payload': None}
+        self._core_proxy_cache = {'timestamp': 0, 'payload': None}
+
+    def _core_proxy_snapshot(self, now):
+        cached = self._core_proxy_cache.get('payload')
+        if cached is not None and now - float(self._core_proxy_cache.get('timestamp') or 0) < self.core_proxy_cache_ttl:
+            return dict(cached)
+        try:
+            payload = xray_compat_runtime.core_proxy_health()
+        except Exception as exc:
+            payload = {
+                'ok': False,
+                'xray_state': 'error',
+                'xray_config_ok': False,
+                'xray_config_message': str(exc),
+                'ports': {},
+            }
+        self._core_proxy_cache = {'timestamp': now, 'payload': dict(payload)}
+        return dict(payload)
 
     def snapshot(self, pool_probe_progress_getter):
         now = self.time_provider()
@@ -407,6 +432,7 @@ class RouterHealthRuntime:
             probe_progress=probe_progress,
             temp_xray_count=count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0,
             dns_health=read_dns_health(time_provider=self.time_provider),
+            core_proxy_health=self._core_proxy_snapshot(now),
         )
         with self._lock:
             self._cache['timestamp'] = now
@@ -416,3 +442,4 @@ class RouterHealthRuntime:
     def invalidate(self):
         with self._lock:
             self._cache = {'timestamp': 0, 'payload': None}
+            self._core_proxy_cache = {'timestamp': 0, 'payload': None}

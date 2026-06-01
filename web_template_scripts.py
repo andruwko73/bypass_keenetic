@@ -1544,6 +1544,11 @@ def render_web_scripts(
                 dnsNote.textContent = health.dns_note || '';
                 dnsNote.classList.toggle('hidden', !dnsNote.textContent);
             }}
+            const coreProxyNote = document.getElementById('router-core-proxy-note');
+            if (coreProxyNote) {{
+                coreProxyNote.textContent = health.core_proxy_note || '';
+                coreProxyNote.classList.toggle('hidden', !coreProxyNote.textContent);
+            }}
             const meter = document.getElementById('router-memory-meter');
             if (meter) {{
                 const percent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));

@@ -94,11 +94,14 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                 if service['field']:
                     if service['field'] not in probe:
                         continue
-                    ok = bool(probe.get(service['field']))
+                    raw_value = probe.get(service['field'])
                 else:
                     if service['id'] not in custom:
                         continue
-                    ok = bool(custom.get(service['id']))
+                    raw_value = custom.get(service['id'])
+                if not isinstance(raw_value, bool):
+                    continue
+                ok = raw_value
                 results.append(ok)
                 if ok:
                     service['count'] += 1
@@ -143,7 +146,11 @@ def web_custom_probe_states(probe, custom_checks):
         if not check_id:
             continue
         if check_id in custom:
-            result[check_id] = 'ok' if custom.get(check_id) else 'fail'
+            value = custom.get(check_id)
+            if value is None:
+                result[check_id] = 'unknown'
+            else:
+                result[check_id] = 'ok' if value else 'fail'
         else:
             result[check_id] = 'unknown'
     return result

@@ -104,6 +104,19 @@ sanitize_xray26_compat() {
   [ -f "$BOT_RUNTIME_DIR/proxy_protocols.py" ] && sed -i '/allowInsecure/d' "$BOT_RUNTIME_DIR/proxy_protocols.py" >/dev/null 2>&1 || true
 }
 
+validate_xray_core_config() {
+  [ -x /opt/etc/init.d/S24xray ] || return 0
+  [ -x /opt/sbin/xray ] || return 0
+  [ -f /opt/etc/xray/config.json ] || return 0
+  log_path="/tmp/bypass-xray-test.log"
+  if /opt/sbin/xray run -test -c /opt/etc/xray/config.json > "$log_path" 2>&1; then
+    return 0
+  fi
+  echo "Xray config validation failed:"
+  tail -n 12 "$log_path" 2>/dev/null || cat "$log_path" 2>/dev/null || true
+  return 1
+}
+
 download_static_asset() {
   repo_path="$1"
   target="$2"
@@ -194,8 +207,21 @@ start_preferred_core_service() {
   fi
   if [ -n "$preferred_core" ]; then
     sanitize_xray26_compat
-    "$preferred_core" start > /dev/null 2>&1 || true
+    if [ "$preferred_core" = "/opt/etc/init.d/S24xray" ]; then
+      validate_xray_core_config || return 1
+    fi
+    "$preferred_core" restart > /dev/null 2>&1 || "$preferred_core" start > /dev/null 2>&1 || {
+      echo "Core proxy service failed to start: $preferred_core"
+      return 1
+    }
+    sleep 1
+    "$preferred_core" status > /tmp/bypass-core-service-status.log 2>&1 || {
+      echo "Core proxy service status failed: $preferred_core"
+      cat /tmp/bypass-core-service-status.log 2>/dev/null || true
+      return 1
+    }
   fi
+  return 0
 }
 
 configure_core_proxy_service() {
@@ -513,7 +539,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -908,7 +934,7 @@ if [ "$1" = "-update" ]; then
     /opt/bin/unblock_update.sh > /dev/null 2>&1 || true
     /opt/etc/init.d/S10cron restart > /dev/null 2>&1 || /opt/etc/init.d/S10cron start > /dev/null 2>&1 || true
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
-    start_preferred_core_service
+    start_preferred_core_service || exit 1
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1
 
     bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)

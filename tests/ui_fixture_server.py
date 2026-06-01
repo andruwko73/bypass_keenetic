@@ -193,6 +193,7 @@ def _router_health():
         "memory_text": "available 256 MB, used 256 of 512 MB",
         "note": "Router fixture: CPU 0.10 / 0.08 / 0.05. Bot RSS 42 MB.",
         "dns_note": "DNS: ndnproxy. ipset updated: fixture.",
+        "core_proxy_note": "Xray: alive, config OK, ports: 10811:ok, 10812:ok, 10813:ok, 10814:ok.",
         "used_percent": 50,
         "pool_probe_running": False,
     }
