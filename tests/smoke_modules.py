@@ -312,6 +312,7 @@ def test_proxy_config_builder():
     )
     outbound_tags = {outbound.get('tag') for outbound in core_config['outbounds']}
     assert {'proxy-shadowsocks', 'proxy-trojan', 'direct'} <= outbound_tags
+    assert 'allowInsecure' not in json.dumps(core_config)
     assert core_config['routing']['rules'][0]['outboundTag'] == 'direct'
     transparent_inbounds = [
         inbound for inbound in core_config['inbounds']
@@ -3673,6 +3674,16 @@ def test_service_route_ui_helpers():
     assert '<select' not in html_text
     assert 'Перенести</button>' not in html_text
     assert key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
+    inactive_preset_html = key_pool_web.web_service_route_tools_html(
+        [route_items[2]],
+        {route_items[2]['id']: {'label': 'Vless 1', 'complete_protocols': ['vless']}},
+        service_routes.protocol_options(),
+        lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+        csrf_input_html='<input type="hidden" name="csrf_token" value="x">',
+        active_check_ids=set(),
+    )
+    assert 'Добавится при выборе' in inactive_preset_html
+    assert 'текущий маршрут' not in inactive_preset_html
 
 
 def test_service_route_runtime_helpers():

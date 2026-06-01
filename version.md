@@ -1,3 +1,6 @@
+*v1.676 (01 Jun 2026) -* main
+*Restores compatibility with Xray 26 by removing the deprecated allowInsecure field from generated configs, and shows “перенести сюда” for preset services that will be added to checks on selection.*
+
 *v1.675 (01 Jun 2026) -* main
 *Moves service route web glue out of bot.py, makes route service menus pop over the desktop grid while staying in-flow on mobile, and refreshes the route-tools fragment after route/check changes without reloading the whole page.*
 

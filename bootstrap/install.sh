@@ -204,6 +204,7 @@ if [ -f "\$ABSENT_PATHS_FILE" ]; then
 fi
 
 /opt/etc/init.d/S98telegram_bot_installer stop >/dev/null 2>&1 || true
+sed -i '/allowInsecure/d' /opt/etc/xray/config.json /opt/etc/v2ray/config.json /opt/etc/bot/proxy_protocols.py 2>/dev/null || true
 if [ -x /opt/etc/init.d/S99web_bot ]; then
     /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
     /opt/etc/init.d/S99web_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99web_bot start >/dev/null 2>&1 || true

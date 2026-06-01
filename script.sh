@@ -97,6 +97,13 @@ if [ -d "/opt/etc/bot" ] || grep -q '/opt/etc/bot/main.py' /opt/etc/init.d/S99te
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 
+sanitize_xray26_compat() {
+  for config_path in /opt/etc/xray/config.json /opt/etc/v2ray/config.json; do
+    [ -f "$config_path" ] && sed -i '/allowInsecure/d' "$config_path" >/dev/null 2>&1 || true
+  done
+  [ -f "$BOT_RUNTIME_DIR/proxy_protocols.py" ] && sed -i '/allowInsecure/d' "$BOT_RUNTIME_DIR/proxy_protocols.py" >/dev/null 2>&1 || true
+}
+
 download_static_asset() {
   repo_path="$1"
   target="$2"
@@ -186,6 +193,7 @@ start_preferred_core_service() {
     /opt/etc/init.d/S24v2ray stop > /dev/null 2>&1 || true
   fi
   if [ -n "$preferred_core" ]; then
+    sanitize_xray26_compat
     "$preferred_core" start > /dev/null 2>&1 || true
   fi
 }
@@ -226,6 +234,7 @@ EOF
     chmod 755 /opt/etc/init.d/S24v2ray || chmod +x /opt/etc/init.d/S24v2ray
     sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1 || true
   fi
+  sanitize_xray26_compat
 }
 
 ensure_entware_dns() {

@@ -181,7 +181,6 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
         if tls_mode in ['tls', 'xtls']:
             stream_settings['security'] = tls_mode
             stream_settings[f'{tls_mode}Settings'] = {
-                'allowInsecure': True,
                 'serverName': data.get('add', ''),
             }
         else:
@@ -221,7 +220,6 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
         if security in ['tls', 'xtls']:
             stream_settings['security'] = security
             stream_settings[f'{security}Settings'] = {
-                'allowInsecure': True,
                 'serverName': data.get('sni', ''),
             }
         elif security == 'reality':
@@ -268,7 +266,6 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
         if data.get('security', 'tls') == 'tls':
             stream_settings['security'] = 'tls'
             stream_settings['tlsSettings'] = {
-                'allowInsecure': True,
                 'serverName': data.get('sni') or data.get('host') or data.get('address', ''),
                 'fingerprint': data.get('fingerprint', 'chrome'),
             }

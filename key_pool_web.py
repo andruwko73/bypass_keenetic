@@ -334,7 +334,8 @@ def web_service_route_tools_html(
             value = html.escape(item['value'], quote=True)
             label = html.escape(item['label'])
             is_active = item['value'] == selected_protocol
-            status_label = 'текущий маршрут' if is_active else 'перенести сюда'
+            no_check_action = is_custom_check and not check_is_active
+            status_label = 'текущий маршрут' if is_active and not no_check_action else 'перенести сюда'
             menu_items.append(
                 f'''<form method="post" action="/service_route_apply" class="service-route-form" data-async-action="service-route">
                     {csrf_input_html}

@@ -1,3 +1,9 @@
+<a name="1.676"></a>
+# [1.676] - 01 Jun 2026
+
+- Removed the deprecated `allowInsecure` field from generated Xray outbound configs so Xray 26 can start.
+- Clarified service route menu labels: preset checks that will be added on selection now show “перенести сюда” for the current protocol too.
+
 <a name="1.675"></a>
 # [1.675] - 01 Jun 2026
 
