@@ -1,3 +1,9 @@
+<a name="1.678"></a>
+# [1.678] - 02 Jun 2026
+
+- Kept Xray health checks compatible with older updaters that do not yet download `xray_compat_runtime.py`.
+- Added fallback startup validation so updates from 1.676/1.677 do not stop the bot when the new helper module is missing.
+
 <a name="1.677"></a>
 # [1.677] - 02 Jun 2026
 

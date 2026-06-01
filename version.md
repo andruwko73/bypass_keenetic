@@ -1,3 +1,6 @@
+*v1.678 (02 Jun 2026) -* main
+*Keeps Xray health validation compatible with older updater scripts that do not yet download the new helper module, preventing bot startup failures during GitHub updates from 1.676/1.677.*
+
 *v1.677 (02 Jun 2026) -* main
 *Validates Xray before core proxy restarts, reports core proxy health after rollback, records pool probe timeouts as unknown instead of failed, and shows Xray health in the router status card.*
 

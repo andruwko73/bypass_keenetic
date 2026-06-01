@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.677, последнее изменение: 02.06.2026
+#  Файл: bot.py, Версия v1.678, последнее изменение: 02.06.2026
 
 import subprocess
 import os
@@ -103,7 +103,10 @@ import telegram_info_runtime
 import auto_failover_runtime
 import app_runtime_mode
 import router_health_runtime
-import xray_compat_runtime
+try:
+    import xray_compat_runtime
+except Exception:
+    xray_compat_runtime = None
 from telegram_auth_state import (
     MENU_STATE_UNSET,
     authorize_message as _telegram_authorize_message,
@@ -3465,6 +3468,45 @@ def _restore_backup_file(source, target, mode=None):
 
 
 def _sanitize_xray26_compat_files():
+    if xray_compat_runtime is None:
+        changed = []
+        try:
+            if os.path.isfile(CORE_PROXY_CONFIG_PATH):
+                with open(CORE_PROXY_CONFIG_PATH, 'r', encoding='utf-8') as file:
+                    config_data = json.load(file)
+                before = json.dumps(config_data, sort_keys=True)
+
+                def drop_removed_options(value):
+                    if isinstance(value, dict):
+                        value.pop('allowInsecure', None)
+                        for child in value.values():
+                            drop_removed_options(child)
+                    elif isinstance(value, list):
+                        for child in value:
+                            drop_removed_options(child)
+
+                drop_removed_options(config_data)
+                after = json.dumps(config_data, sort_keys=True)
+                if before != after:
+                    with open(CORE_PROXY_CONFIG_PATH, 'w', encoding='utf-8') as file:
+                        json.dump(config_data, file, ensure_ascii=False, indent=2)
+                    changed.append('xray config')
+        except Exception as exc:
+            _write_runtime_log(f'Xray fallback migration failed for config: {exc}')
+
+        protocols_path = os.path.join(BOT_DIR, 'proxy_protocols.py')
+        try:
+            if os.path.isfile(protocols_path):
+                with open(protocols_path, 'r', encoding='utf-8', errors='ignore') as file:
+                    text = file.read()
+                if 'allowInsecure' in text:
+                    filtered = ''.join(line for line in text.splitlines(True) if 'allowInsecure' not in line)
+                    with open(protocols_path, 'w', encoding='utf-8') as file:
+                        file.write(filtered)
+                    changed.append('proxy_protocols.py')
+        except Exception as exc:
+            _write_runtime_log(f'Xray fallback migration failed for proxy_protocols.py: {exc}')
+        return changed
     return xray_compat_runtime.sanitize_xray26_compat_files(
         config_paths=(CORE_PROXY_CONFIG_PATH,),
         protocols_path=os.path.join(BOT_DIR, 'proxy_protocols.py'),
@@ -3475,7 +3517,25 @@ def _sanitize_xray26_compat_files():
 def _validate_xray_core_config():
     if os.path.basename(CORE_PROXY_SERVICE_SCRIPT) != 'S24xray':
         return {'ok': True, 'message': 'non-xray core validation skipped', 'returncode': 0}
-    validation = xray_compat_runtime.validate_xray_config(CORE_PROXY_CONFIG_PATH, timeout=8)
+    if xray_compat_runtime is None:
+        try:
+            result = subprocess.run(
+                ['/opt/sbin/xray', 'run', '-test', '-c', CORE_PROXY_CONFIG_PATH],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=8,
+                check=False,
+            )
+            validation = {
+                'ok': result.returncode == 0,
+                'message': '\n'.join((result.stdout or '').splitlines()[-8:]),
+                'returncode': result.returncode,
+            }
+        except Exception as exc:
+            validation = {'ok': False, 'message': str(exc), 'returncode': None}
+    else:
+        validation = xray_compat_runtime.validate_xray_config(CORE_PROXY_CONFIG_PATH, timeout=8)
     if not validation.get('ok'):
         message = str(validation.get('message') or '').strip()
         _write_runtime_log(f'Xray config validation failed: {message}')
@@ -3486,17 +3546,39 @@ def _restart_core_proxy_after_validation():
     validation = _validate_xray_core_config()
     if not validation.get('ok'):
         return False, f'Xray config error: {str(validation.get("message") or "").strip()}'
-    result = xray_compat_runtime.restart_service(CORE_PROXY_SERVICE_SCRIPT, timeout=20)
+    if xray_compat_runtime is None:
+        try:
+            result_obj = subprocess.run(
+                [CORE_PROXY_SERVICE_SCRIPT, 'restart'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            result = {
+                'ok': result_obj.returncode == 0,
+                'message': '\n'.join((result_obj.stdout or '').splitlines()[-5:]),
+            }
+        except Exception as exc:
+            result = {'ok': False, 'message': str(exc)}
+    else:
+        result = xray_compat_runtime.restart_service(CORE_PROXY_SERVICE_SCRIPT, timeout=20)
     if not result.get('ok'):
         message = str(result.get('message') or '').strip()
         _write_runtime_log(f'Core proxy restart failed: {message}')
         return False, f'Core proxy restart failed: {message}'
     time.sleep(2)
-    health = xray_compat_runtime.core_proxy_health(
-        xray_config_path=CORE_PROXY_CONFIG_PATH,
-        xray_service_path=CORE_PROXY_SERVICE_SCRIPT,
-    )
-    note = xray_compat_runtime.core_proxy_note(health)
+    if xray_compat_runtime is None:
+        service_ok = _port_is_listening(localportvless) and _port_is_listening(localportvless2)
+        health = {'ok': service_ok}
+        note = 'Xray: restarted; module fallback; ports checked.' if service_ok else 'Xray: restart requested; ports are not ready.'
+    else:
+        health = xray_compat_runtime.core_proxy_health(
+            xray_config_path=CORE_PROXY_CONFIG_PATH,
+            xray_service_path=CORE_PROXY_SERVICE_SCRIPT,
+        )
+        note = xray_compat_runtime.core_proxy_note(health)
     if not health.get('ok'):
         _write_runtime_log(f'Core proxy health warning: {note}')
     return bool(health.get('ok')), note

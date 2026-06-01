@@ -239,6 +239,21 @@ def test_router_health_runtime_core_proxy_payload():
     assert payload['core_proxy_health']['ok'] is True
     assert 'Xray: alive' in payload['core_proxy_note']
     assert '10813:ok' in payload['core_proxy_note']
+    original_module = router_health_runtime.xray_compat_runtime
+    try:
+        router_health_runtime.xray_compat_runtime = None
+        fallback_payload = router_health_runtime.build_router_health_payload(
+            meminfo={'MemTotal': 64 * 1024, 'MemFree': 8 * 1024, 'MemAvailable': 32 * 1024},
+            ndmc_system={},
+            load_text='0.01 / 0.02 / 0.03',
+            bot_rss_kb=4 * 1024,
+            probe_progress={'running': False, 'total': 0},
+            temp_xray_count=0,
+            core_proxy_health={'ok': False},
+        )
+        assert fallback_payload['core_proxy_note'] == 'Xray: health module unavailable.'
+    finally:
+        router_health_runtime.xray_compat_runtime = original_module
 
 
 def test_router_health_runtime_dns_parsers():

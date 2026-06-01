@@ -4,7 +4,10 @@ import subprocess
 import threading
 import time
 
-import xray_compat_runtime
+try:
+    import xray_compat_runtime
+except Exception:
+    xray_compat_runtime = None
 
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
 IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvlessudp', 'unblockvless2', 'unblockvless2udp', 'unblocktroj')
@@ -356,7 +359,12 @@ def build_router_health_payload(
         swap_total_mb = int(round(swap_total_kb / 1024.0))
         details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB.')
     dns_note = dns_health_note(dns_health)
-    core_proxy_note = xray_compat_runtime.core_proxy_note(core_proxy_health) if core_proxy_health else ''
+    if xray_compat_runtime is not None and core_proxy_health:
+        core_proxy_note = xray_compat_runtime.core_proxy_note(core_proxy_health)
+    elif core_proxy_health:
+        core_proxy_note = 'Xray: health module unavailable.'
+    else:
+        core_proxy_note = ''
     return {
         'memory_text': memory_text,
         'note': ' '.join(details),
@@ -403,7 +411,16 @@ class RouterHealthRuntime:
         if cached is not None and now - float(self._core_proxy_cache.get('timestamp') or 0) < self.core_proxy_cache_ttl:
             return dict(cached)
         try:
-            payload = xray_compat_runtime.core_proxy_health()
+            if xray_compat_runtime is None:
+                payload = {
+                    'ok': False,
+                    'xray_state': 'unknown',
+                    'xray_config_ok': False,
+                    'xray_config_message': 'xray health module unavailable',
+                    'ports': {},
+                }
+            else:
+                payload = xray_compat_runtime.core_proxy_health()
         except Exception as exc:
             payload = {
                 'ok': False,
