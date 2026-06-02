@@ -1,3 +1,6 @@
+*v1.682 (02 Jun 2026) -* main
+*Adds YouTube video IPv6 fallback coverage for preloaded googlevideo hosts and direct IPv6 CIDRs, samples YouTube edge DNS through several resolvers to catch browser/DoH address drift, keeps newly observed video CDN IPv4 routes, and adds a missing Telegram media range for vless1.*
+
 *v1.681 (02 Jun 2026) -* main
 *Adds observed YouTube video CDN ranges to the YouTube route, mirrors QUIC/UDP sets for Shadowsocks, Vmess, both Vless routes, and Trojan, and uses one local QUIC reject path so browser video falls back to TCP through the selected protocol.*
 

@@ -795,18 +795,25 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'unblockvless2v6 "tmp_unblockvless2v6_$$"' in ipset_script
     assert 'udp_quic_domain "$domain"' in ipset_script
     assert 'udp_quic_direct_entry "$direct_entry"' in ipset_script
+    assert 'extract_ipv6_direct_entry()' in ipset_script
+    assert 'append_restore "$ipv6_tmp_set" "$direct_ipv6_entry"' in ipset_script
     assert 'entry ~ /^[0-9.]+(\\/[0-9]+)?$/' in ipset_script
     assert 'UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"' in ipset_script
     assert 'UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in ipset_script
     assert 'from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES' in ipset_script
     assert 'YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"' in ipset_script
+    assert 'YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS="${YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS:-https://www.youtube.com/watch?v=C1ZicUtxD-0}"' in ipset_script
+    assert 'YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"' in ipset_script
+    assert 'for sample_dns in $extra_dns_servers; do' in ipset_script
     assert 'preload_youtube_video_hosts()' in ipset_script
     assert '--socks5-hostname "127.0.0.1:$socks_port"' in ipset_script
     assert "grep -Eo '[A-Za-z0-9.-]+\\.googlevideo\\.com'" in ipset_script
     assert 'function cidr24(ip)' in ipset_script
+    assert 'function cidr64(ip, parts, net)' in ipset_script
     assert 'print "add " tmp_set " " cidr24($1);' in ipset_script
-    assert 'preload_youtube_video_hosts "$set_name" "$main_tmp_set" "$mirror_tmp_set" "$domain_file"' in ipset_script
+    assert 'if (net != "") print "add " tmp_set " " net;' in ipset_script
+    assert 'preload_youtube_video_hosts "$set_name" "$main_tmp_set" "$mirror_tmp_set" "$domain_file" "$ipv6_tmp_set"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq
     assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
     assert 'chatgpt.com|*.chatgpt.com' not in unblock_dnsmasq

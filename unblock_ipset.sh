@@ -10,6 +10,8 @@ LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_VIDEO_PRELOAD_ENABLED="${YOUTUBE_VIDEO_PRELOAD_ENABLED:-1}"
 YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"
+YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS="${YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS:-https://www.youtube.com/watch?v=C1ZicUtxD-0}"
+YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT="${YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT:-6}"
 YOUTUBE_VIDEO_PRELOAD_MAX_TIME="${YOUTUBE_VIDEO_PRELOAD_MAX_TIME:-18}"
 YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT="${YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT:-80}"
@@ -168,6 +170,19 @@ extract_direct_entry() {
 	return 1
 }
 
+extract_ipv6_direct_entry() {
+	line="$(printf '%s\n' "$1" | sed 's/\r//g;s/#.*//;s/[[:space:]].*$//;s/,.*$//' | trim_line)"
+	case "$line" in
+		*:*)
+			if printf '%s\n' "$line" | grep -Eq '^[0-9A-Fa-f:]+(/[0-9]{1,3})?$'; then
+				printf '%s\n' "$line"
+				return 0
+			fi
+			;;
+	esac
+	return 1
+}
+
 normalize_domain() {
 	printf '%s\n' "$1" \
 		| sed 's/\r//g;s/^DOMAIN-SUFFIX,//;s/^DOMAIN,//;s/^HOST-SUFFIX,//;s/^+\.//;s/^\*\.//;s/[[:space:]].*$//;s/,.*$//;s#^/##;s#/$##' \
@@ -287,7 +302,7 @@ resolve_domains() {
 	mirror_domain_file="$4"
 	[ -s "$domain_file" ] || return 0
 
-	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set mirror_tmp_set mirror_domain_file UDP_QUIC_EXCLUDE_SOURCE
+	export DNS_HOST DNS_PORT IPV4_RE LOCAL_RE tmp_set mirror_tmp_set mirror_domain_file UDP_QUIC_EXCLUDE_SOURCE YOUTUBE_DNS_SAMPLE_SERVERS
 	parallel_flag="$(xargs_parallel_flag)"
 
 	# shellcheck disable=SC2086
@@ -297,9 +312,21 @@ resolve_domains() {
 			if [ -n "$mirror_tmp_set" ] && [ -s "$mirror_domain_file" ] && grep -Fx "$domain" "$mirror_domain_file" >/dev/null 2>&1; then
 				mirror_for_domain="$mirror_tmp_set"
 			fi
-			dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
+			extra_dns_servers=""
+			case "$domain" in
+				youtube.com|*.youtube.com|youtube-nocookie.com|*.youtube-nocookie.com|youtu.be|*.youtu.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube.googleapis.com|youtubei.googleapis.com|youtube-ui.l.google.com|wide-youtube.l.google.com)
+					extra_dns_servers="$YOUTUBE_DNS_SAMPLE_SERVERS"
+					;;
+			esac
+			{
+				dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+				for sample_dns in $extra_dns_servers; do
+					dig +time=2 +tries=1 +short "$domain" @"$sample_dns" 2>/dev/null
+				done
+			} \
 				| grep -Eo "$IPV4_RE" \
 				| grep -vE "$LOCAL_RE" \
+				| sort -u \
 				| awk -v tmp_set="$tmp_set" -v mirror_tmp_set="$mirror_for_domain" -v exclude_file="$UDP_QUIC_EXCLUDE_SOURCE" "
 					BEGIN {
 						if (exclude_file != \"\") {
@@ -321,16 +348,28 @@ resolve_ipv6_domains() {
 	[ -n "$ipv6_tmp_set" ] || return 0
 	[ -s "$domain_file" ] || return 0
 
-	export DNS_HOST DNS_PORT LOCAL_RE ipv6_tmp_set
+	export DNS_HOST DNS_PORT LOCAL_RE ipv6_tmp_set YOUTUBE_DNS_SAMPLE_SERVERS
 	parallel_flag="$(xargs_parallel_flag)"
 
 	# shellcheck disable=SC2086
 	sort -u "$domain_file" | xargs -n 1 $parallel_flag sh -c '
 		for domain do
-			dig +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
+			extra_dns_servers=""
+			case "$domain" in
+				youtube.com|*.youtube.com|youtube-nocookie.com|*.youtube-nocookie.com|youtu.be|*.youtu.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube.googleapis.com|youtubei.googleapis.com|youtube-ui.l.google.com|wide-youtube.l.google.com)
+					extra_dns_servers="$YOUTUBE_DNS_SAMPLE_SERVERS"
+					;;
+			esac
+			{
+				dig +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+				for sample_dns in $extra_dns_servers; do
+					dig +time=2 +tries=1 +short AAAA "$domain" @"$sample_dns" 2>/dev/null
+				done
+			} \
 				| grep -E "^[0-9A-Fa-f:]+$" \
 				| grep ":" \
 				| grep -vE "$LOCAL_RE" \
+				| sort -u \
 				| awk -v tmp_set="$ipv6_tmp_set" "{ print \"add \" tmp_set \" \" \$1 }"
 		done
 	' sh >> "$restore_file"
@@ -364,6 +403,7 @@ preload_youtube_video_hosts() {
 	tmp_set="$2"
 	mirror_tmp_set="$3"
 	domain_file="$4"
+	ipv6_tmp_set="$5"
 	[ "$YOUTUBE_VIDEO_PRELOAD_ENABLED" = "0" ] && return 0
 	domain_file_has_googlevideo "$domain_file" || return 0
 	socks_port="$(youtube_socks_port_for_set "$set_name" 2>/dev/null || true)"
@@ -372,22 +412,35 @@ preload_youtube_video_hosts() {
 	[ -x "$curl_bin" ] || curl_bin="$(command -v curl 2>/dev/null || true)"
 	[ -n "$curl_bin" ] || return 0
 
-	page_file="$tmp_dir/${set_name}.youtube_video.html"
 	hosts_file="$tmp_dir/${set_name}.youtube_video.hosts"
-	if ! "$curl_bin" -k -L -sS \
-		--socks5-hostname "127.0.0.1:$socks_port" \
-		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36" \
-		--connect-timeout "$YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT" \
-		--max-time "$YOUTUBE_VIDEO_PRELOAD_MAX_TIME" \
-		"$YOUTUBE_VIDEO_PRELOAD_URL" -o "$page_file" >/dev/null 2>&1; then
-		return 0
-	fi
+	urls_file="$tmp_dir/${set_name}.youtube_video.urls"
+	: > "$hosts_file"
+	{
+		printf '%s\n' "$YOUTUBE_VIDEO_PRELOAD_URL"
+		printf '%s\n' $YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS
+	} | awk 'NF && !seen[$0]++' > "$urls_file"
 
-	grep -Eo '[A-Za-z0-9.-]+\.googlevideo\.com' "$page_file" 2>/dev/null \
-		| tr '[:upper:]' '[:lower:]' \
-		| sort -u \
-		| head -n "$YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT" > "$hosts_file"
+	url_index=0
+	while IFS= read -r preload_url || [ -n "$preload_url" ]; do
+		[ -n "$preload_url" ] || continue
+		page_file="$tmp_dir/${set_name}.youtube_video.${url_index}.html"
+		url_index=$((url_index + 1))
+		if ! "$curl_bin" -k -L -sS \
+			--socks5-hostname "127.0.0.1:$socks_port" \
+			-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36" \
+			--connect-timeout "$YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT" \
+			--max-time "$YOUTUBE_VIDEO_PRELOAD_MAX_TIME" \
+			"$preload_url" -o "$page_file" >/dev/null 2>&1; then
+			continue
+		fi
+
+		grep -Eo '[A-Za-z0-9.-]+\.googlevideo\.com' "$page_file" 2>/dev/null \
+			| tr '[:upper:]' '[:lower:]' >> "$hosts_file"
+	done < "$urls_file"
+
 	[ -s "$hosts_file" ] || return 0
+	sort -u "$hosts_file" | head -n "$YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT" > "$hosts_file.sorted"
+	mv "$hosts_file.sorted" "$hosts_file"
 
 	mirror_for_video=""
 	if [ -n "$mirror_tmp_set" ] && udp_quic_domain "googlevideo.com"; then
@@ -419,6 +472,32 @@ preload_youtube_video_hosts() {
 				if (mirror_tmp_set != "" && !($1 in excluded_ip)) print "add " mirror_tmp_set " " cidr24($1);
 			}
 		' >> "$restore_file"
+
+	if [ -n "$ipv6_tmp_set" ]; then
+		while IFS= read -r video_host || [ -n "$video_host" ]; do
+			[ -n "$video_host" ] || continue
+			dig +short AAAA "$video_host" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+		done < "$hosts_file" \
+			| grep -E "^[0-9A-Fa-f:]+$" \
+			| grep ":" \
+			| grep -vE "$LOCAL_RE" \
+			| sort -u \
+			| awk -v tmp_set="$ipv6_tmp_set" '
+				function cidr64(ip, parts, net) {
+					split(ip, parts, ":")
+					if (parts[1] != "" && parts[2] != "" && parts[3] != "" && parts[4] != "") {
+						net=parts[1] ":" parts[2] ":" parts[3] ":" parts[4] "::/64"
+						return net
+					}
+					return ""
+				}
+				{
+					print "add " tmp_set " " $1;
+					net=cidr64($1);
+					if (net != "") print "add " tmp_set " " net;
+				}
+			' >> "$restore_file"
+	fi
 }
 
 prepare_temp_set() {
@@ -487,6 +566,12 @@ load_file_to_set() {
 			continue
 		fi
 
+		if direct_ipv6_entry="$(extract_ipv6_direct_entry "$line")"; then
+			[ -n "$ipv6_tmp_set" ] && : > "$ipv6_source_file"
+			append_restore "$ipv6_tmp_set" "$direct_ipv6_entry"
+			continue
+		fi
+
 		domain="$(normalize_domain "$line")"
 		if [ -n "$domain" ]; then
 			: > "$source_file"
@@ -500,7 +585,7 @@ load_file_to_set() {
 	done < "$list_path"
 
 	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set" "$mirror_domain_file"
-	preload_youtube_video_hosts "$set_name" "$main_tmp_set" "$mirror_tmp_set" "$domain_file"
+	preload_youtube_video_hosts "$set_name" "$main_tmp_set" "$mirror_tmp_set" "$domain_file" "$ipv6_tmp_set"
 	resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"
 }
 
