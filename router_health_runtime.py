@@ -10,7 +10,18 @@ except Exception:
     xray_compat_runtime = None
 
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
-IPSET_SET_NAMES = ('unblocksh', 'unblockvmess', 'unblockvless', 'unblockvlessudp', 'unblockvless2', 'unblockvless2udp', 'unblocktroj')
+IPSET_SET_NAMES = (
+    'unblocksh',
+    'unblockshudp',
+    'unblockvmess',
+    'unblockvmessudp',
+    'unblockvless',
+    'unblockvlessudp',
+    'unblockvless2',
+    'unblockvless2udp',
+    'unblocktroj',
+    'unblocktrojudp',
+)
 DNSMASQ_STATE_LABELS = {
     'running': 'запущен',
     'dead': 'не запущен',

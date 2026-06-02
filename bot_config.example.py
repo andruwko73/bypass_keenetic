@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.680
+# ВЕРСИЯ СКРИПТА v1.681
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -32,8 +32,11 @@ memory_post_pool_restart_rss_kb = 71680
 memory_post_pool_restart_delay_seconds = 20.0
 memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
+udp_quic_block_shadowsocks_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Shadowsocks list
+udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Vmess list
 udp_quic_block_vless_enabled = True  # умная блокировка QUIC/UDP 443 для YouTube-доменов из списка Vless 1
 udp_quic_block_vless2_enabled = True  # умная блокировка QUIC/UDP 443 для YouTube-доменов из списка Vless 2
+udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
 ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси
 reality_endpoint_overrides = {}  # необязательно: {'server.example.com': '203.0.113.10'} для Reality-доменов с нестабильным DNS-бэкендом
 youtube_vless2_failover_enabled = True  # YouTube остается на Vless 2: если текущий Vless2 ключ перестал отвечать, бот подберет другой из пула Vless2

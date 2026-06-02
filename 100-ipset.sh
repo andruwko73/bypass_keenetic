@@ -1,12 +1,15 @@
 #!/bin/sh
 [ "$1" != "start" ] && exit 0
 ipset create unblocksh hash:net -exist
+ipset create unblockshudp hash:net -exist
 ipset create unblockvmess hash:net -exist
+ipset create unblockvmessudp hash:net -exist
 ipset create unblockvless hash:net -exist
 ipset create unblockvlessudp hash:net -exist
 ipset create unblockvless2 hash:net -exist
 ipset create unblockvless2udp hash:net -exist
 ipset create unblocktroj hash:net -exist
+ipset create unblocktrojudp hash:net -exist
 ipset create unblocksh6 hash:net family inet6 -exist
 ipset create unblockvmess6 hash:net family inet6 -exist
 ipset create unblockvless6 hash:net family inet6 -exist

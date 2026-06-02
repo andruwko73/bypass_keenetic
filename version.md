@@ -1,3 +1,6 @@
+*v1.681 (02 Jun 2026) -* main
+*Adds observed YouTube video CDN ranges to the YouTube route, mirrors QUIC/UDP sets for Shadowsocks, Vmess, both Vless routes, and Trojan, and uses one local QUIC reject path so browser video falls back to TCP through the selected protocol.*
+
 *v1.680 (02 Jun 2026) -* main
 *Schedules rollback and app-mode restarts directly as detached shell processes, so the restart survives web command workers and restored files take effect.*
 

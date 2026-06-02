@@ -1,7 +1,7 @@
 #!/bin/sh
 
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
-EXTRA_SET_NAMES="unblockvlessudp unblockvless2udp"
+EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
 IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6"
 
 ensure_set() {

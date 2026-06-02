@@ -693,12 +693,21 @@ def test_codex_version_matches_commit_count():
     assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in example
     assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in installer
     assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in bootstrap
+    assert 'udp_quic_block_shadowsocks_enabled = True' in example
+    assert 'udp_quic_block_shadowsocks_enabled = True' in installer
+    assert 'udp_quic_block_shadowsocks_enabled = True' in bootstrap
+    assert 'udp_quic_block_vmess_enabled = True' in example
+    assert 'udp_quic_block_vmess_enabled = True' in installer
+    assert 'udp_quic_block_vmess_enabled = True' in bootstrap
     assert 'udp_quic_block_vless_enabled = True' in example
     assert 'udp_quic_block_vless_enabled = True' in installer
     assert 'udp_quic_block_vless_enabled = True' in bootstrap
     assert 'udp_quic_block_vless2_enabled = True' in example
     assert 'udp_quic_block_vless2_enabled = True' in installer
     assert 'udp_quic_block_vless2_enabled = True' in bootstrap
+    assert 'udp_quic_block_trojan_enabled = True' in example
+    assert 'udp_quic_block_trojan_enabled = True' in installer
+    assert 'udp_quic_block_trojan_enabled = True' in bootstrap
     assert 'ipv6_bypass_fallback_enabled = True' in example
     assert 'ipv6_bypass_fallback_enabled = True' in installer
     assert 'ipv6_bypass_fallback_enabled = True' in bootstrap
@@ -730,8 +739,11 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert "s/\\r//g" in unblock_dnsmasq
     assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
     assert 'udp_quic_domain()' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblocksh unblockshudp' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblockvmess unblockvmessudp' in unblock_dnsmasq
     assert 'ipset_targets "$line" unblockvless unblockvlessudp' in unblock_dnsmasq
     assert 'ipset_targets "$line" unblockvless2 unblockvless2udp' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblocktroj unblocktrojudp' in unblock_dnsmasq
 
 
 def test_ipset_refresh_is_backend_aware_and_atomic():
@@ -772,14 +784,18 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"' in ipset_script
     assert 'for set_name in $SET_NAMES $EXTRA_SET_NAMES; do' in ipset_script
     assert 'ipset swap "$swap_tmp_set" "$set_name"' in ipset_script
+    assert 'unblockshudp "tmp_unblockshudp_$$"' in ipset_script
+    assert 'unblockvmessudp "tmp_unblockvmessudp_$$"' in ipset_script
     assert 'unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
     assert 'unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
+    assert 'unblocktrojudp "tmp_unblocktrojudp_$$"' in ipset_script
     assert 'resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"' in ipset_script
     assert 'dig +short AAAA "$domain"' in ipset_script
     assert 'unblockvless6 "tmp_unblockvless6_$$"' in ipset_script
     assert 'unblockvless2v6 "tmp_unblockvless2v6_$$"' in ipset_script
     assert 'udp_quic_domain "$domain"' in ipset_script
     assert 'udp_quic_direct_entry "$direct_entry"' in ipset_script
+    assert 'entry ~ /^[0-9.]+(\\/[0-9]+)?$/' in ipset_script
     assert 'UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"' in ipset_script
     assert 'UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in ipset_script
@@ -795,17 +811,28 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
     assert 'chatgpt.com|*.chatgpt.com' not in unblock_dnsmasq
     assert '8.6.112.6|8.47.69.6|35.190.80.1|64.239.109.65' not in ipset_script
+    assert 'swap_or_preserve_set unblockshudp "tmp_unblockshudp_$$"' in ipset_script
+    assert 'swap_or_preserve_set unblockvmessudp "tmp_unblockvmessudp_$$"' in ipset_script
     assert 'swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
+    assert 'swap_or_preserve_set unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
+    assert 'swap_or_preserve_set unblocktrojudp "tmp_unblocktrojudp_$$"' in ipset_script
+    assert 'ipset create unblockshudp hash:net -exist' in ipset_boot_script
+    assert 'ipset create unblockvmessudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvlessudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
+    assert 'ipset create unblocktrojudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless6 hash:net family inet6 -exist' in ipset_boot_script
     assert 'ipset create unblockvless2v6 hash:net family inet6 -exist' in ipset_boot_script
-    assert '--match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-port 10812' in redirect_script
-    assert '--match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-port 10814' in redirect_script
+    assert 'UDP_QUIC_REJECT_PORT="${UDP_QUIC_REJECT_PORT:-10944}"' in redirect_script
+    assert 'install_udp_quic_block_rule unblockshudp "$BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS"' in redirect_script
+    assert 'install_udp_quic_block_rule unblockvmessudp "$BYPASS_UDP_QUIC_BLOCK_VMESS"' in redirect_script
+    assert 'install_udp_quic_block_rule unblockvlessudp "$BYPASS_UDP_QUIC_BLOCK_VLESS"' in redirect_script
+    assert 'install_udp_quic_block_rule unblockvless2udp "$BYPASS_UDP_QUIC_BLOCK_VLESS2"' in redirect_script
+    assert 'install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"' in redirect_script
+    assert '--match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-port "$UDP_QUIC_REJECT_PORT"' in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT' not in redirect_script
-    assert 'refresh_transparent_udp_quic_reject 10812 "$BYPASS_UDP_QUIC_BLOCK_VLESS"' in redirect_script
-    assert 'refresh_transparent_udp_quic_reject 10814 "$BYPASS_UDP_QUIC_BLOCK_VLESS2"' in redirect_script
+    assert 'refresh_udp_quic_block_rules' in redirect_script
     assert '-p udp --dport "$reject_port" -j REJECT --reject-with icmp-port-unreachable' in redirect_script
     assert 'install_ipv6_fallback_rules()' in redirect_script
     assert 'BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"' in redirect_script

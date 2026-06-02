@@ -598,12 +598,15 @@ if [ "$1" = "-remove" ]; then
     echo "Пакеты удалены, удаляем папки, файлы и настройки"
     ipset flush testset
     ipset flush unblocksh
+    ipset flush unblockshudp
     ipset flush unblockvmess
+    ipset flush unblockvmessudp
     ipset flush unblockvless
     ipset flush unblockvlessudp
     ipset flush unblockvless2
     ipset flush unblockvless2udp
     ipset flush unblocktroj
+    ipset flush unblocktrojudp
     remove_path /opt/root/get-pip.py
     remove_path /opt/etc/crontab
     remove_path /opt/etc/init.d/S22shadowsocks

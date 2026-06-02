@@ -1,6 +1,18 @@
 # Shared route and check presets for the web panel and Telegram bot.
 
-YOUTUBE_CDN_IP_RANGES = []
+YOUTUBE_CDN_IP_RANGES = [
+    '74.125.96.0/24',
+    '74.125.102.0/24',
+    '74.125.164.0/24',
+    '142.251.84.0/24',
+    '142.251.90.0/24',
+    '142.251.91.0/24',
+    '172.217.137.0/24',
+    '172.217.145.0/24',
+    '173.194.22.0/24',
+    '173.194.51.0/24',
+    '209.85.229.0/24',
+]
 
 YOUTUBE_UNBLOCK_ENTRIES = [
     *YOUTUBE_CDN_IP_RANGES,

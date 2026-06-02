@@ -14,7 +14,7 @@ YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT="${YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT:-
 YOUTUBE_VIDEO_PRELOAD_MAX_TIME="${YOUTUBE_VIDEO_PRELOAD_MAX_TIME:-18}"
 YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT="${YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT:-80}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
-EXTRA_SET_NAMES="unblockvlessudp unblockvless2udp"
+EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
 IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6"
 UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"
 UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"
@@ -249,7 +249,7 @@ udp_quic_direct_entry() {
 		function trim(s) { sub(/^[ \t\r\n]+/, "", s); sub(/[ \t\r\n]+$/, "", s); return s }
 		{
 			entry=tolower($0); sub(/\r/, "", entry); sub(/#.*/, "", entry); entry=trim(entry)
-			if (entry == direct_entry && entry !~ /[\/:-]/) found=1
+			if (entry == direct_entry && entry ~ /^[0-9.]+(\/[0-9]+)?$/) found=1
 		}
 		END { exit found ? 0 : 1 }
 	' "$UDP_QUIC_POLICY_SOURCE"
@@ -338,8 +338,11 @@ resolve_ipv6_domains() {
 
 youtube_socks_port_for_set() {
 	case "$1" in
+		unblocksh) printf '%s\n' "${YOUTUBE_SOCKS_PORT_SHADOWSOCKS:-10820}" ;;
+		unblockvmess) printf '%s\n' "${YOUTUBE_SOCKS_PORT_VMESS:-10810}" ;;
 		unblockvless) printf '%s\n' 10811 ;;
 		unblockvless2) printf '%s\n' 10813 ;;
+		unblocktroj) printf '%s\n' "${YOUTUBE_SOCKS_PORT_TROJAN:-10830}" ;;
 		*) return 1 ;;
 	esac
 }
@@ -544,11 +547,11 @@ UDP_QUIC_EXCLUDE_SOURCE="$(udp_quic_exclude_source || true)"
 
 wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAIT_SECONDS}s; old ipset contents preserved."
 
-load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh "tmp_unblocksh_$$" "" "" unblocksh6 "tmp_unblocksh6_$$"
-load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$" "" "" unblockvmess6 "tmp_unblockvmess6_$$"
+load_file_to_set "$UNBLOCK_DIR/shadowsocks.txt" unblocksh "tmp_unblocksh_$$" unblockshudp "tmp_unblockshudp_$$" unblocksh6 "tmp_unblocksh6_$$"
+load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$" unblockvmessudp "tmp_unblockvmessudp_$$" unblockvmess6 "tmp_unblockvmess6_$$"
 load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$" unblockvlessudp "tmp_unblockvlessudp_$$" unblockvless6 "tmp_unblockvless6_$$"
 load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$" unblockvless2udp "tmp_unblockvless2udp_$$" unblockvless2v6 "tmp_unblockvless2v6_$$"
-load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$" "" "" unblocktroj6 "tmp_unblocktroj6_$$"
+load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$" unblocktrojudp "tmp_unblocktrojudp_$$" unblocktroj6 "tmp_unblocktroj6_$$"
 
 sort -u "$restore_file" > "$sorted_restore_file"
 if [ -s "$sorted_restore_file" ]; then
@@ -556,12 +559,15 @@ if [ -s "$sorted_restore_file" ]; then
 fi
 
 swap_or_preserve_set unblocksh "tmp_unblocksh_$$"
+swap_or_preserve_set unblockshudp "tmp_unblockshudp_$$"
 swap_or_preserve_set unblockvmess "tmp_unblockvmess_$$"
+swap_or_preserve_set unblockvmessudp "tmp_unblockvmessudp_$$"
 swap_or_preserve_set unblockvless "tmp_unblockvless_$$"
 swap_or_preserve_set unblockvlessudp "tmp_unblockvlessudp_$$"
 swap_or_preserve_set unblockvless2 "tmp_unblockvless2_$$"
 swap_or_preserve_set unblockvless2udp "tmp_unblockvless2udp_$$"
 swap_or_preserve_set unblocktroj "tmp_unblocktroj_$$"
+swap_or_preserve_set unblocktrojudp "tmp_unblocktrojudp_$$"
 swap_or_preserve_set unblocksh6 "tmp_unblocksh6_$$"
 swap_or_preserve_set unblockvmess6 "tmp_unblockvmess6_$$"
 swap_or_preserve_set unblockvless6 "tmp_unblockvless6_$$"

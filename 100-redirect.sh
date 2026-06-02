@@ -19,8 +19,12 @@ ip4t() {
 UDP_POLICY_CONFIG="${UDP_POLICY_CONFIG:-/opt/etc/bot/udp_policy.conf}"
 [ -r "$UDP_POLICY_CONFIG" ] && . "$UDP_POLICY_CONFIG"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
+BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS="${BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS:-1}"
+BYPASS_UDP_QUIC_BLOCK_VMESS="${BYPASS_UDP_QUIC_BLOCK_VMESS:-1}"
 BYPASS_UDP_QUIC_BLOCK_VLESS="${BYPASS_UDP_QUIC_BLOCK_VLESS:-1}"
 BYPASS_UDP_QUIC_BLOCK_VLESS2="${BYPASS_UDP_QUIC_BLOCK_VLESS2:-1}"
+BYPASS_UDP_QUIC_BLOCK_TROJAN="${BYPASS_UDP_QUIC_BLOCK_TROJAN:-1}"
+UDP_QUIC_REJECT_PORT="${UDP_QUIC_REJECT_PORT:-10944}"
 BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"
 
 install_ipv6_fallback_rules() {
@@ -92,6 +96,61 @@ refresh_transparent_udp_quic_reject() {
 			|| iptables -I INPUT -w -p udp --dport "$reject_port" -j DROP 2>/dev/null \
 			|| true
 	fi
+}
+
+refresh_udp_quic_reject_port() {
+	reject_enabled="$1"
+	for reject_port in 10812 10814 "$UDP_QUIC_REJECT_PORT"; do
+		while iptables -C INPUT -w -p udp --dport "$reject_port" -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; do
+			iptables -D INPUT -w -p udp --dport "$reject_port" -j REJECT --reject-with icmp-port-unreachable
+		done
+		while iptables -C INPUT -w -p udp --dport "$reject_port" -j DROP 2>/dev/null; do
+			iptables -D INPUT -w -p udp --dport "$reject_port" -j DROP
+		done
+	done
+	if [ "$reject_enabled" != "0" ]; then
+		iptables -I INPUT -w -p udp --dport "$UDP_QUIC_REJECT_PORT" -j REJECT --reject-with icmp-port-unreachable 2>/dev/null \
+			|| iptables -I INPUT -w -p udp --dport "$UDP_QUIC_REJECT_PORT" -j DROP 2>/dev/null \
+			|| true
+	fi
+}
+
+remove_udp_quic_block_rule() {
+	set_name="$1"
+	for reject_port in 1082 10812 10814 10815 10829 "$UDP_QUIC_REJECT_PORT"; do
+		while iptables -t nat -C PREROUTING -w -p udp -m set --match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-port "$reject_port" 2>/dev/null; do
+			iptables -t nat -D PREROUTING -w -p udp -m set --match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-port "$reject_port"
+		done
+	done
+}
+
+install_udp_quic_block_rule() {
+	set_name="$1"
+	block_enabled="$2"
+	ipset create "$set_name" hash:net -exist 2>/dev/null
+	remove_udp_quic_block_rule "$set_name"
+	if [ "$block_enabled" != "0" ]; then
+		iptables -I PREROUTING -w -t nat -p udp -m set --match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-port "$UDP_QUIC_REJECT_PORT"
+	fi
+}
+
+refresh_udp_quic_block_rules() {
+	reject_enabled=0
+	for flag in \
+		"$BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS" \
+		"$BYPASS_UDP_QUIC_BLOCK_VMESS" \
+		"$BYPASS_UDP_QUIC_BLOCK_VLESS" \
+		"$BYPASS_UDP_QUIC_BLOCK_VLESS2" \
+		"$BYPASS_UDP_QUIC_BLOCK_TROJAN"
+	do
+		[ "$flag" != "0" ] && reject_enabled=1
+	done
+	refresh_udp_quic_reject_port "$reject_enabled"
+	install_udp_quic_block_rule unblockshudp "$BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS"
+	install_udp_quic_block_rule unblockvmessudp "$BYPASS_UDP_QUIC_BLOCK_VMESS"
+	install_udp_quic_block_rule unblockvlessudp "$BYPASS_UDP_QUIC_BLOCK_VLESS"
+	install_udp_quic_block_rule unblockvless2udp "$BYPASS_UDP_QUIC_BLOCK_VLESS2"
+	install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"
 }
 
 
@@ -304,5 +363,6 @@ if [ -z "$(iptables-save 2>/dev/null | grep unblocktroj)" ]; then
 
 fi
 
+refresh_udp_quic_block_rules
 
 exit 0
