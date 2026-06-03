@@ -741,7 +741,6 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['telegram', 'tg', 'телеграм', 'телега'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst',
         'entries': TELEGRAM_UNBLOCK_ENTRIES,
-        'udp_quic': True,
     },
     'meta': {
         'label': 'Meta AI / Instagram / Facebook',

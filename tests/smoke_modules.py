@@ -2479,11 +2479,16 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'codex' in source['aliases']
     assert source['udp_quic'] is True
     assert service_catalog.SERVICE_LIST_SOURCES['youtube']['udp_quic'] is True
-    assert service_catalog.SERVICE_LIST_SOURCES['telegram']['udp_quic'] is True
+    assert service_catalog.SERVICE_LIST_SOURCES['telegram'].get('udp_quic') is not True
     assert 'chatgpt.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     assert 'youtube.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
-    assert '23.216.134.15' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     udp_routes = set(service_catalog.UDP_QUIC_ROUTE_ENTRIES)
+    assert 'api.telegram.org' not in udp_routes
+    assert 'telegram.org' not in udp_routes
+    assert '149.154.160.0/20' not in udp_routes
+    assert '91.108.36.0/22' not in udp_routes
+    assert '17.249.0.0/16' not in udp_routes
+    assert '23.216.134.15' not in udp_routes
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= udp_routes
     assert '8.6.112.6' in udp_routes
     assert '8.47.69.6' in udp_routes

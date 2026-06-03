@@ -1,3 +1,8 @@
+<a name="1.683"></a>
+# [1.683] - 03 Jun 2026
+
+- Kept Telegram routes out of the UDP/QUIC reject mirror so media and calls are not forced into browser-style QUIC fallback.
+
 <a name="1.680"></a>
 # [1.680] - 02 Jun 2026
 

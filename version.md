@@ -1,3 +1,6 @@
+*v1.683 (03 Jun 2026) -* main
+*Keeps Telegram routes out of the UDP/QUIC reject mirror so media and calls are not forced into the browser-style QUIC fallback path while mobile push TCP port priority remains in place.*
+
 *v1.682 (02 Jun 2026) -* main
 *Adds YouTube video IPv6 fallback coverage for preloaded googlevideo hosts and direct IPv6 CIDRs, samples YouTube edge DNS through several resolvers to catch browser/DoH address drift, keeps newly observed video CDN IPv4 routes, and adds a missing Telegram media range for vless1.*
 
