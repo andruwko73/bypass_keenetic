@@ -1,3 +1,8 @@
+<a name="1.684"></a>
+# [1.684] - 04 Jun 2026
+
+- Restored normal UDP transparent routing for the main Vless service sets while keeping the YouTube/QUIC reject mirror separate.
+
 <a name="1.683"></a>
 # [1.683] - 03 Jun 2026
 

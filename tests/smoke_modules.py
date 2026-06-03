@@ -846,6 +846,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ip6tables -I FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT' in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless dst --dport 443 -j REJECT' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT' not in redirect_script
+    assert '-p udp -m set --match-set unblockvless dst -j REDIRECT --to-port 10812' in redirect_script
+    assert '-p udp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814' in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
     assert '*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1' in crontab
 

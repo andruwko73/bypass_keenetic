@@ -1,3 +1,6 @@
+*v1.684 (04 Jun 2026) -* main
+*Restores normal UDP transparent routing for the main Vless service sets while keeping the narrow YouTube/QUIC reject mirror separate, so Telegram media and calls keep a UDP path after the Telegram QUIC policy split.*
+
 *v1.683 (03 Jun 2026) -* main
 *Keeps Telegram routes out of the UDP/QUIC reject mirror so media and calls are not forced into the browser-style QUIC fallback path while mobile push TCP port priority remains in place.*
 
