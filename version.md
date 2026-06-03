@@ -1,3 +1,6 @@
+*v1.685 (04 Jun 2026) -* main
+*Keeps proxy connection addresses from the keys while using SNI/Host only as TLS/Reality serverName, and adds a startup hold so Telegram auto-failover does not switch keys while Xray is still stabilizing.*
+
 *v1.684 (04 Jun 2026) -* main
 *Restores normal UDP transparent routing for the main Vless service sets while keeping the narrow YouTube/QUIC reject mirror separate, so Telegram media and calls keep a UDP path after the Telegram QUIC policy split.*
 

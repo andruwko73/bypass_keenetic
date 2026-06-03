@@ -29,6 +29,7 @@ def attempt_auto_failover(
     is_transient_failure=None,
     transient_success_ttl=0,
     recent_success_ttl=0,
+    startup_hold_seconds=0,
     audit_key_switch=None,
     time_provider=time.time,
 ):
@@ -37,6 +38,14 @@ def attempt_auto_failover(
         return False
     if pool_probe_locked and pool_probe_locked():
         return False
+    startup_hold = float(startup_hold_seconds or 0)
+    if startup_hold > 0:
+        try:
+            started_at = float(state.get('started_at') or 0)
+        except (TypeError, ValueError):
+            started_at = 0.0
+        if started_at and now - started_at < startup_hold:
+            return False
     if state['last_attempt'] and now - state['last_attempt'] < switch_cooldown_seconds:
         return False
 

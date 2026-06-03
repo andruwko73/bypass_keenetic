@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.684, последнее изменение: 04.06.2026
+#  Файл: bot.py, Версия v1.685, последнее изменение: 04.06.2026
 
 import subprocess
 import os
@@ -391,7 +391,12 @@ AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switc
 AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT = float(getattr(config, 'auto_failover_check_connect_timeout', 2))
 AUTO_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'auto_failover_check_read_timeout', 3))
 AUTO_FAILOVER_RECENT_SUCCESS_TTL = max(0, int(getattr(config, 'auto_failover_recent_success_ttl', 300)))
+AUTO_FAILOVER_STARTUP_HOLD_SECONDS = max(
+    180,
+    int(getattr(config, 'auto_failover_startup_hold_seconds', 180)),
+)
 auto_failover_state = {
+    'started_at': time.time(),
     'last_ok': 0.0,
     'last_fail': 0.0,
     'last_attempt': 0.0,
@@ -642,6 +647,7 @@ def _attempt_auto_failover():
         is_transient_failure=_is_transient_telegram_api_failure,
         transient_success_ttl=TELEGRAM_TRANSIENT_OK_CACHE_TTL,
         recent_success_ttl=AUTO_FAILOVER_RECENT_SUCCESS_TTL,
+        startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS,
         protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER,
     )
 

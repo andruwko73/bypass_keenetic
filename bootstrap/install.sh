@@ -466,6 +466,7 @@ udp_quic_block_vless2_enabled = True
 udp_quic_block_trojan_enabled = True
 ipv6_bypass_fallback_enabled = True
 reality_endpoint_overrides = {}
+auto_failover_startup_hold_seconds = 180
 youtube_vless2_failover_enabled = True
 youtube_vless2_failover_grace_seconds = 180
 youtube_vless2_failover_poll_seconds = 120

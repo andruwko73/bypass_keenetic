@@ -1,3 +1,9 @@
+<a name="1.685"></a>
+# [1.685] - 04 Jun 2026
+
+- Kept proxy connection addresses from the keys while using SNI/Host only as TLS/Reality serverName, restoring Vless/Vless 2/VMess/Trojan keys whose URL host is an IP address.
+- Added a startup hold so Telegram auto-failover does not switch keys while Xray is still stabilizing after a bot restart.
+
 <a name="1.684"></a>
 # [1.684] - 04 Jun 2026
 

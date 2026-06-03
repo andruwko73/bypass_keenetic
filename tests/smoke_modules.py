@@ -395,7 +395,39 @@ def test_proxy_config_builder():
         '?security=reality&sni=alive.example.com&flow=xtls-rprx-vision&pbk=pub&sid=short&type=tcp#sample',
         'proxy-vless',
     )
-    assert stale_ip_reality_outbound['settings']['vnext'][0]['address'] == 'alive.example.com'
+    assert stale_ip_reality_outbound['settings']['vnext'][0]['address'] == '198.51.100.10'
+    assert stale_ip_reality_outbound['streamSettings']['realitySettings']['serverName'] == 'alive.example.com'
+    vless2_reality_outbound = proxy_protocols.proxy_outbound_from_key(
+        'vless2',
+        'vless://00000000-0000-0000-0000-000000000000@198.51.100.11:443'
+        '?security=reality&sni=alive-v2.example.com&flow=xtls-rprx-vision&pbk=pub&sid=short&type=tcp#sample',
+        'proxy-vless2',
+    )
+    assert vless2_reality_outbound['settings']['vnext'][0]['address'] == '198.51.100.11'
+    assert vless2_reality_outbound['streamSettings']['realitySettings']['serverName'] == 'alive-v2.example.com'
+    vmess_key = 'vmess://' + base64.b64encode(json.dumps({
+        'v': '2',
+        'ps': 'sample',
+        'add': '198.51.100.20',
+        'port': '443',
+        'id': '00000000-0000-0000-0000-000000000000',
+        'aid': '0',
+        'net': 'tcp',
+        'type': 'none',
+        'host': 'host.example.com',
+        'tls': 'tls',
+        'sni': 'alive-vmess.example.com',
+    }).encode('utf-8')).decode('ascii').rstrip('=')
+    vmess_outbound = proxy_protocols.proxy_outbound_from_key('vmess', vmess_key, 'proxy-vmess')
+    assert vmess_outbound['settings']['vnext'][0]['address'] == '198.51.100.20'
+    assert vmess_outbound['streamSettings']['tlsSettings']['serverName'] == 'alive-vmess.example.com'
+    trojan_ip_outbound = proxy_protocols.proxy_outbound_from_key(
+        'trojan',
+        'trojan://secret@198.51.100.30:443?sni=alive-trojan.example.com&type=tcp#sample',
+        'proxy-trojan',
+    )
+    assert trojan_ip_outbound['settings']['servers'][0]['address'] == '198.51.100.30'
+    assert trojan_ip_outbound['streamSettings']['tlsSettings']['serverName'] == 'alive-trojan.example.com'
     default_reality_outbound = proxy_protocols.proxy_outbound_from_key(
         'vless',
         'vless://00000000-0000-0000-0000-000000000000@example.com:443'
@@ -714,6 +746,9 @@ def test_codex_version_matches_commit_count():
     assert 'reality_endpoint_overrides = {}' in example
     assert 'reality_endpoint_overrides = {{}}' in installer
     assert 'reality_endpoint_overrides = {}' in bootstrap
+    assert 'auto_failover_startup_hold_seconds = 180' in example
+    assert 'auto_failover_startup_hold_seconds = 180' in installer
+    assert 'auto_failover_startup_hold_seconds = 180' in bootstrap
     assert 'youtube_vless2_failover_enabled = True' in example
     assert 'youtube_vless2_failover_enabled = True' in installer
     assert 'youtube_vless2_failover_enabled = True' in bootstrap
@@ -938,6 +973,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'probe_applied_pool_key_services'" in (ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
     assert "auto_failover_recent_success_ttl', 300" in source
+    assert "auto_failover_startup_hold_seconds', 180" in source
+    assert 'startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS' in source
     assert "youtube_vless2_failover_recent_success_ttl', 300" in source
     assert 'def _youtube_route_protocol' in source
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('vless', 'vless2')" in source
@@ -1521,6 +1558,35 @@ def test_auto_failover_runtime_helpers():
         time_provider=lambda: 20.0,
     ) is False
     assert locked_calls == []
+    startup_hold_calls = []
+    startup_hold_state = {
+        'started_at': 95.0,
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_attempt': 0.0,
+        'in_progress': False,
+    }
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=startup_hold_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: startup_hold_calls.append('check') or (False, 'fail'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: startup_hold_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: startup_hold_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: startup_hold_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: startup_hold_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: startup_hold_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        startup_hold_seconds=180,
+        time_provider=lambda: 100.0,
+    ) is False
+    assert startup_hold_calls == []
 
 
 def test_proxy_apply_runtime_helpers():
