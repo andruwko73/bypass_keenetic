@@ -31,6 +31,17 @@ function assertNoPageFailures(failures) {
   }
 }
 
+function emitGitHubErrorAnnotation(error) {
+  if (process.env.GITHUB_ACTIONS !== 'true') {
+    return;
+  }
+  const text = String((error && error.stack) || error || 'Unknown UI smoke failure')
+    .replace(/%/g, '%25')
+    .replace(/\r/g, '%0D')
+    .replace(/\n/g, '%0A');
+  console.error(`::error title=UI smoke failed::${text}`);
+}
+
 async function assertNoHorizontalOverflow(page, label) {
   const overflow = await page.evaluate(() => ({
     body: document.body.scrollWidth,
@@ -215,5 +226,6 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   console.log('UI smoke passed:', targetUrl);
 })().catch((error) => {
   console.error(error);
+  emitGitHubErrorAnnotation(error);
   process.exit(1);
 });

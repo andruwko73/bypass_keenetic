@@ -1,3 +1,9 @@
+<a name="1.687"></a>
+# [1.687] - 04 Jun 2026
+
+- Added Reality endpoint repair to the active YouTube route before Vless/Vless 2 YouTube failover restarts Xray or switches keys.
+- The temporary endpoint probe now validates the affected service, so YouTube repairs are checked with YouTube healthchecks instead of Telegram API.
+
 <a name="1.686"></a>
 # [1.686] - 04 Jun 2026
 

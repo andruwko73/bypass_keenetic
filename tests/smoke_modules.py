@@ -942,6 +942,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _repair_active_reality_endpoint' in source
     assert 'def _probe_reality_endpoint_with_temp_xray' in source
     assert 'repair_active_proxy=_repair_active_reality_endpoint' in source
+    assert "_repair_active_reality_endpoint(route_proto, confirm_message, service='youtube')" in source
+    assert "_probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service=service)" in source
     assert "proto not in ('vless', 'vless2')" in source
     assert 'authenticated=False' in source
     assert 'def _start_udp_quic_drift_watchdog_thread' in source
@@ -3823,6 +3825,8 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     assert "def _schedule_vless2_youtube_cache_confirm" in source
     assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
     assert "_controller_check_youtube_through_proxy" in source
+    assert "service='youtube'" in source
+    assert 'Reality endpoint repair restored current' in source
     assert "_record_key_probe(proto, key_value, yt_ok=True)" in source
     assert "_invalidate_key_status_cache()" in source
 

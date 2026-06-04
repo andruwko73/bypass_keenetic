@@ -1,3 +1,6 @@
+*v1.687 (04 Jun 2026) -* main
+*Adds service-aware Reality endpoint repair for the active YouTube route before Vless/Vless 2 YouTube failover restarts Xray or switches keys.*
+
 *v1.686 (04 Jun 2026) -* main
 *Adds active Reality endpoint repair for both Vless routes: before Telegram auto-failover switches keys, the bot probes the current key endpoint, SNI domain, and SNI A-records through a temporary Xray and keeps the key if any endpoint works.*
 

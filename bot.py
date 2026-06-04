@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.686, последнее изменение: 04.06.2026
+#  Файл: bot.py, Версия v1.687, последнее изменение: 04.06.2026
 
 import subprocess
 import os
@@ -881,6 +881,34 @@ def _attempt_youtube_failover():
         state['consecutive_failures'] = 0
         _record_key_probe(route_proto, active_key, yt_ok=True)
         return False
+    if (
+        route_proto in ('vless', 'vless2') and
+        not _vless_traffic_guard_active(
+            f'{_pool_proto_label(route_proto)} endpoint repair',
+            log=True,
+            hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+        )
+    ):
+        try:
+            repaired = _repair_active_reality_endpoint(route_proto, confirm_message, service='youtube')
+        except Exception as exc:
+            repaired = False
+            _write_runtime_log(f'YouTube failover: active endpoint repair failed: {exc}')
+        if repaired:
+            confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
+            if confirm_ok:
+                state['last_ok'] = time.time()
+                state['last_fail'] = 0.0
+                state['consecutive_failures'] = 0
+                _record_key_probe(route_proto, active_key, yt_ok=True)
+                _invalidate_web_status_cache()
+                _invalidate_key_status_cache()
+                _write_runtime_log(
+                    f'YouTube failover: Reality endpoint repair restored current {_pool_proto_label(route_proto)} key; '
+                    'key switch skipped.'
+                )
+                return False
+            _write_runtime_log(f'YouTube failover: endpoint repair did not restore current key: {confirm_message}')
     if _restart_core_proxy_and_recheck_youtube(route_proto, active_key, confirm_message):
         return False
 
@@ -6871,7 +6899,7 @@ def _write_core_proxy_endpoint(outbound_tag, endpoint, server_name):
     return True
 
 
-def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint):
+def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service='telegram'):
     port = REALITY_ENDPOINT_REPAIR_BASE_PORT + (1 if proto == 'vless2' else 0)
     data = _parse_vless_key(key)
     temp_key = _vless_key_with_endpoint(key, endpoint, data.get('sni') or data.get('host') or data.get('address') or '')
@@ -6937,12 +6965,31 @@ def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint):
             stderr=subprocess.STDOUT,
         )
         time.sleep(2)
-        ok, _message = _check_telegram_api_through_proxy(
-            f'socks5h://127.0.0.1:{port}',
-            connect_timeout=5,
-            read_timeout=8,
-            authenticated=False,
-        )
+        proxy_url = f'socks5h://127.0.0.1:{port}'
+        if str(service or '').strip().lower() == 'youtube':
+            ok, _message = _controller_check_youtube_through_proxy(
+                _check_http_through_proxy,
+                proxy_url,
+                urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
+                min_ok=YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK,
+                http_timeouts=(
+                    YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+                    YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+                ),
+                http_retry_timeouts=(
+                    YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+                    YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+                ),
+                retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+                sleep=shutdown_requested.wait,
+            )
+        else:
+            ok, _message = _check_telegram_api_through_proxy(
+                proxy_url,
+                connect_timeout=5,
+                read_timeout=8,
+                authenticated=False,
+            )
         return bool(ok)
     finally:
         if process is not None:
@@ -6965,7 +7012,7 @@ def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint):
                 pass
 
 
-def _repair_active_reality_endpoint(proto, failure_message=''):
+def _repair_active_reality_endpoint(proto, failure_message='', service='telegram'):
     if not REALITY_ENDPOINT_REPAIR_ENABLED or proto not in ('vless', 'vless2'):
         return False
     keys = _load_current_keys()
@@ -6984,11 +7031,12 @@ def _repair_active_reality_endpoint(proto, failure_message=''):
     candidates = _reality_endpoint_candidates(data, current_endpoint=current_endpoint)
     if not candidates:
         return False
+    service_name = 'YouTube' if str(service or '').strip().lower() == 'youtube' else 'Telegram'
     _write_runtime_log(
-        f'Reality endpoint repair: probing {len(candidates)} endpoints for {_pool_proto_label(proto)} after Telegram failure.'
+        f'Reality endpoint repair: probing {len(candidates)} endpoints for {_pool_proto_label(proto)} after {service_name} failure.'
     )
     for endpoint in candidates:
-        if _probe_reality_endpoint_with_temp_xray(proto, key, endpoint):
+        if _probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service=service):
             _set_reality_runtime_endpoint(data.get('address'), endpoint)
             if _write_core_proxy_endpoint(outbound_tag, endpoint, server_name):
                 ok, message = _restart_core_proxy_after_validation()
@@ -6998,7 +7046,7 @@ def _repair_active_reality_endpoint(proto, failure_message=''):
             _write_runtime_log(f'Reality endpoint repair: {_pool_proto_label(proto)} restored via endpoint {endpoint}.')
             return True
     _write_runtime_log(
-        f'Reality endpoint repair: no endpoint restored {_pool_proto_label(proto)}. Last Telegram failure: {failure_message}'
+        f'Reality endpoint repair: no endpoint restored {_pool_proto_label(proto)}. Last {service_name} failure: {failure_message}'
     )
     return False
 
