@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.685, последнее изменение: 04.06.2026
+#  Файл: bot.py, Версия v1.686, последнее изменение: 04.06.2026
 
 import subprocess
 import os
@@ -395,6 +395,9 @@ AUTO_FAILOVER_STARTUP_HOLD_SECONDS = max(
     180,
     int(getattr(config, 'auto_failover_startup_hold_seconds', 180)),
 )
+REALITY_ENDPOINT_REPAIR_ENABLED = bool(getattr(config, 'reality_endpoint_repair_enabled', True))
+REALITY_ENDPOINT_REPAIR_BASE_PORT = max(19000, int(getattr(config, 'reality_endpoint_repair_base_port', 19050)))
+REALITY_ENDPOINT_REPAIR_MAX_CANDIDATES = max(2, int(getattr(config, 'reality_endpoint_repair_max_candidates', 6)))
 auto_failover_state = {
     'started_at': time.time(),
     'last_ok': 0.0,
@@ -648,6 +651,7 @@ def _attempt_auto_failover():
         transient_success_ttl=TELEGRAM_TRANSIENT_OK_CACHE_TTL,
         recent_success_ttl=AUTO_FAILOVER_RECENT_SUCCESS_TTL,
         startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS,
+        repair_active_proxy=_repair_active_reality_endpoint,
         protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER,
     )
 
@@ -1199,6 +1203,7 @@ REALITY_ENDPOINT_OVERRIDES = {
     for host, endpoint in (_REALITY_ENDPOINT_OVERRIDES_RAW.items() if isinstance(_REALITY_ENDPOINT_OVERRIDES_RAW, dict) else [])
     if str(host or '').strip() and str(endpoint or '').strip()
 }
+reality_endpoint_runtime_overrides = {}
 UDP_QUIC_DRIFT_CHECK_ENABLED = bool(getattr(config, 'udp_quic_drift_check_enabled', True))
 UDP_QUIC_DRIFT_CHECK_INTERVAL_SECONDS = max(
     180,
@@ -6764,7 +6769,7 @@ def _apply_reality_endpoint_override(key):
     if str(data.get('security') or '').lower() != 'reality':
         return key
     address = str(data.get('address') or '').strip()
-    override = REALITY_ENDPOINT_OVERRIDES.get(address.lower())
+    override = REALITY_ENDPOINT_OVERRIDES.get(address.lower()) or reality_endpoint_runtime_overrides.get(address.lower())
     if not override:
         return key
     try:
@@ -6779,6 +6784,223 @@ def _apply_reality_endpoint_override(key):
         return parsed._replace(netloc=netloc, query=urlencode(query_pairs, doseq=True)).geturl()
     except Exception:
         return key
+
+
+def _vless_key_with_endpoint(key, endpoint, fallback_sni=''):
+    key = str(key or '').strip()
+    endpoint = str(endpoint or '').strip()
+    if not key or not endpoint:
+        return key
+    parsed = urlparse(key)
+    host_part = f'[{endpoint}]' if ':' in endpoint and not endpoint.startswith('[') else endpoint
+    netloc = f'{parsed.username}@{host_part}' if parsed.username else host_part
+    if parsed.port:
+        netloc = f'{netloc}:{parsed.port}'
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    if fallback_sni and not any(name == 'sni' and value for name, value in query_pairs):
+        query_pairs.append(('sni', fallback_sni))
+    return parsed._replace(netloc=netloc, query=urlencode(query_pairs, doseq=True)).geturl()
+
+
+def _reality_endpoint_candidates(data, current_endpoint=''):
+    seen = set()
+    candidates = []
+
+    def add(value):
+        value = str(value or '').strip()
+        key = value.lower()
+        if value and key not in seen:
+            seen.add(key)
+            candidates.append(value)
+
+    add(current_endpoint)
+    add(data.get('address'))
+    sni = str(data.get('sni') or data.get('host') or '').strip()
+    if sni:
+        add(sni)
+        for address in _resolve_domain_ipv4_addresses(sni):
+            add(address)
+    return candidates[:REALITY_ENDPOINT_REPAIR_MAX_CANDIDATES]
+
+
+def _set_reality_runtime_endpoint(address, endpoint):
+    address = str(address or '').strip().lower()
+    endpoint = str(endpoint or '').strip()
+    if not address:
+        return
+    if endpoint and endpoint.lower() != address:
+        reality_endpoint_runtime_overrides[address] = endpoint
+    else:
+        reality_endpoint_runtime_overrides.pop(address, None)
+
+
+def _current_core_proxy_endpoint(outbound_tag):
+    try:
+        with open(CORE_PROXY_CONFIG_PATH, 'r', encoding='utf-8') as file:
+            config_data = json.load(file)
+        for outbound in config_data.get('outbounds', []):
+            if outbound.get('tag') == outbound_tag:
+                return str((outbound.get('settings', {}).get('vnext') or [{}])[0].get('address') or '').strip()
+    except Exception:
+        pass
+    return ''
+
+
+def _write_core_proxy_endpoint(outbound_tag, endpoint, server_name):
+    with open(CORE_PROXY_CONFIG_PATH, 'r', encoding='utf-8') as file:
+        config_data = json.load(file)
+    changed = False
+    for outbound in config_data.get('outbounds', []):
+        if outbound.get('tag') != outbound_tag:
+            continue
+        vnext = outbound.get('settings', {}).get('vnext') or []
+        if not vnext:
+            continue
+        reality_settings = outbound.get('streamSettings', {}).get('realitySettings', {})
+        if vnext[0].get('address') != endpoint:
+            vnext[0]['address'] = endpoint
+            changed = True
+        if server_name and reality_settings.get('serverName') != server_name:
+            reality_settings['serverName'] = server_name
+            changed = True
+    if not changed:
+        return False
+    with open(CORE_PROXY_CONFIG_PATH, 'w', encoding='utf-8') as file:
+        json.dump(config_data, file, ensure_ascii=False, indent=2)
+        file.write('\n')
+    return True
+
+
+def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint):
+    port = REALITY_ENDPOINT_REPAIR_BASE_PORT + (1 if proto == 'vless2' else 0)
+    data = _parse_vless_key(key)
+    temp_key = _vless_key_with_endpoint(key, endpoint, data.get('sni') or data.get('host') or data.get('address') or '')
+    temp_path = os.path.join(tempfile.gettempdir(), f'bypass-reality-repair-{proto}.json')
+    temp_log_path = os.path.join(tempfile.gettempdir(), f'bypass-reality-repair-{proto}.log')
+    keys = _load_current_keys()
+    config_json = _builder_build_proxy_core_config(
+        vmess_key=keys.get('vmess') or '',
+        vless_key=temp_key if proto == 'vless' else keys.get('vless') or '',
+        vless2_key=temp_key if proto == 'vless2' else keys.get('vless2') or '',
+        shadowsocks_key=keys.get('shadowsocks') or '',
+        trojan_key=keys.get('trojan') or '',
+        ports={
+            'vmess': localportvmess,
+            'vmess_transparent': localportvmess_transparent,
+            'vless': port if proto == 'vless' else localportvless,
+            'vless_transparent': localportvless_transparent,
+            'vless2': port if proto == 'vless2' else localportvless2,
+            'vless2_transparent': localportvless2_transparent,
+            'shadowsocks_bot': localportsh_bot,
+            'trojan_bot': localporttrojan_bot,
+        },
+        error_log_path=temp_log_path,
+        access_log_path='/dev/null',
+        loglevel='warning',
+        connectivity_check_domains=CONNECTIVITY_CHECK_DOMAINS,
+        include_vmess_transparent=True,
+    )
+    inbound_tag = 'in-vless' if proto == 'vless' else 'in-vless2'
+    outbound_tag = 'proxy-vless' if proto == 'vless' else 'proxy-vless2'
+    config_json['inbounds'] = [
+        inbound for inbound in config_json.get('inbounds', [])
+        if inbound.get('tag') == inbound_tag
+    ]
+    for inbound in config_json['inbounds']:
+        inbound['listen'] = '127.0.0.1'
+        inbound['port'] = port
+    config_json['routing'] = {
+        'domainStrategy': 'IPIfNonMatch',
+        'rules': [{
+            'type': 'field',
+            'inboundTag': [inbound_tag],
+            'outboundTag': outbound_tag,
+        }],
+    }
+    with open(temp_path, 'w', encoding='utf-8') as file:
+        json.dump(config_json, file, ensure_ascii=False, indent=2)
+    validation = subprocess.run(
+        ['/opt/sbin/xray', 'run', '-test', '-c', temp_path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=8,
+        check=False,
+    )
+    if validation.returncode != 0:
+        return False
+    log_file = open(temp_log_path, 'a', encoding='utf-8', errors='ignore')
+    process = None
+    try:
+        process = subprocess.Popen(
+            ['/opt/sbin/xray', 'run', '-c', temp_path],
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+        time.sleep(2)
+        ok, _message = _check_telegram_api_through_proxy(
+            f'socks5h://127.0.0.1:{port}',
+            connect_timeout=5,
+            read_timeout=8,
+            authenticated=False,
+        )
+        return bool(ok)
+    finally:
+        if process is not None:
+            try:
+                process.terminate()
+                process.wait(timeout=3)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+        try:
+            log_file.close()
+        except Exception:
+            pass
+        for path in (temp_path, temp_log_path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+
+def _repair_active_reality_endpoint(proto, failure_message=''):
+    if not REALITY_ENDPOINT_REPAIR_ENABLED or proto not in ('vless', 'vless2'):
+        return False
+    keys = _load_current_keys()
+    key = (keys.get(proto) or '').strip()
+    if not key:
+        return False
+    try:
+        data = _parse_vless_key(key)
+    except Exception:
+        return False
+    if str(data.get('security') or '').strip().lower() != 'reality':
+        return False
+    outbound_tag = 'proxy-vless2' if proto == 'vless2' else 'proxy-vless'
+    current_endpoint = _current_core_proxy_endpoint(outbound_tag)
+    server_name = data.get('sni') or data.get('host') or data.get('address') or ''
+    candidates = _reality_endpoint_candidates(data, current_endpoint=current_endpoint)
+    if not candidates:
+        return False
+    _write_runtime_log(
+        f'Reality endpoint repair: probing {len(candidates)} endpoints for {_pool_proto_label(proto)} after Telegram failure.'
+    )
+    for endpoint in candidates:
+        if _probe_reality_endpoint_with_temp_xray(proto, key, endpoint):
+            _set_reality_runtime_endpoint(data.get('address'), endpoint)
+            if _write_core_proxy_endpoint(outbound_tag, endpoint, server_name):
+                ok, message = _restart_core_proxy_after_validation()
+                if not ok:
+                    _write_runtime_log(f'Reality endpoint repair: core restart failed after selecting {endpoint}: {message}')
+                    return False
+            _write_runtime_log(f'Reality endpoint repair: {_pool_proto_label(proto)} restored via endpoint {endpoint}.')
+            return True
+    _write_runtime_log(
+        f'Reality endpoint repair: no endpoint restored {_pool_proto_label(proto)}. Last Telegram failure: {failure_message}'
+    )
+    return False
 
 
 def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):

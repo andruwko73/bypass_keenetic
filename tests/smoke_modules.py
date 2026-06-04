@@ -746,6 +746,9 @@ def test_codex_version_matches_commit_count():
     assert 'reality_endpoint_overrides = {}' in example
     assert 'reality_endpoint_overrides = {{}}' in installer
     assert 'reality_endpoint_overrides = {}' in bootstrap
+    assert 'reality_endpoint_repair_enabled = True' in example
+    assert 'reality_endpoint_repair_enabled = True' in installer
+    assert 'reality_endpoint_repair_enabled = True' in bootstrap
     assert 'auto_failover_startup_hold_seconds = 180' in example
     assert 'auto_failover_startup_hold_seconds = 180' in installer
     assert 'auto_failover_startup_hold_seconds = 180' in bootstrap
@@ -936,6 +939,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _sync_udp_policy_config' in source
     assert 'def _apply_reality_endpoint_override' in source
     assert 'REALITY_ENDPOINT_OVERRIDES' in source
+    assert 'def _repair_active_reality_endpoint' in source
+    assert 'def _probe_reality_endpoint_with_temp_xray' in source
+    assert 'repair_active_proxy=_repair_active_reality_endpoint' in source
+    assert "proto not in ('vless', 'vless2')" in source
     assert 'authenticated=False' in source
     assert 'def _start_udp_quic_drift_watchdog_thread' in source
     assert 'UDP_QUIC_DRIFT_SENTINEL_DOMAINS' in source
@@ -1586,7 +1593,35 @@ def test_auto_failover_runtime_helpers():
         startup_hold_seconds=180,
         time_provider=lambda: 100.0,
     ) is False
-    assert startup_hold_calls == []
+    assert 'check' in startup_hold_calls
+    assert not any(isinstance(call, tuple) and call[0] == 'install' for call in startup_hold_calls)
+    repair_calls = []
+    repair_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    repair_checks = iter([(False, 'first fail'), (True, 'after repair')])
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=repair_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: repair_calls.append(('check', kwargs)) or next(repair_checks),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: repair_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: repair_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: repair_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: repair_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: repair_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        repair_active_proxy=lambda proto, message: repair_calls.append(('repair', proto, message)) or True,
+        time_provider=lambda: 20.0,
+    ) is False
+    assert repair_state['last_fail'] == 0.0
+    assert any(call[0] == 'repair' for call in repair_calls)
+    assert not any(call[0] == 'install' for call in repair_calls)
+    assert any(call[0] == 'log' and 'endpoint repair restored' in call[1] for call in repair_calls)
 
 
 def test_proxy_apply_runtime_helpers():

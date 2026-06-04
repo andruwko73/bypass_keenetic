@@ -30,6 +30,7 @@ def attempt_auto_failover(
     transient_success_ttl=0,
     recent_success_ttl=0,
     startup_hold_seconds=0,
+    repair_active_proxy=None,
     audit_key_switch=None,
     time_provider=time.time,
 ):
@@ -38,14 +39,6 @@ def attempt_auto_failover(
         return False
     if pool_probe_locked and pool_probe_locked():
         return False
-    startup_hold = float(startup_hold_seconds or 0)
-    if startup_hold > 0:
-        try:
-            started_at = float(state.get('started_at') or 0)
-        except (TypeError, ValueError):
-            started_at = 0.0
-        if started_at and now - started_at < startup_hold:
-            return False
     if state['last_attempt'] and now - state['last_attempt'] < switch_cooldown_seconds:
         return False
 
@@ -55,6 +48,36 @@ def attempt_auto_failover(
         state['last_ok'] = now
         state['last_fail'] = 0.0
         return False
+
+    if callable(repair_active_proxy):
+        try:
+            repaired = bool(repair_active_proxy(proxy_mode, failure_message))
+        except Exception as exc:
+            repaired = False
+            log(f'Auto-failover: active proxy repair failed: {exc}')
+        if repaired:
+            repair_ok, repair_message = check_telegram_api(
+                proxy_url,
+                connect_timeout=max(float(connect_timeout or 0), 5.0),
+                read_timeout=max(float(read_timeout or 0), 8.0),
+            )
+            if repair_ok:
+                state['last_ok'] = time_provider()
+                state['last_fail'] = 0.0
+                log('Auto-failover: active proxy endpoint repair restored Telegram API; key switch skipped.')
+                return False
+            failure_message = repair_message or failure_message
+
+    startup_hold = float(startup_hold_seconds or 0)
+    if startup_hold > 0:
+        try:
+            started_at = float(state.get('started_at') or 0)
+        except (TypeError, ValueError):
+            started_at = 0.0
+        if started_at and now - started_at < startup_hold:
+            state['last_fail'] = 0.0
+            log('Auto-failover: startup hold is active; key switch skipped after failed Telegram check.')
+            return False
 
     current_keys = None
     recent_ttl = float(recent_success_ttl or 0)

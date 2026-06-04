@@ -1,3 +1,6 @@
+*v1.686 (04 Jun 2026) -* main
+*Adds active Reality endpoint repair for both Vless routes: before Telegram auto-failover switches keys, the bot probes the current key endpoint, SNI domain, and SNI A-records through a temporary Xray and keeps the key if any endpoint works.*
+
 *v1.685 (04 Jun 2026) -* main
 *Keeps proxy connection addresses from the keys while using SNI/Host only as TLS/Reality serverName, and adds a startup hold so Telegram auto-failover does not switch keys while Xray is still stabilizing.*
 

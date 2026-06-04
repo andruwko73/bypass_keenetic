@@ -1,3 +1,9 @@
+<a name="1.686"></a>
+# [1.686] - 04 Jun 2026
+
+- Added active Reality endpoint repair for both Vless routes before Telegram auto-failover switches keys.
+- The repair probes the current key endpoint, SNI domain, and SNI A-records through a temporary Xray and keeps the current key when any endpoint restores Telegram API.
+
 <a name="1.685"></a>
 # [1.685] - 04 Jun 2026
 
