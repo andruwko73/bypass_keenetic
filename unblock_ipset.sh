@@ -355,9 +355,11 @@ resolve_ipv6_domains() {
 	sort -u "$domain_file" | xargs -n 1 $parallel_flag sh -c '
 		for domain do
 			extra_dns_servers=""
+			youtube_ipv6_domain=0
 			case "$domain" in
-				youtube.com|*.youtube.com|youtube-nocookie.com|*.youtube-nocookie.com|youtu.be|*.youtu.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|youtube.googleapis.com|youtubei.googleapis.com|youtube-ui.l.google.com|wide-youtube.l.google.com)
+				youtube.com|*.youtube.com|youtube-nocookie.com|*.youtube-nocookie.com|youtu.be|*.youtu.be|googlevideo.com|*.googlevideo.com|ytimg.com|*.ytimg.com|ggpht.com|*.ggpht.com|yt3.googleusercontent.com|yt4.googleusercontent.com|youtube.googleapis.com|youtubei.googleapis.com|youtube-ui.l.google.com|wide-youtube.l.google.com)
 					extra_dns_servers="$YOUTUBE_DNS_SAMPLE_SERVERS"
+					youtube_ipv6_domain=1
 					;;
 			esac
 			{
@@ -370,7 +372,22 @@ resolve_ipv6_domains() {
 				| grep ":" \
 				| grep -vE "$LOCAL_RE" \
 				| sort -u \
-				| awk -v tmp_set="$ipv6_tmp_set" "{ print \"add \" tmp_set \" \" \$1 }"
+				| awk -v tmp_set="$ipv6_tmp_set" -v add_cidr64="$youtube_ipv6_domain" "
+					function cidr64(ip, parts, net) {
+						split(ip, parts, \":\")
+						if (parts[1] != \"\" && parts[2] != \"\" && parts[3] != \"\" && parts[4] != \"\") {
+							net=parts[1] \":\" parts[2] \":\" parts[3] \":\" parts[4] \"::/64\"
+							return net
+						}
+						return \"\"
+					}
+					{
+						print \"add \" tmp_set \" \" \$1
+						if (add_cidr64 == 1) {
+							net=cidr64(\$1)
+							if (net != \"\") print \"add \" tmp_set \" \" net
+						}
+					}"
 		done
 	' sh >> "$restore_file"
 }
@@ -450,6 +467,9 @@ preload_youtube_video_hosts() {
 	while IFS= read -r video_host || [ -n "$video_host" ]; do
 		[ -n "$video_host" ] || continue
 		dig +short A "$video_host" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+		for sample_dns in $YOUTUBE_DNS_SAMPLE_SERVERS; do
+			dig +time=2 +tries=1 +short A "$video_host" @"$sample_dns" 2>/dev/null
+		done
 	done < "$hosts_file" \
 		| grep -Eo "$IPV4_RE" \
 		| grep -vE "$LOCAL_RE" \
@@ -477,6 +497,9 @@ preload_youtube_video_hosts() {
 		while IFS= read -r video_host || [ -n "$video_host" ]; do
 			[ -n "$video_host" ] || continue
 			dig +short AAAA "$video_host" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+			for sample_dns in $YOUTUBE_DNS_SAMPLE_SERVERS; do
+				dig +time=2 +tries=1 +short AAAA "$video_host" @"$sample_dns" 2>/dev/null
+			done
 		done < "$hosts_file" \
 			| grep -E "^[0-9A-Fa-f:]+$" \
 			| grep ":" \

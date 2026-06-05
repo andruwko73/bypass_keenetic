@@ -1,3 +1,10 @@
+<a name="1.688"></a>
+# [1.688] - 06 Jun 2026
+
+- Added the observed missing YouTube video CDN range to the YouTube route.
+- Added the `yt4.googleusercontent.com` avatar host without broad `googleusercontent.com` routing.
+- Mirrored sampled YouTube video/image IPv6 CDN networks into the protocol IPv6 fallback sets so browsers fall back to the routed IPv4 path instead of bypassing through IPv6.
+
 <a name="1.687"></a>
 # [1.687] - 04 Jun 2026
 

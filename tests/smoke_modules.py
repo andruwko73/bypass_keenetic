@@ -1001,6 +1001,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'i.ytimg.com/generate_204' in youtube_source
     assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 2' in youtube_source
     assert 'YOUTUBE_HEALTHCHECK_REQUIRED_URLS' in youtube_source
+    unblock_source = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
+    assert 'yt4.googleusercontent.com' in unblock_source
+    assert 'add_cidr64="$youtube_ipv6_domain"' in unblock_source
+    assert 'for sample_dns in $YOUTUBE_DNS_SAMPLE_SERVERS' in unblock_source
     assert 'Last confirmation:' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
@@ -2512,6 +2516,11 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
     assert 'redirector.googlevideo.com' in entries
     assert 'yt4.ggpht.com' in entries
+    assert 'yt4.googleusercontent.com' in entries
+    assert '74.125.172.0/24' in entries
+    assert '173.194.31.0/24' in entries
+    assert '74.125.174.0/24' in entries
+    assert '2a00:1450:4010:c22::/64' in entries
     assert {
         '104.21.0.0/16',
         '157.240.0.0/16',

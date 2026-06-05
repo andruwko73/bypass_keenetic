@@ -1,3 +1,6 @@
+*v1.688 (06 Jun 2026) -* main
+*Stabilizes YouTube transparent routing by adding the observed missing video CDN range, routing the yt4 avatar host, and mirroring sampled YouTube video/image IPv6 CDN networks for IPv4 fallback.*
+
 *v1.687 (04 Jun 2026) -* main
 *Adds service-aware Reality endpoint repair for the active YouTube route before Vless/Vless 2 YouTube failover restarts Xray or switches keys.*
 
