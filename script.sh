@@ -939,6 +939,9 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
     start_preferred_core_service || exit 1
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1
+    sleep 2
+    echo "Refreshing ipset after proxy core startup."
+    /opt/bin/unblock_update.sh > /dev/null 2>&1 || true
 
     bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
     bot_new_version=$(grep -m1 "ВЕРСИЯ" "$BOT_MAIN_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)

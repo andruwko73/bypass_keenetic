@@ -1,3 +1,9 @@
+<a name="1.689"></a>
+# [1.689] - 06 Jun 2026
+
+- Runs a second `unblock_update.sh` after the proxy core starts during GitHub updates.
+- This lets the YouTube watch-page preload use the live Vless/Vless 2 SOCKS port and fill dynamic `*.googlevideo.com` CDN entries immediately after an update.
+
 <a name="1.688"></a>
 # [1.688] - 06 Jun 2026
 

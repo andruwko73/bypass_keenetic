@@ -960,6 +960,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
+    assert 'Refreshing ipset after proxy core startup.' in script_source
+    assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source

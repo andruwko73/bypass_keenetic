@@ -1,3 +1,6 @@
+*v1.689 (06 Jun 2026) -* main
+*Runs a second ipset refresh after the proxy core starts during GitHub updates, so YouTube watch-page preload can populate dynamic googlevideo CDN entries instead of leaving only static routes.*
+
 *v1.688 (06 Jun 2026) -* main
 *Stabilizes YouTube transparent routing by adding the observed missing video CDN range, routing the yt4 avatar host, and mirroring sampled YouTube video/image IPv6 CDN networks for IPv4 fallback.*
 
