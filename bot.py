@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.689, последнее изменение: 06.06.2026
+#  Файл: bot.py, Версия v1.690, последнее изменение: 06.06.2026
 
 import subprocess
 import os
@@ -398,6 +398,19 @@ AUTO_FAILOVER_STARTUP_HOLD_SECONDS = max(
 REALITY_ENDPOINT_REPAIR_ENABLED = bool(getattr(config, 'reality_endpoint_repair_enabled', True))
 REALITY_ENDPOINT_REPAIR_BASE_PORT = max(19000, int(getattr(config, 'reality_endpoint_repair_base_port', 19050)))
 REALITY_ENDPOINT_REPAIR_MAX_CANDIDATES = max(2, int(getattr(config, 'reality_endpoint_repair_max_candidates', 6)))
+_REALITY_ENDPOINT_REPAIR_DNS_SERVERS_RAW = getattr(
+    config,
+    'reality_endpoint_repair_dns_servers',
+    ('1.1.1.1', '8.8.8.8', '9.9.9.9'),
+)
+if isinstance(_REALITY_ENDPOINT_REPAIR_DNS_SERVERS_RAW, str):
+    REALITY_ENDPOINT_REPAIR_DNS_SERVERS = tuple(
+        item.strip() for item in _REALITY_ENDPOINT_REPAIR_DNS_SERVERS_RAW.replace(',', ' ').split() if item.strip()
+    )
+else:
+    REALITY_ENDPOINT_REPAIR_DNS_SERVERS = tuple(
+        str(item).strip() for item in (_REALITY_ENDPOINT_REPAIR_DNS_SERVERS_RAW or ()) if str(item).strip()
+    )
 auto_failover_state = {
     'started_at': time.time(),
     'last_ok': 0.0,
@@ -437,6 +450,10 @@ YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES = max(
     1,
     int(getattr(config, 'youtube_vless2_failover_consecutive_failures', 3)),
 )
+YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS = max(
+    45,
+    int(getattr(config, 'youtube_vless2_hard_failure_recovery_cooldown_seconds', 90)),
+)
 YOUTUBE_STREAM_GUARD_ENABLED = bool(getattr(config, 'youtube_stream_guard_enabled', True))
 YOUTUBE_STREAM_GUARD_HOLD_SECONDS = max(60, int(getattr(config, 'youtube_stream_guard_hold_seconds', 300)))
 YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS = max(15, int(getattr(config, 'youtube_stream_guard_failover_hold_seconds', 45)))
@@ -460,6 +477,9 @@ youtube_stream_guard_state = {
 youtube_stream_guard_states = {'vless2': youtube_stream_guard_state}
 youtube_core_restart_state = {
     'last_restart': 0.0,
+}
+youtube_hard_failure_recovery_state = {
+    'last_attempt': 0.0,
 }
 udp_quic_drift_state = {
     'last_refresh': 0.0,
@@ -827,6 +847,90 @@ def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_me
     return True
 
 
+def _youtube_failure_is_hard_proxy_failure(message):
+    text = str(message or '').casefold()
+    return any(
+        marker in text
+        for marker in (
+            'connection reset',
+            'recv failure',
+            'connection aborted',
+            'remote disconnected',
+            'unexpected_eof',
+            'unexpected eof',
+            'ssleoferror',
+            'tls eof',
+            'eof occurred',
+            'connection refused',
+            'failed to establish a new connection',
+            'прокси-сервер разорвал',
+            'разорвал tls',
+        )
+    )
+
+
+def _refresh_ipset_after_youtube_recovery(route_proto, reason=''):
+    try:
+        result = subprocess.run(
+            ['/opt/bin/unblock_update.sh'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=180,
+            check=False,
+        )
+        if result.returncode == 0:
+            _write_runtime_log(f'YouTube recovery: refreshed ipset after {_pool_proto_label(route_proto)} recovery. {reason}'.strip())
+        else:
+            _write_runtime_log(f'YouTube recovery: ipset refresh returned code {result.returncode}. {reason}'.strip())
+    except Exception as exc:
+        _write_runtime_log(f'YouTube recovery: ipset refresh failed after {_pool_proto_label(route_proto)} recovery: {exc}')
+
+
+def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, message):
+    if not _youtube_failure_is_hard_proxy_failure(message):
+        return False
+    now = time.time()
+    last_attempt = float(youtube_hard_failure_recovery_state.get('last_attempt') or 0.0)
+    if last_attempt and now - last_attempt < YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS:
+        return False
+    youtube_hard_failure_recovery_state['last_attempt'] = now
+    _write_runtime_log(
+        f'YouTube recovery: {_pool_proto_label(route_proto)} hard proxy failure detected; '
+        f'repairing current key without failover. Last failure: {message}'
+    )
+
+    recovered = False
+    if route_proto in ('vless', 'vless2'):
+        try:
+            repaired = _repair_active_reality_endpoint(route_proto, message, service='youtube')
+        except Exception as exc:
+            repaired = False
+            _write_runtime_log(f'YouTube recovery: endpoint repair failed: {exc}')
+        if repaired:
+            confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
+            if confirm_ok:
+                recovered = True
+            else:
+                _write_runtime_log(f'YouTube recovery: endpoint repair did not restore current key: {confirm_message}')
+
+    if not recovered:
+        recovered = _restart_core_proxy_and_recheck_youtube(route_proto, active_key, message)
+
+    if recovered:
+        state = _youtube_failover_state(route_proto)
+        state['last_ok'] = time.time()
+        state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
+        _record_key_probe(route_proto, active_key, yt_ok=True)
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+        _refresh_ipset_after_youtube_recovery(route_proto, 'current key kept')
+        _write_runtime_log(f'YouTube recovery: current {_pool_proto_label(route_proto)} key restored; failover skipped.')
+        return True
+
+    return False
+
+
 def _attempt_youtube_failover():
     route_proto = _youtube_route_protocol()
     state = _youtube_failover_state(route_proto)
@@ -859,6 +963,9 @@ def _attempt_youtube_failover():
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
         _record_key_probe(route_proto, active_key, yt_ok=True)
+        return False
+
+    if _recover_current_youtube_route_after_hard_failure(route_proto, active_key, message):
         return False
 
     if _recent_probe_ok(cached_active_probe, 'yt_ok', YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL):
@@ -1744,19 +1851,60 @@ def _udp_quic_policy_matches(domain):
 def _resolve_domain_ipv4_addresses(domain):
     addresses = []
     seen = set()
+    repair_dns_servers = {str(item).strip() for item in REALITY_ENDPOINT_REPAIR_DNS_SERVERS}
+
+    def add_address(address):
+        try:
+            ip_obj = ipaddress.ip_address(str(address or '').strip())
+        except Exception:
+            return
+        value = str(ip_obj)
+        if value in repair_dns_servers:
+            return
+        if ip_obj.version == 4 and not ip_obj.is_private and not ip_obj.is_loopback and value not in seen:
+            seen.add(value)
+            addresses.append(value)
+
     try:
         infos = socket.getaddrinfo(domain, 443, socket.AF_INET, socket.SOCK_STREAM)
     except Exception:
         infos = []
     for item in infos:
         try:
-            address = item[4][0]
-            ip_obj = ipaddress.ip_address(address)
+            add_address(item[4][0])
         except Exception:
             continue
-        if ip_obj.version == 4 and not ip_obj.is_private and not ip_obj.is_loopback and address not in seen:
-            seen.add(address)
-            addresses.append(address)
+    for dns_server in REALITY_ENDPOINT_REPAIR_DNS_SERVERS:
+        outputs = []
+        try:
+            result = subprocess.run(
+                ['dig', '+time=2', '+tries=1', '+short', 'A', str(domain), f'@{dns_server}'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            if result.returncode == 0:
+                outputs.append(result.stdout)
+        except Exception:
+            pass
+        try:
+            result = subprocess.run(
+                ['nslookup', str(domain), str(dns_server)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            if result.returncode == 0:
+                outputs.append(result.stdout)
+        except Exception:
+            pass
+        for output in outputs:
+            for token in str(output or '').replace(',', ' ').split():
+                add_address(token)
     return addresses
 
 

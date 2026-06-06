@@ -1,3 +1,12 @@
+<a name="1.690"></a>
+# [1.690] - 06 Jun 2026
+
+- Added hard-failure recovery for the active YouTube route before failover can switch keys.
+- Reality endpoint repair now falls back to external DNS resolvers when local DNS misses the current endpoint domain.
+- YouTube route recovery refreshes ipset routes after the current key is restored.
+- Pool and apply-time YouTube checks now keep the concrete failed endpoint detail instead of replacing it with a generic primary-endpoint message.
+- Added Telegram IPv6 DC ranges to the service catalog so mobile clients fall back to the routed IPv4 path faster when IPv6 cannot be proxied transparently.
+
 <a name="1.689"></a>
 # [1.689] - 06 Jun 2026
 

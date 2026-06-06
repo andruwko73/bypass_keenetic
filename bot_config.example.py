@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.689
+# ВЕРСИЯ СКРИПТА v1.690
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -41,6 +41,7 @@ ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv
 reality_endpoint_overrides = {}  # необязательно: {'server.example.com': '203.0.113.10'} для Reality-доменов с нестабильным DNS-бэкендом
 reality_endpoint_repair_enabled = True  # перед сменой Reality-ключа бот пробует рабочие endpoint'ы текущего ключа
 reality_endpoint_repair_max_candidates = 6
+reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')
 auto_failover_startup_hold_seconds = 180  # после рестарта бот не переключает Telegram-ключи, пока Xray и маршруты стабилизируются
 youtube_vless2_failover_enabled = True  # YouTube остается на Vless 2: если текущий Vless2 ключ перестал отвечать, бот подберет другой из пула Vless2
 youtube_vless2_failover_grace_seconds = 180
@@ -53,6 +54,7 @@ youtube_vless2_failover_confirm_delay_seconds = 8.0
 youtube_vless2_restart_recheck_enabled = True
 youtube_vless2_restart_recheck_cooldown_seconds = 300
 youtube_vless2_failover_consecutive_failures = 3
+youtube_vless2_hard_failure_recovery_cooldown_seconds = 90
 youtube_stream_guard_failover_hold_seconds = 45  # Если при просмотре YouTube трафик пропал, автозамена Vless2 сможет продолжиться после этой паузы
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять

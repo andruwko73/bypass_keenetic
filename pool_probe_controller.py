@@ -171,6 +171,9 @@ def check_youtube_through_proxy(
                 sleep(retry_delay_seconds)
     missing_required = required_urls - ok_urls
     if missing_required:
+        detail = '; '.join(failed[:2])
+        if detail:
+            return False, 'Primary YouTube connectivity endpoint did not respond through this key: ' + detail
         return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
     return False, '; '.join(failed[-2:]) or 'YouTube endpoints did not respond through this key.'
 

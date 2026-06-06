@@ -14,7 +14,7 @@ YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (YOUTUBE_HEALTHCHECK_URLS[0],)
 def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
     ok_count = 0
     ok_urls = set()
-    last_message = ''
+    failed = []
     connect_timeout, read_timeout = timeouts
     required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS)
     for url in urls:
@@ -30,11 +30,15 @@ def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTH
             if required_urls <= ok_urls and ok_count >= max(1, int(min_ok or 1)):
                 return True, 'YouTube endpoints confirmed'
         else:
-            last_message = message
+            host = url.split('/')[2] if '://' in url else url
+            failed.append(f'{host}: {message}')
     missing_required = required_urls - ok_urls
     if missing_required:
+        detail = '; '.join(failed[:2])
+        if detail:
+            return False, 'Primary YouTube connectivity endpoint did not respond through this key: ' + detail
         return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
-    return False, last_message or 'YouTube endpoints did not respond through this key.'
+    return False, '; '.join(failed[-2:]) or 'YouTube endpoints did not respond through this key.'
 
 
 def proxy_apply_settings(core_service_script, ports):

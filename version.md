@@ -1,3 +1,6 @@
+*v1.690 (06 Jun 2026) -* main
+*Repairs hard YouTube route resets before switching keys by resolving Reality endpoint candidates through fallback DNS, refreshing routes after recovery, and adding Telegram IPv6 DC coverage so clients fall back to the routed IPv4 path faster.*
+
 *v1.689 (06 Jun 2026) -* main
 *Runs a second ipset refresh after the proxy core starts during GitHub updates, so YouTube watch-page preload can populate dynamic googlevideo CDN entries instead of leaving only static routes.*
 

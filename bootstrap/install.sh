@@ -468,6 +468,7 @@ ipv6_bypass_fallback_enabled = True
 reality_endpoint_overrides = {}
 reality_endpoint_repair_enabled = True
 reality_endpoint_repair_max_candidates = 6
+reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')
 auto_failover_startup_hold_seconds = 180
 youtube_vless2_failover_enabled = True
 youtube_vless2_failover_grace_seconds = 180
@@ -480,6 +481,7 @@ youtube_vless2_failover_confirm_delay_seconds = 8.0
 youtube_vless2_restart_recheck_enabled = True
 youtube_vless2_restart_recheck_cooldown_seconds = 300
 youtube_vless2_failover_consecutive_failures = 3
+youtube_vless2_hard_failure_recovery_cooldown_seconds = 90
 
 localportsh = '1082'
 localportvmess = '10810'

@@ -749,6 +749,9 @@ def test_codex_version_matches_commit_count():
     assert 'reality_endpoint_repair_enabled = True' in example
     assert 'reality_endpoint_repair_enabled = True' in installer
     assert 'reality_endpoint_repair_enabled = True' in bootstrap
+    assert "reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')" in example
+    assert "reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')" in installer
+    assert "reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')" in bootstrap
     assert 'auto_failover_startup_hold_seconds = 180' in example
     assert 'auto_failover_startup_hold_seconds = 180' in installer
     assert 'auto_failover_startup_hold_seconds = 180' in bootstrap
@@ -996,6 +999,17 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "cached_fail_since or now" in source
     assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
     assert "getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)" in source
+    assert 'YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS' in source
+    assert 'REALITY_ENDPOINT_REPAIR_DNS_SERVERS' in source
+    assert 'repair_dns_servers = {str(item).strip() for item in REALITY_ENDPOINT_REPAIR_DNS_SERVERS}' in source
+    assert 'if value in repair_dns_servers:' in source
+    assert "['dig', '+time=2', '+tries=1', '+short', 'A'" in source
+    assert "['nslookup', str(domain), str(dns_server)]" in source
+    assert 'def _recover_current_youtube_route_after_hard_failure' in source
+    assert source.find('_recover_current_youtube_route_after_hard_failure(route_proto, active_key, message)') < source.find("_recent_probe_ok(cached_active_probe")
+    assert 'Primary YouTube connectivity endpoint did not respond through this key: ' in pool_controller_source
+    assert 'Primary YouTube connectivity endpoint did not respond through this key: ' in pool_runner_source
+    assert 'Primary YouTube connectivity endpoint did not respond through this key: ' in proxy_apply_source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
     assert 'http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT)' in source
     assert 'redirector.googlevideo.com/generate_204' in youtube_source
@@ -2603,6 +2617,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'telegram.org' not in udp_routes
     assert '149.154.160.0/20' not in udp_routes
     assert '91.108.36.0/22' not in udp_routes
+    assert '2001:67c:4e8::/48' not in udp_routes
     assert '17.249.0.0/16' not in udp_routes
     assert '23.216.134.15' not in udp_routes
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= udp_routes
