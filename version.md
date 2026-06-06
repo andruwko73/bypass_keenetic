@@ -1,3 +1,6 @@
+*v1.694 (06 Jun 2026) -* main
+*Adds a rollback script for regular GitHub updates and backs up installer/service files so the previous runtime can be restored after an update.*
+
 *v1.693 (06 Jun 2026) -* main
 *Makes UDP/QUIC policy follow the list that contains YouTube routes, so YouTube can work from Vless 1, Vless 2, Vmess, Trojan, or Shadowsocks instead of depending on a hard-coded Vless 2 exception, and pins Telegram mobile TCP 5222 to the Telegram route.*
 

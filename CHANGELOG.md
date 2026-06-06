@@ -1,3 +1,9 @@
+<a name="1.694"></a>
+# [1.694] - 06 Jun 2026
+
+- Creates a rollback script for regular GitHub updates and keeps a `/opt/root/bypass-last-update-rollback.sh` pointer to the latest update backup.
+- Backs up installer and service files during update so rollback can restore the previous runtime instead of only restoring ipset scripts.
+
 <a name="1.693"></a>
 # [1.693] - 06 Jun 2026
 

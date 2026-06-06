@@ -533,6 +533,89 @@ backup_static_assets() {
   fi
 }
 
+write_update_rollback_script() {
+  rollback_path="$backup_dir/rollback.sh"
+  cat > "$rollback_path" <<EOF
+#!/bin/sh
+set -eu
+
+BACKUP_DIR="$backup_dir"
+BOT_MAIN_PATH="$BOT_MAIN_PATH"
+BOT_RUNTIME_DIR="$BOT_RUNTIME_DIR"
+BOT_SERVICE_PATH="$BOT_SERVICE_PATH"
+INSTALLER_MAIN_PATH="$INSTALLER_MAIN_PATH"
+INSTALLER_SERVICE_PATH="$INSTALLER_SERVICE_PATH"
+ROLLBACK_MODULES="$BOT_RUNTIME_MODULES"
+
+restore_file() {
+  source_path="\$BACKUP_DIR/\$1"
+  target_path="\$2"
+  [ -e "\$source_path" ] || [ -L "\$source_path" ] || return 0
+  mkdir -p "\$(dirname "\$target_path")"
+  rm -f "\$target_path"
+  cp -a "\$source_path" "\$target_path"
+}
+
+ensure_runtime_legacy_paths() {
+  if [ "\$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "\$BOT_MAIN_PATH" ]; then
+    rm -f /opt/etc/bot/bot.py
+    ln -s main.py /opt/etc/bot/bot.py 2>/dev/null || cp "\$BOT_MAIN_PATH" /opt/etc/bot/bot.py
+  fi
+  if [ "\$BOT_MAIN_PATH" != "/opt/etc/bot.py" ] && [ -f "\$BOT_MAIN_PATH" ]; then
+    rm -f /opt/etc/bot.py
+    ln -s "\$BOT_MAIN_PATH" /opt/etc/bot.py 2>/dev/null || cp "\$BOT_MAIN_PATH" /opt/etc/bot.py
+  fi
+}
+
+[ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks stop >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray stop >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray stop >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan stop >/dev/null 2>&1 || true
+[ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" stop >/dev/null 2>&1 || true
+
+restore_file unblock_ipset.sh /opt/bin/unblock_ipset.sh
+restore_file unblock_dnsmasq.sh /opt/bin/unblock_dnsmasq.sh
+restore_file unblock_update.sh /opt/bin/unblock_update.sh
+restore_file dnsmasq.conf /opt/etc/dnsmasq.conf
+restore_file crontab /opt/etc/crontab
+restore_file 100-ipset.sh /opt/etc/ndm/fs.d/100-ipset.sh
+restore_file 100-redirect.sh /opt/etc/ndm/netfilter.d/100-redirect.sh
+restore_file bot.py "\$BOT_MAIN_PATH"
+restore_file installer.py "\$INSTALLER_MAIN_PATH"
+restore_file S98telegram_bot_installer "\$INSTALLER_SERVICE_PATH"
+restore_file S99telegram_bot "\$BOT_SERVICE_PATH"
+
+for module in \$ROLLBACK_MODULES; do
+  restore_file "\$module" "\$BOT_RUNTIME_DIR/\$module"
+done
+if [ -d "\$BACKUP_DIR/static" ]; then
+  mkdir -p "\$BOT_RUNTIME_DIR/static"
+  rm -rf "\$BOT_RUNTIME_DIR/static"
+  mkdir -p "\$BOT_RUNTIME_DIR/static"
+  cp -a "\$BACKUP_DIR/static"/. "\$BOT_RUNTIME_DIR/static"/
+fi
+
+chmod 755 /opt/bin/unblock_*.sh /opt/etc/ndm/fs.d/100-ipset.sh /opt/etc/ndm/netfilter.d/100-redirect.sh 2>/dev/null || true
+[ -f "\$BOT_MAIN_PATH" ] && chmod 755 "\$BOT_MAIN_PATH" || true
+[ -f "\$INSTALLER_MAIN_PATH" ] && chmod 755 "\$INSTALLER_MAIN_PATH" || true
+[ -f "\$BOT_SERVICE_PATH" ] && chmod 755 "\$BOT_SERVICE_PATH" || true
+[ -f "\$INSTALLER_SERVICE_PATH" ] && chmod 755 "\$INSTALLER_SERVICE_PATH" || true
+ensure_runtime_legacy_paths
+
+/opt/bin/unblock_update.sh >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S10cron ] && /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || /opt/etc/init.d/S24xray start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || /opt/etc/init.d/S24v2ray start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan start >/dev/null 2>&1 || true
+[ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "\$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
+
+echo "Rollback restored files from \$BACKUP_DIR."
+EOF
+  chmod 755 "$rollback_path"
+  ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh 2>/dev/null || true
+}
+
 activate_runtime_modules() {
   for module in "$@"; do
     activate_runtime_module "$module"
@@ -976,8 +1059,18 @@ if [ "$1" = "-update" ]; then
     if [ -f "$BOT_MAIN_PATH" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
+    if [ -f "$INSTALLER_MAIN_PATH" ]; then
+      mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py
+    fi
+    if [ -f "$INSTALLER_SERVICE_PATH" ]; then
+      mv "$INSTALLER_SERVICE_PATH" "$backup_dir"/S98telegram_bot_installer
+    fi
+    if [ -f "$BOT_SERVICE_PATH" ]; then
+      mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot
+    fi
     backup_runtime_modules $BOT_RUNTIME_MODULES
     backup_static_assets
+    write_update_rollback_script
     cleanup_removed_connection_artifacts
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."

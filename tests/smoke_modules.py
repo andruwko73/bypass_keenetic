@@ -980,6 +980,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert 'Refreshing ipset after proxy core startup.' in script_source
     assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')
+    assert 'write_update_rollback_script()' in script_source
+    assert 'ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh' in script_source
+    assert 'mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py' in script_source
+    assert 'mv "$INSTALLER_SERVICE_PATH" "$backup_dir"/S98telegram_bot_installer' in script_source
+    assert 'mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot' in script_source
+    assert 'restore_file S99telegram_bot "\\$BOT_SERVICE_PATH"' in script_source
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source
