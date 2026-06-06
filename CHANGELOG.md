@@ -1,3 +1,9 @@
+<a name="1.691"></a>
+# [1.691] - 06 Jun 2026
+
+- A transient EOF on the primary YouTube healthcheck no longer marks a key as failed when other YouTube CDN endpoints already confirm the route.
+- This reduces false negative YouTube statuses in the pool and web checks while keeping hard failures visible when the route is actually down.
+
 <a name="1.690"></a>
 # [1.690] - 06 Jun 2026
 

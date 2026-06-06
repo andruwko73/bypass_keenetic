@@ -1669,6 +1669,18 @@ def test_proxy_apply_runtime_helpers():
     )
     assert youtube_ok is True
     assert youtube_calls == list(proxy_apply_runtime.YOUTUBE_HEALTHCHECK_URLS[:3])
+
+    primary_transient_ok, primary_transient_message = proxy_apply_runtime.check_youtube_health(
+        lambda proxy, **kwargs: (
+            kwargs['url'] != proxy_apply_runtime.YOUTUBE_HEALTHCHECK_URLS[0],
+            'primary eof',
+        ),
+        'proxy-url',
+        timeouts=(1, 1),
+    )
+    assert primary_transient_ok is True
+    assert primary_transient_message == 'YouTube endpoints confirmed without primary'
+
     commands = []
     sleeps = []
     records = []

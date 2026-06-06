@@ -63,6 +63,8 @@ def check_youtube_through_proxy(check_http, proxy_url, *, http_timeouts, urls=YO
             failed.append(f'{host}: {message}')
     missing_required = required_urls - ok_urls
     if missing_required:
+        if ok_count >= max(1, int(min_ok or 1)):
+            return True, 'YouTube endpoints confirmed without primary'
         detail = '; '.join(failed[:2])
         if detail:
             return False, 'Primary YouTube connectivity endpoint did not respond through this key: ' + detail

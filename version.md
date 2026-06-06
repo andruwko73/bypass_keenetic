@@ -1,3 +1,6 @@
+*v1.691 (06 Jun 2026) -* main
+*Treats a transient primary YouTube healthcheck EOF as successful when other YouTube CDN endpoints already confirm the route, reducing false pool and status failures on working keys.*
+
 *v1.690 (06 Jun 2026) -* main
 *Repairs hard YouTube route resets before switching keys by resolving Reality endpoint candidates through fallback DNS, refreshing routes after recovery, and adding Telegram IPv6 DC coverage so clients fall back to the routed IPv4 path faster.*
 
