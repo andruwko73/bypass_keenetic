@@ -819,6 +819,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'generate_udp_quic_policy_file' in bootstrap
     assert 'UDP_QUIC_EXCLUDE_ENTRIES' in script
     assert 'UDP_QUIC_EXCLUDE_ENTRIES' in bootstrap
+    assert 'from service_catalog import YOUTUBE_UNBLOCK_ENTRIES' in script
+    assert 'from service_catalog import YOUTUBE_UNBLOCK_ENTRIES' in bootstrap
+    assert 'route_contains_youtube(filename)' in script
+    assert 'route_contains_youtube(filename)' in bootstrap
+    assert "('VLESS', 'vless.txt', 'udp_quic_block_vless_enabled')" in script
+    assert "('VLESS2', 'vless-2.txt', 'udp_quic_block_vless2_enabled')" in script
+    assert "print(f'BYPASS_UDP_QUIC_BLOCK_{env_name}={1 if enabled else 0}')" in script
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
@@ -916,7 +923,7 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in redirect_script
     assert 'grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt"' in redirect_script
     push_block = redirect_script.split('refresh_mobile_push_priority() {', 1)[1].split('\n}', 1)[0]
-    assert 'for push_port in 5223 5228 5229 5230' in push_block
+    assert 'for push_port in 5222 5223 5228 5229 5230' in push_block
     assert 'telegram_route="$(telegram_route_protocol)"' in push_block
     assert '[ "$telegram_route" = "vless2" ] && [ -n "$vless2_key_path" ] && target_port=10814' in push_block
     assert 'for push_set in unblockvless unblockvless2' in push_block
@@ -942,6 +949,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert 'def _sync_udp_policy_config' in source
+    assert 'YOUTUBE_UNBLOCK_ENTRIES' in source
+    assert "UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
+    assert 'def _route_list_contains_youtube' in source
+    assert 'def _udp_quic_block_enabled_for_protocol' in source
+    assert "_udp_quic_block_enabled_for_protocol('vless', UDP_QUIC_BLOCK_VLESS_ENABLED)" in source
+    assert "_udp_quic_block_enabled_for_protocol('vless2', UDP_QUIC_BLOCK_VLESS2_ENABLED)" in source
     assert 'def _apply_reality_endpoint_override' in source
     assert 'REALITY_ENDPOINT_OVERRIDES' in source
     assert 'def _repair_active_reality_endpoint' in source
@@ -3907,11 +3920,19 @@ def test_update_status_helpers():
 
 def test_service_routes_apply_and_profile():
     with tempfile.TemporaryDirectory() as tmp:
+        callbacks = []
         discord_entries = service_catalog.SERVICE_LIST_SOURCES['discord']['entries']
         (Path(tmp) / 'vless.txt').write_text(discord_entries[0] + '\n', encoding='utf-8')
         (Path(tmp) / 'vless-2.txt').write_text('\n'.join(discord_entries[:2]) + '\n', encoding='utf-8')
-        result = service_routes.apply_service_route('discord', 'vless', unblock_dir=tmp, update_script='')
+        result = service_routes.apply_service_route(
+            'discord',
+            'vless',
+            unblock_dir=tmp,
+            update_script='',
+            before_update=lambda: callbacks.append('route'),
+        )
         assert result['target_label'] == 'Vless 1'
+        assert callbacks == ['route']
         vless_entries = (Path(tmp) / 'vless.txt').read_text(encoding='utf-8').splitlines()
         vless2_entries = (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
         assert set(discord_entries) <= set(vless_entries)
@@ -3921,20 +3942,29 @@ def test_service_routes_apply_and_profile():
             service_items=[{'id': 'youtube'}, {'id': 'telegram'}],
             unblock_dir=tmp,
             update_script='',
+            before_update=lambda: callbacks.append('profile'),
         )
         assert profile['services'] == 2
+        assert callbacks == ['route', 'profile']
         assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
         assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
 
 
 def test_route_intersections_helpers():
     with tempfile.TemporaryDirectory() as tmp:
+        callbacks = []
         (Path(tmp) / 'vless.txt').write_text('example.com\n198.51.100.0/24\n', encoding='utf-8')
         (Path(tmp) / 'vless-2.txt').write_text('api.example.com\n198.51.100.10\n', encoding='utf-8')
         report = route_intersections.analyze_route_intersections(unblock_dir=tmp)
         assert report['count'] >= 2
-        result = route_intersections.resolve_route_intersections('vless-2', unblock_dir=tmp, update_script='')
+        result = route_intersections.resolve_route_intersections(
+            'vless-2',
+            unblock_dir=tmp,
+            update_script='',
+            before_update=lambda: callbacks.append('sync'),
+        )
         assert result['moved'] >= 2
+        assert callbacks == ['sync']
         assert 'example.com' in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
         assert 'example.com' not in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
 

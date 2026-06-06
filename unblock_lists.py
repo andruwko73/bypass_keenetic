@@ -31,7 +31,7 @@ def normalize_unblock_list(text):
     return '\n'.join(items)
 
 
-def save_unblock_list_file(list_name, text):
+def save_unblock_list_file(list_name, text, before_update=None):
     safe_name = os.path.basename(list_name)
     target_path = os.path.join(UNBLOCK_DIR, safe_name)
     if not target_path.endswith('.txt'):
@@ -41,6 +41,8 @@ def save_unblock_list_file(list_name, text):
     with open(target_path, 'w', encoding='utf-8') as file:
         if normalized:
             file.write(normalized + '\n')
+    if callable(before_update):
+        before_update()
     subprocess.run([UNBLOCK_UPDATE_SCRIPT], check=False)
     return safe_name
 

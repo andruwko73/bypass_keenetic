@@ -1,3 +1,6 @@
+*v1.693 (06 Jun 2026) -* main
+*Makes UDP/QUIC policy follow the list that contains YouTube routes, so YouTube can work from Vless 1, Vless 2, Vmess, Trojan, or Shadowsocks instead of depending on a hard-coded Vless 2 exception, and pins Telegram mobile TCP 5222 to the Telegram route.*
+
 *v1.692 (06 Jun 2026) -* main
 *Uses canonical iptables REDIRECT --to-ports rules so UDP/QUIC policy changes remove stale redirect rules instead of leaving old protocol-specific redirects active.*
 

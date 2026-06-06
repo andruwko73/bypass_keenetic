@@ -314,14 +314,15 @@ telegram_route_protocol() {
 }
 
 refresh_mobile_push_priority() {
-	# Android FCM/mtalk uses TCP 5228-5230; iOS APNs keeps a persistent TCP 5223
-	# connection and can fall back to 443. YouTube's broad Google IP ranges can
-	# capture shared push IPs in the other Vless list, so pin push signaling
+	# Telegram mobile can use MTProto TCP 5222; Android FCM/mtalk uses TCP
+	# 5228-5230; iOS APNs keeps a persistent TCP 5223 connection and can fall
+	# back to 443. YouTube's broad Google IP ranges can capture shared push IPs
+	# in the other Vless list, so pin mobile signaling
 	# ports to whichever Vless list currently carries Telegram routes.
 	telegram_route="$(telegram_route_protocol)"
 	target_port=10812
 	[ "$telegram_route" = "vless2" ] && [ -n "$vless2_key_path" ] && target_port=10814
-	for push_port in 5223 5228 5229 5230; do
+	for push_port in 5222 5223 5228 5229 5230; do
 		for push_set in unblockvless unblockvless2; do
 			for stale_port in 10812 10814; do
 				while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set "$push_set" dst --dport "$push_port" -j REDIRECT --to-ports "$stale_port" 2>/dev/null; do

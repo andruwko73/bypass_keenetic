@@ -129,6 +129,7 @@ def resolve_route_intersections(
     *,
     unblock_dir=UNBLOCK_DIR,
     update_script=UNBLOCK_UPDATE_SCRIPT,
+    before_update=None,
 ):
     target_route = str(target_route or '').strip()
     if target_route.endswith('.txt'):
@@ -146,6 +147,8 @@ def resolve_route_intersections(
     os.makedirs(unblock_dir, exist_ok=True)
     for route, entries in entries_by_route.items():
         write_unblock_list_entries(route, entries, unblock_dir=unblock_dir)
+    if callable(before_update):
+        before_update()
     if update_script:
         subprocess.run([update_script], check=False)
     return {

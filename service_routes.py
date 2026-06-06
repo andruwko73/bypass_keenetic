@@ -171,6 +171,7 @@ def apply_service_route(
     remove_from_others=True,
     unblock_dir=UNBLOCK_DIR,
     update_script=UNBLOCK_UPDATE_SCRIPT,
+    before_update=None,
 ):
     if target_protocol not in PROTOCOL_ROUTES:
         raise ValueError('Неизвестный протокол')
@@ -189,6 +190,8 @@ def apply_service_route(
     route_entries[target_route].update(entries)
     added = len(route_entries[target_route] - before_target)
     _write_routes(route_entries, unblock_dir)
+    if callable(before_update):
+        before_update()
     _run_update(update_script)
     source = SERVICE_LIST_SOURCES.get(service_key) or {}
     return {
@@ -214,6 +217,7 @@ def apply_service_profile(
     service_items=None,
     unblock_dir=UNBLOCK_DIR,
     update_script=UNBLOCK_UPDATE_SCRIPT,
+    before_update=None,
 ):
     profile = next((item for item in ROUTE_PROFILES if item.get('id') == profile_id), None)
     if not profile:
@@ -231,6 +235,8 @@ def apply_service_profile(
                 update_script='',
             )
         )
+    if callable(before_update):
+        before_update()
     _run_update(update_script)
     return {
         'profile_id': profile_id,

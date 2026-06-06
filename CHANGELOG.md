@@ -1,3 +1,10 @@
+<a name="1.693"></a>
+# [1.693] - 06 Jun 2026
+
+- Makes UDP/QUIC policy follow the list that contains YouTube routes instead of treating Vless 2 as a special case.
+- If YouTube is moved to Vless 1, Vless 2, Vmess, Trojan, or Shadowsocks, that protocol keeps UDP/QUIC open while the other protocol lists keep their configured fallback behavior.
+- Pins Telegram's observed mobile TCP 5222 traffic to the Vless route that carries Telegram, alongside the existing mobile push ports.
+
 <a name="1.692"></a>
 # [1.692] - 06 Jun 2026
 

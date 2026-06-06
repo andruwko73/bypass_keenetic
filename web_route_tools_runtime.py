@@ -42,20 +42,28 @@ class ServiceRouteToolsRuntime:
         return route_intersections.analyze_route_intersections()
 
     def apply_service_route(self, service_key, target_protocol):
-        result = service_routes.apply_service_route(service_key, target_protocol)
-        self.sync_udp_policy_config()
+        result = service_routes.apply_service_route(
+            service_key,
+            target_protocol,
+            before_update=self.sync_udp_policy_config,
+        )
         self.invalidate_web_status_cache()
         return result
 
     def apply_service_profile(self, profile_id):
-        result = service_routes.apply_service_profile(profile_id, service_items=self.service_items())
-        self.sync_udp_policy_config()
+        result = service_routes.apply_service_profile(
+            profile_id,
+            service_items=self.service_items(),
+            before_update=self.sync_udp_policy_config,
+        )
         self.invalidate_web_status_cache()
         return result
 
     def resolve_route_intersections(self, target_route):
-        result = route_intersections.resolve_route_intersections(target_route)
-        self.sync_udp_policy_config()
+        result = route_intersections.resolve_route_intersections(
+            target_route,
+            before_update=self.sync_udp_policy_config,
+        )
         self.invalidate_web_status_cache()
         return result
 
