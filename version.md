@@ -1,3 +1,6 @@
+*v1.692 (06 Jun 2026) -* main
+*Uses canonical iptables REDIRECT --to-ports rules so UDP/QUIC policy changes remove stale redirect rules instead of leaving old protocol-specific redirects active.*
+
 *v1.691 (06 Jun 2026) -* main
 *Treats a transient primary YouTube healthcheck EOF as successful when other YouTube CDN endpoints already confirm the route, reducing false pool and status failures on working keys.*
 

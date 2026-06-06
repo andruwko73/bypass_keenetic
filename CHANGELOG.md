@@ -1,3 +1,9 @@
+<a name="1.692"></a>
+# [1.692] - 06 Jun 2026
+
+- Uses canonical `iptables` REDIRECT `--to-ports` rules when installing and deleting transparent proxy redirects.
+- UDP/QUIC policy changes can now remove stale protocol-specific redirects reliably instead of leaving old rules active after updates or live policy changes.
+
 <a name="1.691"></a>
 # [1.691] - 06 Jun 2026
 

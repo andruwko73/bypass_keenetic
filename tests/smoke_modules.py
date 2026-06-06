@@ -877,7 +877,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'install_udp_quic_block_rule unblockvlessudp "$BYPASS_UDP_QUIC_BLOCK_VLESS"' in redirect_script
     assert 'install_udp_quic_block_rule unblockvless2udp "$BYPASS_UDP_QUIC_BLOCK_VLESS2"' in redirect_script
     assert 'install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"' in redirect_script
-    assert '--match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-port "$UDP_QUIC_REJECT_PORT"' in redirect_script
+    assert '--match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-ports "$UDP_QUIC_REJECT_PORT"' in redirect_script
+    assert 'iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-ports 10812' not in redirect_script
+    assert 'iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-ports 10814' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REJECT' not in redirect_script
     assert 'refresh_udp_quic_block_rules' in redirect_script
@@ -887,8 +889,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ip6tables -I FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT' in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless dst --dport 443 -j REJECT' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT' not in redirect_script
-    assert '-p udp -m set --match-set unblockvless dst -j REDIRECT --to-port 10812' in redirect_script
-    assert '-p udp -m set --match-set unblockvless2 dst -j REDIRECT --to-port 10814' in redirect_script
+    assert '-p udp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812' in redirect_script
+    assert '-p udp -m set --match-set unblockvless2 dst -j REDIRECT --to-ports 10814' in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
     assert '*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1' in crontab
 
@@ -903,11 +905,11 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     assert 'CRD/Telegram-style service routes do not get captured by the YouTube key' in redirect_script
     vless2_insert = (
         'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
-        'unblockvless2 dst -j REDIRECT --to-port 10814'
+        'unblockvless2 dst -j REDIRECT --to-ports 10814'
     )
     vless1_insert = (
         'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
-        'unblockvless dst -j REDIRECT --to-port 10812'
+        'unblockvless dst -j REDIRECT --to-ports 10812'
     )
     priority_block = redirect_script.split('refresh_vless_tcp_priority() {', 1)[1].split('\n}', 1)[0]
     assert priority_block.index(vless2_insert) < priority_block.index(vless1_insert)
@@ -918,7 +920,7 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     assert 'telegram_route="$(telegram_route_protocol)"' in push_block
     assert '[ "$telegram_route" = "vless2" ] && [ -n "$vless2_key_path" ] && target_port=10814' in push_block
     assert 'for push_set in unblockvless unblockvless2' in push_block
-    assert '--dport "$push_port" -j REDIRECT --to-port "$target_port"' in push_block
+    assert '--dport "$push_port" -j REDIRECT --to-ports "$target_port"' in push_block
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
