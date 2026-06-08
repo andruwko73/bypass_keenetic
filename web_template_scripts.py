@@ -1686,6 +1686,15 @@ def render_web_scripts(
             actionMessageTimer = window.setTimeout(hideActionMessage, Number(delayMs) || 9000);
         }}
 
+        function setCommandRunningLayout(running) {{
+            if (document.documentElement) {{
+                document.documentElement.classList.toggle('command-running', !!running);
+            }}
+            if (document.body) {{
+                document.body.classList.toggle('command-running', !!running);
+            }}
+        }}
+
         function showActionMessage(text, ok, options) {{
             const block = document.getElementById('web-action-message');
             if (!block) {{
@@ -1712,13 +1721,16 @@ def render_web_scripts(
         function showCommandState(state) {{
             const block = document.getElementById('web-command-status');
             if (!block) {{
+                setCommandRunningLayout(false);
                 return false;
             }}
             if (!state || !state.label) {{
                 block.classList.add('hidden');
+                setCommandRunningLayout(false);
                 return false;
             }}
             block.classList.remove('hidden');
+            setCommandRunningLayout(!!state.running);
             const title = block.querySelector('strong');
             if (title) {{
                 title.textContent = (state.running ? 'Команда выполняется: ' : 'Последняя команда: ') + state.label;
@@ -2188,6 +2200,7 @@ def render_web_scripts(
                 scheduleStatusPolling(POOL_PROBE_POLL_EXTENSION_MS);
             }}
             if (INITIAL_COMMAND_RUNNING) {{
+                setCommandRunningLayout(true);
                 pollCommandState();
             }}
         }});

@@ -278,8 +278,9 @@ def render_web_form(
         'poolProbePollExtensionMs': int(POOL_PROBE_UI_POLL_EXTENSION_MS),
     })
     topbar_actions_class = 'topbar-actions' + ('' if enable_telegram else ' topbar-actions-web-only')
+    page_class = ' class="command-running"' if _script_bool(initial_command_running) else ''
     return f'''<!DOCTYPE html>
-<html lang="ru">
+<html lang="ru"{page_class}>
 <head>
   <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -289,7 +290,7 @@ def render_web_form(
     <script>window.BK_APP_CONFIG={app_config_json};</script>
     <script src="/static/app.js?v={asset_version}" defer></script>
 </head>
-<body>
+<body{page_class}>
     <div class="app-shell">
         <header class="topbar">
             <div class="{topbar_actions_class}">

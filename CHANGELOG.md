@@ -1,3 +1,9 @@
+<a name="1.698"></a>
+# [1.698] - 08 Jun 2026
+
+- Enables page scrolling on desktop while long web commands such as update or rollback are running, so the command log no longer compresses the whole interface.
+- Stretches the Status page router card to the bottom of the dashboard row, removing the visual gap before the service command panel.
+
 <a name="1.697"></a>
 # [1.697] - 08 Jun 2026
 

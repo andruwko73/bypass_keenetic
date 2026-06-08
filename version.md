@@ -1,3 +1,6 @@
+*v1.698 (08 Jun 2026) -* main
+*Allows the desktop web interface to scroll while an update or rollback command is running, and stretches the router card to remove the visual gap before service commands.*
+
 *v1.697 (08 Jun 2026) -* main
 *Tightens desktop web spacing in the status header, service area, and quick-key block; compacts the key check status row; and renames the Meta service shortcut to Instagram / Facebook.*
 

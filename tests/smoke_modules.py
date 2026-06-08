@@ -3382,6 +3382,9 @@ def test_web_template_styles_helpers():
     assert '.mode-control,.theme-control{position:relative;min-width:0;}' in styles
     assert '.mode-control #mode-picker,.theme-control .theme-picker{top:calc(100% + 8px);width:min(320px,calc(100vw - 32px));min-width:260px;z-index:330;}' in styles
     assert '.mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:330;}' in styles
+    assert 'html.command-running body{min-height:100vh;}' in styles
+    assert 'html.command-running .app-main,' in styles
+    assert '.status-dashboard-with-pool .status-dashboard-column-primary .router-health-card{height:100%;align-self:stretch;}' in styles
     assert '.pool-controls{display:grid;grid-template-columns:minmax(240px,520px) minmax(180px,240px);' in styles
     assert '.pool-sort-menu.hidden{display:none;}' in styles
     assert '.pool-sort-divider' in styles
@@ -3701,6 +3704,8 @@ def test_web_template_scripts_helpers():
     assert 'window.requestAnimationFrame' in scripts
     assert 'function hideActionMessage()' in scripts
     assert 'function scheduleActionMessageHide(delayMs)' in scripts
+    assert 'function setCommandRunningLayout(running)' in scripts
+    assert "document.documentElement.classList.toggle('command-running', !!running);" in scripts
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
     assert 'activeCommandName' in scripts
@@ -3801,6 +3806,48 @@ def test_web_form_template_smoke():
     assert '"enableKeyPool":false' in page
     assert '"enableTelegram":true' in page
     assert '<script src="/static/app.js' in page
+    assert 'command-running' not in page
+    running_page = web_form_template.render_web_form(
+        APP_BRANCH_DESCRIPTION='test',
+        APP_BRANCH_LABEL='codex/test',
+        APP_VERSION_LABEL='1',
+        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
+        TELEGRAM_SVG_B64='tg-icon',
+        YOUTUBE_SVG_B64='',
+        _telegram_icon_html=lambda opacity=1.0: 'TG',
+        csrf_token='token',
+        command_block='<div id="web-command-status" class="notice notice-status"><strong>Команда выполняется</strong><pre class="log-output">running</pre></div>',
+        command_buttons_html='',
+        app_runtime_mode_description='test',
+        app_runtime_mode_label='test',
+        app_runtime_mode_picker_block='',
+        current_mode_label='test',
+        custom_checks_json='[]',
+        fallback_block='',
+        initial_command_running='true',
+        initial_status_pending='false',
+        list_route_label='list',
+        message_block='',
+        mode_picker_block='',
+        mode_toggle_label='mode',
+        pool_summary={'active_text': 'none'},
+        pool_summary_note='',
+        protocol_panels_html='',
+        protocol_tabs_html='',
+        quick_key_label='Vless 1',
+        quick_key_proto='vless',
+        quick_key_value='',
+        quick_start_note='note',
+        router_health={},
+        socks_block='',
+        start_button_label='',
+        status={'api_status': 'ok'},
+        topbar_status_text='ok',
+        unblock_panels_html='',
+        unblock_tabs_html='',
+    )
+    assert '<html lang="ru" class="command-running">' in running_page
+    assert '<body class="command-running">' in running_page
     web_only_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',

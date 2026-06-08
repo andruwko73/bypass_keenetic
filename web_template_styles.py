@@ -717,6 +717,10 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .status-dashboard-column{min-height:auto;}
             .status-dashboard-with-pool .status-dashboard-column{display:grid;grid-template-rows:auto auto;gap:8px;align-content:start;align-items:start;}
             .status-dashboard-with-pool .router-health-card,.status-dashboard-with-pool .key-pool-card{height:auto;}
+            .status-dashboard-with-pool{align-items:stretch;}
+            .status-dashboard-with-pool .status-dashboard-column-primary{grid-template-rows:auto minmax(0,1fr);align-content:stretch;align-items:stretch;height:100%;}
+            .status-dashboard-with-pool .status-dashboard-column-primary .quick-start-card{align-self:start;}
+            .status-dashboard-with-pool .status-dashboard-column-primary .router-health-card{height:100%;align-self:stretch;}
             .status-card{overflow:visible;}
             .router-health-card .status-copy{display:block;}
             .router-health-card #router-health-note{max-height:none;overflow:visible;padding-right:0;}
@@ -748,6 +752,22 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .custom-check-card{min-height:auto;}
             .list-workspace .workspace-head{align-items:center;margin-bottom:6px;}
             .list-workspace h2.inline-page-title{margin-bottom:3px;}
+            html.command-running,
+            html.command-running body{height:auto;min-height:100%;overflow:auto;}
+            html.command-running body{min-height:100vh;}
+            html.command-running .app-shell{height:auto;min-height:calc(100vh - 16px);}
+            html.command-running .workspace-layout{flex:none;align-items:start;}
+            html.command-running .app-main,
+            html.command-running .app-view.active{height:auto;min-height:0;overflow:visible;}
+            html.command-running .app-view[data-view="status"].active,
+            html.command-running .app-view[data-view="keys"].active,
+            html.command-running .app-view[data-view="lists"].active{grid-template-rows:auto auto auto;align-content:start;overflow:visible;}
+            html.command-running .status-dashboard,
+            html.command-running .protocol-panels,
+            html.command-running .list-panels,
+            html.command-running .protocol-workspace.active,
+            html.command-running .list-workspace.active,
+            html.command-running .protocol-subview.active{height:auto;max-height:none;overflow:visible;}
         }
         @media (min-width: 1024px){
             .topbar-actions{grid-template-columns:max-content minmax(300px,1fr) max-content max-content;justify-content:stretch;width:100%;gap:8px;}
