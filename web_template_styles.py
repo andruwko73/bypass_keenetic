@@ -708,6 +708,62 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .status-overview-head{grid-template-columns:minmax(0,1fr) minmax(260px,.7fr);}
             .status-dashboard{gap:8px;}
         }
+        @media (min-width: 761px){
+            .topbar{z-index:520;isolation:isolate;}
+            .workspace-layout{position:relative;z-index:1;}
+            .app-main{position:relative;z-index:1;}
+            .app-view[data-view="status"].active{grid-template-rows:auto auto auto auto;align-content:start;gap:6px;overflow:hidden;}
+            .status-dashboard{overflow:visible;align-items:start;margin-bottom:0;}
+            .status-dashboard-column{min-height:auto;}
+            .status-dashboard-with-pool .status-dashboard-column{display:grid;grid-template-rows:auto auto;gap:8px;align-content:start;align-items:start;}
+            .status-dashboard-with-pool .router-health-card,.status-dashboard-with-pool .key-pool-card{height:auto;}
+            .status-card{overflow:visible;}
+            .router-health-card .status-copy{display:block;}
+            .router-health-card #router-health-note{max-height:none;overflow:visible;padding-right:0;}
+            .router-health-actions{margin-top:8px;}
+            .key-pool-card .status-note{max-height:none;overflow:visible;}
+            .overview-service-grid{margin-top:0;margin-bottom:0;}
+            .service-panel,.overview-key-panel{padding:8px 10px;}
+            .service-panel h3{margin-bottom:6px;}
+            .service-command-grid{gap:6px 8px;}
+            .overview-key-panel{margin-top:0;overflow:hidden;}
+            .app-view[data-view="keys"].active,.app-view[data-view="lists"].active{grid-template-rows:auto auto minmax(0,1fr);align-content:start;overflow:hidden;}
+            .protocol-panels,.list-panels{min-height:0;overflow:hidden;}
+            .protocol-workspace.active{min-height:0;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="key"].active),
+            .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active){height:auto;display:grid;grid-template-rows:auto auto auto;align-self:start;overflow:visible;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="key"].active) .protocol-subview.active,
+            .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active) .protocol-subview.active{min-height:0;overflow:visible;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active){height:100%;overflow:hidden;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active) .protocol-subview-check.active{display:block;min-height:0;max-height:100%;overflow:auto;padding-right:4px;}
+            .protocol-subview-check.active > * + *{margin-top:8px;}
+            .key-editor-form textarea[data-key-textarea]{height:clamp(118px,24vh,188px);min-height:118px;max-height:188px;resize:vertical;}
+            .protocol-subview-import.active{align-self:start;overflow:visible;}
+            .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:auto;align-self:start;}
+            .custom-check-card{min-height:auto;}
+            .list-workspace .workspace-head{align-items:center;margin-bottom:6px;}
+            .list-workspace h2.inline-page-title{margin-bottom:3px;}
+        }
+        @media (min-width: 1024px){
+            .topbar-actions{grid-template-columns:minmax(520px,700px) minmax(360px,520px) minmax(136px,180px) minmax(112px,150px);justify-content:start;width:auto;}
+            .app-caption{max-width:700px;}
+            .api-pill{justify-self:start;min-height:var(--control-height);max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+            .status-overview-head{grid-template-columns:minmax(420px,.44fr) minmax(320px,.56fr);}
+            .status-overview-head .section-subtitle{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+            .command-grid.service-command-grid{grid-template-columns:repeat(4,minmax(0,1fr));}
+            .service-command-grid .app-mode-control,.service-command-grid form{min-width:0;}
+        }
+        @media (min-width: 761px) and (max-width: 1023px){
+            .app-view[data-view="status"].active{overflow:auto;padding-right:2px;}
+            .status-dashboard-with-pool{grid-template-columns:1fr;}
+            .status-dashboard-column{min-height:auto;}
+            .status-dashboard-with-pool .status-dashboard-column{min-height:auto;grid-template-rows:auto auto;}
+            .status-dashboard-column-secondary{display:grid;min-height:auto;grid-template-rows:auto auto;gap:8px;}
+            .status-dashboard{position:relative;z-index:3;}
+            .active-mode-card{z-index:12;}
+            .active-mode-control{z-index:14;}
+            .overview-service-grid,.overview-key-panel{position:relative;z-index:1;}
+        }
         .mobile-nav{display:none;}
         .confirm-backdrop{position:fixed;inset:0;z-index:420;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(2,6,23,.72);}
         .confirm-backdrop.hidden{display:none;}

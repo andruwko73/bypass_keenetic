@@ -1,3 +1,6 @@
+*v1.696 (08 Jun 2026) -* main
+*Fixes the desktop web layout after the event-history refactor: status cards no longer overlap service commands, service actions are denser on wide screens, key and subscription tabs size to their content, the check tab scrolls internally, and bypass-list headings stay on one line.*
+
 *v1.695 (08 Jun 2026) -* main
 *Refines the web dashboard layout: event history opens from the router card, page and protocol headings stay on one line, and desktop Status, Keys, and Lists views fit within the viewport with internal scrolling for dense content.*
 

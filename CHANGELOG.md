@@ -1,3 +1,13 @@
+<a name="1.696"></a>
+# [1.696] - 08 Jun 2026
+
+- Fixes desktop status layout so router and key-pool cards keep their full height and service commands no longer overlap them.
+- Moves the top Telegram API status closer to the title area and keeps the status subtitle on one line on desktop.
+- Makes wide desktop service commands use a denser grid, reducing the gap before the quick key block.
+- Lets Key and Subscription subtabs size to their content while the Check subtab uses internal scrolling for dense service controls.
+- Renders bypass list headings as `Список обхода · <протокол>` on one line.
+- Fixes the UI smoke failure where compact desktop service blocks intercepted the active-mode button click.
+
 <a name="1.695"></a>
 # [1.695] - 08 Jun 2026
 

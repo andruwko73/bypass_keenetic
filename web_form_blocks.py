@@ -286,14 +286,12 @@ def render_unblock_lists(
         if show_line_count:
             line_count = len([line for line in content.splitlines() if line.strip()])
             header_html = f'''<div>
-                <span class="eyebrow">Список обхода</span>
-                <h2>{safe_label}</h2>
+                <h2 class="inline-page-title"><span class="title-kicker">Список обхода</span><span>{safe_label}</span></h2>
                 <p class="section-subtitle">Записей: {line_count}. Файл: <span class="file-chip">{safe_name}</span></p>
             </div>'''
         else:
             header_html = f'''<div>
-            <span class="eyebrow">Список обхода</span>
-                <h2>{safe_label}</h2>
+                <h2 class="inline-page-title"><span class="title-kicker">Список обхода</span><span>{safe_label}</span></h2>
             </div>
             <span class="file-chip">{safe_name}</span>'''
         panels.append(f'''<section class="list-workspace{active_class}" data-list-panel="{safe_name}">
