@@ -255,6 +255,16 @@ def render_web_form(
             custom_checks = []
     except Exception:
         custom_checks = []
+    event_history_drawer_html = f'''
+        <div id="event-history-modal" class="event-history-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="event-history-title">
+            <aside class="event-history-drawer">
+                <div class="event-history-drawer-head">
+                    <h2 id="event-history-title">История событий</h2>
+                    <button type="button" class="secondary-button event-history-close" data-event-history-close aria-label="Закрыть историю событий">Закрыть</button>
+                </div>
+                {event_history_html}
+            </aside>
+        </div>''' if event_history_html else ''
     app_config_json = _script_json({
         'csrfToken': csrf_token,
         'customChecks': custom_checks,
@@ -359,6 +369,9 @@ def render_web_form(
                                         <p class="status-note" id="router-core-proxy-note">{router_core_proxy_note}</p>
                                     </div>
                                 </div>
+                                <div class="status-card-actions router-health-actions">
+                                    <button type="button" class="outline-button" data-event-history-open>История событий</button>
+                                </div>
                             </div>
                         </div>
                         {secondary_status_column}
@@ -378,12 +391,10 @@ def render_web_form(
                             </div>
                         </section>
                     </div>
-                    {event_history_html}
                     <section class="panel overview-key-panel">
                         <div class="workspace-head">
                             <div>
-                                <span class="eyebrow">Ключ текущего режима</span>
-                                <h2>{html.escape(quick_key_label)}</h2>
+                                <h2 class="inline-page-title"><span class="title-kicker">Ключ текущего режима</span><span>{html.escape(quick_key_label)}</span></h2>
                                 <p class="section-subtitle">{quick_key_note}</p>
                             </div>
                         </div>
@@ -402,8 +413,7 @@ def render_web_form(
 
                 <section class="app-view" data-view="keys">
                     <div class="view-head">
-                        <span class="eyebrow">Ключи</span>
-                        <h2>Подключения по протоколам</h2>
+                        <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>Подключения по протоколам</span></h2>
                         <p class="section-subtitle">{keys_view_subtitle}</p>
                     </div>
                     <div class="segmented protocol-tabs">{protocol_tabs_html}</div>
@@ -412,8 +422,7 @@ def render_web_form(
 
                 <section class="app-view" data-view="lists">
                     <div class="view-head">
-                        <span class="eyebrow">Маршрутизация</span>
-                        <h2>Списки обхода</h2>
+                        <h2 class="inline-page-title"><span class="title-kicker">Маршрутизация</span><span>Списки обхода</span></h2>
                         <p class="section-subtitle">Домены из выбранного списка будут отправляться через соответствующий протокол.</p>
                     </div>
                     <div class="segmented list-tabs">{unblock_tabs_html}</div>
@@ -445,6 +454,7 @@ def render_web_form(
                 </div>
             </div>
         </div>
+        {event_history_drawer_html}
     </div>
 </body>
 </html>'''

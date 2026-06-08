@@ -1,3 +1,10 @@
+<a name="1.695"></a>
+# [1.695] - 08 Jun 2026
+
+- Moves event history out of the Status page flow into a drawer opened from the router card.
+- Keeps the main page, protocol, and list headings on one line with consistent sizing across Status, Keys, and Lists.
+- Constrains desktop Status, Keys, and Lists views to the viewport while allowing dense tables, route lists, and event history to scroll inside their own areas.
+
 <a name="1.694"></a>
 # [1.694] - 06 Jun 2026
 

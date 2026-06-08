@@ -1,3 +1,6 @@
+*v1.695 (08 Jun 2026) -* main
+*Refines the web dashboard layout: event history opens from the router card, page and protocol headings stay on one line, and desktop Status, Keys, and Lists views fit within the viewport with internal scrolling for dense content.*
+
 *v1.694 (06 Jun 2026) -* main
 *Adds a rollback script for regular GitHub updates and backs up installer/service files so the previous runtime can be restored after an update.*
 

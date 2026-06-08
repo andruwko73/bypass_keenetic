@@ -139,8 +139,7 @@ def render_lazy_protocol_panel_placeholder(key_name, title, *, active=False):
     safe_title = html.escape(title)
     return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}" data-protocol-panel-lazy="1" data-protocol-loaded="0">
         <div class="protocol-lazy-placeholder" data-protocol-loading="{safe_key_name}">
-            <span class="eyebrow">Ключи</span>
-            <h2>{safe_title}</h2>
+            <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
             <p class="section-subtitle">Загрузка данных вкладки...</p>
         </div>
     </section>'''
@@ -323,8 +322,7 @@ def render_protocol_panel(
     return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
         <div class="workspace-head">
             <div>
-                <span class="eyebrow">Ключи</span>
-                <h2>{safe_title}</h2>
+                <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
                 <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
             </div>
             <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons>{active_status_icons}</span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>

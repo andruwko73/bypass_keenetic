@@ -1863,6 +1863,39 @@ def render_web_scripts(
             }});
         }}
 
+        function setupEventHistoryPanel() {{
+            const modal = document.getElementById('event-history-modal');
+            const openButtons = document.querySelectorAll('[data-event-history-open]');
+            if (!modal || !openButtons.length) {{
+                return;
+            }}
+            const closeButtons = modal.querySelectorAll('[data-event-history-close]');
+            function openPanel() {{
+                modal.classList.remove('hidden');
+                document.body.classList.add('event-history-open');
+            }}
+            function closePanel() {{
+                modal.classList.add('hidden');
+                document.body.classList.remove('event-history-open');
+            }}
+            openButtons.forEach(function(button) {{
+                button.addEventListener('click', openPanel);
+            }});
+            closeButtons.forEach(function(button) {{
+                button.addEventListener('click', closePanel);
+            }});
+            modal.addEventListener('click', function(event) {{
+                if (event.target === modal) {{
+                    closePanel();
+                }}
+            }});
+            document.addEventListener('keydown', function(event) {{
+                if (event.key === 'Escape' && !modal.classList.contains('hidden')) {{
+                    closePanel();
+                }}
+            }});
+        }}
+
         function closeServiceRouteMenus(exceptMenu) {{
             document.querySelectorAll('.service-route-menu[open]').forEach(function(menu) {{
                 if (menu !== exceptMenu) {{
@@ -2144,6 +2177,7 @@ def render_web_scripts(
             setupProtocolSubtabs();
             setupPoolControls();
             setupServiceRouteMenus();
+            setupEventHistoryPanel();
             setupLiquidPointer();
             setupAsyncForms();
             const actionBlock = document.getElementById('web-action-message');
