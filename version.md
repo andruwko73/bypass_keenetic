@@ -1,3 +1,6 @@
+*v1.697 (08 Jun 2026) -* main
+*Tightens desktop web spacing in the status header, service area, and quick-key block; compacts the key check status row; and renames the Meta service shortcut to Instagram / Facebook.*
+
 *v1.696 (08 Jun 2026) -* main
 *Fixes the desktop web layout after the event-history refactor: status cards no longer overlap service commands, service actions are denser on wide screens, key and subscription tabs size to their content, the check tab scrolls internally, and bypass-list headings stay on one line.*
 

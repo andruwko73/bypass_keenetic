@@ -1,3 +1,11 @@
+<a name="1.697"></a>
+# [1.697] - 08 Jun 2026
+
+- Tightens wide desktop spacing between the header title, Telegram API status, theme switcher, version badge, and status attention block.
+- Lets the Status quick-key panel fill the remaining desktop viewport instead of leaving unused space below it.
+- Compacts the Key Check state card into a single row on desktop.
+- Renames the Meta route shortcut label to `Instagram / Facebook`.
+
 <a name="1.696"></a>
 # [1.696] - 08 Jun 2026
 

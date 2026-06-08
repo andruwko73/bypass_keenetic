@@ -524,7 +524,7 @@ CUSTOM_CHECK_PRESETS = [
     },
     {
         'id': 'meta',
-        'label': 'Meta AI / Instagram / Facebook',
+        'label': 'Instagram / Facebook',
         'url': 'https://www.meta.ai',
         'urls': [
             'https://www.meta.ai',
@@ -755,7 +755,7 @@ SERVICE_LIST_SOURCES = {
         'entries': TELEGRAM_UNBLOCK_ENTRIES,
     },
     'meta': {
-        'label': 'Meta AI / Instagram / Facebook',
+        'label': 'Instagram / Facebook',
         'aliases': [
             'meta', 'meta ai', 'meta_ai', 'metaai', 'instagram', 'insta',
             'facebook', 'fb', 'whatsapp', 'threads', 'инстаграм',

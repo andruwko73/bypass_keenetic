@@ -2746,7 +2746,7 @@ def test_custom_check_service_sources_are_synced():
     assert service_catalog.SERVICE_LIST_SOURCES['deepseek']['entries'] == service_catalog.DEEPSEEK_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['telegram']['entries'] == service_catalog.TELEGRAM_UNBLOCK_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['meta']['entries'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
-    assert service_catalog.SERVICE_LIST_SOURCES['meta']['label'] == 'Meta AI / Instagram / Facebook'
+    assert service_catalog.SERVICE_LIST_SOURCES['meta']['label'] == 'Instagram / Facebook'
     assert 'telegram' in button_keys
     assert 'meta' in button_keys
     assert {'meta_ai', 'instagram', 'facebook'}.isdisjoint(button_keys)
@@ -2831,7 +2831,7 @@ def test_meta_custom_check_migration():
         {'id': 'meta_ai', 'label': 'Meta AI', 'url': 'https://www.meta.ai'},
     ])
     assert [item['id'] for item in checks] == ['meta']
-    assert checks[0]['label'] == 'Meta AI / Instagram / Facebook'
+    assert checks[0]['label'] == 'Instagram / Facebook'
     assert checks[0]['routes'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
 
 
