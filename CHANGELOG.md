@@ -1,3 +1,8 @@
+<a name="1.699"></a>
+# [1.699] - 09 Jun 2026
+
+- Refreshes YouTube and Googlevideo route ipsets with a short priority cooldown when DNS drift is detected, avoiding stale transparent routes while the selected key itself still checks as working.
+
 <a name="1.698"></a>
 # [1.698] - 08 Jun 2026
 

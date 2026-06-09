@@ -1,3 +1,6 @@
+*v1.699 (09 Jun 2026) -* main
+*Refreshes YouTube/Googlevideo route ipsets with a short priority cooldown when DNS drift is detected, so a working key does not appear broken while transparent routes are stale.*
+
 *v1.698 (08 Jun 2026) -* main
 *Allows the desktop web interface to scroll while an update or rollback command is running, and stretches the router card to remove the visual gap before service commands.*
 

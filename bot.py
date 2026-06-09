@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.698, последнее изменение: 08.06.2026
+#  Файл: bot.py, Версия v1.699, последнее изменение: 09.06.2026
 
 import subprocess
 import os
@@ -1349,6 +1349,10 @@ UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS = max(
     300,
     int(getattr(config, 'udp_quic_drift_refresh_cooldown_seconds', 900)),
 )
+UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS = min(
+    UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS,
+    max(60, int(getattr(config, 'udp_quic_drift_priority_refresh_cooldown_seconds', 120))),
+)
 UDP_QUIC_DRIFT_SENTINEL_DOMAINS = tuple(getattr(config, 'udp_quic_drift_sentinel_domains', (
     'chatgpt.com',
     'api.openai.com',
@@ -1358,6 +1362,10 @@ UDP_QUIC_DRIFT_SENTINEL_DOMAINS = tuple(getattr(config, 'udp_quic_drift_sentinel
     'challenges.cloudflare.com',
     'claude.ai',
     'discord.com',
+    'youtube.com',
+    'googlevideo.com',
+)))
+UDP_QUIC_DRIFT_PRIORITY_DOMAINS = tuple(getattr(config, 'udp_quic_drift_priority_domains', (
     'youtube.com',
     'googlevideo.com',
 )))
@@ -2007,20 +2015,47 @@ def _udp_quic_route_drift_findings():
     return findings
 
 
+def _udp_quic_drift_priority_findings(findings):
+    priority_domains = [
+        _normalize_route_domain_entry(domain)
+        for domain in UDP_QUIC_DRIFT_PRIORITY_DOMAINS
+    ]
+    priority_domains = [domain for domain in priority_domains if domain]
+    if not priority_domains:
+        return []
+    priority = []
+    for item in findings or []:
+        domain = _normalize_route_domain_entry(item.get('domain') if isinstance(item, dict) else '')
+        if domain and any(_route_domain_matches(domain, priority_domain) for priority_domain in priority_domains):
+            priority.append(item)
+    return priority
+
+
+def _udp_quic_drift_refresh_cooldown(findings):
+    if _udp_quic_drift_priority_findings(findings):
+        return UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS
+    return UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS
+
+
 def _refresh_ipset_for_udp_quic_drift(findings):
     now = time.time()
-    if now - float(udp_quic_drift_state.get('last_refresh') or 0.0) < UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS:
+    priority_findings = _udp_quic_drift_priority_findings(findings)
+    cooldown = _udp_quic_drift_refresh_cooldown(findings)
+    if now - float(udp_quic_drift_state.get('last_refresh') or 0.0) < cooldown:
         if now - float(udp_quic_drift_state.get('last_log') or 0.0) >= 300:
             udp_quic_drift_state['last_log'] = now
-            _write_runtime_log('UDP/QUIC drift detected, refresh skipped by cooldown.')
+            label = 'priority ' if priority_findings else ''
+            _write_runtime_log(f'UDP/QUIC {label}drift detected, refresh skipped by cooldown.')
         return
     udp_quic_drift_state['last_refresh'] = now
+    sample_findings = priority_findings or findings
     sample = ', '.join(
         f"{item['proto']}:{item['domain']}:{item['address']}:"
         f"{'tcp' if item['main'] else 'no-tcp'}/{'udp' if item['udp'] else 'no-udp'}"
-        for item in findings[:4]
+        for item in sample_findings[:4]
     )
-    _write_runtime_log(f'UDP/QUIC drift detected; refreshing ipset. {sample}')
+    label = 'priority ' if priority_findings else ''
+    _write_runtime_log(f'UDP/QUIC {label}drift detected; refreshing ipset. {sample}')
     try:
         result = subprocess.run(
             ['/opt/bin/unblock_ipset.sh'],

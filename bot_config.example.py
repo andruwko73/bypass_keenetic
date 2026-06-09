@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.698
+# ВЕРСИЯ СКРИПТА v1.699
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -37,6 +37,7 @@ udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service d
 udp_quic_block_vless_enabled = True  # auto-disabled when this route contains YouTube entries
 udp_quic_block_vless2_enabled = True  # auto-disabled when this route contains YouTube entries
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
+udp_quic_drift_priority_refresh_cooldown_seconds = 120  # refresh YouTube/Googlevideo ipset drift faster than low-priority service drift
 ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси
 reality_endpoint_overrides = {}  # необязательно: {'server.example.com': '203.0.113.10'} для Reality-доменов с нестабильным DNS-бэкендом
 reality_endpoint_repair_enabled = True  # перед сменой Reality-ключа бот пробует рабочие endpoint'ы текущего ключа

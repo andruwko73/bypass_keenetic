@@ -966,6 +966,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'authenticated=False' in source
     assert 'def _start_udp_quic_drift_watchdog_thread' in source
     assert 'UDP_QUIC_DRIFT_SENTINEL_DOMAINS' in source
+    assert 'UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS' in source
+    assert 'UDP_QUIC_DRIFT_PRIORITY_DOMAINS' in source
+    assert 'def _udp_quic_drift_priority_findings' in source
+    assert 'def _udp_quic_drift_refresh_cooldown' in source
     assert "subprocess.run(\n            ['/opt/bin/unblock_ipset.sh']" in source
     assert 'memory_watchdog_high_rss_since' in source
     assert 'memory_watchdog_idle_restart_pending' in source
