@@ -725,6 +725,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in example
     assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in installer
     assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in bootstrap
+    assert 'ipset_refresh_command_timeout_seconds = 420' in example
+    assert 'ipset_refresh_command_timeout_seconds = 420' in installer
+    assert 'ipset_refresh_command_timeout_seconds = 420' in bootstrap
     assert 'udp_quic_block_shadowsocks_enabled = True' in example
     assert 'udp_quic_block_shadowsocks_enabled = True' in installer
     assert 'udp_quic_block_shadowsocks_enabled = True' in bootstrap
@@ -829,10 +832,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"' in ipset_script
+    assert 'PARALLEL_JOBS="${PARALLEL_JOBS:-8}"' in ipset_script
     assert 'lock_pid_is_active()' in ipset_script
     assert 'Removed stale unblock_ipset lock' in ipset_script
     assert 'printf \'%s\\n\' "$$" > "$LOCK_DIR/pid"' in ipset_script
     assert 'rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started_at"' in ipset_script
+    assert 'mkdir -p "$tmp_dir" || {\n\trm -f "$LOCK_DIR/pid" "$LOCK_DIR/started_at"' in ipset_script
     assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
     assert 'DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"' in ipset_script
     assert 'for set_name in $SET_NAMES $EXTRA_SET_NAMES; do' in ipset_script
@@ -975,8 +980,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'UDP_QUIC_DRIFT_PRIORITY_DOMAINS' in source
     assert 'def _udp_quic_drift_priority_findings' in source
     assert 'def _udp_quic_drift_refresh_cooldown' in source
+    assert 'def _udp_quic_drift_refresh_deferred_for_stream' in source
+    assert "getattr(config, 'ipset_refresh_command_timeout_seconds', 420)" in source
+    assert 'timeout=IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS' in source
     assert "subprocess.run(\n            ['/opt/bin/unblock_ipset.sh']" in source
     assert 'stdout=subprocess.PIPE' in source
+    assert "'UDP/QUIC drift refresh'" in source
     assert 'UDP/QUIC drift refresh skipped: unblock_ipset is already running.' in source
     assert 'memory_watchdog_high_rss_since' in source
     assert 'memory_watchdog_idle_restart_pending' in source

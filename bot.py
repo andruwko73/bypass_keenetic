@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.701, последнее изменение: 11.06.2026
+#  Файл: bot.py, Версия v1.702, последнее изменение: 11.06.2026
 
 import subprocess
 import os
@@ -876,7 +876,7 @@ def _refresh_ipset_after_youtube_recovery(route_proto, reason=''):
             ['/opt/bin/unblock_update.sh'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=180,
+            timeout=IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS,
             check=False,
         )
         if result.returncode == 0:
@@ -1352,6 +1352,10 @@ UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS = max(
 UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS = min(
     UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS,
     max(60, int(getattr(config, 'udp_quic_drift_priority_refresh_cooldown_seconds', 120))),
+)
+IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS = max(
+    240,
+    int(getattr(config, 'ipset_refresh_command_timeout_seconds', 420)),
 )
 UDP_QUIC_DRIFT_SENTINEL_DOMAINS = tuple(getattr(config, 'udp_quic_drift_sentinel_domains', (
     'chatgpt.com',
@@ -2037,6 +2041,14 @@ def _udp_quic_drift_refresh_cooldown(findings):
     return UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS
 
 
+def _udp_quic_drift_refresh_deferred_for_stream():
+    return _vless_traffic_guard_active(
+        'UDP/QUIC drift refresh',
+        log=True,
+        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+    )
+
+
 def _refresh_ipset_for_udp_quic_drift(findings):
     now = time.time()
     priority_findings = _udp_quic_drift_priority_findings(findings)
@@ -2046,6 +2058,9 @@ def _refresh_ipset_for_udp_quic_drift(findings):
             udp_quic_drift_state['last_log'] = now
             label = 'priority ' if priority_findings else ''
             _write_runtime_log(f'UDP/QUIC {label}drift detected, refresh skipped by cooldown.')
+        return
+    if _udp_quic_drift_refresh_deferred_for_stream():
+        udp_quic_drift_state['last_log'] = now
         return
     udp_quic_drift_state['last_refresh'] = now
     sample_findings = priority_findings or findings
@@ -2062,7 +2077,7 @@ def _refresh_ipset_for_udp_quic_drift(findings):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=180,
+            timeout=IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS,
             check=False,
         )
         output = (result.stdout or '').strip()

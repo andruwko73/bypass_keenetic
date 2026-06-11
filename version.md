@@ -1,3 +1,6 @@
+*v1.702 (11 Jun 2026) -* main
+*Reduces ipset refresh pressure during YouTube playback, defers watchdog route rebuilds while Vless/Vless2 stream traffic is active, and gives refresh commands enough time to finish cleanly.*
+
 *v1.701 (11 Jun 2026) -* main
 *Fixes the ipset lock cleanup introduced in v1.700 and recovers interrupted refresh locks after 15 minutes instead of one hour.*
 

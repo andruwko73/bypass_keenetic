@@ -1,3 +1,10 @@
+<a name="1.702"></a>
+# [1.702] - 11 Jun 2026
+
+- Reduces the default `unblock_ipset.sh` DNS parallelism so scheduled ipset refreshes put less pressure on the router while YouTube is playing.
+- Defers UDP/QUIC drift-triggered ipset refreshes while active Vless/Vless2 stream traffic is visible, avoiding extra route rebuilds during playback.
+- Gives ipset refresh commands a longer timeout and cleans lock metadata on early temp-directory failures.
+
 <a name="1.701"></a>
 # [1.701] - 11 Jun 2026
 

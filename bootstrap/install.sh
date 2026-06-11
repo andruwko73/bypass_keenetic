@@ -553,6 +553,7 @@ udp_quic_block_vmess_enabled = True
 udp_quic_block_vless_enabled = True
 udp_quic_block_vless2_enabled = True
 udp_quic_block_trojan_enabled = True
+ipset_refresh_command_timeout_seconds = 420
 ipv6_bypass_fallback_enabled = True
 reality_endpoint_overrides = {}
 reality_endpoint_repair_enabled = True

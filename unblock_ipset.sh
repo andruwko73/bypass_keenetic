@@ -3,7 +3,7 @@
 DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
 DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"
-PARALLEL_JOBS="${PARALLEL_JOBS:-20}"
+PARALLEL_JOBS="${PARALLEL_JOBS:-8}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
@@ -66,7 +66,11 @@ date +%s > "$LOCK_DIR/started_at" 2>/dev/null || true
 
 start_ts="$(date +%s 2>/dev/null || echo 0)"
 tmp_dir="$(mktemp -d /tmp/unblock-ipset.XXXXXX 2>/dev/null || echo "/tmp/unblock-ipset.$$")"
-mkdir -p "$tmp_dir" || { rmdir "$LOCK_DIR" >/dev/null 2>&1 || true; exit 1; }
+mkdir -p "$tmp_dir" || {
+	rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started_at" >/dev/null 2>&1 || true
+	rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
+	exit 1
+}
 restore_file="$tmp_dir/restore"
 sorted_restore_file="$tmp_dir/restore.sorted"
 temp_sets_file="$tmp_dir/temp_sets"
