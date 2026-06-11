@@ -1,3 +1,9 @@
+<a name="1.701"></a>
+# [1.701] - 11 Jun 2026
+
+- Fixes `unblock_ipset.sh` cleanup so the lock directory is removed after a successful refresh even when PID metadata files were written.
+- Reduces stale ipset lock recovery to 15 minutes, matching the cron refresh interval.
+
 <a name="1.700"></a>
 # [1.700] - 11 Jun 2026
 

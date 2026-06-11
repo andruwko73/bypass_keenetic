@@ -828,10 +828,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert "print(f'BYPASS_UDP_QUIC_BLOCK_{env_name}={1 if enabled else 0}')" in script
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
-    assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-3600}"' in ipset_script
+    assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"' in ipset_script
     assert 'lock_pid_is_active()' in ipset_script
     assert 'Removed stale unblock_ipset lock' in ipset_script
     assert 'printf \'%s\\n\' "$$" > "$LOCK_DIR/pid"' in ipset_script
+    assert 'rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started_at"' in ipset_script
     assert 'STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"' in ipset_script
     assert 'DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"' in ipset_script
     assert 'for set_name in $SET_NAMES $EXTRA_SET_NAMES; do' in ipset_script

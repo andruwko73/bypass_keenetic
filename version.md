@@ -1,3 +1,6 @@
+*v1.701 (11 Jun 2026) -* main
+*Fixes the ipset lock cleanup introduced in v1.700 and recovers interrupted refresh locks after 15 minutes instead of one hour.*
+
 *v1.700 (11 Jun 2026) -* main
 *Recovers stale ipset refresh locks automatically and logs skipped refresh attempts accurately, so scheduled ipset updates cannot stay blocked silently.*
 

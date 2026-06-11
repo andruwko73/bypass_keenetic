@@ -7,7 +7,7 @@ PARALLEL_JOBS="${PARALLEL_JOBS:-20}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
-LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-3600}"
+LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_VIDEO_PRELOAD_ENABLED="${YOUTUBE_VIDEO_PRELOAD_ENABLED:-1}"
 YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"
@@ -80,6 +80,7 @@ cleanup() {
 		done < "$temp_sets_file"
 	fi
 	rm -rf "$tmp_dir"
+	rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started_at" >/dev/null 2>&1 || true
 	rmdir "$LOCK_DIR" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
