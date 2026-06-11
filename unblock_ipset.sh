@@ -7,6 +7,7 @@ PARALLEL_JOBS="${PARALLEL_JOBS:-20}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
+LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-3600}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_VIDEO_PRELOAD_ENABLED="${YOUTUBE_VIDEO_PRELOAD_ENABLED:-1}"
 YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"
@@ -24,10 +25,44 @@ UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.tx
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
 
+lock_pid_is_active() {
+	pid_file="$LOCK_DIR/pid"
+	[ -s "$pid_file" ] || return 1
+	pid="$(sed -n '1p' "$pid_file" 2>/dev/null | tr -cd '0-9')"
+	[ -n "$pid" ] || return 1
+	kill -0 "$pid" 2>/dev/null
+}
+
+lock_age_seconds() {
+	now="$(date +%s 2>/dev/null || echo 0)"
+	mtime="$(stat -c %Y "$LOCK_DIR" 2>/dev/null || echo 0)"
+	case "$now:$mtime" in
+		*[!0-9:]*|0:*|*:0) printf '%s\n' 0; return ;;
+	esac
+	if [ "$now" -gt "$mtime" ] 2>/dev/null; then
+		printf '%s\n' "$((now - mtime))"
+	else
+		printf '%s\n' 0
+	fi
+}
+
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-	echo "unblock_ipset is already running."
-	exit 0
+	lock_age="$(lock_age_seconds)"
+	if [ "$lock_age" -ge "$LOCK_STALE_SECONDS" ] 2>/dev/null && ! lock_pid_is_active; then
+		rm -rf "$LOCK_DIR" >/dev/null 2>&1 || true
+		if mkdir "$LOCK_DIR" 2>/dev/null; then
+			echo "Removed stale unblock_ipset lock (${lock_age}s old)."
+		else
+			echo "unblock_ipset is already running."
+			exit 0
+		fi
+	else
+		echo "unblock_ipset is already running."
+		exit 0
+	fi
 fi
+printf '%s\n' "$$" > "$LOCK_DIR/pid" 2>/dev/null || true
+date +%s > "$LOCK_DIR/started_at" 2>/dev/null || true
 
 start_ts="$(date +%s 2>/dev/null || echo 0)"
 tmp_dir="$(mktemp -d /tmp/unblock-ipset.XXXXXX 2>/dev/null || echo "/tmp/unblock-ipset.$$")"

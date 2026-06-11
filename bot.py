@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.699, последнее изменение: 09.06.2026
+#  Файл: bot.py, Версия v1.700, последнее изменение: 11.06.2026
 
 import subprocess
 import os
@@ -2059,13 +2059,19 @@ def _refresh_ipset_for_udp_quic_drift(findings):
     try:
         result = subprocess.run(
             ['/opt/bin/unblock_ipset.sh'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             timeout=180,
             check=False,
         )
+        output = (result.stdout or '').strip()
         if result.returncode == 0:
-            _write_runtime_log('UDP/QUIC drift refresh completed.')
+            if 'already running' in output:
+                _write_runtime_log('UDP/QUIC drift refresh skipped: unblock_ipset is already running.')
+            else:
+                suffix = f' {output}' if output else ''
+                _write_runtime_log(f'UDP/QUIC drift refresh completed.{suffix}')
         else:
             _write_runtime_log(f'UDP/QUIC drift refresh failed with code {result.returncode}.')
     except Exception as exc:

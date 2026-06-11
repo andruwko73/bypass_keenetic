@@ -1,3 +1,9 @@
+<a name="1.700"></a>
+# [1.700] - 11 Jun 2026
+
+- Recovers stale `unblock_ipset.sh` locks automatically when no recorded process is alive, allowing cron and watchdog refreshes to resume after an interrupted run.
+- Logs UDP/QUIC drift refresh attempts as skipped when `unblock_ipset.sh` reports an active lock instead of reporting a false successful refresh.
+
 <a name="1.699"></a>
 # [1.699] - 09 Jun 2026
 

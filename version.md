@@ -1,3 +1,6 @@
+*v1.700 (11 Jun 2026) -* main
+*Recovers stale ipset refresh locks automatically and logs skipped refresh attempts accurately, so scheduled ipset updates cannot stay blocked silently.*
+
 *v1.699 (09 Jun 2026) -* main
 *Refreshes YouTube/Googlevideo route ipsets with a short priority cooldown when DNS drift is detected, so a working key does not appear broken while transparent routes are stale.*
 
