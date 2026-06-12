@@ -1,3 +1,6 @@
+*v1.705 (12 Jun 2026) -* main
+*Left-aligns key names in the mobile key-pool table so short pool labels read like a list again.*
+
 *v1.704 (12 Jun 2026) -* main
 *Keeps pool checks resumable without storing raw keys, continues cautiously in low-memory slow mode, limits heavy YouTube throughput samples, and only shows `Стабильно` / `Быстро` after a real speed sample.*
 
