@@ -181,7 +181,19 @@ def failover_candidates(
         probe = key_probe_cache.get(hash_key(key_value), {})
         if not isinstance(probe, dict):
             return (2, 0)
-        if probe.get(service_field) is True:
+        if service == 'youtube':
+            try:
+                score = int(probe.get('yt_score'))
+            except Exception:
+                score = None
+            if score is None:
+                if probe.get(service_field) is True:
+                    score = 60
+                elif service_field in probe and probe.get(service_field) is False:
+                    score = 0
+                else:
+                    score = 30
+        elif probe.get(service_field) is True:
             score = 3
         elif service_field in probe and probe.get(service_field) is False:
             score = 1

@@ -55,6 +55,66 @@ def _probe_state(probe, probe_key):
     return 'ok' if probe.get(probe_key) else 'fail'
 
 
+def _probe_int(probe, key, default=0):
+    try:
+        return int((probe or {}).get(key) or default)
+    except Exception:
+        return int(default)
+
+
+def _probe_float(probe, key, default=0.0):
+    try:
+        return float((probe or {}).get(key) or default)
+    except Exception:
+        return float(default)
+
+
+def _quality_class(probe):
+    quality = str((probe or {}).get('yt_quality') or '').strip().lower()
+    return quality if quality in ('stable', 'fast') else ''
+
+
+def _quality_label(probe):
+    quality = _quality_class(probe)
+    if quality == 'fast':
+        return 'Быстро'
+    if quality == 'stable':
+        return 'Стабильно'
+    return ''
+
+
+def _quality_summary(probe, checked_at=''):
+    if not isinstance(probe, dict):
+        return 'Качество еще не измерено'
+    parts = []
+    label = _quality_label(probe)
+    if label:
+        parts.append(f'YouTube: {label}')
+    score = _probe_int(probe, 'yt_score', 0)
+    if score:
+        parts.append(f'score {score}/100')
+    stream_tier = str(probe.get('yt_stream_tier') or '').strip()
+    if stream_tier:
+        parts.append(f'порог {stream_tier}')
+    for key, label in (
+        ('tg_latency_ms', 'Telegram'),
+        ('yt_latency_ms', 'YouTube'),
+        ('googlevideo_latency_ms', 'Googlevideo'),
+    ):
+        latency = _probe_int(probe, key, 0)
+        if latency:
+            parts.append(f'{label} {latency} мс')
+    throughput = _probe_float(probe, 'yt_throughput_mbps', 0.0)
+    if throughput:
+        parts.append(f'скорость {throughput:g} Мбит/с')
+    error = str(probe.get('quality_error') or '').strip()
+    if error:
+        parts.append(f'замер скорости: {error}')
+    if checked_at:
+        parts.append(f'проверено {checked_at}')
+    return '; '.join(parts) if parts else 'Качество еще не измерено'
+
+
 def render_pool_items(
     *,
     key_name,
@@ -97,13 +157,21 @@ def render_pool_items(
         yt_badge = _service_probe_badge(probe, 'yt_ok', youtube_icon_html(opacity=1.0))
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
-        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
+        quality_score = _probe_int(probe, 'yt_score', 0)
+        quality_class = html.escape(_quality_class(probe), quote=True)
+        quality_label = _quality_label(probe)
+        quality_badge = (
+            f'<span class="pool-quality-badge pool-quality-{quality_class}">{html.escape(quality_label)}</span>'
+            if quality_label else ''
+        )
+        quality_title = html.escape(_quality_summary(probe, probe_checked_at(probe)), quote=True)
+        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-quality-score="{int(quality_score)}" data-quality-class="{quality_class}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
                         <td class="pool-key-cell">
                             <form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">
                                 {csrf_input_html}
                                 <input type="hidden" name="type" value="{safe_key_name}">
                                 <input type="hidden" name="key_id" value="{key_id}">
-                                <button type="submit" class="pool-apply-btn" title="Применить этот ключ">{display_name}</button>
+                                <button type="submit" class="pool-apply-btn" title="{quality_title}"><span class="pool-key-name">{display_name}</span>{quality_badge}</button>
                             </form>
                             <span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>{active_text}</span>
                             <span class="pool-mobile-checked" data-pool-mobile-checked>{checked_at}</span>

@@ -1,3 +1,6 @@
+*v1.703 (11 Jun 2026) -* main
+*Adds quality scoring for pool keys, shows `Стабильно` / `Быстро` details before applying a key, and uses the score for YouTube candidate ordering.*
+
 *v1.702 (11 Jun 2026) -* main
 *Reduces ipset refresh pressure during YouTube playback, defers watchdog route rebuilds while Vless/Vless2 stream traffic is active, and gives refresh commands enough time to finish cleanly.*
 

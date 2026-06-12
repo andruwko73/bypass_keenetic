@@ -1,3 +1,10 @@
+<a name="1.703"></a>
+# [1.703] - 11 Jun 2026
+
+- Adds pool quality scoring for YouTube keys using Telegram/YouTube latency plus a short throughput sample, with 1600p and 4K thresholds for `Стабильно` and `Быстро`.
+- Shows the quality label and measured details on hover before applying a key, without exposing the full key in the web UI.
+- Uses the YouTube quality score when ordering failover candidates and the web pool's YouTube-first sort mode.
+
 <a name="1.702"></a>
 # [1.702] - 11 Jun 2026
 

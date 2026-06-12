@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.702, последнее изменение: 11.06.2026
+#  Файл: bot.py, Версия v1.703, последнее изменение: 11.06.2026
 
 import subprocess
 import os
@@ -157,6 +157,10 @@ from pool_probe_controller import (
 from probe_cache import (
     KEY_PROBE_CACHE_PATH as _KEY_PROBE_CACHE_PATH,
     KeyProbeBatchRecorder as _KeyProbeBatchRecorder,
+    YOUTUBE_QUALITY_DEFAULT_1600P_MBPS as _YOUTUBE_QUALITY_DEFAULT_1600P_MBPS,
+    YOUTUBE_QUALITY_DEFAULT_4K_MBPS as _YOUTUBE_QUALITY_DEFAULT_4K_MBPS,
+    YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS as _YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS,
+    YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS as _YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS,
     forget_key_probes as _forget_key_probes,
     hash_key as _hash_key,
     key_probe_is_fresh as _key_probe_is_fresh,
@@ -1250,13 +1254,42 @@ POOL_PROBE_CUSTOM_READ_TIMEOUT = float(getattr(config, 'pool_probe_custom_read_t
 POOL_PROBE_RETRY_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_retry_connect_timeout', 6))
 POOL_PROBE_RETRY_READ_TIMEOUT = float(getattr(config, 'pool_probe_retry_read_timeout', 10))
 POOL_PROBE_RETRY_DELAY_SECONDS = float(getattr(config, 'pool_probe_retry_delay_seconds', 0.2))
+POOL_PROBE_QUALITY_ENABLED = bool(getattr(config, 'pool_probe_quality_enabled', True))
+POOL_PROBE_QUALITY_DOWNLOAD_URL = str(
+    getattr(config, 'pool_probe_quality_download_url', 'https://speed.cloudflare.com/__down?bytes={bytes}') or ''
+).strip()
+POOL_PROBE_QUALITY_DOWNLOAD_BYTES = max(0, int(getattr(config, 'pool_probe_quality_download_bytes', 1048576)))
+POOL_PROBE_QUALITY_DOWNLOAD_CONNECT_TIMEOUT = float(
+    getattr(config, 'pool_probe_quality_download_connect_timeout', POOL_PROBE_RETRY_CONNECT_TIMEOUT)
+)
+POOL_PROBE_QUALITY_DOWNLOAD_READ_TIMEOUT = float(
+    getattr(config, 'pool_probe_quality_download_read_timeout', min(12.0, max(4.0, POOL_PROBE_RETRY_READ_TIMEOUT)))
+)
+POOL_PROBE_QUALITY_STABLE_LATENCY_MS = max(
+    1,
+    int(getattr(config, 'pool_probe_quality_stable_latency_ms', _YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS)),
+)
+POOL_PROBE_QUALITY_FAST_LATENCY_MS = max(
+    1,
+    int(getattr(config, 'pool_probe_quality_fast_latency_ms', _YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS)),
+)
+POOL_PROBE_QUALITY_1600P_MIN_MBPS = max(
+    0.1,
+    float(getattr(config, 'pool_probe_quality_1600p_min_mbps', _YOUTUBE_QUALITY_DEFAULT_1600P_MBPS)),
+)
+POOL_PROBE_QUALITY_4K_MIN_MBPS = max(
+    POOL_PROBE_QUALITY_1600P_MIN_MBPS,
+    float(getattr(config, 'pool_probe_quality_4k_min_mbps', _YOUTUBE_QUALITY_DEFAULT_4K_MBPS)),
+)
 POOL_PROBE_SINGLE_TIMEOUT_SECONDS = max(
     8.0,
     POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
     POOL_PROBE_HTTP_CONNECT_TIMEOUT + POOL_PROBE_HTTP_READ_TIMEOUT +
     POOL_PROBE_RETRY_CONNECT_TIMEOUT + POOL_PROBE_RETRY_READ_TIMEOUT +
     POOL_PROBE_TG_CONNECT_TIMEOUT + POOL_PROBE_TG_READ_TIMEOUT +
-    POOL_PROBE_RETRY_CONNECT_TIMEOUT + POOL_PROBE_RETRY_READ_TIMEOUT + 3.0,
+    POOL_PROBE_RETRY_CONNECT_TIMEOUT + POOL_PROBE_RETRY_READ_TIMEOUT +
+    (POOL_PROBE_QUALITY_DOWNLOAD_CONNECT_TIMEOUT + POOL_PROBE_QUALITY_DOWNLOAD_READ_TIMEOUT if POOL_PROBE_QUALITY_ENABLED else 0) +
+    3.0,
 )
 POOL_PROBE_BATCH_TIMEOUT_SECONDS = float(
     getattr(config, 'pool_probe_batch_timeout_seconds', POOL_PROBE_SINGLE_TIMEOUT_SECONDS + 5.0)
@@ -4239,6 +4272,71 @@ def _check_http_through_proxy(proxy_url, url='https://www.youtube.com/generate_2
     return _status_check_http(proxy_url, url=url, connect_timeout=connect_timeout, read_timeout=read_timeout)
 
 
+def _pool_probe_quality_download_url(bytes_limit=None):
+    url = POOL_PROBE_QUALITY_DOWNLOAD_URL
+    if not url:
+        return ''
+    bytes_value = max(0, int(bytes_limit or POOL_PROBE_QUALITY_DOWNLOAD_BYTES))
+    if '{bytes}' in url:
+        try:
+            return url.format(bytes=bytes_value)
+        except Exception:
+            return url
+    return url
+
+
+def _pool_probe_quality_settings():
+    return {
+        'enabled': POOL_PROBE_QUALITY_ENABLED and POOL_PROBE_QUALITY_DOWNLOAD_BYTES > 0,
+        'download_url': _pool_probe_quality_download_url(POOL_PROBE_QUALITY_DOWNLOAD_BYTES),
+        'download_bytes': POOL_PROBE_QUALITY_DOWNLOAD_BYTES,
+        'download_connect_timeout': POOL_PROBE_QUALITY_DOWNLOAD_CONNECT_TIMEOUT,
+        'download_read_timeout': POOL_PROBE_QUALITY_DOWNLOAD_READ_TIMEOUT,
+        'stable_latency_ms': POOL_PROBE_QUALITY_STABLE_LATENCY_MS,
+        'fast_latency_ms': POOL_PROBE_QUALITY_FAST_LATENCY_MS,
+        'min_1600p_mbps': POOL_PROBE_QUALITY_1600P_MIN_MBPS,
+        'min_4k_mbps': POOL_PROBE_QUALITY_4K_MIN_MBPS,
+    }
+
+
+def _measure_quality_download_through_proxy(proxy_url, url='', bytes_limit=0, connect_timeout=2, read_timeout=8):
+    bytes_limit = max(0, int(bytes_limit or POOL_PROBE_QUALITY_DOWNLOAD_BYTES))
+    target_url = str(url or _pool_probe_quality_download_url(bytes_limit)).strip()
+    if not target_url or bytes_limit <= 0:
+        return None, 'quality download sample is disabled'
+    session = requests.Session()
+    session.trust_env = False
+    started_at = time.monotonic()
+    received = 0
+    try:
+        response = session.get(
+            target_url,
+            timeout=(connect_timeout, read_timeout),
+            proxies={'https': proxy_url, 'http': proxy_url},
+            headers={'User-Agent': 'bypass_keenetic quality check'},
+            stream=True,
+        )
+        status_code = int(response.status_code)
+        if status_code >= 500:
+            response.close()
+            return None, f'quality download returned HTTP {status_code}'
+        for chunk in response.iter_content(chunk_size=32768):
+            if not chunk:
+                continue
+            received += len(chunk)
+            if received >= bytes_limit:
+                break
+        response.close()
+        elapsed = max(0.001, time.monotonic() - started_at)
+        if received < min(bytes_limit, 32768):
+            return None, f'quality download sample too short: {received} bytes'
+        return round((received * 8.0) / elapsed / 1000000.0, 2), ''
+    except requests.exceptions.RequestException as exc:
+        return None, str(exc).splitlines()[0][:180]
+    finally:
+        session.close()
+
+
 def _check_youtube_health_through_proxy(proxy_url):
     return _controller_check_youtube_through_proxy(
         _check_http_through_proxy,
@@ -5501,6 +5599,8 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
         http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
         telegram_required=_telegram_required_for_protocol(proto),
+        measure_download=_measure_quality_download_through_proxy if POOL_PROBE_QUALITY_ENABLED else None,
+        quality_settings=_pool_probe_quality_settings(),
     )
 
 

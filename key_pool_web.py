@@ -175,6 +175,68 @@ def web_probe_checked_at(probe):
     return time.strftime('%d.%m %H:%M', time.localtime(ts))
 
 
+def web_probe_quality_label(probe):
+    if not isinstance(probe, dict):
+        return ''
+    quality = str(probe.get('yt_quality') or '').strip().lower()
+    if quality == 'fast':
+        return 'Быстро'
+    if quality == 'stable':
+        return 'Стабильно'
+    return ''
+
+
+def web_probe_quality_summary(probe):
+    if not isinstance(probe, dict):
+        return 'Качество еще не измерено'
+    parts = []
+    label = web_probe_quality_label(probe)
+    if label:
+        parts.append(f'YouTube: {label}')
+    try:
+        score = int(probe.get('yt_score'))
+    except Exception:
+        score = None
+    if score is not None:
+        parts.append(f'score {score}/100')
+    tier = str(probe.get('yt_stream_tier') or '').strip()
+    if tier:
+        parts.append(f'порог {tier}')
+    try:
+        tg_latency = int(probe.get('tg_latency_ms'))
+    except Exception:
+        tg_latency = 0
+    if tg_latency:
+        parts.append(f'Telegram {tg_latency} мс')
+    try:
+        yt_latency = int(probe.get('yt_latency_ms'))
+    except Exception:
+        yt_latency = 0
+    if yt_latency:
+        parts.append(f'YouTube {yt_latency} мс')
+    try:
+        googlevideo_latency = int(probe.get('googlevideo_latency_ms'))
+    except Exception:
+        googlevideo_latency = 0
+    if googlevideo_latency:
+        parts.append(f'Googlevideo {googlevideo_latency} мс')
+    try:
+        throughput = float(probe.get('yt_throughput_mbps'))
+    except Exception:
+        throughput = 0.0
+    if throughput:
+        parts.append(f'скорость {throughput:g} Мбит/с')
+    error = str(probe.get('quality_error') or '').strip()
+    if error:
+        parts.append(f'замер скорости: {error}')
+    if not parts:
+        return 'Качество еще не измерено'
+    checked_at = web_probe_checked_at(probe)
+    if checked_at:
+        parts.append(f'проверено {checked_at}')
+    return '; '.join(parts)
+
+
 def web_custom_checks(custom_checks):
     return [
         {
@@ -482,6 +544,11 @@ def web_pool_snapshot(
                 'custom': web_custom_probe_states(probe, custom_checks),
                 'checked_at': probe_checked_at(probe),
                 'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,
+                'yt_score': int(probe.get('yt_score') or 0) if isinstance(probe, dict) else 0,
+                'yt_quality': str(probe.get('yt_quality') or '') if isinstance(probe, dict) else '',
+                'yt_quality_label': web_probe_quality_label(probe),
+                'yt_stream_tier': str(probe.get('yt_stream_tier') or '') if isinstance(probe, dict) else '',
+                'quality_summary': web_probe_quality_summary(probe),
             }
             if include_keys:
                 row['key'] = key_value

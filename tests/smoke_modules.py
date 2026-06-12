@@ -444,7 +444,18 @@ def test_key_pool_web():
     cache = {
         _hash_key('vless-key'): {'tg_ok': True, 'yt_ok': False, 'custom': {'custom': True}, 'ts': 1},
         _hash_key('unused-key'): {'tg_ok': None, 'yt_ok': None, 'custom': {'custom': None}, 'timeout': True, 'ts': 3},
-        _hash_key('vmess-key'): {'tg_ok': True, 'yt_ok': True, 'custom': {'custom': True}, 'ts': 2},
+        _hash_key('vmess-key'): {
+            'tg_ok': True,
+            'yt_ok': True,
+            'custom': {'custom': True},
+            'yt_quality': 'fast',
+            'yt_score': 96,
+            'yt_stream_tier': '4k',
+            'yt_latency_ms': 410,
+            'googlevideo_latency_ms': 520,
+            'yt_throughput_mbps': 58.5,
+            'ts': 2,
+        },
     }
 
     summary = key_pool_web.pool_status_summary(current, pools, cache, checks, _hash_key)
@@ -488,7 +499,11 @@ def test_key_pool_web():
         protocols=['vmess'],
     )
     assert list(scoped_snapshot) == ['vmess']
-    assert scoped_snapshot['vmess']['rows'][0]['key_id'] == _hash_key('vmess-key')[:12]
+    vmess_row = scoped_snapshot['vmess']['rows'][0]
+    assert vmess_row['key_id'] == _hash_key('vmess-key')[:12]
+    assert vmess_row['yt_quality_label'] == 'Быстро'
+    assert vmess_row['yt_score'] == 96
+    assert '58.5 Мбит/с' in vmess_row['quality_summary']
     def icon_html(icon, alt, opacity=1.0, size=18):
         return f'<img data-icon="{icon}" alt="{alt}">'
     check_defs = [{'id': 'custom', 'label': 'Custom', 'url': 'https://example.com/path', 'icon': 'chat'}]
@@ -550,6 +565,19 @@ def test_key_pool_subscription_helpers():
         hash_key=_hash_key,
     )
     assert scored_candidates[:3] == [('vless', 'good'), ('vless', 'unknown'), ('vless', 'bad')]
+    youtube_scored_candidates = key_pool_store.failover_candidates(
+        {'vless2': ['active', 'slow', 'fast', 'unchecked']},
+        'vless2',
+        'active',
+        protocols=('vless2',),
+        key_probe_cache={
+            _hash_key('slow'): {'yt_ok': True, 'yt_score': 62, 'ts': 20},
+            _hash_key('fast'): {'yt_ok': True, 'yt_score': 94, 'ts': 10},
+        },
+        hash_key=_hash_key,
+        service='youtube',
+    )
+    assert youtube_scored_candidates[:3] == [('vless2', 'fast'), ('vless2', 'slow'), ('vless2', 'unchecked')]
 
 
 def test_web_post_actions_helpers():
@@ -1971,6 +1999,40 @@ def test_pool_probe_controller_helpers():
     assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': True})]
 
     records = []
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'quality-key',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (True, ''),
+        check_http=lambda proxy, **kwargs: (True, 'ok'),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        http_retry_timeouts=(6, 10),
+        measure_download=lambda proxy, **kwargs: (55.0, ''),
+        quality_settings={
+            'enabled': True,
+            'download_bytes': 1048576,
+            'stable_latency_ms': 2500,
+            'fast_latency_ms': 1500,
+            'min_1600p_mbps': 25.0,
+            'min_4k_mbps': 45.0,
+        },
+        sleep=lambda seconds: None,
+    )
+    quality_record = records[0][2]
+    assert quality_record['tg_ok'] is True
+    assert quality_record['yt_ok'] is True
+    assert quality_record['yt_throughput_mbps'] == 55.0
+    assert 'tg_latency_ms' in quality_record
+    assert 'yt_latency_ms' in quality_record
+    assert 'googlevideo_latency_ms' in quality_record
+    assert quality_record['min_4k_mbps'] == 45.0
+
+    records = []
     http_calls = []
 
     def check_http_with_app_telegram(proxy, **kwargs):
@@ -3216,7 +3278,16 @@ def test_web_pool_form_blocks_helpers():
         title='Vless 1',
         pool_keys=['vless://sample'],
         current_key='vless://sample',
-        key_probe_cache={'hash-vless': {'tg_ok': True}},
+        key_probe_cache={'hash-vless': {
+            'tg_ok': True,
+            'yt_ok': True,
+            'yt_quality': 'fast',
+            'yt_score': 97,
+            'yt_stream_tier': '4k',
+            'yt_latency_ms': 350,
+            'googlevideo_latency_ms': 480,
+            'yt_throughput_mbps': 61.25,
+        }},
         custom_checks=[],
         key_display_name=lambda key: 'sample-key',
         hash_key=lambda key: 'hash-vless',
@@ -3228,6 +3299,10 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'pool-row-active' in pool_rows
     assert 'data-search="sample-key hash-vless"' in pool_rows
+    assert 'data-quality-score="97"' in pool_rows
+    assert 'pool-quality-fast' in pool_rows
+    assert 'Быстро' in pool_rows
+    assert '61.25 Мбит/с' in pool_rows
     assert 'data-key=' not in pool_rows
     assert 'name="key_id" value="hash-vless"' in pool_rows
     assert 'name="key" value=' not in pool_rows
@@ -3514,18 +3589,63 @@ def test_probe_cache_update_entry_min_interval():
     )
 
 
+def test_probe_cache_quality_metrics():
+    cache = {}
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless2',
+        'quality-key',
+        tg_ok=True,
+        yt_ok=True,
+        tg_latency_ms=420.4,
+        yt_latency_ms=510.1,
+        googlevideo_latency_ms=630.8,
+        yt_throughput_mbps=52.6,
+        now=100,
+        min_1600p_mbps=25.0,
+        min_4k_mbps=45.0,
+    )
+    entry = cache[probe_cache.hash_key('quality-key')]
+    assert entry['tg_latency_ms'] == 420
+    assert entry['yt_latency_ms'] == 510
+    assert entry['googlevideo_latency_ms'] == 631
+    assert entry['yt_throughput_mbps'] == 52.6
+    assert entry['yt_quality'] == 'fast'
+    assert entry['yt_stream_tier'] == '4k'
+    assert entry['yt_score'] >= 90
+
+    stable = probe_cache.youtube_quality_score(
+        yt_ok=True,
+        yt_latency_ms=1200,
+        googlevideo_latency_ms=1300,
+        yt_throughput_mbps=28.0,
+        min_1600p_mbps=25.0,
+        min_4k_mbps=45.0,
+    )
+    assert stable['yt_quality'] == 'stable'
+    assert stable['yt_stream_tier'] == '1600p'
+
+
 def test_probe_cache_ignores_stale_schema(tmp_path):
     cache_path = tmp_path / 'key_probe_cache.json'
     old_path = probe_cache.KEY_PROBE_CACHE_PATH
     probe_cache.KEY_PROBE_CACHE_PATH = str(cache_path)
     try:
         fresh_key = probe_cache.hash_key('fresh')
+        compat_key = probe_cache.hash_key('compat')
         stale_key = probe_cache.hash_key('stale')
         cache_path.write_text(
             json.dumps({
                 fresh_key: {
                     'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
                     'proto': 'vless',
+                    'tg_ok': True,
+                    'yt_ok': True,
+                    'ts': 100,
+                },
+                compat_key: {
+                    'schema': 6,
+                    'proto': 'vless2',
                     'tg_ok': True,
                     'yt_ok': True,
                     'ts': 100,
@@ -3545,6 +3665,7 @@ def test_probe_cache_ignores_stale_schema(tmp_path):
         probe_cache.KEY_PROBE_CACHE_PATH = old_path
 
     assert fresh_key in loaded
+    assert loaded[compat_key]['schema'] == probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION
     assert stale_key not in loaded
     assert not probe_cache.key_probe_is_fresh({'ts': 100}, now=101)
     assert not probe_cache.key_probe_has_required_results({'tg_ok': True, 'yt_ok': True})
@@ -4140,6 +4261,7 @@ def main():
     test_web_status_builder_helpers()
     test_web_template_styles_helpers()
     test_probe_cache_update_entry_min_interval()
+    test_probe_cache_quality_metrics()
     test_probe_cache_invalidates_changed_custom_check_targets()
     test_probe_cache_failed_results_expire_quickly()
     test_probe_cache_keeps_recent_success_on_transient_downgrade()

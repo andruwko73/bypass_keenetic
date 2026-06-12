@@ -909,6 +909,34 @@ def render_web_scripts(
             }}).join('');
         }}
 
+        function poolQualityLabel(row) {{
+            const quality = String((row && row.yt_quality) || '').toLowerCase();
+            if (quality === 'fast') {{
+                return 'Быстро';
+            }}
+            if (quality === 'stable') {{
+                return 'Стабильно';
+            }}
+            return String((row && row.yt_quality_label) || '');
+        }}
+
+        function poolQualityBadge(row) {{
+            const quality = String((row && row.yt_quality) || '').toLowerCase();
+            const label = poolQualityLabel(row);
+            if (!label || (quality !== 'fast' && quality !== 'stable')) {{
+                return '';
+            }}
+            return '<span class="pool-quality-badge pool-quality-' + escapeHtml(quality) + '">' + escapeHtml(label) + '</span>';
+        }}
+
+        function poolQualityTitle(row) {{
+            return String((row && row.quality_summary) || 'Качество еще не измерено');
+        }}
+
+        function poolApplyButtonHtml(row, displayName) {{
+            return '<span class="pool-key-name">' + displayName + '</span>' + poolQualityBadge(row);
+        }}
+
         function customUrlText(check) {{
             const urls = Array.isArray(check.urls) && check.urls.length ? check.urls : [check.url || ''];
             return urls.filter(Boolean).map(function(url) {{
@@ -1124,6 +1152,10 @@ def render_web_scripts(
                         return tgDelta;
                     }}
                 }} else if (sortMode === 'youtube') {{
+                    const qualityDelta = Number(right.dataset.qualityScore || 0) - Number(left.dataset.qualityScore || 0);
+                    if (qualityDelta) {{
+                        return qualityDelta;
+                    }}
                     const ytDelta = poolStateRank(right.dataset.ytState) - poolStateRank(left.dataset.ytState);
                     if (ytDelta) {{
                         return ytDelta;
@@ -1261,12 +1293,12 @@ def render_web_scripts(
                 const keyId = escapeHtml(row.key_id || '');
                 const rowIndex = Number(row.index || (position + 1)) - 1;
                 const displayName = escapeHtml(row.display_name || '');
-                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + keyId + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + keyId + '">' +
+                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + keyId + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-quality-score="' + Number(row.yt_score || 0) + '" data-quality-class="' + escapeHtml(row.yt_quality || '') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + keyId + '">' +
                     '<td class="pool-key-cell">' +
                         '<form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">' +
                             '<input type="hidden" name="type" value="' + proto + '">' +
                             '<input type="hidden" name="key_id" value="' + keyId + '">' +
-                            '<button type="submit" class="pool-apply-btn" title="Применить этот ключ">' + displayName + '</button>' +
+                            '<button type="submit" class="pool-apply-btn" title="' + escapeHtml(poolQualityTitle(row)) + '">' + poolApplyButtonHtml(row, displayName) + '</button>' +
                         '</form>' +
                         '<span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>' + activeText + '</span>' +
                         '<span class="pool-mobile-checked" data-pool-mobile-checked>' + escapeHtml(row.checked_at || '') + '</span>' +
@@ -1321,8 +1353,16 @@ def render_web_scripts(
                 item.dataset.active = row.active ? '1' : '0';
                 item.dataset.tgState = row.tg || 'unknown';
                 item.dataset.ytState = row.yt || 'unknown';
+                item.dataset.qualityScore = String(row.yt_score || 0);
+                item.dataset.qualityClass = String(row.yt_quality || '');
                 item.dataset.checkedTs = String(row.checked_ts || 0);
                 item.dataset.search = String((row.display_name || '') + ' ' + (row.key_id || ''));
+                const button = item.querySelector('.pool-apply-btn');
+                if (button) {{
+                    const displayName = escapeHtml(row.display_name || '');
+                    button.title = poolQualityTitle(row);
+                    button.innerHTML = poolApplyButtonHtml(row, displayName);
+                }}
                 const meta = item.querySelector('[data-pool-key-meta]');
                 if (meta) {{
                     meta.textContent = row.active ? 'активен' : '';

@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.702
+# ВЕРСИЯ СКРИПТА v1.703
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -19,6 +19,15 @@ pool_probe_max_cpu_percent = 70.0
 pool_probe_cpu_sample_seconds = 0.35
 pool_probe_high_cpu_delay_seconds = 5.0
 pool_probe_high_cpu_max_wait_seconds = 45.0
+pool_probe_quality_enabled = True  # короткий download-sample через ключ для оценки YouTube-качества перед применением
+pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={bytes}'
+pool_probe_quality_download_bytes = 1048576
+pool_probe_quality_download_connect_timeout = 6.0
+pool_probe_quality_download_read_timeout = 10.0
+pool_probe_quality_stable_latency_ms = 2500
+pool_probe_quality_fast_latency_ms = 1500
+pool_probe_quality_1600p_min_mbps = 25.0
+pool_probe_quality_4k_min_mbps = 45.0
 memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
 memory_watchdog_rss_soft_kb = 87040  # при достижении порога очищаются кэши статуса и запускается gc.collect()
 memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот перезапустится, если сейчас не идёт обновление или проверка пула

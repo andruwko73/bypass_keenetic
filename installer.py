@@ -68,6 +68,15 @@ pool_probe_max_cpu_percent = 70.0
 pool_probe_cpu_sample_seconds = 0.35
 pool_probe_high_cpu_delay_seconds = 5.0
 pool_probe_high_cpu_max_wait_seconds = 45.0
+pool_probe_quality_enabled = True
+pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={{bytes}}'
+pool_probe_quality_download_bytes = 1048576
+pool_probe_quality_download_connect_timeout = 6.0
+pool_probe_quality_download_read_timeout = 10.0
+pool_probe_quality_stable_latency_ms = 2500
+pool_probe_quality_fast_latency_ms = 1500
+pool_probe_quality_1600p_min_mbps = 25.0
+pool_probe_quality_4k_min_mbps = 45.0
 memory_watchdog_enabled = True
 memory_watchdog_rss_soft_kb = 87040
 memory_watchdog_rss_limit_kb = 112640
