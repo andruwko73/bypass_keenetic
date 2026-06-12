@@ -178,6 +178,12 @@ def web_probe_checked_at(probe):
 def web_probe_quality_label(probe):
     if not isinstance(probe, dict):
         return ''
+    try:
+        throughput = float(probe.get('yt_throughput_mbps'))
+    except Exception:
+        throughput = 0.0
+    if throughput <= 0:
+        return ''
     quality = str(probe.get('yt_quality') or '').strip().lower()
     if quality == 'fast':
         return 'Быстро'
@@ -199,7 +205,7 @@ def web_probe_quality_summary(probe):
         score = None
     if score is not None:
         parts.append(f'score {score}/100')
-    tier = str(probe.get('yt_stream_tier') or '').strip()
+    tier = str(probe.get('yt_stream_tier') or '').strip() if label else ''
     if tier:
         parts.append(f'порог {tier}')
     try:
@@ -534,6 +540,7 @@ def web_pool_snapshot(
         for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
             key_hash = hash_key(key_value)
             probe = cache.get(key_hash, {})
+            quality_label = web_probe_quality_label(probe)
             row = {
                 'index': index,
                 'key_id': key_hash[:12],
@@ -545,9 +552,9 @@ def web_pool_snapshot(
                 'checked_at': probe_checked_at(probe),
                 'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,
                 'yt_score': int(probe.get('yt_score') or 0) if isinstance(probe, dict) else 0,
-                'yt_quality': str(probe.get('yt_quality') or '') if isinstance(probe, dict) else '',
-                'yt_quality_label': web_probe_quality_label(probe),
-                'yt_stream_tier': str(probe.get('yt_stream_tier') or '') if isinstance(probe, dict) else '',
+                'yt_quality': str(probe.get('yt_quality') or '') if quality_label and isinstance(probe, dict) else '',
+                'yt_quality_label': quality_label,
+                'yt_stream_tier': str(probe.get('yt_stream_tier') or '') if quality_label and isinstance(probe, dict) else '',
                 'quality_summary': web_probe_quality_summary(probe),
             }
             if include_keys:

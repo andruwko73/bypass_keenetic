@@ -515,6 +515,7 @@ def test_key_pool_web():
     assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
     assert key_pool_web.web_custom_probe_states({'custom': {'custom': None}}, checks)['custom'] == 'unknown'
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
+    assert key_pool_web.web_probe_quality_label({'yt_quality': 'stable', 'yt_latency_ms': 800}) == ''
 
 def test_key_pool_subscription_helpers():
     raw = '\n'.join([
@@ -729,6 +730,12 @@ def test_codex_version_matches_commit_count():
     assert 'memory_watchdog_rss_limit_kb = 112640' in example
     assert 'memory_watchdog_rss_limit_kb = 112640' in installer
     assert 'memory_watchdog_rss_limit_kb = 112640' in bootstrap
+    assert 'pool_probe_pause_available_kb = 125000' in example
+    assert 'pool_probe_pause_available_kb = 125000' in installer
+    assert 'pool_probe_pause_available_kb = 125000' in bootstrap
+    assert 'pool_probe_slow_available_kb = 190000' in example
+    assert 'pool_probe_slow_available_kb = 190000' in installer
+    assert 'pool_probe_slow_available_kb = 190000' in bootstrap
     assert 'pool_probe_delay_seconds = 1.5' in example
     assert 'pool_probe_delay_seconds = 1.5' in installer
     assert 'pool_probe_delay_seconds = 1.5' in bootstrap
@@ -738,6 +745,9 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_max_cpu_percent = 70.0' in example
     assert 'pool_probe_max_cpu_percent = 70.0' in installer
     assert 'pool_probe_max_cpu_percent = 70.0' in bootstrap
+    assert 'pool_probe_quality_max_samples_per_run = 12' in example
+    assert 'pool_probe_quality_max_samples_per_run = 12' in installer
+    assert 'pool_probe_quality_max_samples_per_run = 12' in bootstrap
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
@@ -983,6 +993,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'subprocess.Popen(' in source
     assert 'bypass-bot-service-restart.log' in source
     assert "pool_probe_min_available_kb', 160000" in source
+    assert "pool_probe_pause_available_kb', min(125000, POOL_PROBE_MIN_AVAILABLE_KB)" in source
+    assert 'slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB' in source
+    assert 'pool_probe_quality_max_samples_per_run' in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
@@ -1042,6 +1055,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _schedule_post_pool_memory_cleanup' in source
     assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
     assert 'def _persist_pool_probe_resume_payload' in source
+    assert "serializable['task_ref'] = 'key_hash'" in source
+    assert 'def _resolve_pool_probe_resume_tasks' in source
     assert 'def _load_persisted_pool_probe_resume' in source
     assert '_load_persisted_pool_probe_resume()' in source
     assert "_schedule_post_pool_memory_cleanup()" in source
@@ -2303,6 +2318,42 @@ def test_pool_probe_runner_failover_candidate():
     assert paused_remaining == [('vless', 'low-memory')]
     assert '190000' in memory_logs[-1]
 
+    slow_notes = []
+    slow_sleeps = []
+    slow_processed = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'slow-memory')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=125000,
+        slow_available_kb=190000,
+        slow_memory_delay_seconds=3.0,
+        test_port='1200',
+        available_memory_kb=lambda: 150000,
+        log=logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: slow_processed.append((proto, key)),
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+        set_note=slow_notes.append,
+        sleep=slow_sleeps.append,
+    )
+    assert (checked, total) == (1, 1)
+    assert slow_processed == [('vless', 'slow-memory')]
+    assert slow_sleeps == [3.0]
+    assert any('экономном режиме' in note for note in slow_notes)
+
     cpu_values = iter([92.0, 20.0])
     time_values = iter([0.0, 1.0])
     cpu_notes = []
@@ -3183,6 +3234,19 @@ def test_web_get_actions_helpers():
     assert pool_snapshot_calls[-1] == (current_keys, False, ['vless', 'vmess'])
     probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
     assert probe['payload']['status'] == 'running'
+    paused_ctx = dict(ctx)
+    paused_ctx.update({
+        'get_pool_probe_progress': lambda: {'running': False, 'checked': 4, 'total': 10, 'note': 'paused'},
+        'has_pool_probe_resume_payload': lambda: True,
+    })
+    paused_status = web_get_actions.dispatch(paused_ctx, '/api/status')
+    assert paused_status['payload']['pool_probe_running'] is False
+    assert paused_status['payload']['pool_probe_paused'] is True
+    paused_pools = web_get_actions.dispatch(paused_ctx, '/api/pools')
+    assert paused_pools['payload']['pool_probe_paused'] is True
+    paused_probe = web_get_actions.dispatch(paused_ctx, '/api/pool_probe')
+    assert paused_probe['payload']['status'] == 'paused'
+    assert paused_probe['payload']['paused'] is True
     panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'proto=vless')
     assert panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'panel:vless'}
     alias_panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'protocol=vless2')
@@ -3610,9 +3674,26 @@ def test_probe_cache_quality_metrics():
     assert entry['yt_latency_ms'] == 510
     assert entry['googlevideo_latency_ms'] == 631
     assert entry['yt_throughput_mbps'] == 52.6
+    assert entry['yt_throughput_ts'] == 100
     assert entry['yt_quality'] == 'fast'
     assert entry['yt_stream_tier'] == '4k'
     assert entry['yt_score'] >= 90
+
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless2',
+        'quality-key',
+        yt_ok=True,
+        yt_latency_ms=600,
+        googlevideo_latency_ms=700,
+        now=200,
+        min_1600p_mbps=25.0,
+        min_4k_mbps=45.0,
+    )
+    refreshed_entry = cache[probe_cache.hash_key('quality-key')]
+    assert 'yt_throughput_mbps' not in refreshed_entry
+    assert 'yt_quality' not in refreshed_entry
+    assert 'yt_stream_tier' not in refreshed_entry
 
     stable = probe_cache.youtube_quality_score(
         yt_ok=True,
@@ -3624,6 +3705,17 @@ def test_probe_cache_quality_metrics():
     )
     assert stable['yt_quality'] == 'stable'
     assert stable['yt_stream_tier'] == '1600p'
+
+    latency_only = probe_cache.youtube_quality_score(
+        yt_ok=True,
+        yt_latency_ms=700,
+        googlevideo_latency_ms=800,
+        yt_throughput_mbps=None,
+        min_1600p_mbps=25.0,
+        min_4k_mbps=45.0,
+    )
+    assert latency_only['yt_quality'] == ''
+    assert latency_only['yt_stream_tier'] == ''
 
 
 def test_probe_cache_ignores_stale_schema(tmp_path):
@@ -3866,10 +3958,10 @@ def test_web_template_scripts_helpers():
     assert "items.push(['info', 'Проверка пула выполняется'" not in scripts
     assert 'проверка пула сейчас не мешает работе' not in scripts
     assert 'poolProbeVisible' in scripts
-    assert "apiPill.textContent = poolProbeVisible" in scripts
-    assert 'function updatePoolProbeControls(active)' in scripts
+    assert "apiPill.textContent = (poolProbeVisible || poolProbePaused)" in scripts
+    assert 'function updatePoolProbeControls(active, paused)' in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
-    assert 'if (poolProbeActive && !document.hidden)' in scripts
+    assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
     assert 'refreshPoolData(2500)' in scripts
     assert 'function poolRowMatchesState(row, state)' in scripts
     assert 'function poolStateFilterFromMode(mode)' in scripts

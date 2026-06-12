@@ -26,6 +26,19 @@ def _pool_probe_running(progress):
     return bool((progress or {}).get('running')) and total > 0
 
 
+def _pool_probe_paused(ctx, progress):
+    if _pool_probe_running(progress):
+        return False
+    try:
+        total = int((progress or {}).get('total') or 0)
+    except Exception:
+        total = 0
+    has_resume = _ctx(ctx, 'has_pool_probe_resume_payload')
+    if has_resume:
+        return bool(has_resume())
+    return total > 0 and bool((progress or {}).get('note'))
+
+
 def _requested_protocols(params):
     raw_values = []
     for name in ('protocols', 'protocol', 'proto'):
@@ -46,8 +59,9 @@ def _status_payload(ctx):
     pool_enabled = _ctx(ctx, 'pool_enabled', False)
     progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})() if pool_enabled else {}
     pool_probe_running = _pool_probe_running(progress)
+    pool_probe_paused = _pool_probe_paused(ctx, progress) if pool_enabled else False
     cache_getter = _ctx(ctx, 'get_status_api_cache')
-    if cache_ttl > 0 and cache_getter and not pool_probe_running:
+    if cache_ttl > 0 and cache_getter and not pool_probe_running and not pool_probe_paused:
         cached = cache_getter()
         if (
             isinstance(cached, dict) and
@@ -90,6 +104,7 @@ def _status_payload(ctx):
             'custom_checks': [],
             'pool_summary': {'active_text': '', 'note': ''},
             'pool_probe_running': False,
+            'pool_probe_paused': False,
             'pool_probe_progress': {},
         })
         return payload
@@ -97,11 +112,12 @@ def _status_payload(ctx):
     payload.update({
         'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
         'pool_probe_running': pool_probe_running,
+        'pool_probe_paused': pool_probe_paused,
         'pool_probe_progress': progress,
         'timestamp': now,
     })
     cache_store = _ctx(ctx, 'store_status_api_cache')
-    if cache_ttl > 0 and cache_store and not pool_probe_running:
+    if cache_ttl > 0 and cache_store and not pool_probe_running and not pool_probe_paused:
         cache_store(payload, now)
     return payload
 
@@ -112,6 +128,9 @@ def _pools_payload(ctx, query=''):
             'pools': {},
             'pool_summary': {'active_text': '', 'note': ''},
             'custom_checks': [],
+            'pool_probe_running': False,
+            'pool_probe_paused': False,
+            'pool_probe_progress': {},
             'timestamp': _ctx(ctx, 'time_provider', time.time)(),
         }
     params = parse_qs(query or '', keep_blank_values=True)
@@ -120,10 +139,12 @@ def _pools_payload(ctx, query=''):
     current_keys = _ctx(ctx, 'load_current_keys')()
     progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})()
     pool_probe_running = _pool_probe_running(progress)
+    pool_probe_paused = _pool_probe_paused(ctx, progress)
     return {
         'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=include_keys, protocols=protocols),
         'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
         'pool_probe_running': pool_probe_running,
+        'pool_probe_paused': pool_probe_paused,
         'pool_probe_progress': progress,
         'custom_checks': _ctx(ctx, 'web_custom_checks')(),
         'timestamp': _ctx(ctx, 'time_provider', time.time)(),
@@ -133,9 +154,11 @@ def _pools_payload(ctx, query=''):
 def _pool_probe_payload(ctx):
     progress = _ctx(ctx, 'get_pool_probe_progress')()
     running = _pool_probe_running(progress)
+    paused = _pool_probe_paused(ctx, progress)
     return {
-        'status': 'running' if running else 'idle',
+        'status': 'running' if running else ('paused' if paused else 'idle'),
         'running': running,
+        'paused': paused,
         'progress': progress,
     }
 

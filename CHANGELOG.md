@@ -1,3 +1,11 @@
+<a name="1.704"></a>
+# [1.704] - 12 Jun 2026
+
+- Stores paused pool-probe resume queues as protocol plus key hash instead of raw proxy URLs, resolving them from current pools when checks resume.
+- Splits pool-probe memory handling into a hard pause threshold and a low-memory slow mode, so checks continue carefully when the router still has enough RAM.
+- Limits heavy YouTube throughput samples per run and skips them on low memory, while keeping lightweight service checks for every key.
+- Requires a measured throughput sample before showing `Стабильно` or `Быстро` in the web pool UI.
+
 <a name="1.703"></a>
 # [1.703] - 11 Jun 2026
 

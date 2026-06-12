@@ -397,6 +397,8 @@ def run_pool_probe_worker(
     max_high_cpu_wait_seconds=45.0,
     low_memory_delay_seconds=15.0,
     max_low_memory_wait_seconds=180.0,
+    slow_available_kb=0,
+    slow_memory_delay_seconds=0,
     sleep=time.sleep,
     time_provider=time.time,
 ):
@@ -482,9 +484,15 @@ def run_pool_probe_worker(
             if check.get('id')
         }
 
-    def memory_below_limit():
+    def memory_below_limit(limit_kb):
+        try:
+            limit_kb = int(limit_kb or 0)
+        except Exception:
+            limit_kb = 0
+        if limit_kb <= 0:
+            return None
         available_kb = available_memory_kb()
-        if available_kb is not None and available_kb < min_available_kb:
+        if available_kb is not None and available_kb < limit_kb:
             return available_kb
         return None
 
@@ -521,7 +529,7 @@ def run_pool_probe_worker(
                     continue
                 log(note + ' Продолжаю один ключ с низким приоритетом.')
             high_cpu_since = None
-            low_memory_kb = memory_below_limit()
+            low_memory_kb = memory_below_limit(min_available_kb)
             if low_memory_kb is not None:
                 if low_memory_since is None:
                     low_memory_since = time_provider()
@@ -537,7 +545,15 @@ def run_pool_probe_worker(
                 sleep(max(1.0, float(low_memory_delay_seconds or 1.0)))
                 continue
             low_memory_since = None
-            update_note('')
+            slow_memory_kb = memory_below_limit(slow_available_kb)
+            if slow_memory_kb is not None:
+                update_note(
+                    f'Проверка пула идёт в экономном режиме: доступно {slow_memory_kb} KB, '
+                    f'порог замедления {int(slow_available_kb)} KB.'
+                )
+                sleep(max(0.0, float(slow_memory_delay_seconds or 0.0)))
+            else:
+                update_note('')
 
             raw_batch = [pending_tasks.popleft() for _ in range(min(batch_size, len(pending_tasks)))]
             valid_batch = []
@@ -564,7 +580,7 @@ def run_pool_probe_worker(
             config_path = None
             try:
                 process, config_path = start_xray_for_batch(valid_batch)
-                low_memory_kb = memory_below_limit()
+                low_memory_kb = memory_below_limit(min_available_kb)
                 if low_memory_kb is not None:
                     note = (
                         f'Проверка остановила временный xray: доступно {low_memory_kb} KB, '

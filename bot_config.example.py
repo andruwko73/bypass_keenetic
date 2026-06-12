@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.703
+# ВЕРСИЯ СКРИПТА v1.704
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -13,6 +13,9 @@ fork_repo_name = 'bypass_keenetic'  # имя репозитория форка
 fork_button_label = 'Fork by andruwko73'  # подпись кнопки установки из вашего форка
 app_runtime_mode = 'advanced'  # simple, advanced или web_only
 pool_probe_min_available_kb = 190000  # проверка пула не запускает временный xray, если доступной памяти меньше этого порога
+pool_probe_pause_available_kb = 125000  # ниже этого порога проверка ставит очередь на паузу до освобождения памяти
+pool_probe_slow_available_kb = 190000  # ниже этого порога проверка идёт медленнее, но не останавливается полностью
+pool_probe_slow_memory_delay_seconds = 3.0
 pool_probe_delay_seconds = 1.5  # пауза между ключами, чтобы полная проверка пула не забивала CPU роутера
 pool_probe_cpu_guard_enabled = True
 pool_probe_max_cpu_percent = 70.0
@@ -22,6 +25,8 @@ pool_probe_high_cpu_max_wait_seconds = 45.0
 pool_probe_quality_enabled = True  # короткий download-sample через ключ для оценки YouTube-качества перед применением
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={bytes}'
 pool_probe_quality_download_bytes = 1048576
+pool_probe_quality_min_available_kb = 170000
+pool_probe_quality_max_samples_per_run = 12
 pool_probe_quality_download_connect_timeout = 6.0
 pool_probe_quality_download_read_timeout = 10.0
 pool_probe_quality_stable_latency_ms = 2500

@@ -138,8 +138,6 @@ def youtube_quality_score(
             quality = YOUTUBE_QUALITY_FAST
         elif throughput >= min_1600p_mbps and latency_is_stable:
             quality = YOUTUBE_QUALITY_STABLE
-    elif latency_is_stable:
-        quality = YOUTUBE_QUALITY_STABLE
     return {'yt_score': score, 'yt_quality': quality, 'yt_stream_tier': stream_tier}
 
 
@@ -271,7 +269,20 @@ def update_key_probe_cache_entry(
         changed = _set_entry_metric(entry, 'tg_latency_ms', tg_latency_ms, digits=0) or changed
         changed = _set_entry_metric(entry, 'yt_latency_ms', yt_latency_ms, digits=0) or changed
         changed = _set_entry_metric(entry, 'googlevideo_latency_ms', googlevideo_latency_ms, digits=0) or changed
+        throughput_measured = yt_throughput_mbps is not None
         changed = _set_entry_metric(entry, 'yt_throughput_mbps', yt_throughput_mbps, digits=2) or changed
+        if throughput_measured and entry.get('yt_throughput_ts') != now:
+            entry['yt_throughput_ts'] = now
+            changed = True
+        if (
+            not throughput_measured and
+            (yt_ok is not None or yt_latency_ms is not None or googlevideo_latency_ms is not None or quality_error) and
+            yt_score is None and yt_quality is None and yt_stream_tier is None
+        ):
+            for marker in ('yt_throughput_mbps', 'yt_throughput_ts', 'yt_quality', 'yt_stream_tier'):
+                if marker in entry:
+                    entry.pop(marker, None)
+                    changed = True
         if (
             yt_score is None and yt_quality is None and yt_stream_tier is None and
             (

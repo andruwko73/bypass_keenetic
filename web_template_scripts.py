@@ -1414,12 +1414,12 @@ def render_web_scripts(
             }});
         }}
 
-        function updatePoolSummaryBlock(poolSummary, progress, running) {{
+        function updatePoolSummaryBlock(poolSummary, progress, running, paused) {{
             if (!poolSummary) {{
                 return;
             }}
             let summaryNote = poolSummary.note || '';
-            if (running && progress && Number(progress.total || 0) > 0) {{
+            if ((running || paused) && progress && Number(progress.total || 0) > 0) {{
                 const progressNote = progress.note ? String(progress.note) : summaryNote;
                 summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + progressNote;
             }}
@@ -1427,18 +1427,20 @@ def render_web_scripts(
             setOptionalText('pool-summary-note', summaryNote);
         }}
 
-        function updatePoolProbeControls(active) {{
+        function updatePoolProbeControls(active, paused) {{
             if (!ENABLE_KEY_POOL) {{
                 return;
             }}
             const running = !!active;
+            const hasPausedQueue = !!paused;
             document.querySelectorAll('[data-pool-probe-start-button]').forEach(function(button) {{
                 button.disabled = running;
                 button.setAttribute('aria-disabled', running ? 'true' : 'false');
             }});
             document.querySelectorAll('[data-pool-probe-cancel-button]').forEach(function(button) {{
-                button.disabled = !running;
-                button.setAttribute('aria-disabled', running ? 'false' : 'true');
+                const canCancel = running || hasPausedQueue;
+                button.disabled = !canCancel;
+                button.setAttribute('aria-disabled', canCancel ? 'false' : 'true');
             }});
         }}
 
@@ -1451,10 +1453,11 @@ def render_web_scripts(
             }}
             const progress = payload.pool_probe_progress || {{}};
             const poolProbeActive = !!payload.pool_probe_running && Number(progress.total || 0) > 0;
-            updatePoolSummaryBlock(payload.pool_summary || null, progress, poolProbeActive);
-            updatePoolProbeControls(poolProbeActive);
+            const poolProbePaused = !!payload.pool_probe_paused && Number(progress.total || 0) > 0;
+            updatePoolSummaryBlock(payload.pool_summary || null, progress, poolProbeActive, poolProbePaused);
+            updatePoolProbeControls(poolProbeActive, poolProbePaused);
             updatePoolStatus(payload.pools);
-            if (poolProbeActive && !document.hidden) {{
+            if ((poolProbeActive || poolProbePaused) && !document.hidden) {{
                 refreshPoolData(2500);
             }}
         }}
@@ -1623,10 +1626,11 @@ def render_web_scripts(
             if (apiPill) {{
                 const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
                 const poolProbeVisible = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
+                const poolProbePaused = ENABLE_KEY_POOL && !!snapshot.pool_probe_paused && Number(progress.total || 0) > 0;
                 const progressLabel = poolProbeProgressLabel(progress.scope || '');
                 const progressNote = progress.note ? String(progress.note) : '';
                 const progressText = '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + (progress.total || 0);
-                apiPill.textContent = poolProbeVisible
+                apiPill.textContent = (poolProbeVisible || poolProbePaused)
                     ? (progressNote ? progressText + '. ' + progressNote : progressText)
                     : (web.api_status || '');
             }}
@@ -1638,7 +1642,8 @@ def render_web_scripts(
 
             const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
             const poolProbeActive = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
-            updatePoolProbeControls(poolProbeActive);
+            const poolProbePaused = ENABLE_KEY_POOL && !!snapshot.pool_probe_paused && Number(progress.total || 0) > 0;
+            updatePoolProbeControls(poolProbeActive, poolProbePaused);
             let pending = (web.api_status || '').indexOf('Проверяется связь текущего режима') !== -1 ||
                 (web.api_status || '').indexOf('Фоновая проверка') !== -1 ||
                 (web.api_status || '').indexOf('перепроверяется') !== -1;
@@ -1651,17 +1656,17 @@ def render_web_scripts(
                 }}
             }});
             const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || null) : null;
-            updatePoolSummaryBlock(poolSummary, progress, poolProbeActive);
+            updatePoolSummaryBlock(poolSummary, progress, poolProbeActive, poolProbePaused);
             updateRouterHealth(snapshot.router_health);
             renderStatusAttention(snapshot);
             if (ENABLE_KEY_POOL && snapshot.pools) {{
                 updatePoolStatus(snapshot.pools);
             }}
-            if (ENABLE_KEY_POOL && poolProbeWasRunning && !poolProbeActive) {{
+            if (ENABLE_KEY_POOL && poolProbeWasRunning && !poolProbeActive && !poolProbePaused) {{
                 refreshPoolData(500);
             }}
-            poolProbeWasRunning = poolProbeActive;
-            if (poolProbeActive) {{
+            poolProbeWasRunning = poolProbeActive || poolProbePaused;
+            if (poolProbeActive || poolProbePaused) {{
                 pending = true;
                 statusPollUntil = Math.max(statusPollUntil, Date.now() + POOL_PROBE_POLL_EXTENSION_MS);
             }}

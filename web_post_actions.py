@@ -333,7 +333,7 @@ def _pool_probe(ctx, data):
             raise ValueError('Неизвестный протокол')
         else:
             keys = _ctx(ctx, 'pool_keys_for_proto')(proto)
-            started, queued = _ctx(ctx, 'probe_pool_keys_background')(proto, keys, stale_only=False)
+            started, queued = _ctx(ctx, 'probe_pool_keys_background')(proto, keys, stale_only=False, resume_pending=True)
             probe_started = bool(started)
             if started:
                 result = f'Безопасная проверка пула {proto} запущена. В очереди: {queued}.'

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.703, последнее изменение: 11.06.2026
+#  Файл: bot.py, Версия v1.704, последнее изменение: 12.06.2026
 
 import subprocess
 import os
@@ -1231,6 +1231,18 @@ KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
 POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 1.5))
 POOL_PROBE_MIN_AVAILABLE_KB = int(getattr(config, 'pool_probe_min_available_kb', 160000))
+POOL_PROBE_SLOW_AVAILABLE_KB = max(
+    POOL_PROBE_MIN_AVAILABLE_KB,
+    int(getattr(config, 'pool_probe_slow_available_kb', POOL_PROBE_MIN_AVAILABLE_KB)),
+)
+POOL_PROBE_PAUSE_AVAILABLE_KB = max(
+    0,
+    int(getattr(config, 'pool_probe_pause_available_kb', min(125000, POOL_PROBE_MIN_AVAILABLE_KB))),
+)
+POOL_PROBE_SLOW_MEMORY_DELAY_SECONDS = max(
+    0.0,
+    float(getattr(config, 'pool_probe_slow_memory_delay_seconds', 3.0)),
+)
 POOL_PROBE_CPU_GUARD_ENABLED = bool(getattr(config, 'pool_probe_cpu_guard_enabled', True))
 POOL_PROBE_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'pool_probe_max_cpu_percent', 70.0)))
 POOL_PROBE_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'pool_probe_cpu_sample_seconds', 0.35)))
@@ -1259,6 +1271,14 @@ POOL_PROBE_QUALITY_DOWNLOAD_URL = str(
     getattr(config, 'pool_probe_quality_download_url', 'https://speed.cloudflare.com/__down?bytes={bytes}') or ''
 ).strip()
 POOL_PROBE_QUALITY_DOWNLOAD_BYTES = max(0, int(getattr(config, 'pool_probe_quality_download_bytes', 1048576)))
+POOL_PROBE_QUALITY_MIN_AVAILABLE_KB = max(
+    0,
+    int(getattr(config, 'pool_probe_quality_min_available_kb', POOL_PROBE_SLOW_AVAILABLE_KB)),
+)
+POOL_PROBE_QUALITY_MAX_SAMPLES_PER_RUN = max(
+    0,
+    int(getattr(config, 'pool_probe_quality_max_samples_per_run', 12)),
+)
 POOL_PROBE_QUALITY_DOWNLOAD_CONNECT_TIMEOUT = float(
     getattr(config, 'pool_probe_quality_download_connect_timeout', POOL_PROBE_RETRY_CONNECT_TIMEOUT)
 )
@@ -1487,6 +1507,8 @@ vless2_youtube_cache_confirm_lock = youtube_cache_confirm_lock
 pool_probe_resume_payload = None
 pool_probe_resume_after_cancel = True
 pool_probe_low_memory_resume_scheduled = False
+pool_probe_quality_sample_lock = threading.Lock()
+pool_probe_quality_sample_count = 0
 pool_probe_progress = PoolProbeProgress()
 process_started_at = time.time()
 memory_watchdog_lock = threading.Lock()
@@ -4299,6 +4321,38 @@ def _pool_probe_quality_settings():
     }
 
 
+def _reset_pool_probe_quality_sample_budget():
+    global pool_probe_quality_sample_count
+    with pool_probe_quality_sample_lock:
+        pool_probe_quality_sample_count = 0
+
+
+def _pool_probe_quality_sample_allowed():
+    if not POOL_PROBE_QUALITY_ENABLED or POOL_PROBE_QUALITY_DOWNLOAD_BYTES <= 0:
+        return False
+    available_kb = _available_memory_kb()
+    if (
+        POOL_PROBE_QUALITY_MIN_AVAILABLE_KB > 0 and
+        available_kb is not None and
+        available_kb < POOL_PROBE_QUALITY_MIN_AVAILABLE_KB
+    ):
+        return False
+    if POOL_PROBE_QUALITY_MAX_SAMPLES_PER_RUN <= 0:
+        return True
+    global pool_probe_quality_sample_count
+    with pool_probe_quality_sample_lock:
+        if pool_probe_quality_sample_count >= POOL_PROBE_QUALITY_MAX_SAMPLES_PER_RUN:
+            return False
+        pool_probe_quality_sample_count += 1
+    return True
+
+
+def _measure_limited_pool_probe_quality_download(proxy_url, **kwargs):
+    if not _pool_probe_quality_sample_allowed():
+        return None, ''
+    return _measure_quality_download_through_proxy(proxy_url, **kwargs)
+
+
 def _measure_quality_download_through_proxy(proxy_url, url='', bytes_limit=0, connect_timeout=2, read_timeout=8):
     bytes_limit = max(0, int(bytes_limit or POOL_PROBE_QUALITY_DOWNLOAD_BYTES))
     target_url = str(url or _pool_probe_quality_download_url(bytes_limit)).strip()
@@ -5087,7 +5141,7 @@ def _send_pool_input_prompt(chat_id, proto, prompt):
 
 
 def _pool_probe_start_result(proto, *, mention_proto=True):
-    started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False)
+    started, queued = _probe_pool_keys_background(proto, _pool_keys_for_proto(proto), stale_only=False, resume_pending=True)
     if started:
         target = f'пула {_pool_proto_label(proto)}' if mention_proto else 'пула'
         return started, queued, (
@@ -5599,7 +5653,7 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
         http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
         telegram_required=_telegram_required_for_protocol(proto),
-        measure_download=_measure_quality_download_through_proxy if POOL_PROBE_QUALITY_ENABLED else None,
+        measure_download=_measure_limited_pool_probe_quality_download if POOL_PROBE_QUALITY_ENABLED else None,
         quality_settings=_pool_probe_quality_settings(),
     )
 
@@ -5702,19 +5756,33 @@ def _delete_pool_probe_resume_file():
         _write_runtime_log(f'Failed to remove pool probe resume file: {exc}')
 
 
+def _pool_probe_resume_task_id(proto, key_or_id):
+    proto = str(proto or '').strip()
+    key_or_id = str(key_or_id or '').strip()
+    if proto not in POOL_PROTOCOL_ORDER or not key_or_id:
+        return None
+    if len(key_or_id) == 40 and all(char in '0123456789abcdefABCDEF' for char in key_or_id):
+        return proto, key_or_id.lower()
+    return proto, _hash_key(key_or_id)
+
+
 def _normalize_pool_probe_resume_payload(payload):
     if not isinstance(payload, dict):
         return None
     tasks = []
-    valid_protocols = set(POOL_PROTOCOL_ORDER)
     for item in payload.get('tasks') or []:
-        if not isinstance(item, (list, tuple)) or len(item) < 2:
+        if isinstance(item, dict):
+            task_id = _pool_probe_resume_task_id(
+                item.get('proto') or item.get('protocol'),
+                item.get('key_id') or item.get('hash') or item.get('key'),
+            )
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            task_id = _pool_probe_resume_task_id(item[0], item[1])
+        else:
             continue
-        proto = str(item[0] or '').strip()
-        key_value = str(item[1] or '').strip()
-        if proto not in valid_protocols or not key_value:
+        if not task_id:
             continue
-        tasks.append((proto, key_value))
+        tasks.append(task_id)
     if not tasks:
         return None
 
@@ -5749,13 +5817,44 @@ def _normalize_pool_probe_resume_payload(payload):
     }
 
 
+def _resolve_pool_probe_resume_tasks(payload):
+    payload = _normalize_pool_probe_resume_payload(payload)
+    if not payload:
+        return None
+    pools = _ensure_current_keys_in_pools(_load_current_keys())
+    lookup = {}
+    for proto in POOL_PROTOCOL_ORDER:
+        for key_value in pools.get(proto, []) or []:
+            key_value = str(key_value or '').strip()
+            if key_value:
+                lookup[(proto, _hash_key(key_value))] = key_value
+    resolved = []
+    for proto, key_id in payload.get('tasks') or []:
+        key_value = lookup.get((proto, key_id))
+        if key_value:
+            resolved.append((proto, key_value))
+    if not resolved:
+        return None
+    resolved_payload = dict(payload)
+    resolved_payload['tasks'] = resolved
+    resolved_payload['total'] = max(
+        int(resolved_payload.get('total') or 0),
+        int(resolved_payload.get('checked') or 0) + len(resolved),
+    )
+    return resolved_payload
+
+
 def _persist_pool_probe_resume_payload(payload):
     normalized = _normalize_pool_probe_resume_payload(payload)
     if not normalized:
         _delete_pool_probe_resume_file()
         return None
     serializable = dict(normalized)
-    serializable['tasks'] = [[proto, key_value] for proto, key_value in normalized['tasks']]
+    serializable['task_ref'] = 'key_hash'
+    serializable['tasks'] = [
+        {'proto': proto, 'key_id': key_id}
+        for proto, key_id in normalized['tasks']
+    ]
     try:
         _write_json_file(POOL_PROBE_RESUME_FILE, serializable)
         try:
@@ -5871,7 +5970,7 @@ def _schedule_low_memory_pool_probe_resume():
                     shutdown_requested.wait(1)
                     continue
                 available_kb = _available_memory_kb()
-                if available_kb is None or available_kb >= POOL_PROBE_MIN_AVAILABLE_KB:
+                if available_kb is None or available_kb >= POOL_PROBE_PAUSE_AVAILABLE_KB:
                     started, queued = _resume_cancelled_pool_probe('ожидания свободной памяти')
                     if started:
                         return
@@ -5880,7 +5979,7 @@ def _schedule_low_memory_pool_probe_resume():
                 else:
                     note = (
                         f'Проверка пула приостановлена до освобождения памяти: доступно {available_kb} KB, '
-                        f'порог {POOL_PROBE_MIN_AVAILABLE_KB} KB.'
+                        f'порог {POOL_PROBE_PAUSE_AVAILABLE_KB} KB.'
                     )
                 _set_pool_probe_progress(note=note)
                 shutdown_requested.wait(max(3.0, POOL_PROBE_LOW_MEMORY_DELAY_SECONDS))
@@ -5896,6 +5995,7 @@ def _schedule_low_memory_pool_probe_resume():
 def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_checked=0, total_count=None, started_at=None):
     global pool_probe_resume_after_cancel
     pool_probe_resume_after_cancel = True
+    _reset_pool_probe_quality_sample_budget()
     return start_pool_probe_worker(
         selected,
         custom_checks,
@@ -5927,6 +6027,7 @@ def _resume_cancelled_pool_probe(reason='применения ключа'):
                 while pool_probe_lock.locked() and time.time() < deadline:
                     time.sleep(0.5)
                 delayed_payload = _take_cancelled_pool_probe()
+                delayed_payload = _resolve_pool_probe_resume_tasks(delayed_payload)
                 if delayed_payload:
                     _start_selected_pool_probe_tasks(
                         delayed_payload.get('tasks') or [],
@@ -5941,13 +6042,16 @@ def _resume_cancelled_pool_probe(reason='применения ключа'):
 
             threading.Thread(target=delayed_resume, daemon=True).start()
         return False, 0
+    resolved_payload = _resolve_pool_probe_resume_tasks(payload)
+    if not resolved_payload:
+        return False, 0
     started, queued = _start_selected_pool_probe_tasks(
-        payload.get('tasks') or [],
-        payload.get('checks') or [],
-        payload.get('scope') or 'manual',
-        initial_checked=payload.get('checked') or 0,
-        total_count=payload.get('total'),
-        started_at=payload.get('started_at') or None,
+        resolved_payload.get('tasks') or [],
+        resolved_payload.get('checks') or [],
+        resolved_payload.get('scope') or 'manual',
+        initial_checked=resolved_payload.get('checked') or 0,
+        total_count=resolved_payload.get('total'),
+        started_at=resolved_payload.get('started_at') or None,
     )
     if not started:
         _restore_pool_probe_resume_payload(payload)
@@ -5973,7 +6077,14 @@ def _pause_pool_probe_for_apply(timeout=12.0):
 def _cancel_pool_probe(timeout=2.0):
     global pool_probe_resume_after_cancel, pool_probe_resume_payload
     if not pool_probe_lock.locked():
+        had_resume_payload = _has_pool_probe_resume_payload()
+        with pool_probe_resume_lock:
+            pool_probe_resume_payload = None
         _delete_pool_probe_resume_file()
+        if had_resume_payload:
+            _set_pool_probe_progress(running=False, checked=0, total=0, scope='', note='', finished_at=time.time())
+            _invalidate_probe_status_caches()
+            return True, 'Очередь проверки пула очищена.'
         return False, 'Проверка пула сейчас не выполняется.'
     pool_probe_resume_after_cancel = False
     with pool_probe_resume_lock:
@@ -6007,7 +6118,7 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             batch_size=batch_size,
             concurrency=concurrency,
             delay_seconds=POOL_PROBE_DELAY_SECONDS,
-            min_available_kb=POOL_PROBE_MIN_AVAILABLE_KB,
+            min_available_kb=POOL_PROBE_PAUSE_AVAILABLE_KB,
             test_port=POOL_PROBE_TEST_PORT,
             available_memory_kb=_available_memory_kb,
             log=_write_runtime_log,
@@ -6040,6 +6151,8 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             max_high_cpu_wait_seconds=POOL_PROBE_HIGH_CPU_MAX_WAIT_SECONDS,
             low_memory_delay_seconds=POOL_PROBE_LOW_MEMORY_DELAY_SECONDS,
             max_low_memory_wait_seconds=POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS,
+            slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB,
+            slow_memory_delay_seconds=POOL_PROBE_SLOW_MEMORY_DELAY_SECONDS,
         )
     finally:
         probe_recorder.flush()
@@ -6058,7 +6171,9 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'
     return _start_selected_pool_probe_tasks(selected, custom_checks, scope)
 
 
-def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, stale_only=True, scope='protocol'):
+def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, stale_only=True, scope='protocol', resume_pending=False):
+    if resume_pending and _has_pool_probe_resume_payload():
+        return _resume_cancelled_pool_probe('ручного запуска')
     if POOL_PROBE_ACTIVE_ONLY:
         current_key = (_load_current_keys().get(proto) or '').strip()
         keys = [current_key] if current_key and current_key in (keys or []) else []
@@ -6389,6 +6504,8 @@ def _refresh_status_caches_async(current_keys):
 
 def _probe_all_pool_keys_async(stale_only=True, max_keys=KEY_PROBE_MAX_PER_RUN, scope='manual_all'):
     """Запускает безопасную фоновую проверку пула через временный xray."""
+    if _has_pool_probe_resume_payload():
+        return _resume_cancelled_pool_probe('ручного запуска')
     if POOL_PROBE_ACTIVE_ONLY:
         active_proto = proxy_mode if proxy_mode in POOL_PROTOCOL_ORDER else ''
         active_key = (_load_current_keys().get(active_proto, '') if active_proto else '').strip()
@@ -6715,6 +6832,7 @@ def _web_get_context(handler):
         'router_health_snapshot': _router_health_snapshot,
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
+        'has_pool_probe_resume_payload': _has_pool_probe_resume_payload,
         'web_pool_snapshot': _web_pool_snapshot,
         'pool_status_summary': _pool_status_summary,
         'web_custom_checks': _web_custom_checks,

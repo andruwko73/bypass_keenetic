@@ -1,3 +1,6 @@
+*v1.704 (12 Jun 2026) -* main
+*Keeps pool checks resumable without storing raw keys, continues cautiously in low-memory slow mode, limits heavy YouTube throughput samples, and only shows `Стабильно` / `Быстро` after a real speed sample.*
+
 *v1.703 (11 Jun 2026) -* main
 *Adds quality scoring for pool keys, shows `Стабильно` / `Быстро` details before applying a key, and uses the score for YouTube candidate ordering.*
 
