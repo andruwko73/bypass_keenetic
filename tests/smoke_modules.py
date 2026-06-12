@@ -90,7 +90,7 @@ def _extract_udp_policy_python(script_text):
     return script_text[start:end]
 
 
-def _run_udp_policy_python(script_path, policy):
+def _run_udp_policy_python(script_path, policy, youtube_route='vless-2.txt'):
     source = _extract_udp_policy_python(script_path.read_text(encoding='utf-8'))
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -107,9 +107,9 @@ def _run_udp_policy_python(script_path, policy):
             "ipv6_bypass_fallback_enabled = True\n",
             encoding='utf-8',
         )
-        for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'trojan.txt'):
+        for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'vless-2.txt', 'trojan.txt'):
             (unblock_dir / filename).write_text('example.org\n', encoding='utf-8')
-        (unblock_dir / 'vless-2.txt').write_text('www.youtube.com\n', encoding='utf-8')
+        (unblock_dir / youtube_route).write_text('www.youtube.com\n', encoding='utf-8')
         env = os.environ.copy()
         env['PYTHONPATH'] = str(runtime_dir)
         env['UNBLOCK_DIR'] = str(unblock_dir)
@@ -968,6 +968,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         assert block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
         assert auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert block_policy['BYPASS_IPV6_FALLBACK_ENABLED'] == '1'
+        vless_auto_policy = _run_udp_policy_python(script_path, 'auto', youtube_route='vless.txt')
+        vless_block_policy = _run_udp_policy_python(script_path, 'block', youtube_route='vless.txt')
+        assert vless_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
+        assert vless_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
+        assert vless_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"' in ipset_script
@@ -1177,7 +1182,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS' in source
     assert "youtube_vless2_failover_recent_success_ttl', 300" in source
     assert 'def _youtube_route_protocol' in source
-    assert "YOUTUBE_ROUTE_PROTOCOLS = ('vless', 'vless2')" in source
+    assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
+    assert "YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')" in source
     assert "proxy_mode == route_proto" in source
     assert 'Telegram is required because bot mode is' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
@@ -4397,6 +4403,20 @@ def test_service_routes_apply_and_profile():
         assert callbacks == ['route', 'profile']
         assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
         assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
+        same_route_dir = Path(tmp) / 'same-route'
+        same_route_dir.mkdir()
+        for route_file in ('vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (same_route_dir / route_file).write_text('', encoding='utf-8')
+        youtube_same = service_routes.apply_service_route('youtube', 'vmess', unblock_dir=str(same_route_dir), update_script='')
+        telegram_same = service_routes.apply_service_route('telegram', 'vmess', unblock_dir=str(same_route_dir), update_script='')
+        vmess_text = (same_route_dir / 'vmess.txt').read_text(encoding='utf-8')
+        vless_text = (same_route_dir / 'vless.txt').read_text(encoding='utf-8')
+        assert youtube_same['target_protocol'] == 'vmess'
+        assert telegram_same['target_protocol'] == 'vmess'
+        assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] in vmess_text
+        assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] in vmess_text
+        assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] not in vless_text
+        assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] not in vless_text
 
 
 def test_route_intersections_helpers():

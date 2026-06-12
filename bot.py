@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.706, последнее изменение: 12.06.2026
+#  Файл: bot.py, Версия v1.707, последнее изменение: 12.06.2026
 
 import subprocess
 import os
@@ -1438,7 +1438,8 @@ VMESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vmess.key')
 VLESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless.key')
 VLESS2_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless2.key')
 KEY_SWITCH_AUDIT_LOG = '/opt/etc/bot/key_switch_audit.log'
-YOUTUBE_ROUTE_PROTOCOLS = ('vless', 'vless2')
+YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')
 YOUTUBE_ROUTE_MARKERS = (
     'youtube.com',
     'youtube-nocookie.com',
@@ -2247,7 +2248,7 @@ def _youtube_stream_guard_state(proto):
 
 def _youtube_protocol_conntrack_ports(proto):
     ports = set()
-    if proto not in YOUTUBE_ROUTE_PROTOCOLS:
+    if proto not in YOUTUBE_STREAM_GUARD_PROTOCOLS:
         return ports
     for value in (globals().get(f'localport{proto}'), globals().get(f'localport{proto}_transparent')):
         try:
@@ -2374,7 +2375,7 @@ def _youtube_vless2_stream_guard_active(reason='', log=False, hold_seconds=None)
 
 
 def _vless_traffic_guard_active(reason='', log=False, hold_seconds=None):
-    for proto in YOUTUBE_ROUTE_PROTOCOLS:
+    for proto in YOUTUBE_STREAM_GUARD_PROTOCOLS:
         if _youtube_stream_guard_active(proto, reason=reason, log=log, hold_seconds=hold_seconds):
             return True
     return False

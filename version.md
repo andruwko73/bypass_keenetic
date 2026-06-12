@@ -1,3 +1,6 @@
+*v1.707 (12 Jun 2026) -* main
+*Lets YouTube route detection follow any supported protocol list while keeping stream-activity guard scoped to Vless routes.*
+
 *v1.706 (12 Jun 2026) -* main
 *Checks YouTube first-load and googlevideo stability more strictly, adds scoped bootstrap routes, and makes YouTube QUIC policy configurable.*
 
