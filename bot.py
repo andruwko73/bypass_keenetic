@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.705, последнее изменение: 12.06.2026
+#  Файл: bot.py, Версия v1.706, последнее изменение: 12.06.2026
 
 import subprocess
 import os
@@ -712,7 +712,7 @@ def _youtube_failover_state(proto):
     return youtube_failover_states[proto]
 
 
-def _check_youtube_protocol_once(proto=None):
+def _check_youtube_protocol_once(proto=None, metrics=None):
     proto = proto or _youtube_route_protocol()
     return _controller_check_youtube_through_proxy(
         _check_http_through_proxy,
@@ -722,6 +722,7 @@ def _check_youtube_protocol_once(proto=None):
         http_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
         http_retry_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
         retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+        metrics=metrics,
         sleep=shutdown_requested.wait,
     )
 
@@ -740,6 +741,7 @@ def _schedule_youtube_cache_confirm(proto, key_value):
                 proxy_url = proxy_settings.get(proto)
                 if not proxy_url:
                     return
+                yt_metrics = {}
                 ok, _message = _controller_check_youtube_through_proxy(
                     _check_http_through_proxy,
                     proxy_url,
@@ -748,10 +750,11 @@ def _schedule_youtube_cache_confirm(proto, key_value):
                     http_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
                     http_retry_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
                     retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+                    metrics=yt_metrics,
                     sleep=shutdown_requested.wait,
                 )
                 if ok:
-                    _record_key_probe(proto, key_value, yt_ok=True)
+                    _record_key_probe(proto, key_value, yt_ok=True, **yt_metrics)
                     _invalidate_key_status_cache()
         finally:
             _memory_cleanup(f'{proto} youtube cache confirm')
@@ -962,12 +965,13 @@ def _attempt_youtube_failover():
         except Exception:
             cached_fail_since = 0.0
 
-    ok, message = _check_youtube_protocol_once(route_proto)
+    yt_metrics = {}
+    ok, message = _check_youtube_protocol_once(route_proto, metrics=yt_metrics)
     if ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
-        _record_key_probe(route_proto, active_key, yt_ok=True)
+        _record_key_probe(route_proto, active_key, yt_ok=True, **yt_metrics)
         return False
 
     if _recover_current_youtube_route_after_hard_failure(route_proto, active_key, message):
@@ -1033,7 +1037,7 @@ def _attempt_youtube_failover():
         )
         return False
 
-    _record_key_probe(route_proto, active_key, yt_ok=False)
+    _record_key_probe(route_proto, active_key, yt_ok=False, **yt_metrics)
     _invalidate_key_status_cache()
     state['in_progress'] = True
     state['last_attempt'] = now
@@ -1386,6 +1390,9 @@ UDP_QUIC_BLOCK_VMESS_ENABLED = bool(getattr(config, 'udp_quic_block_vmess_enable
 UDP_QUIC_BLOCK_VLESS_ENABLED = bool(getattr(config, 'udp_quic_block_vless_enabled', True))
 UDP_QUIC_BLOCK_VLESS2_ENABLED = bool(getattr(config, 'udp_quic_block_vless2_enabled', True))
 UDP_QUIC_BLOCK_TROJAN_ENABLED = bool(getattr(config, 'udp_quic_block_trojan_enabled', True))
+YOUTUBE_QUIC_POLICY = str(getattr(config, 'youtube_quic_policy', 'auto') or 'auto').strip().lower()
+if YOUTUBE_QUIC_POLICY not in ('auto', 'allow', 'block'):
+    YOUTUBE_QUIC_POLICY = 'auto'
 _REALITY_ENDPOINT_OVERRIDES_RAW = getattr(config, 'reality_endpoint_overrides', {})
 REALITY_ENDPOINT_OVERRIDES = {
     str(host or '').strip().lower(): str(endpoint or '').strip()
@@ -1886,6 +1893,10 @@ def _route_list_contains_youtube(proto):
 
 def _udp_quic_block_enabled_for_protocol(proto, configured_enabled):
     if proto in UDP_QUIC_POLICY_PROTOCOLS and _route_list_contains_youtube(proto):
+        if YOUTUBE_QUIC_POLICY == 'allow':
+            return False
+        if YOUTUBE_QUIC_POLICY == 'block':
+            return True
         return False
     return bool(configured_enabled)
 

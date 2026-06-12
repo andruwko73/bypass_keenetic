@@ -63,6 +63,7 @@ import event_history
 import route_intersections
 import service_routes
 import update_status
+import youtube_healthcheck
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -78,6 +79,54 @@ PORTS = {
     'shadowsocks_bot': 10815,
     'trojan_bot': 10816,
 }
+
+
+def _extract_udp_policy_python(script_text):
+    marker = 'from service_catalog import YOUTUBE_UNBLOCK_ENTRIES'
+    marker_at = script_text.index(marker)
+    heredoc_at = script_text.rfind("<<'PY'", 0, marker_at)
+    start = script_text.index('\n', heredoc_at) + 1
+    end = script_text.index('\nPY\n', marker_at)
+    return script_text[start:end]
+
+
+def _run_udp_policy_python(script_path, policy):
+    source = _extract_udp_policy_python(script_path.read_text(encoding='utf-8'))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        runtime_dir = tmp_path / 'runtime'
+        unblock_dir = tmp_path / 'unblock'
+        runtime_dir.mkdir()
+        unblock_dir.mkdir()
+        (runtime_dir / 'service_catalog.py').write_text(
+            "YOUTUBE_UNBLOCK_ENTRIES = ('youtube.com', 'www.youtube.com')\n",
+            encoding='utf-8',
+        )
+        (runtime_dir / 'bot_config.py').write_text(
+            f"youtube_quic_policy = {policy!r}\n"
+            "ipv6_bypass_fallback_enabled = True\n",
+            encoding='utf-8',
+        )
+        for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'trojan.txt'):
+            (unblock_dir / filename).write_text('example.org\n', encoding='utf-8')
+        (unblock_dir / 'vless-2.txt').write_text('www.youtube.com\n', encoding='utf-8')
+        env = os.environ.copy()
+        env['PYTHONPATH'] = str(runtime_dir)
+        env['UNBLOCK_DIR'] = str(unblock_dir)
+        result = subprocess.run(
+            [sys.executable, '-c', source],
+            cwd=str(runtime_dir),
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    return dict(
+        line.split('=', 1)
+        for line in result.stdout.splitlines()
+        if line.startswith('BYPASS_')
+    )
 
 
 class _FakeButton:
@@ -579,6 +628,45 @@ def test_key_pool_subscription_helpers():
         service='youtube',
     )
     assert youtube_scored_candidates[:3] == [('vless2', 'fast'), ('vless2', 'slow'), ('vless2', 'unchecked')]
+    youtube_stable_candidates = key_pool_store.failover_candidates(
+        {'vless2': ['active', 'unstable', 'stable']},
+        'vless2',
+        'active',
+        protocols=('vless2',),
+        key_probe_cache={
+            _hash_key('unstable'): {'yt_ok': True, 'yt_score': 95, 'yt_stability': 'unstable', 'yt_error_rate': 0.125, 'ts': 30},
+            _hash_key('stable'): {'yt_ok': True, 'yt_score': 80, 'yt_stability': 'stable', 'yt_error_rate': 0.0, 'ts': 20},
+        },
+        hash_key=_hash_key,
+        service='youtube',
+    )
+    assert youtube_stable_candidates[:2] == [('vless2', 'stable'), ('vless2', 'unstable')]
+
+
+def test_youtube_healthcheck_detects_first_load_instability():
+    calls = []
+
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        calls.append((url, connect_timeout, read_timeout))
+        if url == youtube_healthcheck.YOUTUBE_GOOGLEVIDEO_URL and len([item for item in calls if item[0] == url]) == 2:
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10813',
+        http_timeouts=(1, 2),
+        metrics=metrics,
+    )
+    assert ok is False
+    assert 'unstable' in message
+    assert metrics['yt_home_ok'] is True
+    assert metrics['yt_bootstrap_ok'] is True
+    assert metrics['googlevideo_ok'] is False
+    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_error_rate'] > 0
+    assert 'unexpected EOF' in metrics['yt_last_error']
 
 
 def test_web_post_actions_helpers():
@@ -781,6 +869,9 @@ def test_codex_version_matches_commit_count():
     assert 'udp_quic_block_trojan_enabled = True' in example
     assert 'udp_quic_block_trojan_enabled = True' in installer
     assert 'udp_quic_block_trojan_enabled = True' in bootstrap
+    assert "youtube_quic_policy = 'auto'" in example
+    assert "youtube_quic_policy = 'auto'" in installer
+    assert "youtube_quic_policy = 'auto'" in bootstrap
     assert 'ipv6_bypass_fallback_enabled = True' in example
     assert 'ipv6_bypass_fallback_enabled = True' in installer
     assert 'ipv6_bypass_fallback_enabled = True' in bootstrap
@@ -867,6 +958,16 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert "('VLESS', 'vless.txt', 'udp_quic_block_vless_enabled')" in script
     assert "('VLESS2', 'vless-2.txt', 'udp_quic_block_vless2_enabled')" in script
     assert "print(f'BYPASS_UDP_QUIC_BLOCK_{env_name}={1 if enabled else 0}')" in script
+
+    for script_path in (ROOT / 'script.sh', ROOT / 'bootstrap' / 'install.sh'):
+        auto_policy = _run_udp_policy_python(script_path, 'auto')
+        allow_policy = _run_udp_policy_python(script_path, 'allow')
+        block_policy = _run_udp_policy_python(script_path, 'block')
+        assert auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '0'
+        assert allow_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '0'
+        assert block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
+        assert auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
+        assert block_policy['BYPASS_IPV6_FALLBACK_ENABLED'] == '1'
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"' in ipset_script
@@ -984,7 +1085,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     pool_controller_source = (ROOT / 'pool_probe_controller.py').read_text(encoding='utf-8')
     pool_runner_source = (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     proxy_apply_source = (ROOT / 'proxy_apply_runtime.py').read_text(encoding='utf-8')
-    youtube_source = source + pool_controller_source + pool_runner_source + proxy_apply_source
+    youtube_health_source = (ROOT / 'youtube_healthcheck.py').read_text(encoding='utf-8')
+    youtube_source = source + pool_controller_source + pool_runner_source + proxy_apply_source + youtube_health_source
     assert 'PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT"' in service
     assert 'cleanup_python_bytecode' in service
     assert 'trim_runtime_logs' in service
@@ -1091,16 +1193,17 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "['nslookup', str(domain), str(dns_server)]" in source
     assert 'def _recover_current_youtube_route_after_hard_failure' in source
     assert source.find('_recover_current_youtube_route_after_hard_failure(route_proto, active_key, message)') < source.find("_recent_probe_ok(cached_active_probe")
-    assert 'Primary YouTube connectivity endpoint did not respond through this key: ' in pool_controller_source
-    assert 'Primary YouTube connectivity endpoint did not respond through this key: ' in pool_runner_source
-    assert 'Primary YouTube connectivity endpoint did not respond through this key: ' in proxy_apply_source
+    assert 'Required YouTube endpoint did not respond through this key: ' in youtube_health_source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
     assert 'http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT)' in source
     assert 'redirector.googlevideo.com/generate_204' in youtube_source
     assert 'googlevideo.com/generate_204' in youtube_source
     assert 'i.ytimg.com/generate_204' in youtube_source
-    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 2' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 7' in youtube_source
     assert 'YOUTUBE_HEALTHCHECK_REQUIRED_URLS' in youtube_source
+    assert 'youtubei-att.googleapis.com' in youtube_source
+    assert 'yt_error_rate' in youtube_source
+    assert 'yt_stability' in youtube_source
     unblock_source = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
     assert 'yt4.googleusercontent.com' in unblock_source
     assert 'add_cidr64="$youtube_ipv6_domain"' in unblock_source
@@ -1741,10 +1844,7 @@ def test_proxy_apply_runtime_helpers():
     youtube_calls = []
     def proxy_apply_youtube_check(proxy, **kwargs):
         youtube_calls.append(kwargs['url'])
-        return kwargs['url'] in (
-            'https://www.youtube.com/generate_204',
-            'https://i.ytimg.com/generate_204',
-        ), 'probe'
+        return True, 'probe'
 
     youtube_ok, _ = proxy_apply_runtime.check_youtube_health(
         proxy_apply_youtube_check,
@@ -1752,7 +1852,7 @@ def test_proxy_apply_runtime_helpers():
         timeouts=(1, 1),
     )
     assert youtube_ok is True
-    assert youtube_calls == list(proxy_apply_runtime.YOUTUBE_HEALTHCHECK_URLS[:3])
+    assert youtube_calls == list(proxy_apply_runtime.YOUTUBE_HEALTHCHECK_URLS)
 
     primary_transient_ok, primary_transient_message = proxy_apply_runtime.check_youtube_health(
         lambda proxy, **kwargs: (
@@ -1762,8 +1862,8 @@ def test_proxy_apply_runtime_helpers():
         'proxy-url',
         timeouts=(1, 1),
     )
-    assert primary_transient_ok is True
-    assert primary_transient_message == 'YouTube endpoints confirmed without primary'
+    assert primary_transient_ok is False
+    assert primary_transient_message.startswith('Required YouTube endpoint did not respond through this key:')
 
     commands = []
     sleeps = []
@@ -1788,7 +1888,11 @@ def test_proxy_apply_runtime_helpers():
     assert result.startswith('✅ Vless 1 ключ сохранён.')
     assert commands == ['/opt/etc/init.d/S24xray restart']
     assert sleeps == []
-    assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': False})]
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless', 'key')
+    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['yt_ok'] is False
+    assert records[0][2]['yt_stability'] == 'fail'
     pending = proxy_apply_runtime.apply_installed_proxy_runtime(
         'trojan',
         'key',
@@ -1825,7 +1929,11 @@ def test_proxy_apply_runtime_helpers():
         sleep=lambda seconds: None,
     )
     assert 'YouTube' in vless2_result
-    assert vless2_records == [('vless2', 'yt-key', {'tg_ok': None, 'yt_ok': True})]
+    assert len(vless2_records) == 1
+    assert vless2_records[0][0:2] == ('vless2', 'yt-key')
+    assert vless2_records[0][2]['tg_ok'] is None
+    assert vless2_records[0][2]['yt_ok'] is True
+    assert vless2_records[0][2]['yt_stability'] == 'stable'
 
     routed_vless_records = []
     routed_vless_result = proxy_apply_runtime.apply_installed_proxy_runtime(
@@ -1847,7 +1955,11 @@ def test_proxy_apply_runtime_helpers():
         sleep=lambda seconds: None,
     )
     assert 'YouTube' in routed_vless_result
-    assert routed_vless_records == [('vless', 'yt-on-vless1', {'tg_ok': None, 'yt_ok': True})]
+    assert len(routed_vless_records) == 1
+    assert routed_vless_records[0][0:2] == ('vless', 'yt-on-vless1')
+    assert routed_vless_records[0][2]['tg_ok'] is None
+    assert routed_vless_records[0][2]['yt_ok'] is True
+    assert routed_vless_records[0][2]['yt_stability'] == 'stable'
 
 
 def test_pool_probe_controller_helpers():
@@ -1976,19 +2088,20 @@ def test_pool_probe_controller_helpers():
         http_timeouts=(3, 4),
         sleep=lambda seconds: None,
     )
-    assert records == [
-        ('vless', 'key', {'tg_ok': False, 'yt_ok': False}),
-        ('vless', 'key', {'custom': {'custom': False}, 'custom_checks': [{'id': 'custom'}]}),
-    ]
+    assert len(records) == 2
+    assert records[0][0:2] == ('vless', 'key')
+    assert records[0][2]['tg_ok'] is False
+    assert records[0][2]['yt_ok'] is False
+    assert records[0][2]['yt_stability'] == 'fail'
+    assert records[1] == ('vless', 'key', {'custom': {'custom': False}, 'custom_checks': [{'id': 'custom'}]})
 
     records = []
     http_calls = []
-    yt_results = iter([(True, 'ok'), (False, 'timeout'), (True, 'ok')])
     def check_http_for_pool_key(proxy, **kwargs):
         http_calls.append(kwargs)
         if kwargs.get('url') == 'https://web.telegram.org/':
             return True, 'telegram ok'
-        return next(yt_results)
+        return True, 'ok'
 
     pool_probe_controller.check_pool_key_through_proxy(
         'vless',
@@ -2007,11 +2120,19 @@ def test_pool_probe_controller_helpers():
     )
     assert http_calls == [
         {'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4},
-        {'url': 'https://www.youtube.com/generate_204', 'connect_timeout': 3, 'read_timeout': 4},
-        {'url': 'https://redirector.googlevideo.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
-        {'url': 'https://i.ytimg.com/generate_204', 'connect_timeout': 6, 'read_timeout': 10},
+    ] + [
+        {
+            'url': url,
+            'connect_timeout': 3 if index == 0 else 6,
+            'read_timeout': 4 if index == 0 else 10,
+        }
+        for index, url in enumerate(pool_probe_controller.YOUTUBE_HEALTHCHECK_URLS)
     ]
-    assert records == [('vless', 'key', {'tg_ok': True, 'yt_ok': True})]
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless', 'key')
+    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['yt_ok'] is True
+    assert records[0][2]['yt_stability'] == 'stable'
 
     records = []
     pool_probe_controller.check_pool_key_through_proxy(
@@ -2072,15 +2193,18 @@ def test_pool_probe_controller_helpers():
         sleep=lambda seconds: None,
     )
     assert http_calls[:1] == [{'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4}]
-    assert records == [('vless', 'app-telegram-key', {'tg_ok': True, 'yt_ok': True})]
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless', 'app-telegram-key')
+    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['yt_ok'] is True
+    assert records[0][2]['yt_stability'] == 'stable'
 
     records = []
-    yt_results = iter([(True, 'ok'), (True, 'ok')])
 
     def check_http_without_app_telegram(proxy, **kwargs):
         if kwargs.get('url') in pool_probe_controller.TELEGRAM_HEALTHCHECK_URLS:
             return False, 'telegram app fail'
-        return next(yt_results)
+        return True, 'ok'
 
     pool_probe_controller.check_pool_key_through_proxy(
         'vless2',
@@ -2096,10 +2220,13 @@ def test_pool_probe_controller_helpers():
         http_timeouts=(3, 4),
         sleep=lambda seconds: None,
     )
-    assert records == [('vless2', 'youtube-only', {'tg_ok': 'unknown', 'yt_ok': True})]
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless2', 'youtube-only')
+    assert records[0][2]['tg_ok'] == 'unknown'
+    assert records[0][2]['yt_ok'] is True
+    assert records[0][2]['yt_stability'] == 'stable'
 
     records = []
-    yt_results = iter([(True, 'ok'), (True, 'ok')])
     pool_probe_controller.check_pool_key_through_proxy(
         'vless2',
         'bot-mode-vless2',
@@ -2115,10 +2242,13 @@ def test_pool_probe_controller_helpers():
         telegram_required=True,
         sleep=lambda seconds: None,
     )
-    assert records == [('vless2', 'bot-mode-vless2', {'tg_ok': False, 'yt_ok': True})]
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless2', 'bot-mode-vless2')
+    assert records[0][2]['tg_ok'] is False
+    assert records[0][2]['yt_ok'] is True
+    assert records[0][2]['yt_stability'] == 'stable'
 
     records = []
-    yt_results = iter([(True, 'ok'), (True, 'ok')])
     telegram_web_attempts = []
 
     def check_http_retry_required_telegram(proxy, **kwargs):
@@ -2128,7 +2258,7 @@ def test_pool_probe_controller_helpers():
             return len(telegram_web_attempts) >= 2, 'telegram app retry'
         if url in pool_probe_controller.TELEGRAM_HEALTHCHECK_URLS:
             return False, 'telegram app fail'
-        return next(yt_results)
+        return True, 'ok'
 
     pool_probe_controller.check_pool_key_through_proxy(
         'vless',
@@ -2146,7 +2276,11 @@ def test_pool_probe_controller_helpers():
         telegram_required=True,
         sleep=lambda seconds: None,
     )
-    assert records == [('vless', 'bot-mode-retry', {'tg_ok': True, 'yt_ok': True})]
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless', 'bot-mode-retry')
+    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['yt_ok'] is True
+    assert records[0][2]['yt_stability'] == 'stable'
     assert telegram_web_attempts == [
         {'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4},
         {'url': 'https://web.telegram.org/', 'connect_timeout': 6, 'read_timeout': 10},
@@ -2241,7 +2375,11 @@ def test_pool_probe_runner_failover_candidate():
         collect_garbage=lambda: None,
     )
     assert youtube_result == ('vless2', 'yt-ok', None, True)
-    assert youtube_records == [('vless2', 'yt-ok', {'tg_ok': None, 'yt_ok': True})]
+    assert len(youtube_records) == 1
+    assert youtube_records[0][0:2] == ('vless2', 'yt-ok')
+    assert youtube_records[0][2]['tg_ok'] is None
+    assert youtube_records[0][2]['yt_ok'] is True
+    assert youtube_records[0][2]['yt_stability'] == 'stable'
 
     cancel_event = threading.Event()
     cancel_event.set()
@@ -2681,6 +2819,15 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'googleusercontent.com' not in entries
     assert 'remotedesktop-pa.googleapis.com' not in entries
     assert 'instantmessaging-pa.googleapis.com' not in entries
+    assert {
+        'accounts.google.com',
+        'apis.google.com',
+        'client-channel.google.com',
+        'clients4.google.com',
+        'fonts.googleapis.com',
+        'www.gstatic.com',
+        'youtubei-att.googleapis.com',
+    } <= entries
     vless_entries = {
         line.strip()
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
@@ -3719,6 +3866,20 @@ def test_probe_cache_quality_metrics():
     assert latency_only['yt_quality'] == ''
     assert latency_only['yt_stream_tier'] == ''
 
+    unstable = probe_cache.youtube_quality_score(
+        yt_ok=True,
+        yt_latency_ms=500,
+        googlevideo_latency_ms=600,
+        googlevideo_ok=False,
+        yt_error_rate=0.125,
+        yt_stability='unstable',
+        yt_throughput_mbps=55.0,
+        min_1600p_mbps=25.0,
+        min_4k_mbps=45.0,
+    )
+    assert unstable['yt_score'] == 0
+    assert unstable['yt_quality'] == ''
+
 
 def test_probe_cache_ignores_stale_schema(tmp_path):
     cache_path = tmp_path / 'key_probe_cache.json'
@@ -4168,7 +4329,7 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     assert "_controller_check_youtube_through_proxy" in source
     assert "service='youtube'" in source
     assert 'Reality endpoint repair restored current' in source
-    assert "_record_key_probe(proto, key_value, yt_ok=True)" in source
+    assert "_record_key_probe(proto, key_value, yt_ok=True, **yt_metrics)" in source
     assert "_invalidate_key_status_cache()" in source
 
 

@@ -38,6 +38,12 @@
 2404:6800:4004:38::/64
 2404:6800:4004:39::/64
 2404:6800:4004:3a::/64
+accounts.google.com
+apis.google.com
+client-channel.google.com
+clients4.google.com
+families.google.com
+fonts.googleapis.com
 ggpht.com
 googlevideo.com
 gaming.youtube.com
@@ -54,9 +60,12 @@ returnyoutubedislikeapi.com
 redirector.googlevideo.com
 s.ytimg.com
 studio.youtube.com
+support.google.com
 tv.youtube.com
 video.google.com
 wide-youtube.l.google.com
+www.google.com
+www.gstatic.com
 www.youtube.com
 www.youtube-nocookie.com
 www.youtubeeducation.com
@@ -68,6 +77,7 @@ youtube-ui.l.google.com
 youtubeeducation.com
 youtubeembeddedplayer.googleapis.com
 youtubei.googleapis.com
+youtubei-att.googleapis.com
 youtubekids.com
 yt.be
 yt-video-upload.l.google.com

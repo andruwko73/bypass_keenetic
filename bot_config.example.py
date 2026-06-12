@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.705
+# ВЕРСИЯ СКРИПТА v1.706
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -51,6 +51,7 @@ udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service d
 udp_quic_block_vless_enabled = True  # auto-disabled when this route contains YouTube entries
 udp_quic_block_vless2_enabled = True  # auto-disabled when this route contains YouTube entries
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
+youtube_quic_policy = 'auto'  # auto keeps current behavior; allow permits QUIC; block forces TCP fallback for YouTube routes
 udp_quic_drift_priority_refresh_cooldown_seconds = 120  # refresh YouTube/Googlevideo ipset drift faster than low-priority service drift
 ipset_refresh_command_timeout_seconds = 420  # allow slower low-load ipset refreshes on busy routers
 ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси

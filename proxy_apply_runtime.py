@@ -1,46 +1,23 @@
 import os
 import time
 
-YOUTUBE_HEALTHCHECK_URLS = (
-    'https://www.youtube.com/generate_204',
-    'https://redirector.googlevideo.com/generate_204',
-    'https://i.ytimg.com/generate_204',
-    'https://www.youtube.com',
+from youtube_healthcheck import (
+    YOUTUBE_HEALTHCHECK_MIN_OK,
+    YOUTUBE_HEALTHCHECK_REQUIRED_URLS,
+    YOUTUBE_HEALTHCHECK_URLS,
+    check_youtube_through_proxy,
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 2
-YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (YOUTUBE_HEALTHCHECK_URLS[0],)
 
 
-def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
-    ok_count = 0
-    ok_urls = set()
-    failed = []
-    connect_timeout, read_timeout = timeouts
-    required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS)
-    for url in urls:
-        ok, message = check_http(
-            proxy_url,
-            url=url,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-        )
-        if ok:
-            ok_count += 1
-            ok_urls.add(url)
-            if required_urls <= ok_urls and ok_count >= max(1, int(min_ok or 1)):
-                return True, 'YouTube endpoints confirmed'
-        else:
-            host = url.split('/')[2] if '://' in url else url
-            failed.append(f'{host}: {message}')
-    missing_required = required_urls - ok_urls
-    if missing_required:
-        if ok_count >= max(1, int(min_ok or 1)):
-            return True, 'YouTube endpoints confirmed without primary'
-        detail = '; '.join(failed[:2])
-        if detail:
-            return False, 'Primary YouTube connectivity endpoint did not respond through this key: ' + detail
-        return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
-    return False, '; '.join(failed[-2:]) or 'YouTube endpoints did not respond through this key.'
+def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK, metrics=None):
+    return check_youtube_through_proxy(
+        check_http,
+        proxy_url,
+        http_timeouts=timeouts,
+        urls=urls,
+        min_ok=min_ok,
+        metrics=metrics,
+    )
 
 
 def proxy_apply_settings(core_service_script, ports):
@@ -132,13 +109,15 @@ def apply_installed_proxy_runtime(
     proxy_url = proxy_url_getter(key_type)
     youtube_route_proto = youtube_route_protocol_getter() if callable(youtube_route_protocol_getter) else 'vless2'
     if key_type == youtube_route_proto and active_mode != key_type and check_http is not None:
+        yt_metrics = {}
         yt_ok, yt_probe_message = check_youtube_health(
             check_http,
             proxy_url,
             timeouts=youtube_timeouts,
+            metrics=yt_metrics,
         )
         if record_key_probe is not None:
-            record_key_probe(key_type, key_value, tg_ok=None, yt_ok=yt_ok)
+            record_key_probe(key_type, key_value, tg_ok=None, yt_ok=yt_ok, **yt_metrics)
         if yt_ok:
             return (f'✅ {current["label"]} ключ сохранён. {endpoint_message} '
                     f'YouTube через этот ключ подтверждён. Telegram не проверялся, потому что текущий {app_mode_noun} {active_label}.').strip()
@@ -152,12 +131,14 @@ def apply_installed_proxy_runtime(
         read_timeout=telegram_timeouts[1],
     )
     if check_http is not None and record_key_probe is not None:
+        yt_metrics = {}
         yt_ok, _ = check_youtube_health(
             check_http,
             proxy_url,
             timeouts=youtube_timeouts,
+            metrics=yt_metrics,
         )
-        record_key_probe(key_type, key_value, tg_ok=api_ok, yt_ok=yt_ok)
+        record_key_probe(key_type, key_value, tg_ok=api_ok, yt_ok=yt_ok, **yt_metrics)
     elif record_key_probe is not None:
         record_key_probe(key_type, key_value, tg_ok=api_ok)
 

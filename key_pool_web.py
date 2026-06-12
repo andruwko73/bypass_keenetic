@@ -205,6 +205,21 @@ def web_probe_quality_summary(probe):
         score = None
     if score is not None:
         parts.append(f'score {score}/100')
+    stability = str(probe.get('yt_stability') or '').strip().lower()
+    if stability and stability != 'stable':
+        parts.append(f'YouTube {stability}')
+    try:
+        first_load = int(probe.get('yt_first_load_ms'))
+    except Exception:
+        first_load = 0
+    if first_load:
+        parts.append(f'first load {first_load} ms')
+    try:
+        error_rate = float(probe.get('yt_error_rate'))
+    except Exception:
+        error_rate = 0.0
+    if error_rate:
+        parts.append(f'errors {int(round(error_rate * 100))}%')
     tier = str(probe.get('yt_stream_tier') or '').strip() if label else ''
     if tier:
         parts.append(f'порог {tier}')
@@ -235,6 +250,9 @@ def web_probe_quality_summary(probe):
     error = str(probe.get('quality_error') or '').strip()
     if error:
         parts.append(f'замер скорости: {error}')
+    yt_error = str(probe.get('yt_last_error') or '').strip()
+    if yt_error:
+        parts.append(f'YouTube check: {html.escape(yt_error)}')
     if not parts:
         return 'Качество еще не измерено'
     checked_at = web_probe_checked_at(probe)

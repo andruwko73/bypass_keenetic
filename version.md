@@ -1,3 +1,6 @@
+*v1.706 (12 Jun 2026) -* main
+*Checks YouTube first-load and googlevideo stability more strictly, adds scoped bootstrap routes, and makes YouTube QUIC policy configurable.*
+
 *v1.705 (12 Jun 2026) -* main
 *Left-aligns key names in the mobile key-pool table so short pool labels read like a list again.*
 

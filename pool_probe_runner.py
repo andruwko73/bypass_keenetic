@@ -9,15 +9,14 @@ import threading
 import time
 from collections import deque
 
-YOUTUBE_HEALTHCHECK_URL = 'https://www.youtube.com/generate_204'
-YOUTUBE_HEALTHCHECK_URLS = (
-    YOUTUBE_HEALTHCHECK_URL,
-    'https://redirector.googlevideo.com/generate_204',
-    'https://i.ytimg.com/generate_204',
-    'https://www.youtube.com',
+from youtube_healthcheck import (
+    YOUTUBE_HEALTHCHECK_MIN_OK,
+    YOUTUBE_HEALTHCHECK_REQUIRED_URLS,
+    YOUTUBE_HEALTHCHECK_URLS,
+    YOUTUBE_PRIMARY_URL as YOUTUBE_HEALTHCHECK_URL,
+    check_youtube_through_proxy,
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 2
-YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (YOUTUBE_HEALTHCHECK_URL,)
+
 TELEGRAM_HEALTHCHECK_URLS = (
     'https://web.telegram.org/',
     'https://t.me/',
@@ -38,38 +37,6 @@ def pool_probe_socks_inbound(port, tag):
 
 def pool_probe_outbound(proto, key_value, tag, proxy_outbound_from_key, email='pool-probe@local'):
     return proxy_outbound_from_key(proto, key_value, tag, email=email)
-
-
-def check_youtube_through_proxy(check_http, proxy_url, *, http_timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK):
-    ok_count = 0
-    ok_urls = set()
-    failed = []
-    connect_timeout, read_timeout = http_timeouts
-    required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS)
-    for url in urls:
-        ok, message = check_http(
-            proxy_url,
-            url=url,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-        )
-        if ok:
-            ok_count += 1
-            ok_urls.add(url)
-            if required_urls <= ok_urls and ok_count >= max(1, int(min_ok or 1)):
-                return True, 'YouTube endpoints confirmed'
-        else:
-            host = url.split('/')[2] if '://' in url else url
-            failed.append(f'{host}: {message}')
-    missing_required = required_urls - ok_urls
-    if missing_required:
-        if ok_count >= max(1, int(min_ok or 1)):
-            return True, 'YouTube endpoints confirmed without primary'
-        detail = '; '.join(failed[:2])
-        if detail:
-            return False, 'Primary YouTube connectivity endpoint did not respond through this key: ' + detail
-        return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
-    return False, '; '.join(failed[-2:]) or 'YouTube endpoints did not respond through this key.'
 
 
 def check_telegram_service_through_proxy(
@@ -335,10 +302,12 @@ def find_pool_failover_candidate(
                     continue
                 proxy_url = f'socks5h://127.0.0.1:{port}'
                 if service == 'youtube':
+                    yt_metrics = {}
                     primary_ok, _ = check_youtube_through_proxy(
                         check_http,
                         proxy_url,
                         http_timeouts=(http_connect, http_read),
+                        metrics=yt_metrics,
                     )
                     tg_ok = None
                     yt_ok = primary_ok
@@ -352,7 +321,8 @@ def find_pool_failover_candidate(
                     )
                     tg_ok = primary_ok
                     yt_ok = None
-                record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
+                    yt_metrics = {}
+                record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok, **yt_metrics)
                 if primary_ok:
                     return proto, key_value, tg_ok, yt_ok
         except Exception as exc:

@@ -9,8 +9,8 @@ KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 KEY_PROBE_CACHE_TTL = 3600
 KEY_PROBE_FAILURE_TTL = 300
 KEY_PROBE_MIN_WRITE_INTERVAL = 30
-KEY_PROBE_CACHE_SCHEMA_VERSION = 7
-KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7)
+KEY_PROBE_CACHE_SCHEMA_VERSION = 8
+KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7, 8)
 KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 YOUTUBE_QUALITY_STABLE = 'stable'
 YOUTUBE_QUALITY_FAST = 'fast'
@@ -83,6 +83,9 @@ def youtube_quality_score(
     yt_ok=None,
     yt_latency_ms=None,
     googlevideo_latency_ms=None,
+    googlevideo_ok=None,
+    yt_error_rate=None,
+    yt_stability='',
     yt_throughput_mbps=None,
     stable_latency_ms=YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS,
     fast_latency_ms=YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS,
@@ -91,11 +94,15 @@ def youtube_quality_score(
 ):
     if yt_ok is not True:
         return {'yt_score': 0 if yt_ok is False else 20, 'yt_quality': '', 'yt_stream_tier': ''}
+    stability = str(yt_stability or '').strip().lower()
+    if stability == 'fail' or googlevideo_ok is False:
+        return {'yt_score': 0, 'yt_quality': '', 'yt_stream_tier': ''}
 
     stable_latency_ms = max(1, _stored_int(stable_latency_ms) or YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS)
     fast_latency_ms = max(1, _stored_int(fast_latency_ms) or YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS)
     min_1600p_mbps = max(0.1, _stored_float(min_1600p_mbps) or YOUTUBE_QUALITY_DEFAULT_1600P_MBPS)
     min_4k_mbps = max(min_1600p_mbps, _stored_float(min_4k_mbps) or YOUTUBE_QUALITY_DEFAULT_4K_MBPS)
+    error_rate = _stored_float(yt_error_rate, digits=3) or 0.0
 
     latencies = [
         value for value in (
@@ -138,6 +145,9 @@ def youtube_quality_score(
             quality = YOUTUBE_QUALITY_FAST
         elif throughput >= min_1600p_mbps and latency_is_stable:
             quality = YOUTUBE_QUALITY_STABLE
+    if stability == 'unstable' or error_rate > 0:
+        score = max(0, score - max(18, int(round(error_rate * 100))))
+        quality = ''
     return {'yt_score': score, 'yt_quality': quality, 'yt_stream_tier': stream_tier}
 
 
@@ -198,6 +208,13 @@ def update_key_probe_cache_entry(
     tg_latency_ms=None,
     yt_latency_ms=None,
     googlevideo_latency_ms=None,
+    yt_home_ok=None,
+    yt_bootstrap_ok=None,
+    googlevideo_ok=None,
+    yt_error_rate=None,
+    yt_last_error='',
+    yt_stability=None,
+    yt_first_load_ms=None,
     yt_throughput_mbps=None,
     yt_score=None,
     yt_quality=None,
@@ -232,6 +249,9 @@ def update_key_probe_cache_entry(
         tg_ok is not None or yt_ok is not None or custom is not None or
         tg_latency_ms is not None or yt_latency_ms is not None or
         googlevideo_latency_ms is not None or yt_throughput_mbps is not None or
+        yt_home_ok is not None or yt_bootstrap_ok is not None or googlevideo_ok is not None or
+        yt_error_rate is not None or bool(yt_last_error) or yt_stability is not None or
+        yt_first_load_ms is not None or
         yt_score is not None or yt_quality is not None or yt_stream_tier is not None or
         bool(quality_error)
     )
@@ -269,6 +289,36 @@ def update_key_probe_cache_entry(
         changed = _set_entry_metric(entry, 'tg_latency_ms', tg_latency_ms, digits=0) or changed
         changed = _set_entry_metric(entry, 'yt_latency_ms', yt_latency_ms, digits=0) or changed
         changed = _set_entry_metric(entry, 'googlevideo_latency_ms', googlevideo_latency_ms, digits=0) or changed
+        changed = _set_entry_metric(entry, 'yt_first_load_ms', yt_first_load_ms, digits=0) or changed
+        changed = _set_entry_metric(entry, 'yt_error_rate', yt_error_rate, digits=3) or changed
+        for field_name, field_value in (
+            ('yt_home_ok', yt_home_ok),
+            ('yt_bootstrap_ok', yt_bootstrap_ok),
+            ('googlevideo_ok', googlevideo_ok),
+        ):
+            if field_value is not None:
+                value = _stored_probe_value(field_value)
+                if entry.get(field_name) is not value:
+                    entry[field_name] = value
+                    changed = True
+        if yt_stability is not None:
+            stability_value = str(yt_stability or '').strip().lower()
+            if stability_value not in ('stable', 'unstable', 'fail'):
+                stability_value = ''
+            if entry.get('yt_stability', '') != stability_value:
+                if stability_value:
+                    entry['yt_stability'] = stability_value
+                else:
+                    entry.pop('yt_stability', None)
+                changed = True
+        if yt_last_error:
+            error_value = str(yt_last_error or '').strip()[:180]
+            if entry.get('yt_last_error') != error_value:
+                entry['yt_last_error'] = error_value
+                changed = True
+        elif has_probe_value and entry.get('yt_last_error') and yt_ok is True:
+            entry.pop('yt_last_error', None)
+            changed = True
         throughput_measured = yt_throughput_mbps is not None
         changed = _set_entry_metric(entry, 'yt_throughput_mbps', yt_throughput_mbps, digits=2) or changed
         if throughput_measured and entry.get('yt_throughput_ts') != now:
@@ -287,13 +337,17 @@ def update_key_probe_cache_entry(
             yt_score is None and yt_quality is None and yt_stream_tier is None and
             (
                 yt_ok is not None or yt_latency_ms is not None or googlevideo_latency_ms is not None or
-                yt_throughput_mbps is not None
+                yt_throughput_mbps is not None or yt_error_rate is not None or yt_stability is not None or
+                googlevideo_ok is not None
             )
         ):
             inferred = youtube_quality_score(
                 yt_ok=entry.get('yt_ok') if yt_ok is None else _stored_probe_value(yt_ok),
                 yt_latency_ms=entry.get('yt_latency_ms'),
                 googlevideo_latency_ms=entry.get('googlevideo_latency_ms'),
+                googlevideo_ok=entry.get('googlevideo_ok'),
+                yt_error_rate=entry.get('yt_error_rate'),
+                yt_stability=entry.get('yt_stability'),
                 yt_throughput_mbps=entry.get('yt_throughput_mbps'),
                 stable_latency_ms=stable_latency_ms,
                 fast_latency_ms=fast_latency_ms,

@@ -2,14 +2,13 @@ import gc
 import threading
 import time
 
-YOUTUBE_HEALTHCHECK_URLS = (
-    'https://www.youtube.com/generate_204',
-    'https://redirector.googlevideo.com/generate_204',
-    'https://i.ytimg.com/generate_204',
-    'https://www.youtube.com',
+from youtube_healthcheck import (
+    YOUTUBE_HEALTHCHECK_MIN_OK,
+    YOUTUBE_HEALTHCHECK_REQUIRED_URLS,
+    YOUTUBE_HEALTHCHECK_URLS,
+    check_youtube_through_proxy,
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 2
-YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (YOUTUBE_HEALTHCHECK_URLS[0],)
+
 TELEGRAM_HEALTHCHECK_URLS = (
     'https://web.telegram.org/',
     'https://t.me/',
@@ -143,59 +142,6 @@ def check_telegram_service_through_proxy(
     return False, '; '.join(failed[-2:]) or 'Telegram web endpoints did not respond through this key.'
 
 
-def check_youtube_through_proxy(
-    check_http,
-    proxy_url,
-    *,
-    urls=YOUTUBE_HEALTHCHECK_URLS,
-    min_ok=YOUTUBE_HEALTHCHECK_MIN_OK,
-    http_timeouts,
-    http_retry_timeouts=None,
-    retry_delay_seconds=0,
-    metrics=None,
-    sleep=time.sleep,
-):
-    retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
-    ok_hosts = []
-    ok_urls = set()
-    failed = []
-    required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS)
-    for index, url in enumerate(urls or YOUTUBE_HEALTHCHECK_URLS):
-        connect_timeout, read_timeout = http_timeouts if index == 0 else (retry_http_connect, retry_http_read)
-        started_at = time.monotonic()
-        ok, message = check_http(
-            proxy_url,
-            url=url,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-        )
-        elapsed_ms = _elapsed_ms(started_at)
-        host = url.split('/')[2] if '://' in url else url
-        if ok:
-            if metrics is not None:
-                if 'youtube.com' in host and 'yt_latency_ms' not in metrics:
-                    metrics['yt_latency_ms'] = elapsed_ms
-                if 'googlevideo.com' in host and 'googlevideo_latency_ms' not in metrics:
-                    metrics['googlevideo_latency_ms'] = elapsed_ms
-            ok_hosts.append(host)
-            ok_urls.add(url)
-            if required_urls <= ok_urls and len(ok_hosts) >= max(1, int(min_ok or 1)):
-                return True, 'YouTube endpoints confirmed: ' + ', '.join(ok_hosts)
-        else:
-            failed.append(f'{host}: {message}')
-            if retry_delay_seconds and index == 0:
-                sleep(retry_delay_seconds)
-    missing_required = required_urls - ok_urls
-    if missing_required:
-        if len(ok_hosts) >= max(1, int(min_ok or 1)):
-            return True, 'YouTube endpoints confirmed without primary: ' + ', '.join(ok_hosts)
-        detail = '; '.join(failed[:2])
-        if detail:
-            return False, 'Primary YouTube connectivity endpoint did not respond through this key: ' + detail
-        return False, 'Primary YouTube connectivity endpoint did not respond through this key.'
-    return False, '; '.join(failed[-2:]) or 'YouTube endpoints did not respond through this key.'
-
-
 def check_pool_key_through_proxy(
     proto,
     key_value,
@@ -236,7 +182,7 @@ def check_pool_key_through_proxy(
         http_timeouts=(http_connect, http_read),
         http_retry_timeouts=(retry_http_connect, retry_http_read),
         retry_delay_seconds=retry_delay_seconds,
-        metrics=yt_metrics if collect_quality else None,
+        metrics=yt_metrics,
         sleep=sleep,
     )
     if not tg_ok and not yt_ok:
@@ -255,7 +201,7 @@ def check_pool_key_through_proxy(
             http_timeouts=(retry_http_connect, retry_http_read),
             http_retry_timeouts=(retry_http_connect, retry_http_read),
             retry_delay_seconds=retry_delay_seconds,
-            metrics=yt_metrics if collect_quality else None,
+            metrics=yt_metrics,
             sleep=sleep,
         )
     elif not tg_ok and telegram_required:
@@ -276,7 +222,7 @@ def check_pool_key_through_proxy(
             http_timeouts=(retry_http_connect, retry_http_read),
             http_retry_timeouts=(retry_http_connect, retry_http_read),
             retry_delay_seconds=retry_delay_seconds,
-            metrics=yt_metrics if collect_quality else None,
+            metrics=yt_metrics,
             sleep=sleep,
         )
 
@@ -284,7 +230,7 @@ def check_pool_key_through_proxy(
     quality_kwargs = {}
     if collect_quality:
         quality_kwargs.update(tg_metrics)
-        quality_kwargs.update(yt_metrics)
+    quality_kwargs.update(yt_metrics)
     if yt_ok and measure_download and quality_settings.get('enabled', True):
         try:
             throughput_mbps, quality_error = measure_download(
