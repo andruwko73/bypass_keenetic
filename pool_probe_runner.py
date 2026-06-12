@@ -582,6 +582,8 @@ def run_pool_probe_worker(
                 max_workers = min(concurrency, len(ready_batch))
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
                 future_map = {}
+                done = set()
+                pending = set()
                 try:
                     batch_timeout = timeout_budget(
                         checks,
@@ -643,6 +645,17 @@ def run_pool_probe_worker(
                         executor.shutdown(wait=False, cancel_futures=True)
                     except TypeError:
                         executor.shutdown(wait=False)
+                    try:
+                        future_map.clear()
+                        done.clear()
+                        pending.clear()
+                    except Exception:
+                        pass
+                    del future_map
+                    del done
+                    del pending
+                    del executor
+                    gc.collect()
             except Exception as exc:
                 log(f'Ошибка проверки пачки ключей из пула: {exc}')
                 for proto, key_value in valid_batch:

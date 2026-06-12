@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.707, последнее изменение: 12.06.2026
+#  Файл: bot.py, Версия v1.708, последнее изменение: 12.06.2026
 
 import subprocess
 import os
@@ -171,6 +171,7 @@ from service_catalog import (
     CONNECTIVITY_CHECK_DOMAINS,
     CUSTOM_CHECK_PRESETS,
     SERVICE_LIST_SOURCES,
+    TELEGRAM_UNBLOCK_ENTRIES,
     UDP_QUIC_ROUTE_ENTRIES,
     YOUTUBE_UNBLOCK_ENTRIES,
 )
@@ -1358,6 +1359,13 @@ MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS = max(
     MEMORY_POST_POOL_RESTART_RETRY_SECONDS,
     float(getattr(config, 'memory_post_pool_restart_max_wait_seconds', 300.0)),
 )
+MEMORY_TIMELINE_ENABLED = bool(getattr(config, 'memory_timeline_enabled', True))
+MEMORY_TIMELINE_PATH = str(getattr(config, 'memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl') or '').strip()
+MEMORY_TIMELINE_INTERVAL_SECONDS = max(
+    30.0,
+    float(getattr(config, 'memory_timeline_interval_seconds', 60.0)),
+)
+MEMORY_TIMELINE_MAX_EVENTS = max(30, int(getattr(config, 'memory_timeline_max_events', 240)))
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
 APP_MODE_LABEL = 'Режим бота'
@@ -1393,6 +1401,9 @@ UDP_QUIC_BLOCK_TROJAN_ENABLED = bool(getattr(config, 'udp_quic_block_trojan_enab
 YOUTUBE_QUIC_POLICY = str(getattr(config, 'youtube_quic_policy', 'auto') or 'auto').strip().lower()
 if YOUTUBE_QUIC_POLICY not in ('auto', 'allow', 'block'):
     YOUTUBE_QUIC_POLICY = 'auto'
+TELEGRAM_UDP_POLICY = str(getattr(config, 'telegram_udp_policy', 'auto') or 'auto').strip().lower()
+if TELEGRAM_UDP_POLICY not in ('auto', 'allow', 'block'):
+    TELEGRAM_UDP_POLICY = 'auto'
 _REALITY_ENDPOINT_OVERRIDES_RAW = getattr(config, 'reality_endpoint_overrides', {})
 REALITY_ENDPOINT_OVERRIDES = {
     str(host or '').strip().lower(): str(endpoint or '').strip()
@@ -1523,6 +1534,9 @@ memory_watchdog_lock = threading.Lock()
 memory_watchdog_restart_scheduled = False
 memory_watchdog_last_restart_at = 0.0
 memory_watchdog_high_rss_since = 0.0
+memory_timeline_lock = threading.Lock()
+memory_timeline_last_sample_at = 0.0
+memory_timeline_last_error_at = 0.0
 post_pool_memory_cleanup_lock = threading.Lock()
 post_pool_memory_cleanup_state = {
     'scheduled': False,
@@ -1879,20 +1893,32 @@ def _route_entry_matches_catalog_entry(entry, catalog_entry):
     return bool(entry_token and catalog_token and entry_token == catalog_token)
 
 
-def _route_list_contains_youtube(proto):
+def _route_list_contains_catalog(proto, catalog_entries):
     try:
         route_name = _unblock_route_for_key_type(proto)
         entries = _read_unblock_list_entries(route_name)
     except Exception:
         entries = []
     return any(
-        _route_entry_matches_catalog_entry(entry, youtube_entry)
+        _route_entry_matches_catalog_entry(entry, catalog_entry)
         for entry in entries
-        for youtube_entry in YOUTUBE_UNBLOCK_ENTRIES
+        for catalog_entry in catalog_entries
     )
 
 
+def _route_list_contains_youtube(proto):
+    return _route_list_contains_catalog(proto, YOUTUBE_UNBLOCK_ENTRIES)
+
+
+def _route_list_contains_telegram(proto):
+    return _route_list_contains_catalog(proto, TELEGRAM_UNBLOCK_ENTRIES)
+
+
 def _udp_quic_block_enabled_for_protocol(proto, configured_enabled):
+    if proto in UDP_QUIC_POLICY_PROTOCOLS and _route_list_contains_telegram(proto):
+        if TELEGRAM_UDP_POLICY == 'block':
+            return True
+        return False
     if proto in UDP_QUIC_POLICY_PROTOCOLS and _route_list_contains_youtube(proto):
         if YOUTUBE_QUIC_POLICY == 'allow':
             return False
@@ -2395,6 +2421,156 @@ def _clear_runtime_memory_caches(clear_status=False):
         pass
 
 
+def _process_hwm_kb(pid='self'):
+    try:
+        with open(f'/proc/{pid}/status', 'r', encoding='utf-8', errors='ignore') as file:
+            for line in file:
+                if line.startswith('VmHWM:'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1])
+    except Exception:
+        return 0
+    return 0
+
+
+def _safe_file_size(path):
+    try:
+        return int(os.path.getsize(path))
+    except Exception:
+        return 0
+
+
+def _safe_dir_entry_count(path):
+    try:
+        return len(os.listdir(path))
+    except Exception:
+        return 0
+
+
+def _temp_pool_probe_runtime_count():
+    try:
+        return sum(1 for name in os.listdir('/tmp') if name.startswith('bypass_pool_probe_'))
+    except Exception:
+        return 0
+
+
+def _memory_timeline_payload(reason='', marker='', extra=None):
+    progress = {}
+    try:
+        progress = _get_pool_probe_progress()
+    except Exception:
+        progress = {}
+    web_command_running = False
+    try:
+        web_command_running = bool(_read_web_command_state_file().get('running'))
+    except Exception:
+        pass
+    try:
+        refresh_count = len(status_refresh_in_progress)
+    except Exception:
+        refresh_count = 0
+    payload = {
+        'ts': time.time(),
+        'uptime_s': int(max(0, time.time() - process_started_at)),
+        'marker': str(marker or '').strip(),
+        'reason': str(reason or '').strip(),
+        'rss_kb': int(_process_rss_kb() or 0),
+        'hwm_kb': int(_process_hwm_kb() or 0),
+        'threads': _safe_dir_entry_count('/proc/self/task'),
+        'fd_count': _safe_dir_entry_count('/proc/self/fd'),
+        'status_refresh_count': int(refresh_count or 0),
+        'pool_probe_running': bool(progress.get('running')),
+        'pool_probe_checked': int(progress.get('checked') or 0),
+        'pool_probe_total': int(progress.get('total') or 0),
+        'web_command_running': web_command_running,
+        'key_probe_cache_bytes': _safe_file_size(_KEY_PROBE_CACHE_PATH),
+        'event_history_bytes': _safe_file_size(getattr(event_history, 'EVENT_HISTORY_PATH', '')),
+        'web_command_state_bytes': _safe_file_size(WEB_COMMAND_STATE_FILE),
+        'pool_probe_resume_bytes': _safe_file_size(POOL_PROBE_RESUME_FILE),
+        'temp_pool_probe_count': _temp_pool_probe_runtime_count(),
+    }
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            safe_key = str(key or '').strip()
+            if safe_key and safe_key not in payload:
+                payload[safe_key] = value
+    return payload
+
+
+def _trim_jsonl_file(path, max_events):
+    if not path or max_events <= 0:
+        return
+    try:
+        if not os.path.exists(path):
+            return
+        with open(path, 'r', encoding='utf-8', errors='ignore') as file:
+            lines = file.readlines()
+        if len(lines) <= max_events:
+            return
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(prefix='.' + os.path.basename(path) + '.', suffix='.tmp', dir=directory or None)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as file:
+                file.writelines(lines[-max_events:])
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temp_path, path)
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def _record_memory_timeline(reason='', marker='', extra=None, force=False):
+    global memory_timeline_last_sample_at, memory_timeline_last_error_at
+    if not MEMORY_TIMELINE_ENABLED or not MEMORY_TIMELINE_PATH:
+        return False
+    now = time.time()
+    if not force and marker == '' and now - memory_timeline_last_sample_at < MEMORY_TIMELINE_INTERVAL_SECONDS:
+        return False
+    with memory_timeline_lock:
+        now = time.time()
+        if not force and marker == '' and now - memory_timeline_last_sample_at < MEMORY_TIMELINE_INTERVAL_SECONDS:
+            return False
+        payload = _memory_timeline_payload(reason=reason, marker=marker, extra=extra)
+        try:
+            directory = os.path.dirname(MEMORY_TIMELINE_PATH)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(MEMORY_TIMELINE_PATH, 'a', encoding='utf-8') as file:
+                file.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n')
+            memory_timeline_last_sample_at = now
+            _trim_jsonl_file(MEMORY_TIMELINE_PATH, MEMORY_TIMELINE_MAX_EVENTS)
+            return True
+        except Exception as exc:
+            if now - memory_timeline_last_error_at >= 300:
+                memory_timeline_last_error_at = now
+                _write_runtime_log(f'Memory timeline write failed: {exc}')
+    return False
+
+
+def _start_memory_timeline_thread():
+    if not MEMORY_TIMELINE_ENABLED or not MEMORY_TIMELINE_PATH:
+        return
+
+    def worker():
+        _record_memory_timeline('startup', marker='startup', force=True)
+        while not shutdown_requested.is_set():
+            shutdown_requested.wait(MEMORY_TIMELINE_INTERVAL_SECONDS)
+            if shutdown_requested.is_set():
+                break
+            _record_memory_timeline('periodic sample')
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
 def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
     _clear_runtime_memory_caches(clear_status=clear_status)
     rss_before = _process_rss_kb()
@@ -2403,6 +2579,17 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
         should_collect = True
     collected = gc.collect() if should_collect else 0
     rss_after = _process_rss_kb()
+    if should_collect or force or clear_status:
+        _record_memory_timeline(
+            reason or 'memory cleanup',
+            marker='cleanup',
+            extra={
+                'rss_before_kb': int(rss_before or 0),
+                'rss_after_kb': int(rss_after or 0),
+                'gc_collected': int(collected or 0),
+            },
+            force=True,
+        )
     if log and reason and should_collect and (force or rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB):
         _write_runtime_log(
             f'Memory cleanup ({reason}): rss {rss_before} -> {rss_after} KB, gc={collected}'
@@ -2459,6 +2646,12 @@ def _schedule_memory_watchdog_restart(rss_kb):
         router_health.invalidate()
     except Exception:
         pass
+    _record_memory_timeline(
+        'memory watchdog restart requested',
+        marker='watchdog_restart',
+        extra={'restart_rss_kb': int(rss_kb or 0)},
+        force=True,
+    )
     _write_runtime_log(f'Memory watchdog: RSS {rss_kb} KB exceeds limit, restarting bot service')
     try:
         subprocess.Popen(
@@ -2536,6 +2729,7 @@ def _schedule_post_pool_memory_cleanup():
             'deadline_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS + MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS,
             'last_message': 'post-pool memory cleanup scheduled',
         })
+    _record_memory_timeline('post-pool memory cleanup scheduled', marker='post_pool_cleanup_scheduled', force=True)
 
     def worker():
         next_wait = MEMORY_POST_POOL_RESTART_DELAY_SECONDS
@@ -2708,19 +2902,22 @@ def _has_socks_support():
 
 
 def _reset_telegram_http_session(reason=''):
+    _record_memory_timeline(reason or 'telegram session reset', marker='telegram_session_reset', force=True)
+    try:
+        session = telebot.apihelper._get_req_session()
+        close = getattr(session, 'close', None)
+        if close:
+            close()
+    except Exception:
+        pass
     try:
         telebot.apihelper._get_req_session(reset=True)
     except TypeError:
-        try:
-            session = telebot.apihelper._get_req_session()
-            close = getattr(session, 'close', None)
-            if close:
-                close()
-        except Exception:
-            pass
+        pass
     except Exception as exc:
         if reason:
             _write_runtime_log(f'Не удалось сбросить Telegram HTTP-сессию ({reason}): {exc}')
+    gc.collect()
 
 
 _install_telegram_send_retry_wrapper()
@@ -4265,6 +4462,9 @@ def _router_health_snapshot():
     payload = router_health.snapshot(_get_pool_probe_progress)
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
     payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
+    payload['memory_timeline_enabled'] = bool(MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH)
+    payload['memory_timeline_path'] = MEMORY_TIMELINE_PATH if MEMORY_TIMELINE_ENABLED else ''
+    payload['memory_timeline_bytes'] = _safe_file_size(MEMORY_TIMELINE_PATH) if MEMORY_TIMELINE_ENABLED else 0
     idle_memory_state = _memory_watchdog_idle_snapshot(payload)
     payload.update(idle_memory_state)
     post_pool_state = _post_pool_memory_cleanup_snapshot()
@@ -4739,10 +4939,22 @@ def _execute_web_command(command):
 def _run_web_command_worker(command):
     with web_command_lock:
         web_command_state.update(_read_web_command_state_file())
+    _record_memory_timeline(
+        f'web command started: {command}',
+        marker='web_command_start',
+        extra={'command': str(command or '')},
+        force=True,
+    )
     try:
         _execute_web_command(command)
     finally:
         _memory_cleanup('web command finished', force=True, clear_status=True)
+        _record_memory_timeline(
+            f'web command finished: {command}',
+            marker='web_command_finish',
+            extra={'command': str(command or '')},
+            force=True,
+        )
 
 
 def _start_web_command_legacy(command):
@@ -6123,6 +6335,17 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
         if available_kb is not None and available_kb >= 200000:
             batch_size = min(2, max(1, len(probe_tasks or [])))
     concurrency = max(1, min(POOL_PROBE_CONCURRENCY, batch_size))
+    _record_memory_timeline(
+        'pool probe started',
+        marker='pool_probe_start',
+        extra={
+            'pool_probe_task_count': len(probe_tasks or []),
+            'pool_probe_batch_size': int(batch_size),
+            'pool_probe_concurrency': int(concurrency),
+            'pool_probe_scope': str(scope or ''),
+        },
+        force=True,
+    )
     try:
         return run_pool_probe_worker(
             probe_tasks,
@@ -6169,6 +6392,12 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
     finally:
         probe_recorder.flush()
         _memory_cleanup('pool probe finished', force=True, clear_status=True)
+        _record_memory_timeline(
+            'pool probe finished',
+            marker='pool_probe_finish',
+            extra={'pool_probe_scope': str(scope or '')},
+            force=True,
+        )
         _schedule_post_pool_memory_cleanup()
 
 
@@ -6502,6 +6731,12 @@ def _refresh_status_caches_async(current_keys):
         status_refresh_in_progress.add(signature)
 
     def worker():
+        _record_memory_timeline(
+            'status refresh started',
+            marker='status_refresh_start',
+            extra={'status_refresh_count': len(status_refresh_in_progress)},
+            force=True,
+        )
         try:
             _build_status_snapshot(current_keys, force_refresh=True)
         except Exception as exc:
@@ -6509,7 +6744,13 @@ def _refresh_status_caches_async(current_keys):
         finally:
             with status_refresh_lock:
                 status_refresh_in_progress.discard(signature)
-            _memory_cleanup('status refresh')
+            _memory_cleanup('status refresh', clear_status=True)
+            _record_memory_timeline(
+                'status refresh finished',
+                marker='status_refresh_finish',
+                extra={'status_refresh_count': len(status_refresh_in_progress)},
+                force=True,
+            )
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -7711,6 +7952,7 @@ def main():
     _cleanup_pool_probe_runtime_light(kill_processes=True)
     _sync_udp_policy_config()
     _start_udp_quic_drift_watchdog_thread()
+    _start_memory_timeline_thread()
     _start_memory_watchdog_thread()
     runtime_mode = _load_app_runtime_mode()
     _write_runtime_log(f'app runtime mode: {runtime_mode}')

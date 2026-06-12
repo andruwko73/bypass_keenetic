@@ -82,7 +82,7 @@ PORTS = {
 
 
 def _extract_udp_policy_python(script_text):
-    marker = 'from service_catalog import YOUTUBE_UNBLOCK_ENTRIES'
+    marker = 'from service_catalog import TELEGRAM_UNBLOCK_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES'
     marker_at = script_text.index(marker)
     heredoc_at = script_text.rfind("<<'PY'", 0, marker_at)
     start = script_text.index('\n', heredoc_at) + 1
@@ -90,7 +90,7 @@ def _extract_udp_policy_python(script_text):
     return script_text[start:end]
 
 
-def _run_udp_policy_python(script_path, policy, youtube_route='vless-2.txt'):
+def _run_udp_policy_python(script_path, policy, youtube_route='vless-2.txt', telegram_route='', telegram_policy='auto'):
     source = _extract_udp_policy_python(script_path.read_text(encoding='utf-8'))
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -99,17 +99,26 @@ def _run_udp_policy_python(script_path, policy, youtube_route='vless-2.txt'):
         runtime_dir.mkdir()
         unblock_dir.mkdir()
         (runtime_dir / 'service_catalog.py').write_text(
+            "TELEGRAM_UNBLOCK_ENTRIES = ('telegram.org', '149.154.160.0/20')\n"
             "YOUTUBE_UNBLOCK_ENTRIES = ('youtube.com', 'www.youtube.com')\n",
             encoding='utf-8',
         )
         (runtime_dir / 'bot_config.py').write_text(
             f"youtube_quic_policy = {policy!r}\n"
+            f"telegram_udp_policy = {telegram_policy!r}\n"
             "ipv6_bypass_fallback_enabled = True\n",
             encoding='utf-8',
         )
-        for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'vless-2.txt', 'trojan.txt'):
-            (unblock_dir / filename).write_text('example.org\n', encoding='utf-8')
-        (unblock_dir / youtube_route).write_text('www.youtube.com\n', encoding='utf-8')
+        route_files = {
+            filename: ['example.org']
+            for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'vless-2.txt', 'trojan.txt')
+        }
+        if youtube_route:
+            route_files.setdefault(youtube_route, []).append('www.youtube.com')
+        if telegram_route:
+            route_files.setdefault(telegram_route, []).append('telegram.org')
+        for filename, entries in route_files.items():
+            (unblock_dir / filename).write_text('\n'.join(entries) + '\n', encoding='utf-8')
         env = os.environ.copy()
         env['PYTHONPATH'] = str(runtime_dir)
         env['UNBLOCK_DIR'] = str(unblock_dir)
@@ -839,6 +848,12 @@ def test_codex_version_matches_commit_count():
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
+    assert 'memory_timeline_enabled = True' in example
+    assert 'memory_timeline_enabled = True' in installer
+    assert 'memory_timeline_enabled = True' in bootstrap
+    assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in example
+    assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in installer
+    assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in bootstrap
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in example
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in installer
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in bootstrap
@@ -872,6 +887,9 @@ def test_codex_version_matches_commit_count():
     assert "youtube_quic_policy = 'auto'" in example
     assert "youtube_quic_policy = 'auto'" in installer
     assert "youtube_quic_policy = 'auto'" in bootstrap
+    assert "telegram_udp_policy = 'auto'" in example
+    assert "telegram_udp_policy = 'auto'" in installer
+    assert "telegram_udp_policy = 'auto'" in bootstrap
     assert 'ipv6_bypass_fallback_enabled = True' in example
     assert 'ipv6_bypass_fallback_enabled = True' in installer
     assert 'ipv6_bypass_fallback_enabled = True' in bootstrap
@@ -951,8 +969,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'generate_udp_quic_policy_file' in bootstrap
     assert 'UDP_QUIC_EXCLUDE_ENTRIES' in script
     assert 'UDP_QUIC_EXCLUDE_ENTRIES' in bootstrap
-    assert 'from service_catalog import YOUTUBE_UNBLOCK_ENTRIES' in script
-    assert 'from service_catalog import YOUTUBE_UNBLOCK_ENTRIES' in bootstrap
+    assert 'from service_catalog import TELEGRAM_UNBLOCK_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES' in script
+    assert 'from service_catalog import TELEGRAM_UNBLOCK_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES' in bootstrap
+    assert 'def telegram_udp_policy()' in script
+    assert 'def telegram_udp_policy()' in bootstrap
+    assert 'route_contains_telegram(filename)' in script
+    assert 'route_contains_telegram(filename)' in bootstrap
     assert 'route_contains_youtube(filename)' in script
     assert 'route_contains_youtube(filename)' in bootstrap
     assert "('VLESS', 'vless.txt', 'udp_quic_block_vless_enabled')" in script
@@ -970,9 +992,27 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         assert block_policy['BYPASS_IPV6_FALLBACK_ENABLED'] == '1'
         vless_auto_policy = _run_udp_policy_python(script_path, 'auto', youtube_route='vless.txt')
         vless_block_policy = _run_udp_policy_python(script_path, 'block', youtube_route='vless.txt')
+        telegram_auto_policy = _run_udp_policy_python(script_path, 'block', telegram_route='vless.txt')
+        telegram_block_policy = _run_udp_policy_python(
+            script_path,
+            'auto',
+            youtube_route='',
+            telegram_route='vless.txt',
+            telegram_policy='block',
+        )
+        combined_policy = _run_udp_policy_python(
+            script_path,
+            'block',
+            youtube_route='vless.txt',
+            telegram_route='vless.txt',
+            telegram_policy='auto',
+        )
         assert vless_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
         assert vless_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
         assert vless_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
+        assert telegram_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
+        assert telegram_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
+        assert combined_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"' in ipset_script
@@ -1106,9 +1146,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
+    assert "memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl'" in source
+    assert 'def _record_memory_timeline' in source
+    assert 'def _start_memory_timeline_thread' in source
+    assert "_start_memory_timeline_thread()" in source
     assert 'def _sync_udp_policy_config' in source
     assert 'YOUTUBE_UNBLOCK_ENTRIES' in source
+    assert 'TELEGRAM_UNBLOCK_ENTRIES' in source
+    assert 'TELEGRAM_UDP_POLICY' in source
     assert "UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
+    assert 'def _route_list_contains_telegram' in source
     assert 'def _route_list_contains_youtube' in source
     assert 'def _udp_quic_block_enabled_for_protocol' in source
     assert "_udp_quic_block_enabled_for_protocol('vless', UDP_QUIC_BLOCK_VLESS_ENABLED)" in source
@@ -1146,6 +1193,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
+    assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
+    assert "telegram_udp_policy = 'auto'" in script_source
     assert 'Refreshing ipset after proxy core startup.' in script_source
     assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')
     assert 'write_update_rollback_script()' in script_source

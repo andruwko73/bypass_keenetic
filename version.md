@@ -1,3 +1,6 @@
+*v1.708 (12 Jun 2026) -* main
+*Keeps Telegram route UDP open for native calls, even when Telegram and YouTube share one route list, and adds memory timeline diagnostics with stricter cleanup markers.*
+
 *v1.707 (12 Jun 2026) -* main
 *Lets YouTube route detection follow any supported protocol list while keeping stream-activity guard scoped to Vless routes.*
 

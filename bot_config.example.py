@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.707
+# ВЕРСИЯ СКРИПТА v1.708
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -46,12 +46,17 @@ memory_post_pool_restart_rss_kb = 71680
 memory_post_pool_restart_delay_seconds = 20.0
 memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
+memory_timeline_enabled = True
+memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
+memory_timeline_interval_seconds = 60.0
+memory_timeline_max_events = 240
 udp_quic_block_shadowsocks_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Shadowsocks list
 udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Vmess list
 udp_quic_block_vless_enabled = True  # auto-disabled when this route contains YouTube entries
 udp_quic_block_vless2_enabled = True  # auto-disabled when this route contains YouTube entries
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
 youtube_quic_policy = 'auto'  # auto keeps current behavior; allow permits QUIC; block forces TCP fallback for YouTube routes
+telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so native calls can use relay/media traffic; block disables it
 udp_quic_drift_priority_refresh_cooldown_seconds = 120  # refresh YouTube/Googlevideo ipset drift faster than low-priority service drift
 ipset_refresh_command_timeout_seconds = 420  # allow slower low-load ipset refreshes on busy routers
 ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси
