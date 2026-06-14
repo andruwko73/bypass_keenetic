@@ -1,3 +1,6 @@
+*v1.709 (14 Jun 2026) -* main
+*Adds Telegram Call TPROXY diagnostics to the router card, keeps learned call media on the selected Telegram route, expands observed YouTube CDN coverage, and aligns desktop web spacing and typography across Status, Keys, and Lists.*
+
 *v1.708 (12 Jun 2026) -* main
 *Keeps Telegram route UDP open for native calls, even when Telegram and YouTube share one route list, and adds memory timeline diagnostics with stricter cleanup markers.*
 

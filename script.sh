@@ -622,7 +622,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_healthcheck.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_healthcheck.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -648,6 +648,42 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_timeline_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_timeline_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_timeline_max_events[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_timeline_max_events = 240\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_udp_policy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "telegram_udp_policy = 'auto'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq "^telegram_call_learning_state_path[[:space:]]*=[[:space:]]*['\"]?/opt/tmp/bypass_telegram_call_learning\\.json['\"]?([[:space:]#]|$)" "$BOT_CONFIG_PATH"; then
+    sed -i "s#^telegram_call_learning_state_path[[:space:]]*=.*#telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'#" "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^telegram_call_learning_state_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_default_duration_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_default_duration_seconds = 90\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_max_duration_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_max_duration_seconds = 180\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_poll_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_poll_interval_seconds = 1.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^telegram_call_learning_auto_enabled[[:space:]]*=[[:space:]]*False([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^telegram_call_learning_auto_enabled[[:space:]]*=.*/telegram_call_learning_auto_enabled = True/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^telegram_call_learning_auto_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_auto_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_scan_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_scan_interval_seconds = 5.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^telegram_call_learning_scan_interval_seconds[[:space:]]*=[[:space:]]*1\.0([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^telegram_call_learning_scan_interval_seconds[[:space:]]*=.*/telegram_call_learning_scan_interval_seconds = 5.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^telegram_call_learning_min_score[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_min_score = 5\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_min_packets[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_min_packets = 2\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_min_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_min_bytes = 240\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_max_candidates = 20\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_max_seen_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_max_seen_addresses = 512\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^telegram_call_learning_apply_by_default[[:space:]]*=[[:space:]]*False([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^telegram_call_learning_apply_by_default[[:space:]]*=.*/telegram_call_learning_apply_by_default = True/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^telegram_call_learning_apply_by_default[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_apply_by_default = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_client_timeout_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_client_timeout_seconds = 900\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^telegram_call_learning_client_timeout_seconds[[:space:]]*=[[:space:]]*14400([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^telegram_call_learning_client_timeout_seconds[[:space:]]*=.*/telegram_call_learning_client_timeout_seconds = 900/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^telegram_call_learning_address_timeout_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_address_timeout_seconds = 14400\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_tproxy_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_tproxy_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localportsh_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportsh_tproxy = '11802'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localportvmess_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportvmess_tproxy = '11815'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localportvless_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportvless_tproxy = '11812'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localportvless2_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportvless2_tproxy = '11814'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localporttrojan_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localporttrojan_tproxy = '11829'\n" >> "$BOT_CONFIG_PATH"
 }
 
 generate_udp_quic_policy_file() {
@@ -704,6 +740,17 @@ def config_bool(name, default=True):
     if config is None:
         return default
     return bool(getattr(config, name, default))
+
+
+def config_int(name, default, minimum, maximum):
+    if config is None:
+        value = default
+    else:
+        try:
+            value = int(getattr(config, name, default))
+        except Exception:
+            value = default
+    return max(int(minimum), min(int(maximum), value))
 
 
 def youtube_quic_policy():
@@ -776,9 +823,12 @@ def route_contains_telegram(filename):
 
 
 print('# Generated by bypass_keenetic. Edit bot_config.py values instead.')
+telegram_route_flags = {}
 for env_name, filename, attr in PROTOCOLS:
+    telegram_route = route_contains_telegram(filename)
+    telegram_route_flags[env_name] = telegram_route
     enabled = config_bool(attr, True)
-    if route_contains_telegram(filename):
+    if telegram_route:
         policy = telegram_udp_policy()
         if policy == 'block':
             enabled = True
@@ -794,6 +844,17 @@ for env_name, filename, attr in PROTOCOLS:
             enabled = False
     print(f'BYPASS_UDP_QUIC_BLOCK_{env_name}={1 if enabled else 0}')
 print(f'BYPASS_IPV6_FALLBACK_ENABLED={1 if config_bool("ipv6_bypass_fallback_enabled", True) else 0}')
+print(f'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED={1 if config_bool("telegram_call_learning_enabled", True) else 0}')
+print(f'BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT={config_int("telegram_call_learning_client_timeout_seconds", 900, 30, 86400)}')
+print(f'BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT={config_int("telegram_call_learning_address_timeout_seconds", 14400, 120, 86400)}')
+print(f'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED={1 if config_bool("telegram_call_tproxy_enabled", True) else 0}')
+print(f'TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS={config_int("localportsh_tproxy", 11802, 1, 65535)}')
+print(f'TELEGRAM_CALL_TPROXY_PORT_VMESS={config_int("localportvmess_tproxy", 11815, 1, 65535)}')
+print(f'TELEGRAM_CALL_TPROXY_PORT_VLESS={config_int("localportvless_tproxy", 11812, 1, 65535)}')
+print(f'TELEGRAM_CALL_TPROXY_PORT_VLESS2={config_int("localportvless2_tproxy", 11814, 1, 65535)}')
+print(f'TELEGRAM_CALL_TPROXY_PORT_TROJAN={config_int("localporttrojan_tproxy", 11829, 1, 65535)}')
+for env_name, _filename, _attr in PROTOCOLS:
+    print(f'BYPASS_TELEGRAM_CALL_ROUTE_{env_name}={1 if telegram_route_flags.get(env_name) else 0}')
 PY
     mv "$block_tmp" "$BOT_RUNTIME_DIR/udp_policy.conf"
     chmod 644 "$BOT_RUNTIME_DIR/udp_policy.conf" 2>/dev/null || true

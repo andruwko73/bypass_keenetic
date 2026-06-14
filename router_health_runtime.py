@@ -10,6 +10,7 @@ except Exception:
     xray_compat_runtime = None
 
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
+UDP_POLICY_CONFIG_FILE = '/opt/etc/bot/udp_policy.conf'
 IPSET_SET_NAMES = (
     'unblocksh',
     'unblockshudp',
@@ -37,6 +38,34 @@ IPSET_REFRESH_STATUS_LABELS = {
 IPSET_REFRESH_MESSAGE_LABELS = {
     'ipset refresh completed.': 'ipset обновлён.',
     'ipset refresh completed with preserved/fallback sets.': 'ipset обновлён частично: часть наборов сохранена.',
+}
+TELEGRAM_CALL_TPROXY_DEFAULT_PORTS = {
+    'shadowsocks': 11802,
+    'vmess': 11815,
+    'vless': 11812,
+    'vless2': 11814,
+    'trojan': 11829,
+}
+TELEGRAM_CALL_TPROXY_PORT_KEYS = {
+    'shadowsocks': 'TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS',
+    'vmess': 'TELEGRAM_CALL_TPROXY_PORT_VMESS',
+    'vless': 'TELEGRAM_CALL_TPROXY_PORT_VLESS',
+    'vless2': 'TELEGRAM_CALL_TPROXY_PORT_VLESS2',
+    'trojan': 'TELEGRAM_CALL_TPROXY_PORT_TROJAN',
+}
+TELEGRAM_CALL_ROUTE_KEYS = {
+    'shadowsocks': 'BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS',
+    'vmess': 'BYPASS_TELEGRAM_CALL_ROUTE_VMESS',
+    'vless': 'BYPASS_TELEGRAM_CALL_ROUTE_VLESS',
+    'vless2': 'BYPASS_TELEGRAM_CALL_ROUTE_VLESS2',
+    'trojan': 'BYPASS_TELEGRAM_CALL_ROUTE_TROJAN',
+}
+TELEGRAM_CALL_PROTOCOL_LABELS = {
+    'shadowsocks': 'Shadowsocks',
+    'vmess': 'Vmess',
+    'vless': 'Vless',
+    'vless2': 'Vless 2',
+    'trojan': 'Trojan',
 }
 
 
@@ -140,6 +169,104 @@ def run_command_text(command, timeout=2):
     except Exception:
         return ''
     return result.stdout or ''
+
+
+def parse_key_value_text(text):
+    values = {}
+    for raw_line in (text or '').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
+
+
+def read_key_value_file(path):
+    return parse_key_value_text(read_proc_text(path, max_bytes=32768))
+
+
+def _config_bool(values, key, default=False):
+    if key not in values:
+        return bool(default)
+    return str(values.get(key) or '').strip().lower() not in ('0', 'false', 'no', 'off', '')
+
+
+def _config_int(values, key, default):
+    try:
+        return int(str(values.get(key, default)).strip())
+    except Exception:
+        return int(default)
+
+
+def parse_listening_ports(netstat_text, ports):
+    result = {}
+    for port in ports:
+        try:
+            port_int = int(port)
+        except Exception:
+            continue
+        pattern = f':{port_int} '
+        result[port_int] = any(pattern in line or f'.{port_int} ' in line for line in (netstat_text or '').splitlines())
+    return result
+
+
+def telegram_call_proxy_health(
+    policy_path=UDP_POLICY_CONFIG_FILE,
+    run_text=run_command_text,
+    read_values=read_key_value_file,
+):
+    values = read_values(policy_path)
+    enabled = _config_bool(values, 'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED', True)
+    tproxy_enabled = _config_bool(values, 'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED', True)
+    protocols = [
+        proto for proto in TELEGRAM_CALL_TPROXY_DEFAULT_PORTS
+        if _config_bool(values, TELEGRAM_CALL_ROUTE_KEYS[proto], False)
+    ]
+    ports_by_protocol = {
+        proto: _config_int(values, TELEGRAM_CALL_TPROXY_PORT_KEYS[proto], default_port)
+        for proto, default_port in TELEGRAM_CALL_TPROXY_DEFAULT_PORTS.items()
+    }
+    active_ports = [ports_by_protocol[proto] for proto in protocols]
+    netstat_text = run_text(['netstat', '-lnp'], timeout=2) if active_ports else ''
+    port_states = parse_listening_ports(netstat_text, active_ports)
+    chain_text = run_text(['iptables', '-t', 'mangle', '-nL', 'BYPASS_TG_CALL_TPROXY'], timeout=2) if protocols else ''
+    chain_ok = bool((chain_text or '').strip())
+    ports_ok = all(port_states.get(port, False) for port in active_ports) if active_ports else False
+    ok = bool(enabled and tproxy_enabled and protocols and chain_ok and ports_ok)
+    return {
+        'ok': ok,
+        'enabled': enabled,
+        'tproxy_enabled': tproxy_enabled,
+        'chain_ok': chain_ok,
+        'protocols': protocols,
+        'ports': {proto: ports_by_protocol[proto] for proto in protocols},
+        'port_states': {str(port): bool(port_states.get(port, False)) for port in active_ports},
+    }
+
+
+def telegram_call_proxy_note(health):
+    health = health or {}
+    if not health.get('enabled'):
+        return 'Telegram Call: disabled.'
+    if not health.get('tproxy_enabled'):
+        return 'Telegram Call: TPROXY disabled.'
+    protocols = list(health.get('protocols') or [])
+    ports = health.get('ports') or {}
+    port_states = health.get('port_states') or {}
+    if not protocols:
+        return 'Telegram Call: standby, активный Telegram-маршрут не выбран.'
+    ports_text = ', '.join(
+        f'{TELEGRAM_CALL_PROTOCOL_LABELS.get(proto, proto)} {ports.get(proto)}:{"ok" if port_states.get(str(ports.get(proto))) else "down"}'
+        for proto in protocols
+    )
+    state = 'alive' if health.get('ok') else 'down'
+    suffix = f', порты: {ports_text}' if ports_text else ''
+    chain_text = '' if health.get('chain_ok') else ', chain down'
+    return f'Telegram Call: {state}, TPROXY{chain_text}{suffix}.'
 
 
 def parse_dns_backend(netstat_text):
@@ -376,12 +503,16 @@ def build_router_health_payload(
         core_proxy_note = 'Xray: health module unavailable.'
     else:
         core_proxy_note = ''
+    telegram_call_health = dict((core_proxy_health or {}).get('telegram_call') or {})
+    telegram_call_note = telegram_call_proxy_note(telegram_call_health) if telegram_call_health else ''
     return {
         'memory_text': memory_text,
         'note': ' '.join(details),
         'dns_note': dns_note,
         'core_proxy_note': core_proxy_note,
         'core_proxy_health': dict(core_proxy_health or {}),
+        'telegram_call_note': telegram_call_note,
+        'telegram_call_health': telegram_call_health,
         'available_kb': available_kb,
         'used_kb': used_kb,
         'total_kb': display_total_kb,
@@ -432,6 +563,7 @@ class RouterHealthRuntime:
                 }
             else:
                 payload = xray_compat_runtime.core_proxy_health()
+            payload['telegram_call'] = telegram_call_proxy_health()
         except Exception as exc:
             payload = {
                 'ok': False,
@@ -439,6 +571,7 @@ class RouterHealthRuntime:
                 'xray_config_ok': False,
                 'xray_config_message': str(exc),
                 'ports': {},
+                'telegram_call': {'ok': False, 'error': str(exc)},
             }
         self._core_proxy_cache = {'timestamp': now, 'payload': dict(payload)}
         return dict(payload)

@@ -1592,6 +1592,11 @@ def render_web_scripts(
                 coreProxyNote.textContent = health.core_proxy_note || '';
                 coreProxyNote.classList.toggle('hidden', !coreProxyNote.textContent);
             }}
+            const telegramCallNote = document.getElementById('router-telegram-call-note');
+            if (telegramCallNote) {{
+                telegramCallNote.textContent = health.telegram_call_note || '';
+                telegramCallNote.classList.toggle('hidden', !telegramCallNote.textContent);
+            }}
             const meter = document.getElementById('router-memory-meter');
             if (meter) {{
                 const percent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));
@@ -1651,7 +1656,7 @@ def render_web_scripts(
             Object.keys(protocols).forEach(function(proto) {{
                 const status = protocols[proto];
                 updateProtocolStatus(proto, status);
-                if (status && status.label === 'Проверяется') {{
+                if (proto === web.proxy_mode && status && (status.label === 'Проверяется' || status.api_pending)) {{
                     pending = true;
                 }}
             }});

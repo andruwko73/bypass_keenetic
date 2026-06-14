@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.708, последнее изменение: 12.06.2026
+#  Файл: bot.py, Версия v1.709, последнее изменение: 13.06.2026
 
 import subprocess
 import os
@@ -104,6 +104,7 @@ import telegram_info_runtime
 import auto_failover_runtime
 import app_runtime_mode
 import router_health_runtime
+import telegram_call_learning
 try:
     import xray_compat_runtime
 except Exception:
@@ -174,6 +175,7 @@ from service_catalog import (
     TELEGRAM_UNBLOCK_ENTRIES,
     UDP_QUIC_ROUTE_ENTRIES,
     YOUTUBE_UNBLOCK_ENTRIES,
+    service_route_entries,
 )
 from web_command_state import (
     command_state_snapshot as _command_state_snapshot,
@@ -1202,6 +1204,11 @@ localportvless2_transparent = str(int(localportvless) + 3)
 localportvmess_transparent = str(int(localportvless) + 4)
 localportsh_bot = str(getattr(config, 'localportsh_bot', 10820))
 localporttrojan_bot = str(getattr(config, 'localporttrojan_bot', 10830))
+localportsh_tproxy = str(getattr(config, 'localportsh_tproxy', 11802))
+localportvmess_tproxy = str(getattr(config, 'localportvmess_tproxy', 11815))
+localportvless_tproxy = str(getattr(config, 'localportvless_tproxy', 11812))
+localportvless2_tproxy = str(getattr(config, 'localportvless2_tproxy', 11814))
+localporttrojan_tproxy = str(getattr(config, 'localporttrojan_tproxy', 11829))
 dnsovertlsport = config.dnsovertlsport
 dnsoverhttpsport = config.dnsoverhttpsport
 
@@ -1463,6 +1470,51 @@ YOUTUBE_ROUTE_MARKERS = (
     'ggpht.com',
 )
 UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+TELEGRAM_CALL_LEARNING_ENABLED = bool(getattr(config, 'telegram_call_learning_enabled', True))
+TELEGRAM_CALL_LEARNING_DEFAULT_STATE_PATH = '/tmp/bypass_telegram_call_learning.json'
+TELEGRAM_CALL_LEARNING_LEGACY_STATE_PATH = '/opt/tmp/bypass_telegram_call_learning.json'
+TELEGRAM_CALL_LEARNING_STATE_PATH = str(
+    getattr(config, 'telegram_call_learning_state_path', TELEGRAM_CALL_LEARNING_DEFAULT_STATE_PATH)
+)
+if TELEGRAM_CALL_LEARNING_STATE_PATH == TELEGRAM_CALL_LEARNING_LEGACY_STATE_PATH:
+    TELEGRAM_CALL_LEARNING_STATE_PATH = TELEGRAM_CALL_LEARNING_DEFAULT_STATE_PATH
+TELEGRAM_CALL_LEARNING_DEFAULT_DURATION_SECONDS = max(
+    20,
+    int(getattr(config, 'telegram_call_learning_default_duration_seconds', 90)),
+)
+TELEGRAM_CALL_LEARNING_MAX_DURATION_SECONDS = max(
+    TELEGRAM_CALL_LEARNING_DEFAULT_DURATION_SECONDS,
+    int(getattr(config, 'telegram_call_learning_max_duration_seconds', 180)),
+)
+TELEGRAM_CALL_LEARNING_POLL_INTERVAL_SECONDS = max(
+    0.5,
+    float(getattr(config, 'telegram_call_learning_poll_interval_seconds', 1.0)),
+)
+TELEGRAM_CALL_LEARNING_AUTO_ENABLED = bool(getattr(config, 'telegram_call_learning_auto_enabled', True))
+TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS = max(
+    1.0,
+    float(getattr(config, 'telegram_call_learning_scan_interval_seconds', 5.0)),
+)
+TELEGRAM_CALL_LEARNING_MIN_SCORE = max(1, int(getattr(config, 'telegram_call_learning_min_score', 5)))
+TELEGRAM_CALL_LEARNING_MIN_PACKETS = max(1, int(getattr(config, 'telegram_call_learning_min_packets', 2)))
+TELEGRAM_CALL_LEARNING_MIN_BYTES = max(1, int(getattr(config, 'telegram_call_learning_min_bytes', 240)))
+TELEGRAM_CALL_LEARNING_MAX_CANDIDATES = max(1, int(getattr(config, 'telegram_call_learning_max_candidates', 20)))
+TELEGRAM_CALL_LEARNING_MAX_SEEN_ADDRESSES = max(
+    TELEGRAM_CALL_LEARNING_MAX_CANDIDATES,
+    int(getattr(config, 'telegram_call_learning_max_seen_addresses', 512)),
+)
+TELEGRAM_CALL_LEARNING_APPLY_BY_DEFAULT = bool(getattr(config, 'telegram_call_learning_apply_by_default', True))
+TELEGRAM_CALL_LEARNING_CLIENT_TIMEOUT_SECONDS = max(
+    30,
+    int(getattr(config, 'telegram_call_learning_client_timeout_seconds', 900)),
+)
+TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS = max(
+    120,
+    int(getattr(config, 'telegram_call_learning_address_timeout_seconds', 14400)),
+)
+TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enabled', True))
+TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
+TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
 
 bot_ready = False
 bot_polling = False
@@ -1545,6 +1597,33 @@ post_pool_memory_cleanup_state = {
     'next_retry_at': 0.0,
     'deadline_at': 0.0,
     'last_message': '',
+}
+telegram_call_learning_lock = threading.Lock()
+telegram_call_learning_cancel_event = threading.Event()
+telegram_call_learning_auto_thread = None
+telegram_call_learning_state_last_write = 0.0
+telegram_call_learning_state_last_digest = ''
+telegram_call_learning_state = {
+    'enabled': TELEGRAM_CALL_LEARNING_ENABLED,
+    'auto_enabled': TELEGRAM_CALL_LEARNING_AUTO_ENABLED,
+    'watching': False,
+    'running': False,
+    'device_ip': '',
+    'protocol': '',
+    'protocols': [],
+    'route_protocols': [],
+    'apply': TELEGRAM_CALL_LEARNING_APPLY_BY_DEFAULT,
+    'duration_seconds': TELEGRAM_CALL_LEARNING_DEFAULT_DURATION_SECONDS,
+    'started_at': 0.0,
+    'updated_at': 0.0,
+    'finished_at': 0.0,
+    'last_scan_at': 0.0,
+    'last_apply_at': 0.0,
+    'seen_clients': [],
+    'candidates': [],
+    'added': [],
+    'message': '',
+    'error': '',
 }
 WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
 web_command_lock = threading.Lock()
@@ -1914,6 +1993,559 @@ def _route_list_contains_telegram(proto):
     return _route_list_contains_catalog(proto, TELEGRAM_UNBLOCK_ENTRIES)
 
 
+def _telegram_call_learning_route_protocols():
+    protocols = []
+    for proto in TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER:
+        try:
+            if _route_list_contains_telegram(proto):
+                protocols.append(proto)
+        except Exception:
+            continue
+    return protocols
+
+
+def _select_telegram_call_learning_protocol(requested=''):
+    requested = str(requested or '').strip().lower()
+    if requested in telegram_call_learning.PROTOCOL_IPSETS:
+        return requested, []
+    route_protocols = _telegram_call_learning_route_protocols()
+    active = ''
+    try:
+        active = _load_proxy_mode()
+    except Exception:
+        active = str(proxy_mode or '')
+    notes = []
+    if active in route_protocols:
+        return active, route_protocols
+    if route_protocols:
+        return route_protocols[0], route_protocols
+    if active in telegram_call_learning.PROTOCOL_IPSETS:
+        notes.append('telegram_route_not_found')
+        return active, route_protocols
+    notes.append('telegram_route_not_found')
+    return 'vless', route_protocols
+
+
+def _telegram_call_learning_target_protocols(requested=''):
+    requested = str(requested or '').strip().lower()
+    if requested in telegram_call_learning.PROTOCOL_IPSETS:
+        return [requested], _telegram_call_learning_route_protocols()
+    route_protocols = _telegram_call_learning_route_protocols()
+    if route_protocols:
+        return route_protocols, route_protocols
+    try:
+        active = _load_proxy_mode()
+    except Exception:
+        active = str(proxy_mode or '')
+    if active in telegram_call_learning.PROTOCOL_IPSETS:
+        return [active], route_protocols
+    return ['vless'], route_protocols
+
+
+def _telegram_call_learning_snapshot():
+    with telegram_call_learning_lock:
+        snapshot = dict(telegram_call_learning_state)
+        snapshot['candidates'] = list(snapshot.get('candidates') or [])
+        snapshot['added'] = list(snapshot.get('added') or [])
+        snapshot['protocols'] = list(snapshot.get('protocols') or [])
+        snapshot['route_protocols'] = list(snapshot.get('route_protocols') or [])
+        snapshot['seen_clients'] = list(snapshot.get('seen_clients') or [])
+    snapshot['enabled'] = TELEGRAM_CALL_LEARNING_ENABLED
+    snapshot['auto_enabled'] = TELEGRAM_CALL_LEARNING_AUTO_ENABLED
+    return snapshot
+
+
+def _write_telegram_call_learning_state(snapshot=None):
+    global telegram_call_learning_state_last_digest, telegram_call_learning_state_last_write
+    if not TELEGRAM_CALL_LEARNING_STATE_PATH:
+        return
+    payload = snapshot or _telegram_call_learning_snapshot()
+    try:
+        digest_payload = dict(payload)
+        digest_payload.pop('updated_at', None)
+        digest_payload.pop('last_scan_at', None)
+        digest = json.dumps(digest_payload, sort_keys=True, ensure_ascii=False)
+    except Exception:
+        digest = ''
+    now = time.time()
+    if (
+        digest
+        and digest == telegram_call_learning_state_last_digest
+        and now - telegram_call_learning_state_last_write < 15
+    ):
+        return
+    try:
+        _write_json_file(TELEGRAM_CALL_LEARNING_STATE_PATH, payload)
+        telegram_call_learning_state_last_digest = digest
+        telegram_call_learning_state_last_write = now
+    except Exception as exc:
+        _write_runtime_log(f'Ошибка записи telegram_call_learning_state: {exc}')
+
+
+def _set_telegram_call_learning_state(**updates):
+    with telegram_call_learning_lock:
+        telegram_call_learning_state.update(updates)
+        telegram_call_learning_state['enabled'] = TELEGRAM_CALL_LEARNING_ENABLED
+        telegram_call_learning_state['auto_enabled'] = TELEGRAM_CALL_LEARNING_AUTO_ENABLED
+        telegram_call_learning_state['updated_at'] = time.time()
+        snapshot = dict(telegram_call_learning_state)
+        snapshot['candidates'] = list(snapshot.get('candidates') or [])
+        snapshot['added'] = list(snapshot.get('added') or [])
+        snapshot['protocols'] = list(snapshot.get('protocols') or [])
+        snapshot['route_protocols'] = list(snapshot.get('route_protocols') or [])
+        snapshot['seen_clients'] = list(snapshot.get('seen_clients') or [])
+    _write_telegram_call_learning_state(snapshot)
+    return snapshot
+
+
+def _telegram_call_learning_candidate_payload(candidate, apply_results=None, conntrack_deleted=False):
+    if isinstance(apply_results, dict):
+        apply_results = [apply_results]
+    apply_results = list(apply_results or [])
+    applied_sets = []
+    errors = []
+    protocols = []
+    sets = []
+    for apply_result in apply_results:
+        protocol = str(apply_result.get('protocol') or '')
+        if protocol:
+            protocols.append(protocol)
+        sets.extend(str(item) for item in (apply_result.get('sets') or []))
+        applied_sets.extend(str(item) for item in (apply_result.get('applied_sets') or []))
+        errors.extend(str(item) for item in (apply_result.get('errors') or []))
+    return {
+        'address': str(candidate.get('address') or candidate.get('dst') or ''),
+        'src': str(candidate.get('src') or ''),
+        'dport': str(candidate.get('dport') or ''),
+        'score': int(candidate.get('score') or 0),
+        'packets': int(candidate.get('packets') or 0),
+        'bytes': int(candidate.get('bytes') or 0),
+        'packet_delta': int(candidate.get('packet_delta') or 0),
+        'byte_delta': int(candidate.get('byte_delta') or 0),
+        'reasons': list(candidate.get('reasons') or []),
+        'udp_call_cluster': bool(candidate.get('udp_call_cluster')),
+        'udp_call_active_media': bool(candidate.get('udp_call_active_media')),
+        'protocols': protocols,
+        'sets': sets,
+        'applied_sets': applied_sets,
+        'errors': errors,
+        'protocol_results': apply_results,
+        'conntrack_deleted': bool(conntrack_deleted),
+    }
+
+
+def _telegram_call_learning_status_message(snapshot):
+    if not TELEGRAM_CALL_LEARNING_ENABLED:
+        return 'Conntrack-learning отключён в bot_config.py.'
+    if snapshot.get('error'):
+        return f"Conntrack-learning завершён с ошибкой: {snapshot.get('error')}"
+    if TELEGRAM_CALL_LEARNING_AUTO_ENABLED and snapshot.get('watching'):
+        added_count = len(snapshot.get('added') or [])
+        clients = len(snapshot.get('seen_clients') or [])
+        return f'Conntrack-learning авто: найдено IP: {added_count}, клиентов: {clients}.'
+    if snapshot.get('running'):
+        added_count = len(snapshot.get('added') or [])
+        mode = 'добавление' if snapshot.get('apply') else 'наблюдение'
+        return f'Conntrack-learning выполняется: {mode}, найдено IP: {added_count}.'
+    added_count = len(snapshot.get('added') or [])
+    if snapshot.get('finished_at'):
+        return f'Conntrack-learning завершён. Найдено IP: {added_count}.'
+    return 'Conntrack-learning готов.'
+
+
+def _trim_telegram_call_learning_seen(seen_addresses):
+    seen_list = list(seen_addresses or [])
+    if len(seen_list) <= TELEGRAM_CALL_LEARNING_MAX_SEEN_ADDRESSES:
+        return set(seen_list)
+    return set(seen_list[-TELEGRAM_CALL_LEARNING_MAX_SEEN_ADDRESSES:])
+
+
+def _apply_telegram_call_learning_candidate(candidate, protocols, apply_entries=True):
+    apply_results = []
+    conntrack_deleted = False
+    for protocol in protocols or []:
+        apply_result = telegram_call_learning.add_candidate_to_ipsets(
+            candidate,
+            protocol,
+            apply=apply_entries,
+        )
+        apply_results.append(apply_result)
+    if apply_entries and any(result.get('applied_sets') for result in apply_results):
+        conntrack_deleted = telegram_call_learning.delete_conntrack_candidate(candidate)
+    return _telegram_call_learning_candidate_payload(candidate, apply_results, conntrack_deleted)
+
+
+def _telegram_call_learning_ipset_members(set_name):
+    try:
+        result = subprocess.run(
+            ['ipset', 'list', str(set_name or '')],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    members = []
+    in_members = False
+    for line in (result.stdout or '').splitlines():
+        text = line.strip()
+        if text == 'Members:':
+            in_members = True
+            continue
+        if not in_members or not text:
+            continue
+        address = text.split()[0].strip()
+        if telegram_call_learning.is_lan_ipv4(address):
+            members.append(address)
+    return sorted(set(members))
+
+
+def _apply_telegram_call_learning_call_candidate(candidate, protocols, apply_entries=True):
+    apply_results = []
+    for protocol in protocols or []:
+        apply_result = telegram_call_learning.add_candidate_to_call_ipset(
+            candidate,
+            protocol,
+            timeout=TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS,
+            apply=apply_entries,
+        )
+        apply_results.append(apply_result)
+    conntrack_deleted = False
+    if apply_entries and any(result.get('applied_sets') for result in apply_results):
+        conntrack_deleted = telegram_call_learning.delete_conntrack_candidate(candidate)
+    return _telegram_call_learning_candidate_payload(candidate, apply_results, conntrack_deleted=conntrack_deleted)
+
+
+def _telegram_call_learning_auto_scan(previous_flows, seen_addresses, candidates_payload, added_payload, active_clients=None):
+    protocols, route_protocols = _telegram_call_learning_target_protocols()
+    active_clients = sorted(set(str(item or '').strip() for item in (active_clients or []) if str(item or '').strip()))
+    current_flows = telegram_call_learning.read_lan_conntrack_flows(
+        router_ip=routerip,
+        allowed_sources=active_clients,
+    )
+    candidates = telegram_call_learning.learn_candidates(
+        previous_flows,
+        current_flows,
+        seen_addresses=seen_addresses,
+        min_score=TELEGRAM_CALL_LEARNING_MIN_SCORE,
+        min_packets=TELEGRAM_CALL_LEARNING_MIN_PACKETS,
+        min_bytes=TELEGRAM_CALL_LEARNING_MIN_BYTES,
+        max_candidates=TELEGRAM_CALL_LEARNING_MAX_CANDIDATES,
+    )
+    changed = False
+    applied_now = []
+    for candidate in candidates:
+        address = str(candidate.get('address') or '')
+        if not address:
+            continue
+        if telegram_call_learning.address_in_networks(address):
+            continue
+        if not candidate.get('udp_call_cluster') and not candidate.get('udp_call_active_media'):
+            continue
+        seen_addresses.add(address)
+        payload = _apply_telegram_call_learning_call_candidate(
+            candidate,
+            protocols,
+            apply_entries=TELEGRAM_CALL_LEARNING_APPLY_BY_DEFAULT,
+        )
+        candidates_payload.append(payload)
+        if payload.get('applied_sets') or (not TELEGRAM_CALL_LEARNING_APPLY_BY_DEFAULT and not payload.get('errors')):
+            added_payload.append(payload)
+            applied_now.append(payload)
+            changed = True
+    seen_addresses = _trim_telegram_call_learning_seen(seen_addresses)
+    seen_clients = sorted({str(flow.get('src') or '') for flow in current_flows.values() if flow.get('src')})
+    snapshot = _set_telegram_call_learning_state(
+        watching=True,
+        running=False,
+        protocol=protocols[0] if protocols else '',
+        protocols=protocols,
+        route_protocols=route_protocols,
+        apply=TELEGRAM_CALL_LEARNING_APPLY_BY_DEFAULT,
+        last_scan_at=time.time(),
+        last_apply_at=time.time() if applied_now else telegram_call_learning_state.get('last_apply_at', 0.0),
+        seen_clients=active_clients or seen_clients,
+        candidates=candidates_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
+        added=added_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
+        message='',
+        error='',
+    )
+    if applied_now:
+        addresses = ', '.join(item.get('address') or '' for item in applied_now[:5])
+        _record_event(
+            'telegram_call_learning_apply',
+            f'Conntrack-learning добавил IP для Telegram-звонка: {addresses}',
+            source='watchdog',
+            protocol=','.join(protocols) if protocols else 'system',
+            service='telegram',
+            details={
+                'count': len(applied_now),
+                'protocols': protocols,
+                'route_protocols': route_protocols,
+                'clients': active_clients or seen_clients,
+            },
+        )
+        try:
+            _invalidate_web_status_cache()
+        except Exception:
+            pass
+    _set_telegram_call_learning_state(message=_telegram_call_learning_status_message(snapshot))
+    return current_flows, seen_addresses, candidates_payload, added_payload, changed
+
+
+def _telegram_call_learning_auto_worker():
+    previous_flows = {}
+    seen_addresses = set()
+    candidates_payload = []
+    added_payload = []
+    was_watching = False
+    idle_active_scans = 0
+    while not shutdown_requested.is_set():
+        try:
+            active_clients = _telegram_call_learning_ipset_members(TELEGRAM_CALL_LEARNING_CLIENT_IPSET)
+            if not active_clients:
+                if was_watching:
+                    previous_flows = {}
+                    seen_addresses = set()
+                    candidates_payload = []
+                    added_payload = []
+                    snapshot = _set_telegram_call_learning_state(
+                        watching=False,
+                        running=False,
+                        seen_clients=[],
+                        candidates=[],
+                        added=[],
+                        message=_telegram_call_learning_status_message({'watching': False, 'added': []}),
+                        error='',
+                    )
+                    _set_telegram_call_learning_state(message=_telegram_call_learning_status_message(snapshot))
+                    was_watching = False
+                    idle_active_scans = 0
+                shutdown_requested.wait(TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS)
+                continue
+            was_watching = True
+            previous_flows, seen_addresses, candidates_payload, added_payload, _changed = _telegram_call_learning_auto_scan(
+                previous_flows,
+                seen_addresses,
+                candidates_payload,
+                added_payload,
+                active_clients=active_clients,
+            )
+            if _changed:
+                idle_active_scans = 0
+            else:
+                idle_active_scans += 1
+        except Exception as exc:
+            _write_runtime_log(f'Telegram call adaptive learning error: {exc}')
+            _set_telegram_call_learning_state(
+                watching=False,
+                running=False,
+                error=str(exc),
+                message=_telegram_call_learning_status_message({'error': str(exc)}),
+            )
+            shutdown_requested.wait(max(5.0, TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS))
+            continue
+        wait_seconds = TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS
+        if added_payload:
+            wait_seconds = max(wait_seconds, 30.0)
+        elif idle_active_scans >= 3:
+            wait_seconds = max(wait_seconds, 15.0)
+        shutdown_requested.wait(wait_seconds)
+
+
+def _start_telegram_call_learning_auto_thread():
+    global telegram_call_learning_auto_thread
+    message = 'Автообучение Telegram-звонков выполняется правилами iptables/ipset без фонового сканирования.'
+    _set_telegram_call_learning_state(
+        watching=False,
+        running=False,
+        message=(
+            message
+            if TELEGRAM_CALL_LEARNING_ENABLED
+            else _telegram_call_learning_status_message({'watching': False})
+        ),
+    )
+    if not TELEGRAM_CALL_LEARNING_ENABLED or not TELEGRAM_CALL_LEARNING_AUTO_ENABLED:
+        return
+    if telegram_call_learning_auto_thread and telegram_call_learning_auto_thread.is_alive():
+        return
+    telegram_call_learning_auto_thread = threading.Thread(
+        target=_telegram_call_learning_auto_worker,
+        name='telegram-call-learning-auto',
+        daemon=True,
+    )
+    telegram_call_learning_auto_thread.start()
+
+
+def _telegram_call_learning_worker(device_ip, protocol, apply_entries, duration_seconds):
+    baseline = telegram_call_learning.read_conntrack_flows(device_ip)
+    seen_addresses = set()
+    candidates_payload = []
+    added_payload = []
+    deadline = time.time() + duration_seconds
+    error = ''
+    try:
+        while not telegram_call_learning_cancel_event.is_set():
+            current = telegram_call_learning.read_conntrack_flows(device_ip)
+            candidates = telegram_call_learning.learn_candidates(
+                baseline,
+                current,
+                seen_addresses=seen_addresses,
+                min_score=TELEGRAM_CALL_LEARNING_MIN_SCORE,
+                min_packets=TELEGRAM_CALL_LEARNING_MIN_PACKETS,
+                min_bytes=TELEGRAM_CALL_LEARNING_MIN_BYTES,
+                max_candidates=TELEGRAM_CALL_LEARNING_MAX_CANDIDATES,
+            )
+            for candidate in candidates:
+                address = str(candidate.get('address') or '')
+                if not address:
+                    continue
+                seen_addresses.add(address)
+                apply_result = telegram_call_learning.add_candidate_to_ipsets(
+                    candidate,
+                    protocol,
+                    apply=apply_entries,
+                )
+                conntrack_deleted = False
+                if apply_entries and apply_result.get('applied_sets'):
+                    conntrack_deleted = telegram_call_learning.delete_conntrack_candidate(candidate)
+                payload = _telegram_call_learning_candidate_payload(candidate, apply_result, conntrack_deleted)
+                candidates_payload.append(payload)
+                if payload.get('applied_sets') or not payload.get('errors'):
+                    added_payload.append(payload)
+            _set_telegram_call_learning_state(
+                candidates=candidates_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
+                added=added_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
+                message=_telegram_call_learning_status_message({
+                    'running': True,
+                    'apply': apply_entries,
+                    'added': added_payload,
+                }),
+            )
+            if time.time() >= deadline:
+                break
+            telegram_call_learning_cancel_event.wait(TELEGRAM_CALL_LEARNING_POLL_INTERVAL_SECONDS)
+    except Exception as exc:
+        error = str(exc)
+        _write_runtime_log(f'Ошибка conntrack-learning Telegram calls: {exc}')
+    finally:
+        cancelled = telegram_call_learning_cancel_event.is_set()
+        snapshot = _set_telegram_call_learning_state(
+            running=False,
+            finished_at=time.time(),
+            candidates=candidates_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
+            added=added_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
+            error=error,
+            message=('Conntrack-learning остановлен.' if cancelled else ''),
+        )
+        _set_telegram_call_learning_state(message=_telegram_call_learning_status_message(snapshot))
+        _record_event(
+            'telegram_call_learning_finish',
+            _telegram_call_learning_status_message(snapshot),
+            source='web',
+            protocol=protocol,
+            service='telegram',
+            details={
+                'device_ip': device_ip,
+                'apply': bool(apply_entries),
+                'added_count': len(added_payload),
+                'error': error,
+                'cancelled': cancelled,
+            },
+        )
+        try:
+            _invalidate_web_status_cache()
+        except Exception:
+            pass
+        try:
+            _memory_cleanup('telegram call learning finished', clear_status=True)
+        except Exception:
+            pass
+
+
+def _start_telegram_call_learning(device_ip, protocol='', apply_entries=None, duration_seconds=None):
+    if not TELEGRAM_CALL_LEARNING_ENABLED:
+        snapshot = _telegram_call_learning_snapshot()
+        return False, _telegram_call_learning_status_message(snapshot), snapshot
+    device_ip = str(device_ip or '').strip()
+    if not telegram_call_learning.is_lan_ipv4(device_ip):
+        snapshot = _telegram_call_learning_snapshot()
+        return False, 'Укажите IPv4-адрес телефона или другого клиента в LAN.', snapshot
+    selected_protocol, route_protocols = _select_telegram_call_learning_protocol(protocol)
+    if not telegram_call_learning.protocol_ipsets(selected_protocol):
+        snapshot = _telegram_call_learning_snapshot()
+        return False, 'Не удалось выбрать протокол для добавления IP в ipset.', snapshot
+    if apply_entries is None:
+        apply_entries = TELEGRAM_CALL_LEARNING_APPLY_BY_DEFAULT
+    try:
+        duration = int(float(duration_seconds or TELEGRAM_CALL_LEARNING_DEFAULT_DURATION_SECONDS))
+    except Exception:
+        duration = TELEGRAM_CALL_LEARNING_DEFAULT_DURATION_SECONDS
+    duration = min(TELEGRAM_CALL_LEARNING_MAX_DURATION_SECONDS, max(20, duration))
+    with telegram_call_learning_lock:
+        if telegram_call_learning_state.get('running'):
+            snapshot = dict(telegram_call_learning_state)
+            snapshot['candidates'] = list(snapshot.get('candidates') or [])
+            snapshot['added'] = list(snapshot.get('added') or [])
+            return False, 'Conntrack-learning уже выполняется.', snapshot
+        telegram_call_learning_cancel_event.clear()
+        telegram_call_learning_state.update({
+            'enabled': TELEGRAM_CALL_LEARNING_ENABLED,
+            'running': True,
+            'device_ip': device_ip,
+            'protocol': selected_protocol,
+            'route_protocols': route_protocols,
+            'apply': bool(apply_entries),
+            'duration_seconds': duration,
+            'started_at': time.time(),
+            'updated_at': time.time(),
+            'finished_at': 0.0,
+            'candidates': [],
+            'added': [],
+            'message': '',
+            'error': '',
+        })
+        snapshot = dict(telegram_call_learning_state)
+    _write_telegram_call_learning_state(snapshot)
+    thread = threading.Thread(
+        target=_telegram_call_learning_worker,
+        args=(device_ip, selected_protocol, bool(apply_entries), duration),
+        daemon=True,
+    )
+    thread.start()
+    message = (
+        f'Conntrack-learning запущен на {duration} сек. '
+        f'Протокол: {selected_protocol}. Режим: {"добавление в ipset" if apply_entries else "наблюдение"}.'
+    )
+    _set_telegram_call_learning_state(message=message)
+    _record_event(
+        'telegram_call_learning_start',
+        message,
+        source='web',
+        protocol=selected_protocol,
+        service='telegram',
+        details={'device_ip': device_ip, 'apply': bool(apply_entries), 'route_protocols': route_protocols},
+    )
+    try:
+        _invalidate_web_status_cache()
+    except Exception:
+        pass
+    return True, message, _telegram_call_learning_snapshot()
+
+
+def _cancel_telegram_call_learning():
+    snapshot = _telegram_call_learning_snapshot()
+    if not snapshot.get('running'):
+        return False, 'Conntrack-learning сейчас не выполняется.', snapshot
+    telegram_call_learning_cancel_event.set()
+    snapshot = _set_telegram_call_learning_state(message='Остановка conntrack-learning...')
+    return True, 'Остановка conntrack-learning запрошена.', snapshot
+
+
 def _udp_quic_block_enabled_for_protocol(proto, configured_enabled):
     if proto in UDP_QUIC_POLICY_PROTOCOLS and _route_list_contains_telegram(proto):
         if TELEGRAM_UDP_POLICY == 'block':
@@ -1934,6 +2566,13 @@ def _sync_udp_policy_config():
     block_vless = _udp_quic_block_enabled_for_protocol('vless', UDP_QUIC_BLOCK_VLESS_ENABLED)
     block_vless2 = _udp_quic_block_enabled_for_protocol('vless2', UDP_QUIC_BLOCK_VLESS2_ENABLED)
     block_trojan = _udp_quic_block_enabled_for_protocol('trojan', UDP_QUIC_BLOCK_TROJAN_ENABLED)
+    telegram_routes = {
+        'shadowsocks': _route_list_contains_telegram('shadowsocks'),
+        'vmess': _route_list_contains_telegram('vmess'),
+        'vless': _route_list_contains_telegram('vless'),
+        'vless2': _route_list_contains_telegram('vless2'),
+        'trojan': _route_list_contains_telegram('trojan'),
+    }
     payload = (
         '# Generated by bypass_keenetic. Edit bot_config.py values instead.\n'
         f'BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS={1 if block_shadowsocks else 0}\n'
@@ -1942,6 +2581,20 @@ def _sync_udp_policy_config():
         f'BYPASS_UDP_QUIC_BLOCK_VLESS2={1 if block_vless2 else 0}\n'
         f'BYPASS_UDP_QUIC_BLOCK_TROJAN={1 if block_trojan else 0}\n'
         f'BYPASS_IPV6_FALLBACK_ENABLED={1 if IPV6_BYPASS_FALLBACK_ENABLED else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED={1 if TELEGRAM_CALL_LEARNING_ENABLED else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT={TELEGRAM_CALL_LEARNING_CLIENT_TIMEOUT_SECONDS}\n'
+        f'BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT={TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS}\n'
+        f'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED={1 if TELEGRAM_CALL_TPROXY_ENABLED else 0}\n'
+        f'TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS={localportsh_tproxy}\n'
+        f'TELEGRAM_CALL_TPROXY_PORT_VMESS={localportvmess_tproxy}\n'
+        f'TELEGRAM_CALL_TPROXY_PORT_VLESS={localportvless_tproxy}\n'
+        f'TELEGRAM_CALL_TPROXY_PORT_VLESS2={localportvless2_tproxy}\n'
+        f'TELEGRAM_CALL_TPROXY_PORT_TROJAN={localporttrojan_tproxy}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS={1 if telegram_routes["shadowsocks"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_VMESS={1 if telegram_routes["vmess"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS={1 if telegram_routes["vless"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS2={1 if telegram_routes["vless2"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_TROJAN={1 if telegram_routes["trojan"] else 0}\n'
     )
     try:
         directory = os.path.dirname(UDP_POLICY_CONFIG_PATH)
@@ -3129,7 +3782,7 @@ def _load_service_entries(service_key):
     if not source:
         raise ValueError('Неизвестный сервис')
     if source.get('entries'):
-        return _socialnet_entries_from_text('\n'.join(source['entries']))
+        return _socialnet_entries_from_text('\n'.join(service_route_entries(service_key)))
     raw_text = _fetch_remote_text(source['url'], timeout=25)
     entries = _parse_service_domains(raw_text)
     if not entries:
@@ -3219,8 +3872,13 @@ def _custom_check_route_entries(custom_checks=None):
     preset_routes = {item.get('id'): item.get('routes') or [] for item in CUSTOM_CHECK_PRESETS}
     values = []
     for check in checks:
-        values.extend(preset_routes.get(check.get('id'), []))
-        values.extend(check.get('routes') or [])
+        check_id = check.get('id')
+        source = SERVICE_LIST_SOURCES.get(check_id) or {}
+        if source.get('entries'):
+            values.extend(service_route_entries(check_id))
+        else:
+            values.extend(preset_routes.get(check_id, []))
+            values.extend(check.get('routes') or [])
         values.extend(check.get('urls') or [check.get('url', '')])
     return _route_entries_from_values(values)
 
@@ -3437,7 +4095,7 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
     source = SERVICE_LIST_SOURCES[service_key]
     try:
         if source.get('entries'):
-            entries = list(source['entries'])
+            entries = service_route_entries(service_key)
         else:
             raw_text = _fetch_remote_text(source['url'], timeout=25)
             entries = _parse_service_domains(raw_text)
@@ -7082,6 +7740,7 @@ def _web_get_context(handler):
         'event_history_snapshot': _event_history_snapshot,
         'route_intersections_snapshot': _route_intersections_snapshot,
         'service_routes_payload': _web_service_routes_payload,
+        'telegram_call_learning_snapshot': _telegram_call_learning_snapshot,
         'router_health_snapshot': _router_health_snapshot,
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
@@ -7253,6 +7912,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         '/api/command_state',
         '/api/update_status',
         '/api/event_history',
+        '/api/telegram_call_learning',
         '/api/route_intersections',
         '/static/',
     )
@@ -7655,6 +8315,7 @@ def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service='telegr
         loglevel='warning',
         connectivity_check_domains=CONNECTIVITY_CHECK_DOMAINS,
         include_vmess_transparent=True,
+        include_tproxy_inbounds=False,
     )
     inbound_tag = 'in-vless' if proto == 'vless' else 'in-vless2'
     outbound_tag = 'proxy-vless' if proto == 'vless' else 'proxy-vless2'
@@ -7795,6 +8456,11 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
             'vless2_transparent': localportvless2_transparent,
             'shadowsocks_bot': localportsh_bot,
             'trojan_bot': localporttrojan_bot,
+            'shadowsocks_tproxy': localportsh_tproxy,
+            'vmess_tproxy': localportvmess_tproxy,
+            'vless_tproxy': localportvless_tproxy,
+            'vless2_tproxy': localportvless2_tproxy,
+            'trojan_tproxy': localporttrojan_tproxy,
         },
         error_log_path=CORE_PROXY_ERROR_LOG,
         access_log_path='/dev/null',
@@ -7952,6 +8618,7 @@ def main():
     _cleanup_pool_probe_runtime_light(kill_processes=True)
     _sync_udp_policy_config()
     _start_udp_quic_drift_watchdog_thread()
+    _start_telegram_call_learning_auto_thread()
     _start_memory_timeline_thread()
     _start_memory_watchdog_thread()
     runtime_mode = _load_app_runtime_mode()

@@ -7,6 +7,13 @@ from unblock_lists import DEFAULT_ORDER, UNBLOCK_DIR, UNBLOCK_UPDATE_SCRIPT, rea
 
 MAX_ISSUES = 120
 ROUTE_FILES = [name[:-4] for name in DEFAULT_ORDER]
+ROUTE_IPSET_SETS = {
+    'shadowsocks': (('unblocksh', 'tcp'), ('unblockshudp', 'udp'), ('unblocksh6', 'ipv6')),
+    'vmess': (('unblockvmess', 'tcp'), ('unblockvmessudp', 'udp'), ('unblockvmess6', 'ipv6')),
+    'vless': (('unblockvless', 'tcp'), ('unblockvlessudp', 'udp'), ('unblockvless6', 'ipv6')),
+    'vless-2': (('unblockvless2', 'tcp'), ('unblockvless2udp', 'udp'), ('unblockvless2v6', 'ipv6')),
+    'trojan': (('unblocktroj', 'tcp'), ('unblocktrojudp', 'udp'), ('unblocktroj6', 'ipv6')),
+}
 
 
 def _read_all(unblock_dir):
@@ -44,7 +51,83 @@ def _owners(entries_by_route, entry):
     return [route for route, entries in entries_by_route.items() if entry in entries]
 
 
-def analyze_route_intersections(*, unblock_dir=UNBLOCK_DIR, max_issues=MAX_ISSUES):
+def _command_text(args, *, run_command=subprocess.run, timeout=3):
+    try:
+        result = run_command(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception:
+        return ''
+    return result.stdout or ''
+
+
+def _read_ipset_members(set_name, *, run_command=subprocess.run):
+    text = _command_text(['ipset', 'list', set_name], run_command=run_command)
+    members = set()
+    in_members = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == 'Members:':
+            in_members = True
+            continue
+        if in_members:
+            members.add(line.split()[0])
+    return members
+
+
+def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subprocess.run):
+    members_by_set = {}
+    for sets in ROUTE_IPSET_SETS.values():
+        for set_name, _kind in sets:
+            members_by_set[set_name] = _read_ipset_members(set_name, run_command=run_command)
+
+    issues = []
+    routes = list(ROUTE_IPSET_SETS)
+    for index, route in enumerate(routes):
+        for other_route in routes[index + 1:]:
+            for (set_name, kind), (other_set, other_kind) in zip(
+                ROUTE_IPSET_SETS[route],
+                ROUTE_IPSET_SETS[other_route],
+            ):
+                if kind != other_kind:
+                    continue
+                shared = members_by_set.get(set_name, set()) & members_by_set.get(other_set, set())
+                if not shared:
+                    continue
+                sample = sorted(shared)[:8]
+                issues.append({
+                    'kind': 'runtime_ipset_overlap',
+                    'runtime': True,
+                    'entry': f'{set_name} / {other_set}',
+                    'entries': [],
+                    'routes': sorted({route, other_route}),
+                    'set_names': [set_name, other_set],
+                    'match_count': len(shared),
+                    'samples': sample,
+                    'message': (
+                        f'{set_name} и {other_set}: {len(shared)} общих IP '
+                        f'в реальных ipset ({", ".join(sample)})'
+                    ),
+                })
+                if len(issues) >= max_issues:
+                    return issues
+    return issues
+
+
+def analyze_route_intersections(
+    *,
+    unblock_dir=UNBLOCK_DIR,
+    max_issues=MAX_ISSUES,
+    include_runtime=True,
+    run_command=subprocess.run,
+):
     entries_by_route = _read_all(unblock_dir)
     issues = []
     exact_seen = {}
@@ -116,9 +199,21 @@ def analyze_route_intersections(*, unblock_dir=UNBLOCK_DIR, max_issues=MAX_ISSUE
         if len(issues) >= max_issues:
             break
 
+    file_issues = list(issues)
+    runtime_issues = []
+    if include_runtime and len(issues) < max_issues:
+        runtime_issues = _runtime_ipset_intersections(
+            max_issues=max_issues - len(issues),
+            run_command=run_command,
+        )
+        issues.extend(runtime_issues)
+
     return {
         'issues': issues[:max_issues],
         'count': len(issues),
+        'file_count': len(file_issues),
+        'runtime_count': len(runtime_issues),
+        'runtime_match_count': sum(int(item.get('match_count') or 0) for item in runtime_issues),
         'truncated': len(issues) > max_issues,
         'routes': {route: len(entries) for route, entries in entries_by_route.items()},
     }
@@ -136,7 +231,7 @@ def resolve_route_intersections(
         target_route = target_route[:-4]
     if target_route not in ROUTE_FILES:
         raise ValueError('Неизвестный список обхода')
-    report = analyze_route_intersections(unblock_dir=unblock_dir)
+    report = analyze_route_intersections(unblock_dir=unblock_dir, include_runtime=False)
     entries_by_route = _read_all(unblock_dir)
     affected = set()
     for issue in report.get('issues') or []:

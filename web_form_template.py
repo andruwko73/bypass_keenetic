@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'routes-history-1'
+ASSET_CACHE_REVISION = 'status-typography-4'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -158,6 +158,7 @@ def render_web_form(
     router_health_note = html.escape(str(router_health.get('note') or 'данные обновляются из /proc с коротким кэшем'))
     router_dns_note = html.escape(str(router_health.get('dns_note') or ''))
     router_core_proxy_note = html.escape(str(router_health.get('core_proxy_note') or ''))
+    router_telegram_call_note = html.escape(str(router_health.get('telegram_call_note') or ''))
     router_memory_percent = _safe_percent(router_health.get('used_percent'))
     router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
     attention_html = ''.join(
@@ -368,6 +369,7 @@ def render_web_form(
                                         </div>
                                         <p class="status-note" id="router-health-note">{router_health_note}</p>
                                         <p class="status-note" id="router-core-proxy-note">{router_core_proxy_note}</p>
+                                        <p class="status-note" id="router-telegram-call-note">{router_telegram_call_note}</p>
                                     </div>
                                 </div>
                                 <div class="status-card-actions router-health-actions">

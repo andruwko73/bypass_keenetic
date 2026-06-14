@@ -26,6 +26,31 @@ BYPASS_UDP_QUIC_BLOCK_VLESS2="${BYPASS_UDP_QUIC_BLOCK_VLESS2:-1}"
 BYPASS_UDP_QUIC_BLOCK_TROJAN="${BYPASS_UDP_QUIC_BLOCK_TROJAN:-1}"
 UDP_QUIC_REJECT_PORT="${UDP_QUIC_REJECT_PORT:-10944}"
 BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"
+BYPASS_TELEGRAM_CALL_LEARNING_ENABLED="${BYPASS_TELEGRAM_CALL_LEARNING_ENABLED:-1}"
+BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT="${BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT:-14400}"
+BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT="${BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT:-14400}"
+BYPASS_TELEGRAM_CALL_TPROXY_ENABLED="${BYPASS_TELEGRAM_CALL_TPROXY_ENABLED:-1}"
+BYPASS_TELEGRAM_CALL_TPROXY_MARK="${BYPASS_TELEGRAM_CALL_TPROXY_MARK:-0x71}"
+BYPASS_TELEGRAM_CALL_TPROXY_TABLE="${BYPASS_TELEGRAM_CALL_TPROXY_TABLE:-100}"
+BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY="${BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY:-100}"
+BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED="${BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED:-0}"
+BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED:-1}"
+BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED:-1}"
+BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS="${BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS:-0}"
+BYPASS_TELEGRAM_CALL_ROUTE_VMESS="${BYPASS_TELEGRAM_CALL_ROUTE_VMESS:-0}"
+BYPASS_TELEGRAM_CALL_ROUTE_VLESS="${BYPASS_TELEGRAM_CALL_ROUTE_VLESS:-0}"
+BYPASS_TELEGRAM_CALL_ROUTE_VLESS2="${BYPASS_TELEGRAM_CALL_ROUTE_VLESS2:-0}"
+BYPASS_TELEGRAM_CALL_ROUTE_TROJAN="${BYPASS_TELEGRAM_CALL_ROUTE_TROJAN:-0}"
+TELEGRAM_CALL_CLIENT_SET="${TELEGRAM_CALL_CLIENT_SET:-bypass_tg_call_clients}"
+TELEGRAM_CALL_SIGNAL_SET="${TELEGRAM_CALL_SIGNAL_SET:-bypass_tg_call_signal}"
+TELEGRAM_CALL_LEARN_CHAIN="${TELEGRAM_CALL_LEARN_CHAIN:-BYPASS_TG_CALL_LEARN}"
+TELEGRAM_CALL_ROUTE_CHAIN="${TELEGRAM_CALL_ROUTE_CHAIN:-BYPASS_TG_CALL_ROUTE}"
+TELEGRAM_CALL_TPROXY_CHAIN="${TELEGRAM_CALL_TPROXY_CHAIN:-BYPASS_TG_CALL_TPROXY}"
+TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS="${TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS:-11802}"
+TELEGRAM_CALL_TPROXY_PORT_VMESS="${TELEGRAM_CALL_TPROXY_PORT_VMESS:-11815}"
+TELEGRAM_CALL_TPROXY_PORT_VLESS="${TELEGRAM_CALL_TPROXY_PORT_VLESS:-11812}"
+TELEGRAM_CALL_TPROXY_PORT_VLESS2="${TELEGRAM_CALL_TPROXY_PORT_VLESS2:-11814}"
+TELEGRAM_CALL_TPROXY_PORT_TROJAN="${TELEGRAM_CALL_TPROXY_PORT_TROJAN:-11829}"
 
 install_ipv6_fallback_rules() {
 	command -v ip6tables >/dev/null 2>&1 || return 0
@@ -151,6 +176,464 @@ refresh_udp_quic_block_rules() {
 	install_udp_quic_block_rule unblockvlessudp "$BYPASS_UDP_QUIC_BLOCK_VLESS"
 	install_udp_quic_block_rule unblockvless2udp "$BYPASS_UDP_QUIC_BLOCK_VLESS2"
 	install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"
+}
+
+telegram_call_route_enabled() {
+	case "$1" in
+		shadowsocks) [ "$BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS" = "1" ] ;;
+		vmess) [ "$BYPASS_TELEGRAM_CALL_ROUTE_VMESS" = "1" ] ;;
+		vless) [ "$BYPASS_TELEGRAM_CALL_ROUTE_VLESS" = "1" ] ;;
+		vless2) [ "$BYPASS_TELEGRAM_CALL_ROUTE_VLESS2" = "1" ] ;;
+		trojan) [ "$BYPASS_TELEGRAM_CALL_ROUTE_TROJAN" = "1" ] ;;
+		*) return 1 ;;
+	esac
+}
+
+telegram_call_base_set() {
+	case "$1" in
+		shadowsocks) printf '%s\n' unblocksh ;;
+		vmess) printf '%s\n' unblockvmess ;;
+		vless) printf '%s\n' unblockvless ;;
+		vless2) printf '%s\n' unblockvless2 ;;
+		trojan) printf '%s\n' unblocktroj ;;
+	esac
+}
+
+telegram_call_learned_set() {
+	case "$1" in
+		shadowsocks) printf '%s\n' bypass_tg_call_sh ;;
+		vmess) printf '%s\n' bypass_tg_call_vmess ;;
+		vless) printf '%s\n' bypass_tg_call_vless ;;
+		vless2) printf '%s\n' bypass_tg_call_vless2 ;;
+		trojan) printf '%s\n' bypass_tg_call_troj ;;
+	esac
+}
+
+telegram_call_target_port() {
+	case "$1" in
+		shadowsocks) printf '%s\n' 1082 ;;
+		vmess) printf '%s\n' 10815 ;;
+		vless) printf '%s\n' 10812 ;;
+		vless2) [ -n "$vless2_key_path" ] && printf '%s\n' 10814 ;;
+		trojan) printf '%s\n' 10829 ;;
+	esac
+}
+
+telegram_call_tproxy_port() {
+	case "$1" in
+		shadowsocks) printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS" ;;
+		vmess) printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_VMESS" ;;
+		vless) printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_VLESS" ;;
+		vless2) [ -n "$vless2_key_path" ] && printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_VLESS2" ;;
+		trojan) printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_TROJAN" ;;
+	esac
+}
+
+telegram_call_excluded_destinations() {
+	cat <<'EOF'
+0.0.0.0/8
+10.0.0.0/8
+100.64.0.0/10
+127.0.0.0/8
+169.254.0.0/16
+172.16.0.0/12
+192.168.0.0/16
+224.0.0.0/4
+240.0.0.0/4
+EOF
+}
+
+telegram_call_signal_tcp_ports() {
+	printf '%s\n' 80 88 443 5222 5223 5228 5229 5230
+}
+
+telegram_call_client_udp_ports() {
+	printf '%s\n' 1024:65535
+}
+
+telegram_call_client_udp_cleanup_ports() {
+	printf '%s\n' 443 1024:65535
+}
+
+telegram_call_known_route_sets() {
+	cat <<'EOF'
+unblocksh
+unblockvmess
+unblockvless
+unblockvless2
+unblocktroj
+unblockshudp
+unblockvmessudp
+unblockvlessudp
+unblockvless2udp
+unblocktrojudp
+EOF
+}
+
+telegram_call_ipset_has_entries() {
+	set_name="$1"
+	ipset list "$set_name" 2>/dev/null | awk -F': ' '
+		/^Number of entries:/ {
+			if (($2 + 0) > 0) found = 1
+		}
+		/^Members:/ {
+			members = 1
+			next
+		}
+		members && NF {
+			found = 1
+		}
+		END { exit(found ? 0 : 1) }
+	'
+}
+
+telegram_call_chains_installed() {
+	iptables -t mangle -L "$TELEGRAM_CALL_LEARN_CHAIN" >/dev/null 2>&1 || return 1
+	iptables -t mangle -L "$TELEGRAM_CALL_TPROXY_CHAIN" >/dev/null 2>&1 || return 1
+	iptables -t nat -L "$TELEGRAM_CALL_ROUTE_CHAIN" >/dev/null 2>&1 || return 1
+}
+
+load_tproxy_module() {
+	module_name="$1"
+	module_path="/lib/modules/$(uname -r)/${module_name}.ko"
+	[ -f "$module_path" ] || return 1
+	for insmod_bin in /sbin/insmod /opt/sbin/insmod insmod; do
+		command -v "$insmod_bin" >/dev/null 2>&1 || continue
+		"$insmod_bin" "$module_path" >/dev/null 2>&1 || true
+		return 0
+	done
+	return 1
+}
+
+ensure_telegram_call_tproxy_support() {
+	[ "$BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" != "0" ] || return 1
+	grep -qx socket /proc/net/ip_tables_matches 2>/dev/null || load_tproxy_module xt_socket || return 1
+	grep -qx TPROXY /proc/net/ip_tables_targets 2>/dev/null || load_tproxy_module xt_TPROXY || return 1
+	grep -qx socket /proc/net/ip_tables_matches 2>/dev/null || return 1
+	grep -qx TPROXY /proc/net/ip_tables_targets 2>/dev/null || return 1
+	command -v ip >/dev/null 2>&1 || return 1
+	ip rule show 2>/dev/null | grep -q "fwmark $BYPASS_TELEGRAM_CALL_TPROXY_MARK .*lookup $BYPASS_TELEGRAM_CALL_TPROXY_TABLE" \
+		|| ip rule add fwmark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK" lookup "$BYPASS_TELEGRAM_CALL_TPROXY_TABLE" priority "$BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY" >/dev/null 2>&1 \
+		|| true
+	ip route show table "$BYPASS_TELEGRAM_CALL_TPROXY_TABLE" 2>/dev/null | grep -q '^local default dev lo' \
+		|| ip route add local 0.0.0.0/0 dev lo table "$BYPASS_TELEGRAM_CALL_TPROXY_TABLE" >/dev/null 2>&1 \
+		|| true
+	ip rule show 2>/dev/null | grep -q "fwmark $BYPASS_TELEGRAM_CALL_TPROXY_MARK .*lookup $BYPASS_TELEGRAM_CALL_TPROXY_TABLE" || return 1
+	ip route show table "$BYPASS_TELEGRAM_CALL_TPROXY_TABLE" 2>/dev/null | grep -q '^local default dev lo' || return 1
+	return 0
+}
+
+ensure_timeout_ipset() {
+	set_name="$1"
+	timeout_value="$2"
+	maxelem="${3:-256}"
+	current_timeout="$(
+		ipset list "$set_name" 2>/dev/null \
+			| awk '/^Header:/ { for (i = 1; i <= NF; i++) if ($i == "timeout") { print $(i + 1); exit } }'
+	)"
+	if [ -n "$current_timeout" ] && [ "$current_timeout" != "$timeout_value" ]; then
+		ipset destroy "$set_name" >/dev/null 2>&1 || true
+	fi
+	ipset create "$set_name" hash:ip timeout "$timeout_value" maxelem "$maxelem" -exist >/dev/null 2>&1 && return 0
+	ipset destroy "$set_name" >/dev/null 2>&1 || true
+	ipset create "$set_name" hash:ip timeout "$timeout_value" maxelem "$maxelem" -exist >/dev/null 2>&1
+}
+
+refresh_telegram_call_signal_set() {
+	ipset create "$TELEGRAM_CALL_SIGNAL_SET" hash:net -exist >/dev/null 2>&1 || return 1
+	ipset flush "$TELEGRAM_CALL_SIGNAL_SET" >/dev/null 2>&1 || true
+	for telegram_network in 91.108.0.0/16 149.154.160.0/20 95.161.64.0/20; do
+		ipset add "$TELEGRAM_CALL_SIGNAL_SET" "$telegram_network" -exist >/dev/null 2>&1 || true
+	done
+}
+
+reset_iptables_chain() {
+	table_name="$1"
+	chain_name="$2"
+	iptables -t "$table_name" -N "$chain_name" 2>/dev/null || true
+	iptables -t "$table_name" -F "$chain_name" 2>/dev/null || true
+}
+
+remove_telegram_call_prerouting_jumps() {
+	while iptables -t "$table_name" -C PREROUTING -j "$chain_name" 2>/dev/null; do
+		iptables -t "$table_name" -D PREROUTING -j "$chain_name"
+	done
+	if [ "$table_name" = "mangle" ] && [ "$chain_name" = "$TELEGRAM_CALL_LEARN_CHAIN" ]; then
+		for signal_port in $(telegram_call_signal_tcp_ports); do
+			while iptables -t mangle -C PREROUTING -p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN" 2>/dev/null; do
+				iptables -t mangle -D PREROUTING -p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
+			done
+		done
+		while iptables -t mangle -C PREROUTING -p udp -m udp --dport 3478:3497 -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN" 2>/dev/null; do
+			iptables -t mangle -D PREROUTING -p udp -m udp --dport 3478:3497 -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
+		done
+		while iptables -t mangle -C PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN" 2>/dev/null; do
+			iptables -t mangle -D PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
+		done
+		for client_udp_port in $(telegram_call_client_udp_cleanup_ports); do
+			while iptables -t mangle -C PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_LEARN_CHAIN" 2>/dev/null; do
+				iptables -t mangle -D PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_LEARN_CHAIN"
+			done
+		done
+		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+			while iptables -t mangle -C PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN" 2>/dev/null; do
+				iptables -t mangle -D PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
+			done
+		done
+	fi
+	if [ "$table_name" = "mangle" ] && [ "$chain_name" = "$TELEGRAM_CALL_TPROXY_CHAIN" ]; then
+		for client_udp_port in $(telegram_call_client_udp_cleanup_ports); do
+			while iptables -t mangle -C PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_TPROXY_CHAIN" 2>/dev/null; do
+				iptables -t mangle -D PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_TPROXY_CHAIN"
+			done
+		done
+		while iptables -t mangle -C PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN" 2>/dev/null; do
+			iptables -t mangle -D PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
+		done
+		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+			while iptables -t mangle -C PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN" 2>/dev/null; do
+				iptables -t mangle -D PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
+			done
+		done
+	fi
+	if [ "$table_name" = "nat" ] && [ "$chain_name" = "$TELEGRAM_CALL_ROUTE_CHAIN" ]; then
+		while iptables -t nat -C PREROUTING -p udp -j "$TELEGRAM_CALL_ROUTE_CHAIN" 2>/dev/null; do
+			iptables -t nat -D PREROUTING -p udp -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+		done
+		for client_udp_port in $(telegram_call_client_udp_cleanup_ports); do
+			while iptables -t nat -C PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_ROUTE_CHAIN" 2>/dev/null; do
+				iptables -t nat -D PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+			done
+			while iptables -t nat -C PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j RETURN 2>/dev/null; do
+				iptables -t nat -D PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j RETURN
+			done
+		done
+		for signal_port in $(telegram_call_signal_tcp_ports); do
+			while iptables -t nat -C PREROUTING -p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN" 2>/dev/null; do
+				iptables -t nat -D PREROUTING -p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+			done
+		done
+		while iptables -t nat -C PREROUTING -p udp -m udp --dport 1024:65535 -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN" 2>/dev/null; do
+			iptables -t nat -D PREROUTING -p udp -m udp --dport 1024:65535 -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+		done
+		while iptables -t nat -C PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j RETURN 2>/dev/null; do
+			iptables -t nat -D PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j RETURN
+		done
+		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+			while iptables -t nat -C PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN" 2>/dev/null; do
+				iptables -t nat -D PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+			done
+			while iptables -t nat -C PREROUTING -p udp -m set --match-set "$learned_set" dst -j RETURN 2>/dev/null; do
+				iptables -t nat -D PREROUTING -p udp -m set --match-set "$learned_set" dst -j RETURN
+			done
+		done
+	fi
+}
+
+remove_iptables_chain() {
+	table_name="$1"
+	chain_name="$2"
+	remove_telegram_call_prerouting_jumps
+	iptables -t "$table_name" -F "$chain_name" 2>/dev/null || true
+	iptables -t "$table_name" -X "$chain_name" 2>/dev/null || true
+}
+
+install_telegram_call_prerouting_jumps() {
+	for signal_port in $(telegram_call_signal_tcp_ports); do
+		iptables -t mangle -I PREROUTING -p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
+	done
+	iptables -t mangle -I PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
+	for proto in shadowsocks vmess vless vless2 trojan; do
+		telegram_call_route_enabled "$proto" || continue
+		learned_set="$(telegram_call_learned_set "$proto")"
+		[ -n "$learned_set" ] || continue
+		ipset list "$learned_set" >/dev/null 2>&1 || continue
+		iptables -t mangle -I PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
+	done
+	if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
+		for proto in shadowsocks vmess vless vless2 trojan; do
+			telegram_call_route_enabled "$proto" || continue
+			learned_set="$(telegram_call_learned_set "$proto")"
+			[ -n "$learned_set" ] || continue
+			ipset list "$learned_set" >/dev/null 2>&1 || continue
+			iptables -t nat -I PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+		done
+	else
+		for proto in shadowsocks vmess vless vless2 trojan; do
+			telegram_call_route_enabled "$proto" || continue
+			learned_set="$(telegram_call_learned_set "$proto")"
+			[ -n "$learned_set" ] || continue
+			ipset list "$learned_set" >/dev/null 2>&1 || continue
+			iptables -t nat -I PREROUTING -p udp -m set --match-set "$learned_set" dst -j RETURN
+		done
+		iptables -t nat -I PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j RETURN
+		for client_udp_port in $(telegram_call_client_udp_ports); do
+			iptables -t nat -I PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j RETURN
+		done
+	fi
+	if [ "$BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED" != "0" ]; then
+		for signal_port in $(telegram_call_signal_tcp_ports); do
+			iptables -t nat -I PREROUTING -p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+		done
+		if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
+			iptables -t nat -I PREROUTING -p udp -m udp --dport 1024:65535 -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+		fi
+	fi
+	if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ] && [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ]; then
+		for client_udp_port in $(telegram_call_client_udp_ports); do
+			iptables -t nat -I PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_ROUTE_CHAIN"
+		done
+	fi
+}
+
+telegram_call_mangle_tproxy_insert_index() {
+	learn_jump_count="$(
+		iptables-save -t mangle 2>/dev/null \
+			| grep -c -- "^-A PREROUTING .* -j $TELEGRAM_CALL_LEARN_CHAIN"
+	)"
+	printf '%s\n' "$((learn_jump_count + 1))"
+}
+
+install_telegram_call_tproxy_prerouting_rule() {
+	insert_index="$(telegram_call_mangle_tproxy_insert_index)"
+	iptables -t mangle -I PREROUTING "$insert_index" "$@"
+}
+
+install_telegram_call_tproxy_prerouting_jumps() {
+	[ "$telegram_call_tproxy_ready" = "1" ] || return 0
+	if [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ]; then
+		for client_udp_port in $(telegram_call_client_udp_ports); do
+			install_telegram_call_tproxy_prerouting_rule -p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_TPROXY_CHAIN"
+		done
+	fi
+	install_telegram_call_tproxy_prerouting_rule -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
+	for proto in shadowsocks vmess vless vless2 trojan; do
+		telegram_call_route_enabled "$proto" || continue
+		learned_set="$(telegram_call_learned_set "$proto")"
+		[ -n "$learned_set" ] || continue
+		ipset list "$learned_set" >/dev/null 2>&1 || continue
+		install_telegram_call_tproxy_prerouting_rule -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
+	done
+}
+
+refresh_telegram_call_prerouting_jumps() {
+	table_name=mangle chain_name="$TELEGRAM_CALL_LEARN_CHAIN" remove_telegram_call_prerouting_jumps
+	table_name=mangle chain_name="$TELEGRAM_CALL_TPROXY_CHAIN" remove_telegram_call_prerouting_jumps
+	table_name=nat chain_name="$TELEGRAM_CALL_ROUTE_CHAIN" remove_telegram_call_prerouting_jumps
+	install_telegram_call_prerouting_jumps
+	install_telegram_call_tproxy_prerouting_jumps
+}
+
+cleanup_telegram_call_learning_rules() {
+	remove_iptables_chain mangle "$TELEGRAM_CALL_LEARN_CHAIN"
+	remove_iptables_chain mangle "$TELEGRAM_CALL_TPROXY_CHAIN"
+	remove_iptables_chain nat "$TELEGRAM_CALL_ROUTE_CHAIN"
+	for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+		ipset destroy "$learned_set" >/dev/null 2>&1 || true
+	done
+	ipset destroy "$TELEGRAM_CALL_SIGNAL_SET" >/dev/null 2>&1 || true
+	ipset destroy "$TELEGRAM_CALL_CLIENT_SET" >/dev/null 2>&1 || true
+}
+
+telegram_call_active_protocols() {
+	for proto in shadowsocks vmess vless vless2 trojan; do
+		telegram_call_route_enabled "$proto" && printf '%s\n' "$proto"
+	done
+}
+
+refresh_telegram_call_learning_rules() {
+	if [ "$BYPASS_TELEGRAM_CALL_LEARNING_ENABLED" = "0" ]; then
+		cleanup_telegram_call_learning_rules
+		return
+	fi
+
+	active_protocols="$(telegram_call_active_protocols)"
+	if [ -z "$active_protocols" ]; then
+		cleanup_telegram_call_learning_rules
+		return
+	fi
+
+	reset_iptables_chain mangle "$TELEGRAM_CALL_LEARN_CHAIN"
+	reset_iptables_chain mangle "$TELEGRAM_CALL_TPROXY_CHAIN"
+	reset_iptables_chain nat "$TELEGRAM_CALL_ROUTE_CHAIN"
+	ensure_timeout_ipset "$TELEGRAM_CALL_CLIENT_SET" "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT" 64 || return 0
+	refresh_telegram_call_signal_set || return 0
+	telegram_call_tproxy_ready=0
+	if ensure_telegram_call_tproxy_support; then
+		telegram_call_tproxy_ready=1
+	fi
+
+	for excluded_destination in $(telegram_call_excluded_destinations); do
+		iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -d "$excluded_destination" -j RETURN
+		iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -d "$excluded_destination" -j RETURN
+		iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -d "$excluded_destination" -j RETURN
+	done
+
+	for signal_port in $(telegram_call_signal_tcp_ports); do
+		iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p tcp -m tcp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst --dport "$signal_port" \
+			-j SET --add-set "$TELEGRAM_CALL_CLIENT_SET" src --exist --timeout "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT"
+	done
+	iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst \
+		-j SET --add-set "$TELEGRAM_CALL_CLIENT_SET" src --exist --timeout "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT"
+	for known_set in $(telegram_call_known_route_sets); do
+		ipset list "$known_set" >/dev/null 2>&1 || continue
+		iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN
+	done
+
+	client_udp_route_installed=0
+	signal_route_installed=0
+	tproxy_default_port=""
+	for proto in $active_protocols; do
+		[ -n "$proto" ] || continue
+		base_set="$(telegram_call_base_set "$proto")"
+		learned_set="$(telegram_call_learned_set "$proto")"
+		target_port="$(telegram_call_target_port "$proto")"
+		tproxy_port="$(telegram_call_tproxy_port "$proto")"
+		[ -n "$base_set" ] && [ -n "$learned_set" ] && [ -n "$target_port" ] || continue
+		ipset list "$base_set" >/dev/null 2>&1 || continue
+		ensure_timeout_ipset "$learned_set" "$BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT" 256 || continue
+		iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$learned_set" dst \
+			-j SET --add-set "$TELEGRAM_CALL_CLIENT_SET" src --exist --timeout "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT"
+		iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$learned_set" dst \
+			-j SET --add-set "$learned_set" dst --exist --timeout "$BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT"
+		if [ "$telegram_call_tproxy_ready" = "1" ] && [ -n "$tproxy_port" ]; then
+			iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$learned_set" dst \
+				-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
+			[ -n "$tproxy_default_port" ] || tproxy_default_port="$tproxy_port"
+		fi
+		if [ "$BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED" != "0" ] && [ "$signal_route_installed" != "1" ]; then
+			for signal_port in $(telegram_call_signal_tcp_ports); do
+				iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p tcp -m tcp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst --dport "$signal_port" \
+					-j REDIRECT --to-ports "$target_port"
+			done
+			if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
+				iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst --dport 1024:65535 \
+					-j REDIRECT --to-ports "$target_port"
+			fi
+			signal_route_installed=1
+		fi
+		if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ] && [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ] && [ "$client_udp_route_installed" != "1" ]; then
+			for client_udp_port in $(telegram_call_client_udp_ports); do
+				iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m udp -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src --dport "$client_udp_port" \
+					-j REDIRECT --to-ports "$target_port"
+			done
+			client_udp_route_installed=1
+		fi
+		if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
+			iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m set --match-set "$learned_set" dst -j REDIRECT --to-ports "$target_port"
+		fi
+	done
+	if [ "$telegram_call_tproxy_ready" = "1" ] && [ -n "$tproxy_default_port" ]; then
+		iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst \
+			-j TPROXY --on-port "$tproxy_default_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
+		if [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ]; then
+			for client_udp_port in $(telegram_call_client_udp_ports); do
+				iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m udp -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src --dport "$client_udp_port" \
+					-j TPROXY --on-port "$tproxy_default_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
+			done
+		fi
+	fi
+	refresh_telegram_call_prerouting_jumps
 }
 
 
@@ -286,21 +769,25 @@ if [ -n "$vless2_key_path" ]; then
 fi
 
 refresh_vless_tcp_priority() {
-	# Shared Google IPs can land in both Vless sets. Keep Vless 1 first so
-	# CRD/Telegram-style service routes do not get captured by the YouTube key.
+	youtube_route="$(youtube_route_protocol)"
 	while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812 2>/dev/null; do
 		iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812
 	done
 	while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-ports 10814 2>/dev/null; do
 		iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-ports 10814
 	done
-	if [ -n "$vless2_key_path" ]; then
+	if [ "$youtube_route" = "vless2" ] && [ -n "$vless2_key_path" ]; then
+		# Shared Google IPs must follow the YouTube route for video streams.
+		# Telegram mobile push ports are pinned separately below.
+		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812
 		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-ports 10814
+	else
+		if [ -n "$vless2_key_path" ]; then
+			iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless2 dst -j REDIRECT --to-ports 10814
+		fi
+		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812
 	fi
-	iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812
 }
-
-refresh_vless_tcp_priority
 
 telegram_route_protocol() {
 	telegram_markers="api.telegram.org 149.154.160.0/20 mtalk.google.com 17.249.0.0/16"
@@ -312,6 +799,25 @@ telegram_route_protocol() {
 	done
 	printf '%s\n' "vless"
 }
+
+youtube_route_protocol() {
+	youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com"
+	for marker in $youtube_markers; do
+		if grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt" >/dev/null 2>&1; then
+			printf '%s\n' "vless2"
+			return
+		fi
+	done
+	for marker in $youtube_markers; do
+		if grep -Fxs "$marker" "$UNBLOCK_DIR/vless.txt" >/dev/null 2>&1; then
+			printf '%s\n' "vless"
+			return
+		fi
+	done
+	printf '%s\n' "vless"
+}
+
+refresh_vless_tcp_priority
 
 refresh_mobile_push_priority() {
 	# Telegram mobile can use MTProto TCP 5222; Android FCM/mtalk uses TCP
@@ -361,5 +867,7 @@ if [ -z "$(iptables-save 2>/dev/null | grep unblocktroj)" ]; then
 fi
 
 refresh_udp_quic_block_rules
+
+refresh_telegram_call_learning_rules
 
 exit 0

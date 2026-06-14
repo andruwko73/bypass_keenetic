@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.708
+# ВЕРСИЯ СКРИПТА v1.709
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -57,6 +57,22 @@ udp_quic_block_vless2_enabled = True  # auto-disabled when this route contains Y
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
 youtube_quic_policy = 'auto'  # auto keeps current behavior; allow permits QUIC; block forces TCP fallback for YouTube routes
 telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so native calls can use relay/media traffic; block disables it
+telegram_call_learning_enabled = True
+telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'
+telegram_call_learning_default_duration_seconds = 90
+telegram_call_learning_max_duration_seconds = 180
+telegram_call_learning_poll_interval_seconds = 1.0
+telegram_call_learning_auto_enabled = True
+telegram_call_learning_scan_interval_seconds = 5.0
+telegram_call_learning_min_score = 5
+telegram_call_learning_min_packets = 2
+telegram_call_learning_min_bytes = 240
+telegram_call_learning_max_candidates = 20
+telegram_call_learning_max_seen_addresses = 512
+telegram_call_learning_apply_by_default = True
+telegram_call_learning_client_timeout_seconds = 900  # idle kernel window after Telegram signaling from a LAN client
+telegram_call_learning_address_timeout_seconds = 14400  # learned call relay/P2P addresses expire automatically
+telegram_call_tproxy_enabled = True  # routes Telegram call UDP through TPROXY when KeenOS exposes xt_TPROXY/xt_socket
 udp_quic_drift_priority_refresh_cooldown_seconds = 120  # refresh YouTube/Googlevideo ipset drift faster than low-priority service drift
 ipset_refresh_command_timeout_seconds = 420  # allow slower low-load ipset refreshes on busy routers
 ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси
@@ -84,6 +100,11 @@ localportsh = '1082'  # локальный порт для shadowsocks
 localportvmess = '10810'  # локальный порт для vmess
 localportvless = '10811'  # локальный порт для vless
 localporttrojan = '10829'  # локальный порт для trojan
+localportsh_tproxy = '11802'  # UDP TPROXY inbound for Telegram calls through Shadowsocks
+localportvmess_tproxy = '11815'  # UDP TPROXY inbound for Telegram calls through VMess
+localportvless_tproxy = '11812'  # UDP TPROXY inbound for Telegram calls through Vless
+localportvless2_tproxy = '11814'  # UDP TPROXY inbound for Telegram calls through Vless 2
+localporttrojan_tproxy = '11829'  # UDP TPROXY inbound for Telegram calls through Trojan
 default_proxy_mode = 'none'  # выбор прокси для Telegram API: none, shadowsocks, vmess, vless, vless2, trojan
 dnsovertlsport = '40500'  # можно посмотреть номер порта командой "cat /tmp/ndnproxymain.stat"
 dnsoverhttpsport = '40508'  # можно посмотреть номер порта командой "cat /tmp/ndnproxymain.stat"

@@ -45,6 +45,7 @@ import telegram_message_flow
 import telegram_install_ui
 import telegram_key_ui
 import telegram_info_runtime
+import telegram_call_learning
 import pool_probe_controller
 import pool_probe_runner
 import probe_cache
@@ -78,6 +79,11 @@ PORTS = {
     'vless2_transparent': 10814,
     'shadowsocks_bot': 10815,
     'trojan_bot': 10816,
+    'shadowsocks_tproxy': 11802,
+    'vmess_tproxy': 11815,
+    'vless_tproxy': 11812,
+    'vless2_tproxy': 11814,
+    'trojan_tproxy': 11829,
 }
 
 
@@ -134,7 +140,7 @@ def _run_udp_policy_python(script_path, policy, youtube_route='vless-2.txt', tel
     return dict(
         line.split('=', 1)
         for line in result.stdout.splitlines()
-        if line.startswith('BYPASS_')
+        if line.startswith('BYPASS_') or line.startswith('TELEGRAM_CALL_')
     )
 
 
@@ -434,11 +440,24 @@ def test_proxy_config_builder():
     transparent_inbounds = [
         inbound for inbound in core_config['inbounds']
         if inbound.get('protocol') == 'dokodemo-door'
+        and inbound['streamSettings']['sockopt']['tproxy'] == 'redirect'
     ]
     assert transparent_inbounds
     assert all(inbound['settings']['network'] == 'tcp,udp' for inbound in transparent_inbounds)
     assert all(inbound['streamSettings']['sockopt']['tproxy'] == 'redirect' for inbound in transparent_inbounds)
     assert all(inbound['sniffing']['enabled'] is False for inbound in transparent_inbounds)
+    tproxy_inbounds = [
+        inbound for inbound in core_config['inbounds']
+        if inbound.get('protocol') == 'dokodemo-door'
+        and inbound['streamSettings']['sockopt']['tproxy'] == 'tproxy'
+    ]
+    assert {inbound['tag'] for inbound in tproxy_inbounds} == {
+        'in-shadowsocks-tproxy',
+        'in-vless-tproxy',
+        'in-trojan-tproxy',
+    }
+    assert {inbound['port'] for inbound in tproxy_inbounds} == {11802, 11812, 11829}
+    assert all(inbound['settings']['network'] == 'udp' for inbound in tproxy_inbounds)
     reality_outbound = proxy_protocols.proxy_outbound_from_key(
         'vless',
         'vless://00000000-0000-0000-0000-000000000000@example.com:443'
@@ -574,6 +593,11 @@ def test_key_pool_web():
     assert key_pool_web.web_custom_probe_states({'custom': {'custom': None}}, checks)['custom'] == 'unknown'
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
     assert key_pool_web.web_probe_quality_label({'yt_quality': 'stable', 'yt_latency_ms': 800}) == ''
+    history_html = key_pool_web.web_event_history_html([
+        {'ts': 1, 'level': 'info', 'action': 'test', 'protocol': 'vless', 'service': 'telegram', 'message': 'ok'}
+    ])
+    assert '<strong>История событий</strong>' not in history_html
+    assert '<h3>История событий</h3>' not in history_html
 
 def test_key_pool_subscription_helpers():
     raw = '\n'.join([
@@ -678,6 +702,136 @@ def test_youtube_healthcheck_detects_first_load_instability():
     assert 'unexpected EOF' in metrics['yt_last_error']
 
 
+def test_telegram_call_learning_helpers():
+    line = (
+        'ipv4 2 udp 17 29 src=192.168.1.23 dst=149.154.167.91 sport=53122 dport=3478 '
+        'packets=3 bytes=640 src=149.154.167.91 dst=192.168.1.23 sport=3478 dport=53122 '
+        'packets=4 bytes=880 [ASSURED] mark=0 use=2'
+    )
+    flow = telegram_call_learning.parse_udp_flow(line, device_ip='192.168.1.23')
+    assert flow['dst'] == '149.154.167.91'
+    assert flow['dport'] == '3478'
+    assert flow['packets'] == 7
+    assert flow['bytes'] == 1520
+    reverse_nat_line = (
+        'ipv4 2 udp 17 135 src=197.89.55.30 dst=10.107.57.20 sport=49001 dport=43490 '
+        'packets=15 bytes=1500 src=192.168.1.23 dst=197.89.55.30 sport=43490 dport=49001 '
+        'packets=16 bytes=2200 [ASSURED] mark=0 use=2'
+    )
+    reverse_flow = telegram_call_learning.parse_udp_flow(reverse_nat_line, device_ip='192.168.1.23')
+    assert reverse_flow['src'] == '192.168.1.23'
+    assert reverse_flow['dst'] == '197.89.55.30'
+    assert reverse_flow['dport'] == '49001'
+    assert telegram_call_learning.parse_udp_flow(line, device_ip='192.168.1.24') is None
+    assert telegram_call_learning.parse_udp_flow(line.replace('dport=3478', 'dport=53'), device_ip='192.168.1.23') is None
+    assert telegram_call_learning.parse_udp_flow(line.replace('149.154.167.91', '192.168.1.200'), device_ip='192.168.1.23') is None
+    signal_line = (
+        'ipv4 2 tcp 6 1199 ESTABLISHED src=192.168.1.23 dst=149.154.167.41 '
+        'sport=56440 dport=443 packets=30 bytes=6000 src=192.168.1.1 dst=192.168.1.23 '
+        'sport=10812 dport=56440 packets=90 bytes=120000 [ASSURED] mark=0 use=2'
+    )
+    cluster_one = (
+        'ipv4 2 udp 17 135 src=192.168.1.23 dst=197.89.55.30 sport=43490 dport=49001 '
+        'packets=7 bytes=1700 src=197.89.55.30 dst=10.107.57.20 sport=49001 dport=43490 '
+        'packets=8 bytes=1300 [ASSURED] mark=0 use=2'
+    )
+    cluster_two = (
+        'ipv4 2 udp 17 135 src=91.132.107.120 dst=10.107.57.20 sport=5392 dport=43490 '
+        'packets=6 bytes=1200 src=192.168.1.23 dst=91.132.107.120 sport=43490 dport=5392 '
+        'packets=6 bytes=1400 [ASSURED] mark=0 use=2'
+    )
+    cluster_signal = (
+        'ipv4 2 udp 17 135 src=192.168.1.23 dst=149.154.167.92 sport=43490 dport=54545 '
+        'packets=5 bytes=1400 src=149.154.167.92 dst=10.107.57.20 sport=54545 dport=43490 '
+        'packets=6 bytes=1800 [ASSURED] mark=0 use=2'
+    )
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', delete=False) as tmp:
+        tmp.write(line + '\n')
+        tmp.write(line.replace('dport=3478', 'dport=53') + '\n')
+        tmp.write(line.replace('149.154.167.91', '8.8.8.8').replace('sport=53122', 'sport=53123', 1) + '\n')
+        tmp.write(signal_line + '\n')
+        tmp.write(cluster_one + '\n')
+        tmp.write(cluster_two + '\n')
+        tmp.write(cluster_signal + '\n')
+        for index in range(9):
+            tmp.write(
+                'ipv4 2 udp 17 135 src=192.168.1.23 dst=45.129.59.%d sport=45000 dport=50%03d '
+                'packets=5 bytes=900 src=45.129.59.%d dst=10.107.57.20 sport=50%03d dport=45000 '
+                'packets=5 bytes=900 [ASSURED] mark=0 use=2\n'
+                % (index + 10, index, index + 10, index)
+            )
+        tmp_path = tmp.name
+    try:
+        lan_flows = telegram_call_learning.read_lan_conntrack_flows(router_ip='192.168.1.1', conntrack_path=tmp_path)
+    finally:
+        os.remove(tmp_path)
+    assert list(lan_flows.values())[0]['src'] == '192.168.1.23'
+    assert len(lan_flows) == 4
+    cluster_flows = [item for item in lan_flows.values() if item.get('udp_call_cluster')]
+    assert {item['dst'] for item in cluster_flows} == {'197.89.55.30', '91.132.107.120', '149.154.167.92'}
+    assert all(item['cluster_flow_count'] == 3 for item in cluster_flows)
+    assert all(item['cluster_telegram_flow_count'] == 1 for item in cluster_flows)
+    assert not any(item.get('sport') == '45000' for item in lan_flows.values())
+    active_media_line = (
+        'ipv4 2 udp 17 141 src=192.168.1.23 dst=80.234.76.169 sport=43490 dport=1624 '
+        'packets=70 bytes=9000 src=80.234.76.169 dst=10.107.102.48 sport=1624 dport=43490 '
+        'packets=71 bytes=6200 [ASSURED] mark=0 use=2'
+    )
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', delete=False) as tmp:
+        tmp.write(active_media_line + '\n')
+        active_media_path = tmp.name
+    try:
+        active_media_flows = telegram_call_learning.read_lan_conntrack_flows(
+            router_ip='192.168.1.1',
+            conntrack_path=active_media_path,
+            allowed_sources=['192.168.1.23'],
+        )
+    finally:
+        os.remove(active_media_path)
+    assert len(active_media_flows) == 1
+    active_media_flow = next(iter(active_media_flows.values()))
+    assert active_media_flow['dst'] == '80.234.76.169'
+    assert active_media_flow['udp_call_active_media'] is True
+
+    candidates = telegram_call_learning.learn_candidates(
+        {},
+        {flow['identity']: flow},
+        min_score=5,
+        min_packets=2,
+        min_bytes=240,
+    )
+    assert len(candidates) == 1
+    assert candidates[0]['address'] == '149.154.167.91'
+    cluster_candidates = telegram_call_learning.learn_candidates(
+        {},
+        {item['identity']: item for item in cluster_flows},
+        min_score=5,
+        min_packets=2,
+        min_bytes=240,
+    )
+    assert len(cluster_candidates) == 3
+    assert all('udp-cluster' in item['reasons'] for item in cluster_candidates)
+    assert len([item for item in cluster_candidates if not telegram_call_learning.address_in_networks(item['address'])]) == 2
+    dry_run = telegram_call_learning.add_candidate_to_ipsets(candidates[0], 'vless', apply=False)
+    assert dry_run['sets'] == ['unblockvless', 'unblockvlessudp']
+    assert dry_run['applied_sets'] == []
+    call_dry_run = telegram_call_learning.add_candidate_to_call_ipset(cluster_candidates[0], 'vless', apply=False)
+    assert call_dry_run['sets'] == ['bypass_tg_call_vless']
+    assert call_dry_run['applied_sets'] == []
+
+    calls = []
+
+    def runner(args, timeout=3):
+        calls.append((args, timeout))
+        return py_types.SimpleNamespace(returncode=0, stderr=b'')
+
+    applied = telegram_call_learning.add_candidate_to_ipsets(candidates[0], 'vless2', apply=True, run_command=runner)
+    assert applied['applied_sets'] == ['unblockvless2', 'unblockvless2udp']
+    assert calls[0][0] == ['ipset', 'add', 'unblockvless2', '149.154.167.91', '-exist']
+    assert telegram_call_learning.delete_conntrack_candidate(candidates[0], run_command=runner) is True
+    assert calls[-1][0][:6] == ['conntrack', '-D', '-p', 'udp', '--orig-src', '192.168.1.23']
+
+
 def test_web_post_actions_helpers():
     data = {'target_list_name': ['custom'], 'list_name': ['fallback']}
     assert web_post_actions.form_value(data, 'missing', 'none') == 'none'
@@ -752,6 +906,7 @@ def test_web_post_actions_helpers():
     assert apply_result['extra']['key_id'] == 'id-one-1234'
     assert apply_result['extra']['key'] == 'vless://one'
     assert snapshots[-1] is False
+    assert web_post_actions.dispatch(ctx, '/telegram_call_learn', {}) is None
 
 
 def test_web_action_feature_gates():
@@ -890,6 +1045,32 @@ def test_codex_version_matches_commit_count():
     assert "telegram_udp_policy = 'auto'" in example
     assert "telegram_udp_policy = 'auto'" in installer
     assert "telegram_udp_policy = 'auto'" in bootstrap
+    for config_line in (
+        'telegram_call_learning_enabled = True',
+        "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",
+        'telegram_call_learning_default_duration_seconds = 90',
+        'telegram_call_learning_max_duration_seconds = 180',
+        'telegram_call_learning_poll_interval_seconds = 1.0',
+        'telegram_call_learning_auto_enabled = True',
+        'telegram_call_learning_scan_interval_seconds = 5.0',
+        'telegram_call_learning_min_score = 5',
+        'telegram_call_learning_min_packets = 2',
+        'telegram_call_learning_min_bytes = 240',
+        'telegram_call_learning_max_candidates = 20',
+        'telegram_call_learning_max_seen_addresses = 512',
+        'telegram_call_learning_apply_by_default = True',
+        'telegram_call_learning_client_timeout_seconds = 900',
+        'telegram_call_learning_address_timeout_seconds = 14400',
+        'telegram_call_tproxy_enabled = True',
+        "localportsh_tproxy = '11802'",
+        "localportvmess_tproxy = '11815'",
+        "localportvless_tproxy = '11812'",
+        "localportvless2_tproxy = '11814'",
+        "localporttrojan_tproxy = '11829'",
+    ):
+        assert config_line in example
+        assert config_line in installer
+        assert config_line in bootstrap
     assert 'ipv6_bypass_fallback_enabled = True' in example
     assert 'ipv6_bypass_fallback_enabled = True' in installer
     assert 'ipv6_bypass_fallback_enabled = True' in bootstrap
@@ -980,6 +1161,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert "('VLESS', 'vless.txt', 'udp_quic_block_vless_enabled')" in script
     assert "('VLESS2', 'vless-2.txt', 'udp_quic_block_vless2_enabled')" in script
     assert "print(f'BYPASS_UDP_QUIC_BLOCK_{env_name}={1 if enabled else 0}')" in script
+    assert "BYPASS_TELEGRAM_CALL_LEARNING_ENABLED" in script
+    assert "BYPASS_TELEGRAM_CALL_ROUTE_{env_name}" in script
+    assert "BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT" in script
+    assert "BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT" in script
+    assert "BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" in script
+    assert "TELEGRAM_CALL_TPROXY_PORT_VLESS" in script
+    assert "TELEGRAM_CALL_TPROXY_PORT_VLESS2" in bootstrap
 
     for script_path in (ROOT / 'script.sh', ROOT / 'bootstrap' / 'install.sh'):
         auto_policy = _run_udp_policy_python(script_path, 'auto')
@@ -1013,6 +1201,20 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         assert telegram_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
         assert telegram_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert combined_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_LEARNING_ENABLED'] == '1'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT'] == '900'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT'] == '14400'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_TPROXY_ENABLED'] == '1'
+        assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS'] == '11812'
+        assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS2'] == '11814'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS2'] == '0'
+        assert telegram_auto_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS'] == '1'
+        assert telegram_auto_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS2'] == '0'
+        assert combined_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS'] == '1'
+        vless2_telegram_policy = _run_udp_policy_python(script_path, 'auto', telegram_route='vless-2.txt')
+        vmess_telegram_policy = _run_udp_policy_python(script_path, 'auto', telegram_route='vmess.txt')
+        assert vless2_telegram_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS2'] == '1'
+        assert vmess_telegram_policy['BYPASS_TELEGRAM_CALL_ROUTE_VMESS'] == '1'
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"' in ipset_script
@@ -1079,6 +1281,56 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'install_udp_quic_block_rule unblockvless2udp "$BYPASS_UDP_QUIC_BLOCK_VLESS2"' in redirect_script
     assert 'install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"' in redirect_script
     assert '--match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-ports "$UDP_QUIC_REJECT_PORT"' in redirect_script
+    assert 'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED="${BYPASS_TELEGRAM_CALL_LEARNING_ENABLED:-1}"' in redirect_script
+    assert 'TELEGRAM_CALL_CLIENT_SET="${TELEGRAM_CALL_CLIENT_SET:-bypass_tg_call_clients}"' in redirect_script
+    assert 'TELEGRAM_CALL_SIGNAL_SET="${TELEGRAM_CALL_SIGNAL_SET:-bypass_tg_call_signal}"' in redirect_script
+    assert 'TELEGRAM_CALL_TPROXY_CHAIN="${TELEGRAM_CALL_TPROXY_CHAIN:-BYPASS_TG_CALL_TPROXY}"' in redirect_script
+    assert 'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED="${BYPASS_TELEGRAM_CALL_TPROXY_ENABLED:-1}"' in redirect_script
+    assert 'load_tproxy_module xt_TPROXY' in redirect_script
+    assert 'load_tproxy_module xt_socket' in redirect_script
+    assert 'ip rule add fwmark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK"' in redirect_script
+    assert 'ip route add local 0.0.0.0/0 dev lo table "$BYPASS_TELEGRAM_CALL_TPROXY_TABLE"' in redirect_script
+    assert 'refresh_telegram_call_learning_rules()' in redirect_script
+    assert 'refresh_telegram_call_signal_set()' in redirect_script
+    assert 'BYPASS_TG_CALL_LEARN' in redirect_script
+    assert 'BYPASS_TG_CALL_ROUTE' in redirect_script
+    assert 'BYPASS_TG_CALL_TPROXY' in redirect_script
+    assert 'ipset create "$set_name" hash:ip timeout "$timeout_value" maxelem "$maxelem" -exist' in redirect_script
+    assert 'current_timeout="$(' in redirect_script
+    assert 'ipset create "$TELEGRAM_CALL_SIGNAL_SET" hash:net -exist' in redirect_script
+    assert '149.154.160.0/20' in redirect_script
+    assert '--match-set "$TELEGRAM_CALL_SIGNAL_SET" dst --dport "$signal_port"' in redirect_script
+    assert 'iptables -t mangle -I PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
+    assert '-p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
+    assert 'telegram_call_client_udp_ports()' in redirect_script
+    assert "printf '%s\\n' 1024:65535" in redirect_script
+    assert 'telegram_call_client_udp_cleanup_ports()' in redirect_script
+    assert "printf '%s\\n' 443 1024:65535" in redirect_script
+    assert 'telegram_call_known_route_sets()' in redirect_script
+    assert 'unblockvless2udp' in redirect_script
+    assert 'telegram_call_ipset_has_entries()' in redirect_script
+    assert 'telegram_call_chains_installed()' in redirect_script
+    assert 'if telegram_call_ipset_has_entries "$TELEGRAM_CALL_CLIENT_SET" && telegram_call_chains_installed; then' not in redirect_script
+    assert 'telegram_call_mangle_tproxy_insert_index()' in redirect_script
+    assert 'install_telegram_call_tproxy_prerouting_rule()' in redirect_script
+    assert 'iptables -t mangle -I PREROUTING "$insert_index" "$@"' in redirect_script
+    assert 'iptables -t mangle -A PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"' not in redirect_script
+    assert 'for client_udp_port in $(telegram_call_client_udp_ports); do' in redirect_script
+    assert '-p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
+    active_call_prerouting = redirect_script.split('install_telegram_call_prerouting_jumps() {', 1)[1].split('\n}', 1)[0]
+    assert '-p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_LEARN_CHAIN"' not in active_call_prerouting
+    assert '-p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_TPROXY_CHAIN"' in redirect_script
+    assert 'iptables -t "$table_name" -I PREROUTING -j "$chain_name"' not in redirect_script
+    assert 'iptables -t mangle -I PREROUTING -j "$TELEGRAM_CALL_LEARN_CHAIN"' not in redirect_script
+    assert 'iptables -t nat -I PREROUTING -j "$TELEGRAM_CALL_ROUTE_CHAIN"' not in redirect_script
+    assert '-j SET --add-set "$TELEGRAM_CALL_CLIENT_SET" src --exist --timeout "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT"' in redirect_script
+    assert '-j SET --add-set "$learned_set" dst --exist --timeout "$BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT"' in redirect_script
+    assert 'iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN' in redirect_script
+    assert '-m set --match-set "$learned_set" dst \\' in redirect_script
+    assert '-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"' in redirect_script
+    assert 'iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m set --match-set "$learned_set" dst -j REDIRECT --to-ports "$target_port"' in redirect_script
+    assert 'telegram_call_route_enabled "$proto"' in redirect_script
+    assert 'vless2) [ -n "$vless2_key_path" ] && printf' in redirect_script
     assert 'iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-ports 10812' not in redirect_script
     assert 'iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvless2udp dst --dport 443 -j REDIRECT --to-ports 10814' not in redirect_script
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REJECT' not in redirect_script
@@ -1195,6 +1447,30 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
+    assert "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'" in script_source
+    assert '/opt/tmp/bypass_telegram_call_learning.json' in source
+    assert "getattr(config, 'telegram_call_learning_default_duration_seconds', 90)" in source
+    assert "getattr(config, 'telegram_call_learning_auto_enabled', True)" in source
+    assert "getattr(config, 'telegram_call_learning_scan_interval_seconds', 5.0)" in source
+    assert "getattr(config, 'telegram_call_learning_client_timeout_seconds', 900)" in source
+    assert "getattr(config, 'telegram_call_learning_address_timeout_seconds', 14400)" in source
+    assert "getattr(config, 'telegram_call_tproxy_enabled', True)" in source
+    assert "getattr(config, 'localportvless_tproxy', 11812)" in source
+    assert 'TELEGRAM_CALL_TPROXY_PORT_VLESS={localportvless_tproxy}' in source
+    assert 'def _start_telegram_call_learning_auto_thread' in source
+    assert '_start_telegram_call_learning_auto_thread()' in source
+    auto_start = source.split('def _start_telegram_call_learning_auto_thread', 1)[1].split('def _telegram_call_learning_worker', 1)[0]
+    assert 'threading.Thread' in auto_start
+    assert '_telegram_call_learning_auto_worker' in auto_start
+    assert 'read_lan_conntrack_flows' in source
+    assert 'TELEGRAM_CALL_LEARNING_CLIENT_IPSET' in source
+    assert 'add_candidate_to_call_ipset' in source
+    assert 'iptables/ipset без фонового сканирования' in auto_start
+    assert 'telegram_call_learning_apply_by_default = True' in script_source
+    assert 'telegram_call_learning_client_timeout_seconds = 900' in script_source
+    assert 'telegram_call_learning_address_timeout_seconds = 14400' in script_source
+    assert 'telegram_call_tproxy_enabled = True' in script_source
+    assert "localportvless_tproxy = '11812'" in script_source
     assert 'Refreshing ipset after proxy core startup.' in script_source
     assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')
     assert 'write_update_rollback_script()' in script_source
@@ -1306,7 +1582,7 @@ def test_runtime_modules_are_installed_by_update_scripts():
     assert script_modules == bootstrap_modules
     for module in script_modules:
         assert (ROOT / module).exists()
-    for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'web_commands_runtime.py'):
+    for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'telegram_call_learning.py', 'web_commands_runtime.py'):
         assert module in script
         assert f'$RAW_BASE/{module}' in bootstrap
         assert f'$BOT_DIR/{module}' in bootstrap
@@ -1373,6 +1649,34 @@ def test_web_status_runtime_helpers():
         True,
     )
     assert attention[0][0] == 'warn'
+
+
+def test_telegram_call_router_health_note():
+    policy = '\n'.join([
+        'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED=1',
+        'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED=1',
+        'BYPASS_TELEGRAM_CALL_ROUTE_VLESS=1',
+        'BYPASS_TELEGRAM_CALL_ROUTE_VLESS2=0',
+        'TELEGRAM_CALL_TPROXY_PORT_VLESS=11812',
+    ])
+    commands = []
+
+    def run_text(command, timeout=2):
+        commands.append(tuple(command))
+        if command[:2] == ['netstat', '-lnp']:
+            return 'udp        0      0 0.0.0.0:11812           0.0.0.0:*                           123/xray\n'
+        if command[:4] == ['iptables', '-t', 'mangle', '-nL']:
+            return 'Chain BYPASS_TG_CALL_TPROXY (3 references)\n'
+        return ''
+
+    health = router_health_runtime.telegram_call_proxy_health(
+        run_text=run_text,
+        read_values=lambda _path: router_health_runtime.parse_key_value_text(policy),
+    )
+    assert health['ok'] is True
+    assert health['ports'] == {'vless': 11812}
+    assert router_health_runtime.telegram_call_proxy_note(health) == 'Telegram Call: alive, TPROXY, порты: Vless 11812:ok.'
+    assert ('netstat', '-lnp') in commands
 
 
 def test_telegram_confirm_state_source():
@@ -2875,7 +3179,6 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'remotedesktop-pa.googleapis.com' not in entries
     assert 'instantmessaging-pa.googleapis.com' not in entries
     assert {
-        'accounts.google.com',
         'apis.google.com',
         'client-channel.google.com',
         'clients4.google.com',
@@ -2883,13 +3186,20 @@ def test_vless2_youtube_routes_are_scoped():
         'www.gstatic.com',
         'youtubei-att.googleapis.com',
     } <= entries
+    assert 'accounts.google.com' not in entries
+    assert 'www.google.com' not in entries
     vless_entries = {
         line.strip()
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
+    assert {'accounts.google.com', 'www.google.com'} <= vless_entries
     assert 'rutracker.org' not in entries
     assert 'rutracker.wiki' not in entries
+    assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
+    assert service_routes.service_route_state('youtube', unblock_dir=str(ROOT))['label'] == 'Vless 2'
+    assert service_routes.service_route_state('gemini', unblock_dir=str(ROOT))['label'] == 'Vless 1'
+    assert service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert 'static.rutracker.cc' not in entries
     assert 'feed.rutracker.cc' not in entries
     assert 'rutracker.org' in vless_entries
@@ -2942,8 +3252,9 @@ def test_chrome_remote_desktop_routes_stay_on_vless():
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
-    assert set(service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES) <= entries
-    assert set(service_catalog.CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES) <= entries
+    source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
+    state_entries = set(source['entries']) - set(source.get('route_state_exclude') or [])
+    assert state_entries <= entries
     assert 'full:instantmessaging-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
 
@@ -3006,7 +3317,9 @@ def test_ai_assistant_custom_routes_are_synced():
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
 
     assert set(service_catalog.CLAUDE_ROUTE_ENTRIES) <= entries
-    assert set(service_catalog.GEMINI_ROUTE_ENTRIES) <= entries
+    gemini_source = service_catalog.SERVICE_LIST_SOURCES['gemini']
+    gemini_state_entries = set(gemini_source['entries']) - set(gemini_source.get('route_state_exclude') or [])
+    assert gemini_state_entries <= entries
     assert presets['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert presets['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
     assert presets['claude']['urls'] == ['https://api.anthropic.com/v1/models']
@@ -3070,9 +3383,11 @@ def test_custom_check_service_sources_are_synced():
         source = service_catalog.SERVICE_LIST_SOURCES[preset['id']]
         source_entries = set(source.get('entries') or [])
         preset_routes = set(preset.get('routes') or [])
+        applied_routes = set(service_catalog.service_route_entries(preset['id']))
         assert source_entries
         assert preset_routes <= source_entries
-        assert preset_routes <= entries
+        assert applied_routes <= source_entries
+        assert applied_routes <= entries
 
     assert service_catalog.SERVICE_LIST_SOURCES['discord']['entries'] == service_catalog.DISCORD_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['copilot']['entries'] == service_catalog.COPILOT_ROUTE_ENTRIES
@@ -3176,7 +3491,9 @@ def test_chrome_remote_desktop_routes_are_in_vless():
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
-    assert set(service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES) <= entries
+    source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
+    state_entries = set(source['entries']) - set(source.get('route_state_exclude') or [])
+    assert state_entries <= entries
     assert service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']['entries'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
     assert presets['chrome_remote_desktop']['routes'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
@@ -3403,6 +3720,7 @@ def test_web_get_actions_helpers():
         'pool_status_summary': lambda keys: {'active_text': '1 / 5'},
         'web_custom_checks': lambda: [{'id': 'custom'}],
         'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
+        'telegram_call_learning_snapshot': lambda: {'watching': True, 'seen_clients': ['192.168.1.23']},
         'time_provider': lambda: 123.0,
         'static_dir': '/tmp/static',
         'service_icons_enabled': True,
@@ -3411,6 +3729,7 @@ def test_web_get_actions_helpers():
     status = web_get_actions.dispatch(ctx, '/api/status')
     assert status['payload']['pool_probe_running'] is True
     assert status['payload']['timestamp'] == 123.0
+    assert status['payload']['telegram_call_learning']['watching'] is True
     assert 'pools' not in status['payload']
     assert refreshed == [current_keys]
     placeholder_refreshed = []
@@ -3436,6 +3755,8 @@ def test_web_get_actions_helpers():
     assert pool_snapshot_calls[-1] == (current_keys, False, ['vless', 'vmess'])
     probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
     assert probe['payload']['status'] == 'running'
+    learning = web_get_actions.dispatch(ctx, '/api/telegram_call_learning')
+    assert learning['payload']['telegram_call_learning']['seen_clients'] == ['192.168.1.23']
     paused_ctx = dict(ctx)
     paused_ctx.update({
         'get_pool_probe_progress': lambda: {'running': False, 'checked': 4, 'total': 10, 'note': 'paused'},
@@ -3476,6 +3797,16 @@ def test_web_form_blocks_helpers():
     assert 'web-action-message' in status_blocks['message_block']
     assert 'cmd' in status_blocks['command_block']
     assert 'socks ok' in status_blocks['socks_block']
+    assert web_form_blocks.status_refresh_pending(
+        {'proxy_mode': 'vless', 'api_status': '✅ ok'},
+        {'vless2': {'label': 'Проверяется'}},
+        pool_probe_pending=False,
+    ) is False
+    assert web_form_blocks.status_refresh_pending(
+        {'proxy_mode': 'vless', 'api_status': '✅ ok'},
+        {'vless': {'label': 'Проверяется'}},
+        pool_probe_pending=False,
+    ) is True
     quick_key = web_form_blocks.quick_key_context({'proxy_mode': 'none'}, {'vless': 'vless://sample'}, 'Без прокси')
     assert quick_key == {'proto': 'vless', 'label': 'Vless 1', 'value': 'vless://sample'}
     basics = web_form_blocks.render_form_basics(
@@ -3745,7 +4076,16 @@ def test_web_template_styles_helpers():
     assert '.mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:330;}' in styles
     assert 'html.command-running body{min-height:100vh;}' in styles
     assert 'html.command-running .app-main,' in styles
-    assert '.status-dashboard-with-pool .status-dashboard-column-primary .router-health-card{height:100%;align-self:stretch;}' in styles
+    assert '.app-view[data-view="status"].active{grid-template-rows:auto auto auto auto;align-content:start;gap:8px;overflow:hidden;}' in styles
+    assert '.topbar{position:relative;z-index:260;top:0;padding:8px 10px;margin-bottom:8px;' in styles
+    assert '.workspace-layout{flex:1;min-height:0;gap:8px;align-items:stretch;}' in styles
+    assert '.view-head,.segmented,.status-dashboard,.overview-service-grid{margin-bottom:0;}' in styles
+    assert '.status-dashboard-with-pool .status-dashboard-column{display:grid;grid-template-rows:auto minmax(0,1fr);gap:8px;align-content:stretch;align-items:stretch;min-width:0;height:100%;}' in styles
+    assert '.status-dashboard-with-pool .router-health-card,.status-dashboard-with-pool .key-pool-card{height:100%;align-self:stretch;}' in styles
+    assert '.inline-page-title{display:flex;align-items:baseline;gap:8px;min-width:0;margin:0 0 4px;color:var(--text);font-size:13px;font-weight:800;line-height:1.22;' in styles
+    assert '.inline-page-title .title-kicker{flex:none;color:#d3a557;font-size:inherit;font-weight:inherit;letter-spacing:0;text-transform:none;line-height:inherit;}' in styles
+    assert '.section-subtitle{font-size:12px;line-height:1.35;}' in styles
+    assert '.key-status-note{margin:3px 0 0;font-size:12px;line-height:1.35;}' in styles
     assert '.pool-controls{display:grid;grid-template-columns:minmax(240px,520px) minmax(180px,240px);' in styles
     assert '.pool-sort-menu.hidden{display:none;}' in styles
     assert '.pool-sort-divider' in styles
@@ -4128,6 +4468,10 @@ def test_web_template_scripts_helpers():
     assert 'function schedulePoolView(proto, delayMs)' in scripts
     assert 'const rowByKeyId = new Map();' in scripts
     assert "fetch('/api/pools' + loadedPoolProtocolQuery()" in scripts
+    assert "proto === web.proxy_mode && status && (status.label === 'Проверяется' || status.api_pending)" in scripts
+    assert 'function updateTelegramCallLearning(state)' not in scripts
+    assert "fetch('/api/telegram_call_learning'" not in scripts
+    assert "action === 'telegram-call-learn'" not in scripts
     assert 'state.scrolled = true' in scripts
     assert "if (typeof delay === 'number' && delay <= 0)" in scripts
     assert 'if (liquidTouchState && liquidTouchState.scrolled)' in scripts
@@ -4242,6 +4586,8 @@ def test_web_form_template_smoke():
     assert 'quick-start-actions' in page
     assert 'router-memory-text' in page
     assert 'router-memory-meter' in page
+    assert 'call-learn-details' not in page
+    assert 'telegram_call_learn' not in page
     assert 'status-attention-list' in page
     assert 'status-overview-head' in page
     assert 'Панель состояния' not in page
@@ -4452,6 +4798,9 @@ def test_service_routes_apply_and_profile():
         assert callbacks == ['route', 'profile']
         assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
         assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
+        vless_after_profile = set((Path(tmp) / 'vless.txt').read_text(encoding='utf-8').splitlines())
+        assert set(service_catalog.service_route_entries('telegram')) <= vless_after_profile
+        assert not (set(service_catalog.SERVICE_LIST_SOURCES['telegram'].get('route_state_exclude') or []) & vless_after_profile)
         same_route_dir = Path(tmp) / 'same-route'
         same_route_dir.mkdir()
         for route_file in ('vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
@@ -4485,6 +4834,47 @@ def test_route_intersections_helpers():
         assert callbacks == ['sync']
         assert 'example.com' in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
         assert 'example.com' not in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
+
+
+def test_route_intersections_detect_runtime_ipset_overlap():
+    with tempfile.TemporaryDirectory() as tmp:
+        for route_file, content in (
+            ('vless.txt', 'telegram.org\n'),
+            ('vless-2.txt', 'youtube.com\n'),
+            ('vmess.txt', ''),
+            ('trojan.txt', ''),
+            ('shadowsocks.txt', ''),
+        ):
+            (Path(tmp) / route_file).write_text(content, encoding='utf-8')
+
+        ipsets = {
+            'unblockvless': ['1.1.1.1', '8.8.8.8'],
+            'unblockvlessudp': ['8.8.4.4'],
+            'unblockvless2': ['8.8.8.8', '9.9.9.9'],
+            'unblockvless2udp': ['8.8.4.4', '9.9.9.9'],
+        }
+
+        def fake_run(args, stdout=None, stderr=None, text=None, timeout=None, check=None):
+            set_name = args[-1]
+            members = ipsets.get(set_name, [])
+            output = 'Name: {0}\nMembers:\n{1}\n'.format(set_name, '\n'.join(members))
+            return py_types.SimpleNamespace(stdout=output, returncode=0)
+
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=tmp,
+            run_command=fake_run,
+        )
+        assert report['file_count'] == 0
+        assert report['runtime_count'] == 2
+        assert report['runtime_match_count'] == 2
+        assert {issue['kind'] for issue in report['issues']} == {'runtime_ipset_overlap'}
+
+        result = route_intersections.resolve_route_intersections(
+            'vless-2',
+            unblock_dir=tmp,
+            update_script='',
+        )
+        assert result['moved'] == 0
 
 
 def test_service_route_ui_helpers():
@@ -4589,6 +4979,7 @@ def main():
     test_probe_cache_invalidates_changed_custom_check_targets()
     test_probe_cache_failed_results_expire_quickly()
     test_probe_cache_keeps_recent_success_on_transient_downgrade()
+    test_telegram_call_learning_helpers()
     test_web_template_scripts_helpers()
     test_web_form_template_smoke()
     test_web_post_actions_helpers()
@@ -4617,6 +5008,7 @@ def main():
     test_update_status_helpers()
     test_service_routes_apply_and_profile()
     test_route_intersections_helpers()
+    test_route_intersections_detect_runtime_ipset_overlap()
     test_service_route_ui_helpers()
     test_service_route_runtime_helpers()
     test_pool_probe_runner_failover_candidate()

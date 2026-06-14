@@ -37,6 +37,23 @@ def transparent_inbound(port, tag):
     }
 
 
+def tproxy_inbound(port, tag):
+    return {
+        'port': int(port),
+        'listen': '0.0.0.0',
+        'protocol': 'dokodemo-door',
+        'settings': {
+            'network': 'udp',
+            'followRedirect': True,
+        },
+        'streamSettings': {
+            'sockopt': {'tproxy': 'tproxy'},
+        },
+        'sniffing': {'enabled': False},
+        'tag': tag,
+    }
+
+
 def _add_proxy_route(config_data, inbound_tags, outbound_tag):
     config_data['routing']['rules'].append({
         'type': 'field',
@@ -63,6 +80,13 @@ def _add_transparent_proxy(config_data, proto, key_value, socks_port, transparen
     _add_proxy_route(config_data, [socks_tag, transparent_tag], outbound_tag)
 
 
+def _add_tproxy_route(config_data, key_value, tproxy_port, tproxy_tag, outbound_tag):
+    if not key_value or not tproxy_port:
+        return
+    config_data['inbounds'].append(tproxy_inbound(tproxy_port, tproxy_tag))
+    _add_proxy_route(config_data, [tproxy_tag], outbound_tag)
+
+
 def build_proxy_core_config(
     *,
     vmess_key=None,
@@ -76,6 +100,7 @@ def build_proxy_core_config(
     loglevel='warning',
     connectivity_check_domains=None,
     include_vmess_transparent=False,
+    include_tproxy_inbounds=True,
 ):
     config_data = {
         'log': {
@@ -141,6 +166,43 @@ def build_proxy_core_config(
         'proxy-vless2',
     )
     _add_socks_proxy(config_data, 'trojan', trojan_key, ports['trojan_bot'], 'in-trojan', 'proxy-trojan')
+
+    if include_tproxy_inbounds:
+        _add_tproxy_route(
+            config_data,
+            shadowsocks_key,
+            ports.get('shadowsocks_tproxy'),
+            'in-shadowsocks-tproxy',
+            'proxy-shadowsocks',
+        )
+        _add_tproxy_route(
+            config_data,
+            vmess_key,
+            ports.get('vmess_tproxy'),
+            'in-vmess-tproxy',
+            'proxy-vmess',
+        )
+        _add_tproxy_route(
+            config_data,
+            vless_key,
+            ports.get('vless_tproxy'),
+            'in-vless-tproxy',
+            'proxy-vless',
+        )
+        _add_tproxy_route(
+            config_data,
+            vless2_key,
+            ports.get('vless2_tproxy'),
+            'in-vless2-tproxy',
+            'proxy-vless2',
+        )
+        _add_tproxy_route(
+            config_data,
+            trojan_key,
+            ports.get('trojan_tproxy'),
+            'in-trojan-tproxy',
+            'proxy-trojan',
+        )
 
     if config_data['outbounds']:
         config_data['outbounds'].append({'protocol': 'freedom', 'tag': 'direct'})

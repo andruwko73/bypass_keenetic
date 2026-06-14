@@ -16,9 +16,12 @@ def js_bool(value):
 
 
 def status_refresh_pending(status, protocol_statuses, pool_probe_pending=False):
+    proxy_mode = (status or {}).get('proxy_mode')
+    active_status = (protocol_statuses or {}).get(proxy_mode, {}) if proxy_mode else {}
     return (
         'Фоновая проверка связи выполняется' in (status or {}).get('api_status', '') or
-        any(item.get('label') == 'Проверяется' for item in (protocol_statuses or {}).values()) or
+        active_status.get('label') == 'Проверяется' or
+        bool(active_status.get('api_pending')) or
         bool(pool_probe_pending)
     )
 

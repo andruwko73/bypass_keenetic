@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-from service_catalog import CUSTOM_CHECK_PRESETS, SERVICE_LIST_SOURCES
+from service_catalog import CUSTOM_CHECK_PRESETS, SERVICE_LIST_SOURCES, service_route_entries
 from unblock_lists import (
     BASE_LABELS,
     UNBLOCK_DIR,
@@ -72,7 +72,7 @@ def route_service_items(*, include_core=True, presets=None):
             'icon': preset.get('icon') or source.get('icon') or '',
             'badge': preset.get('badge') or '',
             'url': preset.get('url') or source.get('url') or '',
-            'routes': preset.get('routes') or source.get('entries') or [],
+            'routes': service_route_entries(service_key),
             'is_custom_check': bool(preset),
         }
         if service_key == 'telegram':
@@ -93,7 +93,7 @@ def _service_entries(service_key):
     source = SERVICE_LIST_SOURCES.get(service_key) or {}
     entries = []
     seen = set()
-    for value in source.get('entries') or []:
+    for value in service_route_entries(service_key):
         item = str(value or '').strip()
         if item and item not in seen:
             seen.add(item)
@@ -101,6 +101,10 @@ def _service_entries(service_key):
     if not entries:
         raise ValueError(f'У сервиса {service_key} нет готового списка адресов')
     return entries
+
+
+def _service_state_entries(service_key):
+    return set(_service_entries(service_key))
 
 
 def _read_route(route, unblock_dir):
@@ -123,7 +127,7 @@ def _run_update(update_script):
 
 def service_route_state(service_key, *, unblock_dir=UNBLOCK_DIR):
     try:
-        entries = set(_service_entries(service_key))
+        entries = set(_service_state_entries(service_key))
     except ValueError:
         entries = set()
     total = len(entries)

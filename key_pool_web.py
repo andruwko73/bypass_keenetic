@@ -26,7 +26,6 @@ def web_event_history_html(events):
     events = events or []
     if not events:
         return '''<section class="panel event-history-panel">
-            <h3>История событий</h3>
             <p class="section-subtitle">Пока нет записей о переключениях, маршрутах и обновлениях.</p>
         </section>'''
     rows = []
@@ -47,7 +46,6 @@ def web_event_history_html(events):
         </li>''')
     return f'''<section class="panel event-history-panel">
         <div class="route-section-head">
-            <strong>История событий</strong>
             <small>Последние переключения ключей, обновления и изменения маршрутов по всем протоколам.</small>
         </div>
         <ul class="event-history-list">{"".join(rows)}</ul>
@@ -502,6 +500,7 @@ def web_route_profiles_html(profiles, csrf_input_html=''):
 def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
     report = report or {}
     count = int(report.get('count') or 0)
+    file_count = int(report.get('file_count') if report.get('file_count') is not None else count)
     if count <= 0:
         return '''<div class="route-intersection-card route-intersection-ok">
             <strong>Пересечений в списках не найдено</strong>
@@ -512,7 +511,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
         examples.append(f'<li>{html.escape(issue.get("message") or issue.get("entry") or "")}</li>')
     examples_html = f'<ul>{"".join(examples)}</ul>' if examples else ''
     buttons = []
-    for item in protocol_options or []:
+    for item in ((protocol_options or []) if file_count else []):
         route_value = 'vless-2' if item['value'] == 'vless2' else item['value']
         buttons.append(f'''<form method="post" action="/route_intersections_resolve" data-async-action="service-route" data-confirm-title="Перенести пересечения?" data-confirm-message="Все найденные пересекающиеся адреса будут оставлены только в списке {html.escape(item['label'])}.">
             {csrf_input_html}

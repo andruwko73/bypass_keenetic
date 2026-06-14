@@ -98,6 +98,7 @@ def _status_payload(ctx):
         'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
         'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
         'router_health': _ctx(ctx, 'router_health_snapshot', lambda: {})(),
+        'telegram_call_learning': _call(ctx, 'telegram_call_learning_snapshot') or {},
     }
     if not pool_enabled:
         payload.update({
@@ -163,6 +164,11 @@ def _pool_probe_payload(ctx):
     }
 
 
+def _telegram_call_learning_payload(ctx):
+    snapshot = _call(ctx, 'telegram_call_learning_snapshot') or {}
+    return {'telegram_call_learning': snapshot}
+
+
 def _static_file(ctx, path):
     static_dir = _ctx(ctx, 'static_dir')
     if not static_dir:
@@ -225,6 +231,8 @@ def dispatch(ctx, path, query=''):
         return {'kind': 'json', 'payload': _ctx(ctx, 'service_routes_payload', lambda: {})(), 'status': 200}
     if path == '/api/pool_probe' and _ctx(ctx, 'pool_enabled', False):
         return {'kind': 'json', 'payload': _pool_probe_payload(ctx), 'status': 200}
+    if path == '/api/telegram_call_learning':
+        return {'kind': 'json', 'payload': _telegram_call_learning_payload(ctx), 'status': 200}
     if path == '/api/protocol_panel' and _ctx(ctx, 'pool_enabled', False):
         payload = _protocol_panel_payload(ctx, query)
         return {'kind': 'json', 'payload': payload, 'status': 200 if payload.get('ok') else 400}

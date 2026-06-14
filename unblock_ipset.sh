@@ -16,6 +16,8 @@ YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.
 YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT="${YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT:-6}"
 YOUTUBE_VIDEO_PRELOAD_MAX_TIME="${YOUTUBE_VIDEO_PRELOAD_MAX_TIME:-18}"
 YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT="${YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT:-80}"
+RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
+VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
 IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6"
@@ -327,6 +329,29 @@ wait_for_dns() {
 		fi
 		sleep 5
 	done
+}
+
+route_file_has_markers() {
+	route_file="$1"
+	shift
+	[ -s "$route_file" ] || return 1
+	for marker in "$@"; do
+		grep -Fxs "$marker" "$route_file" >/dev/null 2>&1 && return 0
+	done
+	return 1
+}
+
+youtube_route_protocol() {
+	youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com"
+	if route_file_has_markers "$UNBLOCK_DIR/vless-2.txt" $youtube_markers && [ -s "$VLESS2_KEY_PATH" ]; then
+		printf '%s\n' "vless2"
+		return 0
+	fi
+	if route_file_has_markers "$UNBLOCK_DIR/vless.txt" $youtube_markers; then
+		printf '%s\n' "vless"
+		return 0
+	fi
+	printf '%s\n' "vless"
 }
 
 xargs_parallel_flag() {
@@ -657,6 +682,87 @@ entry_count_for_tmp_set() {
 	awk -v tmp_set="$tmp_set" '$1 == "add" && $2 == tmp_set { count++ } END { print count + 0 }' "$sorted_restore_file"
 }
 
+filter_restore_exact_overlap() {
+	loser_set="$1"
+	winner_set="$2"
+	source_file="$3"
+	target_file="$4"
+	[ -n "$loser_set" ] && [ -n "$winner_set" ] && [ -s "$source_file" ] || return 0
+	awk -v loser="$loser_set" -v winner="$winner_set" '
+		$1 == "add" && $2 == winner { winner_value[$3]=1 }
+		{
+			line[NR]=$0
+			command[NR]=$1
+			set_name[NR]=$2
+			value[NR]=$3
+		}
+		END {
+			for (idx=1; idx<=NR; idx++) {
+				if (command[idx] == "add" && set_name[idx] == loser && (value[idx] in winner_value)) {
+					continue
+				}
+				print line[idx]
+			}
+		}
+	' "$source_file" > "$target_file"
+}
+
+remove_runtime_overlap_from_set() {
+	loser_set="$1"
+	winner_set="$2"
+	[ -n "$loser_set" ] && [ -n "$winner_set" ] || return 0
+	ipset list "$loser_set" >/dev/null 2>&1 || return 0
+	ipset list "$winner_set" >/dev/null 2>&1 || return 0
+	ipset list "$loser_set" 2>/dev/null | awk '
+		/^Members:/ { members=1; next }
+		members && NF { print $1 }
+	' | while IFS= read -r member; do
+		[ -n "$member" ] || continue
+		if ipset test "$winner_set" "$member" >/dev/null 2>&1; then
+			ipset del "$loser_set" "$member" >/dev/null 2>&1 || true
+		fi
+	done
+}
+
+dedupe_vless_runtime_restore() {
+	[ "$RUNTIME_IPSET_DEDUPE_ENABLED" = "0" ] && return 0
+	[ -s "$sorted_restore_file" ] || return 0
+	filtered_restore_file="$tmp_dir/restore.sorted.runtime-deduped"
+	case "$(youtube_route_protocol)" in
+		vless2)
+			filter_restore_exact_overlap "tmp_unblockvless_$$" "tmp_unblockvless2_$$" "$sorted_restore_file" "$filtered_restore_file"
+			filter_restore_exact_overlap "tmp_unblockvlessudp_$$" "tmp_unblockvless2udp_$$" "$filtered_restore_file" "$filtered_restore_file.next"
+			mv "$filtered_restore_file.next" "$filtered_restore_file"
+			filter_restore_exact_overlap "tmp_unblockvless6_$$" "tmp_unblockvless2v6_$$" "$filtered_restore_file" "$filtered_restore_file.next"
+			mv "$filtered_restore_file.next" "$filtered_restore_file"
+			;;
+		*)
+			filter_restore_exact_overlap "tmp_unblockvless2_$$" "tmp_unblockvless_$$" "$sorted_restore_file" "$filtered_restore_file"
+			filter_restore_exact_overlap "tmp_unblockvless2udp_$$" "tmp_unblockvlessudp_$$" "$filtered_restore_file" "$filtered_restore_file.next"
+			mv "$filtered_restore_file.next" "$filtered_restore_file"
+			filter_restore_exact_overlap "tmp_unblockvless2v6_$$" "tmp_unblockvless6_$$" "$filtered_restore_file" "$filtered_restore_file.next"
+			mv "$filtered_restore_file.next" "$filtered_restore_file"
+			;;
+	esac
+	mv "$filtered_restore_file" "$sorted_restore_file"
+}
+
+dedupe_vless_runtime_ipsets() {
+	[ "$RUNTIME_IPSET_DEDUPE_ENABLED" = "0" ] && return 0
+	case "$(youtube_route_protocol)" in
+		vless2)
+			remove_runtime_overlap_from_set "tmp_unblockvless_$$" "tmp_unblockvless2_$$"
+			remove_runtime_overlap_from_set "tmp_unblockvlessudp_$$" "tmp_unblockvless2udp_$$"
+			remove_runtime_overlap_from_set "tmp_unblockvless6_$$" "tmp_unblockvless2v6_$$"
+			;;
+		*)
+			remove_runtime_overlap_from_set "tmp_unblockvless2_$$" "tmp_unblockvless_$$"
+			remove_runtime_overlap_from_set "tmp_unblockvless2udp_$$" "tmp_unblockvlessudp_$$"
+			remove_runtime_overlap_from_set "tmp_unblockvless2v6_$$" "tmp_unblockvless6_$$"
+			;;
+	esac
+}
+
 swap_or_preserve_set() {
 	set_name="$1"
 	swap_tmp_set="$2"
@@ -702,8 +808,10 @@ load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$"
 load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$" unblocktrojudp "tmp_unblocktrojudp_$$" unblocktroj6 "tmp_unblocktroj6_$$"
 
 sort -u "$restore_file" > "$sorted_restore_file"
+dedupe_vless_runtime_restore
 if [ -s "$sorted_restore_file" ]; then
 	ipset restore -exist < "$sorted_restore_file" >/dev/null 2>&1 || fail_status "ipset restore to temporary sets failed; old ipset contents preserved."
+	dedupe_vless_runtime_ipsets
 fi
 
 swap_or_preserve_set unblocksh "tmp_unblocksh_$$"

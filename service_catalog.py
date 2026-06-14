@@ -2,21 +2,30 @@
 
 YOUTUBE_CDN_IP_RANGES = [
     '64.233.164.198',
+    '64.233.161.0/24',
+    '64.233.164.0/24',
+    '64.233.165.0/24',
     '74.125.10.0/24',
     '74.125.96.0/24',
     '74.125.102.0/24',
+    '74.125.131.0/24',
+    '74.125.163.0/24',
     '74.125.164.0/24',
     '74.125.172.0/24',
     '74.125.174.0/24',
+    '108.177.14.0/24',
     '142.251.84.0/24',
     '142.251.90.0/24',
     '142.251.91.0/24',
     '172.217.137.0/24',
     '172.217.145.0/24',
+    '173.194.6.0/24',
+    '173.194.16.0/24',
     '173.194.22.0/24',
     '173.194.31.0/24',
     '173.194.49.0/24',
     '173.194.51.0/24',
+    '173.194.221.0/24',
     '209.85.229.0/24',
     '2a00:1450:4010:c01::/64',
     '2a00:1450:4010:c03::/64',
@@ -60,14 +69,12 @@ YOUTUBE_UNBLOCK_ENTRIES = [
     'youtubeeducation.com',
     'www.youtubeeducation.com',
     'youtubekids.com',
-    'accounts.google.com',
     'apis.google.com',
     'client-channel.google.com',
     'clients4.google.com',
     'families.google.com',
     'fonts.googleapis.com',
     'support.google.com',
-    'www.google.com',
     'www.gstatic.com',
     'youtubei.googleapis.com',
     'youtubei-att.googleapis.com',
@@ -438,6 +445,13 @@ CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES = [
     *CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES,
 ]
 
+GOOGLE_SHARED_ROUTE_STATE_ENTRIES = [
+    'apis.google.com',
+    'clients4.google.com',
+    'fonts.googleapis.com',
+    'www.gstatic.com',
+]
+
 CUSTOM_CHECK_PRESETS = [
     {
         'id': 'chatgpt_services',
@@ -721,6 +735,7 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['gemini', 'google ai', 'google ai studio', 'aistudio', 'bard'],
         'url': '',
         'entries': GEMINI_ROUTE_ENTRIES,
+        'route_state_exclude': GOOGLE_SHARED_ROUTE_STATE_ENTRIES,
         'udp_quic': True,
     },
     'copilot': {
@@ -763,6 +778,7 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['telegram', 'tg', 'телеграм', 'телега'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/telegram.lst',
         'entries': TELEGRAM_UNBLOCK_ENTRIES,
+        'route_state_exclude': CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES,
     },
     'meta': {
         'label': 'Instagram / Facebook',
@@ -785,6 +801,10 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['chrome remote desktop', 'crd', 'chromoting', 'remote desktop', 'удаленный рабочий стол chrome'],
         'url': '',
         'entries': CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
+        'route_state_exclude': [
+            *GOOGLE_SHARED_ROUTE_STATE_ENTRIES,
+            *CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES,
+        ],
     },
     'tiktok': {
         'label': 'TikTok',
@@ -814,6 +834,25 @@ def _dedupe_policy_entries(values):
         seen.add(entry)
         result.append(entry)
     return result
+
+
+def service_route_entries(service_key, service_sources=None):
+    sources = service_sources or SERVICE_LIST_SOURCES
+    source = sources.get(service_key) or {}
+    entries = []
+    seen = set()
+    for value in source.get('entries') or []:
+        entry = str(value or '').strip()
+        if entry and entry not in seen:
+            seen.add(entry)
+            entries.append(entry)
+    excluded = {
+        str(value or '').strip()
+        for value in source.get('route_state_exclude') or []
+        if str(value or '').strip()
+    }
+    scoped_entries = [entry for entry in entries if entry not in excluded]
+    return scoped_entries or entries
 
 
 def udp_quic_policy_entries(service_sources=None):
