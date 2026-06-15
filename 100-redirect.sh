@@ -16,6 +16,33 @@ ip4t() {
 	fi
 }
 
+REDIRECT_LOCK_STALE_SECONDS="${REDIRECT_LOCK_STALE_SECONDS:-120}"
+REDIRECT_LOCK_DIR="${REDIRECT_LOCK_DIR:-/tmp/bypass-redirect-${type:-iptables}-${table:-unknown}.lock}"
+redirect_lock_acquired=0
+if mkdir "$REDIRECT_LOCK_DIR" 2>/dev/null; then
+	redirect_lock_acquired=1
+	printf '%s\n' "$$" > "$REDIRECT_LOCK_DIR/pid" 2>/dev/null || true
+	date +%s > "$REDIRECT_LOCK_DIR/started_at" 2>/dev/null || true
+else
+	lock_pid="$(cat "$REDIRECT_LOCK_DIR/pid" 2>/dev/null || true)"
+	if [ -n "$lock_pid" ] && [ -d "/proc/$lock_pid" ]; then
+		exit 0
+	fi
+	lock_started="$(cat "$REDIRECT_LOCK_DIR/started_at" 2>/dev/null || echo 0)"
+	lock_now="$(date +%s 2>/dev/null || echo 0)"
+	if [ "$lock_now" -gt 0 ] 2>/dev/null && [ "$lock_started" -gt 0 ] 2>/dev/null \
+		&& [ $((lock_now - lock_started)) -gt "$REDIRECT_LOCK_STALE_SECONDS" ] 2>/dev/null; then
+		rm -rf "$REDIRECT_LOCK_DIR" 2>/dev/null || true
+		if mkdir "$REDIRECT_LOCK_DIR" 2>/dev/null; then
+			redirect_lock_acquired=1
+			printf '%s\n' "$$" > "$REDIRECT_LOCK_DIR/pid" 2>/dev/null || true
+			date +%s > "$REDIRECT_LOCK_DIR/started_at" 2>/dev/null || true
+		fi
+	fi
+	[ "$redirect_lock_acquired" = "1" ] || exit 0
+fi
+trap '[ "$redirect_lock_acquired" = "1" ] && rm -rf "$REDIRECT_LOCK_DIR" 2>/dev/null || true' EXIT INT TERM
+
 UDP_POLICY_CONFIG="${UDP_POLICY_CONFIG:-/opt/etc/bot/udp_policy.conf}"
 [ -r "$UDP_POLICY_CONFIG" ] && . "$UDP_POLICY_CONFIG"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"

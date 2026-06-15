@@ -1,3 +1,4 @@
+import math
 import os
 import subprocess
 
@@ -206,6 +207,97 @@ def apply_service_route(
         'entries': len(entries),
         'added': added,
         'removed': removed,
+    }
+
+
+def repair_service_route_catalog_drift(
+    *,
+    service_items=None,
+    min_coverage=0.5,
+    remove_from_others=True,
+    unblock_dir=UNBLOCK_DIR,
+    update_script=UNBLOCK_UPDATE_SCRIPT,
+    before_update=None,
+):
+    service_items = service_items or route_service_items()
+    route_entries = {route: _read_route(route, unblock_dir) for route in PROTOCOL_ROUTES.values()}
+    repaired = []
+    threshold_ratio = max(0.0, min(1.0, float(min_coverage)))
+
+    for item in service_items:
+        service_key = item.get('id') if isinstance(item, dict) else str(item or '')
+        if not service_key:
+            continue
+        try:
+            entries = set(_service_entries(service_key))
+        except ValueError:
+            continue
+        if not entries:
+            continue
+
+        matches = {
+            proto: entries & route_entries[PROTOCOL_ROUTES[proto]]
+            for proto in ROUTE_ORDER
+        }
+        matched_protocols = [proto for proto in ROUTE_ORDER if matches[proto]]
+        if not matched_protocols:
+            continue
+
+        complete_protocols = [
+            proto for proto in ROUTE_ORDER
+            if len(matches[proto]) == len(entries)
+        ]
+        if complete_protocols:
+            target_protocol = complete_protocols[0]
+            reason = 'duplicate_cleanup'
+        else:
+            target_protocol = max(
+                matched_protocols,
+                key=lambda proto: (len(matches[proto]), -ROUTE_ORDER.index(proto)),
+            )
+            required = max(1, int(math.ceil(len(entries) * threshold_ratio)))
+            if len(matches[target_protocol]) < required:
+                continue
+            reason = 'catalog_drift'
+
+        target_route = PROTOCOL_ROUTES[target_protocol]
+        before_target = set(route_entries[target_route])
+        removed = 0
+        if remove_from_others:
+            for route, values in route_entries.items():
+                if route == target_route:
+                    continue
+                size_before = len(values)
+                values.difference_update(entries)
+                removed += size_before - len(values)
+
+        route_entries[target_route].update(entries)
+        added = len(route_entries[target_route] - before_target)
+        if added or removed:
+            source = SERVICE_LIST_SOURCES.get(service_key) or {}
+            repaired.append({
+                'service_key': service_key,
+                'service_label': source.get('label') or service_key,
+                'target_protocol': target_protocol,
+                'target_label': protocol_label(target_protocol),
+                'entries': len(entries),
+                'matched': len(matches[target_protocol]),
+                'added': added,
+                'removed': removed,
+                'reason': reason,
+            })
+
+    if repaired:
+        _write_routes(route_entries, unblock_dir)
+        if callable(before_update):
+            before_update()
+        _run_update(update_script)
+
+    return {
+        'services': len(repaired),
+        'entries_added': sum(item.get('added', 0) for item in repaired),
+        'entries_removed': sum(item.get('removed', 0) for item in repaired),
+        'repaired': repaired,
     }
 
 

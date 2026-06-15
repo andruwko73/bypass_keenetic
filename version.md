@@ -1,3 +1,6 @@
+*v1.711 (15 Jun 2026) -* main
+*Keeps the transition to dnsmasq controlled by the existing DNS Override buttons, removes the heavy YouTube watch/manifest ipset preload, and reduces router CPU pressure in web status, netfilter hooks, UDP/QUIC drift checks, stream guard, and background YouTube failover.*
+
 *v1.710 (15 Jun 2026) -* main
 *Adds a real YouTube watch-page healthcheck and follows live HLS manifests into variant playlists during ipset preload, so live streams like `BhvS39zQAnE` can populate real chunk `googlevideo` hosts in the selected YouTube route instead of spinning on playback.*
 

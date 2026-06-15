@@ -1,3 +1,13 @@
+<a name="1.711"></a>
+# [1.711] - 15 Jun 2026
+
+- Keeps DNS Override under the existing web and Telegram buttons, without hidden enable/disable during update or reboot.
+- Preserves DNS Override during Entware DNS preparation and reports ndnproxy as a fallback until the user activates dnsmasq with the button and reboots.
+- Removes the post-1.709 YouTube watch/manifest ipset preload and relies on route files plus dnsmasq dynamic ipset fills, avoiding long `dig`/`curl` bursts on the router.
+- Reduces web status CPU pressure by reusing ipset counts from the refresh status file and caching router health/API status longer.
+- Coalesces repeated Keenetic netfilter hook runs, removes external DNS probes from the UDP/QUIC drift watchdog, caches stream-guard conntrack scans, and skips full YouTube failover checks while the active key has a fresh successful probe.
+- Fixes YouTube probe cache updates for the `yt_watch_ok` metric so background failover does not keep retrying after a successful watch-page healthcheck.
+
 <a name="1.710"></a>
 # [1.710] - 15 Jun 2026
 

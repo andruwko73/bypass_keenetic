@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.710, последнее изменение: 15.06.2026
+#  Файл: bot.py, Версия v1.711, последнее изменение: 15.06.2026
 
 import subprocess
 import os
@@ -468,6 +468,10 @@ YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS = max(15, int(getattr(config, 'youtub
 YOUTUBE_STREAM_GUARD_MIN_BYTES = max(1024, int(getattr(config, 'youtube_stream_guard_min_bytes', 8192)))
 YOUTUBE_STREAM_GUARD_MIN_PACKETS = max(1, int(getattr(config, 'youtube_stream_guard_min_packets', 8)))
 YOUTUBE_STREAM_GUARD_LOG_INTERVAL = max(60, int(getattr(config, 'youtube_stream_guard_log_interval_seconds', 180)))
+YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS = max(
+    1.0,
+    float(getattr(config, 'youtube_stream_guard_scan_cache_seconds', 8.0)),
+)
 youtube_vless2_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
@@ -967,6 +971,10 @@ def _attempt_youtube_failover():
             cached_fail_since = float(cached_active_probe.get('ts') or 0.0)
         except Exception:
             cached_fail_since = 0.0
+    if _recent_probe_ok(cached_active_probe, 'yt_ok', YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL):
+        state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
+        return False
 
     yt_metrics = {}
     ok, message = _check_youtube_protocol_once(route_proto, metrics=yt_metrics)
@@ -980,14 +988,6 @@ def _attempt_youtube_failover():
     if _recover_current_youtube_route_after_hard_failure(route_proto, active_key, message):
         return False
 
-    if _recent_probe_ok(cached_active_probe, 'yt_ok', YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL):
-        state['last_fail'] = 0.0
-        state['consecutive_failures'] = 0
-        _write_runtime_log(
-            f'YouTube failover: {_pool_proto_label(route_proto)} active key failed one check, '
-            'but it was recently marked working; switch skipped.'
-        )
-        return False
     if not state['last_fail']:
         state['last_fail'] = cached_fail_since or now
     if now - state['last_fail'] < YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS:
@@ -1236,8 +1236,8 @@ KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
-WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 3.0))
-ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 5.0))
+WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 10.0))
+ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
@@ -2656,7 +2656,7 @@ def _udp_quic_policy_matches(domain):
     return any(_route_domain_matches(domain, policy) for policy in UDP_QUIC_ROUTE_ENTRIES)
 
 
-def _resolve_domain_ipv4_addresses(domain):
+def _resolve_domain_ipv4_addresses(domain, external_dns=True):
     addresses = []
     seen = set()
     repair_dns_servers = {str(item).strip() for item in REALITY_ENDPOINT_REPAIR_DNS_SERVERS}
@@ -2682,6 +2682,8 @@ def _resolve_domain_ipv4_addresses(domain):
             add_address(item[4][0])
         except Exception:
             continue
+    if not external_dns:
+        return addresses
     for dns_server in REALITY_ENDPOINT_REPAIR_DNS_SERVERS:
         outputs = []
         try:
@@ -2750,7 +2752,7 @@ def _udp_quic_route_drift_findings():
                 continue
             if not any(_route_domain_matches(entry, domain) for entry in entries):
                 continue
-            for address in _resolve_domain_ipv4_addresses(domain):
+            for address in _resolve_domain_ipv4_addresses(domain, external_dns=False):
                 in_main = _ipset_contains(main_set, address)
                 in_udp = _ipset_contains(udp_set, address)
                 if not in_main or not in_udp:
@@ -2920,6 +2922,8 @@ def _youtube_stream_guard_state(proto):
             'last_active': 0.0,
             'last_log': 0.0,
             'last_count': 0,
+            'last_scan_at': 0.0,
+            'last_scan_count': 0,
             'conntrack': {},
         }
     return youtube_stream_guard_states[proto]
@@ -2970,14 +2974,20 @@ def _youtube_active_connection_count(proto):
     ports = _youtube_protocol_conntrack_ports(proto)
     if not ports:
         return 0
+    now = time.time()
+    state = _youtube_stream_guard_state(proto)
+    last_scan_at = float(state.get('last_scan_at') or 0.0)
+    if last_scan_at and now - last_scan_at < YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS:
+        try:
+            return max(0, int(state.get('last_scan_count') or 0))
+        except Exception:
+            return 0
     try:
         with open('/proc/net/nf_conntrack', 'r', encoding='utf-8', errors='ignore') as file:
             lines = file.readlines()
     except Exception:
         return 0
     active = 0
-    now = time.time()
-    state = _youtube_stream_guard_state(proto)
     previous = state.get('conntrack')
     if not isinstance(previous, dict):
         previous = {}
@@ -3014,6 +3024,8 @@ def _youtube_active_connection_count(proto):
         ):
             active += 1
     state['conntrack'] = current
+    state['last_scan_at'] = now
+    state['last_scan_count'] = active
     return active
 
 
@@ -4645,11 +4657,17 @@ def _schedule_router_reboot(delay_seconds=5):
 def _set_dns_override(enabled):
     _save_bot_autostart(True)
     if enabled:
+        if _dns_override_enabled():
+            subprocess.run(['/opt/etc/init.d/S56dnsmasq', 'restart'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            subprocess.run(['/opt/bin/unblock_update.sh'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            return 'DNS Override уже включён. dnsmasq перезапущен, списки и ipset обновлены.'
         os.system("ndmc -c 'opkg dns-override'")
         time.sleep(2)
         os.system("ndmc -c 'system configuration save'")
         _schedule_router_reboot()
         return '✅ DNS Override включен. Роутер будет автоматически перезагружен через несколько секунд.'
+    if not _dns_override_enabled():
+        return 'DNS Override уже выключен.'
     os.system("ndmc -c 'no opkg dns-override'")
     time.sleep(2)
     os.system("ndmc -c 'system configuration save'")

@@ -209,6 +209,7 @@ def update_key_probe_cache_entry(
     yt_latency_ms=None,
     googlevideo_latency_ms=None,
     yt_home_ok=None,
+    yt_watch_ok=None,
     yt_bootstrap_ok=None,
     googlevideo_ok=None,
     yt_error_rate=None,
@@ -249,7 +250,7 @@ def update_key_probe_cache_entry(
         tg_ok is not None or yt_ok is not None or custom is not None or
         tg_latency_ms is not None or yt_latency_ms is not None or
         googlevideo_latency_ms is not None or yt_throughput_mbps is not None or
-        yt_home_ok is not None or yt_bootstrap_ok is not None or googlevideo_ok is not None or
+        yt_home_ok is not None or yt_watch_ok is not None or yt_bootstrap_ok is not None or googlevideo_ok is not None or
         yt_error_rate is not None or bool(yt_last_error) or yt_stability is not None or
         yt_first_load_ms is not None or
         yt_score is not None or yt_quality is not None or yt_stream_tier is not None or
@@ -293,6 +294,7 @@ def update_key_probe_cache_entry(
         changed = _set_entry_metric(entry, 'yt_error_rate', yt_error_rate, digits=3) or changed
         for field_name, field_value in (
             ('yt_home_ok', yt_home_ok),
+            ('yt_watch_ok', yt_watch_ok),
             ('yt_bootstrap_ok', yt_bootstrap_ok),
             ('googlevideo_ok', googlevideo_ok),
         ):

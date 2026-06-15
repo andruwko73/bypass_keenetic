@@ -31,11 +31,10 @@ def prepare_entware_dns():
 
     notes = []
     try:
-        _run_quiet(['ndmc', '-c', 'no opkg dns-override'])
-        _run_quiet(['ndmc', '-c', 'system configuration save'])
-        notes.append('opkg dns-override отключён')
+        _run_quiet(['ndmc', '-c', 'show running-config'])
+        notes.append('opkg dns-override сохранён без изменений')
     except Exception:
-        notes.append('не удалось отключить opkg dns-override')
+        notes.append('не удалось проверить opkg dns-override')
 
     try:
         resolv_conf = '/etc/resolv.conf'

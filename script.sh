@@ -686,6 +686,25 @@ migrate_runtime_config_defaults() {
   grep -Eq '^localporttrojan_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localporttrojan_tproxy = '11829'\n" >> "$BOT_CONFIG_PATH"
 }
 
+repair_service_route_catalog_drift() {
+  python_bin="/opt/bin/python3"
+  [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+  [ -n "$python_bin" ] || return 0
+  PYTHONPATH="$BOT_RUNTIME_DIR" "$python_bin" - <<'PY' || true
+from service_routes import repair_service_route_catalog_drift as repair_drift
+
+result = repair_drift(update_script='')
+services = int(result.get('services') or 0)
+if services:
+    print(
+        'Service route catalog repaired: '
+        f'{services} service(s), '
+        f'{result.get("entries_added", 0)} added, '
+        f'{result.get("entries_removed", 0)} removed.'
+    )
+PY
+}
+
 generate_udp_quic_policy_file() {
   python_bin="/opt/bin/python3"
   [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
@@ -1035,6 +1054,7 @@ if [ "$1" = "-install" ]; then
     install_runtime_modules $BOT_RUNTIME_MODULES
     install_static_assets
     ensure_runtime_legacy_paths
+    repair_service_route_catalog_drift
     generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
@@ -1204,6 +1224,7 @@ if [ "$1" = "-update" ]; then
     activate_runtime_modules $BOT_RUNTIME_MODULES
     ensure_runtime_legacy_paths
     migrate_runtime_config_defaults
+    repair_service_route_catalog_drift
     generate_udp_quic_policy_file
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
@@ -1274,10 +1295,6 @@ if [ "$1" = "-update" ]; then
 fi
 
 if [ "$1" = "-reboot" ]; then
-    ndmc -c 'opkg dns-override'
-    sleep 3
-    ndmc -c 'system configuration save'
-    sleep 3
     echo "Перезагрузка роутера"
     ndmc -c 'system reboot'
 fi

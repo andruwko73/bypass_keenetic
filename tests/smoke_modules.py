@@ -327,6 +327,40 @@ def test_router_health_runtime_dns_parsers():
     assert router_health_runtime.parse_dns_backend('') == 'none'
     assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nMembers:\n1.1.1.1\n2.2.2.0/24\n') == 2
     assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nNumber of entries: 42\nMembers:\n') == 42
+    status_counts = {
+        'counts': {
+            'unblockvless': '516',
+            'unblockvless2': 221,
+            'unblockvlessudp': '210',
+            'unblockvless2udp': 207,
+        },
+        'updated_at': 100,
+        'dns_backend': 'dnsmasq',
+        'status': 'success',
+        'message': 'ipset refresh completed.',
+    }
+    assert router_health_runtime.ipset_counts_from_status(status_counts)['unblockvless'] == 516
+    commands = []
+
+    def fake_run(command, timeout=2):
+        commands.append(tuple(command))
+        if command[:2] == ['netstat', '-lnptu']:
+            return 'tcp 0 0 0.0.0.0:53 0.0.0.0:* LISTEN 12/dnsmasq\n'
+        if command[:2] == ['/opt/etc/init.d/S56dnsmasq', 'status']:
+            return 'running'
+        if command[:2] == ['ipset', 'list']:
+            raise AssertionError('ipset list should not run when status counts are available')
+        return ''
+
+    dns_health = router_health_runtime.read_dns_health(
+        run_text=fake_run,
+        read_text=lambda path, max_bytes=8192: json.dumps(status_counts),
+        time_provider=lambda: 160,
+    )
+    assert dns_health['backend'] == 'dnsmasq'
+    assert dns_health['ipset_counts']['unblockvless2'] == 221
+    assert dns_health['ipset_refresh_age_seconds'] == 60
+    assert not any(command[:2] == ('ipset', 'list') for command in commands)
 
 
 def test_xray_compat_runtime_helpers():
@@ -1151,7 +1185,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     crontab = (ROOT / 'crontab').read_text(encoding='utf-8')
 
     assert 'flush_set' not in update_script
-    assert 'Using Keenetic ndnproxy, preloading ipset' in update_script
+    assert 'Use DNS Override ON button to make dnsmasq the primary DNS' in update_script
+    assert 'Using Keenetic ndnproxy fallback, preloading ipset' in update_script
     assert '/opt/bin/unblock_ipset.sh &' not in update_script
     assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab"' in script
     assert 'mv "$stage_dir/crontab" /opt/etc/crontab' in script
@@ -1159,6 +1194,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '/opt/bin/unblock_update.sh > /dev/null 2>&1 || true' in script
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source
+    reboot_block = script.split('if [ "$1" = "-reboot" ]; then', 1)[1].split('fi', 1)[0]
+    assert "opkg dns-override" not in reboot_block
     assert 'detect_ipset_type()' in script
     assert script.count('set_type="$(detect_ipset_type)"') == 2
     assert 'sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-ipset.sh"' in script
@@ -1189,6 +1226,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert "BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" in script
     assert "TELEGRAM_CALL_TPROXY_PORT_VLESS" in script
     assert "TELEGRAM_CALL_TPROXY_PORT_VLESS2" in bootstrap
+    assert 'repair_service_route_catalog_drift()' in script
+    service_routes_source = (ROOT / 'service_routes.py').read_text(encoding='utf-8')
+    assert 'def repair_service_route_catalog_drift(' in service_routes_source
+    assert 'update_script=UNBLOCK_UPDATE_SCRIPT' in service_routes_source
+    assert 'ensure_runtime_legacy_paths\n    repair_service_route_catalog_drift\n    generate_udp_quic_policy_file' in script
+    assert 'migrate_runtime_config_defaults\n    repair_service_route_catalog_drift\n    generate_udp_quic_policy_file' in script
 
     for script_path in (ROOT / 'script.sh', ROOT / 'bootstrap' / 'install.sh'):
         auto_policy = _run_udp_policy_python(script_path, 'auto')
@@ -1267,21 +1310,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in ipset_script
     assert 'from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES' in ipset_script
-    assert 'YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"' in ipset_script
-    assert 'YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS="${YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS:-https://www.youtube.com/watch?v=C1ZicUtxD-0 https://www.youtube.com/watch?v=BhvS39zQAnE}"' in ipset_script
     assert 'YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"' in ipset_script
     assert 'for sample_dns in $extra_dns_servers; do' in ipset_script
-    assert 'preload_youtube_video_hosts()' in ipset_script
-    assert '--socks5-hostname "127.0.0.1:$socks_port"' in ipset_script
-    assert 'append_youtube_video_hosts_from_file()' in ipset_script
-    assert 'preload_youtube_manifest_hosts()' in ipset_script
-    assert 'extract_youtube_manifest_urls "$page_file"' in ipset_script
-    assert "grep -Eo '[A-Za-z0-9][A-Za-z0-9.-]*\\.(googlevideo|c\\.youtube)\\.com'" in ipset_script
-    assert 'function cidr24(ip)' in ipset_script
+    assert 'YOUTUBE_VIDEO_PRELOAD' not in ipset_script
+    assert 'preload_youtube_video_hosts' not in ipset_script
+    assert '--socks5-hostname "127.0.0.1:$socks_port"' not in ipset_script
+    assert 'manifest.googlevideo.com' not in ipset_script
     assert 'function cidr64(ip, parts, net)' in ipset_script
-    assert 'print "add " tmp_set " " cidr24($1);' in ipset_script
-    assert 'if (net != "") print "add " tmp_set " " net;' in ipset_script
-    assert 'preload_youtube_video_hosts "$set_name" "$main_tmp_set" "$mirror_tmp_set" "$domain_file" "$ipv6_tmp_set"' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq
     assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
     assert 'chatgpt.com|*.chatgpt.com' not in unblock_dnsmasq
@@ -1334,6 +1369,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'unblockvless2udp' in redirect_script
     assert 'telegram_call_ipset_has_entries()' in redirect_script
     assert 'telegram_call_chains_installed()' in redirect_script
+    assert 'REDIRECT_LOCK_STALE_SECONDS="${REDIRECT_LOCK_STALE_SECONDS:-120}"' in redirect_script
+    assert 'REDIRECT_LOCK_DIR="${REDIRECT_LOCK_DIR:-/tmp/bypass-redirect-${type:-iptables}-${table:-unknown}.lock}"' in redirect_script
     assert 'if telegram_call_ipset_has_entries "$TELEGRAM_CALL_CLIENT_SET" && telegram_call_chains_installed; then' not in redirect_script
     assert 'telegram_call_mangle_tproxy_insert_index()' in redirect_script
     assert 'install_telegram_call_tproxy_prerouting_rule()' in redirect_script
@@ -1537,17 +1574,22 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'Telegram is required because bot mode is' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
     assert "youtube_stream_guard_failover_hold_seconds" in source
+    assert "youtube_stream_guard_scan_cache_seconds" in source
+    assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
+    assert "last_scan_count" in source
     assert "cached_fail_since or now" in source
     assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
     assert "getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)" in source
     assert 'YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS' in source
     assert 'REALITY_ENDPOINT_REPAIR_DNS_SERVERS' in source
+    assert 'def _resolve_domain_ipv4_addresses(domain, external_dns=True):' in source
+    assert '_resolve_domain_ipv4_addresses(domain, external_dns=False)' in source
     assert 'repair_dns_servers = {str(item).strip() for item in REALITY_ENDPOINT_REPAIR_DNS_SERVERS}' in source
     assert 'if value in repair_dns_servers:' in source
     assert "['dig', '+time=2', '+tries=1', '+short', 'A'" in source
     assert "['nslookup', str(domain), str(dns_server)]" in source
     assert 'def _recover_current_youtube_route_after_hard_failure' in source
-    assert source.find('_recover_current_youtube_route_after_hard_failure(route_proto, active_key, message)') < source.find("_recent_probe_ok(cached_active_probe")
+    assert source.find("_recent_probe_ok(cached_active_probe, 'yt_ok'") < source.find('ok, message = _check_youtube_protocol_once(route_proto')
     assert 'Required YouTube endpoint did not respond through this key: ' in youtube_health_source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
     assert 'http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT)' in source
@@ -1564,7 +1606,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     unblock_source = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
     assert 'yt4.googleusercontent.com' in unblock_source
     assert 'add_cidr64="$youtube_ipv6_domain"' in unblock_source
-    assert 'for sample_dns in $YOUTUBE_DNS_SAMPLE_SERVERS' in unblock_source
+    assert 'extra_dns_servers="$YOUTUBE_DNS_SAMPLE_SERVERS"' in unblock_source
+    assert 'for sample_dns in $extra_dns_servers; do' in unblock_source
     assert 'Last confirmation:' in source
     assert 'def _check_youtube_health_through_proxy' in source
     assert 'read_timeout=8' in source
@@ -1623,6 +1666,8 @@ def test_entware_dns_runtime_helpers():
     assert entware_dns_runtime.entware_dns_is_available(run_quiet=lambda args: _Result(0))
     assert not entware_dns_runtime.entware_dns_is_available(run_quiet=lambda args: _Result(1))
     assert entware_dns_runtime.entware_ip_from_lookup('Address 1: 1.1.1.1\nAddress 2: 2.2.2.2') == '2.2.2.2'
+    source = (ROOT / 'entware_dns_runtime.py').read_text(encoding='utf-8')
+    assert "no opkg dns-override" not in source
 
 
 def test_web_status_runtime_helpers():
@@ -4234,6 +4279,7 @@ def test_probe_cache_quality_metrics():
         tg_latency_ms=420.4,
         yt_latency_ms=510.1,
         googlevideo_latency_ms=630.8,
+        yt_watch_ok=True,
         yt_throughput_mbps=52.6,
         now=100,
         min_1600p_mbps=25.0,
@@ -4243,6 +4289,7 @@ def test_probe_cache_quality_metrics():
     assert entry['tg_latency_ms'] == 420
     assert entry['yt_latency_ms'] == 510
     assert entry['googlevideo_latency_ms'] == 631
+    assert entry['yt_watch_ok'] is True
     assert entry['yt_throughput_mbps'] == 52.6
     assert entry['yt_throughput_ts'] == 100
     assert entry['yt_quality'] == 'fast'
@@ -4841,6 +4888,30 @@ def test_service_routes_apply_and_profile():
         assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] in vmess_text
         assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] not in vless_text
         assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] not in vless_text
+        drift_dir = Path(tmp) / 'drift'
+        drift_dir.mkdir()
+        old_youtube = service_catalog.YOUTUBE_UNBLOCK_ENTRIES[:-4]
+        for route_file in ('vless.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (drift_dir / route_file).write_text('', encoding='utf-8')
+        (drift_dir / 'vless-2.txt').write_text('\n'.join(old_youtube) + '\n', encoding='utf-8')
+        (drift_dir / 'vless.txt').write_text(service_catalog.YOUTUBE_UNBLOCK_ENTRIES[-1] + '\n', encoding='utf-8')
+        before = service_routes.service_route_state('youtube', unblock_dir=str(drift_dir))
+        assert before['complete_protocols'] == []
+        assert set(before['partial_protocols']) == {'vless', 'vless2'}
+        repaired = service_routes.repair_service_route_catalog_drift(
+            service_items=[{'id': 'youtube'}, {'id': 'telegram'}],
+            unblock_dir=str(drift_dir),
+            update_script='',
+        )
+        assert repaired['services'] == 1
+        assert repaired['entries_added'] == 4
+        assert repaired['entries_removed'] == 1
+        after = service_routes.service_route_state('youtube', unblock_dir=str(drift_dir))
+        assert after['label'] == 'Vless 2'
+        assert route_intersections.analyze_route_intersections(
+            unblock_dir=str(drift_dir),
+            include_runtime=False,
+        )['count'] == 0
 
 
 def test_route_intersections_helpers():

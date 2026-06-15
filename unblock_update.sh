@@ -65,6 +65,10 @@ detect_dns_backend() {
 	printf '%s\n' none
 }
 
+dns_override_enabled() {
+	ndmc -c 'show running-config' 2>/dev/null | grep -q 'opkg dns-override'
+}
+
 refresh_dns_backend() {
 	backend="$1"
 	[ -x /opt/bin/unblock_dnsmasq.sh ] && /opt/bin/unblock_dnsmasq.sh
@@ -75,7 +79,12 @@ refresh_dns_backend() {
 			[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart
 			;;
 		ndnproxy)
-			echo "DNS backend: ndnproxy (Keenetic). Using Keenetic ndnproxy, preloading ipset."
+			if dns_override_enabled; then
+				echo "DNS backend: ndnproxy, but DNS Override is configured. Reboot router to activate dnsmasq on port 53."
+			else
+				echo "DNS backend: ndnproxy. Use DNS Override ON button to make dnsmasq the primary DNS."
+			fi
+			echo "Using Keenetic ndnproxy fallback, preloading ipset."
 			;;
 		none)
 			echo "DNS backend: none detected, trying S56dnsmasq."

@@ -327,6 +327,19 @@ def load_ipset_refresh_status(status_path=IPSET_STATUS_FILE, read_text=read_proc
     return data if isinstance(data, dict) else {}
 
 
+def ipset_counts_from_status(status):
+    raw_counts = (status or {}).get('counts')
+    if not isinstance(raw_counts, dict):
+        return {}
+    counts = {}
+    for set_name in IPSET_SET_NAMES:
+        try:
+            counts[set_name] = int(raw_counts.get(set_name) or 0)
+        except Exception:
+            counts[set_name] = 0
+    return counts
+
+
 def read_dns_health(
     *,
     run_text=run_command_text,
@@ -337,9 +350,11 @@ def read_dns_health(
     netstat_text = run_text(['netstat', '-lnptu'], timeout=2)
     backend = parse_dns_backend(netstat_text)
     status = load_ipset_refresh_status(status_path, read_text=read_text)
-    counts = {}
-    for set_name in IPSET_SET_NAMES:
-        counts[set_name] = ipset_member_count(set_name, run_text=run_text)
+    counts = ipset_counts_from_status(status)
+    if not counts:
+        counts = {}
+        for set_name in IPSET_SET_NAMES:
+            counts[set_name] = ipset_member_count(set_name, run_text=run_text)
     updated_at = int(status.get('updated_at') or 0)
     age_seconds = None
     if updated_at:

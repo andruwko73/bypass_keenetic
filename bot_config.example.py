@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.710
+# ВЕРСИЯ СКРИПТА v1.711
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -93,6 +93,7 @@ youtube_vless2_restart_recheck_enabled = True
 youtube_vless2_restart_recheck_cooldown_seconds = 300
 youtube_vless2_failover_consecutive_failures = 3
 youtube_vless2_hard_failure_recovery_cooldown_seconds = 90
+youtube_stream_guard_scan_cache_seconds = 8.0  # reuse recent conntrack scan results to avoid repeated CPU spikes
 youtube_stream_guard_failover_hold_seconds = 45  # Если при просмотре YouTube трафик пропал, автозамена Vless2 сможет продолжиться после этой паузы
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять
