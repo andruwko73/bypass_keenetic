@@ -14,6 +14,7 @@
 173.194.51.0/24
 173.194.6.0/24
 209.85.229.0/24
+2a00:1450:4001:9::/64
 2404:6800:4004:12::/64
 2404:6800:4004:13::/64
 2404:6800:4004:1::/64
@@ -48,6 +49,7 @@
 64.233.165.188
 64.233.165.95
 74.125.10.0/24
+74.125.11.0/24
 74.125.102.0/24
 74.125.131.0/24
 74.125.131.100
@@ -65,6 +67,7 @@
 apis.google.com
 client-channel.google.com
 clients4.google.com
+c.youtube.com
 families.google.com
 fonts.googleapis.com
 gaming.youtube.com
@@ -75,6 +78,7 @@ gvt2.com
 i.ytimg.com
 jnn-pa.googleapis.com
 kids.youtube.com
+manifest.googlevideo.com
 m.youtube.com
 music.youtube.com
 nhacmp3youtube.com

@@ -1,3 +1,9 @@
+<a name="1.710"></a>
+# [1.710] - 15 Jun 2026
+
+- Adds a real YouTube watch-page healthcheck for the selected route.
+- Follows live YouTube HLS manifests into variant playlists during ipset preload, adding real live chunk `googlevideo` hosts to the selected YouTube route.
+
 <a name="1.704"></a>
 # [1.704] - 12 Jun 2026
 

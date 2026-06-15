@@ -4,10 +4,12 @@ from urllib.parse import urlparse
 
 YOUTUBE_PRIMARY_URL = 'https://www.youtube.com/generate_204'
 YOUTUBE_HOME_URL = 'https://www.youtube.com/'
+YOUTUBE_WATCH_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
 YOUTUBE_GOOGLEVIDEO_URL = 'https://redirector.googlevideo.com/generate_204'
 YOUTUBE_HEALTHCHECK_URLS = (
     YOUTUBE_PRIMARY_URL,
     YOUTUBE_HOME_URL,
+    YOUTUBE_WATCH_URL,
     'https://youtubei.googleapis.com/generate_204',
     'https://youtubei-att.googleapis.com/',
     'https://i.ytimg.com/generate_204',
@@ -15,10 +17,11 @@ YOUTUBE_HEALTHCHECK_URLS = (
     YOUTUBE_GOOGLEVIDEO_URL,
     YOUTUBE_GOOGLEVIDEO_URL,
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 7
+YOUTUBE_HEALTHCHECK_MIN_OK = 8
 YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (
     YOUTUBE_PRIMARY_URL,
     YOUTUBE_HOME_URL,
+    YOUTUBE_WATCH_URL,
     YOUTUBE_GOOGLEVIDEO_URL,
 )
 YOUTUBE_BOOTSTRAP_HOSTS = frozenset((
@@ -47,10 +50,12 @@ def youtube_url_host(url):
 
 def youtube_url_kind(url):
     host = youtube_url_host(url)
-    if host == 'redirector.googlevideo.com' or host.endswith('.googlevideo.com'):
+    if host == 'redirector.googlevideo.com' or host.endswith('.googlevideo.com') or host.endswith('.c.youtube.com'):
         return 'googlevideo'
     if host == 'www.youtube.com' and (urlparse(url).path or '/') == '/':
         return 'home'
+    if host == 'www.youtube.com' and (urlparse(url).path or '') == '/watch':
+        return 'watch'
     if url == YOUTUBE_PRIMARY_URL:
         return 'primary'
     if host in YOUTUBE_BOOTSTRAP_HOSTS:
@@ -147,6 +152,7 @@ def check_youtube_through_proxy(
     failure_count = len(failed)
     required_missing = required_urls - ok_urls
     home_ok = 'home' not in seen_kinds or 'home' in ok_kinds
+    watch_ok = 'watch' not in seen_kinds or 'watch' in ok_kinds
     bootstrap_ok = 'bootstrap' not in seen_kinds or 'bootstrap' not in failed_kinds
     googlevideo_ok = 'googlevideo' not in seen_kinds or (
         googlevideo_ok_count > 0 and googlevideo_fail_count == 0
@@ -157,6 +163,7 @@ def check_youtube_through_proxy(
         success_threshold and
         not required_missing and
         home_ok and
+        watch_ok and
         bootstrap_ok and
         googlevideo_ok and
         failure_count <= max(0, int(max_failures or 0)) and
@@ -166,12 +173,14 @@ def check_youtube_through_proxy(
         success_threshold and
         not required_missing and
         home_ok and
+        watch_ok and
         googlevideo_ok_count > 0
     )
     stability = 'stable' if stable else ('unstable' if partially_ok else 'fail')
 
     if metrics is not None:
         metrics['yt_home_ok'] = home_ok
+        metrics['yt_watch_ok'] = watch_ok
         metrics['yt_bootstrap_ok'] = bootstrap_ok
         metrics['googlevideo_ok'] = googlevideo_ok
         metrics['yt_error_rate'] = round(float(failure_count) / float(total_count), 3)

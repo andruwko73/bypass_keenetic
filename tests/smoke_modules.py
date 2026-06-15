@@ -702,6 +702,27 @@ def test_youtube_healthcheck_detects_first_load_instability():
     assert 'unexpected EOF' in metrics['yt_last_error']
 
 
+def test_youtube_healthcheck_requires_watch_page():
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        if url == youtube_healthcheck.YOUTUBE_WATCH_URL:
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10813',
+        http_timeouts=(1, 2),
+        metrics=metrics,
+    )
+
+    assert ok is False
+    assert 'Required YouTube endpoint did not respond' in message
+    assert metrics['yt_home_ok'] is True
+    assert metrics['yt_watch_ok'] is False
+    assert metrics['yt_stability'] == 'fail'
+
+
 def test_telegram_call_learning_helpers():
     line = (
         'ipv4 2 udp 17 29 src=192.168.1.23 dst=149.154.167.91 sport=53122 dport=3478 '
@@ -1247,12 +1268,15 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in ipset_script
     assert 'from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES' in ipset_script
     assert 'YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"' in ipset_script
-    assert 'YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS="${YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS:-https://www.youtube.com/watch?v=C1ZicUtxD-0}"' in ipset_script
+    assert 'YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS="${YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS:-https://www.youtube.com/watch?v=C1ZicUtxD-0 https://www.youtube.com/watch?v=BhvS39zQAnE}"' in ipset_script
     assert 'YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"' in ipset_script
     assert 'for sample_dns in $extra_dns_servers; do' in ipset_script
     assert 'preload_youtube_video_hosts()' in ipset_script
     assert '--socks5-hostname "127.0.0.1:$socks_port"' in ipset_script
-    assert "grep -Eo '[A-Za-z0-9.-]+\\.googlevideo\\.com'" in ipset_script
+    assert 'append_youtube_video_hosts_from_file()' in ipset_script
+    assert 'preload_youtube_manifest_hosts()' in ipset_script
+    assert 'extract_youtube_manifest_urls "$page_file"' in ipset_script
+    assert "grep -Eo '[A-Za-z0-9][A-Za-z0-9.-]*\\.(googlevideo|c\\.youtube)\\.com'" in ipset_script
     assert 'function cidr24(ip)' in ipset_script
     assert 'function cidr64(ip, parts, net)' in ipset_script
     assert 'print "add " tmp_set " " cidr24($1);' in ipset_script
@@ -1530,8 +1554,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'redirector.googlevideo.com/generate_204' in youtube_source
     assert 'googlevideo.com/generate_204' in youtube_source
     assert 'i.ytimg.com/generate_204' in youtube_source
-    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 7' in youtube_source
+    assert 'YOUTUBE_WATCH_URL' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 8' in youtube_source
     assert 'YOUTUBE_HEALTHCHECK_REQUIRED_URLS' in youtube_source
+    assert "host.endswith('.c.youtube.com')" in youtube_source
     assert 'youtubei-att.googleapis.com' in youtube_source
     assert 'yt_error_rate' in youtube_source
     assert 'yt_stability' in youtube_source

@@ -1,3 +1,6 @@
+*v1.710 (15 Jun 2026) -* main
+*Adds a real YouTube watch-page healthcheck and follows live HLS manifests into variant playlists during ipset preload, so live streams like `BhvS39zQAnE` can populate real chunk `googlevideo` hosts in the selected YouTube route instead of spinning on playback.*
+
 *v1.709 (14 Jun 2026) -* main
 *Adds Telegram Call TPROXY diagnostics to the router card, keeps learned call media on the selected Telegram route, expands observed YouTube CDN coverage, and aligns desktop web spacing and typography across Status, Keys, and Lists.*
 

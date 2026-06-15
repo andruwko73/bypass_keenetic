@@ -11,11 +11,13 @@ LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_VIDEO_PRELOAD_ENABLED="${YOUTUBE_VIDEO_PRELOAD_ENABLED:-1}"
 YOUTUBE_VIDEO_PRELOAD_URL="${YOUTUBE_VIDEO_PRELOAD_URL:-https://www.youtube.com/watch?v=dQw4w9WgXcQ}"
-YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS="${YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS:-https://www.youtube.com/watch?v=C1ZicUtxD-0}"
+YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS="${YOUTUBE_VIDEO_PRELOAD_EXTRA_URLS:-https://www.youtube.com/watch?v=C1ZicUtxD-0 https://www.youtube.com/watch?v=BhvS39zQAnE}"
 YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT="${YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT:-6}"
 YOUTUBE_VIDEO_PRELOAD_MAX_TIME="${YOUTUBE_VIDEO_PRELOAD_MAX_TIME:-18}"
 YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT="${YOUTUBE_VIDEO_PRELOAD_HOST_LIMIT:-80}"
+YOUTUBE_VIDEO_PRELOAD_MANIFEST_LIMIT="${YOUTUBE_VIDEO_PRELOAD_MANIFEST_LIMIT:-4}"
+YOUTUBE_VIDEO_PRELOAD_PLAYLIST_LIMIT="${YOUTUBE_VIDEO_PRELOAD_PLAYLIST_LIMIT:-3}"
 RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
 VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
@@ -480,6 +482,77 @@ domain_file_has_googlevideo() {
 	' "$1"
 }
 
+append_youtube_video_hosts_from_file() {
+	source_file="$1"
+	hosts_file="$2"
+	[ -s "$source_file" ] || return 0
+	grep -Eo '[A-Za-z0-9][A-Za-z0-9.-]*\.(googlevideo|c\.youtube)\.com' "$source_file" 2>/dev/null \
+		| tr '[:upper:]' '[:lower:]' >> "$hosts_file"
+}
+
+extract_youtube_manifest_urls() {
+	source_file="$1"
+	[ -s "$source_file" ] || return 0
+	sed \
+		-e 's#\\/#/#g' \
+		-e 's#\\u0026#\&#g' \
+		-e 's#\\u003d#=#g' \
+		-e 's#\\u003f#?#g' \
+		-e 's#\\u0025#%#g' \
+		-e 's#&amp;#\&#g' \
+		"$source_file" 2>/dev/null \
+		| grep -Eo 'https://manifest\.googlevideo\.com[^"<>[:space:]\\]+' \
+		| sed 's/[),;]*$//' \
+		| awk 'NF && !seen[$0]++'
+}
+
+preload_youtube_manifest_hosts() {
+	socks_port="$1"
+	page_file="$2"
+	hosts_file="$3"
+	file_prefix="$4"
+	manifest_urls_file="$tmp_dir/${file_prefix}.manifest.urls"
+	extract_youtube_manifest_urls "$page_file" \
+		| head -n "$YOUTUBE_VIDEO_PRELOAD_MANIFEST_LIMIT" > "$manifest_urls_file"
+	[ -s "$manifest_urls_file" ] || return 0
+
+	manifest_index=0
+	while IFS= read -r manifest_url || [ -n "$manifest_url" ]; do
+		[ -n "$manifest_url" ] || continue
+		manifest_file="$tmp_dir/${file_prefix}.manifest.${manifest_index}.m3u8"
+		playlist_urls_file="$tmp_dir/${file_prefix}.manifest.${manifest_index}.playlist.urls"
+		manifest_index=$((manifest_index + 1))
+		if ! "$curl_bin" -k -L -sS \
+			--socks5-hostname "127.0.0.1:$socks_port" \
+			-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36" \
+			--connect-timeout "$YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT" \
+			--max-time "$YOUTUBE_VIDEO_PRELOAD_MAX_TIME" \
+			"$manifest_url" -o "$manifest_file" >/dev/null 2>&1; then
+			continue
+		fi
+		append_youtube_video_hosts_from_file "$manifest_file" "$hosts_file"
+		extract_youtube_manifest_urls "$manifest_file" \
+			| grep '/playlist/' \
+			| head -n "$YOUTUBE_VIDEO_PRELOAD_PLAYLIST_LIMIT" > "$playlist_urls_file"
+		[ -s "$playlist_urls_file" ] || continue
+
+		playlist_index=0
+		while IFS= read -r playlist_url || [ -n "$playlist_url" ]; do
+			[ -n "$playlist_url" ] || continue
+			playlist_file="$tmp_dir/${file_prefix}.manifest.${manifest_index}.playlist.${playlist_index}.m3u8"
+			playlist_index=$((playlist_index + 1))
+			if "$curl_bin" -k -L -sS \
+				--socks5-hostname "127.0.0.1:$socks_port" \
+				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/125 Safari/537.36" \
+				--connect-timeout "$YOUTUBE_VIDEO_PRELOAD_CONNECT_TIMEOUT" \
+				--max-time "$YOUTUBE_VIDEO_PRELOAD_MAX_TIME" \
+				"$playlist_url" -o "$playlist_file" >/dev/null 2>&1; then
+				append_youtube_video_hosts_from_file "$playlist_file" "$hosts_file"
+			fi
+		done < "$playlist_urls_file"
+	done < "$manifest_urls_file"
+}
+
 preload_youtube_video_hosts() {
 	set_name="$1"
 	tmp_set="$2"
@@ -516,8 +589,8 @@ preload_youtube_video_hosts() {
 			continue
 		fi
 
-		grep -Eo '[A-Za-z0-9.-]+\.googlevideo\.com' "$page_file" 2>/dev/null \
-			| tr '[:upper:]' '[:lower:]' >> "$hosts_file"
+		append_youtube_video_hosts_from_file "$page_file" "$hosts_file"
+		preload_youtube_manifest_hosts "$socks_port" "$page_file" "$hosts_file" "${set_name}.youtube_video.${url_index}"
 	done < "$urls_file"
 
 	[ -s "$hosts_file" ] || return 0
