@@ -1,3 +1,6 @@
+*v1.719 (16 Jun 2026) -* main
+*Fixes GitHub update validation for the new `S99unblock refresh` crontab entry, so router updates can stage the cron file successfully.*
+
 *v1.718 (16 Jun 2026) -* main
 *Documents dnsmasq/UDP/TPROXY behavior, installs scheduled refresh through S99unblock, and adds adaptive dnsmasq/ndnproxy refresh plus 30-second runtime Vless dedupe so route intersections are cleaned without constant heavy DNS refreshes.*
 

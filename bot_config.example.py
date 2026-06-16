@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.718
+# ВЕРСИЯ СКРИПТА v1.719
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.

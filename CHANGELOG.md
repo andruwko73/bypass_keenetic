@@ -1,3 +1,8 @@
+<a name="1.719"></a>
+# [1.719] - 16 Jun 2026
+
+- Fixes GitHub update validation for the new `S99unblock refresh` crontab entry, so v1.718+ updates no longer fail while staging the cron file.
+
 <a name="1.718"></a>
 # [1.718] - 16 Jun 2026
 

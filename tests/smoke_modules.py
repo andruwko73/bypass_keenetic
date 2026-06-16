@@ -1190,6 +1190,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'Using Keenetic ndnproxy fallback, preloading ipset' in update_script
     assert '/opt/bin/unblock_ipset.sh &' not in update_script
     assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab"' in script
+    assert '"$stage_dir/crontab" "S99unblock refresh" "crontab"' in script
     assert 'mv "$stage_dir/crontab" /opt/etc/crontab' in script
     assert 'install_unblock_ipset_cron_job()' in script
     assert "grep -v '/opt/bin/unblock_ipset.sh' | grep -v '/opt/etc/init.d/S99unblock refresh'" in script
