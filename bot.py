@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.711, последнее изменение: 15.06.2026
+#  Файл: bot.py, Версия v1.712, последнее изменение: 16.06.2026
 
 import subprocess
 import os
@@ -4654,16 +4654,32 @@ def _schedule_router_reboot(delay_seconds=5):
     )
 
 
+def _refresh_dns_override_runtime(restart_dnsmasq=False):
+    if restart_dnsmasq:
+        subprocess.run(
+            ['/opt/etc/init.d/S56dnsmasq', 'restart'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    subprocess.run(
+        ['/opt/bin/unblock_update.sh'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
 def _set_dns_override(enabled):
     _save_bot_autostart(True)
     if enabled:
         if _dns_override_enabled():
-            subprocess.run(['/opt/etc/init.d/S56dnsmasq', 'restart'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-            subprocess.run(['/opt/bin/unblock_update.sh'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            _refresh_dns_override_runtime(restart_dnsmasq=True)
             return 'DNS Override уже включён. dnsmasq перезапущен, списки и ipset обновлены.'
         os.system("ndmc -c 'opkg dns-override'")
         time.sleep(2)
         os.system("ndmc -c 'system configuration save'")
+        _refresh_dns_override_runtime(restart_dnsmasq=True)
         _schedule_router_reboot()
         return '✅ DNS Override включен. Роутер будет автоматически перезагружен через несколько секунд.'
     if not _dns_override_enabled():
@@ -4671,6 +4687,7 @@ def _set_dns_override(enabled):
     os.system("ndmc -c 'no opkg dns-override'")
     time.sleep(2)
     os.system("ndmc -c 'system configuration save'")
+    _refresh_dns_override_runtime(restart_dnsmasq=False)
     _schedule_router_reboot()
     return '✅ DNS Override выключен. Роутер будет автоматически перезагружен через несколько секунд.'
 

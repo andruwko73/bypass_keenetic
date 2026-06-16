@@ -1,3 +1,10 @@
+<a name="1.712"></a>
+# [1.712] - 16 Jun 2026
+
+- Refreshes `dnsmasq`/`ipset` state immediately after DNS Override is enabled or disabled, so the router card no longer keeps stale ndnproxy refresh data after switching back to dnsmasq.
+- Repairs preserved service route files during install/update when the shared service catalog gains new addresses, keeping YouTube, Telegram, Gemini and Chrome Remote Desktop fully assigned to their selected protocol instead of showing as partially routed.
+- Keeps the source route files and live runtime ipsets free of cross-protocol intersections after GitHub update and rollback cycles.
+
 <a name="1.711"></a>
 # [1.711] - 15 Jun 2026
 

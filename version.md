@@ -1,3 +1,6 @@
+*v1.712 (16 Jun 2026) -* main
+*Refreshes route/ipset state immediately after DNS Override changes and repairs preserved service route files when the shared service catalog gains new addresses, preventing partially routed YouTube/Telegram service cards after updates.*
+
 *v1.711 (15 Jun 2026) -* main
 *Keeps the transition to dnsmasq controlled by the existing DNS Override buttons, removes the heavy YouTube watch/manifest ipset preload, and reduces router CPU pressure in web status, netfilter hooks, UDP/QUIC drift checks, stream guard, and background YouTube failover.*
 

@@ -1194,6 +1194,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '/opt/bin/unblock_update.sh > /dev/null 2>&1 || true' in script
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source
+    assert 'def _refresh_dns_override_runtime(restart_dnsmasq=False)' in bot_source
+    assert "['/opt/etc/init.d/S56dnsmasq', 'restart']" in bot_source
+    assert bot_source.count('_refresh_dns_override_runtime(restart_dnsmasq=True)') == 2
+    assert bot_source.count('_refresh_dns_override_runtime(restart_dnsmasq=False)') == 2
+    assert bot_source.find("ndmc -c 'opkg dns-override'") < bot_source.find('_refresh_dns_override_runtime(restart_dnsmasq=True)', bot_source.find("ndmc -c 'opkg dns-override'"))
+    assert bot_source.find("ndmc -c 'no opkg dns-override'") < bot_source.find('_refresh_dns_override_runtime(restart_dnsmasq=False)', bot_source.find("ndmc -c 'no opkg dns-override'"))
     reboot_block = script.split('if [ "$1" = "-reboot" ]; then', 1)[1].split('fi', 1)[0]
     assert "opkg dns-override" not in reboot_block
     assert 'detect_ipset_type()' in script
