@@ -1318,6 +1318,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES' in ipset_script
     assert 'YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"' in ipset_script
     assert 'for sample_dns in $extra_dns_servers; do' in ipset_script
+    assert "sed 's/\\r$//' \"$route_file\" | grep -Fxs \"$marker\"" in ipset_script
     assert 'YOUTUBE_VIDEO_PRELOAD' not in ipset_script
     assert 'preload_youtube_video_hosts' not in ipset_script
     assert '--socks5-hostname "127.0.0.1:$socks_port"' not in ipset_script

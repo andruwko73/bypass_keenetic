@@ -330,7 +330,7 @@ route_file_has_markers() {
 	shift
 	[ -s "$route_file" ] || return 1
 	for marker in "$@"; do
-		grep -Fxs "$marker" "$route_file" >/dev/null 2>&1 && return 0
+		sed 's/\r$//' "$route_file" | grep -Fxs "$marker" >/dev/null 2>&1 && return 0
 	done
 	return 1
 }

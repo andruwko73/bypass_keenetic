@@ -1,3 +1,6 @@
+*v1.713 (16 Jun 2026) -* main
+*Normalizes CRLF route files while detecting the selected YouTube protocol for runtime ipset dedupe, keeping live `unblockvless` and `unblockvless2` sets free of shared DNS-resolved IPs.*
+
 *v1.712 (16 Jun 2026) -* main
 *Refreshes route/ipset state immediately after DNS Override changes and repairs preserved service route files when the shared service catalog gains new addresses, preventing partially routed YouTube/Telegram service cards after updates.*
 

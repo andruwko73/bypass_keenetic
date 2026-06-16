@@ -1,3 +1,8 @@
+<a name="1.713"></a>
+# [1.713] - 16 Jun 2026
+
+- Normalizes CRLF route files while detecting the selected YouTube protocol for runtime ipset dedupe, so DNS-resolved Google/YouTube IPs are removed from the non-YouTube Vless set instead of remaining in both `unblockvless` and `unblockvless2`.
+
 <a name="1.712"></a>
 # [1.712] - 16 Jun 2026
 
