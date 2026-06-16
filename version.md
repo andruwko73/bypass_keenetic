@@ -1,3 +1,6 @@
+*v1.714 (16 Jun 2026) -* main
+*Adds short timeouts to local DNS lookups during ipset refresh, preventing GitHub updates from hanging on slow domain resolution and reducing router load during dnsmasq route rebuilds.*
+
 *v1.713 (16 Jun 2026) -* main
 *Normalizes CRLF route files while detecting the selected YouTube protocol for runtime ipset dedupe, keeping live `unblockvless` and `unblockvless2` sets free of shared DNS-resolved IPs.*
 

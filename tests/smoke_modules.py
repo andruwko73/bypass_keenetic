@@ -1304,7 +1304,6 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'unblockvless2udp "tmp_unblockvless2udp_$$"' in ipset_script
     assert 'unblocktrojudp "tmp_unblocktrojudp_$$"' in ipset_script
     assert 'resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"' in ipset_script
-    assert 'dig +short AAAA "$domain"' in ipset_script
     assert 'unblockvless6 "tmp_unblockvless6_$$"' in ipset_script
     assert 'unblockvless2v6 "tmp_unblockvless2v6_$$"' in ipset_script
     assert 'udp_quic_domain "$domain"' in ipset_script
@@ -1318,6 +1317,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'from service_catalog import UDP_QUIC_EXCLUDE_ENTRIES' in ipset_script
     assert 'YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"' in ipset_script
     assert 'for sample_dns in $extra_dns_servers; do' in ipset_script
+    assert 'dig +time=2 +tries=1 +short "$domain" @"$DNS_HOST" -p "$DNS_PORT"' in ipset_script
+    assert 'dig +time=2 +tries=1 +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT"' in ipset_script
     assert "sed 's/\\r$//' \"$route_file\" | grep -Fxs \"$marker\"" in ipset_script
     assert 'YOUTUBE_VIDEO_PRELOAD' not in ipset_script
     assert 'preload_youtube_video_hosts' not in ipset_script

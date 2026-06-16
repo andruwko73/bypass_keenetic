@@ -1,3 +1,8 @@
+<a name="1.714"></a>
+# [1.714] - 16 Jun 2026
+
+- Adds short `dig` timeouts to local DNS lookups during `unblock_ipset.sh`, so a slow or stalled domain resolve cannot hold GitHub update, DNS Override refresh, or scheduled dnsmasq route rebuilds for minutes.
+
 <a name="1.713"></a>
 # [1.713] - 16 Jun 2026
 

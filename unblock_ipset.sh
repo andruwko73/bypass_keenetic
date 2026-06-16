@@ -378,7 +378,7 @@ resolve_domains() {
 					;;
 			esac
 			{
-				dig +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+				dig +time=2 +tries=1 +short "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
 				for sample_dns in $extra_dns_servers; do
 					dig +time=2 +tries=1 +short "$domain" @"$sample_dns" 2>/dev/null
 				done
@@ -422,7 +422,7 @@ resolve_ipv6_domains() {
 					;;
 			esac
 			{
-				dig +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
+				dig +time=2 +tries=1 +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
 				for sample_dns in $extra_dns_servers; do
 					dig +time=2 +tries=1 +short AAAA "$domain" @"$sample_dns" 2>/dev/null
 				done
