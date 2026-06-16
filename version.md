@@ -1,3 +1,6 @@
+*v1.717 (16 Jun 2026) -* main
+*Lets long post-update ipset refreshes finish in the background instead of killing them, preventing partially swapped runtime sets while still letting web updates restart the bot promptly.*
+
 *v1.716 (16 Jun 2026) -* main
 *Uses BusyBox-safe CR stripping when detecting route markers, so YouTube protocol detection and runtime ipset dedupe work with CRLF route files on the router.*
 

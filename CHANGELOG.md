@@ -1,3 +1,8 @@
+<a name="1.717"></a>
+# [1.717] - 16 Jun 2026
+
+- Lets long post-update ipset refreshes finish in the background instead of killing them, preventing partially swapped runtime sets while still letting web updates restart the bot promptly.
+
 <a name="1.716"></a>
 # [1.716] - 16 Jun 2026
 

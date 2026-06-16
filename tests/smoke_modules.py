@@ -1193,7 +1193,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '/opt/etc/init.d/S10cron restart' in script
     assert 'run_update_ipset_refresh()' in script
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
-    assert 'continuing update with previous runtime sets' in script
+    assert 'continuing update while refresh finishes in background' in script
     assert 'run_update_ipset_refresh "Post-update"' in script
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source

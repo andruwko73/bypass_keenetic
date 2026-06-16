@@ -233,11 +233,7 @@ run_update_ipset_refresh() {
   elapsed=0
   while kill -0 "$refresh_pid" >/dev/null 2>&1; do
     if [ "$elapsed" -ge "$timeout_seconds" ] 2>/dev/null; then
-      echo "${label}: ipset refresh is still running after ${timeout_seconds}s; continuing update with previous runtime sets."
-      kill "$refresh_pid" >/dev/null 2>&1 || true
-      lock_pid="$(cat /tmp/bypass-unblock-ipset.lock/pid 2>/dev/null | tr -cd '0-9')"
-      [ -n "$lock_pid" ] && kill "$lock_pid" >/dev/null 2>&1 || true
-      sleep 2
+      echo "${label}: ipset refresh is still running after ${timeout_seconds}s; continuing update while refresh finishes in background."
       return 0
     fi
     sleep 2
