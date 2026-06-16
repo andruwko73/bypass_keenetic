@@ -1,3 +1,6 @@
+*v1.723 (16 Jun 2026) -* main
+*Adds observed YouTube short-link and thumbnail edge IPs to the YouTube/Vless 2 route so cached client DNS cannot miss the bypass on the first video load.*
+
 *v1.722 (16 Jun 2026) -* main
 *Pins YouTube player API frontends to the YouTube/Vless 2 route so selected videos do not wait on mismatched Google service routing before playback starts.*
 

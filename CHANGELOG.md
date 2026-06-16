@@ -1,3 +1,8 @@
+<a name="1.723"></a>
+# [1.723] - 16 Jun 2026
+
+- Adds observed YouTube short-link and thumbnail edge IPs to the YouTube/Vless 2 route so cached client DNS cannot miss the bypass on the first video load.
+
 <a name="1.722"></a>
 # [1.722] - 16 Jun 2026
 

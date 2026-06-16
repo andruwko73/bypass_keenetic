@@ -61,9 +61,25 @@ YOUTUBE_PLAYER_API_IP_ENTRIES = [
     '216.239.38.223',
 ]
 
+YOUTUBE_EDGE_IP_ENTRIES = [
+    '142.250.150.119',
+    '142.251.1.119',
+    '172.253.130.119',
+    '173.194.222.119',
+    '173.194.73.119',
+    '209.85.233.91',
+    '209.85.233.93',
+    '209.85.233.119',
+    '209.85.233.136',
+    '209.85.233.190',
+    '64.233.162.119',
+    '74.125.205.119',
+]
+
 YOUTUBE_UNBLOCK_ENTRIES = [
     *YOUTUBE_CDN_IP_RANGES,
     *YOUTUBE_PLAYER_API_IP_ENTRIES,
+    *YOUTUBE_EDGE_IP_ENTRIES,
     'youtube.com',
     'www.youtube.com',
     'c.youtube.com',
