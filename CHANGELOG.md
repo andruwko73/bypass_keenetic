@@ -1,3 +1,8 @@
+<a name="1.720"></a>
+# [1.720] - 16 Jun 2026
+
+- Cleans Vixie cron metadata comments while reinstalling the active root crontab, preventing repeated GitHub update and rollback tests from accumulating duplicate generated comments.
+
 <a name="1.719"></a>
 # [1.719] - 16 Jun 2026
 

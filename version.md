@@ -1,3 +1,6 @@
+*v1.720 (16 Jun 2026) -* main
+*Cleans generated Vixie cron metadata comments when reinstalling the active root crontab, keeping repeated update and rollback tests tidy while preserving real cron jobs.*
+
 *v1.719 (16 Jun 2026) -* main
 *Fixes GitHub update validation for the new `S99unblock refresh` crontab entry, so router updates can stage the cron file successfully.*
 
