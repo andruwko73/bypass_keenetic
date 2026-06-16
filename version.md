@@ -1,3 +1,6 @@
+*v1.715 (16 Jun 2026) -* main
+*Bounds the post-update ipset refresh and removes the duplicate foreground rebuild, so web updates can finish and restart the bot even when dnsmasq route resolution is slow.*
+
 *v1.714 (16 Jun 2026) -* main
 *Adds short timeouts to local DNS lookups during ipset refresh, preventing GitHub updates from hanging on slow domain resolution and reducing router load during dnsmasq route rebuilds.*
 

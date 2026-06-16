@@ -1191,7 +1191,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab"' in script
     assert 'mv "$stage_dir/crontab" /opt/etc/crontab' in script
     assert '/opt/etc/init.d/S10cron restart' in script
-    assert '/opt/bin/unblock_update.sh > /dev/null 2>&1 || true' in script
+    assert 'run_update_ipset_refresh()' in script
+    assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
+    assert 'continuing update with previous runtime sets' in script
+    assert 'run_update_ipset_refresh "Post-update"' in script
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source
     assert 'def _refresh_dns_override_runtime(restart_dnsmasq=False)' in bot_source
@@ -1542,6 +1545,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "localportvless_tproxy = '11812'" in script_source
     assert 'Refreshing ipset after proxy core startup.' in script_source
     assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')
+    assert script_source.find('/opt/etc/init.d/S10cron restart') < script_source.find('start_preferred_core_service || exit 1')
+    assert script_source.find('run_update_ipset_refresh "Post-update"') > script_source.find('Refreshing ipset after proxy core startup.')
     assert 'write_update_rollback_script()' in script_source
     assert 'ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh' in script_source
     assert 'mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py' in script_source

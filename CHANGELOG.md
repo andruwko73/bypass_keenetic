@@ -1,3 +1,8 @@
+<a name="1.715"></a>
+# [1.715] - 16 Jun 2026
+
+- Bounds the post-update `unblock_update.sh` refresh and removes the duplicate foreground rebuild, so web updates can complete and restart the bot even when dnsmasq route resolution is slow.
+
 <a name="1.714"></a>
 # [1.714] - 16 Jun 2026
 

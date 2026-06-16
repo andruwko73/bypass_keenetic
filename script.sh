@@ -224,6 +224,33 @@ start_preferred_core_service() {
   return 0
 }
 
+run_update_ipset_refresh() {
+  label="$1"
+  timeout_seconds="${UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75}"
+  [ -x /opt/bin/unblock_update.sh ] || return 0
+  /opt/bin/unblock_update.sh >/tmp/bypass-update-ipset-refresh.log 2>&1 &
+  refresh_pid="$!"
+  elapsed=0
+  while kill -0 "$refresh_pid" >/dev/null 2>&1; do
+    if [ "$elapsed" -ge "$timeout_seconds" ] 2>/dev/null; then
+      echo "${label}: ipset refresh is still running after ${timeout_seconds}s; continuing update with previous runtime sets."
+      kill "$refresh_pid" >/dev/null 2>&1 || true
+      lock_pid="$(cat /tmp/bypass-unblock-ipset.lock/pid 2>/dev/null | tr -cd '0-9')"
+      [ -n "$lock_pid" ] && kill "$lock_pid" >/dev/null 2>&1 || true
+      sleep 2
+      return 0
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+  wait "$refresh_pid" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "${label}: ipset refresh exited with code ${rc}; continuing update with preserved runtime sets."
+  fi
+  return 0
+}
+
 configure_core_proxy_service() {
   core_config_source="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/vmessconfig.json"
 
@@ -1237,14 +1264,13 @@ if [ "$1" = "-update" ]; then
     cleanup_update_artifacts 3
     echo "Обновления скачены, права настроены."
 
-    /opt/bin/unblock_update.sh > /dev/null 2>&1 || true
     /opt/etc/init.d/S10cron restart > /dev/null 2>&1 || /opt/etc/init.d/S10cron start > /dev/null 2>&1 || true
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
     start_preferred_core_service || exit 1
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1
     sleep 2
     echo "Refreshing ipset after proxy core startup."
-    /opt/bin/unblock_update.sh > /dev/null 2>&1 || true
+    run_update_ipset_refresh "Post-update"
 
     bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
     bot_new_version=$(grep -m1 "ВЕРСИЯ" "$BOT_MAIN_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
