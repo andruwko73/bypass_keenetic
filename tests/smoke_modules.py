@@ -1183,6 +1183,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     ipset_boot_script = (ROOT / '100-ipset.sh').read_text(encoding='utf-8')
     redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     crontab = (ROOT / 'crontab').read_text(encoding='utf-8')
+    s99unblock = (ROOT / 'S99unblock').read_text(encoding='utf-8')
 
     assert 'flush_set' not in update_script
     assert 'Use DNS Override ON button to make dnsmasq the primary DNS' in update_script
@@ -1190,7 +1191,27 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '/opt/bin/unblock_ipset.sh &' not in update_script
     assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab"' in script
     assert 'mv "$stage_dir/crontab" /opt/etc/crontab' in script
+    assert 'install_unblock_ipset_cron_job()' in script
+    assert "grep -v '/opt/bin/unblock_ipset.sh' | grep -v '/opt/etc/init.d/S99unblock refresh'" in script
+    assert "printf '%s\\n' '*/15 * * * * /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1'" in script
+    assert 'install_unblock_ipset_cron_job || true' in script
+    assert 'install_unblock_ipset_cron_job || true' in bootstrap
+    assert 'chmod 600 /opt/var/spool/cron/crontabs/root' in script
+    assert 'chmod 600 /opt/var/spool/cron/crontabs/root' in bootstrap
     assert '/opt/etc/init.d/S10cron restart' in script
+    assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99unblock"' in script
+    assert 'mv "$stage_dir/S99unblock" /opt/etc/init.d/S99unblock' in script
+    assert '/opt/etc/init.d/S99unblock restart' in script
+    assert 'BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
+    assert 'BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600' in s99unblock
+    assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-30' in s99unblock
+    assert 'run_refresh_if_due()' in s99unblock
+    assert 'refresh)' in s99unblock
+    assert 'while :' in s99unblock
+    assert '/opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock
+    assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
+    assert "awk 'NR == FNR { seen[$0] = 1; next } seen[$0]'" in s99unblock
+    assert '*unblock_ipset.sh*) continue ;;' in s99unblock
     assert 'run_update_ipset_refresh()' in script
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
     assert 'continuing update while refresh finishes in background' in script
@@ -1417,7 +1438,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '-p udp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812' in redirect_script
     assert '-p udp -m set --match-set unblockvless2 dst -j REDIRECT --to-ports 10814' in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
-    assert '*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1' in crontab
+    assert '*/15 * * * * root /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1' in crontab
 
 
 def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():

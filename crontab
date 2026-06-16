@@ -9,4 +9,4 @@ HOME=/
 #02 4 * * * root /opt/bin/run-parts /opt/etc/cron.daily>
 #22 4 * * 0 root /opt/bin/run-parts /opt/etc/cron.weekly<------>
 #42 4 1 * * root /opt/bin/run-parts /opt/etc/cron.monthly<----->
-*/15 * * * * root /opt/bin/unblock_ipset.sh >/dev/null 2>&1
+*/15 * * * * root /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1

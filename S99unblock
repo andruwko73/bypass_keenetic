@@ -1,3 +1,197 @@
 #!/bin/sh
-[ "$1" != "start" ] && exit 0
-/opt/bin/unblock_ipset.sh &
+
+PID_FILE="${BYPASS_UNBLOCK_REFRESH_PID_FILE:-/opt/var/run/bypass-unblock-scheduler.pid}"
+INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900}"
+DNSMASQ_INTERVAL_SECONDS="${BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600}"
+NDNPROXY_INTERVAL_SECONDS="${BYPASS_UNBLOCK_NDNPROXY_REFRESH_INTERVAL_SECONDS:-$INTERVAL_SECONDS}"
+DEDUP_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-30}"
+LOG_FILE="${BYPASS_UNBLOCK_REFRESH_LOG:-/opt/var/log/bypass-unblock-scheduler.log}"
+UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
+STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
+
+is_running() {
+    [ -s "$PID_FILE" ] || return 1
+    pid="$(sed -n '1p' "$PID_FILE" 2>/dev/null | tr -cd '0-9')"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+run_refresh() {
+    [ -x /opt/bin/unblock_ipset.sh ] || return 0
+    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+    /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true
+}
+
+detect_dns_backend() {
+    dns_lines="$(netstat -lnptu 2>/dev/null | grep -E ':53[[:space:]]' || true)"
+    if printf '%s\n' "$dns_lines" | grep -q 'dnsmasq'; then
+        printf '%s\n' dnsmasq
+        return
+    fi
+    if printf '%s\n' "$dns_lines" | grep -q 'ndnproxy'; then
+        printf '%s\n' ndnproxy
+        return
+    fi
+    if pidof dnsmasq >/dev/null 2>&1; then
+        printf '%s\n' dnsmasq
+        return
+    fi
+    if pidof ndnproxy >/dev/null 2>&1; then
+        printf '%s\n' ndnproxy
+        return
+    fi
+    printf '%s\n' unknown
+}
+
+current_refresh_interval() {
+    case "$(detect_dns_backend)" in
+        dnsmasq) printf '%s\n' "$DNSMASQ_INTERVAL_SECONDS" ;;
+        *) printf '%s\n' "$NDNPROXY_INTERVAL_SECONDS" ;;
+    esac
+}
+
+status_updated_at() {
+    [ -r "$STATUS_FILE" ] || {
+        printf '%s\n' 0
+        return
+    }
+    updated_at="$(sed -n 's/.*"updated_at"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$STATUS_FILE" 2>/dev/null | head -n 1)"
+    [ -n "$updated_at" ] || updated_at=0
+    printf '%s\n' "$updated_at"
+}
+
+refresh_due() {
+    last_refresh="$1"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    interval="$(current_refresh_interval)"
+    case "$now:$last_refresh:$interval" in
+        *[!0-9:]*|0:*|*:0) return 0 ;;
+    esac
+    [ "$last_refresh" -eq 0 ] 2>/dev/null && return 0
+    [ $((now - last_refresh)) -ge "$interval" ] 2>/dev/null
+}
+
+run_refresh_if_due() {
+    if refresh_due "$(status_updated_at)"; then
+        run_refresh
+    fi
+}
+
+youtube_route_protocol() {
+    youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com"
+    for marker in $youtube_markers; do
+        if grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt" >/dev/null 2>&1; then
+            printf '%s\n' "vless2"
+            return
+        fi
+    done
+    printf '%s\n' "vless"
+}
+
+write_ipset_members() {
+    set_name="$1"
+    target_file="$2"
+    ipset list "$set_name" 2>/dev/null | awk '
+        $0 == "Members:" { members = 1; next }
+        members && NF { print $1 }
+    ' | sort -u > "$target_file"
+}
+
+dedupe_ipset_pair() {
+    loser_set="$1"
+    winner_set="$2"
+    tmp_base="/tmp/bypass-runtime-dedupe.$$.$loser_set.$winner_set"
+    loser_file="${tmp_base}.loser"
+    winner_file="${tmp_base}.winner"
+    shared_file="${tmp_base}.shared"
+
+    write_ipset_members "$loser_set" "$loser_file"
+    write_ipset_members "$winner_set" "$winner_file"
+    awk 'NR == FNR { seen[$0] = 1; next } seen[$0]' "$winner_file" "$loser_file" > "$shared_file" 2>/dev/null || true
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        ipset del "$loser_set" "$entry" >/dev/null 2>&1 || true
+    done < "$shared_file"
+    rm -f "$loser_file" "$winner_file" "$shared_file"
+}
+
+run_runtime_dedupe() {
+    [ "${DEDUP_INTERVAL_SECONDS:-0}" -gt 0 ] 2>/dev/null || return 0
+    lock_dir="/tmp/bypass-runtime-dedupe.lock"
+    mkdir "$lock_dir" 2>/dev/null || return 0
+    trap 'rm -rf "$lock_dir" 2>/dev/null || true' EXIT INT TERM
+    youtube_route="$(youtube_route_protocol)"
+    if [ "$youtube_route" = "vless2" ]; then
+        dedupe_ipset_pair unblockvless unblockvless2
+        dedupe_ipset_pair unblockvlessudp unblockvless2udp
+        dedupe_ipset_pair unblockvless6 unblockvless2v6
+    else
+        dedupe_ipset_pair unblockvless2 unblockvless
+        dedupe_ipset_pair unblockvless2udp unblockvlessudp
+        dedupe_ipset_pair unblockvless2v6 unblockvless6
+    fi
+    rm -rf "$lock_dir"
+    trap - EXIT INT TERM
+}
+
+start_scheduler() {
+    if is_running; then
+        exit 0
+    fi
+    mkdir -p "$(dirname "$PID_FILE")" 2>/dev/null || true
+    (
+        while :; do
+            run_refresh_if_due
+            run_runtime_dedupe
+            sleep_seconds="$DEDUP_INTERVAL_SECONDS"
+            [ "$sleep_seconds" -gt 0 ] 2>/dev/null || sleep_seconds="$INTERVAL_SECONDS"
+            sleep "$sleep_seconds" &
+            wait "$!" || exit 0
+        done
+    ) &
+    echo "$!" > "$PID_FILE"
+}
+
+stop_scheduler() {
+    if is_running; then
+        pid="$(sed -n '1p' "$PID_FILE" 2>/dev/null | tr -cd '0-9')"
+        for child in $(pgrep -P "$pid" 2>/dev/null); do
+            child_cmd="$(tr '\0' ' ' < "/proc/$child/cmdline" 2>/dev/null || true)"
+            case "$child_cmd" in
+                *unblock_ipset.sh*) continue ;;
+            esac
+            kill "$child" >/dev/null 2>&1 || true
+        done
+        kill "$pid" >/dev/null 2>&1 || true
+    fi
+    rm -f "$PID_FILE"
+}
+
+case "$1" in
+    start)
+        start_scheduler
+        ;;
+    stop)
+        stop_scheduler
+        ;;
+    restart)
+        stop_scheduler
+        start_scheduler
+        ;;
+    refresh)
+        run_refresh_if_due
+        run_runtime_dedupe
+        ;;
+    status)
+        if is_running; then
+            echo "bypass unblock scheduler is running."
+        else
+            echo "bypass unblock scheduler is stopped."
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|refresh|status}"
+        exit 1
+        ;;
+esac

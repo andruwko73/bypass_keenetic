@@ -291,6 +291,24 @@ remove_added_path() {
     fi
 }
 
+install_unblock_ipset_cron_job() {
+    cron_tmp="/tmp/bypass-unblock-crontab.\$\$"
+    {
+        crontab -l 2>/dev/null | grep -v '/opt/bin/unblock_ipset.sh' | grep -v '/opt/etc/init.d/S99unblock refresh' || true
+        printf '%s\n' '*/15 * * * * /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1'
+    } > "\$cron_tmp"
+    if crontab "\$cron_tmp" >/dev/null 2>&1; then
+        rm -f "\$cron_tmp"
+        chown root:root /opt/var/spool/cron /opt/var/spool/cron/crontabs /opt/var/spool/cron/crontabs/root 2>/dev/null || true
+        chmod 700 /opt/var/spool/cron /opt/var/spool/cron/crontabs 2>/dev/null || true
+        chmod 600 /opt/var/spool/cron/crontabs/root 2>/dev/null || true
+        return 0
+    fi
+    rm -f "\$cron_tmp"
+    echo "Warning: failed to install active root crontab for unblock_ipset.sh."
+    return 1
+}
+
 restore_path /opt/etc/bot/main.py
 restore_path /opt/etc/bot/installer.py
 restore_path /opt/etc/bot/installer.env
@@ -368,6 +386,8 @@ else
     /opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99telegram_bot start >/dev/null 2>&1 || true
 fi
 /opt/bin/unblock_update.sh >/dev/null 2>&1 || true
+install_unblock_ipset_cron_job || true
+/opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
 /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || true

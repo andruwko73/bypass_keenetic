@@ -1,3 +1,10 @@
+<a name="1.718"></a>
+# [1.718] - 16 Jun 2026
+
+- Documented dnsmasq operation, UDP/TPROXY responsibilities, and pool maintenance behavior.
+- Installs the scheduled refresh into the active Entware root crontab through `S99unblock refresh` during install, update and rollback, so route intersections are cleaned on schedule instead of depending only on the saved `/opt/etc/crontab` file.
+- Turns `S99unblock` into a lightweight fallback scheduler: 15-minute refresh for ndnproxy fallback, hourly full refresh for dnsmasq after a recent-status guard, plus 30-second runtime dedupe for `Vless 1` / `Vless 2` ipsets.
+
 <a name="1.717"></a>
 # [1.717] - 16 Jun 2026
 

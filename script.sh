@@ -247,6 +247,24 @@ run_update_ipset_refresh() {
   return 0
 }
 
+install_unblock_ipset_cron_job() {
+  cron_tmp="/tmp/bypass-unblock-crontab.$$"
+  {
+    crontab -l 2>/dev/null | grep -v '/opt/bin/unblock_ipset.sh' | grep -v '/opt/etc/init.d/S99unblock refresh' || true
+    printf '%s\n' '*/15 * * * * /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1'
+  } > "$cron_tmp"
+  if crontab "$cron_tmp" >/dev/null 2>&1; then
+    rm -f "$cron_tmp"
+    chown root:root /opt/var/spool/cron /opt/var/spool/cron/crontabs /opt/var/spool/cron/crontabs/root 2>/dev/null || true
+    chmod 700 /opt/var/spool/cron /opt/var/spool/cron/crontabs 2>/dev/null || true
+    chmod 600 /opt/var/spool/cron/crontabs/root 2>/dev/null || true
+    return 0
+  fi
+  rm -f "$cron_tmp"
+  echo "Warning: failed to install active root crontab for unblock_ipset.sh."
+  return 1
+}
+
 configure_core_proxy_service() {
   core_config_source="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/vmessconfig.json"
 
@@ -590,6 +608,24 @@ ensure_runtime_legacy_paths() {
   fi
 }
 
+install_unblock_ipset_cron_job() {
+  cron_tmp="/tmp/bypass-unblock-crontab.\$\$"
+  {
+    crontab -l 2>/dev/null | grep -v '/opt/bin/unblock_ipset.sh' | grep -v '/opt/etc/init.d/S99unblock refresh' || true
+    printf '%s\n' '*/15 * * * * /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1'
+  } > "\$cron_tmp"
+  if crontab "\$cron_tmp" >/dev/null 2>&1; then
+    rm -f "\$cron_tmp"
+    chown root:root /opt/var/spool/cron /opt/var/spool/cron/crontabs /opt/var/spool/cron/crontabs/root 2>/dev/null || true
+    chmod 700 /opt/var/spool/cron /opt/var/spool/cron/crontabs 2>/dev/null || true
+    chmod 600 /opt/var/spool/cron/crontabs/root 2>/dev/null || true
+    return 0
+  fi
+  rm -f "\$cron_tmp"
+  echo "Warning: failed to install active root crontab for unblock_ipset.sh."
+  return 1
+}
+
 [ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks stop >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray stop >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray stop >/dev/null 2>&1 || true
@@ -601,6 +637,7 @@ restore_file unblock_dnsmasq.sh /opt/bin/unblock_dnsmasq.sh
 restore_file unblock_update.sh /opt/bin/unblock_update.sh
 restore_file dnsmasq.conf /opt/etc/dnsmasq.conf
 restore_file crontab /opt/etc/crontab
+restore_file S99unblock /opt/etc/init.d/S99unblock
 restore_file 100-ipset.sh /opt/etc/ndm/fs.d/100-ipset.sh
 restore_file 100-redirect.sh /opt/etc/ndm/netfilter.d/100-redirect.sh
 restore_file bot.py "\$BOT_MAIN_PATH"
@@ -626,7 +663,9 @@ chmod 755 /opt/bin/unblock_*.sh /opt/etc/ndm/fs.d/100-ipset.sh /opt/etc/ndm/netf
 ensure_runtime_legacy_paths
 
 /opt/bin/unblock_update.sh >/dev/null 2>&1 || true
+install_unblock_ipset_cron_job || true
 [ -x /opt/etc/init.d/S10cron ] && /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S99unblock ] && /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || /opt/etc/init.d/S24xray start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || /opt/etc/init.d/S24v2ray start >/dev/null 2>&1 || true
@@ -1072,6 +1111,8 @@ if [ "$1" = "-install" ]; then
     rm -f /opt/etc/crontab
     curl -o /opt/etc/crontab https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab
     chmod 755 /opt/etc/crontab
+    install_unblock_ipset_cron_job || true
+    [ -x /opt/etc/init.d/S10cron ] && /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
     mkdir -p "$BOT_RUNTIME_DIR"
     install_runtime_modules $BOT_RUNTIME_MODULES
@@ -1080,6 +1121,7 @@ if [ "$1" = "-install" ]; then
     repair_service_route_catalog_drift
     generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
+    /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || /opt/etc/init.d/S99unblock start >/dev/null 2>&1 || true
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
 
     #ndmc -c 'opkg dns-override'
@@ -1135,6 +1177,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab" "$stage_dir/crontab" "unblock_ipset.sh" "crontab" || exit 1
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99unblock" "$stage_dir/S99unblock" "bypass unblock scheduler" "S99unblock" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
     for module in $BOT_RUNTIME_MODULES; do
       stage_runtime_module "$module" "" || exit 1
@@ -1189,6 +1232,7 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S24xray stop > /dev/null 2>&1
     /opt/etc/init.d/S24v2ray stop > /dev/null 2>&1
     /opt/etc/init.d/S22trojan stop > /dev/null 2>&1
+    /opt/etc/init.d/S99unblock stop > /dev/null 2>&1 || true
     echo "Сервисы остановлены."
 
     mkdir -p "$backup_dir"
@@ -1197,6 +1241,7 @@ if [ "$1" = "-update" ]; then
     [ -f /opt/bin/unblock_update.sh ] && mv /opt/bin/unblock_update.sh "$backup_dir"/unblock_update.sh
     [ -f /opt/etc/dnsmasq.conf ] && mv /opt/etc/dnsmasq.conf "$backup_dir"/dnsmasq.conf
     [ -f /opt/etc/crontab ] && mv /opt/etc/crontab "$backup_dir"/crontab
+    [ -f /opt/etc/init.d/S99unblock ] && mv /opt/etc/init.d/S99unblock "$backup_dir"/S99unblock
     [ -f /opt/etc/ndm/fs.d/100-ipset.sh ] && mv /opt/etc/ndm/fs.d/100-ipset.sh "$backup_dir"/100-ipset.sh
     [ -f /opt/etc/ndm/netfilter.d/100-redirect.sh ] && mv /opt/etc/ndm/netfilter.d/100-redirect.sh "$backup_dir"/100-redirect.sh
     if [ -f "$BOT_MAIN_PATH" ]; then
@@ -1238,6 +1283,9 @@ if [ "$1" = "-update" ]; then
     chmod 755 /opt/etc/dnsmasq.conf
     mv "$stage_dir/crontab" /opt/etc/crontab
     chmod 755 /opt/etc/crontab
+    install_unblock_ipset_cron_job || true
+    mv "$stage_dir/S99unblock" /opt/etc/init.d/S99unblock
+    chmod 755 /opt/etc/init.d/S99unblock
 
     configure_core_proxy_service
 
@@ -1267,6 +1315,7 @@ if [ "$1" = "-update" ]; then
     sleep 2
     echo "Refreshing ipset after proxy core startup."
     run_update_ipset_refresh "Post-update"
+    /opt/etc/init.d/S99unblock restart > /dev/null 2>&1 || /opt/etc/init.d/S99unblock start > /dev/null 2>&1 || true
 
     bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
     bot_new_version=$(grep -m1 "ВЕРСИЯ" "$BOT_MAIN_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)

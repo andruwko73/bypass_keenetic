@@ -1,3 +1,6 @@
+*v1.718 (16 Jun 2026) -* main
+*Documents dnsmasq/UDP/TPROXY behavior, installs scheduled refresh through S99unblock, and adds adaptive dnsmasq/ndnproxy refresh plus 30-second runtime Vless dedupe so route intersections are cleaned without constant heavy DNS refreshes.*
+
 *v1.717 (16 Jun 2026) -* main
 *Lets long post-update ipset refreshes finish in the background instead of killing them, preventing partially swapped runtime sets while still letting web updates restart the bot promptly.*
 
