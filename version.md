@@ -1,3 +1,6 @@
+*v1.721 (16 Jun 2026) -* main
+*Fixes web rollback so version/readme metadata and scheduler files are restored together with Python runtime files.*
+
 *v1.720 (16 Jun 2026) -* main
 *Cleans generated Vixie cron metadata comments when reinstalling the active root crontab, keeping repeated update and rollback tests tidy while preserving real cron jobs.*
 

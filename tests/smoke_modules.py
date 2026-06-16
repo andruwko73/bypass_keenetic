@@ -1580,6 +1580,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'mv "$INSTALLER_SERVICE_PATH" "$backup_dir"/S98telegram_bot_installer' in script_source
     assert 'mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot' in script_source
     assert 'restore_file S99telegram_bot "\\$BOT_SERVICE_PATH"' in script_source
+    assert "for name in ('version.md', 'README.md')" in source
+    assert "'crontab': ('/opt/etc/crontab', 0o644)" in source
+    assert "'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755)" in source
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source

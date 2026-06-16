@@ -1,3 +1,8 @@
+<a name="1.721"></a>
+# [1.721] - 16 Jun 2026
+
+- Fixes web rollback so version/readme metadata and scheduler files are restored together with Python runtime files.
+
 <a name="1.720"></a>
 # [1.720] - 16 Jun 2026
 

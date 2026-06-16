@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.720, последнее изменение: 16.06.2026
+#  Файл: bot.py, Версия v1.721, последнее изменение: 16.06.2026
 
 import subprocess
 import os
@@ -4863,6 +4863,9 @@ def _rollback_last_update():
             continue
         if _restore_backup_file(os.path.join(backup_dir, name), os.path.join(BOT_DIR, name), 0o644):
             restored.append(name)
+    for name in ('version.md', 'README.md'):
+        if _restore_backup_file(os.path.join(backup_dir, name), os.path.join(BOT_DIR, name), 0o644):
+            restored.append(name)
     static_source = os.path.join(backup_dir, 'static')
     static_target = os.path.join(BOT_DIR, 'static')
     static_absent_marker = os.path.join(backup_dir, '.static-absent')
@@ -4891,6 +4894,8 @@ def _rollback_last_update():
         'unblock_dnsmasq.sh': ('/opt/bin/unblock_dnsmasq.sh', 0o755),
         'unblock_update.sh': ('/opt/bin/unblock_update.sh', 0o755),
         'dnsmasq.conf': ('/opt/etc/dnsmasq.conf', 0o644),
+        'crontab': ('/opt/etc/crontab', 0o644),
+        'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755),
         '100-ipset.sh': ('/opt/etc/ndm/fs.d/100-ipset.sh', 0o755),
         '100-redirect.sh': ('/opt/etc/ndm/netfilter.d/100-redirect.sh', 0o755),
     }
