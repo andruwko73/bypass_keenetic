@@ -1322,7 +1322,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'for sample_dns in $extra_dns_servers; do' in ipset_script
     assert 'dig +time=2 +tries=1 +short "$domain" @"$DNS_HOST" -p "$DNS_PORT"' in ipset_script
     assert 'dig +time=2 +tries=1 +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT"' in ipset_script
-    assert "sed 's/\\r$//' \"$route_file\" | grep -Fxs \"$marker\"" in ipset_script
+    assert "tr -d '\\r' < \"$route_file\" | grep -Fxs \"$marker\"" in ipset_script
     assert 'YOUTUBE_VIDEO_PRELOAD' not in ipset_script
     assert 'preload_youtube_video_hosts' not in ipset_script
     assert '--socks5-hostname "127.0.0.1:$socks_port"' not in ipset_script

@@ -1,3 +1,8 @@
+<a name="1.716"></a>
+# [1.716] - 16 Jun 2026
+
+- Uses BusyBox-safe CR stripping when detecting route markers, so YouTube protocol detection and runtime ipset dedupe work with CRLF route files on the router.
+
 <a name="1.715"></a>
 # [1.715] - 16 Jun 2026
 

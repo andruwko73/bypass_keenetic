@@ -1,3 +1,6 @@
+*v1.716 (16 Jun 2026) -* main
+*Uses BusyBox-safe CR stripping when detecting route markers, so YouTube protocol detection and runtime ipset dedupe work with CRLF route files on the router.*
+
 *v1.715 (16 Jun 2026) -* main
 *Bounds the post-update ipset refresh and removes the duplicate foreground rebuild, so web updates can finish and restart the bot even when dnsmasq route resolution is slow.*
 
