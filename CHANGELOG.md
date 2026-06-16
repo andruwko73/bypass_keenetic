@@ -1,3 +1,8 @@
+<a name="1.722"></a>
+# [1.722] - 16 Jun 2026
+
+- Pins YouTube player API frontends to the YouTube/Vless 2 route so selected videos do not wait on mismatched Google service routing before playback starts.
+
 <a name="1.721"></a>
 # [1.721] - 16 Jun 2026
 

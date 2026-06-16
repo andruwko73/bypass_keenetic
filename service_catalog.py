@@ -54,8 +54,16 @@ YOUTUBE_CDN_IP_RANGES = [
     '2404:6800:4004:3a::/64',
 ]
 
+YOUTUBE_PLAYER_API_IP_ENTRIES = [
+    '216.239.32.223',
+    '216.239.34.223',
+    '216.239.36.223',
+    '216.239.38.223',
+]
+
 YOUTUBE_UNBLOCK_ENTRIES = [
     *YOUTUBE_CDN_IP_RANGES,
+    *YOUTUBE_PLAYER_API_IP_ENTRIES,
     'youtube.com',
     'www.youtube.com',
     'c.youtube.com',

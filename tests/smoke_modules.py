@@ -3325,6 +3325,8 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'redirector.googlevideo.com' in entries
     assert 'yt4.ggpht.com' in entries
     assert 'yt4.googleusercontent.com' in entries
+    assert set(service_catalog.YOUTUBE_PLAYER_API_IP_ENTRIES) <= entries
+    assert not (set(service_catalog.YOUTUBE_PLAYER_API_IP_ENTRIES) & vless_entries)
     assert '74.125.172.0/24' in entries
     assert '173.194.31.0/24' in entries
     assert '74.125.174.0/24' in entries

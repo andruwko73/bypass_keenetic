@@ -1,3 +1,6 @@
+*v1.722 (16 Jun 2026) -* main
+*Pins YouTube player API frontends to the YouTube/Vless 2 route so selected videos do not wait on mismatched Google service routing before playback starts.*
+
 *v1.721 (16 Jun 2026) -* main
 *Fixes web rollback so version/readme metadata and scheduler files are restored together with Python runtime files.*
 
