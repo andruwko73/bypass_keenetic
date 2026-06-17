@@ -84,6 +84,32 @@ ROUTE_STATES = {
     "chatgpt_services": {"label": "частично: Vless 1 / Vless 2"},
 }
 
+APP_MODE_FIXTURES = {
+    "simple": {
+        "label": "Simple",
+        "description": "fixture interface and Telegram bot",
+        "pool": False,
+        "telegram": True,
+    },
+    "advanced": {
+        "label": "Advanced",
+        "description": "fixture with key pool and Telegram bot",
+        "pool": True,
+        "telegram": True,
+    },
+    "web_only": {
+        "label": "Web only",
+        "description": "fixture key-pool web UI without Telegram bot",
+        "pool": True,
+        "telegram": False,
+    },
+}
+
+
+def _normalize_app_mode(mode):
+    mode = str(mode or "").strip().lower().replace("-", "_")
+    return mode if mode in APP_MODE_FIXTURES else "advanced"
+
 
 def _hash_key(key_value):
     return hashlib.sha256((key_value or "").encode("utf-8")).hexdigest()
@@ -312,8 +338,13 @@ def _protocol_panel(protocol):
     return panels
 
 
-def _page_html():
-    cache = _probe_cache()
+def _page_html(mode="advanced"):
+    mode = _normalize_app_mode(mode)
+    mode_fixture = APP_MODE_FIXTURES[mode]
+    enable_key_pool = bool(mode_fixture["pool"])
+    enable_telegram = bool(mode_fixture["telegram"])
+    enable_custom_checks = enable_key_pool
+    cache = _probe_cache() if enable_key_pool else {}
     csrf_input_html = web_form_blocks.render_csrf_input("fixture-token")
     status = _status()
     current_mode_label = web_form_blocks.proxy_mode_label(status["proxy_mode"])
@@ -325,28 +356,34 @@ def _page_html():
         current_mode_label,
         live=True,
     )
-    custom_presets_html = key_pool_web.web_custom_presets_html(
-        CUSTOM_CHECKS,
-        [],
-        _service_icon_html,
-        csrf_input_html,
-    )
-    custom_checks_html = key_pool_web.web_custom_checks_html(
-        [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
-        _service_icon_html,
-        csrf_input_html,
-        empty_message="",
-    )
-    route_tools_html = _route_tools_html(csrf_input_html)
-    table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
+    if enable_custom_checks:
+        custom_presets_html = key_pool_web.web_custom_presets_html(
+            CUSTOM_CHECKS,
+            [],
+            _service_icon_html,
+            csrf_input_html,
+        )
+        custom_checks_html = key_pool_web.web_custom_checks_html(
+            [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
+            _service_icon_html,
+            csrf_input_html,
+            empty_message="",
+        )
+        route_tools_html = _route_tools_html(csrf_input_html)
+        table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
+    else:
+        custom_presets_html = ""
+        custom_checks_html = ""
+        route_tools_html = ""
+        table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout([])
     protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         web_form_blocks.PROTOCOL_SECTIONS,
         CURRENT_KEYS,
         _protocol_statuses(),
         csrf_input_html,
-        key_pools=POOLS,
-        key_probe_cache=cache,
-        custom_checks=CUSTOM_CHECKS,
+        key_pools=POOLS if enable_key_pool else None,
+        key_probe_cache=cache if enable_key_pool else None,
+        custom_checks=CUSTOM_CHECKS if enable_custom_checks else None,
         key_display_name=_display_name,
         hash_key=_hash_key,
         telegram_icon_html=_telegram_icon_html,
@@ -362,12 +399,14 @@ def _page_html():
         pool_table_class=table_class,
         pool_custom_col_width=custom_width,
         pool_mobile_custom_col_width=mobile_width,
-        custom_header_icons=key_pool_web.custom_check_header_icons(CUSTOM_CHECKS, _service_icon_html),
+        custom_header_icons=key_pool_web.custom_check_header_icons(CUSTOM_CHECKS, _service_icon_html) if enable_custom_checks else "",
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
         route_tools_html=route_tools_html,
         active_protocol="vless",
         lazy_protocol_panels=True,
+        enable_key_pool=enable_key_pool,
+        enable_custom_checks=enable_custom_checks,
         pool_probe_pending=False,
     )
     unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
@@ -388,7 +427,7 @@ def _page_html():
         "all",
         lambda key: "All services" if key == "all" else str(key),
     )
-    pool_summary = _pool_summary(cache)
+    pool_summary = _pool_summary(cache) if enable_key_pool else {"active_text": "", "note": ""}
     quick_key = form_basics["quick_key"]
     return web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION="fixture",
@@ -401,18 +440,22 @@ def _page_html():
         csrf_token="fixture-token",
         command_block=form_basics["command_block"],
         command_buttons_html=web_form_blocks.render_router_command_buttons(csrf_input_html, dns_override_active=False),
-        app_runtime_mode_description="fixture with key pool and Telegram bot",
-        app_runtime_mode_label="Advanced",
+        app_runtime_mode_description=mode_fixture["description"],
+        app_runtime_mode_label=mode_fixture["label"],
         app_runtime_mode_picker_block=web_form_blocks.render_app_runtime_mode_picker(
-            "advanced",
+            mode,
             [
+                ("simple", "Simple", "Fixture web UI without key pool"),
                 ("advanced", "Advanced", "Fixture full UI"),
-                ("web", "Web only", "Fixture web UI"),
+                ("web_only", "Web only", "Fixture key-pool UI without Telegram bot"),
             ],
             csrf_input_html,
         ),
         current_mode_label=current_mode_label,
-        custom_checks_json=json.dumps(key_pool_web.web_custom_checks(CUSTOM_CHECKS), ensure_ascii=False),
+        custom_checks_json=json.dumps(
+            key_pool_web.web_custom_checks(CUSTOM_CHECKS) if enable_custom_checks else [],
+            ensure_ascii=False,
+        ),
         event_history_html=key_pool_web.web_event_history_html(
             [
                 {
@@ -439,7 +482,11 @@ def _page_html():
         quick_key_label=quick_key["label"],
         quick_key_proto=quick_key["proto"],
         quick_key_value=quick_key["value"],
-        quick_start_note="Fixture bot controls are visible for UI smoke.",
+        quick_start_note=(
+            "Fixture web controls are visible for UI smoke."
+            if not enable_telegram else
+            "Fixture bot controls are visible for UI smoke."
+        ),
         router_health=_router_health(),
         socks_block=form_basics["socks_block"],
         start_button_label="Start bot",
@@ -447,9 +494,9 @@ def _page_html():
         topbar_status_text=status["api_status"],
         unblock_panels_html=unblock_panels_html,
         unblock_tabs_html=unblock_tabs_html,
-        enable_custom_checks=True,
-        enable_key_pool=True,
-        enable_telegram=True,
+        enable_custom_checks=enable_custom_checks,
+        enable_key_pool=enable_key_pool,
+        enable_telegram=enable_telegram,
     )
 
 
@@ -478,7 +525,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path in ("/", "/index.html", "/command"):
-            self._send(_page_html(), "text/html; charset=utf-8")
+            params = parse_qs(parsed.query or "", keep_blank_values=True)
+            mode = (params.get("mode") or ["advanced"])[0]
+            self._send(_page_html(mode), "text/html; charset=utf-8")
             return
         if path == "/static/app.css":
             self._send(

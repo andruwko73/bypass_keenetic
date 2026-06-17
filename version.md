@@ -1,3 +1,6 @@
+*v1.725 (17 Jun 2026) -* main
+*Keeps runtime Vless/Vless 2 dnsmasq ipsets deduped after stale scheduler locks and preserved refresh sets, reducing slow YouTube starts caused by shared Google video IPs taking the wrong route.*
+
 *v1.724 (17 Jun 2026) -* main
 *Blocks QUIC/UDP 443 by default for YouTube-only routes so mobile clients fall back to the stable TCP bypass path immediately instead of waiting on failed QUIC attempts.*
 

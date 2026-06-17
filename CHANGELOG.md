@@ -1,3 +1,8 @@
+<a name="1.725"></a>
+# [1.725] - 17 Jun 2026
+
+- Keeps runtime Vless/Vless 2 dnsmasq ipsets deduped after stale scheduler locks and preserved refresh sets, reducing slow YouTube starts caused by shared Google video IPs taking the wrong route.
+
 <a name="1.724"></a>
 # [1.724] - 17 Jun 2026
 

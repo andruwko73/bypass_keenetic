@@ -625,6 +625,22 @@ dedupe_vless_runtime_ipsets() {
 	esac
 }
 
+dedupe_vless_final_ipsets() {
+	[ "$RUNTIME_IPSET_DEDUPE_ENABLED" = "0" ] && return 0
+	case "$(youtube_route_protocol)" in
+		vless2)
+			remove_runtime_overlap_from_set "unblockvless" "unblockvless2"
+			remove_runtime_overlap_from_set "unblockvlessudp" "unblockvless2udp"
+			remove_runtime_overlap_from_set "unblockvless6" "unblockvless2v6"
+			;;
+		*)
+			remove_runtime_overlap_from_set "unblockvless2" "unblockvless"
+			remove_runtime_overlap_from_set "unblockvless2udp" "unblockvlessudp"
+			remove_runtime_overlap_from_set "unblockvless2v6" "unblockvless6"
+			;;
+	esac
+}
+
 swap_or_preserve_set() {
 	set_name="$1"
 	swap_tmp_set="$2"
@@ -691,6 +707,8 @@ swap_or_preserve_set unblockvmess6 "tmp_unblockvmess6_$$"
 swap_or_preserve_set unblockvless6 "tmp_unblockvless6_$$"
 swap_or_preserve_set unblockvless2v6 "tmp_unblockvless2v6_$$"
 swap_or_preserve_set unblocktroj6 "tmp_unblocktroj6_$$"
+
+dedupe_vless_final_ipsets
 
 if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
 	message="ipset refresh completed with preserved/fallback sets."

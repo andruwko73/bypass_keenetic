@@ -1220,13 +1220,23 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
     assert 'BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600' in s99unblock
     assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-30' in s99unblock
+    assert 'BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120' in s99unblock
+    assert 'dedupe_lock_pid_is_active()' in s99unblock
+    assert 'dedupe_lock_age_seconds()' in s99unblock
     assert 'run_refresh_if_due()' in s99unblock
     assert 'refresh)' in s99unblock
     assert 'while :' in s99unblock
     assert '/opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
     assert "awk 'NR == FNR { seen[$0] = 1; next } seen[$0]'" in s99unblock
+    assert 'acquire_runtime_dedupe_lock || return 0' in s99unblock
     assert '*unblock_ipset.sh*) continue ;;' in s99unblock
+    assert 'dedupe_vless_final_ipsets()' in ipset_script
+    assert 'remove_runtime_overlap_from_set "unblockvless" "unblockvless2"' in ipset_script
+    assert 'remove_runtime_overlap_from_set "unblockvless2" "unblockvless"' in ipset_script
+    last_swap_idx = ipset_script.index('swap_or_preserve_set unblocktroj6')
+    final_dedupe_call_idx = ipset_script.index('dedupe_vless_final_ipsets', last_swap_idx)
+    assert last_swap_idx < final_dedupe_call_idx
     assert 'run_update_ipset_refresh()' in script
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
     assert 'continuing update while refresh finishes in background' in script
@@ -1473,7 +1483,8 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     assert 'refresh_mobile_push_priority()' in redirect_script
     assert 'remove_vless_tcp_forward_guard()' in redirect_script
     assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' not in redirect_script
-    assert 'CRD/Telegram-style service routes do not get captured by the YouTube key' in redirect_script
+    assert 'Shared Google IPs must follow the YouTube route for video streams.' in redirect_script
+    assert 'ports to whichever Vless list currently carries Telegram routes.' in redirect_script
     vless2_insert = (
         'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
         'unblockvless2 dst -j REDIRECT --to-ports 10814'
@@ -1483,7 +1494,9 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
         'unblockvless dst -j REDIRECT --to-ports 10812'
     )
     priority_block = redirect_script.split('refresh_vless_tcp_priority() {', 1)[1].split('\n}', 1)[0]
-    assert priority_block.index(vless2_insert) < priority_block.index(vless1_insert)
+    # iptables -I inserts each rule at the top, so the command emitted last has
+    # effective priority in the final chain.
+    assert priority_block.index(vless1_insert) < priority_block.index(vless2_insert)
     assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in redirect_script
     assert 'grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt"' in redirect_script
     push_block = redirect_script.split('refresh_mobile_push_priority() {', 1)[1].split('\n}', 1)[0]

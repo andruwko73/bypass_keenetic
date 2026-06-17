@@ -6,6 +6,17 @@ const leakedFixtureKeys = [
   'vless://fixture-backup-vless',
   'vless://fixture-backup-vless2',
 ];
+const appModes = [
+  { mode: 'advanced', expectPool: true, expectCustomChecks: true, expectTelegram: true },
+  { mode: 'simple', expectPool: false, expectCustomChecks: false, expectTelegram: true },
+  { mode: 'web_only', expectPool: true, expectCustomChecks: true, expectTelegram: false },
+];
+
+function urlForMode(mode) {
+  const url = new URL(targetUrl);
+  url.searchParams.set('mode', mode);
+  return url.toString();
+}
 
 function watchPage(page, label) {
   const failures = [];
@@ -117,7 +128,8 @@ async function clickLazyProtocol(page, protocol, label) {
   await assertVisibleBox(page, `[data-protocol-panel="${protocol}"].active:not([data-protocol-panel-lazy="1"])`, `${label} ${protocol} panel`);
 }
 
-async function runViewport(browser, name, viewport, isMobile = false) {
+async function runViewport(browser, modeConfig, viewportName, viewport, isMobile = false) {
+  const name = `${modeConfig.mode} ${viewportName}`;
   const context = await browser.newContext({
     viewport,
     isMobile,
@@ -127,8 +139,19 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   const page = await context.newPage();
   const failures = watchPage(page, name);
   await page.addInitScript(() => localStorage.setItem('router-theme', 'glass'));
-  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await page.goto(urlForMode(modeConfig.mode), { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+
+  const pageConfig = await page.evaluate(() => window.BK_APP_CONFIG || {});
+  if (Boolean(pageConfig.enableKeyPool) !== modeConfig.expectPool) {
+    throw new Error(`${name}: enableKeyPool expected ${modeConfig.expectPool}, got ${pageConfig.enableKeyPool}`);
+  }
+  if (Boolean(pageConfig.enableCustomChecks) !== modeConfig.expectCustomChecks) {
+    throw new Error(`${name}: enableCustomChecks expected ${modeConfig.expectCustomChecks}, got ${pageConfig.enableCustomChecks}`);
+  }
+  if (Boolean(pageConfig.enableTelegram) !== modeConfig.expectTelegram) {
+    throw new Error(`${name}: enableTelegram expected ${modeConfig.expectTelegram}, got ${pageConfig.enableTelegram}`);
+  }
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
@@ -143,7 +166,11 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await assertVisibleBox(page, '#theme-picker:not(.hidden)', `${name} theme picker`);
   await page.locator('#theme-toggle-button').click();
 
-  if (await page.locator('#mode-toggle-button').count()) {
+  const modeToggleCount = await page.locator('#mode-toggle-button').count();
+  if (!modeConfig.expectTelegram && modeToggleCount) {
+    throw new Error(`${name}: Telegram mode toggle is rendered in web-only mode`);
+  }
+  if (modeToggleCount) {
     await page.locator('#mode-toggle-button').click();
     await assertVisibleBox(page, '#mode-picker:not(.hidden)', `${name} mode picker`);
     await page.locator('#mode-toggle-button').click();
@@ -152,60 +179,71 @@ async function runViewport(browser, name, viewport, isMobile = false) {
   await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);
   await assertPoolKeysAreMasked(page, `${name} initial keys`);
-  await page.locator('[data-protocol-panel].active [data-subview-target="check"]').click();
-  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
-  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-telegram-icon', `${name} Telegram route icon`);
-  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-youtube-icon', `${name} YouTube route icon`);
-  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-card:first-child .service-route-trigger', `${name} service route trigger`);
-  await page.locator('[data-protocol-panel].active .service-route-trigger').first().click();
-  await assertVisibleBox(page, '[data-protocol-panel].active .service-route-menu[open] .service-route-form:first-child .service-route-menu-item', `${name} service route menu`);
-  const routeMenuPosition = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => getComputedStyle(node).position);
-  if (!isMobile && routeMenuPosition !== 'absolute') {
-    throw new Error(`${name}: service route menu should be a desktop popover, got ${routeMenuPosition}`);
+  if (modeConfig.expectPool) {
+    await page.locator('[data-protocol-panel].active [data-subview-target="check"]').click();
+    await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
+    await assertVisibleBox(page, '[data-protocol-panel].active .service-route-telegram-icon', `${name} Telegram route icon`);
+    await assertVisibleBox(page, '[data-protocol-panel].active .service-route-youtube-icon', `${name} YouTube route icon`);
+    await assertVisibleBox(page, '[data-protocol-panel].active .service-route-card:first-child .service-route-trigger', `${name} service route trigger`);
+    await page.locator('[data-protocol-panel].active .service-route-trigger').first().click();
+    await assertVisibleBox(page, '[data-protocol-panel].active .service-route-menu[open] .service-route-form:first-child .service-route-menu-item', `${name} service route menu`);
+    const routeMenuPosition = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => getComputedStyle(node).position);
+    if (!isMobile && routeMenuPosition !== 'absolute') {
+      throw new Error(`${name}: service route menu should be a desktop popover, got ${routeMenuPosition}`);
+    }
+    if (isMobile && routeMenuPosition === 'absolute') {
+      throw new Error(`${name}: service route menu should stay in-flow on mobile`);
+    }
+    const routeMenuViewport = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom, height: window.innerHeight };
+    });
+    if (!isMobile && (routeMenuViewport.top < -2 || routeMenuViewport.bottom > routeMenuViewport.height + 2)) {
+      throw new Error(`${name}: service route popover is clipped by viewport ${JSON.stringify(routeMenuViewport)}`);
+    }
+    const oldRouteChoiceCount = await page.locator('[data-protocol-panel].active .service-route-choice').count();
+    if (oldRouteChoiceCount) {
+      throw new Error(`${name}: old service route choice buttons are still rendered`);
+    }
+    const routeApi = await page.evaluate(async () => {
+      const response = await fetch('/api/service_routes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const payload = await response.json();
+      return { ok: response.ok, hasHtml: String(payload.route_tools_html || '').includes('service-route-trigger') };
+    });
+    if (!routeApi.ok || !routeApi.hasHtml) {
+      throw new Error(`${name}: service route fragment API failed`);
+    }
+    await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
+    await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
+    const routeTextFits = await page.locator('[data-protocol-panel].active .service-route-card').evaluateAll((nodes) => (
+      nodes.every((node) => node.scrollWidth <= node.clientWidth + 2)
+    ));
+    if (!routeTextFits) {
+      throw new Error(`${name}: service route cards overflow`);
+    }
+    await page.locator('[data-protocol-panel].active [data-subview-target="pool"]').click();
+    if (await page.locator('[data-pool-filter]').count()) {
+      await assertVisibleBox(page, '[data-pool-filter]', `${name} pool filter`);
+    }
+    if (await page.locator('.pool-delete-btn').count()) {
+      await assertVisibleBox(page, '[data-protocol-panel].active [data-pool-body] tr:first-child .pool-delete-btn', `${name} delete button`);
+    }
+    await clickLazyProtocol(page, 'vless2', name);
+    await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();
+    await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);
+    await assertActivePoolRowPinned(page, 'vless2', `${name} original pool order`);
+    await assertPoolKeysAreMasked(page, `${name} lazy keys`);
+  } else {
+    const poolOnlyControls = await page.locator('[data-pool-filter], .pool-toolbar, [data-subview-target="pool"], [data-subview-target="check"], .service-route-tools').count();
+    if (poolOnlyControls) {
+      throw new Error(`${name}: pool-only controls are rendered in simple mode`);
+    }
   }
-  if (isMobile && routeMenuPosition === 'absolute') {
-    throw new Error(`${name}: service route menu should stay in-flow on mobile`);
-  }
-  const routeMenuViewport = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => {
-    const rect = node.getBoundingClientRect();
-    return { top: rect.top, bottom: rect.bottom, height: window.innerHeight };
-  });
-  if (!isMobile && (routeMenuViewport.top < -2 || routeMenuViewport.bottom > routeMenuViewport.height + 2)) {
-    throw new Error(`${name}: service route popover is clipped by viewport ${JSON.stringify(routeMenuViewport)}`);
-  }
-  const oldRouteChoiceCount = await page.locator('[data-protocol-panel].active .service-route-choice').count();
-  if (oldRouteChoiceCount) {
-    throw new Error(`${name}: old service route choice buttons are still rendered`);
-  }
-  const routeApi = await page.evaluate(async () => {
-    const response = await fetch('/api/service_routes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
-    const payload = await response.json();
-    return { ok: response.ok, hasHtml: String(payload.route_tools_html || '').includes('service-route-trigger') };
-  });
-  if (!routeApi.ok || !routeApi.hasHtml) {
-    throw new Error(`${name}: service route fragment API failed`);
-  }
-  await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
-  await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
-  const routeTextFits = await page.locator('[data-protocol-panel].active .service-route-card').evaluateAll((nodes) => (
-    nodes.every((node) => node.scrollWidth <= node.clientWidth + 2)
-  ));
-  if (!routeTextFits) {
-    throw new Error(`${name}: service route cards overflow`);
-  }
-  await page.locator('[data-protocol-panel].active [data-subview-target="pool"]').click();
-  if (await page.locator('[data-pool-filter]').count()) {
-    await assertVisibleBox(page, '[data-pool-filter]', `${name} pool filter`);
-  }
-  if (await page.locator('.pool-delete-btn').count()) {
-    await assertVisibleBox(page, '[data-protocol-panel].active [data-pool-body] tr:first-child .pool-delete-btn', `${name} delete button`);
-  }
-  await clickLazyProtocol(page, 'vless2', name);
-  await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();
-  await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);
-  await assertActivePoolRowPinned(page, 'vless2', `${name} original pool order`);
-  await assertPoolKeysAreMasked(page, `${name} lazy keys`);
   await assertNoHorizontalOverflow(page, `${name} keys`);
+
+  await page.locator('.side-nav .nav-item[data-view-target="lists"]:visible, .mobile-nav .nav-item[data-view-target="lists"]:visible').click();
+  await assertVisibleBox(page, '[data-view="lists"].active', `${name} lists view`);
+  await assertNoHorizontalOverflow(page, `${name} lists`);
   assertNoPageFailures(failures);
 
   await context.close();
@@ -217,13 +255,15 @@ async function runViewport(browser, name, viewport, isMobile = false) {
     executablePath: chromeExecutable,
   });
   try {
-    await runViewport(browser, 'desktop', { width: 1365, height: 768 });
-    await runViewport(browser, 'compact desktop', { width: 915, height: 640 });
-    await runViewport(browser, 'mobile', devices['Pixel 5'].viewport, true);
+    for (const modeConfig of appModes) {
+      await runViewport(browser, modeConfig, 'desktop', { width: 1365, height: 768 });
+      await runViewport(browser, modeConfig, 'compact desktop', { width: 915, height: 640 });
+      await runViewport(browser, modeConfig, 'mobile', devices['Pixel 5'].viewport, true);
+    }
   } finally {
     await browser.close();
   }
-  console.log('UI smoke passed:', targetUrl);
+  console.log('UI smoke passed:', targetUrl, 'modes:', appModes.map(({ mode }) => mode).join(', '));
 })().catch((error) => {
   console.error(error);
   emitGitHubErrorAnnotation(error);

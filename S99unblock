@@ -5,9 +5,11 @@ INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900}"
 DNSMASQ_INTERVAL_SECONDS="${BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600}"
 NDNPROXY_INTERVAL_SECONDS="${BYPASS_UNBLOCK_NDNPROXY_REFRESH_INTERVAL_SECONDS:-$INTERVAL_SECONDS}"
 DEDUP_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-30}"
+DEDUP_LOCK_STALE_SECONDS="${BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120}"
 LOG_FILE="${BYPASS_UNBLOCK_REFRESH_LOG:-/opt/var/log/bypass-unblock-scheduler.log}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
+RUNTIME_DEDUPE_LOCK_DIR="${BYPASS_RUNTIME_DEDUPE_LOCK_DIR:-/tmp/bypass-runtime-dedupe.lock}"
 
 is_running() {
     [ -s "$PID_FILE" ] || return 1
@@ -115,11 +117,57 @@ dedupe_ipset_pair() {
     rm -f "$loser_file" "$winner_file" "$shared_file"
 }
 
+dedupe_lock_pid_is_active() {
+    lock_dir="$1"
+    pid_file="$lock_dir/pid"
+    [ -s "$pid_file" ] || return 1
+    pid="$(sed -n '1p' "$pid_file" 2>/dev/null | tr -cd '0-9')"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+dedupe_lock_age_seconds() {
+    lock_dir="$1"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    mtime="$(stat -c %Y "$lock_dir" 2>/dev/null || echo 0)"
+    case "$now:$mtime" in
+        *[!0-9:]*|0:*|*:0) printf '%s\n' 0; return ;;
+    esac
+    if [ "$now" -gt "$mtime" ] 2>/dev/null; then
+        printf '%s\n' "$((now - mtime))"
+    else
+        printf '%s\n' 0
+    fi
+}
+
+cleanup_runtime_dedupe_lock() {
+    rm -f "$RUNTIME_DEDUPE_LOCK_DIR/pid" "$RUNTIME_DEDUPE_LOCK_DIR/started_at" >/dev/null 2>&1 || true
+    rmdir "$RUNTIME_DEDUPE_LOCK_DIR" >/dev/null 2>&1 || true
+}
+
+acquire_runtime_dedupe_lock() {
+    if mkdir "$RUNTIME_DEDUPE_LOCK_DIR" 2>/dev/null; then
+        printf '%s\n' "$$" > "$RUNTIME_DEDUPE_LOCK_DIR/pid" 2>/dev/null || true
+        date +%s > "$RUNTIME_DEDUPE_LOCK_DIR/started_at" 2>/dev/null || true
+        return 0
+    fi
+
+    lock_age="$(dedupe_lock_age_seconds "$RUNTIME_DEDUPE_LOCK_DIR")"
+    if [ "$lock_age" -ge "$DEDUP_LOCK_STALE_SECONDS" ] 2>/dev/null && ! dedupe_lock_pid_is_active "$RUNTIME_DEDUPE_LOCK_DIR"; then
+        rm -rf "$RUNTIME_DEDUPE_LOCK_DIR" >/dev/null 2>&1 || true
+        if mkdir "$RUNTIME_DEDUPE_LOCK_DIR" 2>/dev/null; then
+            printf '%s\n' "$$" > "$RUNTIME_DEDUPE_LOCK_DIR/pid" 2>/dev/null || true
+            date +%s > "$RUNTIME_DEDUPE_LOCK_DIR/started_at" 2>/dev/null || true
+            return 0
+        fi
+    fi
+    return 1
+}
+
 run_runtime_dedupe() {
     [ "${DEDUP_INTERVAL_SECONDS:-0}" -gt 0 ] 2>/dev/null || return 0
-    lock_dir="/tmp/bypass-runtime-dedupe.lock"
-    mkdir "$lock_dir" 2>/dev/null || return 0
-    trap 'rm -rf "$lock_dir" 2>/dev/null || true' EXIT INT TERM
+    acquire_runtime_dedupe_lock || return 0
+    trap cleanup_runtime_dedupe_lock EXIT INT TERM
     youtube_route="$(youtube_route_protocol)"
     if [ "$youtube_route" = "vless2" ]; then
         dedupe_ipset_pair unblockvless unblockvless2
@@ -130,7 +178,7 @@ run_runtime_dedupe() {
         dedupe_ipset_pair unblockvless2udp unblockvlessudp
         dedupe_ipset_pair unblockvless2v6 unblockvless6
     fi
-    rm -rf "$lock_dir"
+    cleanup_runtime_dedupe_lock
     trap - EXIT INT TERM
 }
 
