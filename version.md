@@ -1,3 +1,6 @@
+*v1.724 (17 Jun 2026) -* main
+*Blocks QUIC/UDP 443 by default for YouTube-only routes so mobile clients fall back to the stable TCP bypass path immediately instead of waiting on failed QUIC attempts.*
+
 *v1.723 (16 Jun 2026) -* main
 *Adds observed YouTube short-link and thumbnail edge IPs to the YouTube/Vless 2 route so cached client DNS cannot miss the bypass on the first video load.*
 

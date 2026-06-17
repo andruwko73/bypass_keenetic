@@ -1,3 +1,8 @@
+<a name="1.724"></a>
+# [1.724] - 17 Jun 2026
+
+- Blocks QUIC/UDP 443 by default for YouTube-only routes so mobile clients fall back to the stable TCP bypass path immediately instead of waiting on failed QUIC attempts.
+
 <a name="1.723"></a>
 # [1.723] - 16 Jun 2026
 

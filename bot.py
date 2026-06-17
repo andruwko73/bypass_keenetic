@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.723, последнее изменение: 16.06.2026
+#  Файл: bot.py, Версия v1.724, последнее изменение: 17.06.2026
 
 import subprocess
 import os
@@ -2547,14 +2547,14 @@ def _cancel_telegram_call_learning():
 
 
 def _udp_quic_block_enabled_for_protocol(proto, configured_enabled):
-    if proto in UDP_QUIC_POLICY_PROTOCOLS and _route_list_contains_telegram(proto):
-        if TELEGRAM_UDP_POLICY == 'block':
-            return True
-        return False
     if proto in UDP_QUIC_POLICY_PROTOCOLS and _route_list_contains_youtube(proto):
         if YOUTUBE_QUIC_POLICY == 'allow':
             return False
         if YOUTUBE_QUIC_POLICY == 'block':
+            return True
+        return True
+    if proto in UDP_QUIC_POLICY_PROTOCOLS and _route_list_contains_telegram(proto):
+        if TELEGRAM_UDP_POLICY == 'block':
             return True
         return False
     return bool(configured_enabled)

@@ -218,17 +218,17 @@ for env_name, filename, attr in PROTOCOLS:
     telegram_route = route_contains_telegram(filename)
     telegram_route_flags[env_name] = telegram_route
     enabled = config_bool(attr, True)
-    if telegram_route:
-        policy = telegram_udp_policy()
-        if policy == 'block':
-            enabled = True
-        else:
-            enabled = False
-    elif route_contains_youtube(filename):
+    if route_contains_youtube(filename):
         policy = youtube_quic_policy()
         if policy == 'allow':
             enabled = False
         elif policy == 'block':
+            enabled = True
+        else:
+            enabled = True
+    elif telegram_route:
+        policy = telegram_udp_policy()
+        if policy == 'block':
             enabled = True
         else:
             enabled = False

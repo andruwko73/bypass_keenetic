@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.723
+# ВЕРСИЯ СКРИПТА v1.724
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -52,10 +52,10 @@ memory_timeline_interval_seconds = 60.0
 memory_timeline_max_events = 240
 udp_quic_block_shadowsocks_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Shadowsocks list
 udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Vmess list
-udp_quic_block_vless_enabled = True  # auto-disabled when this route contains YouTube entries
-udp_quic_block_vless2_enabled = True  # auto-disabled when this route contains YouTube entries
+udp_quic_block_vless_enabled = True  # smart QUIC/UDP 443 fallback for non-YouTube routes
+udp_quic_block_vless2_enabled = True  # smart QUIC/UDP 443 fallback for non-YouTube routes
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
-youtube_quic_policy = 'auto'  # auto keeps current behavior; allow permits QUIC; block forces TCP fallback for YouTube routes
+youtube_quic_policy = 'auto'  # auto blocks QUIC for routes that contain YouTube; allow permits QUIC; block forces TCP fallback
 telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so native calls can use relay/media traffic; block disables it
 telegram_call_learning_enabled = True
 telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'

@@ -96,7 +96,14 @@ def _extract_udp_policy_python(script_text):
     return script_text[start:end]
 
 
-def _run_udp_policy_python(script_path, policy, youtube_route='vless-2.txt', telegram_route='', telegram_policy='auto'):
+def _run_udp_policy_python(
+    script_path,
+    policy,
+    youtube_route='vless-2.txt',
+    telegram_route='',
+    telegram_policy='auto',
+    vless2_quic_enabled=None,
+):
     source = _extract_udp_policy_python(script_path.read_text(encoding='utf-8'))
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -109,12 +116,14 @@ def _run_udp_policy_python(script_path, policy, youtube_route='vless-2.txt', tel
             "YOUTUBE_UNBLOCK_ENTRIES = ('youtube.com', 'www.youtube.com')\n",
             encoding='utf-8',
         )
-        (runtime_dir / 'bot_config.py').write_text(
+        config_text = (
             f"youtube_quic_policy = {policy!r}\n"
             f"telegram_udp_policy = {telegram_policy!r}\n"
-            "ipv6_bypass_fallback_enabled = True\n",
-            encoding='utf-8',
+            "ipv6_bypass_fallback_enabled = True\n"
         )
+        if vless2_quic_enabled is not None:
+            config_text += f"udp_quic_block_vless2_enabled = {bool(vless2_quic_enabled)!r}\n"
+        (runtime_dir / 'bot_config.py').write_text(config_text, encoding='utf-8')
         route_files = {
             filename: ['example.org']
             for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'vless-2.txt', 'trojan.txt')
@@ -1273,9 +1282,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         auto_policy = _run_udp_policy_python(script_path, 'auto')
         allow_policy = _run_udp_policy_python(script_path, 'allow')
         block_policy = _run_udp_policy_python(script_path, 'block')
-        assert auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '0'
+        legacy_disabled_policy = _run_udp_policy_python(script_path, 'auto', vless2_quic_enabled=False)
+        assert auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
         assert allow_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '0'
         assert block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
+        assert legacy_disabled_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
         assert auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert block_policy['BYPASS_IPV6_FALLBACK_ENABLED'] == '1'
         vless_auto_policy = _run_udp_policy_python(script_path, 'auto', youtube_route='vless.txt')
@@ -1295,12 +1306,20 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
             telegram_route='vless.txt',
             telegram_policy='auto',
         )
-        assert vless_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
+        combined_auto_policy = _run_udp_policy_python(
+            script_path,
+            'auto',
+            youtube_route='vless.txt',
+            telegram_route='vless.txt',
+            telegram_policy='auto',
+        )
+        assert vless_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert vless_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS2'] == '1'
         assert vless_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert telegram_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
         assert telegram_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
-        assert combined_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '0'
+        assert combined_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
+        assert combined_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert auto_policy['BYPASS_TELEGRAM_CALL_LEARNING_ENABLED'] == '1'
         assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT'] == '900'
         assert auto_policy['BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT'] == '14400'
