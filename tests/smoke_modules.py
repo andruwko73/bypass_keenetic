@@ -1219,11 +1219,14 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '/opt/etc/init.d/S99unblock restart' in script
     assert 'BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
     assert 'BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600' in s99unblock
-    assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-30' in s99unblock
+    assert 'BYPASS_UNBLOCK_REFRESH_CHECK_INTERVAL_SECONDS:-60' in s99unblock
+    assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-10' in s99unblock
     assert 'BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120' in s99unblock
     assert 'dedupe_lock_pid_is_active()' in s99unblock
     assert 'dedupe_lock_age_seconds()' in s99unblock
     assert 'run_refresh_if_due()' in s99unblock
+    assert 'run_refresh_if_check_due()' in s99unblock
+    assert 'last_refresh_check=0' in s99unblock
     assert 'refresh)' in s99unblock
     assert 'while :' in s99unblock
     assert '/opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock

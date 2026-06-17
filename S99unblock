@@ -4,7 +4,8 @@ PID_FILE="${BYPASS_UNBLOCK_REFRESH_PID_FILE:-/opt/var/run/bypass-unblock-schedul
 INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900}"
 DNSMASQ_INTERVAL_SECONDS="${BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600}"
 NDNPROXY_INTERVAL_SECONDS="${BYPASS_UNBLOCK_NDNPROXY_REFRESH_INTERVAL_SECONDS:-$INTERVAL_SECONDS}"
-DEDUP_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-30}"
+REFRESH_CHECK_INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_CHECK_INTERVAL_SECONDS:-60}"
+DEDUP_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-10}"
 DEDUP_LOCK_STALE_SECONDS="${BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120}"
 LOG_FILE="${BYPASS_UNBLOCK_REFRESH_LOG:-/opt/var/log/bypass-unblock-scheduler.log}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
@@ -76,6 +77,17 @@ refresh_due() {
 run_refresh_if_due() {
     if refresh_due "$(status_updated_at)"; then
         run_refresh
+    fi
+}
+
+run_refresh_if_check_due() {
+    now="$(date +%s 2>/dev/null || echo 0)"
+    case "$now:$last_refresh_check" in
+        *[!0-9:]*|0:*) return 0 ;;
+    esac
+    if [ "${last_refresh_check:-0}" -eq 0 ] 2>/dev/null || [ $((now - last_refresh_check)) -ge "$REFRESH_CHECK_INTERVAL_SECONDS" ] 2>/dev/null; then
+        last_refresh_check="$now"
+        run_refresh_if_due
     fi
 }
 
@@ -188,8 +200,9 @@ start_scheduler() {
     fi
     mkdir -p "$(dirname "$PID_FILE")" 2>/dev/null || true
     (
+        last_refresh_check=0
         while :; do
-            run_refresh_if_due
+            run_refresh_if_check_due
             run_runtime_dedupe
             sleep_seconds="$DEDUP_INTERVAL_SECONDS"
             [ "$sleep_seconds" -gt 0 ] 2>/dev/null || sleep_seconds="$INTERVAL_SECONDS"
