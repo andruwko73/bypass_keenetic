@@ -1,3 +1,6 @@
+*v1.727 (18 Jun 2026) -* main
+*Keeps refreshed web status snapshots after async status cleanup so inactive protocol tabs show the latest cached key checks instead of staying stuck on the pending state.*
+
 *v1.726 (17 Jun 2026) -* main
 *Runs the lightweight runtime Vless/Vless 2 ipset dedupe every 10 seconds while checking full refresh due state separately, shrinking transient shared Google IP routing windows without adding heavy DNS refresh load.*
 

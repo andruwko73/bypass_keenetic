@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.726, последнее изменение: 17.06.2026
+#  Файл: bot.py, Версия v1.727, последнее изменение: 18.06.2026
 
 import subprocess
 import os
@@ -7399,6 +7399,18 @@ def _placeholder_web_status_snapshot():
 
 def _placeholder_status_snapshot(current_keys):
     protocols = _placeholder_protocol_statuses(current_keys)
+    key_probe_cache = _load_key_probe_cache()
+    custom_checks = _load_custom_checks()
+    for key_name, key_value in (current_keys or {}).items():
+        if not str(key_value or '').strip():
+            continue
+        protocols[key_name] = _cached_protocol_status_for_key(
+            key_name,
+            key_value,
+            custom_checks=custom_checks,
+            key_probe_cache=key_probe_cache,
+            allow_youtube_confirm=False,
+        )
     active_key = (current_keys or {}).get(proxy_mode, '')
     if active_key:
         cached_active = _cached_active_mode_protocol_status(current_keys)
@@ -7442,7 +7454,7 @@ def _refresh_status_caches_async(current_keys):
         finally:
             with status_refresh_lock:
                 status_refresh_in_progress.discard(signature)
-            _memory_cleanup('status refresh', clear_status=True)
+            _memory_cleanup('status refresh', force=True, clear_status=False)
             _record_memory_timeline(
                 'status refresh finished',
                 marker='status_refresh_finish',

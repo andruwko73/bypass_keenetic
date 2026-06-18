@@ -1620,8 +1620,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755)" in source
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
+    assert 'for key_name, key_value in (current_keys or {}).items()' in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source
     assert 'allow_youtube_confirm=False' in source
+    assert "_memory_cleanup('status refresh', force=True, clear_status=False)" in source
     assert 'def _pool_probe_cpu_busy_percent' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source
     assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
