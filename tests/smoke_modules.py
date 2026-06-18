@@ -766,6 +766,78 @@ def test_youtube_healthcheck_requires_watch_page():
     assert metrics['yt_stability'] == 'fail'
 
 
+def test_youtube_healthcheck_retries_transient_watch_page():
+    calls = []
+
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        calls.append((url, connect_timeout, read_timeout))
+        if url == youtube_healthcheck.YOUTUBE_WATCH_URL and len([item for item in calls if item[0] == url]) == 1:
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10813',
+        http_timeouts=(1, 2),
+        http_retry_timeouts=(3, 4),
+        retry_delay_seconds=0,
+        metrics=metrics,
+    )
+
+    assert ok is True
+    assert 'confirmed' in message
+    assert metrics['yt_watch_ok'] is True
+    assert metrics['yt_stability'] == 'stable'
+    assert calls.count((youtube_healthcheck.YOUTUBE_WATCH_URL, 3, 4)) == 1
+
+
+def test_youtube_healthcheck_tolerates_transient_primary_generate_204():
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        if url == youtube_healthcheck.YOUTUBE_PRIMARY_URL:
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10811',
+        http_timeouts=(1, 2),
+        metrics=metrics,
+    )
+
+    assert ok is True
+    assert 'transient soft check' in message
+    assert metrics['yt_home_ok'] is True
+    assert metrics['yt_watch_ok'] is True
+    assert metrics['googlevideo_ok'] is True
+    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_error_rate'] > 0
+
+
+def test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure():
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        if url == 'https://youtubei.googleapis.com/generate_204':
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10811',
+        http_timeouts=(1, 2),
+        metrics=metrics,
+    )
+
+    assert ok is True
+    assert 'transient soft check' in message
+    assert metrics['yt_home_ok'] is True
+    assert metrics['yt_watch_ok'] is True
+    assert metrics['googlevideo_ok'] is True
+    assert metrics['yt_bootstrap_ok'] is False
+    assert metrics['yt_stability'] == 'unstable'
+
+
 def test_telegram_call_learning_helpers():
     line = (
         'ipv4 2 udp 17 29 src=192.168.1.23 dst=149.154.167.91 sport=53122 dport=3478 '
@@ -2372,8 +2444,8 @@ def test_proxy_apply_runtime_helpers():
         'proxy-url',
         timeouts=(1, 1),
     )
-    assert primary_transient_ok is False
-    assert primary_transient_message.startswith('Required YouTube endpoint did not respond through this key:')
+    assert primary_transient_ok is True
+    assert 'transient soft check' in primary_transient_message
 
     commands = []
     sleeps = []

@@ -1,3 +1,6 @@
+*v1.728 (18 Jun 2026) -* main
+*Treats a single transient failure of a soft YouTube endpoint (`www.youtube.com/generate_204` or bootstrap hosts) as unstable but usable when home/watch/googlevideo still pass, avoiding false web UI YouTube failures for otherwise working keys.*
+
 *v1.727 (18 Jun 2026) -* main
 *Keeps refreshed web status snapshots after async status cleanup so inactive protocol tabs show the latest cached key checks instead of staying stuck on the pending state.*
 

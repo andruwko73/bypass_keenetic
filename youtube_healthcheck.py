@@ -122,6 +122,19 @@ def check_youtube_through_proxy(
             connect_timeout=connect_timeout,
             read_timeout=read_timeout,
         )
+        if (
+            not ok and
+            kind in ('primary', 'home', 'watch', 'bootstrap') and
+            youtube_error_is_unstable(message)
+        ):
+            if retry_delay_seconds:
+                sleep(retry_delay_seconds)
+            ok, message = check_http(
+                proxy_url,
+                url=url,
+                connect_timeout=retry_http_connect,
+                read_timeout=retry_http_read,
+            )
         elapsed_ms = _elapsed_ms(started_at)
         if kind == 'home' and first_home_ms is None:
             first_home_ms = elapsed_ms
@@ -145,8 +158,6 @@ def check_youtube_through_proxy(
                 unstable_failures += 1
             last_error = _short_error(host, message)
             failed.append(last_error)
-            if retry_delay_seconds and index == 0:
-                sleep(retry_delay_seconds)
 
     total_count = max(1, len(urls))
     failure_count = len(failed)
@@ -159,6 +170,15 @@ def check_youtube_through_proxy(
     )
     success_required = min(total_count, max(1, int(min_ok or 1)))
     success_threshold = ok_count >= success_required
+    soft_unstable_failure = (
+        required_missing <= {YOUTUBE_PRIMARY_URL} and
+        failed_kinds <= {'primary', 'bootstrap'} and
+        home_ok and
+        watch_ok and
+        googlevideo_ok and
+        failure_count == 1 and
+        unstable_failures == 1
+    )
     stable = (
         success_threshold and
         not required_missing and
@@ -176,7 +196,7 @@ def check_youtube_through_proxy(
         watch_ok and
         googlevideo_ok_count > 0
     )
-    stability = 'stable' if stable else ('unstable' if partially_ok else 'fail')
+    stability = 'stable' if stable else ('unstable' if partially_ok or soft_unstable_failure else 'fail')
 
     if metrics is not None:
         metrics['yt_home_ok'] = home_ok
@@ -192,6 +212,9 @@ def check_youtube_through_proxy(
 
     if stable:
         return True, 'YouTube first-load endpoints confirmed: ' + ', '.join(sorted(ok_kinds))
+    if soft_unstable_failure:
+        detail = '; '.join(failed[-1:]) or 'soft endpoint is transient'
+        return True, f'YouTube first-load endpoints confirmed with transient soft check: {detail}'
     if partially_ok:
         detail = '; '.join(failed[-3:]) or 'intermittent YouTube endpoint failure'
         return False, f'YouTube is unstable: {detail}'
