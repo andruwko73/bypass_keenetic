@@ -1647,6 +1647,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
+    startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
+    assert "update_proxy('none', persist=False)" not in startup_restore
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source

@@ -1,3 +1,6 @@
+*v1.729 (18 Jun 2026) -* main
+*Keeps the saved proxy mode active during startup if the SOCKS endpoint is briefly not confirmed after an app-mode restart, so switching Simple/Advanced/Web only does not leave the web UI in `none` until the user reapplies Vless.*
+
 *v1.728 (18 Jun 2026) -* main
 *Treats a single transient failure of a soft YouTube endpoint (`www.youtube.com/generate_204` or bootstrap hosts) as unstable but usable when home/watch/googlevideo still pass, avoiding false web UI YouTube failures for otherwise working keys.*
 

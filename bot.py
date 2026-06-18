@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.728, последнее изменение: 18.06.2026
+#  Файл: bot.py, Версия v1.729, последнее изменение: 18.06.2026
 
 import subprocess
 import os
@@ -8630,7 +8630,6 @@ def _restore_startup_proxy_mode():
     if not endpoint_ok:
         fallback_mode = proxy_mode
         _write_runtime_log(f'Прокси-режим {fallback_mode} временно отключён при старте: {endpoint_message}')
-        update_proxy('none', persist=False)
         _save_proxy_mode(fallback_mode)
         return
 
