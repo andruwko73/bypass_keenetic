@@ -136,3 +136,41 @@ def load_events(limit=50, *, event_path=None):
         if len(events) >= int(limit or 50):
             break
     return events
+
+
+def estimate_update_duration(
+    command='update',
+    *,
+    event_path=None,
+    limit=300,
+    default_seconds=180,
+    min_seconds=30,
+    max_seconds=900,
+):
+    events = list(reversed(load_events(limit=limit, event_path=event_path)))
+    durations = []
+    current_start = None
+    for event in events:
+        if event.get('source') != 'web' or event.get('service') != command:
+            continue
+        action = event.get('action')
+        try:
+            ts = int(event.get('ts') or 0)
+        except Exception:
+            ts = 0
+        if ts <= 0:
+            continue
+        if action == 'web_command_start':
+            current_start = ts
+            continue
+        if action == 'web_command_finish' and current_start:
+            duration = ts - current_start
+            current_start = None
+            if min_seconds <= duration <= max_seconds:
+                durations.append(duration)
+    if not durations:
+        return int(default_seconds), 0
+    recent = durations[-8:]
+    if len(recent) >= 5:
+        recent = sorted(recent)[1:-1]
+    return int(round(sum(recent) / float(len(recent)))), len(durations)

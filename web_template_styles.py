@@ -112,10 +112,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .traffic-chip-label{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
             .traffic-chip-value{font-size:13px;font-weight:700;color:var(--text);}
                 .status-note{margin-top:6px;color:var(--text);font-size:14px;line-height:1.45;overflow-wrap:anywhere;word-break:break-word;}
-                .command-progress-block{margin:14px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.03);}
-                .command-progress-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:var(--text);font-size:13px;font-weight:700;}
-                .command-progress-track{width:100%;height:10px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;}
-                .command-progress-fill{height:100%;border-radius:999px;background:linear-gradient(90deg, var(--secondary), var(--primary));transition:width .35s ease;}
+                .command-timer-block{margin:14px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.03);}
+                .command-timer-header{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--text);font-size:13px;font-weight:700;}
                 .log-output{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.45 Consolas,Monaco,monospace;color:var(--text);}
                 .eyebrow{display:inline-block;margin-bottom:10px;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#8b6f4a;}
                 .section-title{margin:0 0 6px;font-size:24px;color:var(--text);}
@@ -1172,8 +1170,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .notice-status{background:var(--success-bg);border-color:var(--success-border);color:#174f3b;}
         [data-theme="light"] .notice strong,
         [data-theme="light"] .log-output{color:inherit;}
-        [data-theme="light"] .command-progress-block{background:rgba(225,230,236,.82);border-color:var(--border);}
-        [data-theme="light"] .command-progress-track{background:#d2dbe5;}
+        [data-theme="light"] .command-timer-block{background:rgba(225,230,236,.82);border-color:var(--border);}
         [data-theme="light"] .confirm-backdrop{background:rgba(31,41,55,.36);}
         [data-theme="light"] .mobile-nav{background:rgba(231,235,240,.96);border-color:var(--border);box-shadow:0 14px 34px rgba(46,63,86,.18);}
         /* Liquid Glass is an optional interface theme for controls and navigation. */

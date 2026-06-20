@@ -64,29 +64,26 @@ def render_command_block(command_state, *, live=False):
         suffix = 'Статус обновится без перезагрузки страницы' if live else 'Обновление страницы происходит автоматически'
         command_text = command_state.get('result') or f'⏳ {command_state["label"]} ещё выполняется. {suffix}'
         block_id = ' id="web-command-status"' if live else ''
-        progress = max(0, min(100, int(command_state.get('progress') or 0)))
         progress_label = html.escape(str(command_state.get('progress_label') or 'Подготовка обновления'))
-        progress_hidden = '' if command_state.get('command') == 'update' and (command_state.get('running') or progress) else ' hidden'
+        timer_hidden = '' if command_state.get('command') == 'update' and command_state.get('running') else ' hidden'
         return f'''<div{block_id} class="notice notice-status">
   <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
-  <div class="command-progress-block{progress_hidden}" data-command-progress>
-    <div class="command-progress-header">
+  <div class="command-timer-block{timer_hidden}" data-command-progress>
+    <div class="command-timer-header">
       <span data-command-progress-label>{progress_label}</span>
       <span data-command-progress-timer></span>
     </div>
-    <div class="command-progress-track"><span class="command-progress-fill" data-command-progress-fill style="width:{progress}%"></span></div>
   </div>
   <pre class="log-output">{html.escape(command_text)}</pre>
 </div>'''
     if live:
         return '''<div id="web-command-status" class="notice notice-status hidden">
   <strong></strong>
-  <div class="command-progress-block hidden" data-command-progress>
-    <div class="command-progress-header">
+  <div class="command-timer-block hidden" data-command-progress>
+    <div class="command-timer-header">
       <span data-command-progress-label></span>
       <span data-command-progress-timer></span>
     </div>
-    <div class="command-progress-track"><span class="command-progress-fill" data-command-progress-fill style="width:0%"></span></div>
   </div>
   <pre class="log-output"></pre>
 </div>'''

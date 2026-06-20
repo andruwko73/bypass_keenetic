@@ -3912,6 +3912,25 @@ def test_chrome_remote_desktop_routes_are_in_vless():
 def test_web_command_state_helpers():
     assert web_command_state.estimate_update_progress('noop', '', ('update',)) == (0, '')
     assert web_command_state.estimate_update_progress('update', 'Бэкап создан.') == (70, 'Резервная копия готова, идёт замена файлов')
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'events.jsonl'
+        event_history.record_event(
+            action='web_command_start',
+            source='web',
+            protocol='system',
+            service='update',
+            event_path=str(path),
+            time_provider=lambda: 100,
+        )
+        event_history.record_event(
+            action='web_command_finish',
+            source='web',
+            protocol='system',
+            service='update',
+            event_path=str(path),
+            time_provider=lambda: 280,
+        )
+        assert event_history.estimate_update_duration(event_path=str(path)) == (180, 1)
     state = {}
     lock = threading.Lock()
     web_command_state.set_flash_message(lock, state, 'ok')
@@ -4219,6 +4238,18 @@ def test_web_form_blocks_helpers():
     ) is True
     quick_key = web_form_blocks.quick_key_context({'proxy_mode': 'none'}, {'vless': 'vless://sample'}, 'Без прокси')
     assert quick_key == {'proto': 'vless', 'label': 'Vless 1', 'value': 'vless://sample'}
+    command_html = web_form_blocks.render_command_block(
+        {
+            'label': 'Обновить до последнего релиза',
+            'command': 'update',
+            'running': True,
+            'progress_label': 'Подготовка',
+        },
+        live=True,
+    )
+    assert 'command-timer-block' in command_html
+    assert 'command-progress-track' not in command_html
+    assert 'data-command-progress-fill' not in command_html
     basics = web_form_blocks.render_form_basics(
         '',
         {'running': True},
@@ -4972,6 +5003,10 @@ def test_web_template_scripts_helpers():
     assert 'function setCommandRunningLayout(running)' in scripts
     assert "document.documentElement.classList.toggle('command-running', !!running);" in scripts
     assert 'function commandTimerText(state)' in scripts
+    assert 'expected_seconds' in scripts
+    assert 'обычно осталось около' in scripts
+    assert 'elapsed * (100 - progress) / progress' not in scripts
+    assert 'data-command-progress-fill' not in scripts
     assert "sortMode === 'quality'" in scripts
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
@@ -5083,6 +5118,8 @@ def test_web_form_template_smoke():
     assert '"enableTelegram":true' in page
     assert '<script src="/static/app.js' in page
     assert 'command-running' not in page
+    assert 'command-progress-track' not in page
+    assert 'data-command-progress-fill' not in page
     running_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',

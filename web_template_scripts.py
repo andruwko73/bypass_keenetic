@@ -1797,12 +1797,18 @@ def render_web_scripts(
                 return '';
             }}
             const elapsed = commandElapsedSeconds(state);
-            const progress = Math.max(0, Math.min(100, Number(state.progress || 0)));
-            if (progress > 5 && progress < 100 && elapsed > 8) {{
-                const remaining = Math.max(0, elapsed * (100 - progress) / progress);
-                return 'Прошло ' + formatCommandDuration(elapsed) + ' · осталось примерно ' + formatCommandDuration(remaining);
+            const expected = Math.max(0, Number(state.expected_seconds || 0));
+            if (expected > 0) {{
+                const remaining = Math.max(0, expected - elapsed);
+                if (remaining > 0) {{
+                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · обычно осталось около ' + formatCommandDuration(remaining);
+                }}
+                if (elapsed <= expected + 90) {{
+                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · обычно уже завершается';
+                }}
+                return 'Прошло ' + formatCommandDuration(elapsed) + ' · дольше обычного ' + formatCommandDuration(expected);
             }}
-            return 'Прошло ' + formatCommandDuration(elapsed) + ' · оцениваем время';
+            return 'Прошло ' + formatCommandDuration(elapsed);
         }}
 
         function updateCommandProgress(state) {{
@@ -1810,8 +1816,7 @@ def render_web_scripts(
             if (!progressBlock) {{
                 return;
             }}
-            const progress = Math.max(0, Math.min(100, Number((state && state.progress) || 0)));
-            const isUpdate = !!state && state.command === 'update' && (!!state.running || progress > 0);
+            const isUpdate = !!state && state.command === 'update' && !!state.running;
             progressBlock.classList.toggle('hidden', !isUpdate);
             if (!isUpdate) {{
                 return;
@@ -1823,10 +1828,6 @@ def render_web_scripts(
             const timer = progressBlock.querySelector('[data-command-progress-timer]');
             if (timer) {{
                 timer.textContent = state.running ? commandTimerText(state) : 'Готово';
-            }}
-            const fill = progressBlock.querySelector('[data-command-progress-fill]');
-            if (fill) {{
-                fill.style.width = String(progress) + '%';
             }}
         }}
 

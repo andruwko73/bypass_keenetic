@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.734, последнее изменение: 20.06.2026
+#  Файл: bot.py, Версия v1.735, последнее изменение: 20.06.2026
 
 import subprocess
 import os
@@ -5265,6 +5265,8 @@ def _update_status_snapshot():
             'progress_label': command_state.get('progress_label', ''),
             'message': command_state.get('result', ''),
             'started_at': command_state.get('started_at', 0),
+            'expected_seconds': command_state.get('expected_seconds', 0),
+            'expected_samples': command_state.get('expected_samples', 0),
         })
     return state
 
@@ -5772,6 +5774,8 @@ def _web_command_state_defaults():
         'result': '',
         'progress': 0,
         'progress_label': '',
+        'expected_seconds': 0,
+        'expected_samples': 0,
         'started_at': 0,
         'finished_at': 0,
         'shown_after_finish': False,
@@ -5791,6 +5795,18 @@ def _read_web_command_state_file():
 
 def _write_web_command_state_file(state):
     _write_json_file(WEB_COMMAND_STATE_FILE, _normalize_web_command_state(state))
+
+
+def _attach_web_command_duration_estimate(state):
+    state = dict(state or {})
+    if state.get('command') not in WEB_UPDATE_COMMANDS:
+        state['expected_seconds'] = 0
+        state['expected_samples'] = 0
+        return state
+    expected_seconds, expected_samples = event_history.estimate_update_duration(command=state.get('command') or 'update')
+    state['expected_seconds'] = expected_seconds
+    state['expected_samples'] = expected_samples
+    return state
 
 
 def _shared_command_job_running(state=None, source=None):
@@ -5823,6 +5839,7 @@ def _get_web_command_state():
         state['progress_label'] = ''
         state['finished_at'] = time.time()
         _write_web_command_state_file(state)
+    state = _attach_web_command_duration_estimate(state)
     with web_command_lock:
         web_command_state.update(state)
     return _command_state_snapshot(web_command_lock, web_command_state)
