@@ -1,3 +1,7 @@
+*v1.736 (20 Jun 2026) -* main
+
+*Moves the active 64.233.162.0/24 Google video range into the YouTube/Vless 2 route owner and removes conflicting Chrome Remote Desktop point IPs from Vless 1 presets.*
+
 *v1.735 (20 Jun 2026) -* main
 
 *Replaces the misleading web update progress bar with an elapsed timer and a remaining-time hint based on recent real update durations from event history.*
