@@ -529,7 +529,7 @@ def web_service_route_tools_html(
     return f'''<div class="service-route-tools">
         <div class="route-section-head">
             <strong>Сервисы и маршруты</strong>
-            <small>В одной карточке видно, через какой список идёт сервис, и добавлена ли его проверка в пул.</small>
+            <small>В одной карточке видно, через какой список идёт сервис, и добавлена ли его проверка в пул</small>
         </div>
         <div class="service-route-grid">{''.join(cards)}</div>
     </div>'''
@@ -554,7 +554,7 @@ def web_route_profiles_html(profiles, csrf_input_html=''):
     return f'''<div class="route-profile-panel">
         <div class="route-section-head">
             <strong>Быстрые сценарии маршрутов</strong>
-            <small>Профиль переносит только известные адреса сервисов из каталога.</small>
+            <small>Профиль переносит только известные адреса сервисов из каталога</small>
         </div>
         <div class="route-profile-grid">{''.join(buttons)}</div>
     </div>'''
@@ -567,7 +567,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
     if count <= 0:
         return '''<div class="route-intersection-card route-intersection-ok">
             <strong>Пересечений в списках не найдено</strong>
-            <small>Файлы обхода не содержат одинаковых доменов, вложенных доменов или пересекающихся IP-сетей.</small>
+            <small>Файлы обхода не содержат одинаковых доменов, вложенных доменов или пересекающихся IP-сетей</small>
         </div>'''
     examples = []
     for issue in (report.get('issues') or [])[:3]:
@@ -584,7 +584,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
     return f'''<div class="route-intersection-card route-intersection-warn">
         <div>
             <strong>Найдены пересечения списков: {count}</strong>
-            <small>Это может отправлять один сервис через разные ключи и вызывать обрывы.</small>
+            <small>Это может отправлять один сервис через разные ключи и вызывать обрывы</small>
             {examples_html}
         </div>
         <div class="route-intersection-actions">

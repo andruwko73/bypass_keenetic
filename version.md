@@ -1,3 +1,6 @@
+*v1.732 (20 Jun 2026) -* main
+*Removes the remaining trailing punctuation from static route/list helper descriptions so the web UI copy is consistent across status, keys, and lists pages.*
+
 *v1.731 (20 Jun 2026) -* main
 *Adds a visible web update progress timer/ETA, a pool sort mode by measured quality score, restores the neutral light-gray theme, removes trailing punctuation from static web descriptions, backs off idle Telegram-call conntrack learning scans, and stops logging benign Telegram auto-failover deferrals while Vless traffic is active.*
 

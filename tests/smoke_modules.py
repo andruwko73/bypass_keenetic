@@ -5392,6 +5392,7 @@ def test_service_route_ui_helpers():
     )
     assert '/service_route_apply' in html_text
     assert 'Сервисы и маршруты' in html_text
+    assert 'В одной карточке видно, через какой список идёт сервис, и добавлена ли его проверка в пул.</small>' not in html_text
     assert 'service-route-trigger' in html_text
     assert 'service-route-menu-item active' in html_text
     assert 'service-route-telegram-icon' in html_text
@@ -5400,7 +5401,11 @@ def test_service_route_ui_helpers():
     assert '/custom_check_delete' in html_text
     assert '<select' not in html_text
     assert 'Перенести</button>' not in html_text
-    assert key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
+    intersections_html = key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
+    assert intersections_html
+    assert 'IP-сетей.</small>' not in intersections_html
+    profiles_html = key_pool_web.web_route_profiles_html([{'id': 'all', 'label': 'Все сервисы', 'description': 'desc'}])
+    assert 'из каталога.</small>' not in profiles_html
     inactive_preset_html = key_pool_web.web_service_route_tools_html(
         [route_items[2]],
         {route_items[2]['id']: {'label': 'Vless 1', 'complete_protocols': ['vless']}},
