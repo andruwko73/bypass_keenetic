@@ -408,6 +408,67 @@ def test_router_health_runtime_process_rss_parser():
     assert router_health_runtime.process_rss_kb('self', read_text=fake_read) == 54321
 
 
+def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
+    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0}
+    original = {
+        'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
+        'read_proc_text': router_health_runtime.read_proc_text,
+        'process_rss_kb': router_health_runtime.process_rss_kb,
+        'count_proc_cmdline': router_health_runtime.count_proc_cmdline,
+        'read_ndmc_system_snapshot': router_health_runtime.read_ndmc_system_snapshot,
+        'read_dns_health': router_health_runtime.read_dns_health,
+        'telegram_call_proxy_health': router_health_runtime.telegram_call_proxy_health,
+        'xray_compat_runtime': router_health_runtime.xray_compat_runtime,
+    }
+
+    def fake_ndmc():
+        calls['ndmc'] += 1
+        return {'memory_total': 512000, 'memory_used': 256000, 'memfree': 128000}
+
+    def fake_dns(**kwargs):
+        calls['dns'] += 1
+        return {'backend': 'dnsmasq', 'dnsmasq_state': 'running', 'ipset_counts': {'unblockvless': 1}}
+
+    def fake_core_health():
+        calls['core'] += 1
+        return {'ok': True, 'xray_state': 'alive', 'ports': {}}
+
+    def fake_call_health():
+        calls['call'] += 1
+        return {'ok': True, 'enabled': True, 'tproxy_enabled': True, 'protocols': ['vless'], 'ports': {'vless': 11812}, 'port_states': {'11812': True}}
+
+    now = [100.0]
+    try:
+        router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
+        router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
+        router_health_runtime.process_rss_kb = lambda pid='self': 64000
+        router_health_runtime.count_proc_cmdline = lambda marker: 0
+        router_health_runtime.read_ndmc_system_snapshot = fake_ndmc
+        router_health_runtime.read_dns_health = fake_dns
+        router_health_runtime.telegram_call_proxy_health = fake_call_health
+        router_health_runtime.xray_compat_runtime = py_types.SimpleNamespace(
+            core_proxy_health=fake_core_health,
+            core_proxy_note=lambda health: 'Xray: alive',
+        )
+        runtime = router_health_runtime.RouterHealthRuntime(
+            cache_ttl=0,
+            time_provider=lambda: now[0],
+            core_proxy_cache_ttl=60,
+            dns_cache_ttl=60,
+            ndmc_cache_ttl=60,
+        )
+        first = runtime.snapshot(lambda: {'running': False, 'total': 0})
+        now[0] += 10
+        second = runtime.snapshot(lambda: {'running': False, 'total': 0})
+    finally:
+        for name, value in original.items():
+            setattr(router_health_runtime, name, value)
+
+    assert first['dns_backend'] == 'dnsmasq'
+    assert second['dns_backend'] == 'dnsmasq'
+    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1}
+
+
 def test_web_commands_runtime_dispatch():
     calls = []
 
@@ -792,7 +853,7 @@ def test_youtube_healthcheck_detects_first_load_instability():
 
     def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
         calls.append((url, connect_timeout, read_timeout))
-        if url == youtube_healthcheck.YOUTUBE_GOOGLEVIDEO_URL and len([item for item in calls if item[0] == url]) == 2:
+        if url == youtube_healthcheck.YOUTUBE_GOOGLEVIDEO_URL:
             return False, 'TLS connect error: unexpected EOF while reading'
         return True, 'ok'
 
@@ -804,11 +865,11 @@ def test_youtube_healthcheck_detects_first_load_instability():
         metrics=metrics,
     )
     assert ok is False
-    assert 'unstable' in message
+    assert 'Required YouTube endpoint' in message
     assert metrics['yt_home_ok'] is True
     assert metrics['yt_bootstrap_ok'] is True
     assert metrics['googlevideo_ok'] is False
-    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_stability'] == 'fail'
     assert metrics['yt_error_rate'] > 0
     assert 'unexpected EOF' in metrics['yt_last_error']
 
@@ -1387,7 +1448,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'while :' in s99unblock
     assert '/opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
-    assert "awk 'NR == FNR { seen[$0] = 1; next } seen[$0]'" in s99unblock
+    assert 'ipset test "$winner_set" "$entry"' in s99unblock
     assert 'acquire_runtime_dedupe_lock || return 0' in s99unblock
     assert '*unblock_ipset.sh*) continue ;;' in s99unblock
     assert 'dedupe_vless_final_ipsets()' in ipset_script
@@ -1726,6 +1787,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _udp_quic_drift_priority_findings' in source
     assert 'def _udp_quic_drift_refresh_cooldown' in source
     assert 'def _udp_quic_drift_refresh_deferred_for_stream' in source
+    assert 'def _apply_priority_udp_quic_drift_findings' in source
+    assert 'def _delete_conntrack_for_address' in source
+    assert "['conntrack', '-D', '-p', proto, direction, address]" in source
+    assert "['ipset', 'add', set_name, address, '-exist']" in source
+    assert "'udp_quic_drift_fast_add'" in source
+    assert "'conntrack_cleared': str(conntrack_deleted)" in source
+    assert "if _apply_priority_udp_quic_drift_findings(priority_findings):" in source
+    assert source.find('if _apply_priority_udp_quic_drift_findings(priority_findings):') < source.find('if _udp_quic_drift_refresh_deferred_for_stream(findings):')
+    assert "'youtu.be'," in source
+    assert "'i.ytimg.com'," in source
     assert "getattr(config, 'ipset_refresh_command_timeout_seconds', 420)" in source
     assert 'timeout=IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS' in source
     assert "subprocess.run(\n            ['/opt/bin/unblock_ipset.sh']" in source
@@ -1848,10 +1919,14 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'redirector.googlevideo.com/generate_204' in youtube_source
     assert 'googlevideo.com/generate_204' in youtube_source
     assert 'i.ytimg.com/generate_204' in youtube_source
+    assert 'YOUTUBE_SHORT_URL' in youtube_source
+    assert 'https://youtu.be/' in youtube_source
     assert 'YOUTUBE_WATCH_URL' in youtube_source
-    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 8' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 9' in youtube_source
     assert 'YOUTUBE_HEALTHCHECK_REQUIRED_URLS' in youtube_source
     assert "host.endswith('.c.youtube.com')" in youtube_source
+    assert "host == 'youtu.be'" in youtube_source
+    assert "'yt_short_ok'" in youtube_source
     assert 'youtubei-att.googleapis.com' in youtube_source
     assert 'yt_error_rate' in youtube_source
     assert 'yt_stability' in youtube_source
@@ -2615,7 +2690,17 @@ def test_proxy_apply_runtime_helpers():
         timeouts=(1, 1),
     )
     assert youtube_ok is True
-    assert youtube_calls == list(proxy_apply_runtime.YOUTUBE_HEALTHCHECK_URLS)
+    assert youtube_calls == list(youtube_healthcheck.YOUTUBE_HEALTHCHECK_QUICK_URLS)
+
+    full_youtube_calls = []
+    youtube_ok, _ = proxy_apply_runtime.check_youtube_health(
+        lambda proxy, **kwargs: full_youtube_calls.append(kwargs['url']) or (True, 'probe'),
+        'proxy-url',
+        timeouts=(1, 1),
+        profile='full',
+    )
+    assert youtube_ok is True
+    assert full_youtube_calls == list(proxy_apply_runtime.YOUTUBE_HEALTHCHECK_URLS)
 
     primary_transient_ok, primary_transient_message = proxy_apply_runtime.check_youtube_health(
         lambda proxy, **kwargs: (
@@ -2627,6 +2712,32 @@ def test_proxy_apply_runtime_helpers():
     )
     assert primary_transient_ok is True
     assert 'transient soft check' in primary_transient_message
+
+    short_transient_ok, short_transient_message = proxy_apply_runtime.check_youtube_health(
+        lambda proxy, **kwargs: (
+            kwargs['url'] != proxy_apply_runtime.YOUTUBE_SHORT_URL,
+            'short eof',
+        ),
+        'proxy-url',
+        timeouts=(1, 1),
+    )
+    assert short_transient_ok is True
+    assert 'transient soft check' in short_transient_message
+
+    googlevideo_attempts = {'count': 0}
+    def googlevideo_transient_check(proxy, **kwargs):
+        if 'redirector.googlevideo.com' in kwargs['url'] and googlevideo_attempts['count'] == 0:
+            googlevideo_attempts['count'] += 1
+            return False, 'googlevideo eof'
+        return True, 'ok'
+
+    googlevideo_transient_ok, _ = proxy_apply_runtime.check_youtube_health(
+        googlevideo_transient_check,
+        'proxy-url',
+        timeouts=(1, 1),
+    )
+    assert googlevideo_transient_ok is True
+    assert googlevideo_attempts['count'] == 1
 
     commands = []
     sleeps = []
@@ -3590,6 +3701,17 @@ def test_vless2_youtube_routes_are_scoped():
         'www.gstatic.com',
         'youtubei-att.googleapis.com',
     } <= entries
+    assert {
+        '173.194.10.0/24',
+        '173.194.18.0/24',
+        '173.194.19.0/24',
+        '173.194.182.0/24',
+        '173.194.187.0/24',
+        '74.125.13.0/24',
+        '74.125.104.0/24',
+        '74.125.160.0/24',
+        '74.125.162.0/24',
+    } <= entries
     assert 'accounts.google.com' not in entries
     assert 'www.google.com' not in entries
     vless_entries = {
@@ -3624,11 +3746,11 @@ def test_vless2_youtube_routes_are_scoped():
     assert '74.125.174.0/24' in entries
     assert '2a00:1450:4010:c22::/64' in entries
     assert {
-        '104.21.0.0/16',
         '157.240.0.0/16',
         'thepiratebay.org',
         'discord-attachments-uploads-prd.storage.googleapis.com',
     } <= vless_entries
+    assert '104.21.0.0/16' not in vless_entries
     assert not {
         '64.233.0.0/16',
         '72.14.0.0/16',
@@ -5401,10 +5523,10 @@ def test_route_intersections_detect_runtime_ipset_overlap():
             (Path(tmp) / route_file).write_text(content, encoding='utf-8')
 
         ipsets = {
-            'unblockvless': ['1.1.1.1', '8.8.8.8'],
-            'unblockvlessudp': ['8.8.4.4'],
-            'unblockvless2': ['8.8.8.8', '9.9.9.9'],
-            'unblockvless2udp': ['8.8.4.4', '9.9.9.9'],
+            'unblockvless': ['1.1.1.1', '8.8.8.8', '142.251.156.119'],
+            'unblockvlessudp': ['8.8.4.4', '64.233.163.119'],
+            'unblockvless2': ['8.8.8.8', '9.9.9.9', '142.251.156.0/24'],
+            'unblockvless2udp': ['8.8.4.4', '9.9.9.9', '64.233.163.0/24'],
         }
 
         def fake_run(args, stdout=None, stderr=None, text=None, timeout=None, check=None):
@@ -5419,8 +5541,9 @@ def test_route_intersections_detect_runtime_ipset_overlap():
         )
         assert report['file_count'] == 0
         assert report['runtime_count'] == 2
-        assert report['runtime_match_count'] == 2
+        assert report['runtime_match_count'] == 4
         assert {issue['kind'] for issue in report['issues']} == {'runtime_ipset_overlap'}
+        assert any('142.251.156.119 / 142.251.156.0/24' in issue.get('samples', []) for issue in report['issues'])
 
         result = route_intersections.resolve_route_intersections(
             'vless-2',
@@ -5505,6 +5628,7 @@ def main():
     test_router_health_runtime_dns_parsers()
     test_xray_compat_runtime_helpers()
     test_router_health_runtime_process_rss_parser()
+    test_router_health_runtime_slow_snapshot_caches_heavy_checks()
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()

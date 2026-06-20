@@ -6,6 +6,8 @@ import shutil
 import subprocess
 from urllib.parse import parse_qs
 
+from web_http_common import is_local_web_client
+
 
 def detect_router_ip():
     try:
@@ -19,14 +21,6 @@ def detect_router_ip():
     except Exception:
         pass
     return '192.168.1.1'
-
-
-def is_local_web_client(address):
-    try:
-        ip_obj = ipaddress.ip_address((address or '').strip())
-    except ValueError:
-        return False
-    return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
 
 
 def resolve_bind_host():

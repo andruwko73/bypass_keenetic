@@ -5,11 +5,13 @@ from urllib.parse import urlparse
 YOUTUBE_PRIMARY_URL = 'https://www.youtube.com/generate_204'
 YOUTUBE_HOME_URL = 'https://www.youtube.com/'
 YOUTUBE_WATCH_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+YOUTUBE_SHORT_URL = 'https://youtu.be/dQw4w9WgXcQ'
 YOUTUBE_GOOGLEVIDEO_URL = 'https://redirector.googlevideo.com/generate_204'
 YOUTUBE_HEALTHCHECK_URLS = (
     YOUTUBE_PRIMARY_URL,
     YOUTUBE_HOME_URL,
     YOUTUBE_WATCH_URL,
+    YOUTUBE_SHORT_URL,
     'https://youtubei.googleapis.com/generate_204',
     'https://youtubei-att.googleapis.com/',
     'https://i.ytimg.com/generate_204',
@@ -17,7 +19,25 @@ YOUTUBE_HEALTHCHECK_URLS = (
     YOUTUBE_GOOGLEVIDEO_URL,
     YOUTUBE_GOOGLEVIDEO_URL,
 )
-YOUTUBE_HEALTHCHECK_MIN_OK = 8
+YOUTUBE_HEALTHCHECK_MIN_OK = 9
+YOUTUBE_HEALTHCHECK_QUICK_URLS = (
+    YOUTUBE_PRIMARY_URL,
+    YOUTUBE_HOME_URL,
+    YOUTUBE_SHORT_URL,
+    YOUTUBE_GOOGLEVIDEO_URL,
+)
+YOUTUBE_HEALTHCHECK_CONFIRM_URLS = (
+    YOUTUBE_PRIMARY_URL,
+    YOUTUBE_HOME_URL,
+    YOUTUBE_WATCH_URL,
+    YOUTUBE_SHORT_URL,
+    YOUTUBE_GOOGLEVIDEO_URL,
+)
+YOUTUBE_HEALTHCHECK_PROFILES = {
+    'quick': (YOUTUBE_HEALTHCHECK_QUICK_URLS, 4, 0),
+    'confirm': (YOUTUBE_HEALTHCHECK_CONFIRM_URLS, 5, 0),
+    'full': (YOUTUBE_HEALTHCHECK_URLS, YOUTUBE_HEALTHCHECK_MIN_OK, 0),
+}
 YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (
     YOUTUBE_PRIMARY_URL,
     YOUTUBE_HOME_URL,
@@ -56,6 +76,8 @@ def youtube_url_kind(url):
         return 'home'
     if host == 'www.youtube.com' and (urlparse(url).path or '') == '/watch':
         return 'watch'
+    if host == 'youtu.be':
+        return 'short'
     if url == YOUTUBE_PRIMARY_URL:
         return 'primary'
     if host in YOUTUBE_BOOTSTRAP_HOSTS:
@@ -82,21 +104,29 @@ def _short_error(host, message):
     return f'{host}: {text}' if host else text
 
 
+def youtube_healthcheck_profile(profile):
+    return YOUTUBE_HEALTHCHECK_PROFILES.get(str(profile or 'full').strip().lower(), YOUTUBE_HEALTHCHECK_PROFILES['full'])
+
+
 def check_youtube_through_proxy(
     check_http,
     proxy_url,
     *,
     http_timeouts,
-    urls=YOUTUBE_HEALTHCHECK_URLS,
-    min_ok=YOUTUBE_HEALTHCHECK_MIN_OK,
+    urls=None,
+    min_ok=None,
+    profile='full',
     http_retry_timeouts=None,
     retry_delay_seconds=0,
     metrics=None,
     sleep=time.sleep,
-    max_failures=0,
+    max_failures=None,
 ):
+    profile_urls, profile_min_ok, profile_max_failures = youtube_healthcheck_profile(profile)
     retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
-    urls = tuple(urls or YOUTUBE_HEALTHCHECK_URLS)
+    urls = tuple(urls or profile_urls)
+    min_ok = profile_min_ok if min_ok is None else min_ok
+    max_failures = profile_max_failures if max_failures is None else max_failures
     required_urls = set(YOUTUBE_HEALTHCHECK_REQUIRED_URLS).intersection(urls)
     ok_count = 0
     failed = []
@@ -124,7 +154,7 @@ def check_youtube_through_proxy(
         )
         if (
             not ok and
-            kind in ('primary', 'home', 'watch', 'bootstrap') and
+            kind in ('primary', 'home', 'watch', 'short', 'bootstrap', 'googlevideo') and
             youtube_error_is_unstable(message)
         ):
             if retry_delay_seconds:
@@ -164,6 +194,7 @@ def check_youtube_through_proxy(
     required_missing = required_urls - ok_urls
     home_ok = 'home' not in seen_kinds or 'home' in ok_kinds
     watch_ok = 'watch' not in seen_kinds or 'watch' in ok_kinds
+    short_ok = 'short' not in seen_kinds or 'short' in ok_kinds
     bootstrap_ok = 'bootstrap' not in seen_kinds or 'bootstrap' not in failed_kinds
     googlevideo_ok = 'googlevideo' not in seen_kinds or (
         googlevideo_ok_count > 0 and googlevideo_fail_count == 0
@@ -172,10 +203,10 @@ def check_youtube_through_proxy(
     success_threshold = ok_count >= success_required
     soft_unstable_failure = (
         required_missing <= {YOUTUBE_PRIMARY_URL} and
-        failed_kinds <= {'primary', 'bootstrap'} and
+        failed_kinds <= {'primary', 'short', 'bootstrap', 'googlevideo'} and
         home_ok and
         watch_ok and
-        googlevideo_ok and
+        (googlevideo_ok or googlevideo_ok_count > 0) and
         failure_count == 1 and
         unstable_failures == 1
     )
@@ -184,6 +215,7 @@ def check_youtube_through_proxy(
         not required_missing and
         home_ok and
         watch_ok and
+        short_ok and
         bootstrap_ok and
         googlevideo_ok and
         failure_count <= max(0, int(max_failures or 0)) and
@@ -194,6 +226,7 @@ def check_youtube_through_proxy(
         not required_missing and
         home_ok and
         watch_ok and
+        short_ok and
         googlevideo_ok_count > 0
     )
     stability = 'stable' if stable else ('unstable' if partially_ok or soft_unstable_failure else 'fail')
@@ -201,6 +234,7 @@ def check_youtube_through_proxy(
     if metrics is not None:
         metrics['yt_home_ok'] = home_ok
         metrics['yt_watch_ok'] = watch_ok
+        metrics['yt_short_ok'] = short_ok
         metrics['yt_bootstrap_ok'] = bootstrap_ok
         metrics['googlevideo_ok'] = googlevideo_ok
         metrics['yt_error_rate'] = round(float(failure_count) / float(total_count), 3)

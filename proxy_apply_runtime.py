@@ -5,11 +5,21 @@ from youtube_healthcheck import (
     YOUTUBE_HEALTHCHECK_MIN_OK,
     YOUTUBE_HEALTHCHECK_REQUIRED_URLS,
     YOUTUBE_HEALTHCHECK_URLS,
+    YOUTUBE_SHORT_URL,
     check_youtube_through_proxy,
 )
 
 
-def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTHCHECK_URLS, min_ok=YOUTUBE_HEALTHCHECK_MIN_OK, metrics=None):
+def check_youtube_health(
+    check_http,
+    proxy_url,
+    *,
+    timeouts,
+    urls=None,
+    min_ok=None,
+    metrics=None,
+    profile='quick',
+):
     return check_youtube_through_proxy(
         check_http,
         proxy_url,
@@ -17,6 +27,7 @@ def check_youtube_health(check_http, proxy_url, *, timeouts, urls=YOUTUBE_HEALTH
         urls=urls,
         min_ok=min_ok,
         metrics=metrics,
+        profile=profile,
     )
 
 

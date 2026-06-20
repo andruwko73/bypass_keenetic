@@ -16,6 +16,20 @@ ROUTE_IPSET_SETS = {
 }
 
 
+def route_files_signature(unblock_dir=UNBLOCK_DIR):
+    signature = []
+    for route in ROUTE_FILES:
+        path = os.path.join(unblock_dir, f'{route}.txt')
+        try:
+            stat = os.stat(path)
+            signature.append((route, int(stat.st_mtime), int(stat.st_size)))
+        except FileNotFoundError:
+            signature.append((route, 0, 0))
+        except Exception:
+            signature.append((route, -1, -1))
+    return tuple(signature)
+
+
 def _read_all(unblock_dir):
     result = {}
     for route in ROUTE_FILES:
@@ -82,6 +96,49 @@ def _read_ipset_members(set_name, *, run_command=subprocess.run):
     return members
 
 
+def _network_overlap_samples(left_members, right_members, *, max_samples=8):
+    left_networks = {4: [], 6: []}
+    right_networks = {4: [], 6: []}
+    for value in left_members or []:
+        network = _ip_network(value)
+        if network:
+            left_networks[network.version].append((
+                int(network.network_address),
+                int(network.broadcast_address),
+                value,
+            ))
+    for value in right_members or []:
+        network = _ip_network(value)
+        if network:
+            right_networks[network.version].append((
+                int(network.network_address),
+                int(network.broadcast_address),
+                value,
+            ))
+    samples = []
+    seen = set()
+    match_count = 0
+    for version in (4, 6):
+        left_items = sorted(left_networks[version])
+        right_items = sorted(right_networks[version])
+        right_index = 0
+        for left_start, left_end, left_value in left_items:
+            while right_index < len(right_items) and right_items[right_index][1] < left_start:
+                right_index += 1
+            scan_index = right_index
+            while scan_index < len(right_items) and right_items[scan_index][0] <= left_end:
+                right_start, right_end, right_value = right_items[scan_index]
+                if right_end >= left_start:
+                    key = (left_value, right_value)
+                    if key not in seen:
+                        seen.add(key)
+                        match_count += 1
+                        if len(samples) < max_samples:
+                            samples.append(left_value if left_value == right_value else f'{left_value} / {right_value}')
+                scan_index += 1
+    return samples, match_count
+
+
 def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subprocess.run):
     members_by_set = {}
     for sets in ROUTE_IPSET_SETS.values():
@@ -98,10 +155,14 @@ def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subproces
             ):
                 if kind != other_kind:
                     continue
-                shared = members_by_set.get(set_name, set()) & members_by_set.get(other_set, set())
-                if not shared:
+                samples, match_count = _network_overlap_samples(
+                    members_by_set.get(set_name, set()),
+                    members_by_set.get(other_set, set()),
+                )
+                if not match_count:
                     continue
-                sample = sorted(shared)[:8]
+                sample = samples
+                shared = [None] * match_count
                 issues.append({
                     'kind': 'runtime_ipset_overlap',
                     'runtime': True,
@@ -109,8 +170,8 @@ def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subproces
                     'entries': [],
                     'routes': sorted({route, other_route}),
                     'set_names': [set_name, other_set],
-                    'match_count': len(shared),
-                    'samples': sample,
+                    'match_count': match_count,
+                    'samples': samples,
                     'message': (
                         f'{set_name} и {other_set}: {len(shared)} общих IP '
                         f'в реальных ipset ({", ".join(sample)})'

@@ -1,3 +1,7 @@
+*v1.738 (20 Jun 2026) -* main
+
+*Keeps YouTube drift repair focused on the affected Vless route, adds DNS-first fast ipset repair for youtu.be/youtubei/ytimg/ggpht/googlevideo, and expands YouTube-owned Google edge ranges seen on current watch/live CDN answers so Vless 1 traffic no longer delays Vless 2 route repair.*
+
 *v1.737 (20 Jun 2026) -* main
 
 *Keeps live YouTube short-link redirects on Vless 2 by assigning active Google frontend edge ranges 142.251.1.0/24, 172.253.152.0/24, 173.194.222.0/24, and 74.125.205.0/24 to the YouTube route owner instead of Chrome Remote Desktop point IPs.*

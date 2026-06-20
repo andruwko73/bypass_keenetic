@@ -16,12 +16,11 @@ from youtube_healthcheck import (
     YOUTUBE_PRIMARY_URL as YOUTUBE_HEALTHCHECK_URL,
     check_youtube_through_proxy,
 )
-
-TELEGRAM_HEALTHCHECK_URLS = (
-    'https://web.telegram.org/',
-    'https://t.me/',
+from telegram_healthcheck import (
+    TELEGRAM_HEALTHCHECK_MIN_OK,
+    TELEGRAM_HEALTHCHECK_URLS,
+    check_telegram_service_through_proxy,
 )
-TELEGRAM_HEALTHCHECK_MIN_OK = 1
 
 
 def pool_probe_socks_inbound(port, tag):
@@ -37,45 +36,6 @@ def pool_probe_socks_inbound(port, tag):
 
 def pool_probe_outbound(proto, key_value, tag, proxy_outbound_from_key, email='pool-probe@local'):
     return proxy_outbound_from_key(proto, key_value, tag, email=email)
-
-
-def check_telegram_service_through_proxy(
-    check_telegram_api,
-    check_http,
-    proxy_url,
-    *,
-    telegram_timeouts,
-    http_timeouts,
-    urls=TELEGRAM_HEALTHCHECK_URLS,
-    min_ok=TELEGRAM_HEALTHCHECK_MIN_OK,
-):
-    tg_connect, tg_read = telegram_timeouts
-    api_ok, api_message = check_telegram_api(
-        proxy_url,
-        connect_timeout=tg_connect,
-        read_timeout=tg_read,
-    )
-    if not api_ok:
-        return False, api_message
-
-    connect_timeout, read_timeout = http_timeouts
-    ok_hosts = []
-    failed = []
-    for url in urls or TELEGRAM_HEALTHCHECK_URLS:
-        host = url.split('/')[2] if '://' in url else url
-        ok, message = check_http(
-            proxy_url,
-            url=url,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-        )
-        if ok:
-            ok_hosts.append(host)
-            if len(ok_hosts) >= max(1, int(min_ok or 1)):
-                return True, 'Telegram endpoints confirmed: ' + ', '.join(ok_hosts)
-        else:
-            failed.append(f'{host}: {message}')
-    return False, '; '.join(failed[-2:]) or 'Telegram web endpoints did not respond through this key.'
 
 
 def build_pool_probe_core_config_batch(probe_tasks, test_port, proxy_outbound_from_key):
@@ -308,6 +268,7 @@ def find_pool_failover_candidate(
                         proxy_url,
                         http_timeouts=(http_connect, http_read),
                         metrics=yt_metrics,
+                        profile='confirm',
                     )
                     tg_ok = None
                     yt_ok = primary_ok
@@ -318,6 +279,7 @@ def find_pool_failover_candidate(
                         proxy_url,
                         telegram_timeouts=(tg_connect, tg_read),
                         http_timeouts=(http_connect, http_read),
+                        allow_app_endpoints_without_api=False,
                     )
                     tg_ok = primary_ok
                     yt_ok = None
@@ -616,8 +578,6 @@ def run_pool_probe_worker(
                         finally:
                             clear_result_deadline(proto, key_value)
                             mark_checked(proto, key_value)
-                            invalidate_caches()
-                            gc.collect()
 
                     for future in pending:
                         proto, key_value = future_map[future]
@@ -638,8 +598,6 @@ def run_pool_probe_worker(
                         )
                         ignore_late_result(proto, key_value)
                         mark_checked(proto, key_value)
-                        invalidate_caches()
-                        gc.collect()
                 finally:
                     try:
                         executor.shutdown(wait=False, cancel_futures=True)
@@ -655,7 +613,6 @@ def run_pool_probe_worker(
                     del done
                     del pending
                     del executor
-                    gc.collect()
             except Exception as exc:
                 log(f'Ошибка проверки пачки ключей из пула: {exc}')
                 for proto, key_value in valid_batch:

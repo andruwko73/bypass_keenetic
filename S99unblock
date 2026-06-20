@@ -116,17 +116,15 @@ dedupe_ipset_pair() {
     winner_set="$2"
     tmp_base="/tmp/bypass-runtime-dedupe.$$.$loser_set.$winner_set"
     loser_file="${tmp_base}.loser"
-    winner_file="${tmp_base}.winner"
-    shared_file="${tmp_base}.shared"
 
     write_ipset_members "$loser_set" "$loser_file"
-    write_ipset_members "$winner_set" "$winner_file"
-    awk 'NR == FNR { seen[$0] = 1; next } seen[$0]' "$winner_file" "$loser_file" > "$shared_file" 2>/dev/null || true
     while IFS= read -r entry; do
         [ -n "$entry" ] || continue
-        ipset del "$loser_set" "$entry" >/dev/null 2>&1 || true
-    done < "$shared_file"
-    rm -f "$loser_file" "$winner_file" "$shared_file"
+        if ipset test "$winner_set" "$entry" >/dev/null 2>&1; then
+            ipset del "$loser_set" "$entry" >/dev/null 2>&1 || true
+        fi
+    done < "$loser_file"
+    rm -f "$loser_file"
 }
 
 dedupe_lock_pid_is_active() {

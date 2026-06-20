@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.737
+# ВЕРСИЯ СКРИПТА v1.738
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -33,6 +33,9 @@ pool_probe_quality_stable_latency_ms = 2500
 pool_probe_quality_fast_latency_ms = 1500
 pool_probe_quality_1600p_min_mbps = 25.0
 pool_probe_quality_4k_min_mbps = 45.0
+router_health_cache_ttl = 15.0  # быстрый веб-статус памяти/CPU
+router_health_dns_cache_ttl = 45.0  # dnsmasq/ipset diagnostics не дергать на каждом обновлении страницы
+router_health_ndmc_cache_ttl = 30.0  # ndmc show system тяжелее /proc, держим отдельный TTL
 memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
 memory_watchdog_rss_soft_kb = 87040  # при достижении порога очищаются кэши статуса и запускается gc.collect()
 memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот перезапустится, если сейчас не идёт обновление или проверка пула
@@ -65,6 +68,7 @@ telegram_call_learning_poll_interval_seconds = 1.0
 telegram_call_learning_auto_enabled = True
 telegram_call_learning_scan_interval_seconds = 5.0
 telegram_call_learning_idle_backoff_seconds = 60.0
+telegram_call_learning_route_cache_ttl_seconds = 30.0
 telegram_call_learning_fast_scan_limit = 3
 telegram_call_learning_min_score = 5
 telegram_call_learning_min_packets = 2

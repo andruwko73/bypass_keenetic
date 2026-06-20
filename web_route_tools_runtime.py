@@ -1,6 +1,8 @@
 import key_pool_web
 import route_intersections
 import service_routes
+import threading
+import time
 
 
 def _noop():
@@ -17,6 +19,7 @@ class ServiceRouteToolsRuntime:
         youtube_icon_html,
         sync_udp_policy_config=None,
         invalidate_web_status_cache=None,
+        intersections_cache_ttl=20.0,
     ):
         self.custom_check_presets_getter = custom_check_presets_getter
         self.service_icon_html = service_icon_html
@@ -24,6 +27,9 @@ class ServiceRouteToolsRuntime:
         self.youtube_icon_html = youtube_icon_html
         self.sync_udp_policy_config = sync_udp_policy_config or _noop
         self.invalidate_web_status_cache = invalidate_web_status_cache or _noop
+        self.intersections_cache_ttl = max(1.0, float(intersections_cache_ttl or 1.0))
+        self._intersections_lock = threading.Lock()
+        self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
 
     def service_items(self):
         return service_routes.route_service_items(presets=self.custom_check_presets_getter())
@@ -39,7 +45,27 @@ class ServiceRouteToolsRuntime:
         ]
 
     def intersections_snapshot(self):
-        return route_intersections.analyze_route_intersections()
+        now = time.time()
+        signature = (
+            route_intersections.route_files_signature(),
+            int(now // self.intersections_cache_ttl),
+        )
+        with self._intersections_lock:
+            cached_report = self._intersections_cache.get('report')
+            if cached_report is not None and self._intersections_cache.get('signature') == signature:
+                return dict(cached_report)
+        report = route_intersections.analyze_route_intersections()
+        with self._intersections_lock:
+            self._intersections_cache = {
+                'signature': signature,
+                'timestamp': now,
+                'report': dict(report),
+            }
+        return dict(report)
+
+    def invalidate_intersections_cache(self):
+        with self._intersections_lock:
+            self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
 
     def apply_service_route(self, service_key, target_protocol):
         result = service_routes.apply_service_route(
@@ -47,6 +73,7 @@ class ServiceRouteToolsRuntime:
             target_protocol,
             before_update=self.sync_udp_policy_config,
         )
+        self.invalidate_intersections_cache()
         self.invalidate_web_status_cache()
         return result
 
@@ -56,6 +83,7 @@ class ServiceRouteToolsRuntime:
             service_items=self.service_items(),
             before_update=self.sync_udp_policy_config,
         )
+        self.invalidate_intersections_cache()
         self.invalidate_web_status_cache()
         return result
 
@@ -64,6 +92,7 @@ class ServiceRouteToolsRuntime:
             target_route,
             before_update=self.sync_udp_policy_config,
         )
+        self.invalidate_intersections_cache()
         self.invalidate_web_status_cache()
         return result
 

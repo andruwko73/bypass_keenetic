@@ -554,41 +554,76 @@ def build_router_health_payload(
 
 
 class RouterHealthRuntime:
-    def __init__(self, cache_ttl=5.0, time_provider=time.time, core_proxy_cache_ttl=60.0):
+    def __init__(
+        self,
+        cache_ttl=5.0,
+        time_provider=time.time,
+        core_proxy_cache_ttl=60.0,
+        dns_cache_ttl=45.0,
+        ndmc_cache_ttl=30.0,
+    ):
         self.cache_ttl = float(cache_ttl or 0)
         self.core_proxy_cache_ttl = float(core_proxy_cache_ttl or 0)
+        self.dns_cache_ttl = float(dns_cache_ttl or 0)
+        self.ndmc_cache_ttl = float(ndmc_cache_ttl or 0)
         self.time_provider = time_provider
         self._lock = threading.Lock()
         self._cache = {'timestamp': 0, 'payload': None}
         self._core_proxy_cache = {'timestamp': 0, 'payload': None}
+        self._dns_cache = {'timestamp': 0, 'payload': None}
+        self._ndmc_cache = {'timestamp': 0, 'payload': None}
+
+    def _cached_payload(self, cache_name, ttl, now, loader):
+        cache = getattr(self, cache_name)
+        cached = cache.get('payload')
+        if cached is not None and now - float(cache.get('timestamp') or 0) < float(ttl or 0):
+            return dict(cached) if isinstance(cached, dict) else cached
+        payload = loader()
+        setattr(self, cache_name, {'timestamp': now, 'payload': dict(payload) if isinstance(payload, dict) else payload})
+        return dict(payload) if isinstance(payload, dict) else payload
 
     def _core_proxy_snapshot(self, now):
-        cached = self._core_proxy_cache.get('payload')
-        if cached is not None and now - float(self._core_proxy_cache.get('timestamp') or 0) < self.core_proxy_cache_ttl:
-            return dict(cached)
-        try:
-            if xray_compat_runtime is None:
-                payload = {
+        def load_core_proxy():
+            try:
+                if xray_compat_runtime is None:
+                    payload = {
+                        'ok': False,
+                        'xray_state': 'unknown',
+                        'xray_config_ok': False,
+                        'xray_config_message': 'xray health module unavailable',
+                        'ports': {},
+                    }
+                else:
+                    payload = xray_compat_runtime.core_proxy_health()
+                payload['telegram_call'] = telegram_call_proxy_health()
+                return payload
+            except Exception as exc:
+                return {
                     'ok': False,
-                    'xray_state': 'unknown',
+                    'xray_state': 'error',
                     'xray_config_ok': False,
-                    'xray_config_message': 'xray health module unavailable',
+                    'xray_config_message': str(exc),
                     'ports': {},
+                    'telegram_call': {'ok': False, 'error': str(exc)},
                 }
-            else:
-                payload = xray_compat_runtime.core_proxy_health()
-            payload['telegram_call'] = telegram_call_proxy_health()
-        except Exception as exc:
-            payload = {
-                'ok': False,
-                'xray_state': 'error',
-                'xray_config_ok': False,
-                'xray_config_message': str(exc),
-                'ports': {},
-                'telegram_call': {'ok': False, 'error': str(exc)},
-            }
-        self._core_proxy_cache = {'timestamp': now, 'payload': dict(payload)}
-        return dict(payload)
+
+        return self._cached_payload('_core_proxy_cache', self.core_proxy_cache_ttl, now, load_core_proxy)
+
+    def _dns_snapshot(self, now):
+        return self._cached_payload(
+            '_dns_cache',
+            self.dns_cache_ttl,
+            now,
+            lambda: read_dns_health(time_provider=self.time_provider),
+        )
+
+    def _ndmc_snapshot(self, now):
+        return self._cached_payload(
+            '_ndmc_cache',
+            self.ndmc_cache_ttl,
+            now,
+            read_ndmc_system_snapshot,
+        )
 
     def snapshot(self, pool_probe_progress_getter):
         now = self.time_provider()
@@ -601,12 +636,12 @@ class RouterHealthRuntime:
         probe_running = bool((probe_progress or {}).get('running')) and int((probe_progress or {}).get('total') or 0) > 0
         payload = build_router_health_payload(
             meminfo=read_proc_meminfo(),
-            ndmc_system=read_ndmc_system_snapshot(),
+            ndmc_system=self._ndmc_snapshot(now),
             load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
             bot_rss_kb=process_rss_kb('self'),
             probe_progress=probe_progress,
             temp_xray_count=count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0,
-            dns_health=read_dns_health(time_provider=self.time_provider),
+            dns_health=self._dns_snapshot(now),
             core_proxy_health=self._core_proxy_snapshot(now),
         )
         with self._lock:
@@ -618,3 +653,5 @@ class RouterHealthRuntime:
         with self._lock:
             self._cache = {'timestamp': 0, 'payload': None}
             self._core_proxy_cache = {'timestamp': 0, 'payload': None}
+            self._dns_cache = {'timestamp': 0, 'payload': None}
+            self._ndmc_cache = {'timestamp': 0, 'payload': None}

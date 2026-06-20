@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.737, последнее изменение: 20.06.2026
+#  Файл: bot.py, Версия v1.738, последнее изменение: 20.06.2026
 
 import subprocess
 import os
@@ -1296,6 +1296,8 @@ ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 10.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
+ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
+ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
@@ -1504,10 +1506,22 @@ UDP_QUIC_DRIFT_SENTINEL_DOMAINS = tuple(getattr(config, 'udp_quic_drift_sentinel
     'claude.ai',
     'discord.com',
     'youtube.com',
+    'youtu.be',
+    'youtubei.googleapis.com',
+    'youtubei-att.googleapis.com',
+    'i.ytimg.com',
+    'ytimg.com',
+    'ggpht.com',
     'googlevideo.com',
 )))
 UDP_QUIC_DRIFT_PRIORITY_DOMAINS = tuple(getattr(config, 'udp_quic_drift_priority_domains', (
     'youtube.com',
+    'youtu.be',
+    'youtubei.googleapis.com',
+    'youtubei-att.googleapis.com',
+    'i.ytimg.com',
+    'ytimg.com',
+    'ggpht.com',
     'googlevideo.com',
 )))
 IPV6_BYPASS_FALLBACK_ENABLED = bool(getattr(config, 'ipv6_bypass_fallback_enabled', True))
@@ -1583,6 +1597,10 @@ TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enable
 TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
 TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(telegram_call_learning.CALL_CLIENT_IPSETS)
 TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+TELEGRAM_CALL_LEARNING_ROUTE_CACHE_TTL_SECONDS = max(
+    5.0,
+    float(getattr(config, 'telegram_call_learning_route_cache_ttl_seconds', 30.0)),
+)
 
 bot_ready = False
 bot_polling = False
@@ -1625,7 +1643,11 @@ pool_summary_cache = {
     'signature': None,
     'summary': None,
 }
-router_health = router_health_runtime.RouterHealthRuntime(cache_ttl=ROUTER_HEALTH_CACHE_TTL)
+router_health = router_health_runtime.RouterHealthRuntime(
+    cache_ttl=ROUTER_HEALTH_CACHE_TTL,
+    dns_cache_ttl=ROUTER_HEALTH_DNS_CACHE_TTL,
+    ndmc_cache_ttl=ROUTER_HEALTH_NDMC_CACHE_TTL,
+)
 active_mode_status_cache = {
     'timestamp': 0,
     'signature': None,
@@ -1692,6 +1714,11 @@ telegram_call_learning_state = {
     'added': [],
     'message': '',
     'error': '',
+}
+telegram_call_learning_route_cache = {
+    'signature': None,
+    'protocols': [],
+    'timestamp': 0.0,
 }
 WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
 web_command_lock = threading.Lock()
@@ -2097,7 +2124,29 @@ def _route_list_contains_realtime_call(proto):
     return _route_list_contains_catalog(proto, REALTIME_CALL_SIGNAL_ROUTE_ENTRIES)
 
 
+def _telegram_call_learning_route_signature():
+    signature = []
+    for proto in TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER:
+        try:
+            route_name = _unblock_route_for_key_type(proto)
+            path = _unblock_list_path(route_name)
+            stat = os.stat(path)
+            signature.append((proto, int(stat.st_mtime), int(stat.st_size)))
+        except Exception:
+            signature.append((proto, 0, 0))
+    return tuple(signature)
+
+
 def _telegram_call_learning_route_protocols():
+    now = time.time()
+    signature = _telegram_call_learning_route_signature()
+    cached_signature = telegram_call_learning_route_cache.get('signature')
+    cached_at = float(telegram_call_learning_route_cache.get('timestamp') or 0.0)
+    if (
+        cached_signature == signature and
+        now - cached_at < TELEGRAM_CALL_LEARNING_ROUTE_CACHE_TTL_SECONDS
+    ):
+        return list(telegram_call_learning_route_cache.get('protocols') or [])
     protocols = []
     for proto in TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER:
         try:
@@ -2105,6 +2154,11 @@ def _telegram_call_learning_route_protocols():
                 protocols.append(proto)
         except Exception:
             continue
+    telegram_call_learning_route_cache.update({
+        'signature': signature,
+        'protocols': list(protocols),
+        'timestamp': now,
+    })
     return protocols
 
 
@@ -2451,7 +2505,11 @@ def _telegram_call_learning_auto_worker():
         try:
             route_protocols = _telegram_call_learning_route_protocols()
             active_clients_by_protocol = {}
-            for proto in TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER:
+            poll_protocols = [
+                proto for proto in (route_protocols or TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER)
+                if proto in TELEGRAM_CALL_LEARNING_CLIENT_IPSETS
+            ]
+            for proto in poll_protocols:
                 set_name = TELEGRAM_CALL_LEARNING_CLIENT_IPSETS.get(proto, '')
                 if not set_name:
                     continue
@@ -2898,6 +2956,40 @@ def _ipset_contains(set_name, address):
         return False
 
 
+def _ipset_add_address(set_name, address):
+    try:
+        result = subprocess.run(
+            ['ipset', 'add', set_name, address, '-exist'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        return result.returncode == 0, (result.stdout or '').strip()
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _delete_conntrack_for_address(address):
+    deleted = 0
+    for proto in ('tcp', 'udp'):
+        for direction in ('--orig-dst', '--reply-src'):
+            try:
+                result = subprocess.run(
+                    ['conntrack', '-D', '-p', proto, direction, address],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    deleted += 1
+            except Exception:
+                continue
+    return deleted
+
+
 def _udp_quic_route_drift_findings():
     findings = []
     route_sets = {
@@ -2934,6 +3026,63 @@ def _udp_quic_route_drift_findings():
     return findings
 
 
+def _apply_priority_udp_quic_drift_findings(findings):
+    priority_findings = _udp_quic_drift_priority_findings(findings)
+    if not priority_findings:
+        return 0
+    route_sets = {
+        'vless': ('unblockvless', 'unblockvlessudp'),
+        'vless2': ('unblockvless2', 'unblockvless2udp'),
+    }
+    added = []
+    failed = []
+    added_addresses = set()
+    for item in priority_findings:
+        if not isinstance(item, dict):
+            continue
+        proto = str(item.get('proto') or '').strip().lower()
+        address = str(item.get('address') or '').strip()
+        domain = str(item.get('domain') or '').strip()
+        if proto not in route_sets or not address:
+            continue
+        main_set, udp_set = route_sets[proto]
+        targets = []
+        if not item.get('main'):
+            targets.append(main_set)
+        if not item.get('udp'):
+            targets.append(udp_set)
+        for set_name in targets:
+            ok, output = _ipset_add_address(set_name, address)
+            if ok:
+                added.append((proto, domain, address, set_name))
+                added_addresses.add(address)
+            else:
+                failed.append((proto, domain, address, set_name, output))
+    conntrack_deleted = 0
+    for address in sorted(added_addresses):
+        conntrack_deleted += _delete_conntrack_for_address(address)
+    if added:
+        sample = ', '.join(f'{proto}:{domain}:{address}->{set_name}' for proto, domain, address, set_name in added[:4])
+        message = (
+            f'UDP/QUIC priority drift fast ipset add: {len(added)} entries, '
+            f'conntrack cleared={conntrack_deleted}. {sample}'
+        )
+        _write_runtime_log(message)
+        _record_event(
+            'udp_quic_drift_fast_add',
+            message,
+            level='info',
+            source='watchdog',
+            protocol=added[0][0],
+            service='youtube',
+            details={'added': str(len(added)), 'conntrack_cleared': str(conntrack_deleted), 'sample': sample},
+        )
+    if failed:
+        sample = ', '.join(f'{proto}:{domain}:{address}->{set_name}:{output}' for proto, domain, address, set_name, output in failed[:3])
+        _write_runtime_log(f'UDP/QUIC priority drift fast ipset add failed: {sample}')
+    return len(added)
+
+
 def _udp_quic_drift_priority_findings(findings):
     priority_domains = [
         _normalize_route_domain_entry(domain)
@@ -2956,17 +3105,39 @@ def _udp_quic_drift_refresh_cooldown(findings):
     return UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS
 
 
-def _udp_quic_drift_refresh_deferred_for_stream():
-    return _vless_traffic_guard_active(
-        'UDP/QUIC drift refresh',
-        log=True,
-        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-    )
+def _udp_quic_drift_refresh_guard_protocols(findings):
+    protocols = []
+    seen = set()
+    for item in findings or []:
+        if not isinstance(item, dict):
+            continue
+        proto = str(item.get('proto') or '').strip().lower()
+        if proto in YOUTUBE_STREAM_GUARD_PROTOCOLS and proto not in seen:
+            seen.add(proto)
+            protocols.append(proto)
+    return tuple(protocols) or tuple(YOUTUBE_STREAM_GUARD_PROTOCOLS)
+
+
+def _udp_quic_drift_refresh_deferred_for_stream(findings):
+    guarded_findings = _udp_quic_drift_priority_findings(findings) or findings
+    for proto in _udp_quic_drift_refresh_guard_protocols(guarded_findings):
+        if _youtube_stream_guard_active(
+            proto,
+            reason='UDP/QUIC drift refresh',
+            log=True,
+            hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+        ):
+            return True
+    return False
 
 
 def _refresh_ipset_for_udp_quic_drift(findings):
     now = time.time()
     priority_findings = _udp_quic_drift_priority_findings(findings)
+    if _apply_priority_udp_quic_drift_findings(priority_findings):
+        udp_quic_drift_state['last_refresh'] = now
+        udp_quic_drift_state['last_log'] = now
+        return
     cooldown = _udp_quic_drift_refresh_cooldown(findings)
     if now - float(udp_quic_drift_state.get('last_refresh') or 0.0) < cooldown:
         if now - float(udp_quic_drift_state.get('last_log') or 0.0) >= 300:
@@ -2974,7 +3145,7 @@ def _refresh_ipset_for_udp_quic_drift(findings):
             label = 'priority ' if priority_findings else ''
             _write_runtime_log(f'UDP/QUIC {label}drift detected, refresh skipped by cooldown.')
         return
-    if _udp_quic_drift_refresh_deferred_for_stream():
+    if _udp_quic_drift_refresh_deferred_for_stream(findings):
         udp_quic_drift_state['last_log'] = now
         return
     udp_quic_drift_state['last_refresh'] = now
