@@ -61,7 +61,6 @@
 173.252.0.0/16
 173.252.64.0/18
 173.255.0.0/16
-64.233.164.188
 176.97.0.0/16
 179.60.192.0/22
 18.165.122.105
@@ -291,7 +290,6 @@ fbsbx.com
 fc-api.arkoselabs.com
 featureassets.org
 featuregates.org
-feed.rutracker.cc
 files.oaiusercontent.com
 fonts.gstatic.com
 forwarder.workos.com
@@ -393,8 +391,6 @@ remotedesktop.google.com
 rum.browser-intake-datadoghq.com
 rutor.info
 rutor.is
-rutracker.org
-rutracker.wiki
 setup.auth.openai.com
 setup.workos.com
 sr-client-cfg.amplitude.com

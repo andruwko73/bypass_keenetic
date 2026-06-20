@@ -1,3 +1,7 @@
+*v1.734 (20 Jun 2026) -* main
+
+*Moves tracker route domains and a shared Google video IP out of Vless 1 into Vless 2 so route intersection checks stay clean and YouTube/tracker traffic keeps one owner.*
+
 *v1.733 (20 Jun 2026) -* main
 
 *Cleaned dynamic web status text punctuation, restored wrapping for the key health row, and added compact route diagnostics to stream-guard events.*

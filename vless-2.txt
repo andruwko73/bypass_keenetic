@@ -85,6 +85,7 @@ client-channel.google.com
 clients4.google.com
 c.youtube.com
 families.google.com
+feed.rutracker.cc
 fonts.googleapis.com
 gaming.youtube.com
 ggpht.com
@@ -101,6 +102,8 @@ nhacmp3youtube.com
 play-fe.googleapis.com
 redirector.googlevideo.com
 returnyoutubedislikeapi.com
+rutracker.org
+rutracker.wiki
 s.ytimg.com
 studio.youtube.com
 support.google.com

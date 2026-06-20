@@ -3598,18 +3598,18 @@ def test_vless2_youtube_routes_are_scoped():
         if line.strip() and not line.lstrip().startswith('#')
     }
     assert {'accounts.google.com', 'www.google.com'} <= vless_entries
-    assert 'rutracker.org' not in entries
-    assert 'rutracker.wiki' not in entries
+    assert 'rutracker.org' in entries
+    assert 'rutracker.wiki' in entries
     assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert service_routes.service_route_state('youtube', unblock_dir=str(ROOT))['label'] == 'Vless 2'
     assert service_routes.service_route_state('gemini', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert 'static.rutracker.cc' not in entries
-    assert 'feed.rutracker.cc' not in entries
-    assert 'rutracker.org' in vless_entries
-    assert 'rutracker.wiki' in vless_entries
+    assert 'feed.rutracker.cc' in entries
+    assert 'rutracker.org' not in vless_entries
+    assert 'rutracker.wiki' not in vless_entries
     assert 'static.rutracker.cc' in vless_entries
-    assert 'feed.rutracker.cc' in vless_entries
+    assert 'feed.rutracker.cc' not in vless_entries
     assert 'thepiratebay.org' not in entries
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
     assert 'redirector.googlevideo.com' in entries
@@ -3833,7 +3833,7 @@ def test_telegram_routes_include_mini_app_dependencies():
         '104.21.72.109', '151.101.129.91', 'internal.api.vk.ru',
         'queuev4.vk.ru', 'tracker-api.vk-analytics.ru',
         '17.249.0.0/16', '17.252.0.0/16', '17.188.128.0/18',
-        '64.233.164.188', '142.251.169.188', '172.253.145.188',
+        '142.251.169.188', '172.253.145.188',
     }
     assert expected <= set(service_catalog.TELEGRAM_UNBLOCK_ENTRIES)
     assert expected <= entries
