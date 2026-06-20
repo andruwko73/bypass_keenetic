@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.739
+# ВЕРСИЯ СКРИПТА v1.740
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -22,6 +22,7 @@ pool_probe_max_cpu_percent = 70.0
 pool_probe_cpu_sample_seconds = 0.35
 pool_probe_high_cpu_delay_seconds = 5.0
 pool_probe_high_cpu_max_wait_seconds = 45.0
+pool_probe_youtube_profile = 'quick'  # quick для пула, full остаётся для детальной диагностики активного ключа
 pool_probe_quality_enabled = True  # короткий download-sample через ключ для оценки YouTube-качества перед применением
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={bytes}'
 pool_probe_quality_download_bytes = 1048576

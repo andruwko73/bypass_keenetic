@@ -1,3 +1,7 @@
+*v1.740 (21 Jun 2026) -* main
+
+*Makes pool checks use the quick YouTube health profile by default while preserving full YouTube diagnostics for active-key checks, so one slow Vless 2 candidate cannot hold the router in a long temporary-Xray probe.*
+
 *v1.739 (21 Jun 2026) -* main
 
 *Pauses long pool checks when the bot RSS reaches the router-safe threshold and resumes only after memory settles, preventing Vless 2 pool probes from sitting in “checking” while pushing the router above the post-pool restart limit.*

@@ -1,3 +1,9 @@
+<a name="1.740"></a>
+# [1.740] - 21 Jun 2026
+
+- Switches pool probes to the quick YouTube health profile by default and keeps long retry timeouts out of that fast path, so one slow candidate cannot hold a temporary Xray probe for minutes.
+- Keeps the full YouTube health profile available for active-key and explicit diagnostic checks.
+
 <a name="1.730"></a>
 # [1.730] - 20 Jun 2026
 

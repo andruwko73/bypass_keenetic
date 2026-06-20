@@ -1265,6 +1265,9 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_quality_max_samples_per_run = 12' in example
     assert 'pool_probe_quality_max_samples_per_run = 12' in installer
     assert 'pool_probe_quality_max_samples_per_run = 12' in bootstrap
+    assert "pool_probe_youtube_profile = 'quick'" in example
+    assert "pool_probe_youtube_profile = 'quick'" in installer
+    assert "pool_probe_youtube_profile = 'quick'" in bootstrap
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
@@ -2850,13 +2853,13 @@ def test_pool_probe_controller_helpers():
         2,
         1,
         (1, 2, 3, 4, 5, 6, 10, 20),
-    ) == 113.0
+    ) == 155.0
     assert pool_probe_controller.pool_probe_timeout_budget(
         [{'urls': ['https://a', 'https://b']}],
         1,
         1,
         (1, 2, 3, 4, 5, 6, 10, 20, 7, 8),
-    ) == 119.0
+    ) == 125.0
     meminfo_path = ROOT / 'tests' / '_meminfo.tmp'
     try:
         meminfo_path.write_text('MemAvailable:        12345 kB\n', encoding='utf-8')
@@ -2995,6 +2998,40 @@ def test_pool_probe_controller_helpers():
         sleep=lambda seconds: None,
     )
     assert http_calls == [
+        {'url': 'https://web.telegram.org/', 'connect_timeout': 1.0, 'read_timeout': 1.5},
+    ] + [
+        {
+            'url': url,
+            'connect_timeout': 3,
+            'read_timeout': 4,
+        }
+        for url in youtube_healthcheck.YOUTUBE_HEALTHCHECK_QUICK_URLS
+    ]
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless', 'key')
+    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['yt_ok'] is True
+    assert records[0][2]['yt_stability'] == 'stable'
+
+    records = []
+    full_http_calls = []
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'full-youtube-key',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (True, ''),
+        check_http=lambda proxy, **kwargs: full_http_calls.append(kwargs) or (True, 'ok'),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        http_retry_timeouts=(6, 10),
+        youtube_profile='full',
+        sleep=lambda seconds: None,
+    )
+    assert full_http_calls == [
         {'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4},
     ] + [
         {
@@ -3004,11 +3041,37 @@ def test_pool_probe_controller_helpers():
         }
         for index, url in enumerate(pool_probe_controller.YOUTUBE_HEALTHCHECK_URLS)
     ]
-    assert len(records) == 1
-    assert records[0][0:2] == ('vless', 'key')
-    assert records[0][2]['tg_ok'] is True
-    assert records[0][2]['yt_ok'] is True
-    assert records[0][2]['yt_stability'] == 'stable'
+
+    records = []
+    optional_tg_calls = []
+
+    def check_optional_tg_retry_is_skipped(proxy, **kwargs):
+        optional_tg_calls.append(kwargs)
+        return False, 'fail'
+
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless2',
+        'optional-telegram-key',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'telegram fail'),
+        check_http=check_optional_tg_retry_is_skipped,
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        http_retry_timeouts=(6, 10),
+        telegram_required=False,
+        sleep=lambda seconds: None,
+    )
+    assert optional_tg_calls[:1] == [
+        {'url': 'https://web.telegram.org/', 'connect_timeout': 1.0, 'read_timeout': 1.5},
+    ]
+    assert all(
+        call['connect_timeout'] == 3 and call['read_timeout'] == 4
+        for call in optional_tg_calls[1:]
+    )
 
     records = []
     pool_probe_controller.check_pool_key_through_proxy(
@@ -3068,7 +3131,7 @@ def test_pool_probe_controller_helpers():
         http_timeouts=(3, 4),
         sleep=lambda seconds: None,
     )
-    assert http_calls[:1] == [{'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4}]
+    assert http_calls[:1] == [{'url': 'https://web.telegram.org/', 'connect_timeout': 1.0, 'read_timeout': 1.5}]
     assert len(records) == 1
     assert records[0][0:2] == ('vless', 'app-telegram-key')
     assert records[0][2]['tg_ok'] is True

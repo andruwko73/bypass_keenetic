@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.739, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.740, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -1338,6 +1338,7 @@ POOL_PROBE_CUSTOM_READ_TIMEOUT = float(getattr(config, 'pool_probe_custom_read_t
 POOL_PROBE_RETRY_CONNECT_TIMEOUT = float(getattr(config, 'pool_probe_retry_connect_timeout', 6))
 POOL_PROBE_RETRY_READ_TIMEOUT = float(getattr(config, 'pool_probe_retry_read_timeout', 10))
 POOL_PROBE_RETRY_DELAY_SECONDS = float(getattr(config, 'pool_probe_retry_delay_seconds', 0.2))
+POOL_PROBE_YOUTUBE_PROFILE = str(getattr(config, 'pool_probe_youtube_profile', 'quick') or 'quick').strip().lower()
 POOL_PROBE_QUALITY_ENABLED = bool(getattr(config, 'pool_probe_quality_enabled', True))
 POOL_PROBE_QUALITY_DOWNLOAD_URL = str(
     getattr(config, 'pool_probe_quality_download_url', 'https://speed.cloudflare.com/__down?bytes={bytes}') or ''
@@ -7013,7 +7014,13 @@ def _pool_probe_progress_label(progress=None):
 
 
 def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
-    return _controller_pool_probe_timeout_budget(custom_checks, task_count, workers, POOL_PROBE_TIMEOUTS)
+    return _controller_pool_probe_timeout_budget(
+        custom_checks,
+        task_count,
+        workers,
+        POOL_PROBE_TIMEOUTS,
+        youtube_profile=POOL_PROBE_YOUTUBE_PROFILE,
+    )
 
 
 def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None, record_key_probe=None):
@@ -7031,6 +7038,7 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
         http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
         telegram_required=_telegram_required_for_protocol(proto),
+        youtube_profile=POOL_PROBE_YOUTUBE_PROFILE,
         measure_download=_measure_limited_pool_probe_quality_download if POOL_PROBE_QUALITY_ENABLED else None,
         quality_settings=_pool_probe_quality_settings(),
     )

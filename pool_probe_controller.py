@@ -7,6 +7,7 @@ from youtube_healthcheck import (
     YOUTUBE_HEALTHCHECK_REQUIRED_URLS,
     YOUTUBE_HEALTHCHECK_URLS,
     check_youtube_through_proxy,
+    youtube_healthcheck_profile,
 )
 from telegram_healthcheck import (
     TELEGRAM_HEALTHCHECK_MIN_OK,
@@ -67,7 +68,7 @@ def available_memory_kb(meminfo_path='/proc/meminfo'):
     return None
 
 
-def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
+def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts, youtube_profile='quick'):
     tg_connect, tg_read, http_connect, http_read, custom_connect, custom_read, single_timeout, batch_timeout = timeouts[:8]
     has_http_retry_timeouts = len(timeouts) > 9
     retry_http_connect = timeouts[8] if has_http_retry_timeouts else 0
@@ -77,11 +78,11 @@ def pool_probe_timeout_budget(custom_checks, task_count, workers, timeouts):
     for check in custom_checks or []:
         targets = check.get('urls') if isinstance(check.get('urls'), list) else [check.get('url', '')]
         custom_target_count += len([target for target in targets[:2] if target])
+    youtube_urls, _youtube_min_ok, _youtube_max_failures = youtube_healthcheck_profile(youtube_profile)
     base_per_key = (
         tg_connect + tg_read +
         len(TELEGRAM_HEALTHCHECK_URLS) * (http_connect + http_read) +
-        http_connect + http_read +
-        retry_http_connect + retry_http_read +
+        len(youtube_urls) * (http_connect + http_read) +
         custom_target_count * (custom_connect + custom_read + custom_retry_budget)
     )
     retry_per_key = tg_connect + tg_read + retry_http_connect + retry_http_read
@@ -107,6 +108,7 @@ def check_pool_key_through_proxy(
     http_timeouts,
     http_retry_timeouts=None,
     telegram_required=False,
+    youtube_profile='quick',
     measure_download=None,
     quality_settings=None,
     sleep=time.sleep,
@@ -114,6 +116,15 @@ def check_pool_key_through_proxy(
     tg_connect, tg_read = telegram_timeouts
     http_connect, http_read = http_timeouts
     retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
+    quick_youtube_profile = str(youtube_profile or '').strip().lower() == 'quick'
+    youtube_retry_timeouts = http_timeouts if quick_youtube_profile else (retry_http_connect, retry_http_read)
+    tg_check_timeouts = (tg_connect, tg_read)
+    tg_http_timeouts = (http_connect, http_read)
+    tg_urls = TELEGRAM_HEALTHCHECK_URLS
+    if quick_youtube_profile and not telegram_required:
+        tg_check_timeouts = (min(tg_connect, 1.0), min(tg_read, 1.5))
+        tg_http_timeouts = (min(http_connect, 1.0), min(http_read, 1.5))
+        tg_urls = TELEGRAM_HEALTHCHECK_URLS[:1]
     quality_settings = quality_settings or {}
     collect_quality = bool(quality_settings.get('enabled') or measure_download)
     tg_metrics = {}
@@ -122,35 +133,39 @@ def check_pool_key_through_proxy(
         check_telegram_api,
         check_http,
         proxy_url,
-        telegram_timeouts=(tg_connect, tg_read),
-        http_timeouts=(http_connect, http_read),
+        telegram_timeouts=tg_check_timeouts,
+        http_timeouts=tg_http_timeouts,
+        urls=tg_urls,
         metrics=tg_metrics if collect_quality else None,
     )
     yt_ok, _ = check_youtube_through_proxy(
         check_http,
         proxy_url,
         http_timeouts=(http_connect, http_read),
-        http_retry_timeouts=(retry_http_connect, retry_http_read),
+        http_retry_timeouts=youtube_retry_timeouts,
         retry_delay_seconds=retry_delay_seconds,
+        profile=youtube_profile,
         metrics=yt_metrics,
         sleep=sleep,
     )
     if not tg_ok and not yt_ok:
         sleep(retry_delay_seconds)
-        tg_ok, _ = check_telegram_service_through_proxy(
-            check_telegram_api,
-            check_http,
-            proxy_url,
-            telegram_timeouts=(tg_connect, tg_read),
-            http_timeouts=(retry_http_connect, retry_http_read),
-            metrics=tg_metrics if collect_quality else None,
-        )
+        if telegram_required:
+            tg_ok, _ = check_telegram_service_through_proxy(
+                check_telegram_api,
+                check_http,
+                proxy_url,
+                telegram_timeouts=(tg_connect, tg_read),
+                http_timeouts=(retry_http_connect, retry_http_read),
+                metrics=tg_metrics if collect_quality else None,
+            )
         yt_ok, _ = check_youtube_through_proxy(
             check_http,
             proxy_url,
-            http_timeouts=(retry_http_connect, retry_http_read),
-            http_retry_timeouts=(retry_http_connect, retry_http_read),
+            http_timeouts=youtube_retry_timeouts,
+            http_retry_timeouts=youtube_retry_timeouts,
             retry_delay_seconds=retry_delay_seconds,
+            profile=youtube_profile,
             metrics=yt_metrics,
             sleep=sleep,
         )
@@ -169,9 +184,10 @@ def check_pool_key_through_proxy(
         yt_ok, _ = check_youtube_through_proxy(
             check_http,
             proxy_url,
-            http_timeouts=(retry_http_connect, retry_http_read),
-            http_retry_timeouts=(retry_http_connect, retry_http_read),
+            http_timeouts=youtube_retry_timeouts,
+            http_retry_timeouts=youtube_retry_timeouts,
             retry_delay_seconds=retry_delay_seconds,
+            profile=youtube_profile,
             metrics=yt_metrics,
             sleep=sleep,
         )
