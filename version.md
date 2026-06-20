@@ -1,3 +1,7 @@
+*v1.739 (21 Jun 2026) -* main
+
+*Pauses long pool checks when the bot RSS reaches the router-safe threshold and resumes only after memory settles, preventing Vless 2 pool probes from sitting in “checking” while pushing the router above the post-pool restart limit.*
+
 *v1.738 (20 Jun 2026) -* main
 
 *Keeps YouTube drift repair focused on the affected Vless route, adds DNS-first fast ipset repair for youtu.be/youtubei/ytimg/ggpht/googlevideo, and expands YouTube-owned Google edge ranges seen on current watch/live CDN answers so Vless 1 traffic no longer delays Vless 2 route repair.*

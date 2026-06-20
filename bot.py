@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.738, последнее изменение: 20.06.2026
+#  Файл: bot.py, Версия v1.739, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -7348,11 +7348,30 @@ def _schedule_low_memory_pool_probe_resume():
                     shutdown_requested.wait(1)
                     continue
                 available_kb = _available_memory_kb()
-                if available_kb is None or available_kb >= POOL_PROBE_PAUSE_AVAILABLE_KB:
+                rss_kb = _process_rss_kb()
+                rss_ready = (
+                    MEMORY_POST_POOL_RESTART_RSS_KB <= 0 or
+                    not rss_kb or
+                    rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB
+                )
+                if not rss_ready:
+                    cleanup = _memory_cleanup('pool probe resume wait', force=True, clear_status=True)
+                    rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
+                    rss_ready = (
+                        MEMORY_POST_POOL_RESTART_RSS_KB <= 0 or
+                        not rss_kb or
+                        rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB
+                    )
+                if (available_kb is None or available_kb >= POOL_PROBE_PAUSE_AVAILABLE_KB) and rss_ready:
                     started, queued = _resume_cancelled_pool_probe('ожидания свободной памяти')
                     if started:
                         return
-                if available_kb is None:
+                if not rss_ready:
+                    note = (
+                        f'Проверка пула приостановлена до освобождения памяти бота: RSS {int(rss_kb or 0)} KB, '
+                        f'порог {MEMORY_POST_POOL_RESTART_RSS_KB} KB.'
+                    )
+                elif available_kb is None:
                     note = 'Проверка пула приостановлена до освобождения памяти.'
                 else:
                     note = (
@@ -7542,6 +7561,8 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             max_low_memory_wait_seconds=POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS,
             slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB,
             slow_memory_delay_seconds=POOL_PROBE_SLOW_MEMORY_DELAY_SECONDS,
+            process_rss_kb=_process_rss_kb,
+            max_process_rss_kb=MEMORY_POST_POOL_RESTART_RSS_KB,
         )
     finally:
         probe_recorder.flush()

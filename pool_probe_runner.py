@@ -331,6 +331,8 @@ def run_pool_probe_worker(
     max_low_memory_wait_seconds=180.0,
     slow_available_kb=0,
     slow_memory_delay_seconds=0,
+    process_rss_kb=None,
+    max_process_rss_kb=0,
     sleep=time.sleep,
     time_provider=time.time,
 ):
@@ -439,10 +441,35 @@ def run_pool_probe_worker(
             return busy
         return None
 
+    def rss_above_limit():
+        if not process_rss_kb or not max_process_rss_kb or max_process_rss_kb <= 0:
+            return None
+        try:
+            rss_kb = process_rss_kb()
+        except Exception:
+            return None
+        try:
+            rss_kb = int(rss_kb or 0)
+        except Exception:
+            rss_kb = 0
+        if rss_kb and rss_kb >= int(max_process_rss_kb):
+            return rss_kb
+        return None
+
     try:
         while pending_tasks:
             if cancel_requested():
                 log('Проверка пула приостановлена для применения выбранного ключа.')
+                break
+            high_rss_kb = rss_above_limit()
+            if high_rss_kb is not None:
+                note = (
+                    f'Проверка пула приостановлена: RSS бота {int(high_rss_kb)} KB, '
+                    f'порог {int(max_process_rss_kb)} KB.'
+                )
+                log(note)
+                update_note(note)
+                paused_remaining = True
                 break
             high_cpu_percent = cpu_above_limit()
             if high_cpu_percent is not None:

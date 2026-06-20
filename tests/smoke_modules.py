@@ -1810,6 +1810,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
+    assert 'process_rss_kb=_process_rss_kb' in source
+    assert 'max_process_rss_kb=MEMORY_POST_POOL_RESTART_RSS_KB' in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
     assert "update_proxy('none', persist=False)" not in startup_restore
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -3329,6 +3331,42 @@ def test_pool_probe_runner_failover_candidate():
     assert cleaned == [True]
     assert paused_remaining == [('vless', 'low-memory')]
     assert '190000' in memory_logs[-1]
+
+    rss_notes = []
+    rss_logs = []
+    rss_remaining = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless2', 'rss-high'), ('vless2', 'rss-next')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=rss_logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: (_ for _ in ()).throw(AssertionError('rss guard should stop before validation')),
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: (_ for _ in ()).throw(AssertionError('rss guard should stop before xray')),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: None,
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+        on_cancelled_remaining=rss_remaining.extend,
+        set_note=rss_notes.append,
+        process_rss_kb=lambda: 73000,
+        max_process_rss_kb=71680,
+    )
+    assert (checked, total) == (0, 2)
+    assert rss_remaining == [('vless2', 'rss-high'), ('vless2', 'rss-next')]
+    assert any('RSS' in note and '71680' in note for note in rss_notes)
+    assert any('RSS' in item for item in rss_logs)
 
     slow_notes = []
     slow_sleeps = []
