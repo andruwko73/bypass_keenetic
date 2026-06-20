@@ -41,6 +41,8 @@ def render_web_scripts(
         let poolDataRefreshTimer = null;
         let poolViewTimers = {{}};
         let commandPollTimer = null;
+        let commandTimer = null;
+        let commandTimerState = null;
         let actionMessageTimer = null;
         let activeCommandName = '';
 
@@ -714,7 +716,7 @@ def render_web_scripts(
                 if (!target) {{
                     return;
                 }}
-                const message = error && error.message ? error.message : 'Не удалось загрузить вкладку.';
+                const message = error && error.message ? error.message : 'Не удалось загрузить вкладку';
                 target.innerHTML = '<span class="eyebrow">Ключи</span><h2>Ошибка загрузки</h2><p class="section-subtitle">' + escapeHtml(message) + '</p><button type="button" class="secondary-button" data-protocol-retry>Повторить</button>';
                 const retry = target.querySelector('[data-protocol-retry]');
                 if (retry) {{
@@ -1163,6 +1165,15 @@ def render_web_scripts(
                     const ytDelta = poolStateRank(right.dataset.ytState) - poolStateRank(left.dataset.ytState);
                     if (ytDelta) {{
                         return ytDelta;
+                    }}
+                }} else if (sortMode === 'quality') {{
+                    const qualityDelta = Number(right.dataset.qualityScore || 0) - Number(left.dataset.qualityScore || 0);
+                    if (qualityDelta) {{
+                        return qualityDelta;
+                    }}
+                    const checkedDelta = Number(right.dataset.checkedTs || 0) - Number(left.dataset.checkedTs || 0);
+                    if (checkedDelta) {{
+                        return checkedDelta;
                     }}
                 }} else if (sortMode === 'checked') {{
                     const checkedDelta = Number(right.dataset.checkedTs || 0) - Number(left.dataset.checkedTs || 0);
@@ -1757,6 +1768,87 @@ def render_web_scripts(
             }}
         }}
 
+        function formatCommandDuration(seconds) {{
+            const safeSeconds = Math.max(0, Math.round(Number(seconds || 0)));
+            const minutes = Math.floor(safeSeconds / 60);
+            const rest = safeSeconds % 60;
+            if (minutes >= 60) {{
+                const hours = Math.floor(minutes / 60);
+                const hourMinutes = minutes % 60;
+                return hours + ':' + String(hourMinutes).padStart(2, '0') + ':' + String(rest).padStart(2, '0');
+            }}
+            return minutes + ':' + String(rest).padStart(2, '0');
+        }}
+
+        function commandElapsedSeconds(state) {{
+            const startedAt = Number((state && state.started_at) || 0);
+            if (!startedAt) {{
+                return 0;
+            }}
+            return Math.max(0, (Date.now() / 1000) - startedAt);
+        }}
+
+        function commandTimerText(state) {{
+            if (!state || state.command !== 'update' || !state.running) {{
+                return '';
+            }}
+            const elapsed = commandElapsedSeconds(state);
+            const progress = Math.max(0, Math.min(100, Number(state.progress || 0)));
+            if (progress > 5 && progress < 100 && elapsed > 8) {{
+                const remaining = Math.max(0, elapsed * (100 - progress) / progress);
+                return 'Прошло ' + formatCommandDuration(elapsed) + ' · осталось примерно ' + formatCommandDuration(remaining);
+            }}
+            return 'Прошло ' + formatCommandDuration(elapsed) + ' · оцениваем время';
+        }}
+
+        function updateCommandProgress(state) {{
+            const progressBlock = document.querySelector('#web-command-status [data-command-progress]');
+            if (!progressBlock) {{
+                return;
+            }}
+            const progress = Math.max(0, Math.min(100, Number((state && state.progress) || 0)));
+            const isUpdate = !!state && state.command === 'update' && (!!state.running || progress > 0);
+            progressBlock.classList.toggle('hidden', !isUpdate);
+            if (!isUpdate) {{
+                return;
+            }}
+            const label = progressBlock.querySelector('[data-command-progress-label]');
+            if (label) {{
+                label.textContent = state.progress_label || (state.running ? 'Обновление выполняется' : 'Обновление завершено');
+            }}
+            const timer = progressBlock.querySelector('[data-command-progress-timer]');
+            if (timer) {{
+                timer.textContent = state.running ? commandTimerText(state) : 'Готово';
+            }}
+            const fill = progressBlock.querySelector('[data-command-progress-fill]');
+            if (fill) {{
+                fill.style.width = String(progress) + '%';
+            }}
+        }}
+
+        function stopCommandTimer() {{
+            if (commandTimer) {{
+                window.clearInterval(commandTimer);
+                commandTimer = null;
+            }}
+            commandTimerState = null;
+        }}
+
+        function startCommandTimer(state) {{
+            commandTimerState = Object.assign({{}}, state || {{}});
+            updateCommandProgress(commandTimerState);
+            if (commandTimer) {{
+                return;
+            }}
+            commandTimer = window.setInterval(function() {{
+                if (!commandTimerState || !commandTimerState.running) {{
+                    stopCommandTimer();
+                    return;
+                }}
+                updateCommandProgress(commandTimerState);
+            }}, 1000);
+        }}
+
         function showActionMessage(text, ok, options) {{
             const block = document.getElementById('web-action-message');
             if (!block) {{
@@ -1784,11 +1876,13 @@ def render_web_scripts(
             const block = document.getElementById('web-command-status');
             if (!block) {{
                 setCommandRunningLayout(false);
+                stopCommandTimer();
                 return false;
             }}
             if (!state || !state.label) {{
                 block.classList.add('hidden');
                 setCommandRunningLayout(false);
+                stopCommandTimer();
                 return false;
             }}
             block.classList.remove('hidden');
@@ -1799,7 +1893,13 @@ def render_web_scripts(
             }}
             const output = block.querySelector('.log-output');
             if (output) {{
-                output.textContent = state.result || ('⏳ ' + state.label + ' ещё выполняется. Статус обновится без перезагрузки страницы.');
+                output.textContent = state.result || ('⏳ ' + state.label + ' ещё выполняется. Статус обновится без перезагрузки страницы');
+            }}
+            updateCommandProgress(state);
+            if (state.running && state.command === 'update') {{
+                startCommandTimer(state);
+            }} else {{
+                stopCommandTimer();
             }}
             return !!state.running;
         }}
@@ -1856,7 +1956,7 @@ def render_web_scripts(
             }}
             const details = card.querySelector('[data-protocol-status-details]');
             if (details) {{
-                details.textContent = text || 'Проверка Telegram API, YouTube и дополнительных сервисов выполняется в фоне.';
+                details.textContent = text || 'Проверка Telegram API, YouTube и дополнительных сервисов выполняется в фоне';
             }}
             const icons = card.querySelector('[data-protocol-status-icons]');
             if (icons) {{
@@ -1914,7 +2014,7 @@ def render_web_scripts(
                 return Promise.resolve(window.confirm(message || title || 'Подтвердить действие?'));
             }}
             titleNode.textContent = title || 'Подтверждение';
-            messageNode.textContent = message || 'Подтвердите действие.';
+            messageNode.textContent = message || 'Подтвердите действие';
             modal.classList.remove('hidden');
             return new Promise(function(resolve) {{
                 function cleanup(result) {{
@@ -2073,7 +2173,7 @@ def render_web_scripts(
                         if (proto && (action === 'install' || action === 'pool-apply' || action === 'pool-probe')) {{
                             markProtocolPending(proto);
                         }}
-                        showActionMessage('⏳ Выполняется действие. Страница останется на месте.', true);
+                        showActionMessage('⏳ Выполняется действие. Страница останется на месте', true);
                         const requestBody = new URLSearchParams();
                         formData.forEach(function(value, name) {{
                             requestBody.append(name, value);
@@ -2097,7 +2197,7 @@ def render_web_scripts(
                         }})
                         .then(function(payload) {{
                             const ok = payload._responseOk && payload.ok !== false;
-                            showActionMessage(payload.result || 'Готово.', ok, {{
+                            showActionMessage(payload.result || 'Готово', ok, {{
                                 autoHide: ok,
                                 delayMs: action === 'command' ? 5000 : 9000
                             }});

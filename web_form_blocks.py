@@ -61,16 +61,33 @@ def render_command_block(command_state, *, live=False):
     command_state = command_state or {}
     if command_state.get('label'):
         command_title = 'Команда выполняется' if command_state.get('running') else 'Последняя команда'
-        suffix = 'Статус обновится без перезагрузки страницы.' if live else 'Обновление страницы происходит автоматически.'
+        suffix = 'Статус обновится без перезагрузки страницы' if live else 'Обновление страницы происходит автоматически'
         command_text = command_state.get('result') or f'⏳ {command_state["label"]} ещё выполняется. {suffix}'
         block_id = ' id="web-command-status"' if live else ''
+        progress = max(0, min(100, int(command_state.get('progress') or 0)))
+        progress_label = html.escape(str(command_state.get('progress_label') or 'Подготовка обновления'))
+        progress_hidden = '' if command_state.get('command') == 'update' and (command_state.get('running') or progress) else ' hidden'
         return f'''<div{block_id} class="notice notice-status">
   <strong>{html.escape(command_title)}: {html.escape(command_state['label'])}</strong>
+  <div class="command-progress-block{progress_hidden}" data-command-progress>
+    <div class="command-progress-header">
+      <span data-command-progress-label>{progress_label}</span>
+      <span data-command-progress-timer></span>
+    </div>
+    <div class="command-progress-track"><span class="command-progress-fill" data-command-progress-fill style="width:{progress}%"></span></div>
+  </div>
   <pre class="log-output">{html.escape(command_text)}</pre>
 </div>'''
     if live:
         return '''<div id="web-command-status" class="notice notice-status hidden">
   <strong></strong>
+  <div class="command-progress-block hidden" data-command-progress>
+    <div class="command-progress-header">
+      <span data-command-progress-label></span>
+      <span data-command-progress-timer></span>
+    </div>
+    <div class="command-progress-track"><span class="command-progress-fill" data-command-progress-fill style="width:0%"></span></div>
+  </div>
   <pre class="log-output"></pre>
 </div>'''
     return ''
@@ -182,7 +199,7 @@ def render_app_runtime_mode_picker(active_mode, modes, csrf_input_html=''):
     def render_mode_form(value, label, _description):
         confirm_attrs = _confirm_attrs(
             f'Переключить режим на {label}?',
-            'Сервис может перезапуститься, страница обновится. Ключи и списки сохранятся.',
+            'Сервис может перезапуститься, страница обновится. Ключи и списки сохранятся',
         )
         active_class = ' active' if active_mode == value else ''
         return f'''<form method="post" action="/set_app_mode" data-async-action="set-app-mode"{confirm_attrs}>
@@ -228,13 +245,13 @@ def render_command_button_forms(command_buttons, csrf_input_html):
 def render_router_command_buttons(csrf_input_html, dns_override_active=False):
     return render_command_button_forms(
         [
-            ('restart_services', 'Перезапустить сервисы', '', 'Перезапустить сервисы?', 'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть.'),
-            ('update', 'Обновить до последнего релиза', '', 'Обновить до последнего релиза?', 'Код и служебные файлы будут обновлены без сброса ключей, пулов и списков.'),
-            ('rollback_update', 'Откатить обновление', 'secondary-button', 'Откатить последнее обновление?', 'Будет восстановлен последний backup из /opt/root и перезапущен сервис бота.'),
-            ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else '', 'Включить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
-            ('dns_off', 'DNS Override ВЫКЛ', 'danger', 'Выключить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится.'),
-            ('remove', 'Удалить компоненты', 'danger', 'Удалить компоненты?', 'Будут удалены установленные компоненты программы. Настройки роутера могут измениться.'),
-            ('reboot', 'Перезагрузить роутер', 'danger', 'Перезагрузить роутер?', 'Связь с веб-интерфейсом временно пропадет.'),
+            ('restart_services', 'Перезапустить сервисы', '', 'Перезапустить сервисы?', 'Службы прокси и DNS будут перезапущены; соединение может кратко пропасть'),
+            ('update', 'Обновить до последнего релиза', '', 'Обновить до последнего релиза?', 'Код и служебные файлы будут обновлены без сброса ключей, пулов и списков'),
+            ('rollback_update', 'Откатить обновление', 'secondary-button', 'Откатить последнее обновление?', 'Будет восстановлен последний backup из /opt/root и перезапущен сервис бота'),
+            ('dns_on', 'DNS Override ВКЛ', 'success-button' if dns_override_active else '', 'Включить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится'),
+            ('dns_off', 'DNS Override ВЫКЛ', 'danger', 'Выключить DNS Override?', 'Роутер сохранит конфигурацию и перезагрузится'),
+            ('remove', 'Удалить компоненты', 'danger', 'Удалить компоненты?', 'Будут удалены установленные компоненты программы. Настройки роутера могут измениться'),
+            ('reboot', 'Перезагрузить роутер', 'danger', 'Перезагрузить роутер?', 'Связь с веб-интерфейсом временно пропадет'),
         ],
         csrf_input_html,
     )

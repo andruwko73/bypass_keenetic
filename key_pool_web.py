@@ -87,7 +87,7 @@ def web_event_history_html(events):
         </li>''')
     return f'''<section class="panel event-history-panel">
         <div class="route-section-head">
-            <small>Последние переключения ключей, обновления и изменения маршрутов по всем протоколам.</small>
+            <small>Последние переключения ключей, обновления и изменения маршрутов по всем протоколам</small>
         </div>
         <ul class="event-history-list">{"".join(rows)}</ul>
     </section>'''
@@ -393,7 +393,7 @@ def web_custom_check_badges(probe, custom_checks, service_icon_html):
     return ''.join(badges)
 
 
-def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html='', empty_message='Дополнительные проверки пока не добавлены.'):
+def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html='', empty_message='Дополнительные проверки пока не добавлены'):
     if not custom_checks:
         if not empty_message:
             return ''

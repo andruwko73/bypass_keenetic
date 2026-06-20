@@ -2001,6 +2001,30 @@ def test_telegram_call_router_health_note():
     assert ('netstat', '-lnp') in commands
 
 
+def test_telegram_call_learning_idle_backoff_source():
+    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    config_source = (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    installer_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS' in source
+    assert 'TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
+    assert '_telegram_call_learning_ipset_members(set_name, include_timeouts=True)' in source
+    assert 'active_clients_changed = active_clients_key != previous_active_clients_key' in source
+    assert 'idle_active_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
+    assert 'telegram_call_learning_idle_backoff_seconds = 60.0' in config_source
+    assert 'telegram_call_learning_idle_backoff_seconds = 60.0' in installer_source
+
+
+def test_cached_protocol_status_description_has_no_static_trailing_period():
+    status = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': True},
+        [{'id': 'discord', 'label': 'Discord'}],
+        {'discord': 'ok'},
+    )
+    assert status['details'].endswith('Discord: работает')
+    assert not status['details'].endswith('.')
+
+
 def test_telegram_confirm_state_source():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     install_source = (ROOT / 'telegram_install_ui.py').read_text(encoding='utf-8')
@@ -4301,6 +4325,7 @@ def test_web_pool_form_blocks_helpers():
     assert 'protocol-workspace active' in panel
     assert 'pool-sort-control' in panel
     assert 'data-pool-sort-value="telegram"' in panel
+    assert 'data-pool-sort-value="quality"' in panel
     assert 'data-pool-sort-value="active"' not in panel
     assert 'data-pool-sort-value="problem"' in panel
     assert 'custom-check-form' in panel
@@ -4504,6 +4529,14 @@ def test_web_template_styles_helpers():
     assert '.pool-controls{display:grid;grid-template-columns:minmax(240px,520px) minmax(180px,240px);' in styles
     assert '.pool-sort-menu.hidden{display:none;}' in styles
     assert '.pool-sort-divider' in styles
+    assert '#f7f3ea' not in styles
+    assert '#ece3d4' not in styles
+    assert '#fff1d7' not in styles
+    assert '#f4f7fb' not in styles
+    assert '#f8fbff' not in styles
+    assert 'rgba(238,222,191' not in styles
+    assert '--bg:#dde2e8;' in styles
+    assert '--surface:#e7ebf0;' in styles
     assert '.pool-apply-btn{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;justify-content:flex-start;gap:6px;}' in styles
     assert '.pool-apply-btn{display:flex;width:100%;font-size:10.5px;line-height:1.18;text-align:left;justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;gap:4px;}' in styles
     assert '.health-meter.warn span' in styles
@@ -4920,6 +4953,8 @@ def test_web_template_scripts_helpers():
     assert 'function scheduleActionMessageHide(delayMs)' in scripts
     assert 'function setCommandRunningLayout(running)' in scripts
     assert "document.documentElement.classList.toggle('command-running', !!running);" in scripts
+    assert 'function commandTimerText(state)' in scripts
+    assert "sortMode === 'quality'" in scripts
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
     assert 'activeCommandName' in scripts
@@ -5019,6 +5054,9 @@ def test_web_form_template_smoke():
     assert 'value="update"' not in page
     assert 'Локальная панель управления обходом на роутере' in page
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
+    assert 'Связь, активный режим и сервисные действия собраны в одном месте.' not in page
+    assert 'Выберите протокол, сохраните активный ключ или управляйте его пулом.' not in page
+    assert 'Домены из выбранного списка будут отправляться через соответствующий протокол.' not in page
     assert 'Переустановка компонентов' not in page
     assert '{TELEGRAM_SVG_B64}' not in page
     assert 'window.BK_APP_CONFIG=' in page

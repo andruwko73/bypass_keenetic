@@ -2,7 +2,7 @@ def empty_protocol_status():
     return {
         'tone': 'empty',
         'label': 'Не сохранён',
-        'details': 'Ключ ещё не сохранён на роутере.',
+        'details': 'Ключ ещё не сохранён на роутере',
     }
 
 
@@ -51,7 +51,7 @@ def active_protocol_status(
             'tone': 'warn',
             'label': 'Проверяется',
             'details': (f'{endpoint_message} Telegram API не ответил вовремя, идёт повторная проверка. '
-                        'Статус обновится без перезагрузки страницы.').strip(),
+                        'Статус обновится без перезагрузки страницы').strip(),
             'endpoint_ok': endpoint_ok,
             'endpoint_message': endpoint_message,
             'api_ok': False,
@@ -96,7 +96,7 @@ def cached_protocol_status(key_value, probe, custom_checks, custom_states, *, ap
         return {
             'tone': 'warn',
             'label': 'Не проверялся',
-            'details': 'Ключ ждёт фоновой проверки. Чтобы не перегружать роутер, ключи проверяются по одному.',
+            'details': 'Ключ ждёт фоновой проверки. Чтобы не перегружать роутер, ключи проверяются по одному',
             'endpoint_ok': None,
             'endpoint_message': '',
             'api_ok': False,
@@ -118,9 +118,9 @@ def cached_protocol_status(key_value, probe, custom_checks, custom_states, *, ap
         state = custom_states.get(check_id)
         if state in ('ok', 'fail'):
             service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
-    details = 'Показан последний результат проверки пула.'
+    details = 'Показан последний результат проверки пула'
     if service_parts:
-        details += ' ' + ', '.join(service_parts) + '.'
+        details += ' ' + ', '.join(service_parts)
     tone, label = tone_label(api_ok, yt_ok, custom_states, api_required=api_required)
     return {
         'tone': tone,

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.730, последнее изменение: 20.06.2026
+#  Файл: bot.py, Версия v1.731, последнее изменение: 20.06.2026
 
 import subprocess
 import os
@@ -708,7 +708,7 @@ def _auto_failover_log(message):
 def _attempt_auto_failover():
     if proxy_mode in YOUTUBE_ROUTE_PROTOCOLS and _vless_traffic_guard_active(
         'Telegram auto-failover',
-        log=True,
+        log=False,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
     ):
         auto_failover_state['last_fail'] = 0.0
@@ -1436,7 +1436,7 @@ APP_MODE_LABEL = 'Режим бота'
 APP_MODE_NOUN = 'режим бота'
 APP_START_IDLE_LABEL = 'Запустить бота'
 APP_START_REPEAT_LABEL = 'Повторить запуск бота'
-APP_START_RESULT = 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд.'
+APP_START_RESULT = 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд'
 APP_QUICK_START_NOTE = 'После установки ключей можно сразу запустить или перезапустить Telegram-бота'
 APP_PROXY_USER_LABEL = 'Бот'
 APP_RUNTIME_MODE_FILE = app_runtime_mode.APP_RUNTIME_MODE_FILE
@@ -1552,6 +1552,14 @@ TELEGRAM_CALL_LEARNING_AUTO_ENABLED = bool(getattr(config, 'telegram_call_learni
 TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS = max(
     1.0,
     float(getattr(config, 'telegram_call_learning_scan_interval_seconds', 5.0)),
+)
+TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS = max(
+    TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS,
+    float(getattr(config, 'telegram_call_learning_idle_backoff_seconds', 60.0)),
+)
+TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT = max(
+    1,
+    int(getattr(config, 'telegram_call_learning_fast_scan_limit', 3)),
 )
 TELEGRAM_CALL_LEARNING_MIN_SCORE = max(1, int(getattr(config, 'telegram_call_learning_min_score', 5)))
 TELEGRAM_CALL_LEARNING_MIN_PACKETS = max(1, int(getattr(config, 'telegram_call_learning_min_packets', 2)))
@@ -2270,7 +2278,7 @@ def _apply_telegram_call_learning_candidate(candidate, protocols, apply_entries=
     return _telegram_call_learning_candidate_payload(candidate, apply_results, conntrack_deleted)
 
 
-def _telegram_call_learning_ipset_members(set_name):
+def _telegram_call_learning_ipset_members(set_name, include_timeouts=False):
     try:
         result = subprocess.run(
             ['ipset', 'list', str(set_name or '')],
@@ -2281,13 +2289,22 @@ def _telegram_call_learning_ipset_members(set_name):
             check=False,
         )
     except Exception:
-        return []
+        return {} if include_timeouts else []
     if result.returncode != 0:
-        return []
-    members = []
+        return {} if include_timeouts else []
+    members = {} if include_timeouts else []
     in_members = False
+    default_timeout = 0
     for line in (result.stdout or '').splitlines():
         text = line.strip()
+        if text.startswith('Header:'):
+            parts = text.split()
+            if 'timeout' in parts:
+                try:
+                    default_timeout = int(parts[parts.index('timeout') + 1])
+                except Exception:
+                    default_timeout = 0
+            continue
         if text == 'Members:':
             in_members = True
             continue
@@ -2295,7 +2312,19 @@ def _telegram_call_learning_ipset_members(set_name):
             continue
         address = text.split()[0].strip()
         if telegram_call_learning.is_lan_ipv4(address):
-            members.append(address)
+            if include_timeouts:
+                parts = text.split()
+                timeout_value = default_timeout
+                if 'timeout' in parts:
+                    try:
+                        timeout_value = int(parts[parts.index('timeout') + 1])
+                    except Exception:
+                        timeout_value = default_timeout
+                members[address] = timeout_value
+            else:
+                members.append(address)
+    if include_timeouts:
+        return dict(sorted(members.items()))
     return sorted(set(members))
 
 
@@ -2416,6 +2445,7 @@ def _telegram_call_learning_auto_worker():
     added_payload = []
     was_watching = False
     idle_active_scans = 0
+    previous_active_clients_key = ()
     while not shutdown_requested.is_set():
         try:
             route_protocols = _telegram_call_learning_route_protocols()
@@ -2424,7 +2454,8 @@ def _telegram_call_learning_auto_worker():
                 set_name = TELEGRAM_CALL_LEARNING_CLIENT_IPSETS.get(proto, '')
                 if not set_name:
                     continue
-                clients = _telegram_call_learning_ipset_members(set_name)
+                client_timeouts = _telegram_call_learning_ipset_members(set_name, include_timeouts=True)
+                clients = sorted(client_timeouts)
                 if clients:
                     active_clients_by_protocol[proto] = clients
             legacy_clients = _telegram_call_learning_ipset_members(TELEGRAM_CALL_LEARNING_CLIENT_IPSET)
@@ -2432,12 +2463,19 @@ def _telegram_call_learning_auto_worker():
                 fallback_protocols, _fallback_routes = _telegram_call_learning_target_protocols()
                 for proto in fallback_protocols:
                     active_clients_by_protocol.setdefault(proto, legacy_clients)
+            active_clients_key = tuple(
+                (proto, tuple(active_clients_by_protocol.get(proto) or ()))
+                for proto in sorted(active_clients_by_protocol)
+            )
+            active_clients_changed = active_clients_key != previous_active_clients_key
+            previous_active_clients_key = active_clients_key
             if not active_clients_by_protocol:
                 if was_watching:
                     previous_flows_by_protocol = {}
                     seen_addresses_by_protocol = {}
                     candidates_payload = []
                     added_payload = []
+                    previous_active_clients_key = ()
                     snapshot = _set_telegram_call_learning_state(
                         watching=False,
                         running=False,
@@ -2470,7 +2508,7 @@ def _telegram_call_learning_auto_worker():
                 seen_addresses_by_protocol[proto] = seen_addresses
                 changed_any = changed_any or changed
             _set_telegram_call_learning_state(seen_clients=sorted(set(combined_clients)))
-            if changed_any:
+            if changed_any or active_clients_changed:
                 idle_active_scans = 0
             else:
                 idle_active_scans += 1
@@ -2487,8 +2525,8 @@ def _telegram_call_learning_auto_worker():
         wait_seconds = TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS
         if added_payload:
             wait_seconds = max(wait_seconds, 30.0)
-        elif idle_active_scans >= 3:
-            wait_seconds = max(wait_seconds, 15.0)
+        elif idle_active_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT:
+            wait_seconds = max(wait_seconds, TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS)
         shutdown_requested.wait(wait_seconds)
 
 
@@ -5512,12 +5550,12 @@ def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_ti
         response = session.get(url, timeout=(connect_timeout, read_timeout), proxies=proxies)
         if not authenticated_check:
             if response.status_code < 500:
-                return True, 'Доступ к api.telegram.org подтверждён.'
+                return True, 'Доступ к api.telegram.org подтверждён'
             response.raise_for_status()
         response.raise_for_status()
         data = response.json()
         if data.get('ok'):
-            return True, 'Доступ к api.telegram.org подтверждён.'
+            return True, 'Доступ к api.telegram.org подтверждён'
         return False, f'Telegram API ответил: {data.get("description", "Не удалось определить причину")}.'
     except requests.exceptions.ConnectTimeout:
         return False, 'Прокси не установил соединение с api.telegram.org за отведённое время.'
@@ -5646,7 +5684,7 @@ def _cached_protocol_status_for_key(
 def _placeholder_protocol_statuses(current_keys):
     return _status_placeholder_protocols(
         current_keys,
-        pending_details='Фоновая проверка ключа выполняется. Статус обновится без перезагрузки страницы.',
+        pending_details='Фоновая проверка ключа выполняется. Статус обновится без перезагрузки страницы',
     )
 
 
@@ -5826,7 +5864,7 @@ def _start_web_command_legacy(command):
             f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
         ),
         started_message=lambda label: (
-            f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы.'
+            f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы'
         ),
     )
 
@@ -5876,7 +5914,7 @@ def _start_web_command(command):
         close_fds=True,
         start_new_session=True,
     )
-    return True, f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы.'
+    return True, f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы'
 
 
 def _load_bot_autostart():
@@ -7402,7 +7440,7 @@ def check_telegram_api(retries=2, retry_delay=7, connect_timeout=30, read_timeou
         proxy_url = proxy_settings.get(proxy_mode)
         ok, probe_message = _check_telegram_api_through_proxy(proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout)
         if ok:
-            return '✅ Доступ к api.telegram.org подтверждён.'
+            return '✅ Доступ к api.telegram.org подтверждён'
         if 'PySocks' in probe_message:
             return ('❌ Не удалось подключиться к Telegram API: отсутствует поддержка SOCKS (PySocks). '
                     'Установите python3-pysocks или используйте режим без SOCKS.')
@@ -7569,7 +7607,7 @@ def _placeholder_web_status_snapshot():
     return {
         'state_label': _telegram_state_label(),
         'proxy_mode': proxy_mode,
-        'api_status': '⏳ Проверяется связь текущего режима. Статус обновится без перезагрузки страницы.',
+        'api_status': '⏳ Проверяется связь текущего режима. Статус обновится без перезагрузки страницы',
         'socks_details': '',
         'fallback_reason': _last_proxy_disable_reason(),
     }

@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'event-history-compact-1'
+ASSET_CACHE_REVISION = 'ui-copy-theme-1731-2'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -482,7 +482,7 @@ def render_web_form(
         <div id="confirm-modal" class="confirm-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
             <div class="confirm-card">
                 <h2 id="confirm-title">Подтверждение</h2>
-                <p id="confirm-message">Подтвердите действие.</p>
+                <p id="confirm-message">Подтвердите действие</p>
                 <div class="confirm-actions">
                     <button type="button" id="confirm-cancel" class="secondary-button">Отмена</button>
                     <button type="button" id="confirm-accept" class="danger">Подтвердить</button>

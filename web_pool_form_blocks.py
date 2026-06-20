@@ -3,7 +3,7 @@ import html
 
 POOL_EMPTY_ROW_HTML = (
     '<tr class="pool-row pool-empty-row"><td colspan="6">'
-    'Пул пуст. Добавьте ключи или загрузите subscription.'
+    'Пул пуст. Добавьте ключи или загрузите subscription'
     '</td></tr>'
 )
 
@@ -293,6 +293,7 @@ def render_protocol_panel(
                         <button type="button" class="pool-sort-option active" data-pool-sort-value="original">Исходный порядок</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="telegram">Telegram сначала</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="youtube">YouTube сначала</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="quality">Качество сначала</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="checked">Свежие проверки</button>
                         <span class="pool-sort-divider">Фильтр</span>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="working">Работают</button>
@@ -352,7 +353,7 @@ def render_protocol_panel(
                 <div class="custom-check-head">
                     <span>
                         <strong>Дополнительные сервисы</strong>
-                        <small>Проверяются через выбранный прокси вместе с Telegram и YouTube.</small>
+                        <small>Проверяются через выбранный прокси вместе с Telegram и YouTube</small>
                     </span>
                 </div>
                 {route_tools_block_html}
@@ -364,7 +365,7 @@ def render_protocol_panel(
                     <input type="text" name="label" placeholder="Название, например ChatGPT">
                     <input type="text" name="url" placeholder="Домен, IP или URL: chatgpt.com">
                     <button type="submit" class="secondary-button">Добавить проверку</button>
-                    <button type="submit" class="secondary-button" formaction="/custom_checks_to_list" data-confirm-title="Добавить проверки в список обхода?" data-confirm-message="Домены выбранных дополнительных проверок будут добавлены в список {safe_title}.">Добавить в список обхода</button>
+                    <button type="submit" class="secondary-button" formaction="/custom_checks_to_list" data-confirm-title="Добавить проверки в список обхода?" data-confirm-message="Домены выбранных дополнительных проверок будут добавлены в список {safe_title}">Добавить в список обхода</button>
                 </form>
             </div>'''
     check_probe_form_html = ''
@@ -465,7 +466,7 @@ def render_protocol_tabs_and_panels(
     default_status = {
         'tone': 'empty',
         'label': 'Не сохранён',
-        'details': 'Ключ ещё не сохранён на роутере.',
+        'details': 'Ключ ещё не сохранён на роутере',
     }
     tabs = []
     panels = []

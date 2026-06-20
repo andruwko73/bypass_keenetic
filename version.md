@@ -1,3 +1,6 @@
+*v1.731 (20 Jun 2026) -* main
+*Adds a visible web update progress timer/ETA, a pool sort mode by measured quality score, restores the neutral light-gray theme, removes trailing punctuation from static web descriptions, backs off idle Telegram-call conntrack learning scans, and stops logging benign Telegram auto-failover deferrals while Vless traffic is active.*
+
 *v1.730 (20 Jun 2026) -* main
 *Generalizes realtime TPROXY call routing for Telegram, WhatsApp, and Discord, adds compact 50-event diagnostics with failover reasons, keeps auto-failover conservative, and refreshes web UI/README release notes for the dnsmasq-based workflow.*
 

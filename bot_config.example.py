@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.730
+# ВЕРСИЯ СКРИПТА v1.731
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -64,6 +64,8 @@ telegram_call_learning_max_duration_seconds = 180
 telegram_call_learning_poll_interval_seconds = 1.0
 telegram_call_learning_auto_enabled = True
 telegram_call_learning_scan_interval_seconds = 5.0
+telegram_call_learning_idle_backoff_seconds = 60.0
+telegram_call_learning_fast_scan_limit = 3
 telegram_call_learning_min_score = 5
 telegram_call_learning_min_packets = 2
 telegram_call_learning_min_bytes = 240

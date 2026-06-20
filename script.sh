@@ -738,6 +738,8 @@ migrate_runtime_config_defaults() {
   if grep -Eq '^telegram_call_learning_scan_interval_seconds[[:space:]]*=[[:space:]]*1\.0([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^telegram_call_learning_scan_interval_seconds[[:space:]]*=.*/telegram_call_learning_scan_interval_seconds = 5.0/' "$BOT_CONFIG_PATH" || true
   fi
+  grep -Eq '^telegram_call_learning_idle_backoff_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_idle_backoff_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^telegram_call_learning_fast_scan_limit[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_fast_scan_limit = 3\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_call_learning_min_score[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_min_score = 5\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_call_learning_min_packets[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_min_packets = 2\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_call_learning_min_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_min_bytes = 240\n' >> "$BOT_CONFIG_PATH"

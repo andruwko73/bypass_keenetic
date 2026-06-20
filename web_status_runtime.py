@@ -2,14 +2,14 @@ PROXY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
 
 
 def telegram_api_success_message():
-    return '✅ Доступ к api.telegram.org подтверждён.'
+    return '✅ Доступ к api.telegram.org подтверждён'
 
 
 def telegram_api_pending_message():
     return (
         '⏳ Telegram API не ответил вовремя через текущий режим. '
         'Локальный SOCKS работает, идёт повторная проверка. '
-        'Статус обновится без перезагрузки страницы.'
+        'Статус обновится без перезагрузки страницы'
     )
 
 
@@ -32,13 +32,13 @@ def protocol_preflight_status(key_value, endpoint_ok, endpoint_message, *, proxy
         return {
             'tone': 'empty',
             'label': 'Не сохранён',
-            'details': 'Ключ ещё не сохранён на роутере.',
+            'details': 'Ключ ещё не сохранён на роутере',
         }
     if not endpoint_ok:
         return {
             'tone': 'fail',
             'label': 'Не работает',
-            'details': f'{endpoint_message} {proxy_user_label} не может использовать этот ключ.',
+            'details': f'{endpoint_message} {proxy_user_label} не может использовать этот ключ',
         }
     if xray_required:
         return {

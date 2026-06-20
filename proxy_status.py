@@ -188,7 +188,7 @@ def store_active_status(cache, signature, status, lock, *, now=None):
 
 
 def placeholder_protocol_statuses(current_keys, *, pending_details=None):
-    pending_details = pending_details or 'Фоновая проверка ключа выполняется. Обновите страницу через несколько секунд.'
+    pending_details = pending_details or 'Фоновая проверка ключа выполняется. Обновите страницу через несколько секунд'
     result = {}
     for key_name, key_value in current_keys.items():
         if str(key_value or '').strip():
@@ -201,7 +201,7 @@ def placeholder_protocol_statuses(current_keys, *, pending_details=None):
             result[key_name] = {
                 'tone': 'empty',
                 'label': 'Не сохранён',
-                'details': 'Ключ ещё не сохранён на роутере.',
+                'details': 'Ключ ещё не сохранён на роутере',
             }
     return result
 
