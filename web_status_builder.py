@@ -6,6 +6,10 @@ def empty_protocol_status():
     }
 
 
+def _strip_status_period(text):
+    return str(text or '').strip().rstrip('.')
+
+
 def service_status_parts(api_ok, yt_ok, custom_states, custom_checks, *, api_transient=False, api_required=True):
     parts = [
         f'YouTube: {"работает" if yt_ok else "не работает"}',
@@ -70,10 +74,16 @@ def active_protocol_status(
         api_required=api_required,
     )
     tone, label = tone_label(api_ok, yt_ok, custom_states, api_required=api_required)
+    endpoint_text = _strip_status_period(endpoint_message)
+    details = 'Показан результат проверки активного ключа'
+    if endpoint_text:
+        details += f'; {endpoint_text}'
+    if service_parts:
+        details += '; ' + ', '.join(service_parts)
     return {
         'tone': tone,
         'label': label,
-        'details': (f'Показан результат проверки активного ключа. {endpoint_message} ' + ', '.join(service_parts) + '.').strip(),
+        'details': details,
         'endpoint_ok': endpoint_ok,
         'endpoint_message': endpoint_message,
         'api_ok': api_ok,
@@ -120,7 +130,7 @@ def cached_protocol_status(key_value, probe, custom_checks, custom_states, *, ap
             service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
     details = 'Показан последний результат проверки пула'
     if service_parts:
-        details += ' ' + ', '.join(service_parts)
+        details += '; ' + ', '.join(service_parts)
     tone, label = tone_label(api_ok, yt_ok, custom_states, api_required=api_required)
     return {
         'tone': tone,

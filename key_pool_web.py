@@ -152,7 +152,7 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                 all_services_count += 1
 
     active_key_count = sum(1 for proto in POOL_PROTOCOL_ORDER if (current_keys.get(proto) or '').strip())
-    service_text = '. '.join(f"{service['label']}: {service['count']}" for service in services)
+    service_text = '; '.join(f"{service['label']}: {service['count']}" for service in services)
     note_parts = [
         f'{_POOL_TOTAL_TEXT}: {total_count}',
         f'{_CHECKED_TEXT}: {checked_count}',
@@ -161,7 +161,7 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
         note_parts.append(service_text)
     note_parts.append(f'{_ALL_SERVICES_TEXT}: {all_services_count}')
     note_parts.append(f'{_ANY_SERVICE_TEXT}: {any_service_count}')
-    note = '. '.join(note_parts) + '.'
+    note = '; '.join(note_parts)
     return {
         'active_key_count': active_key_count,
         'protocol_count': len(POOL_PROTOCOL_ORDER),

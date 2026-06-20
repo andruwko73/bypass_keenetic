@@ -37,6 +37,10 @@ def _attention_text_html(text):
     return safe_text
 
 
+def _display_note_text(text):
+    return str(text or '').strip().rstrip('.')
+
+
 def _api_status_requires_attention(api_status):
     text = str(api_status or '').strip()
     if not text:
@@ -188,10 +192,10 @@ def render_web_form(
     quick_key_secondary_label = 'Открыть пул ключей' if enable_key_pool else 'Открыть все ключи'
     router_health = router_health or {}
     router_memory_text = html.escape(str(router_health.get('memory_text') or 'недоступно'))
-    router_health_note = html.escape(str(router_health.get('note') or 'данные обновляются из /proc с коротким кэшем'))
-    router_dns_note = html.escape(str(router_health.get('dns_note') or ''))
-    router_core_proxy_note = html.escape(str(router_health.get('core_proxy_note') or ''))
-    router_telegram_call_note = html.escape(str(router_health.get('telegram_call_note') or ''))
+    router_health_note = html.escape(_display_note_text(router_health.get('note') or 'данные обновляются из /proc с коротким кэшем'))
+    router_dns_note = html.escape(_display_note_text(router_health.get('dns_note') or ''))
+    router_core_proxy_note = html.escape(_display_note_text(router_health.get('core_proxy_note') or ''))
+    router_telegram_call_note = html.escape(_display_note_text(router_health.get('telegram_call_note') or ''))
     router_memory_percent = _safe_percent(router_health.get('used_percent'))
     router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
     keys_view_subtitle = (

@@ -261,7 +261,8 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['memory_text'] == 'Память: доступно 201 MB, занято 281 из 512 MB'
     assert payload['used_percent'] == 55
     assert payload['pool_probe_text'] == 'Не запущена'
-    assert 'Бот использует 52 MB RAM.' in payload['note']
+    assert 'Бот использует 52 MB RAM' in payload['note']
+    assert not payload['note'].endswith('.')
     assert 'Проверка пула' not in payload['note']
 
 
@@ -1997,7 +1998,7 @@ def test_telegram_call_router_health_note():
     )
     assert health['ok'] is True
     assert health['ports'] == {'vless': 11812}
-    assert router_health_runtime.telegram_call_proxy_note(health) == 'Calls: alive, TPROXY, порты: Vless 11812:ok.'
+    assert router_health_runtime.telegram_call_proxy_note(health) == 'Calls: alive, TPROXY, порты: Vless 11812:ok'
     assert ('netstat', '-lnp') in commands
 
 
@@ -2022,6 +2023,22 @@ def test_cached_protocol_status_description_has_no_static_trailing_period():
         {'discord': 'ok'},
     )
     assert status['details'].endswith('Discord: работает')
+    assert not status['details'].endswith('.')
+
+
+def test_active_protocol_status_description_has_no_trailing_period():
+    status = web_status_builder.active_protocol_status(
+        endpoint_ok=True,
+        endpoint_message='Локальный SOCKS-порт 127.0.0.1:10811 отвечает как SOCKS5.',
+        api_ok=True,
+        api_message='ok',
+        api_transient=False,
+        yt_ok=True,
+        yt_message='ok',
+        custom_states={},
+        custom_checks=[],
+    )
+    assert status['details'].endswith('YouTube: работает')
     assert not status['details'].endswith('.')
 
 
@@ -4526,6 +4543,7 @@ def test_web_template_styles_helpers():
     assert '.inline-page-title .title-kicker{flex:none;color:#d3a557;font-size:inherit;font-weight:inherit;letter-spacing:0;text-transform:none;line-height:inherit;}' in styles
     assert '.section-subtitle{font-size:12px;line-height:1.35;}' in styles
     assert '.key-status-note{margin:3px 0 0;font-size:12px;line-height:1.35;}' in styles
+    assert '.protocol-subview-check.active > .status-card .status-note{white-space:normal;overflow:visible;text-overflow:clip;' in styles
     assert '.pool-controls{display:grid;grid-template-columns:minmax(240px,520px) minmax(180px,240px);' in styles
     assert '.pool-sort-menu.hidden{display:none;}' in styles
     assert '.pool-sort-divider' in styles
@@ -5494,6 +5512,8 @@ def main():
     test_web_response_body_ignores_client_disconnect()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
+    test_cached_protocol_status_description_has_no_static_trailing_period()
+    test_active_protocol_status_description_has_no_trailing_period()
     test_telegram_confirm_state_source()
     test_telegram_confirm_helpers()
     test_telegram_auth_state_helpers()

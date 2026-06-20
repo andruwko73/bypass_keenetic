@@ -8,6 +8,10 @@ POOL_EMPTY_ROW_HTML = (
 )
 
 
+def _display_note_text(text):
+    return str(text or '').strip().rstrip('.')
+
+
 def pool_probe_topbar_text(pool_probe_pending, progress, progress_label_func, fallback_text):
     if not pool_probe_pending:
         return fallback_text
@@ -17,7 +21,7 @@ def pool_probe_topbar_text(pool_probe_pending, progress, progress_label_func, fa
     progress_label = progress_label_func(progress)
     progress_note = str(progress.get('note') or '').strip()
     progress_text = f'⏳ {progress_label}: {progress_checked}/{progress_total}'
-    return f'{progress_text}. {progress_note}' if progress_note else progress_text
+    return f'{progress_text} - {progress_note}' if progress_note else progress_text
 
 
 def pool_summary_note_with_progress(pool_summary_note, pool_probe_pending, progress, progress_label_func):
@@ -245,7 +249,7 @@ def render_protocol_panel(
     safe_placeholder = html.escape(placeholder)
     safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
     safe_label = html.escape(status_info.get('label', ''))
-    safe_details = html.escape(status_info.get('details', ''))
+    safe_details = html.escape(_display_note_text(status_info.get('details', '')))
     pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_pending else ' aria-disabled="false"'
     pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_pending else ' disabled aria-disabled="true"'
     subtabs = [('key', 'Ключ')]

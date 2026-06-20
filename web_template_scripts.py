@@ -840,9 +840,13 @@ def render_web_scripts(
             if (!element) {{
                 return;
             }}
-            const value = text || '';
+            const value = cleanStatusText(text || '');
             element.textContent = value;
             element.classList.toggle('hidden', !value);
+        }}
+
+        function cleanStatusText(text) {{
+            return String(text || '').replace(/\s*\.+\s*$/u, '');
         }}
 
         function serviceIcon(src, alt) {{
@@ -1436,7 +1440,7 @@ def render_web_scripts(
             let summaryNote = poolSummary.note || '';
             if ((running || paused) && progress && Number(progress.total || 0) > 0) {{
                 const progressNote = progress.note ? String(progress.note) : summaryNote;
-                summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + '. ' + progressNote;
+                summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + ' - ' + progressNote;
             }}
             setOptionalText('pool-active-summary', poolSummary.active_text || '');
             setOptionalText('pool-summary-note', summaryNote);
@@ -1510,7 +1514,7 @@ def render_web_scripts(
             }}
             const details = card.querySelector('[data-protocol-status-details]');
             if (details) {{
-                details.textContent = status.details || '';
+                details.textContent = cleanStatusText(status.details || '');
             }}
             const icons = card.querySelector('[data-protocol-status-icons]');
             if (icons) {{
@@ -1614,22 +1618,22 @@ def render_web_scripts(
             }}
             const note = document.getElementById('router-health-note');
             if (note) {{
-                note.textContent = health.note || '';
+                note.textContent = cleanStatusText(health.note || '');
                 note.classList.toggle('hidden', !note.textContent);
             }}
             const dnsNote = document.getElementById('active-mode-dns-note');
             if (dnsNote) {{
-                dnsNote.textContent = health.dns_note || '';
+                dnsNote.textContent = cleanStatusText(health.dns_note || '');
                 dnsNote.classList.toggle('hidden', !dnsNote.textContent);
             }}
             const coreProxyNote = document.getElementById('router-core-proxy-note');
             if (coreProxyNote) {{
-                coreProxyNote.textContent = health.core_proxy_note || '';
+                coreProxyNote.textContent = cleanStatusText(health.core_proxy_note || '');
                 coreProxyNote.classList.toggle('hidden', !coreProxyNote.textContent);
             }}
             const telegramCallNote = document.getElementById('router-telegram-call-note');
             if (telegramCallNote) {{
-                telegramCallNote.textContent = health.telegram_call_note || '';
+                telegramCallNote.textContent = cleanStatusText(health.telegram_call_note || '');
                 telegramCallNote.classList.toggle('hidden', !telegramCallNote.textContent);
             }}
             const meter = document.getElementById('router-memory-meter');

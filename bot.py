@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.732, последнее изменение: 20.06.2026
+#  Файл: bot.py, Версия v1.733, последнее изменение: 20.06.2026
 
 import subprocess
 import os
@@ -489,6 +489,7 @@ youtube_stream_guard_state = {
     'last_log': 0.0,
     'last_count': 0,
     'conntrack': {},
+    'last_samples': [],
 }
 youtube_stream_guard_states = {'vless2': youtube_stream_guard_state}
 youtube_core_restart_state = {
@@ -3091,6 +3092,7 @@ def _youtube_stream_guard_state(proto):
             'last_scan_at': 0.0,
             'last_scan_count': 0,
             'conntrack': {},
+            'last_samples': [],
         }
     return youtube_stream_guard_states[proto]
 
@@ -3134,6 +3136,55 @@ def _conntrack_identity(line):
     return '|'.join(f'{name}={value}' for name, value in fields[:8])
 
 
+def _conntrack_tuple_summary(line):
+    fields = re.findall(r'\b(src|dst|sport|dport)=([^ ]+)', line or '')
+    if len(fields) < 4:
+        return {}
+    summary = {}
+    for index, (name, value) in enumerate(fields[:8]):
+        prefix = 'orig' if index < 4 else 'reply'
+        summary[f'{prefix}_{name}'] = value
+    return summary
+
+
+def _conntrack_route_diagnostic(proto, sample_limit=6):
+    try:
+        sample_limit = max(1, min(12, int(sample_limit or 6)))
+    except Exception:
+        sample_limit = 6
+    state = _youtube_stream_guard_state(proto)
+    samples = list(state.get('last_samples') or [])[:sample_limit]
+    fastnat = []
+    try:
+        with open('/proc/net/nf_conntrack', 'r', encoding='utf-8', errors='ignore') as file:
+            lines = file.readlines()
+    except Exception:
+        lines = []
+    for line in lines:
+        if len(fastnat) >= sample_limit:
+            break
+        if '[FASTNAT]' not in line or ' dport=443 ' not in line or 'TIME_WAIT' in line or 'CLOSE' in line:
+            continue
+        info = _conntrack_tuple_summary(line)
+        src = info.get('orig_src', '')
+        dst = info.get('orig_dst', '')
+        if not src.startswith('192.168.'):
+            continue
+        packets, bytes_count = _conntrack_packets_bytes(line)
+        fastnat.append({
+            'src': src,
+            'dst': dst,
+            'sport': info.get('orig_sport', ''),
+            'packets': packets,
+            'bytes': bytes_count,
+        })
+    return {
+        'proxy_ports': sorted(_youtube_protocol_conntrack_ports(proto)),
+        'proxy_samples': samples,
+        'fastnat_samples': fastnat,
+    }
+
+
 def _youtube_active_connection_count(proto):
     if not YOUTUBE_STREAM_GUARD_ENABLED:
         return 0
@@ -3158,6 +3209,7 @@ def _youtube_active_connection_count(proto):
     if not isinstance(previous, dict):
         previous = {}
     current = {}
+    samples = []
     for line in lines:
         if ' dport=443 ' not in line and ' dport=443\n' not in line:
             continue
@@ -3189,7 +3241,20 @@ def _youtube_active_connection_count(proto):
             byte_delta >= YOUTUBE_STREAM_GUARD_MIN_BYTES
         ):
             active += 1
+            if len(samples) < 8:
+                info = _conntrack_tuple_summary(line)
+                samples.append({
+                    'src': info.get('orig_src', ''),
+                    'dst': info.get('orig_dst', ''),
+                    'sport': info.get('orig_sport', ''),
+                    'reply_sport': info.get('reply_sport', ''),
+                    'packets': packets,
+                    'bytes': bytes_count,
+                    'delta_packets': packet_delta,
+                    'delta_bytes': byte_delta,
+                })
     state['conntrack'] = current
+    state['last_samples'] = samples
     state['last_scan_at'] = now
     state['last_scan_count'] = active
     return active
@@ -3224,6 +3289,7 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
                 f'YouTube stream guard: deferred {reason or "operation"}; '
                 f'active {_pool_proto_label(proto)} connections={count}, last activity {age}s ago.'
             )
+            route_diagnostic = _conntrack_route_diagnostic(proto)
             _write_runtime_log(message)
             _record_event(
                 'stream_guard_defer',
@@ -3238,6 +3304,7 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
                     'last_activity_age_s': age,
                     'hold_seconds': int(max(1.0, hold)),
                     'scan_active_count': active_count,
+                    'route_diagnostic': route_diagnostic,
                 },
             )
     return guarded
@@ -5338,6 +5405,11 @@ def _store_web_status_api_cache(payload, timestamp=None):
         web_status_api_cache['payload'] = payload
 
 
+def _append_status_note(note, extra):
+    parts = [str(value or '').strip().rstrip('.') for value in (note, extra)]
+    return '; '.join(part for part in parts if part)
+
+
 def _router_health_snapshot():
     payload = router_health.snapshot(_get_pool_probe_progress)
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
@@ -5354,27 +5426,27 @@ def _router_health_snapshot():
     threshold_mb = int(round(MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB / 1024.0)) if MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 else 0
     if idle_memory_state.get('memory_watchdog_restart_scheduled'):
         note = str(payload.get('note') or '').strip()
-        payload['note'] = f'{note} RSS бота выше порога {threshold_mb} MB; автоперезапуск уже запрошен.'.strip()
+        payload['note'] = _append_status_note(note, f'RSS бота выше порога {threshold_mb} MB; автоперезапуск уже запрошен')
     elif idle_memory_state.get('memory_watchdog_idle_restart_pending'):
         retry_in = int(idle_memory_state.get('memory_watchdog_idle_restart_in_seconds') or 0)
         if _memory_sensitive_operation_running():
-            idle_note = f'RSS бота выше порога {threshold_mb} MB; автоперезапуск ждёт завершения фоновых операций.'
+            idle_note = f'RSS бота выше порога {threshold_mb} MB; автоперезапуск ждёт завершения фоновых операций'
         elif retry_in > 0:
-            idle_note = f'RSS бота выше порога {threshold_mb} MB; автоперезапуск в простое примерно через {retry_in} с, если память не освободится.'
+            idle_note = f'RSS бота выше порога {threshold_mb} MB; автоперезапуск в простое примерно через {retry_in} с, если память не освободится'
         else:
-            idle_note = f'RSS бота выше порога {threshold_mb} MB; watchdog выполнит очистку и перезапуск на ближайшем цикле.'
+            idle_note = f'RSS бота выше порога {threshold_mb} MB; watchdog выполнит очистку и перезапуск на ближайшем цикле'
         note = str(payload.get('note') or '').strip()
-        payload['note'] = f'{note} {idle_note}'.strip()
+        payload['note'] = _append_status_note(note, idle_note)
     elif threshold_mb and payload.get('bot_rss_kb'):
         note = str(payload.get('note') or '').strip()
-        threshold_note = f'Автоперезапуск бота в простое: порог {threshold_mb} MB RSS.'
-        payload['note'] = f'{note} {threshold_note}'.strip()
+        threshold_note = f'Автоперезапуск бота в простое: порог {threshold_mb} MB RSS'
+        payload['note'] = _append_status_note(note, threshold_note)
     if post_pool_state.get('scheduled'):
         rss_mb = int(round((post_pool_state.get('rss_kb') or 0) / 1024.0))
         retry_in = max(0, int(round((post_pool_state.get('next_retry_at') or 0.0) - time.time())))
         note = str(payload.get('note') or '').strip()
-        retry_note = f'После проверки пула ожидается повторная очистка памяти: RSS бота {rss_mb} MB, попытка через {retry_in} с.'
-        payload['note'] = f'{note} {retry_note}'.strip()
+        retry_note = f'После проверки пула ожидается повторная очистка памяти: RSS бота {rss_mb} MB, попытка через {retry_in} с'
+        payload['note'] = _append_status_note(note, retry_note)
     return payload
 
 

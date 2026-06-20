@@ -231,7 +231,7 @@ def core_proxy_note(health):
         for port, ok in sorted(port_states.items())
     )
     if health.get('ok'):
-        return f'Xray: alive, config OK, {PORTS_LABEL}: {ports_text}.'
+        return f'Xray: alive, config OK, {PORTS_LABEL}: {ports_text}'
     parts = [
         f"Xray: {health.get('xray_state') or 'unknown'}",
         f"config: {'OK' if health.get('xray_config_ok') else 'error'}",

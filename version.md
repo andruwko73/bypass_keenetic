@@ -1,3 +1,7 @@
+*v1.733 (20 Jun 2026) -* main
+
+*Cleaned dynamic web status text punctuation, restored wrapping for the key health row, and added compact route diagnostics to stream-guard events.*
+
 *v1.732 (20 Jun 2026) -* main
 *Removes the remaining trailing punctuation from static route/list helper descriptions so the web UI copy is consistent across status, keys, and lists pages.*
 

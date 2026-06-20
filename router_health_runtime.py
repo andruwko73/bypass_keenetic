@@ -251,14 +251,14 @@ def telegram_call_proxy_health(
 def telegram_call_proxy_note(health):
     health = health or {}
     if not health.get('enabled'):
-        return 'Calls: disabled.'
+        return 'Calls: disabled'
     if not health.get('tproxy_enabled'):
-        return 'Calls: TPROXY disabled.'
+        return 'Calls: TPROXY disabled'
     protocols = list(health.get('protocols') or [])
     ports = health.get('ports') or {}
     port_states = health.get('port_states') or {}
     if not protocols:
-        return 'Telegram Call: standby, активный Telegram-маршрут не выбран.'
+        return 'Telegram Call: standby, активный Telegram-маршрут не выбран'
     ports_text = ', '.join(
         f'{TELEGRAM_CALL_PROTOCOL_LABELS.get(proto, proto)} {ports.get(proto)}:{"ok" if port_states.get(str(ports.get(proto))) else "down"}'
         for proto in protocols
@@ -266,7 +266,7 @@ def telegram_call_proxy_note(health):
     state = 'alive' if health.get('ok') else 'down'
     suffix = f', порты: {ports_text}' if ports_text else ''
     chain_text = '' if health.get('chain_ok') else ', chain down'
-    return f'Calls: {state}, TPROXY{chain_text}{suffix}.'
+    return f'Calls: {state}, TPROXY{chain_text}{suffix}'
 
 
 def parse_dns_backend(netstat_text):
@@ -429,9 +429,8 @@ def dns_health_note(dns_health):
     already_shown = refresh_status == 'success' and raw_message == 'ipset refresh completed.'
     detail_texts = {part.rstrip('.') for part in details}
     if message and not already_shown and message.rstrip('.') not in detail_texts:
-        details.append(message if message.endswith(('.', '!', '?')) else f'{message}.')
-    note = '. '.join(part.rstrip('.') for part in details if part)
-    return note + '.' if note else ''
+        details.append(message.rstrip('.'))
+    return '; '.join(part.rstrip('.') for part in details if part)
 
 
 def build_router_health_payload(
@@ -497,20 +496,20 @@ def build_router_health_payload(
         memory_text = 'Память: данные недоступны'
     details = []
     if used_mb:
-        details.append(f'Занято по данным роутера: {used_mb} MB ({used_percent}%).')
+        details.append(f'Занято по данным роутера: {used_mb} MB ({used_percent}%)')
     if free_mb:
-        details.append(f'Свободно: {free_mb} MB.')
+        details.append(f'Свободно: {free_mb} MB')
     if available_mb:
-        details.append(f'Доступно для приложений: {available_mb} MB ({available_percent}%).')
+        details.append(f'Доступно для приложений: {available_mb} MB ({available_percent}%)')
     if cache_mb:
-        details.append(f'Кэш и буферы: {cache_mb} MB.')
+        details.append(f'Кэш и буферы: {cache_mb} MB')
     if load_text:
-        details.append(f'Нагрузка CPU за 1/5/15 мин: {load_text}.')
+        details.append(f'Нагрузка CPU за 1/5/15 мин: {load_text}')
     if bot_rss_mb:
-        details.append(f'Бот использует {bot_rss_mb} MB RAM.')
+        details.append(f'Бот использует {bot_rss_mb} MB RAM')
     if swap_total_kb:
         swap_total_mb = int(round(swap_total_kb / 1024.0))
-        details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB.')
+        details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB')
     dns_note = dns_health_note(dns_health)
     if xray_compat_runtime is not None and core_proxy_health:
         core_proxy_note = xray_compat_runtime.core_proxy_note(core_proxy_health)
@@ -522,7 +521,7 @@ def build_router_health_payload(
     telegram_call_note = telegram_call_proxy_note(telegram_call_health) if telegram_call_health else ''
     return {
         'memory_text': memory_text,
-        'note': ' '.join(details),
+        'note': '; '.join(details),
         'dns_note': dns_note,
         'core_proxy_note': core_proxy_note,
         'core_proxy_health': dict(core_proxy_health or {}),

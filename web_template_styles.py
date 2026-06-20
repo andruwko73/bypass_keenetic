@@ -759,11 +759,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active){height:100%;overflow:hidden;}
             .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active) .protocol-subview-check.active{display:block;min-height:0;max-height:100%;overflow:auto;padding-right:4px;}
             .protocol-subview-check.active > * + *{margin-top:8px;}
-            .protocol-subview-check.active > .status-card{min-height:0;display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:center;gap:4px 12px;padding:8px 10px;}
+            .protocol-subview-check.active > .status-card{min-height:0;display:grid;grid-template-columns:max-content max-content minmax(0,1fr);align-items:start;gap:4px 12px;padding:8px 10px;}
             .protocol-subview-check.active > .status-card .status-label,
             .protocol-subview-check.active > .status-card .status-value,
             .protocol-subview-check.active > .status-card .status-note{margin:0;min-width:0;}
-            .protocol-subview-check.active > .status-card .status-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+            .protocol-subview-check.active > .status-card .status-note{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;}
             .key-editor-form textarea[data-key-textarea]{height:clamp(118px,24vh,188px);min-height:118px;max-height:188px;resize:vertical;}
             .protocol-subview-import.active{align-self:start;overflow:visible;}
             .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:auto;align-self:start;}
