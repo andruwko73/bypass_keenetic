@@ -1,3 +1,7 @@
+*v1.741 (21 Jun 2026) -* main
+
+*Separates the active pool-probe RSS ceiling from the lower post-pool restart threshold, so quick Vless 2 checks can continue past the first warmup keys while the bot still cleans up after the pool finishes.*
+
 *v1.740 (21 Jun 2026) -* main
 
 *Makes pool checks use the quick YouTube health profile by default while preserving full YouTube diagnostics for active-key checks, so one slow Vless 2 candidate cannot hold the router in a long temporary-Xray probe.*

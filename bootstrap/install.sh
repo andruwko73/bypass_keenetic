@@ -645,6 +645,7 @@ pool_probe_max_cpu_percent = 70.0
 pool_probe_cpu_sample_seconds = 0.35
 pool_probe_high_cpu_delay_seconds = 5.0
 pool_probe_high_cpu_max_wait_seconds = 45.0
+pool_probe_max_process_rss_kb = 87040
 pool_probe_youtube_profile = 'quick'
 pool_probe_quality_enabled = True
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={{bytes}}'

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.740, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.741, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -1426,6 +1426,10 @@ MEMORY_POST_POOL_RESTART_RETRY_SECONDS = max(
 MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS = max(
     MEMORY_POST_POOL_RESTART_RETRY_SECONDS,
     float(getattr(config, 'memory_post_pool_restart_max_wait_seconds', 300.0)),
+)
+POOL_PROBE_MAX_PROCESS_RSS_KB = max(
+    MEMORY_POST_POOL_RESTART_RSS_KB,
+    int(getattr(config, 'pool_probe_max_process_rss_kb', MEMORY_WATCHDOG_RSS_SOFT_KB)),
 )
 MEMORY_TIMELINE_ENABLED = bool(getattr(config, 'memory_timeline_enabled', True))
 MEMORY_TIMELINE_PATH = str(getattr(config, 'memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl') or '').strip()
@@ -7570,7 +7574,7 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB,
             slow_memory_delay_seconds=POOL_PROBE_SLOW_MEMORY_DELAY_SECONDS,
             process_rss_kb=_process_rss_kb,
-            max_process_rss_kb=MEMORY_POST_POOL_RESTART_RSS_KB,
+            max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB,
         )
     finally:
         probe_recorder.flush()

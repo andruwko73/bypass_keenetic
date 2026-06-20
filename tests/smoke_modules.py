@@ -1265,6 +1265,9 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_quality_max_samples_per_run = 12' in example
     assert 'pool_probe_quality_max_samples_per_run = 12' in installer
     assert 'pool_probe_quality_max_samples_per_run = 12' in bootstrap
+    assert 'pool_probe_max_process_rss_kb = 87040' in example
+    assert 'pool_probe_max_process_rss_kb = 87040' in installer
+    assert 'pool_probe_max_process_rss_kb = 87040' in bootstrap
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
@@ -1814,7 +1817,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _memory_cleanup' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
     assert 'process_rss_kb=_process_rss_kb' in source
-    assert 'max_process_rss_kb=MEMORY_POST_POOL_RESTART_RSS_KB' in source
+    assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
     assert "update_proxy('none', persist=False)" not in startup_restore
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')

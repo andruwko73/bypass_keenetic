@@ -1,3 +1,8 @@
+<a name="1.741"></a>
+# [1.741] - 21 Jun 2026
+
+- Separates the active pool-probe RSS ceiling from the lower post-pool restart threshold, allowing quick pool checks to continue after the first warmup keys while preserving post-pool memory cleanup.
+
 <a name="1.740"></a>
 # [1.740] - 21 Jun 2026
 
