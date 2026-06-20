@@ -1,3 +1,6 @@
+*v1.730 (20 Jun 2026) -* main
+*Generalizes realtime TPROXY call routing for Telegram, WhatsApp, and Discord, adds compact 50-event diagnostics with failover reasons, keeps auto-failover conservative, and refreshes web UI/README release notes for the dnsmasq-based workflow.*
+
 *v1.729 (18 Jun 2026) -* main
 *Keeps the saved proxy mode active during startup if the SOCKS endpoint is briefly not confirmed after an app-mode restart, so switching Simple/Advanced/Web only does not leave the web UI in `none` until the user reapplies Vless.*
 

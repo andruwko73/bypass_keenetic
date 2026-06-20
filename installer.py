@@ -129,6 +129,7 @@ reality_endpoint_repair_enabled = True
 reality_endpoint_repair_max_candidates = 6
 reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')
 auto_failover_startup_hold_seconds = 180
+auto_failover_consecutive_failures = 3
 youtube_vless2_failover_enabled = True
 youtube_vless2_failover_grace_seconds = 180
 youtube_vless2_failover_poll_seconds = 120

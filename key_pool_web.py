@@ -22,14 +22,36 @@ def pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
 
 
+def _compact_event_value(value):
+    if isinstance(value, (list, tuple, set)):
+        return ', '.join(str(item) for item in value)
+    if isinstance(value, dict):
+        return ', '.join(f'{key}={_compact_event_value(item)}' for key, item in value.items())
+    return '' if value is None else str(value)
+
+
+def _compact_event_details(details):
+    if not isinstance(details, dict) or not details:
+        return ''
+    parts = []
+    for key, value in details.items():
+        if value in (None, '', [], {}, ()):
+            continue
+        key_text = str(key or '').strip()
+        value_text = _compact_event_value(value).replace('\r', ' ').replace('\n', ' ').strip()
+        if key_text and value_text:
+            parts.append(f'{key_text}={value_text}')
+    return ' · '.join(parts)
+
+
 def web_event_history_html(events):
     events = events or []
     if not events:
         return '''<section class="panel event-history-panel">
-            <p class="section-subtitle">Пока нет записей о переключениях, маршрутах и обновлениях.</p>
+            <p class="section-subtitle">Пока нет записей о переключениях, маршрутах и обновлениях</p>
         </section>'''
     rows = []
-    for event in events[:12]:
+    for event in events[:50]:
         try:
             stamp = time.strftime('%d.%m %H:%M', time.localtime(float(event.get('ts') or 0)))
         except Exception:
@@ -38,11 +60,30 @@ def web_event_history_html(events):
         action = html.escape(event.get('action') or '')
         protocol = html.escape(event.get('protocol_label') or event.get('protocol') or '')
         service = html.escape(event.get('service') or '')
+        source = html.escape(event.get('source') or '')
+        key_hash = html.escape(event.get('key_hash') or '')
         message = html.escape(event.get('message') or '')
         meta = ' · '.join(item for item in (protocol, service) if item)
+        details_text = _compact_event_details(event.get('details') or {})
+        details = html.escape(details_text)
+        meta = ' · '.join(item for item in (protocol, service, source, key_hash) if item)
+        message_line = ' · '.join(item for item in (message, details) if item)
+        title = html.escape(
+            ' | '.join(
+                item for item in (
+                    stamp,
+                    event.get('action') or '',
+                    meta,
+                    event.get('message') or '',
+                    details_text,
+                )
+                if item
+            ),
+            quote=True,
+        )
         rows.append(f'''<li class="event-history-item event-{level}">
             <span class="event-time">{html.escape(stamp)}</span>
-            <span class="event-main"><strong>{action}</strong><small>{html.escape(meta)}</small><em>{message}</em></span>
+            <span class="event-main" title="{title}"><span class="event-title-row"><strong>{action}</strong><small>{html.escape(meta)}</small></span><em>{message_line}</em></span>
         </li>''')
     return f'''<section class="panel event-history-panel">
         <div class="route-section-head">
@@ -151,6 +192,28 @@ def web_custom_probe_states(probe, custom_checks):
                 result[check_id] = 'ok' if value else 'fail'
         else:
             result[check_id] = 'unknown'
+    return result
+
+
+def protocol_custom_checks(custom_checks, route_states, protocol):
+    if not custom_checks:
+        return []
+    if not isinstance(route_states, dict):
+        return list(custom_checks or [])
+    protocol = str(protocol or '').strip()
+    result = []
+    for check in custom_checks or []:
+        check_id = str(check.get('id') or '').strip()
+        if not check_id:
+            continue
+        route_state = route_states.get(check_id)
+        if not isinstance(route_state, dict):
+            result.append(check)
+            continue
+        route_protocols = set(route_state.get('complete_protocols') or [])
+        route_protocols.update(route_state.get('partial_protocols') or [])
+        if protocol in route_protocols:
+            result.append(check)
     return result
 
 
@@ -542,6 +605,7 @@ def web_pool_snapshot(
     probe_state,
     probe_checked_at,
     protocols=None,
+    route_states=None,
 ):
     current_keys = current_keys or {}
     pools = pools or {}
@@ -553,6 +617,7 @@ def web_pool_snapshot(
     ]
     for proto in protocol_order:
         current_key = current_keys.get(proto, '')
+        protocol_checks = protocol_custom_checks(custom_checks, route_states, proto)
         rows = []
         for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
             key_hash = hash_key(key_value)
@@ -565,7 +630,7 @@ def web_pool_snapshot(
                 'active': bool(current_key and key_value == current_key),
                 'tg': probe_state(probe, 'tg_ok'),
                 'yt': probe_state(probe, 'yt_ok'),
-                'custom': web_custom_probe_states(probe, custom_checks),
+                'custom': web_custom_probe_states(probe, protocol_checks),
                 'checked_at': probe_checked_at(probe),
                 'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,
                 'yt_score': int(probe.get('yt_score') or 0) if isinstance(probe, dict) else 0,

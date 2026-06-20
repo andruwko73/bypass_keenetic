@@ -290,7 +290,7 @@ def render_unblock_lists(
             line_count = len([line for line in content.splitlines() if line.strip()])
             header_html = f'''<div>
                 <h2 class="inline-page-title"><span class="title-kicker">Список обхода</span><span>{safe_label}</span></h2>
-                <p class="section-subtitle">Записей: {line_count}. Файл: <span class="file-chip">{safe_name}</span></p>
+                <p class="section-subtitle">Записей: {line_count}; файл: <span class="file-chip">{safe_name}</span></p>
             </div>'''
         else:
             header_html = f'''<div>

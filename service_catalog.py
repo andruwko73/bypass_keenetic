@@ -742,6 +742,50 @@ TELEGRAM_UNBLOCK_ENTRIES = [
     'usercontent.dev',
 ]
 
+TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES = [
+    '91.108.56.0/22',
+    '91.108.4.0/22',
+    '91.108.8.0/22',
+    '91.108.16.0/22',
+    '91.108.12.0/22',
+    '149.154.160.0/20',
+    '91.105.192.0/23',
+    '91.108.20.0/22',
+    '91.108.36.0/22',
+    '185.76.151.0/24',
+    '5.28.192.0/21',
+    '95.161.64.0/20',
+    'api.telegram.org',
+    'web.telegram.org',
+    'my.telegram.org',
+    'core.telegram.org',
+    'oauth.telegram.org',
+    'widgets.telegram.org',
+    't.me',
+    'tx.me',
+    'telegra.ph',
+    'telegram.org',
+    'telegram.me',
+    'telegram.dog',
+    'telegram-cdn.org',
+    'telegramapp.org',
+    'telegramdownload.com',
+    'cdn-telegram.org',
+]
+
+WHATSAPP_CALL_SIGNAL_ROUTE_ENTRIES = [
+    'wa.me',
+    'whatsapp.biz',
+    'whatsapp.com',
+    'whatsapp.net',
+]
+
+REALTIME_CALL_SIGNAL_ROUTE_ENTRIES = [
+    *TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES,
+    *WHATSAPP_CALL_SIGNAL_ROUTE_ENTRIES,
+    *DISCORD_ROUTE_ENTRIES,
+]
+
 SERVICE_LIST_SOURCES = {
     'chatgpt_services': {
         'label': 'ChatGPT / Codex',

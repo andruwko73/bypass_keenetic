@@ -208,7 +208,7 @@ def render_lazy_protocol_panel_placeholder(key_name, title, *, active=False):
     return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}" data-protocol-panel-lazy="1" data-protocol-loaded="0">
         <div class="protocol-lazy-placeholder" data-protocol-loading="{safe_key_name}">
             <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
-            <p class="section-subtitle">Загрузка данных вкладки...</p>
+            <p class="section-subtitle">Загрузка данных вкладки</p>
         </div>
     </section>'''
 
@@ -436,6 +436,8 @@ def render_protocol_tabs_and_panels(
     pool_custom_col_width=32,
     pool_mobile_custom_col_width=28,
     custom_header_icons='',
+    custom_checks_for_protocol=None,
+    custom_header_icons_for_protocol=None,
     custom_presets_html='',
     custom_checks_html='',
     route_tools_html='',
@@ -456,6 +458,10 @@ def render_protocol_tabs_and_panels(
     probe_checked_at = probe_checked_at or (lambda probe: '')
     custom_probe_states = custom_probe_states or (lambda probe, checks: {})
     service_icon_html = service_icon_html or (lambda icon, alt, opacity=1.0, size=18: '')
+    custom_checks_for_protocol = custom_checks_for_protocol or (lambda protocol, checks: checks or [])
+    custom_header_icons_for_protocol = custom_header_icons_for_protocol or (
+        lambda protocol, checks: custom_header_icons
+    )
     default_status = {
         'tone': 'empty',
         'label': 'Не сохранён',
@@ -470,6 +476,25 @@ def render_protocol_tabs_and_panels(
         status_info = protocol_statuses.get(key_name, default_status)
         tab_active = key_name == active_protocol
         pool_keys = key_pools.get(key_name, []) if enable_key_pool else []
+        protocol_custom_checks = (
+            custom_checks_for_protocol(key_name, custom_checks)
+            if enable_custom_checks else []
+        )
+        protocol_table_class = pool_table_class
+        protocol_custom_col_width = pool_custom_col_width
+        protocol_mobile_custom_col_width = pool_mobile_custom_col_width
+        protocol_custom_header_icons = custom_header_icons
+        if enable_custom_checks and len(protocol_custom_checks) != len(custom_checks):
+            (
+                protocol_table_class,
+                protocol_custom_col_width,
+                protocol_mobile_custom_col_width,
+            ) = pool_table_layout(protocol_custom_checks)
+        if enable_custom_checks:
+            protocol_custom_header_icons = custom_header_icons_for_protocol(
+                key_name,
+                protocol_custom_checks,
+            )
         tab_count = len(pool_keys) if enable_key_pool else (1 if current_keys.get(key_name, '').strip() else 0)
         active_status_icons = ''
         pool_items_html = ''
@@ -491,13 +516,13 @@ def render_protocol_tabs_and_panels(
             api_ok = status_info.get('api_ok', False)
             current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
             current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
-            custom_states = status_info.get('custom') or custom_probe_states(current_probe, custom_checks)
+            custom_states = status_info.get('custom') or custom_probe_states(current_probe, protocol_custom_checks)
             active_status_icons = ''.join([
                 telegram_icon_html(opacity=1.0) if current_tg_ok else '',
                 youtube_icon_html(opacity=1.0) if current_yt_ok else '',
             ] + [
                 service_icon_html(check.get('icon'), check.get('label', 'Service'), opacity=1.0, size=18)
-                for check in custom_checks
+                for check in protocol_custom_checks
                 if enable_custom_checks and custom_states.get(check.get('id')) == 'ok'
             ])
             pool_items_html = render_pool_items(
@@ -506,7 +531,7 @@ def render_protocol_tabs_and_panels(
                 pool_keys=pool_keys,
                 current_key=current_keys.get(key_name, ''),
                 key_probe_cache=key_probe_cache,
-                custom_checks=custom_checks,
+                custom_checks=protocol_custom_checks,
                 key_display_name=key_display_name,
                 hash_key=hash_key,
                 telegram_icon_html=telegram_icon_html,
@@ -525,10 +550,10 @@ def render_protocol_tabs_and_panels(
                 status_info=status_info,
                 active_status_icons=active_status_icons,
                 pool_items_html=pool_items_html,
-                pool_table_class=pool_table_class,
-                pool_custom_col_width=pool_custom_col_width,
-                pool_mobile_custom_col_width=pool_mobile_custom_col_width,
-                custom_header_icons=custom_header_icons,
+                pool_table_class=protocol_table_class,
+                pool_custom_col_width=protocol_custom_col_width,
+                pool_mobile_custom_col_width=protocol_mobile_custom_col_width,
+                custom_header_icons=protocol_custom_header_icons,
                 custom_presets_html=custom_presets_html,
                 custom_checks_html=custom_checks_html,
                 route_tools_html=route_tools_html,

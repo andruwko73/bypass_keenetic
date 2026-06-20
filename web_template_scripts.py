@@ -20,6 +20,7 @@ def render_web_scripts(
         const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;
         const ENABLE_LIVE_STATUS = APP_CONFIG.enableLiveStatus !== false;
         const ENABLE_TELEGRAM = APP_CONFIG.enableTelegram !== false;
+        let botReady = APP_CONFIG.botReady === true;
         const POOL_PROBE_POLL_EXTENSION_MS = Number(APP_CONFIG.poolProbePollExtensionMs || {POOL_PROBE_UI_POLL_EXTENSION_MS});
         const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
         const YOUTUBE_ICON_SRC = 'data:image/svg+xml;base64,{YOUTUBE_SVG_B64}';
@@ -903,8 +904,11 @@ def render_web_scripts(
             if (!customChecks.length) {{
                 return '';
             }}
-            return customChecks.map(function(check) {{
-                const state = states && states[check.id] ? states[check.id] : 'unknown';
+            const stateMap = states || {{}};
+            return customChecks.filter(function(check) {{
+                return Object.prototype.hasOwnProperty.call(stateMap, check.id);
+            }}).map(function(check) {{
+                const state = stateMap[check.id] || 'unknown';
                 return customBadge(state, check);
             }}).join('');
         }}
@@ -1516,57 +1520,77 @@ def render_web_scripts(
             return 'Фоновая проверка пула ключей';
         }}
 
-        function attentionItemHtml(tone, title, text) {{
-            const rawText = String(text || '');
-            const telegramIcon = rawText.indexOf('Telegram API') === 0
-                ? '<span class="attention-telegram-icon" aria-hidden="true"></span>'
-                : '';
-            return '<li class="attention-item attention-' + escapeHtml(tone || 'info') + '">' +
-                '<span class="attention-dot"></span>' +
-                '<div><strong>' + escapeHtml(title || '') + '</strong><span>' + telegramIcon + escapeHtml(rawText) + '</span></div>' +
-                '</li>';
+        function apiStatusRequiresAttention(apiStatus) {{
+            const text = String(apiStatus || '').trim();
+            if (!text) {{
+                return false;
+            }}
+            const lower = text.toLowerCase();
+            const failed = ['❌', 'не проходит', 'не отвечает', 'ошибка', 'failed', 'error', 'timeout', 'таймаут'].some(function(marker) {{
+                return lower.indexOf(marker) !== -1;
+            }});
+            if (failed) {{
+                return true;
+            }}
+            return !['подтверж', 'работает', 'ok', 'доступ'].some(function(marker) {{
+                return lower.indexOf(marker) !== -1;
+            }});
         }}
 
-        function renderStatusAttention(snapshot) {{
-            const list = document.getElementById('status-attention-list');
-            if (!list || !snapshot) {{
-                return;
+        function topbarStatusFromSnapshot(snapshot) {{
+            snapshot = snapshot || {{}};
+            const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
+            const poolProbeVisible = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
+            const poolProbePaused = ENABLE_KEY_POOL && !!snapshot.pool_probe_paused && Number(progress.total || 0) > 0;
+            if (poolProbeVisible || poolProbePaused) {{
+                const progressLabel = poolProbeProgressLabel(progress.scope || '');
+                const progressNote = progress.note ? String(progress.note) : '';
+                const progressText = '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + (progress.total || 0);
+                return ['info', 'Статус обновляется', progressNote ? progressText + '. ' + progressNote : progressText, false];
             }}
-            const items = [];
+
             const health = snapshot.router_health || {{}};
             const usedPercent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));
             if (usedPercent >= 85) {{
-                items.push(['danger', 'Память роутера почти заполнена', 'Сейчас занято ' + usedPercent + '%. Лучше остановить проверку пула или перезапустить сервис.']);
+                return ['danger', 'Память роутера почти заполнена', 'Сейчас занято ' + usedPercent + '%; лучше остановить проверку пула или перезапустить сервис', botReady];
             }} else if (usedPercent >= 70) {{
-                items.push(['warn', 'Память роутера под нагрузкой', 'Сейчас занято ' + usedPercent + '%. Проверку большого пула стоит запускать осторожно.']);
+                return ['warn', 'Память роутера под нагрузкой', 'Сейчас занято ' + usedPercent + '%; проверку большого пула стоит запускать осторожно', botReady];
             }}
             const web = snapshot.web || {{}};
             const apiStatus = String(web.api_status || '').trim();
-            const apiLower = apiStatus.toLowerCase();
-            const apiLooksFailed = ['❌', 'не проходит', 'не отвечает', 'ошибка', 'failed', 'error', 'timeout', 'таймаут'].some(function(marker) {{
-                return apiLower.indexOf(marker) !== -1;
-            }});
-            const apiLooksOk = !apiStatus || (!apiLooksFailed && ['подтверж', 'работает', 'ok', 'доступ'].some(function(marker) {{
-                return apiLower.indexOf(marker) !== -1;
-            }}));
-            if (ENABLE_TELEGRAM && !apiLooksOk) {{
-                items.push(['warn', 'Telegram API требует внимания', apiStatus]);
+            if (ENABLE_TELEGRAM && apiStatusRequiresAttention(apiStatus)) {{
+                return ['warn', 'Telegram API требует внимания', apiStatus, botReady];
             }}
             const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || {{}}) : {{}};
             if (ENABLE_KEY_POOL && String(poolSummary.note || '').toLowerCase().indexOf('не работает') !== -1) {{
-                items.push(['warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и включите быстрый фильтр "Есть проблемы".']);
+                return ['warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и включите быстрый фильтр "Есть проблемы"', botReady];
             }}
-            if (!items.length) {{
-                const okText = ENABLE_TELEGRAM
-                    ? 'Telegram API отвечает, память роутера в норме.'
-                    : ENABLE_KEY_POOL
-                    ? 'Память роутера в норме.'
-                    : 'Память роутера в норме, веб-интерфейс готов к работе.';
-                items.push(['ok', 'Проблем не найдено', okText]);
+            if (ENABLE_TELEGRAM) {{
+                return ['ok', botReady ? 'Telegram-бот работает' : 'Telegram API отвечает', 'API отвечает, память роутера в норме', botReady];
             }}
-            list.innerHTML = items.map(function(item) {{
-                return attentionItemHtml(item[0], item[1], item[2]);
-            }}).join('');
+            return ['ok', 'Проблем не найдено', ENABLE_KEY_POOL ? 'Память роутера в норме' : 'Память роутера в норме, веб-интерфейс готов к работе', false];
+        }}
+
+        function renderTopbarStatus(snapshot) {{
+            const pill = document.getElementById('web-api-pill');
+            if (!pill) {{
+                return;
+            }}
+            if (snapshot && Object.prototype.hasOwnProperty.call(snapshot, 'bot_ready')) {{
+                botReady = !!snapshot.bot_ready;
+            }}
+            const item = topbarStatusFromSnapshot(snapshot || {{}});
+            const tone = item[0] || 'info';
+            const showTelegramIcon = ENABLE_TELEGRAM && !!item[3];
+            pill.className = 'api-pill topbar-status topbar-status-' + escapeHtml(tone);
+            pill.setAttribute('data-bot-ready', showTelegramIcon ? 'true' : 'false');
+            pill.innerHTML = (showTelegramIcon ? '<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"></span>' : '') +
+                '<span class="topbar-status-copy"><strong id="topbar-status-title">' + escapeHtml(item[1] || '') +
+                '</strong><span id="topbar-status-text">' + escapeHtml(item[2] || '') + '</span></span>';
+        }}
+
+        function renderStatusAttention(snapshot) {{
+            renderTopbarStatus(snapshot);
         }}
 
         function updateRouterHealth(health) {{
@@ -1626,18 +1650,6 @@ def render_web_scripts(
             const apiStatus = document.getElementById('web-api-status');
             if (apiStatus) {{
                 apiStatus.textContent = web.api_status || '';
-            }}
-            const apiPill = document.getElementById('web-api-pill');
-            if (apiPill) {{
-                const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
-                const poolProbeVisible = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
-                const poolProbePaused = ENABLE_KEY_POOL && !!snapshot.pool_probe_paused && Number(progress.total || 0) > 0;
-                const progressLabel = poolProbeProgressLabel(progress.scope || '');
-                const progressNote = progress.note ? String(progress.note) : '';
-                const progressText = '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + (progress.total || 0);
-                apiPill.textContent = (poolProbeVisible || poolProbePaused)
-                    ? (progressNote ? progressText + '. ' + progressNote : progressText)
-                    : (web.api_status || '');
             }}
             setOptionalText('web-socks-details', web.socks_details || '');
             const fallbackText = web.fallback_reason && web.proxy_mode === 'none'

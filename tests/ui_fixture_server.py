@@ -497,6 +497,7 @@ def _page_html(mode="advanced"):
         enable_custom_checks=enable_custom_checks,
         enable_key_pool=enable_key_pool,
         enable_telegram=enable_telegram,
+        bot_ready=enable_telegram,
     )
 
 
@@ -559,6 +560,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
                     "web": _status(),
                     "protocols": _protocol_statuses(),
                     "router_health": _router_health(),
+                    "bot_ready": True,
                     "pool_summary": _pool_summary(),
                     "pool_probe_running": False,
                     "pool_probe_progress": {},

@@ -100,6 +100,9 @@ def _status_payload(ctx):
         'router_health': _ctx(ctx, 'router_health_snapshot', lambda: {})(),
         'telegram_call_learning': _call(ctx, 'telegram_call_learning_snapshot') or {},
     }
+    bot_ready = _ctx(ctx, 'bot_ready')
+    if bot_ready is not None:
+        payload['bot_ready'] = bool(bot_ready() if callable(bot_ready) else bot_ready)
     if not pool_enabled:
         payload.update({
             'custom_checks': [],

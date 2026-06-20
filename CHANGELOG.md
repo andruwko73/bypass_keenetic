@@ -1,3 +1,11 @@
+<a name="1.730"></a>
+# [1.730] - 20 Jun 2026
+
+- Generalizes realtime call routing from Telegram to Telegram, WhatsApp, and Discord with compact service-specific signal route sets and per-protocol TPROXY handling.
+- Adds compact 50-row event history diagnostics, including auto-failover and stream-guard details without losing zero-valued fields.
+- Requires repeated confirmed failures before automatic key failover, reducing route churn during transient YouTube or Telegram hiccups.
+- Polishes the web UI spacing, typography, status blocks, and README coverage for the dnsmasq/DNS Override and realtime-call workflow.
+
 <a name="1.726"></a>
 # [1.726] - 17 Jun 2026
 

@@ -52,6 +52,14 @@ CALL_LEARNED_IPSETS = {
     'trojan': 'bypass_tg_call_troj',
 }
 
+CALL_CLIENT_IPSETS = {
+    'shadowsocks': 'bypass_call_clients_sh',
+    'vmess': 'bypass_call_clients_vmess',
+    'vless': 'bypass_call_clients_vless',
+    'vless2': 'bypass_call_clients_vless2',
+    'trojan': 'bypass_call_clients_troj',
+}
+
 NOISE_UDP_PORTS = {
     '53',
     '67',
@@ -77,6 +85,10 @@ def protocol_ipsets(protocol):
 
 def protocol_call_ipset(protocol):
     return CALL_LEARNED_IPSETS.get(str(protocol or '').strip().lower(), '')
+
+
+def protocol_client_ipset(protocol):
+    return CALL_CLIENT_IPSETS.get(str(protocol or '').strip().lower(), '')
 
 
 def is_public_ipv4(value):

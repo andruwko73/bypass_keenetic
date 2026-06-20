@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'status-typography-4'
+ASSET_CACHE_REVISION = 'event-history-compact-1'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
@@ -64,9 +64,9 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool, 
     router_health = router_health or {}
     used_percent = _safe_percent(router_health.get('used_percent'))
     if used_percent >= 85:
-        items.append(('danger', 'Память роутера почти заполнена', f'Сейчас занято {used_percent}%. Лучше остановить проверку пула или перезапустить сервис.'))
+        items.append(('danger', 'Память роутера почти заполнена', f'Сейчас занято {used_percent}%; лучше остановить проверку пула или перезапустить сервис'))
     elif used_percent >= 70:
-        items.append(('warn', 'Память роутера под нагрузкой', f'Сейчас занято {used_percent}%. Проверку большого пула стоит запускать осторожно.'))
+        items.append(('warn', 'Память роутера под нагрузкой', f'Сейчас занято {used_percent}%; проверку большого пула стоит запускать осторожно'))
 
     api_status = str(status.get('api_status') or '').strip()
     if enable_telegram and _api_status_requires_attention(api_status):
@@ -74,17 +74,49 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool, 
 
     pool_note_lower = str(pool_summary_note or '').lower()
     if enable_key_pool and 'не работает' in pool_note_lower:
-        items.append(('warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и отфильтруйте строки с проблемами.'))
+        items.append(('warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и отфильтруйте строки с проблемами'))
 
     if not items:
         if enable_telegram:
-            text = 'Telegram API отвечает, память роутера в норме.'
+            text = 'Telegram API отвечает, память роутера в норме'
         elif enable_key_pool:
-            text = 'Память роутера в норме.'
+            text = 'Память роутера в норме'
         else:
-            text = 'Память роутера в норме, веб-интерфейс готов к работе.'
+            text = 'Память роутера в норме, веб-интерфейс готов к работе'
         items.append(('ok', 'Проблем не найдено', text))
     return items
+
+
+def _topbar_status_item(status, router_health, pool_summary_note, enable_key_pool, enable_telegram=True, bot_ready=False, topbar_status_text=''):
+    status = status or {}
+    override_text = str(topbar_status_text or '').strip()
+    api_status = str(status.get('api_status') or '').strip()
+    if override_text and override_text != api_status:
+        tone = 'warn' if any(marker in override_text.casefold() for marker in ('ошибка', 'не работает', 'failed', 'error')) else 'info'
+        return tone, 'Статус обновляется', override_text
+
+    tone, title, text = _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram)[0]
+    if tone == 'ok' and enable_telegram:
+        title = 'Telegram-бот работает' if bot_ready else 'Telegram API отвечает'
+        text = 'API отвечает, память роутера в норме'
+    return tone, title, text
+
+
+def _topbar_status_html(status_item, *, enable_telegram=True, bot_ready=False):
+    tone, title, text = status_item
+    safe_tone = html.escape(tone or 'info', quote=True)
+    icon_html = (
+        '<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"></span>'
+        if enable_telegram and bot_ready else
+        ''
+    )
+    return f'''<span class="api-pill topbar-status topbar-status-{safe_tone}" id="web-api-pill" data-bot-ready="{str(bool(bot_ready)).lower()}">
+                    {icon_html}
+                    <span class="topbar-status-copy">
+                        <strong id="topbar-status-title">{html.escape(title)}</strong>
+                        <span id="topbar-status-text">{html.escape(text)}</span>
+                    </span>
+                </span>'''
 
 
 def render_web_form(
@@ -131,6 +163,7 @@ def render_web_form(
     enable_key_pool=True,
     enable_live_status=True,
     enable_telegram=True,
+    bot_ready=False,
 ):
     start_form_async_attr = ' data-async-action="start"' if enable_async_forms else ''
     quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
@@ -148,9 +181,9 @@ def render_web_form(
                                 {''.join(quick_start_forms)}
                             </div>''' if quick_start_forms else ''
     quick_key_note = (
-        'Быстрое редактирование активного ключа. Полное управление пулом находится во вкладке "Ключи".'
+        'Быстрое редактирование активного ключа, полное управление пулом находится во вкладке "Ключи"'
         if enable_key_pool else
-        'Быстрое редактирование активного ключа. Остальные ключи находятся во вкладке "Ключи".'
+        'Быстрое редактирование активного ключа, остальные ключи находятся во вкладке "Ключи"'
     )
     quick_key_secondary_label = 'Открыть пул ключей' if enable_key_pool else 'Открыть все ключи'
     router_health = router_health or {}
@@ -161,20 +194,10 @@ def render_web_form(
     router_telegram_call_note = html.escape(str(router_health.get('telegram_call_note') or ''))
     router_memory_percent = _safe_percent(router_health.get('used_percent'))
     router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
-    attention_html = ''.join(
-        f'''<li class="attention-item attention-{html.escape(tone, quote=True)}">
-                                <span class="attention-dot"></span>
-                                <div>
-                                    <strong>{html.escape(title)}</strong>
-                                    <span>{_attention_text_html(text)}</span>
-                                </div>
-                            </li>'''
-        for tone, title, text in _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram)
-    )
     keys_view_subtitle = (
-        'Выберите протокол, сохраните активный ключ или управляйте его пулом.'
+        'Выберите протокол, сохраните активный ключ или управляйте его пулом'
         if enable_key_pool else
-        'Выберите протокол и сохраните активный ключ.'
+        'Выберите протокол и сохраните активный ключ'
     )
     key_pool_status_card = ''
     dashboard_classes = ['status-dashboard']
@@ -187,9 +210,9 @@ def render_web_form(
     pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_running else ' aria-disabled="false"'
     pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_running else ' disabled aria-disabled="true"'
     status_overview_subtitle = (
-        'Связь, активный режим и сервисные действия собраны в одном месте.'
+        'Связь, активный режим и сервисные действия собраны в одном месте'
         if enable_telegram else
-        'Веб-интерфейс, состояние роутера и сервисные действия собраны в одном месте.'
+        'Веб-интерфейс, состояние роутера и сервисные действия собраны в одном месте'
     )
     if enable_key_pool:
         key_pool_status_card = f'''
@@ -243,8 +266,17 @@ def render_web_form(
                             {active_mode_card}
                             {key_pool_status_card}
                         </div>'''
+    topbar_status_item = _topbar_status_item(
+        status,
+        router_health,
+        pool_summary_note,
+        enable_key_pool,
+        enable_telegram,
+        bot_ready=bot_ready,
+        topbar_status_text=topbar_status_text,
+    )
     telegram_topbar_block = (
-        f'<span class="api-pill" id="web-api-pill">{html.escape(topbar_status_text)}</span>'
+        _topbar_status_html(topbar_status_item, enable_telegram=enable_telegram, bot_ready=bot_ready)
         if enable_telegram else
         ''
     )
@@ -276,6 +308,7 @@ def render_web_form(
         'enableKeyPool': bool(enable_key_pool),
         'enableLiveStatus': bool(enable_live_status),
         'enableTelegram': bool(enable_telegram),
+        'botReady': bool(bot_ready),
         'poolProbePollExtensionMs': int(POOL_PROBE_UI_POLL_EXTENSION_MS),
     })
     topbar_actions_class = 'topbar-actions' + ('' if enable_telegram else ' topbar-actions-web-only')
@@ -344,7 +377,6 @@ def render_web_form(
                             <h2>Статус и сервис</h2>
                             <p class="section-subtitle">{html.escape(status_overview_subtitle)}</p>
                         </div>
-                        <ul class="attention-list status-head-attention" id="status-attention-list">{attention_html}</ul>
                     </div>
                     <div class="{dashboard_class}">
                         <div class="status-dashboard-column status-dashboard-column-primary">
@@ -426,7 +458,7 @@ def render_web_form(
                 <section class="app-view" data-view="lists">
                     <div class="view-head">
                         <h2 class="inline-page-title"><span class="title-kicker">Маршрутизация</span><span>Списки обхода</span></h2>
-                        <p class="section-subtitle">Домены из выбранного списка будут отправляться через соответствующий протокол.</p>
+                        <p class="section-subtitle">Домены из выбранного списка будут отправляться через соответствующий протокол</p>
                     </div>
                     <div class="segmented list-tabs">{unblock_tabs_html}</div>
                     <div class="list-panels">{unblock_panels_html}</div>

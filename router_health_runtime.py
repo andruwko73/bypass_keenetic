@@ -251,9 +251,9 @@ def telegram_call_proxy_health(
 def telegram_call_proxy_note(health):
     health = health or {}
     if not health.get('enabled'):
-        return 'Telegram Call: disabled.'
+        return 'Calls: disabled.'
     if not health.get('tproxy_enabled'):
-        return 'Telegram Call: TPROXY disabled.'
+        return 'Calls: TPROXY disabled.'
     protocols = list(health.get('protocols') or [])
     ports = health.get('ports') or {}
     port_states = health.get('port_states') or {}
@@ -266,7 +266,7 @@ def telegram_call_proxy_note(health):
     state = 'alive' if health.get('ok') else 'down'
     suffix = f', порты: {ports_text}' if ports_text else ''
     chain_text = '' if health.get('chain_ok') else ', chain down'
-    return f'Telegram Call: {state}, TPROXY{chain_text}{suffix}.'
+    return f'Calls: {state}, TPROXY{chain_text}{suffix}.'
 
 
 def parse_dns_backend(netstat_text):

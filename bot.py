@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.729, последнее изменение: 18.06.2026
+#  Файл: bot.py, Версия v1.730, последнее изменение: 20.06.2026
 
 import subprocess
 import os
@@ -171,7 +171,9 @@ from probe_cache import (
 from service_catalog import (
     CONNECTIVITY_CHECK_DOMAINS,
     CUSTOM_CHECK_PRESETS,
+    REALTIME_CALL_SIGNAL_ROUTE_ENTRIES,
     SERVICE_LIST_SOURCES,
+    TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES,
     TELEGRAM_UNBLOCK_ENTRIES,
     UDP_QUIC_ROUTE_ENTRIES,
     YOUTUBE_UNBLOCK_ENTRIES,
@@ -399,6 +401,7 @@ AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switc
 AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT = float(getattr(config, 'auto_failover_check_connect_timeout', 2))
 AUTO_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'auto_failover_check_read_timeout', 3))
 AUTO_FAILOVER_RECENT_SUCCESS_TTL = max(0, int(getattr(config, 'auto_failover_recent_success_ttl', 300)))
+AUTO_FAILOVER_CONSECUTIVE_FAILURES = max(1, int(getattr(config, 'auto_failover_consecutive_failures', 3)))
 AUTO_FAILOVER_STARTUP_HOLD_SECONDS = max(
     180,
     int(getattr(config, 'auto_failover_startup_hold_seconds', 180)),
@@ -424,6 +427,7 @@ auto_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
     'last_attempt': 0.0,
+    'consecutive_failures': 0,
     'in_progress': False,
 }
 YOUTUBE_VLESS2_FAILOVER_ENABLED = bool(getattr(config, 'youtube_vless2_failover_enabled', True))
@@ -651,12 +655,64 @@ def _install_key_for_protocol(proto, key_value, verify=True):
     raise ValueError(f'Unsupported protocol: {proto}')
 
 
+def _auto_failover_event_details(extra=None):
+    now = time.time()
+    try:
+        last_ok = float(auto_failover_state.get('last_ok') or 0)
+    except Exception:
+        last_ok = 0.0
+    try:
+        last_fail = float(auto_failover_state.get('last_fail') or 0)
+    except Exception:
+        last_fail = 0.0
+    try:
+        last_attempt = float(auto_failover_state.get('last_attempt') or 0)
+    except Exception:
+        last_attempt = 0.0
+    details = {
+        'mode': proxy_mode,
+        'consecutive_failures': int(auto_failover_state.get('consecutive_failures') or 0),
+        'failure_threshold': AUTO_FAILOVER_CONSECUTIVE_FAILURES,
+        'last_ok_age_s': int(now - last_ok) if last_ok else '',
+        'last_fail_age_s': int(now - last_fail) if last_fail else '',
+        'cooldown_left_s': int(max(0, AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS - (now - last_attempt))) if last_attempt else 0,
+    }
+    if isinstance(extra, dict):
+        details.update(extra)
+    return details
+
+
+def _auto_failover_log(message):
+    _write_runtime_log(message)
+    text = str(message or '')
+    lower_text = text.lower()
+    level = 'warn' if any(marker in lower_text for marker in ('failed confirmation', 'failed', 'error')) else 'info'
+    action = 'auto_failover'
+    if 'failed confirmation' in lower_text:
+        action = 'auto_failover_confirm_fail'
+    elif 'switch skipped' in lower_text or 'пропущ' in lower_text:
+        action = 'auto_failover_skip'
+    elif 'switched' in lower_text or 'переключ' in lower_text:
+        action = 'auto_failover_switch'
+    _record_event(
+        action,
+        text,
+        level=level,
+        source='watchdog',
+        protocol=proxy_mode,
+        service='telegram',
+        details=_auto_failover_event_details(),
+    )
+
+
 def _attempt_auto_failover():
     if proxy_mode in YOUTUBE_ROUTE_PROTOCOLS and _vless_traffic_guard_active(
         'Telegram auto-failover',
         log=True,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
     ):
+        auto_failover_state['last_fail'] = 0.0
+        auto_failover_state['consecutive_failures'] = 0
         return False
     return auto_failover_runtime.attempt_auto_failover(
         state=auto_failover_state,
@@ -672,7 +728,7 @@ def _attempt_auto_failover():
         update_proxy=update_proxy,
         set_active_key=_set_active_key,
         record_key_probe=_record_key_probe,
-        log=_write_runtime_log,
+        log=_auto_failover_log,
         audit_key_switch=_audit_key_switch,
         grace_seconds=AUTO_FAILOVER_GRACE_SECONDS,
         switch_cooldown_seconds=AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
@@ -683,6 +739,7 @@ def _attempt_auto_failover():
         transient_success_ttl=TELEGRAM_TRANSIENT_OK_CACHE_TTL,
         recent_success_ttl=AUTO_FAILOVER_RECENT_SUCCESS_TTL,
         startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS,
+        min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES,
         repair_active_proxy=_repair_active_reality_endpoint,
         protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER,
     )
@@ -1380,7 +1437,7 @@ APP_MODE_NOUN = 'режим бота'
 APP_START_IDLE_LABEL = 'Запустить бота'
 APP_START_REPEAT_LABEL = 'Повторить запуск бота'
 APP_START_RESULT = 'Команда запуска принята. Если Telegram API доступен, бот начнет отвечать через несколько секунд.'
-APP_QUICK_START_NOTE = 'После установки ключей можно сразу запустить или перезапустить Telegram-бота.'
+APP_QUICK_START_NOTE = 'После установки ключей можно сразу запустить или перезапустить Telegram-бота'
 APP_PROXY_USER_LABEL = 'Бот'
 APP_RUNTIME_MODE_FILE = app_runtime_mode.APP_RUNTIME_MODE_FILE
 APP_RUNTIME_MODES = app_runtime_mode.APP_RUNTIME_MODES
@@ -1400,6 +1457,7 @@ CORE_PROXY_CONFIG_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'config.json')
 CORE_PROXY_ERROR_LOG = os.path.join(CORE_PROXY_CONFIG_DIR, 'error.log')
 CORE_PROXY_ACCESS_LOG = os.path.join(CORE_PROXY_CONFIG_DIR, 'access.log')
 UDP_POLICY_CONFIG_PATH = '/opt/etc/bot/udp_policy.conf'
+CALL_SIGNAL_ROUTES_PATH = '/opt/etc/bot/call_signal_routes.txt'
 UDP_QUIC_BLOCK_SHADOWSOCKS_ENABLED = bool(getattr(config, 'udp_quic_block_shadowsocks_enabled', True))
 UDP_QUIC_BLOCK_VMESS_ENABLED = bool(getattr(config, 'udp_quic_block_vmess_enabled', True))
 UDP_QUIC_BLOCK_VLESS_ENABLED = bool(getattr(config, 'udp_quic_block_vless_enabled', True))
@@ -1514,6 +1572,7 @@ TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS = max(
 )
 TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enabled', True))
 TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
+TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(telegram_call_learning.CALL_CLIENT_IPSETS)
 TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
 
 bot_ready = False
@@ -1948,6 +2007,38 @@ def _write_json_file(path, payload):
                 pass
 
 
+def _write_text_file_atomic(path, text, mode=0o644):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    current = ''
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as file:
+            current = file.read()
+    except Exception:
+        pass
+    if current == text:
+        return False
+    fd, temp_path = tempfile.mkstemp(prefix='.' + os.path.basename(path) + '.', suffix='.tmp', dir=directory or None)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as file:
+            file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+        try:
+            os.chmod(path, mode)
+        except Exception:
+            pass
+        return True
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
 def _normalize_route_match_token(entry):
     value = str(entry or '').split('#', 1)[0].strip().lower()
     if not value:
@@ -1990,14 +2081,18 @@ def _route_list_contains_youtube(proto):
 
 
 def _route_list_contains_telegram(proto):
-    return _route_list_contains_catalog(proto, TELEGRAM_UNBLOCK_ENTRIES)
+    return _route_list_contains_catalog(proto, TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES)
+
+
+def _route_list_contains_realtime_call(proto):
+    return _route_list_contains_catalog(proto, REALTIME_CALL_SIGNAL_ROUTE_ENTRIES)
 
 
 def _telegram_call_learning_route_protocols():
     protocols = []
     for proto in TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER:
         try:
-            if _route_list_contains_telegram(proto):
+            if _route_list_contains_realtime_call(proto):
                 protocols.append(proto)
         except Exception:
             continue
@@ -2220,8 +2315,25 @@ def _apply_telegram_call_learning_call_candidate(candidate, protocols, apply_ent
     return _telegram_call_learning_candidate_payload(candidate, apply_results, conntrack_deleted=conntrack_deleted)
 
 
-def _telegram_call_learning_auto_scan(previous_flows, seen_addresses, candidates_payload, added_payload, active_clients=None):
-    protocols, route_protocols = _telegram_call_learning_target_protocols()
+def _telegram_call_learning_auto_scan(
+    previous_flows,
+    seen_addresses,
+    candidates_payload,
+    added_payload,
+    active_clients=None,
+    target_protocols=None,
+    route_protocols=None,
+):
+    if target_protocols is None:
+        protocols, resolved_route_protocols = _telegram_call_learning_target_protocols()
+        route_protocols = resolved_route_protocols if route_protocols is None else route_protocols
+    else:
+        protocols = [
+            str(proto or '').strip().lower()
+            for proto in (target_protocols or [])
+            if telegram_call_learning.protocol_call_ipset(proto)
+        ]
+        route_protocols = list(route_protocols or _telegram_call_learning_route_protocols())
     active_clients = sorted(set(str(item or '').strip() for item in (active_clients or []) if str(item or '').strip()))
     current_flows = telegram_call_learning.read_lan_conntrack_flows(
         router_ip=routerip,
@@ -2298,19 +2410,32 @@ def _telegram_call_learning_auto_scan(previous_flows, seen_addresses, candidates
 
 
 def _telegram_call_learning_auto_worker():
-    previous_flows = {}
-    seen_addresses = set()
+    previous_flows_by_protocol = {}
+    seen_addresses_by_protocol = {}
     candidates_payload = []
     added_payload = []
     was_watching = False
     idle_active_scans = 0
     while not shutdown_requested.is_set():
         try:
-            active_clients = _telegram_call_learning_ipset_members(TELEGRAM_CALL_LEARNING_CLIENT_IPSET)
-            if not active_clients:
+            route_protocols = _telegram_call_learning_route_protocols()
+            active_clients_by_protocol = {}
+            for proto in TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER:
+                set_name = TELEGRAM_CALL_LEARNING_CLIENT_IPSETS.get(proto, '')
+                if not set_name:
+                    continue
+                clients = _telegram_call_learning_ipset_members(set_name)
+                if clients:
+                    active_clients_by_protocol[proto] = clients
+            legacy_clients = _telegram_call_learning_ipset_members(TELEGRAM_CALL_LEARNING_CLIENT_IPSET)
+            if legacy_clients and not active_clients_by_protocol:
+                fallback_protocols, _fallback_routes = _telegram_call_learning_target_protocols()
+                for proto in fallback_protocols:
+                    active_clients_by_protocol.setdefault(proto, legacy_clients)
+            if not active_clients_by_protocol:
                 if was_watching:
-                    previous_flows = {}
-                    seen_addresses = set()
+                    previous_flows_by_protocol = {}
+                    seen_addresses_by_protocol = {}
                     candidates_payload = []
                     added_payload = []
                     snapshot = _set_telegram_call_learning_state(
@@ -2328,14 +2453,24 @@ def _telegram_call_learning_auto_worker():
                 shutdown_requested.wait(TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS)
                 continue
             was_watching = True
-            previous_flows, seen_addresses, candidates_payload, added_payload, _changed = _telegram_call_learning_auto_scan(
-                previous_flows,
-                seen_addresses,
-                candidates_payload,
-                added_payload,
-                active_clients=active_clients,
-            )
-            if _changed:
+            changed_any = False
+            combined_clients = []
+            for proto, active_clients in active_clients_by_protocol.items():
+                combined_clients.extend(active_clients)
+                previous_flows, seen_addresses, candidates_payload, added_payload, changed = _telegram_call_learning_auto_scan(
+                    previous_flows_by_protocol.get(proto, {}),
+                    seen_addresses_by_protocol.get(proto, set()),
+                    candidates_payload,
+                    added_payload,
+                    active_clients=active_clients,
+                    target_protocols=[proto],
+                    route_protocols=route_protocols,
+                )
+                previous_flows_by_protocol[proto] = previous_flows
+                seen_addresses_by_protocol[proto] = seen_addresses
+                changed_any = changed_any or changed
+            _set_telegram_call_learning_state(seen_clients=sorted(set(combined_clients)))
+            if changed_any:
                 idle_active_scans = 0
             else:
                 idle_active_scans += 1
@@ -2573,6 +2708,16 @@ def _sync_udp_policy_config():
         'vless2': _route_list_contains_telegram('vless2'),
         'trojan': _route_list_contains_telegram('trojan'),
     }
+    realtime_call_routes = {
+        'shadowsocks': _route_list_contains_realtime_call('shadowsocks'),
+        'vmess': _route_list_contains_realtime_call('vmess'),
+        'vless': _route_list_contains_realtime_call('vless'),
+        'vless2': _route_list_contains_realtime_call('vless2'),
+        'trojan': _route_list_contains_realtime_call('trojan'),
+    }
+    call_signal_routes_payload = ''.join(
+        f'{entry}\n' for entry in REALTIME_CALL_SIGNAL_ROUTE_ENTRIES
+    )
     payload = (
         '# Generated by bypass_keenetic. Edit bot_config.py values instead.\n'
         f'BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS={1 if block_shadowsocks else 0}\n'
@@ -2590,39 +2735,22 @@ def _sync_udp_policy_config():
         f'TELEGRAM_CALL_TPROXY_PORT_VLESS={localportvless_tproxy}\n'
         f'TELEGRAM_CALL_TPROXY_PORT_VLESS2={localportvless2_tproxy}\n'
         f'TELEGRAM_CALL_TPROXY_PORT_TROJAN={localporttrojan_tproxy}\n'
-        f'BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS={1 if telegram_routes["shadowsocks"] else 0}\n'
-        f'BYPASS_TELEGRAM_CALL_ROUTE_VMESS={1 if telegram_routes["vmess"] else 0}\n'
-        f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS={1 if telegram_routes["vless"] else 0}\n'
-        f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS2={1 if telegram_routes["vless2"] else 0}\n'
-        f'BYPASS_TELEGRAM_CALL_ROUTE_TROJAN={1 if telegram_routes["trojan"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS={1 if realtime_call_routes["shadowsocks"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_VMESS={1 if realtime_call_routes["vmess"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS={1 if realtime_call_routes["vless"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS2={1 if realtime_call_routes["vless2"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_TROJAN={1 if realtime_call_routes["trojan"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_SHADOWSOCKS={1 if telegram_routes["shadowsocks"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VMESS={1 if telegram_routes["vmess"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS={1 if telegram_routes["vless"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS2={1 if telegram_routes["vless2"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_TROJAN={1 if telegram_routes["trojan"] else 0}\n'
     )
     try:
         directory = os.path.dirname(UDP_POLICY_CONFIG_PATH)
         os.makedirs(directory, exist_ok=True)
-        current = ''
-        if os.path.exists(UDP_POLICY_CONFIG_PATH):
-            with open(UDP_POLICY_CONFIG_PATH, 'r', encoding='utf-8', errors='ignore') as file:
-                current = file.read()
-        if current == payload:
-            return
-        fd, temp_path = tempfile.mkstemp(
-            prefix='.' + os.path.basename(UDP_POLICY_CONFIG_PATH) + '.',
-            suffix='.tmp',
-            dir=directory,
-        )
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as file:
-                file.write(payload)
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temp_path, UDP_POLICY_CONFIG_PATH)
-            os.chmod(UDP_POLICY_CONFIG_PATH, 0o644)
-        finally:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
+        _write_text_file_atomic(UDP_POLICY_CONFIG_PATH, payload)
+        _write_text_file_atomic(CALL_SIGNAL_ROUTES_PATH, call_signal_routes_payload)
     except Exception as exc:
         _write_runtime_log(f'UDP policy sync failed: {exc}')
 
@@ -3054,9 +3182,25 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
             state['last_log'] = now
             age = max(0, int(now - last_active))
             count = int(state.get('last_count') or active_count or 0)
-            _write_runtime_log(
+            message = (
                 f'YouTube stream guard: deferred {reason or "operation"}; '
                 f'active {_pool_proto_label(proto)} connections={count}, last activity {age}s ago.'
+            )
+            _write_runtime_log(message)
+            _record_event(
+                'stream_guard_defer',
+                message,
+                level='info',
+                source='watchdog',
+                protocol=proto,
+                service='telegram' if 'Telegram' in str(reason or '') else 'youtube',
+                details={
+                    'reason': reason or 'operation',
+                    'active_connections': count,
+                    'last_activity_age_s': age,
+                    'hold_seconds': int(max(1.0, hold)),
+                    'scan_active_count': active_count,
+                },
             )
     return guarded
 
@@ -5001,7 +5145,7 @@ def _resolve_route_intersections(target_route):
     return _route_tools_runtime().resolve_route_intersections(target_route)
 
 
-def _event_history_snapshot(limit=40):
+def _event_history_snapshot(limit=50):
     return event_history.load_events(limit=limit)
 
 
@@ -5416,7 +5560,7 @@ def _core_proxy_runtime_name():
     return 'v2ray'
 
 
-def _protocol_status_for_key(key_name, key_value):
+def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_states=None, key_probe_cache=None):
     port = PROXY_LOCAL_PORTS.get(key_name)
     endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_name, port)
     preflight = web_status_runtime.protocol_preflight_status(
@@ -5438,9 +5582,13 @@ def _protocol_status_for_key(key_name, key_value):
     )
     api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
     yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url)
-    custom_checks = _load_custom_checks()
-    cached_probe = _load_key_probe_cache().get(_hash_key(key_value), {})
-    custom_states = key_pool_web.web_custom_probe_states(cached_probe, custom_checks)
+    custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
+    if route_states is None and custom_checks:
+        route_states = _service_route_summary()
+    protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
+    cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
+    cached_probe = cache.get(_hash_key(key_value), {})
+    custom_states = key_pool_web.web_custom_probe_states(cached_probe, protocol_custom_checks)
     if api_transient and _recent_probe_ok(cached_probe, 'tg_ok', TELEGRAM_TRANSIENT_OK_CACHE_TTL):
         api_ok = True
         api_transient = False
@@ -5458,15 +5606,25 @@ def _protocol_status_for_key(key_name, key_value):
         yt_ok=yt_ok,
         yt_message=yt_message,
         custom_states=custom_states,
-        custom_checks=custom_checks,
+        custom_checks=protocol_custom_checks,
         api_required=_telegram_required_for_protocol(key_name),
     )
 
 
-def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key_probe_cache=None, allow_youtube_confirm=True):
+def _cached_protocol_status_for_key(
+    key_name,
+    key_value,
+    custom_checks=None,
+    key_probe_cache=None,
+    allow_youtube_confirm=True,
+    route_states=None,
+):
     if not key_value.strip():
         return _status_empty_protocol_status()
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
+    if route_states is None and custom_checks:
+        route_states = _service_route_summary()
+    protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     probe = cache.get(_hash_key(key_value), {})
     if (
@@ -5475,11 +5633,11 @@ def _cached_protocol_status_for_key(key_name, key_value, custom_checks=None, key
         (not isinstance(probe, dict) or probe.get('yt_ok') is not True)
     ):
         _schedule_youtube_cache_confirm(key_name, key_value)
-    custom_states = key_pool_web.web_custom_probe_states(probe, custom_checks)
+    custom_states = key_pool_web.web_custom_probe_states(probe, protocol_custom_checks)
     return _status_cached_protocol_status(
         key_value,
         probe,
-        custom_checks,
+        protocol_custom_checks,
         custom_states,
         api_required=_telegram_required_for_protocol(key_name),
     )
@@ -5936,7 +6094,7 @@ def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto
 def _format_pool_summary():
     current_keys = _load_current_keys()
     pools = _ensure_current_keys_in_pools(current_keys)
-    lines = ['📦 Пул ключей', 'Выберите протокол для управления пулом.', '']
+    lines = ['📦 Пул ключей', 'Выберите протокол для управления пулом', '']
     for proto in POOL_PROTOCOL_ORDER:
         keys = pools.get(proto, []) or []
         current_key = current_keys.get(proto)
@@ -6051,7 +6209,7 @@ def _handle_pool_protocol_state(message, set_menu_state):
         return True
     proto = _resolve_pool_protocol(message.text)
     if not proto:
-        bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу.', reply_markup=_pool_protocol_markup())
+        bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу', reply_markup=_pool_protocol_markup())
         return True
     set_menu_state(21, proto)
     _send_pool_page(message.chat.id, proto, page=0)
@@ -7155,17 +7313,20 @@ def _web_custom_checks():
 
 def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
+    custom_checks = _load_custom_checks()
+    route_states = _service_route_summary() if custom_checks else None
     return key_pool_web.web_pool_snapshot(
         current_keys,
         _ensure_current_keys_in_pools(current_keys),
         _load_key_probe_cache(),
-        _load_custom_checks(),
+        custom_checks,
         include_keys=include_keys,
         hash_key=_hash_key,
         display_name=_pool_key_display_name,
         probe_state=key_pool_web.web_probe_state,
         probe_checked_at=key_pool_web.web_probe_checked_at,
         protocols=protocols,
+        route_states=route_states,
     )
 
 
@@ -7292,12 +7453,19 @@ def _build_status_snapshot(current_keys, force_refresh=False):
         return cached
 
     custom_checks = _load_custom_checks()
+    route_states = _service_route_summary() if custom_checks else None
     key_probe_cache = _load_key_probe_cache()
     protocols = {}
     for key_name, key_value in current_keys.items():
         try:
             if key_name == proxy_mode:
-                protocols[key_name] = _protocol_status_for_key(key_name, key_value)
+                protocols[key_name] = _protocol_status_for_key(
+                    key_name,
+                    key_value,
+                    custom_checks=custom_checks,
+                    route_states=route_states,
+                    key_probe_cache=key_probe_cache,
+                )
                 _store_active_mode_protocol_status(current_keys, protocols[key_name])
             else:
                 protocols[key_name] = _cached_protocol_status_for_key(
@@ -7305,6 +7473,7 @@ def _build_status_snapshot(current_keys, force_refresh=False):
                     key_value,
                     custom_checks=custom_checks,
                     key_probe_cache=key_probe_cache,
+                    route_states=route_states,
                 )
         except Exception as exc:
             _write_runtime_log(f'Ошибка проверки ключа {key_name}: {exc}')
@@ -7324,6 +7493,8 @@ def _active_mode_status_snapshot(current_keys):
         protocols = dict(cached.get('protocols') or {})
     else:
         protocols = _placeholder_protocol_statuses(current_keys)
+    custom_checks = _load_custom_checks()
+    route_states = _service_route_summary() if custom_checks else None
 
     if proxy_mode in current_keys:
         try:
@@ -7334,10 +7505,17 @@ def _active_mode_status_snapshot(current_keys):
                 protocols[proxy_mode] = _cached_protocol_status_for_key(
                     proxy_mode,
                     current_keys.get(proxy_mode, ''),
+                    custom_checks=custom_checks,
                     allow_youtube_confirm=False,
+                    route_states=route_states,
                 )
             else:
-                protocols[proxy_mode] = _protocol_status_for_key(proxy_mode, current_keys.get(proxy_mode, ''))
+                protocols[proxy_mode] = _protocol_status_for_key(
+                    proxy_mode,
+                    current_keys.get(proxy_mode, ''),
+                    custom_checks=custom_checks,
+                    route_states=route_states,
+                )
                 _store_active_mode_protocol_status(current_keys, protocols[proxy_mode])
         except Exception as exc:
             _write_runtime_log(f'Ошибка быстрой проверки активного режима {proxy_mode}: {exc}')
@@ -7401,6 +7579,7 @@ def _placeholder_status_snapshot(current_keys):
     protocols = _placeholder_protocol_statuses(current_keys)
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
+    route_states = _service_route_summary() if custom_checks else None
     for key_name, key_value in (current_keys or {}).items():
         if not str(key_value or '').strip():
             continue
@@ -7410,6 +7589,7 @@ def _placeholder_status_snapshot(current_keys):
             custom_checks=custom_checks,
             key_probe_cache=key_probe_cache,
             allow_youtube_confirm=False,
+            route_states=route_states,
         )
     active_key = (current_keys or {}).get(proxy_mode, '')
     if active_key:
@@ -7422,8 +7602,10 @@ def _placeholder_status_snapshot(current_keys):
                 protocols[proxy_mode] = _cached_protocol_status_for_key(
                     proxy_mode,
                     active_key,
+                    custom_checks=custom_checks,
                     key_probe_cache={_hash_key(active_key): probe},
                     allow_youtube_confirm=False,
+                    route_states=route_states,
                 )
     return {
         'web': _build_web_status(current_keys, protocols=protocols),
@@ -7794,6 +7976,7 @@ def _web_get_context(handler):
         'service_routes_payload': _web_service_routes_payload,
         'telegram_call_learning_snapshot': _telegram_call_learning_snapshot,
         'router_health_snapshot': _router_health_snapshot,
+        'bot_ready': lambda: bool(bot_ready),
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
         'has_pool_probe_resume_payload': _has_pool_probe_resume_payload,
@@ -7838,6 +8021,15 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
+    custom_checks_for_protocol = lambda protocol, checks: key_pool_web.protocol_custom_checks(
+        checks,
+        route_states,
+        protocol,
+    )
+    custom_header_icons_for_protocol = lambda protocol, checks: key_pool_web.custom_check_header_icons(
+        checks,
+        _service_icon_html,
+    )
     _tabs_html, panel_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         protocol_sections,
         current_keys,
@@ -7858,6 +8050,8 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         pool_custom_col_width=pool_custom_col_width,
         pool_mobile_custom_col_width=pool_mobile_custom_col_width,
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        custom_checks_for_protocol=custom_checks_for_protocol,
+        custom_header_icons_for_protocol=custom_header_icons_for_protocol,
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
         route_tools_html=route_tools_html,
@@ -7889,6 +8083,15 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
+    custom_checks_for_protocol = lambda protocol, checks: key_pool_web.protocol_custom_checks(
+        checks,
+        route_states,
+        protocol,
+    )
+    custom_header_icons_for_protocol = lambda protocol, checks: key_pool_web.custom_check_header_icons(
+        checks,
+        _service_icon_html,
+    )
     protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         web_form_blocks.PROTOCOL_SECTIONS,
         current_keys,
@@ -7909,6 +8112,8 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         pool_custom_col_width=pool_custom_col_width,
         pool_mobile_custom_col_width=pool_mobile_custom_col_width,
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        custom_checks_for_protocol=custom_checks_for_protocol,
+        custom_header_icons_for_protocol=custom_header_icons_for_protocol,
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
         route_tools_html=route_tools_html,
@@ -8112,6 +8317,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             enable_custom_checks=pool_enabled,
             enable_key_pool=pool_enabled,
             enable_telegram=telegram_enabled,
+            bot_ready=bool(bot_ready),
         )
 
     def _build_protocol_panel(self, protocol):

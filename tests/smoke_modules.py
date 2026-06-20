@@ -88,7 +88,7 @@ PORTS = {
 
 
 def _extract_udp_policy_python(script_text):
-    marker = 'from service_catalog import TELEGRAM_UNBLOCK_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES'
+    marker = 'from service_catalog import REALTIME_CALL_SIGNAL_ROUTE_ENTRIES, TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES'
     marker_at = script_text.index(marker)
     heredoc_at = script_text.rfind("<<'PY'", 0, marker_at)
     start = script_text.index('\n', heredoc_at) + 1
@@ -101,6 +101,7 @@ def _run_udp_policy_python(
     policy,
     youtube_route='vless-2.txt',
     telegram_route='',
+    realtime_call_route='',
     telegram_policy='auto',
     vless2_quic_enabled=None,
 ):
@@ -113,6 +114,8 @@ def _run_udp_policy_python(
         unblock_dir.mkdir()
         (runtime_dir / 'service_catalog.py').write_text(
             "TELEGRAM_UNBLOCK_ENTRIES = ('telegram.org', '149.154.160.0/20')\n"
+            "TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES = ('telegram.org', '149.154.160.0/20')\n"
+            "REALTIME_CALL_SIGNAL_ROUTE_ENTRIES = ('telegram.org', '149.154.160.0/20', 'discord.com', 'whatsapp.com')\n"
             "YOUTUBE_UNBLOCK_ENTRIES = ('youtube.com', 'www.youtube.com')\n",
             encoding='utf-8',
         )
@@ -132,6 +135,8 @@ def _run_udp_policy_python(
             route_files.setdefault(youtube_route, []).append('www.youtube.com')
         if telegram_route:
             route_files.setdefault(telegram_route, []).append('telegram.org')
+        if realtime_call_route:
+            route_files.setdefault(realtime_call_route, []).append('discord.com')
         for filename, entries in route_files.items():
             (unblock_dir / filename).write_text('\n'.join(entries) + '\n', encoding='utf-8')
         env = os.environ.copy()
@@ -634,13 +639,75 @@ def test_key_pool_web():
     assert key_pool_web.web_probe_state({'tg_ok': True}, 'tg_ok') == 'ok'
     assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
     assert key_pool_web.web_custom_probe_states({'custom': {'custom': None}}, checks)['custom'] == 'unknown'
+    scoped_checks = [
+        {'id': 'discord', 'label': 'Discord'},
+        {'id': 'claude', 'label': 'Claude'},
+        {'id': 'manual', 'label': 'Manual'},
+    ]
+    route_states = {
+        'discord': {'complete_protocols': ['vless'], 'partial_protocols': []},
+        'claude': {'complete_protocols': [], 'partial_protocols': ['vless2']},
+    }
+    assert [
+        check['id']
+        for check in key_pool_web.protocol_custom_checks(scoped_checks, route_states, 'vless')
+    ] == ['discord', 'manual']
+    assert [
+        check['id']
+        for check in key_pool_web.protocol_custom_checks(scoped_checks, route_states, 'vless2')
+    ] == ['claude', 'manual']
+    assert [
+        check['id']
+        for check in key_pool_web.protocol_custom_checks(scoped_checks, route_states, 'vmess')
+    ] == ['manual']
+    scoped_service_snapshot = key_pool_web.web_pool_snapshot(
+        {'vmess': 'vmess-key'},
+        {'vmess': ['vmess-key']},
+        {
+            _hash_key('vmess-key'): {
+                'tg_ok': True,
+                'yt_ok': True,
+                'custom': {'discord': True, 'claude': True, 'manual': True},
+                'ts': 4,
+            },
+        },
+        scoped_checks,
+        include_keys=False,
+        hash_key=_hash_key,
+        display_name=lambda value: value,
+        probe_state=lambda probe, field: 'ok' if probe.get(field) else 'fail' if field in probe else 'unknown',
+        probe_checked_at=lambda probe: str(probe.get('ts', '')),
+        protocols=['vmess'],
+        route_states=route_states,
+    )
+    scoped_row = scoped_service_snapshot['vmess']['rows'][0]
+    assert scoped_row['tg'] == 'ok'
+    assert scoped_row['yt'] == 'ok'
+    assert scoped_row['custom'] == {'manual': 'ok'}
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
     assert key_pool_web.web_probe_quality_label({'yt_quality': 'stable', 'yt_latency_ms': 800}) == ''
     history_html = key_pool_web.web_event_history_html([
-        {'ts': 1, 'level': 'info', 'action': 'test', 'protocol': 'vless', 'service': 'telegram', 'message': 'ok'}
+        {
+            'ts': index + 1,
+            'level': 'info',
+            'action': f'test_{index}',
+            'protocol': 'vless',
+            'service': 'telegram',
+            'source': 'watchdog',
+            'message': 'ok',
+            'details': {'active_connections': index},
+        }
+        for index in range(55)
     ])
     assert '<strong>История событий</strong>' not in history_html
     assert '<h3>История событий</h3>' not in history_html
+    assert history_html.count('event-history-item') == 50
+    assert 'test_49' in history_html
+    assert 'test_50' not in history_html
+    assert 'watchdog' in history_html
+    assert 'active_connections=0' in history_html
+    assert 'active_connections=49' in history_html
+
 
 def test_key_pool_subscription_helpers():
     raw = '\n'.join([
@@ -789,7 +856,7 @@ def test_youtube_healthcheck_retries_transient_watch_page():
     assert 'confirmed' in message
     assert metrics['yt_watch_ok'] is True
     assert metrics['yt_stability'] == 'stable'
-    assert calls.count((youtube_healthcheck.YOUTUBE_WATCH_URL, 3, 4)) == 1
+    assert calls.count((youtube_healthcheck.YOUTUBE_WATCH_URL, 3, 4)) == 2
 
 
 def test_youtube_healthcheck_tolerates_transient_primary_generate_204():
@@ -1222,6 +1289,9 @@ def test_codex_version_matches_commit_count():
     assert 'auto_failover_startup_hold_seconds = 180' in example
     assert 'auto_failover_startup_hold_seconds = 180' in installer
     assert 'auto_failover_startup_hold_seconds = 180' in bootstrap
+    assert 'auto_failover_consecutive_failures = 3' in example
+    assert 'auto_failover_consecutive_failures = 3' in installer
+    assert 'auto_failover_consecutive_failures = 3' in bootstrap
     assert 'youtube_vless2_failover_enabled = True' in example
     assert 'youtube_vless2_failover_enabled = True' in installer
     assert 'youtube_vless2_failover_enabled = True' in bootstrap
@@ -1247,11 +1317,24 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert "s/\\r//g" in unblock_dnsmasq
     assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
     assert 'udp_quic_domain()' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblocksh unblockshudp' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblockvmess unblockvmessudp' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblockvless unblockvlessudp' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblockvless2 unblockvless2udp' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblocktroj unblocktrojudp' in unblock_dnsmasq
+    assert 'call_signal_domain()' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblocksh unblockshudp bypass_call_signal_sh' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblockvless unblockvlessudp bypass_call_signal_vless' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblockvless2 unblockvless2udp bypass_call_signal_vless2' in unblock_dnsmasq
+    assert 'ipset_targets "$line" unblocktroj unblocktrojudp bypass_call_signal_troj' in unblock_dnsmasq
+
+
+def test_realtime_call_signal_catalog_is_call_specific():
+    entries = set(service_catalog.REALTIME_CALL_SIGNAL_ROUTE_ENTRIES)
+    assert 'api.telegram.org' in entries
+    assert 'discord.com' in entries
+    assert 'whatsapp.com' in entries
+    assert 'facebook.com' not in entries
+    assert 'instagram.com' not in entries
+    assert 'youtube.com' not in entries
+    assert '64.233.164.188' not in entries
+    assert set(service_catalog.TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES) <= set(service_catalog.TELEGRAM_UNBLOCK_ENTRIES)
 
 
 def test_ipset_refresh_is_backend_aware_and_atomic():
@@ -1338,8 +1421,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'generate_udp_quic_policy_file' in bootstrap
     assert 'UDP_QUIC_EXCLUDE_ENTRIES' in script
     assert 'UDP_QUIC_EXCLUDE_ENTRIES' in bootstrap
-    assert 'from service_catalog import TELEGRAM_UNBLOCK_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES' in script
-    assert 'from service_catalog import TELEGRAM_UNBLOCK_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES' in bootstrap
+    assert 'from service_catalog import REALTIME_CALL_SIGNAL_ROUTE_ENTRIES, TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES' in script
+    assert 'from service_catalog import REALTIME_CALL_SIGNAL_ROUTE_ENTRIES, TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES, YOUTUBE_UNBLOCK_ENTRIES' in bootstrap
     assert 'def telegram_udp_policy()' in script
     assert 'def telegram_udp_policy()' in bootstrap
     assert 'route_contains_telegram(filename)' in script
@@ -1351,6 +1434,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert "print(f'BYPASS_UDP_QUIC_BLOCK_{env_name}={1 if enabled else 0}')" in script
     assert "BYPASS_TELEGRAM_CALL_LEARNING_ENABLED" in script
     assert "BYPASS_TELEGRAM_CALL_ROUTE_{env_name}" in script
+    assert "BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_{env_name}" in script
     assert "BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT" in script
     assert "BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT" in script
     assert "BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" in script
@@ -1417,7 +1501,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         assert combined_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS'] == '1'
         vless2_telegram_policy = _run_udp_policy_python(script_path, 'auto', telegram_route='vless-2.txt')
         vmess_telegram_policy = _run_udp_policy_python(script_path, 'auto', telegram_route='vmess.txt')
+        vless2_discord_policy = _run_udp_policy_python(script_path, 'auto', realtime_call_route='vless-2.txt')
         assert vless2_telegram_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS2'] == '1'
+        assert vless2_discord_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS2'] == '1'
+        assert vless2_discord_policy['BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS2'] == '0'
         assert vmess_telegram_policy['BYPASS_TELEGRAM_CALL_ROUTE_VMESS'] == '1'
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
@@ -1485,6 +1572,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED="${BYPASS_TELEGRAM_CALL_LEARNING_ENABLED:-1}"' in redirect_script
     assert 'TELEGRAM_CALL_CLIENT_SET="${TELEGRAM_CALL_CLIENT_SET:-bypass_tg_call_clients}"' in redirect_script
     assert 'TELEGRAM_CALL_SIGNAL_SET="${TELEGRAM_CALL_SIGNAL_SET:-bypass_tg_call_signal}"' in redirect_script
+    assert 'CALL_CLIENT_SET_VLESS="${CALL_CLIENT_SET_VLESS:-bypass_call_clients_vless}"' in redirect_script
+    assert 'CALL_SIGNAL_SET_VLESS2="${CALL_SIGNAL_SET_VLESS2:-bypass_call_signal_vless2}"' in redirect_script
     assert 'TELEGRAM_CALL_TPROXY_CHAIN="${TELEGRAM_CALL_TPROXY_CHAIN:-BYPASS_TG_CALL_TPROXY}"' in redirect_script
     assert 'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED="${BYPASS_TELEGRAM_CALL_TPROXY_ENABLED:-1}"' in redirect_script
     assert 'load_tproxy_module xt_TPROXY' in redirect_script
@@ -1499,10 +1588,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ipset create "$set_name" hash:ip timeout "$timeout_value" maxelem "$maxelem" -exist' in redirect_script
     assert 'current_timeout="$(' in redirect_script
     assert 'ipset create "$TELEGRAM_CALL_SIGNAL_SET" hash:net -exist' in redirect_script
+    assert 'ipset create "$signal_set" hash:net -exist' in redirect_script
+    assert 'ensure_timeout_ipset "$client_set" "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT" 64' in redirect_script
     assert '149.154.160.0/20' in redirect_script
-    assert '--match-set "$TELEGRAM_CALL_SIGNAL_SET" dst --dport "$signal_port"' in redirect_script
-    assert 'iptables -t mangle -I PREROUTING -p udp -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
-    assert '-p tcp -m tcp --dport "$signal_port" -m set --match-set "$TELEGRAM_CALL_SIGNAL_SET" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
+    assert '--match-set "$signal_set" dst --dport "$signal_port"' in redirect_script
+    assert 'iptables -t mangle -I PREROUTING -p udp -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
+    assert '-p tcp -m tcp --dport "$signal_port" -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
     assert 'telegram_call_client_udp_ports()' in redirect_script
     assert "printf '%s\\n' 1024:65535" in redirect_script
     assert 'telegram_call_client_udp_cleanup_ports()' in redirect_script
@@ -1522,11 +1613,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '-p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
     active_call_prerouting = redirect_script.split('install_telegram_call_prerouting_jumps() {', 1)[1].split('\n}', 1)[0]
     assert '-p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_LEARN_CHAIN"' not in active_call_prerouting
-    assert '-p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_TPROXY_CHAIN"' in redirect_script
+    assert '-p udp -m udp --dport "$client_udp_port" -m set --match-set "$client_set" src -j "$TELEGRAM_CALL_TPROXY_CHAIN"' in redirect_script
     assert 'iptables -t "$table_name" -I PREROUTING -j "$chain_name"' not in redirect_script
     assert 'iptables -t mangle -I PREROUTING -j "$TELEGRAM_CALL_LEARN_CHAIN"' not in redirect_script
     assert 'iptables -t nat -I PREROUTING -j "$TELEGRAM_CALL_ROUTE_CHAIN"' not in redirect_script
-    assert '-j SET --add-set "$TELEGRAM_CALL_CLIENT_SET" src --exist --timeout "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT"' in redirect_script
+    assert '-j SET --add-set "$client_set" src --exist --timeout "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT"' in redirect_script
     assert '-j SET --add-set "$learned_set" dst --exist --timeout "$BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT"' in redirect_script
     assert 'iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN' in redirect_script
     assert '-m set --match-set "$learned_set" dst \\' in redirect_script
@@ -1719,7 +1810,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
     assert "auto_failover_recent_success_ttl', 300" in source
     assert "auto_failover_startup_hold_seconds', 180" in source
+    assert "auto_failover_consecutive_failures', 3" in source
+    assert 'def _event_history_snapshot(limit=50)' in source
     assert 'startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS' in source
+    assert 'min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES' in source
+    assert 'def _auto_failover_log' in source
+    assert "'auto_failover_confirm_fail'" in source
+    assert "'stream_guard_defer'" in source
     assert "youtube_vless2_failover_recent_success_ttl', 300" in source
     assert 'def _youtube_route_protocol' in source
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
@@ -1900,7 +1997,7 @@ def test_telegram_call_router_health_note():
     )
     assert health['ok'] is True
     assert health['ports'] == {'vless': 11812}
-    assert router_health_runtime.telegram_call_proxy_note(health) == 'Telegram Call: alive, TPROXY, порты: Vless 11812:ok.'
+    assert router_health_runtime.telegram_call_proxy_note(health) == 'Calls: alive, TPROXY, порты: Vless 11812:ok.'
     assert ('netstat', '-lnp') in commands
 
 
@@ -2415,6 +2512,47 @@ def test_auto_failover_runtime_helpers():
     assert any(call[0] == 'repair' for call in repair_calls)
     assert not any(call[0] == 'install' for call in repair_calls)
     assert any(call[0] == 'log' and 'endpoint repair restored' in call[1] for call in repair_calls)
+
+    repeated_calls = []
+    repeated_state = {
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_attempt': 0.0,
+        'consecutive_failures': 0,
+        'in_progress': False,
+    }
+
+    def repeated_attempt(now_value):
+        return auto_failover_runtime.attempt_auto_failover(
+            state=repeated_state,
+            pool_probe_locked=lambda: False,
+            proxy_mode='vless',
+            proxy_url='proxy',
+            check_telegram_api=lambda proxy, **kwargs: (False, 'fail'),
+            load_current_keys=lambda: {'vless': 'active'},
+            load_key_pools=lambda: {'vless': ['active', 'next']},
+            failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+            find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+            install_key_for_protocol=lambda proto, key, verify=True: repeated_calls.append(('install', proto, key, verify)) or 'ok',
+            update_proxy=lambda proto: repeated_calls.append(('update', proto)),
+            set_active_key=lambda proto, key: repeated_calls.append(('active', proto, key)),
+            record_key_probe=lambda proto, key, **kwargs: repeated_calls.append(('probe', proto, key, kwargs)),
+            log=lambda message: repeated_calls.append(('log', message)),
+            grace_seconds=10,
+            switch_cooldown_seconds=30,
+            min_consecutive_failures=3,
+            time_provider=iter([now_value, now_value + 1]).__next__,
+        )
+
+    assert repeated_attempt(20.0) is False
+    assert repeated_state['consecutive_failures'] == 1
+    assert not any(call[0] == 'install' for call in repeated_calls)
+    assert repeated_attempt(30.0) is False
+    assert repeated_state['consecutive_failures'] == 2
+    assert not any(call[0] == 'install' for call in repeated_calls)
+    assert repeated_attempt(40.0) is True
+    assert repeated_state['consecutive_failures'] == 0
+    assert ('update', 'vless') in repeated_calls
 
 
 def test_proxy_apply_runtime_helpers():
@@ -3944,6 +4082,7 @@ def test_web_get_actions_helpers():
         'pool_probe_locked': lambda: False,
         'get_web_command_state': lambda: {'running': False},
         'pool_enabled': True,
+        'bot_ready': lambda: True,
         'get_pool_probe_progress': lambda: {'running': True, 'total': 2},
         'web_pool_snapshot': pool_snapshot,
         'pool_status_summary': lambda keys: {'active_text': '1 / 5'},
@@ -3957,6 +4096,7 @@ def test_web_get_actions_helpers():
     assert web_get_actions.dispatch(ctx, '/') == {'kind': 'html', 'html': 'form:saved'}
     status = web_get_actions.dispatch(ctx, '/api/status')
     assert status['payload']['pool_probe_running'] is True
+    assert status['payload']['bot_ready'] is True
     assert status['payload']['timestamp'] == 123.0
     assert status['payload']['telegram_call_learning']['watching'] is True
     assert 'pools' not in status['payload']
@@ -4219,6 +4359,35 @@ def test_web_pool_form_blocks_helpers():
     assert lazy_tabs_html.count('protocol-tab') == 2
     assert 'data-protocol-panel-lazy="1"' in lazy_panels_html
     assert 'vless://hidden' not in lazy_panels_html
+    scoped_tabs_html, scoped_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        [
+            ('vless', 'Vless 1', 3, 'vless://...'),
+            ('vmess', 'Vmess', 3, 'vmess://...'),
+        ],
+        {'vless': 'vless://sample', 'vmess': 'vmess://sample'},
+        {
+            'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'},
+            'vmess': {'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        },
+        '<input name="csrf_token" value="token">',
+        key_pools={'vless': ['vless://sample'], 'vmess': ['vmess://sample']},
+        key_probe_cache={
+            'vless://sample': {'tg_ok': True, 'yt_ok': True, 'custom': {'discord': True}},
+            'vmess://sample': {'tg_ok': True, 'yt_ok': True, 'custom': {'discord': True}},
+        },
+        custom_checks=[{'id': 'discord', 'label': 'Discord'}],
+        custom_checks_for_protocol=lambda protocol, checks: checks if protocol == 'vless' else [],
+        custom_header_icons_for_protocol=lambda protocol, checks: ''.join(f'H-{check["id"]}' for check in checks),
+        custom_check_badges=lambda probe, checks: ''.join(f'B-{check["id"]}' for check in checks),
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+    )
+    assert scoped_tabs_html.count('protocol-tab') == 2
+    assert 'H-discord' in scoped_panels_html
+    assert 'B-discord' in scoped_panels_html
+    vmess_panel_html = scoped_panels_html.split('data-protocol-panel="vmess"', 1)[1]
+    assert 'H-discord' not in vmess_panel_html
+    assert 'B-discord' not in vmess_panel_html
 
 
 def test_web_status_builder_helpers():
@@ -4252,6 +4421,23 @@ def test_web_status_builder_helpers():
         api_required=False,
     )
     assert youtube_only['tone'] == 'ok'
+    scoped_checks = key_pool_web.protocol_custom_checks(
+        [{'id': 'discord', 'label': 'Discord'}],
+        {'discord': {'complete_protocols': ['vless'], 'partial_protocols': []}},
+        'vmess',
+    )
+    scoped_states = key_pool_web.web_custom_probe_states(
+        {'tg_ok': True, 'yt_ok': True, 'custom': {'discord': True}},
+        scoped_checks,
+    )
+    scoped_status = web_status_builder.cached_protocol_status(
+        'key',
+        {'tg_ok': True, 'yt_ok': True, 'custom': {'discord': True}},
+        scoped_checks,
+        scoped_states,
+    )
+    assert scoped_status['custom'] == {}
+    assert 'Discord' not in scoped_status['details']
     assert 'не требуется для текущего режима' in youtube_only['details']
 
 
@@ -4321,7 +4507,8 @@ def test_web_template_styles_helpers():
     assert '.pool-apply-btn{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;justify-content:flex-start;gap:6px;}' in styles
     assert '.pool-apply-btn{display:flex;width:100%;font-size:10.5px;line-height:1.18;text-align:left;justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;gap:4px;}' in styles
     assert '.health-meter.warn span' in styles
-    assert '.status-overview-head{display:grid;' in styles
+    assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
+    assert '.topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,tg-icon");}' in styles
     assert '.version-badge{grid-column:2;grid-row:1;justify-self:end;align-self:start;width:auto;min-width:48px;' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
@@ -4698,6 +4885,7 @@ def test_web_template_scripts_helpers():
     assert 'function loadedPoolProtocolQuery()' in scripts
     assert 'function schedulePoolView(proto, delayMs)' in scripts
     assert 'const rowByKeyId = new Map();' in scripts
+    assert 'Object.prototype.hasOwnProperty.call(stateMap, check.id)' in scripts
     assert "fetch('/api/pools' + loadedPoolProtocolQuery()" in scripts
     assert "proto === web.proxy_mode && status && (status.label === 'Проверяется' || status.api_pending)" in scripts
     assert 'function updateTelegramCallLearning(state)' not in scripts
@@ -4748,10 +4936,11 @@ def test_web_template_scripts_helpers():
     assert 'name="key_id"' in scripts
     assert 'function setupProtocolSubtabs(root)' in scripts
     assert 'function renderStatusAttention(snapshot)' in scripts
+    assert 'function renderTopbarStatus(snapshot)' in scripts
     assert "items.push(['info', 'Проверка пула выполняется'" not in scripts
     assert 'проверка пула сейчас не мешает работе' not in scripts
     assert 'poolProbeVisible' in scripts
-    assert "apiPill.textContent = (poolProbeVisible || poolProbePaused)" in scripts
+    assert "pill.innerHTML = (showTelegramIcon" in scripts
     assert 'function updatePoolProbeControls(active, paused)' in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
@@ -4803,6 +4992,7 @@ def test_web_form_template_smoke():
         unblock_tabs_html='',
         enable_key_pool=False,
         enable_custom_checks=False,
+        bot_ready=True,
     )
     assert '/static/app.css?v=' in page
     assert '/static/app.js?v=' in page
@@ -4819,7 +5009,9 @@ def test_web_form_template_smoke():
     assert 'router-memory-meter' in page
     assert 'call-learn-details' not in page
     assert 'telegram_call_learn' not in page
-    assert 'status-attention-list' in page
+    assert 'status-attention-list' not in page
+    assert 'topbar-status-icon-telegram' in page
+    assert '"botReady":true' in page
     assert 'status-overview-head' in page
     assert 'Панель состояния' not in page
     assert '10 / 64 MB' in page
@@ -4973,12 +5165,25 @@ def test_event_history_helpers():
             message='installed vless://secret@example.test:443#name',
             protocol='vless',
             service='telegram',
+            details={'last_activity_age_s': 0},
             event_path=str(path),
         )
+        for index in range(60):
+            assert event_history.record_event(
+                action=f'event_{index}',
+                message=f'message {index}',
+                protocol='vless',
+                event_path=str(path),
+            )
         events = event_history.load_events(event_path=str(path))
-    assert events[0]['protocol_label'] == 'Vless 1'
-    assert '<proxy-key-hidden>' in events[0]['message']
-    assert 'vless://' not in events[0]['message']
+        redacted_events = event_history.load_events(limit=100, event_path=str(path))
+    assert len(events) == 50
+    assert events[0]['action'] == 'event_59'
+    assert events[-1]['action'] == 'event_10'
+    assert redacted_events[-1]['protocol_label'] == 'Vless 1'
+    assert '<proxy-key-hidden>' in redacted_events[-1]['message']
+    assert 'vless://' not in redacted_events[-1]['message']
+    assert redacted_events[-1]['details']['last_activity_age_s'] == '0'
 
 
 def test_update_status_helpers():

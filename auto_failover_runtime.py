@@ -30,6 +30,7 @@ def attempt_auto_failover(
     transient_success_ttl=0,
     recent_success_ttl=0,
     startup_hold_seconds=0,
+    min_consecutive_failures=1,
     repair_active_proxy=None,
     audit_key_switch=None,
     time_provider=time.time,
@@ -47,6 +48,7 @@ def attempt_auto_failover(
     if ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
         return False
 
     if callable(repair_active_proxy):
@@ -64,6 +66,7 @@ def attempt_auto_failover(
             if repair_ok:
                 state['last_ok'] = time_provider()
                 state['last_fail'] = 0.0
+                state['consecutive_failures'] = 0
                 log('Auto-failover: active proxy endpoint repair restored Telegram API; key switch skipped.')
                 return False
             failure_message = repair_message or failure_message
@@ -76,6 +79,7 @@ def attempt_auto_failover(
             started_at = 0.0
         if started_at and now - started_at < startup_hold:
             state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
             log('Auto-failover: startup hold is active; key switch skipped after failed Telegram check.')
             return False
 
@@ -88,6 +92,7 @@ def attempt_auto_failover(
             last_ok = 0.0
         if last_ok and now - last_ok <= recent_ttl:
             state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
             log('Auto-failover: active Telegram key had a recent successful check; switch skipped after a temporary failure.')
             return False
         current_keys = load_current_keys()
@@ -104,6 +109,7 @@ def attempt_auto_failover(
             now - checked_ts <= recent_ttl
         ):
             state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
             log('Auto-failover: active Telegram key is recently marked working in the pool cache; switch skipped.')
             return False
 
@@ -115,6 +121,7 @@ def attempt_auto_failover(
             last_ok = 0.0
         if last_ok and now - last_ok <= ttl:
             state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
             log('Auto-failover: временный сбой Telegram API после недавнего успешного ответа; переключение пропущено.')
             return False
         current_keys = current_keys if current_keys is not None else load_current_keys()
@@ -131,11 +138,13 @@ def attempt_auto_failover(
             now - checked_ts <= ttl
         ):
             state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
             log('Auto-failover: временный сбой Telegram API, активный ключ недавно проверялся успешно; переключение пропущено.')
             return False
 
     if not state['last_fail']:
         state['last_fail'] = now
+        state['consecutive_failures'] = 0
     if now - state['last_fail'] < grace_seconds:
         return False
 
@@ -149,9 +158,20 @@ def attempt_auto_failover(
     if confirm_ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
         log('Auto-failover: repeated Telegram API check for the active key succeeded; switch skipped.')
         return False
     failure_message = confirm_message or failure_message
+
+    min_failures = max(1, int(min_consecutive_failures or 1))
+    state['consecutive_failures'] = int(state.get('consecutive_failures') or 0) + 1
+    if state['consecutive_failures'] < min_failures:
+        log(
+            f'Auto-failover: Telegram API failed confirmation '
+            f'{state["consecutive_failures"]}/{min_failures}; '
+            'current key is kept until failures repeat.'
+        )
+        return False
 
     state['in_progress'] = True
     state['last_attempt'] = now
@@ -196,6 +216,7 @@ def attempt_auto_failover(
         record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
         state['last_ok'] = time_provider()
         state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
         log(f'Auto-failover: переключено на {proto}; Telegram API доступен. {result}')
         return True
     finally:

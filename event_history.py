@@ -27,7 +27,7 @@ SECRET_PATTERNS = [
 
 
 def redact_sensitive_text(value):
-    text = str(value or '')
+    text = '' if value is None else str(value)
     for pattern, replacement in SECRET_PATTERNS:
         text = pattern.sub(replacement, text)
     return text
