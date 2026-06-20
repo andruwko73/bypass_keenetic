@@ -1,3 +1,7 @@
+*v1.737 (20 Jun 2026) -* main
+
+*Keeps live YouTube short-link redirects on Vless 2 by assigning active Google frontend edge ranges 142.251.1.0/24, 172.253.152.0/24, 173.194.222.0/24, and 74.125.205.0/24 to the YouTube route owner instead of Chrome Remote Desktop point IPs.*
+
 *v1.736 (20 Jun 2026) -* main
 
 *Moves the active 64.233.162.0/24 Google video range into the YouTube/Vless 2 route owner and removes conflicting Chrome Remote Desktop point IPs from Vless 1 presets.*
