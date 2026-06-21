@@ -297,6 +297,9 @@ def update_key_probe_cache_entry(
         elif 'tg_ok' not in entry or entry.get('tg_ok') is not value:
             entry['tg_ok'] = value
             changed = True
+        if value is not True and tg_latency_ms is None and 'tg_latency_ms' in entry:
+            entry.pop('tg_latency_ms', None)
+            changed = True
     if yt_ok is not None:
         value = _stored_probe_value(yt_ok)
         if _skip_recent_success_downgrade(entry, 'yt_ok', value, now, previous_ts):

@@ -1,3 +1,7 @@
+*v1.754 (21 Jun 2026) -* main
+
+*Marks one-off YouTube endpoint timeouts as unstable when other YouTube signals pass, confirms Telegram with lightweight SOCKS TCP probes to app endpoints when API/web checks are inconclusive, keeps temporary pool-probe infrastructure failures from poisoning key status, and fixes router refresh scripts when system utilities are missing from PATH.*
+
 *v1.753 (21 Jun 2026) -* main
 
 *Lets the topbar status use a bounded multi-line note, makes web route-list saves return before background route application, and avoids checking identical pool keys twice.*

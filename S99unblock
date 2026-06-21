@@ -1,5 +1,8 @@
 #!/bin/sh
 
+PATH="/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+export PATH
+
 PID_FILE="${BYPASS_UNBLOCK_REFRESH_PID_FILE:-/opt/var/run/bypass-unblock-scheduler.pid}"
 INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900}"
 DNSMASQ_INTERVAL_SECONDS="${BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600}"

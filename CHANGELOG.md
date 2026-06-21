@@ -1,3 +1,8 @@
+<a name="1.754"></a>
+# [1.754] - 21 Jun 2026
+
+- Treats transient YouTube endpoint timeouts as unstable warnings when the key has enough successful YouTube signals, confirms Telegram through lightweight SOCKS TCP probes to Telegram app endpoints when API/web checks are inconclusive, records pool-probe infrastructure failures as unknown/timeout, and exports a safe PATH in unblock refresh scripts so routers can always find system utilities such as sleep.
+
 <a name="1.753"></a>
 # [1.753] - 21 Jun 2026
 

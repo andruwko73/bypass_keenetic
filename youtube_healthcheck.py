@@ -58,6 +58,11 @@ YOUTUBE_UNSTABLE_ERROR_MARKERS = (
     'connection aborted',
     'remote disconnected',
     'unexpected',
+    'timeout',
+    'timed out',
+    'max retries',
+    'не ответил',
+    'вовремя',
 )
 
 
@@ -211,6 +216,17 @@ def check_youtube_through_proxy(
         failure_count == 1 and
         unstable_failures == 1
     )
+    soft_required_endpoint_failure = (
+        not soft_unstable_failure and
+        len(required_missing) == 1 and
+        required_missing <= {YOUTUBE_PRIMARY_URL, YOUTUBE_HOME_URL, YOUTUBE_SHORT_URL} and
+        failed_kinds <= {'primary', 'home', 'short', 'bootstrap'} and
+        watch_ok and
+        googlevideo_ok and
+        ok_count >= max(1, success_required - 1) and
+        failure_count == 1 and
+        unstable_failures == 1
+    )
     stable = (
         success_threshold and
         not required_missing and
@@ -230,7 +246,9 @@ def check_youtube_through_proxy(
         short_ok and
         googlevideo_ok_count > 0
     )
-    stability = 'stable' if stable else ('unstable' if partially_ok or soft_unstable_failure else 'fail')
+    stability = 'stable' if stable else (
+        'unstable' if partially_ok or soft_unstable_failure or soft_required_endpoint_failure else 'fail'
+    )
 
     if metrics is not None:
         metrics['yt_home_ok'] = home_ok
@@ -247,7 +265,7 @@ def check_youtube_through_proxy(
 
     if stable:
         return True, 'YouTube first-load endpoints confirmed: ' + ', '.join(sorted(ok_kinds))
-    if soft_unstable_failure:
+    if soft_unstable_failure or soft_required_endpoint_failure:
         detail = '; '.join(failed[-1:]) or 'soft endpoint is transient'
         return True, f'YouTube first-load endpoints confirmed with transient soft check: {detail}'
     if partially_ok:

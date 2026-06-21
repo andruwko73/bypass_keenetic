@@ -13,6 +13,7 @@ from telegram_healthcheck import (
     TELEGRAM_HEALTHCHECK_MIN_OK,
     TELEGRAM_HEALTHCHECK_URLS,
     check_telegram_service_through_proxy,
+    telegram_failure_is_transient,
 )
 
 
@@ -129,7 +130,7 @@ def check_pool_key_through_proxy(
     collect_quality = bool(quality_settings.get('enabled') or measure_download)
     tg_metrics = {}
     yt_metrics = {}
-    tg_ok, _ = check_telegram_service_through_proxy(
+    tg_ok, tg_message = check_telegram_service_through_proxy(
         check_telegram_api,
         check_http,
         proxy_url,
@@ -151,7 +152,7 @@ def check_pool_key_through_proxy(
     if not tg_ok and not yt_ok:
         sleep(retry_delay_seconds)
         if telegram_required:
-            tg_ok, _ = check_telegram_service_through_proxy(
+            tg_ok, tg_message = check_telegram_service_through_proxy(
                 check_telegram_api,
                 check_http,
                 proxy_url,
@@ -172,7 +173,7 @@ def check_pool_key_through_proxy(
             )
     elif not tg_ok and telegram_required:
         sleep(retry_delay_seconds)
-        tg_ok, _ = check_telegram_service_through_proxy(
+        tg_ok, tg_message = check_telegram_service_through_proxy(
             check_telegram_api,
             check_http,
             proxy_url,
@@ -193,7 +194,11 @@ def check_pool_key_through_proxy(
             sleep=sleep,
         )
 
-    record_tg_ok = tg_ok if (telegram_required or tg_ok or not yt_ok) else 'unknown'
+    tg_transient = (not tg_ok) and telegram_failure_is_transient(tg_message)
+    if tg_transient:
+        record_tg_ok = 'unknown'
+    else:
+        record_tg_ok = tg_ok if (telegram_required or tg_ok or not yt_ok) else 'unknown'
     quality_kwargs = {}
     if collect_quality:
         quality_kwargs.update(tg_metrics)

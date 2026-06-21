@@ -1,5 +1,8 @@
 #!/bin/sh
 
+PATH="/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+export PATH
+
 DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
 DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"

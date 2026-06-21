@@ -46,6 +46,7 @@ import telegram_install_ui
 import telegram_key_ui
 import telegram_info_runtime
 import telegram_call_learning
+import telegram_healthcheck
 import pool_probe_controller
 import pool_probe_runner
 import probe_cache
@@ -701,6 +702,12 @@ def test_key_pool_web():
     assert key_pool_web.web_probe_state({'tg_ok': True}, 'tg_ok') == 'ok'
     assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
     assert key_pool_web.web_probe_state({'yt_ok': False, 'yt_stability': 'unstable'}, 'yt_ok') == 'warn'
+    cache_key = probe_cache.hash_key('old-key')
+    cache = {cache_key: {'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION, 'tg_ok': True, 'tg_latency_ms': 825, 'ts': 1}}
+    changed = probe_cache.update_key_probe_cache_entry(cache, 'vless', 'old-key', tg_ok='unknown', now=2)
+    assert changed is True
+    assert cache[cache_key]['tg_ok'] is None
+    assert 'tg_latency_ms' not in cache[cache_key]
     warn_summary = key_pool_web.pool_status_summary(
         {'vless2': 'warn-key'},
         {'vless2': ['warn-key']},
@@ -952,6 +959,28 @@ def test_youtube_healthcheck_tolerates_transient_primary_generate_204():
     assert metrics['googlevideo_ok'] is True
     assert metrics['yt_stability'] == 'unstable'
     assert metrics['yt_error_rate'] > 0
+
+
+def test_youtube_healthcheck_warns_on_single_required_timeout():
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        if url == youtube_healthcheck.YOUTUBE_HOME_URL:
+            return False, 'Удалённый сервер не ответил вовремя через этот ключ.'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10811',
+        http_timeouts=(1, 2),
+        profile='quick',
+        metrics=metrics,
+    )
+
+    assert ok is True
+    assert 'transient soft check' in message
+    assert metrics['yt_home_ok'] is False
+    assert metrics['googlevideo_ok'] is True
+    assert metrics['yt_stability'] == 'unstable'
 
 
 def test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure():
@@ -3078,6 +3107,22 @@ def test_pool_probe_controller_helpers():
     assert records[0][2]['yt_ok'] is True
     assert records[0][2]['yt_stability'] == 'stable'
 
+    metrics = {}
+    tcp_calls = []
+    tg_ok, tg_message = telegram_healthcheck.check_telegram_service_through_proxy(
+        lambda proxy, **kwargs: (False, 'bot api failed'),
+        lambda proxy, **kwargs: (False, 'telegram web fail'),
+        'socks5h://127.0.0.1:10811',
+        telegram_timeouts=(1, 2),
+        http_timeouts=(1, 1),
+        metrics=metrics,
+        check_app_tcp=lambda proxy, **kwargs: tcp_calls.append((proxy, kwargs)) or (True, 'telegram dc ok'),
+    )
+    assert tg_ok is True
+    assert tg_message == 'telegram dc ok'
+    assert tcp_calls and tcp_calls[0][0] == 'socks5h://127.0.0.1:10811'
+    assert 'tg_latency_ms' in metrics
+
     records = []
     full_http_calls = []
     pool_probe_controller.check_pool_key_through_proxy(
@@ -3252,6 +3297,29 @@ def test_pool_probe_controller_helpers():
     assert records[0][2]['tg_ok'] is False
     assert records[0][2]['yt_ok'] is True
     assert records[0][2]['yt_stability'] == 'stable'
+
+    records = []
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'bot-mode-transient-telegram',
+        [],
+        'proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'Прокси не установил соединение с api.telegram.org за отведённое время.'),
+        check_http=check_http_without_app_telegram,
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        telegram_required=True,
+        sleep=lambda seconds: None,
+    )
+    assert len(records) == 1
+    assert records[0][0:2] == ('vless', 'bot-mode-transient-telegram')
+    assert records[0][2]['tg_ok'] == 'unknown'
+    assert records[0][2]['yt_ok'] is True
+    assert telegram_healthcheck.telegram_failure_is_transient(records[0][2].get('tg_ok')) is False
+    assert telegram_healthcheck.telegram_failure_is_transient('SOCKSHTTPSConnectionPool: Max retries exceeded') is True
 
     records = []
     telegram_web_attempts = []
@@ -3603,7 +3671,59 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (1, 1)
     assert checked_values == [1]
     assert failure_records == [
-        ('vless', 'sockless', {'tg_ok': False, 'yt_ok': False, 'custom': {'custom': False}}),
+        (
+            'vless',
+            'sockless',
+            {
+                'tg_ok': 'unknown',
+                'yt_ok': 'unknown',
+                'custom': {'custom': 'unknown'},
+                'custom_checks': [{'id': 'custom'}],
+                'timeout': True,
+                'timeout_reason': 'socks port 1200 not ready',
+            },
+        ),
+    ]
+
+    exception_records = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'probe-exception')],
+        [{'id': 'custom'}],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {'custom': False},
+        record_key_probe=lambda proto, key, **kwargs: exception_records.append((proto, key, kwargs)),
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: (_ for _ in ()).throw(RuntimeError('temporary probe error')),
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+    )
+    assert (checked, total) == (1, 1)
+    assert exception_records == [
+        (
+            'vless',
+            'probe-exception',
+            {
+                'tg_ok': 'unknown',
+                'yt_ok': 'unknown',
+                'custom': {'custom': 'unknown'},
+                'custom_checks': [{'id': 'custom'}],
+                'timeout': True,
+                'timeout_reason': 'probe exception: temporary probe error',
+            },
+        ),
     ]
 
     timeout_records = []

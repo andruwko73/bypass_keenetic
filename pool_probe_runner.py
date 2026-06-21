@@ -418,6 +418,18 @@ def run_pool_probe_worker(
             if check.get('id')
         }
 
+    def record_probe_infrastructure_issue(proto, key_value, reason):
+        record_key_probe(
+            proto,
+            key_value,
+            tg_ok='unknown',
+            yt_ok='unknown',
+            custom=unknown_custom_results(checks),
+            custom_checks=checks,
+            timeout=True,
+            timeout_reason=str(reason or 'probe infrastructure issue')[:160],
+        )
+
     def memory_below_limit(limit_kb):
         try:
             limit_kb = int(limit_kb or 0)
@@ -554,12 +566,10 @@ def run_pool_probe_worker(
                     port = str(int(test_port) + offset)
                     if not wait_for_socks5(port, timeout=6):
                         log(f'Тестовый SOCKS-порт {port} не поднялся для {proto_label(proto)}.')
-                        record_key_probe(
+                        record_probe_infrastructure_issue(
                             proto,
                             key_value,
-                            tg_ok=False,
-                            yt_ok=False,
-                            custom=failed_custom_results(checks),
+                            f'socks port {port} not ready',
                         )
                         mark_checked(proto, key_value)
                         continue
@@ -595,12 +605,10 @@ def run_pool_probe_worker(
                             future.result()
                         except Exception as exc:
                             log(f'Ошибка проверки ключа из пула {proto_label(proto)}: {exc}')
-                            record_key_probe(
+                            record_probe_infrastructure_issue(
                                 proto,
                                 key_value,
-                                tg_ok=False,
-                                yt_ok=False,
-                                custom=failed_custom_results(checks),
+                                f'probe exception: {exc}',
                             )
                         finally:
                             clear_result_deadline(proto, key_value)
@@ -643,12 +651,10 @@ def run_pool_probe_worker(
             except Exception as exc:
                 log(f'Ошибка проверки пачки ключей из пула: {exc}')
                 for proto, key_value in valid_batch:
-                    record_key_probe(
+                    record_probe_infrastructure_issue(
                         proto,
                         key_value,
-                        tg_ok=False,
-                        yt_ok=False,
-                        custom=failed_custom_results(checks),
+                        f'batch exception: {exc}',
                     )
                     mark_checked(proto, key_value)
             finally:
