@@ -47,7 +47,9 @@ def pool_table_layout(custom_checks):
     )
 
 
-def _service_probe_badge(probe, probe_key, ok_html):
+def _service_probe_badge(probe, probe_key, ok_html, applicable=True):
+    if not applicable:
+        return '<span class="service-probe-mark service-probe-na">-</span>'
     if probe_key == 'yt_ok' and youtube_probe_state(probe) == 'warn':
         return '<span class="service-probe-mark service-probe-warn">!</span>'
     if probe.get(probe_key):
@@ -140,11 +142,15 @@ def render_pool_items(
     custom_check_badges,
     probe_checked_at,
     csrf_input_html='',
+    service_applicability=None,
 ):
     rows = []
     safe_key_name = html.escape(key_name, quote=True)
     safe_title = html.escape(title)
     current_key = current_key or ''
+    service_applicability = service_applicability or {}
+    telegram_applicable = bool(service_applicability.get('telegram', True))
+    youtube_applicable = bool(service_applicability.get('youtube', True))
     for index, pool_key in enumerate(pool_keys or []):
         key_hash = hash_key(pool_key)
         key_id = html.escape(str(key_hash[:12]), quote=True)
@@ -157,25 +163,43 @@ def render_pool_items(
         probe = key_probe_cache.get(key_hash, {})
         if not isinstance(probe, dict):
             probe = {}
-        tg_state = html.escape(_probe_state(probe, 'tg_ok'), quote=True)
-        yt_state = html.escape(_probe_state(probe, 'yt_ok'), quote=True)
+        tg_state = 'na' if not telegram_applicable else _probe_state(probe, 'tg_ok')
+        yt_state = 'na' if not youtube_applicable else _probe_state(probe, 'yt_ok')
+        safe_tg_state = html.escape(tg_state, quote=True)
+        safe_yt_state = html.escape(yt_state, quote=True)
         try:
             checked_ts = int(probe.get('ts') or 0)
         except Exception:
             checked_ts = 0
-        tg_badge = _service_probe_badge(probe, 'tg_ok', telegram_icon_html(opacity=1.0))
-        yt_badge = _service_probe_badge(probe, 'yt_ok', youtube_icon_html(opacity=1.0))
+        tg_badge = _service_probe_badge(
+            probe,
+            'tg_ok',
+            telegram_icon_html(opacity=1.0),
+            applicable=telegram_applicable,
+        )
+        yt_badge = _service_probe_badge(
+            probe,
+            'yt_ok',
+            youtube_icon_html(opacity=1.0),
+            applicable=youtube_applicable,
+        )
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
-        quality_score = _probe_int(probe, 'yt_score', 0)
-        quality_class = html.escape(_quality_class(probe), quote=True)
-        quality_label = _quality_label(probe)
+        quality_probe = probe if youtube_applicable else {}
+        quality_score = _probe_int(quality_probe, 'yt_score', 0)
+        quality_class = html.escape(_quality_class(quality_probe), quote=True)
+        quality_label = _quality_label(quality_probe)
         quality_badge = (
             f'<span class="pool-quality-badge pool-quality-{quality_class}">{html.escape(quality_label)}</span>'
             if quality_label else ''
         )
-        quality_title = html.escape(_quality_summary(probe, probe_checked_at(probe)), quote=True)
-        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{tg_state}" data-yt-state="{yt_state}" data-quality-score="{int(quality_score)}" data-quality-class="{quality_class}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
+        quality_title_text = (
+            _quality_summary(probe, probe_checked_at(probe))
+            if youtube_applicable else
+            'YouTube не назначен на этот протокол'
+        )
+        quality_title = html.escape(quality_title_text, quote=True)
+        rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{safe_tg_state}" data-yt-state="{safe_yt_state}" data-quality-score="{int(quality_score)}" data-quality-class="{quality_class}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
                         <td class="pool-key-cell">
                             <form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">
                                 {csrf_input_html}
@@ -455,6 +479,7 @@ def render_protocol_tabs_and_panels(
     active_protocol=None,
     lazy_protocol_panels=False,
     pool_probe_pending=False,
+    core_service_applicability_for_protocol=None,
 ):
     current_keys = current_keys or {}
     protocol_statuses = protocol_statuses or {}
@@ -472,6 +497,9 @@ def render_protocol_tabs_and_panels(
     custom_checks_for_protocol = custom_checks_for_protocol or (lambda protocol, checks: checks or [])
     custom_header_icons_for_protocol = custom_header_icons_for_protocol or (
         lambda protocol, checks: custom_header_icons
+    )
+    core_service_applicability_for_protocol = core_service_applicability_for_protocol or (
+        lambda protocol: {'telegram': True, 'youtube': True}
     )
     default_status = {
         'tone': 'empty',
@@ -521,12 +549,15 @@ def render_protocol_tabs_and_panels(
             panels.append(render_lazy_protocol_panel_placeholder(key_name, title, active=False))
             continue
         if enable_key_pool:
+            core_applicability = core_service_applicability_for_protocol(key_name) or {}
+            telegram_applicable = bool(core_applicability.get('telegram', True))
+            youtube_applicable = bool(core_applicability.get('youtube', True))
             current_probe = key_probe_cache.get(hash_key(current_keys.get(key_name, '')), {})
             if not isinstance(current_probe, dict):
                 current_probe = {}
             api_ok = status_info.get('api_ok', False)
-            current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
-            current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
+            current_tg_ok = telegram_applicable and (api_ok or bool(current_probe.get('tg_ok')))
+            current_yt_ok = youtube_applicable and bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
             custom_states = status_info.get('custom') or custom_probe_states(current_probe, protocol_custom_checks)
             active_status_icons = ''.join([
                 telegram_icon_html(opacity=1.0) if current_tg_ok else '',
@@ -550,6 +581,7 @@ def render_protocol_tabs_and_panels(
                 custom_check_badges=custom_check_badges,
                 probe_checked_at=probe_checked_at,
                 csrf_input_html=csrf_input_html,
+                service_applicability=core_applicability,
             )
         panels.append(
             render_protocol_panel(

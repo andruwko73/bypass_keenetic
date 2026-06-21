@@ -872,6 +872,9 @@ def render_web_scripts(
         }}
 
         function probeBadge(state, service) {{
+            if (state === 'na') {{
+                return '<span class="service-probe-mark service-probe-na">-</span>';
+            }}
             if (state === 'ok') {{
                 return serviceIcon(service === 'tg' ? TELEGRAM_ICON_SRC : YOUTUBE_ICON_SRC, service === 'tg' ? 'Telegram' : 'YouTube');
             }}
@@ -1072,6 +1075,9 @@ def render_web_scripts(
             }}
             if (value === 'fail') {{
                 return 1;
+            }}
+            if (value === 'na') {{
+                return 0;
             }}
             return 0;
         }}

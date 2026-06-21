@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.757, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.758, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -5566,13 +5566,24 @@ def _file_cache_signature(path):
         return None
 
 
-def _pool_summary_cache_signature(current_keys):
+def _pool_summary_cache_signature(current_keys, route_states=None):
     current_keys = current_keys or {}
+    route_state_sig = []
+    if isinstance(route_states, dict):
+        for service_id, state in sorted(route_states.items()):
+            if not isinstance(state, dict):
+                continue
+            route_state_sig.append((
+                service_id,
+                tuple(state.get('complete_protocols') or []),
+                tuple(state.get('partial_protocols') or []),
+            ))
     return (
         tuple((proto, current_keys.get(proto, '')) for proto in POOL_PROTOCOL_ORDER),
         _file_cache_signature(KEY_POOLS_PATH),
         _file_cache_signature(_KEY_PROBE_CACHE_PATH),
         _file_cache_signature(_CUSTOM_CHECKS_PATH),
+        tuple(route_state_sig),
     )
 
 
@@ -6432,10 +6443,11 @@ def _format_pool_summary():
     return '\n'.join(lines)
 
 
-def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None, custom_checks=None):
+def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None, custom_checks=None, route_states=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
+    resolved_route_states = route_states if route_states is not None else _service_route_summary()
     can_use_cache = key_pools is None and key_probe_cache is None and custom_checks is None
-    signature = _pool_summary_cache_signature(current_keys) if can_use_cache else None
+    signature = _pool_summary_cache_signature(current_keys, resolved_route_states) if can_use_cache else None
     if can_use_cache:
         with pool_summary_cache_lock:
             if pool_summary_cache.get('signature') == signature and pool_summary_cache.get('summary') is not None:
@@ -6449,6 +6461,7 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
         resolved_key_probe_cache,
         resolved_custom_checks,
         _hash_key,
+        route_states=resolved_route_states,
     )
     if can_use_cache:
         with pool_summary_cache_lock:
@@ -7671,7 +7684,7 @@ def _web_custom_checks():
 def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
     custom_checks = _load_custom_checks()
-    route_states = _service_route_summary() if custom_checks else None
+    route_states = _service_route_summary()
     return key_pool_web.web_pool_snapshot(
         current_keys,
         _ensure_current_keys_in_pools(current_keys),
@@ -8392,6 +8405,10 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         checks,
         _service_icon_html,
     )
+    core_service_applicability_for_protocol = lambda protocol: key_pool_web.core_service_applicability(
+        route_states,
+        protocol,
+    )
     _tabs_html, panel_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         protocol_sections,
         current_keys,
@@ -8414,6 +8431,7 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
         custom_checks_for_protocol=custom_checks_for_protocol,
         custom_header_icons_for_protocol=custom_header_icons_for_protocol,
+        core_service_applicability_for_protocol=core_service_applicability_for_protocol,
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
         route_tools_html=route_tools_html,
@@ -8454,6 +8472,10 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         checks,
         _service_icon_html,
     )
+    core_service_applicability_for_protocol = lambda protocol: key_pool_web.core_service_applicability(
+        route_states,
+        protocol,
+    )
     protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         web_form_blocks.PROTOCOL_SECTIONS,
         current_keys,
@@ -8476,6 +8498,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
         custom_checks_for_protocol=custom_checks_for_protocol,
         custom_header_icons_for_protocol=custom_header_icons_for_protocol,
+        core_service_applicability_for_protocol=core_service_applicability_for_protocol,
         custom_presets_html=custom_presets_html,
         custom_checks_html=custom_checks_html,
         route_tools_html=route_tools_html,
@@ -8483,7 +8506,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         lazy_protocol_panels=True,
         pool_probe_pending=pool_probe_pending,
     )
-    pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks)
+    pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)
     return {
         'custom_checks_json': json.dumps(key_pool_web.web_custom_checks(custom_checks), ensure_ascii=False),
         'pool_summary': pool_summary,

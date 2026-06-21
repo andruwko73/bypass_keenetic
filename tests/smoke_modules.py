@@ -763,6 +763,52 @@ def test_key_pool_web():
     assert scoped_row['tg'] == 'ok'
     assert scoped_row['yt'] == 'ok'
     assert scoped_row['custom'] == {'manual': 'ok'}
+    core_route_states = {
+        'telegram': {'complete_protocols': ['vless'], 'partial_protocols': []},
+        'youtube': {'complete_protocols': ['vless2'], 'partial_protocols': []},
+    }
+    assert key_pool_web.core_service_applicability(core_route_states, 'vless') == {
+        'telegram': True,
+        'youtube': False,
+    }
+    scoped_core_snapshot = key_pool_web.web_pool_snapshot(
+        {'vless2': 'yt-key', 'vless': 'tg-key'},
+        {'vless2': ['yt-key'], 'vless': ['tg-key']},
+        {
+            _hash_key('yt-key'): {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'unstable', 'ts': 8},
+            _hash_key('tg-key'): {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'fail', 'yt_score': 91, 'ts': 9},
+        },
+        [],
+        include_keys=False,
+        hash_key=_hash_key,
+        display_name=lambda value: value,
+        probe_state=key_pool_web.web_probe_state,
+        probe_checked_at=lambda probe: str(probe.get('ts', '')),
+        protocols=['vless', 'vless2'],
+        route_states=core_route_states,
+    )
+    assert scoped_core_snapshot['vless']['rows'][0]['tg'] == 'ok'
+    assert scoped_core_snapshot['vless']['rows'][0]['yt'] == 'na'
+    assert scoped_core_snapshot['vless']['rows'][0]['yt_score'] == 0
+    assert scoped_core_snapshot['vless']['rows'][0]['quality_summary'] == 'YouTube не назначен на этот протокол'
+    assert scoped_core_snapshot['vless2']['rows'][0]['tg'] == 'na'
+    assert scoped_core_snapshot['vless2']['rows'][0]['yt'] == 'warn'
+    scoped_summary = key_pool_web.pool_status_summary(
+        {'vless2': 'yt-key', 'vless': 'tg-key'},
+        {'vless2': ['yt-key'], 'vless': ['tg-key']},
+        {
+            _hash_key('yt-key'): {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'unstable', 'ts': 8},
+            _hash_key('tg-key'): {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'fail', 'ts': 9},
+        },
+        [],
+        _hash_key,
+        route_states=core_route_states,
+    )
+    assert scoped_summary['services'][:2] == [
+        {'label': 'Telegram', 'count': 1},
+        {'label': 'YouTube', 'count': 1},
+    ]
+    assert scoped_summary['all_services_count'] == 2
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
     assert key_pool_web.web_probe_quality_label({'yt_quality': 'stable', 'yt_latency_ms': 800}) == ''
     history_html = key_pool_web.web_event_history_html([
@@ -5006,6 +5052,27 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'data-yt-state="warn"' in warn_rows
     assert 'service-probe-warn' in warn_rows
+    not_applicable_rows = web_pool_form_blocks.render_pool_items(
+        key_name='vless2',
+        title='Vless 2',
+        pool_keys=['route-scoped-key'],
+        current_key='',
+        key_probe_cache={'hash-scoped': {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'fail', 'yt_score': 91}},
+        custom_checks=[],
+        key_display_name=lambda key: 'route-scoped',
+        hash_key=lambda key: 'hash-scoped',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        custom_check_badges=lambda probe, checks: '',
+        probe_checked_at=lambda probe: 'now',
+        csrf_input_html='<input name="csrf_token" value="token">',
+        service_applicability={'telegram': False, 'youtube': False},
+    )
+    assert 'data-tg-state="na"' in not_applicable_rows
+    assert 'data-yt-state="na"' in not_applicable_rows
+    assert 'data-quality-score="0"' in not_applicable_rows
+    assert not_applicable_rows.count('service-probe-na') == 2
+    assert 'pool-quality-' not in not_applicable_rows
     panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
         title='Vless 1',

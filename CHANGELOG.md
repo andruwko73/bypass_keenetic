@@ -1,3 +1,8 @@
+<a name="1.758"></a>
+# [1.758] - 21 Jun 2026
+
+- Scopes Telegram and YouTube pool status badges to the protocols where those services are actually routed, so unrelated protocol pools show not-applicable instead of misleading ok/fail states.
+
 <a name="1.757"></a>
 # [1.757] - 21 Jun 2026
 

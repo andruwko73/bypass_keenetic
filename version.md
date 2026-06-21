@@ -1,3 +1,7 @@
+*v1.758 (21 Jun 2026) -* main
+
+*Scopes Telegram and YouTube pool status badges to the protocols where those services are actually routed, so unrelated protocol pools show not-applicable instead of misleading ok/fail states.*
+
 *v1.757 (21 Jun 2026) -* main
 
 *Self-updates the router-side /opt/root/script.sh during direct SSH updates so the update_status fix is deployed for future script.sh -update runs and rollback can restore the previous updater script.*

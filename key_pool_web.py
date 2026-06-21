@@ -18,6 +18,10 @@ _POOL_TOTAL_TEXT = '\u0412 \u043f\u0443\u043b\u0430\u0445'
 _CHECKED_TEXT = '\u041f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043e'
 _ALL_SERVICES_TEXT = '\u0412\u0441\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b'
 _ANY_SERVICE_TEXT = '\u0425\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d'
+CORE_SERVICE_ROUTE_KEYS = {
+    'tg_ok': 'telegram',
+    'yt_ok': 'youtube',
+}
 
 
 def pool_proto_label(proto):
@@ -111,7 +115,34 @@ def _service_counter(custom_checks):
     return services
 
 
-def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, hash_key):
+def service_applies_to_protocol(route_states, service_id, protocol):
+    if not isinstance(route_states, dict):
+        return True
+    state = route_states.get(service_id)
+    if not isinstance(state, dict):
+        return True
+    route_protocols = set(state.get('complete_protocols') or [])
+    route_protocols.update(state.get('partial_protocols') or [])
+    if not route_protocols:
+        return False
+    return str(protocol or '').strip() in route_protocols
+
+
+def core_service_applicability(route_states, protocol):
+    return {
+        'telegram': service_applies_to_protocol(route_states, 'telegram', protocol),
+        'youtube': service_applies_to_protocol(route_states, 'youtube', protocol),
+    }
+
+
+def core_probe_state(probe, key, route_states=None, protocol=''):
+    service_id = CORE_SERVICE_ROUTE_KEYS.get(key)
+    if service_id and not service_applies_to_protocol(route_states, service_id, protocol):
+        return 'na'
+    return web_probe_state(probe, key)
+
+
+def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, hash_key, route_states=None):
     current_keys = current_keys or {}
     key_pools = key_pools or {}
     key_probe_cache = key_probe_cache or {}
@@ -131,8 +162,13 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
             if not isinstance(custom, dict):
                 custom = {}
             results = []
+            expected_count = 0
             for service in services:
                 if service['field']:
+                    service_id = CORE_SERVICE_ROUTE_KEYS.get(service['field'])
+                    if service_id and not service_applies_to_protocol(route_states, service_id, proto):
+                        continue
+                    expected_count += 1
                     if service['field'] not in probe:
                         continue
                     raw_value = probe.get(service['field'])
@@ -146,6 +182,7 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                             service['count'] += 1
                         continue
                 else:
+                    expected_count += 1
                     if service['id'] not in custom:
                         continue
                     raw_value = custom.get(service['id'])
@@ -155,11 +192,11 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                 results.append(ok)
                 if ok:
                     service['count'] += 1
-            if len(results) == len(services):
-                checked_count += 1
             if results and any(results):
                 any_service_count += 1
-            if len(results) == len(services) and all(results):
+            if expected_count and len(results) == expected_count:
+                checked_count += 1
+            if expected_count and len(results) == expected_count and all(results):
                 all_services_count += 1
 
     active_key_count = sum(1 for proto in POOL_PROTOCOL_ORDER if (current_keys.get(proto) or '').strip())
@@ -635,22 +672,25 @@ def web_pool_snapshot(
         for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
             key_hash = hash_key(key_value)
             probe = cache.get(key_hash, {})
-            quality_label = web_probe_quality_label(probe)
+            tg_state = core_probe_state(probe, 'tg_ok', route_states, proto)
+            yt_state = core_probe_state(probe, 'yt_ok', route_states, proto)
+            youtube_applicable = yt_state != 'na'
+            quality_label = web_probe_quality_label(probe) if youtube_applicable else ''
             row = {
                 'index': index,
                 'key_id': key_hash[:12],
                 'display_name': display_name(key_value),
                 'active': bool(current_key and key_value == current_key),
-                'tg': probe_state(probe, 'tg_ok'),
-                'yt': probe_state(probe, 'yt_ok'),
+                'tg': tg_state,
+                'yt': yt_state,
                 'custom': web_custom_probe_states(probe, protocol_checks),
                 'checked_at': probe_checked_at(probe),
                 'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,
-                'yt_score': int(probe.get('yt_score') or 0) if isinstance(probe, dict) else 0,
+                'yt_score': int(probe.get('yt_score') or 0) if youtube_applicable and isinstance(probe, dict) else 0,
                 'yt_quality': str(probe.get('yt_quality') or '') if quality_label and isinstance(probe, dict) else '',
                 'yt_quality_label': quality_label,
                 'yt_stream_tier': str(probe.get('yt_stream_tier') or '') if quality_label and isinstance(probe, dict) else '',
-                'quality_summary': web_probe_quality_summary(probe),
+                'quality_summary': web_probe_quality_summary(probe) if youtube_applicable else 'YouTube не назначен на этот протокол',
             }
             if include_keys:
                 row['key'] = key_value
