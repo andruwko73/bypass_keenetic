@@ -5635,12 +5635,26 @@ def test_stream_guard_event_history_redacts_ip_samples_and_compacts_details():
             },
             event_path=str(path),
         )
+        with path.open('a', encoding='utf-8') as file:
+            file.write(json.dumps({
+                'ts': 2,
+                'level': 'info',
+                'action': 'stream_guard_defer',
+                'source': 'watchdog',
+                'protocol': 'vless',
+                'service': 'youtube',
+                'message': 'legacy 192.168.1.23 -> 142.250.74.110',
+                'details': {
+                    'route_diagnostic': "{'proxy_ports': ['10811'], 'proxy_samples': [{'src': '192.168.1.23', 'dst': '142.250.74.110'}]}",
+                },
+            }, ensure_ascii=False) + '\n')
         events = event_history.load_events(event_path=str(path))
     serialized = json.dumps(events, ensure_ascii=False)
     assert '192.168.1.23' not in serialized
     assert '142.250.74.110' not in serialized
     assert '<ip-hidden>' in serialized
-    assert events[0]['details']['route_diagnostic'] == 'proxy_ports=2; proxy_samples=1; fastnat_samples=1'
+    assert events[1]['details']['route_diagnostic'] == 'proxy_ports=2; proxy_samples=1; fastnat_samples=1'
+    assert events[0]['details']['route_diagnostic'].startswith('route_diagnostic compacted;')
 
 
 def test_update_status_helpers():

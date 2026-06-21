@@ -78,6 +78,16 @@ def _compact_event_detail(action, key, value):
             f'proxy_samples={len(proxy_samples)}; '
             f'fastnat_samples={len(fastnat_samples)}'
         )
+    if key_text == 'route_diagnostic' and isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith('proxy_ports=') or stripped.startswith('route_diagnostic compacted;'):
+            return stripped
+        redacted = redact_sensitive_text(value)
+        return (
+            f'route_diagnostic compacted; '
+            f'chars={len(redacted)}; '
+            f'redacted_ip_markers={redacted.count("<ip-hidden>")}'
+        )
     if key_text in ('proxy_samples', 'fastnat_samples') and isinstance(value, (list, tuple)):
         return f'{key_text}={len(value)}'
     if key_text == 'sample' and _action_redacts_ip(action):

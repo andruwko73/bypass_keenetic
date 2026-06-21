@@ -1,3 +1,7 @@
+*v1.746 (21 Jun 2026) -* main
+
+*Compacts legacy stream-guard route diagnostics when reading event history, so older reconnect diagnostics no longer expand into long rows after updating.*
+
 *v1.745 (21 Jun 2026) -* main
 
 *Treat transient YouTube googlevideo failures as a warning instead of a broken key, compact reconnect diagnostics in event history without exposing IP addresses, and show generalized realtime call TPROXY status for Telegram, WhatsApp, and Discord.*
