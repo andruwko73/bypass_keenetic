@@ -1,3 +1,8 @@
+<a name="1.752"></a>
+# [1.752] - 21 Jun 2026
+
+- Cleans empty ipset refresh lock directories with no active PID, fixing routers where a stale lock without pid kept automatic refreshes blocked.
+
 <a name="1.751"></a>
 # [1.751] - 21 Jun 2026
 

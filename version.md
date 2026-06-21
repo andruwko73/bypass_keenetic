@@ -1,3 +1,7 @@
+*v1.752 (21 Jun 2026) -* main
+
+*Recovers empty ipset refresh lock directories that have no active PID, covering routers where the lock mtime is not enough to identify a stale refresh.*
+
 *v1.751 (21 Jun 2026) -* main
 
 *Lets stale ipset refresh locks recover when an old unblock_ipset process is still alive, so automatic route refreshes do not stay stuck for days after a hung resolver run.*

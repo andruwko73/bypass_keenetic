@@ -1617,8 +1617,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'lock_pid_is_active()' in ipset_script
     assert 'lock_pid_is_unblock_refresh()' in ipset_script
     assert 'stop_stale_lock_process()' in ipset_script
+    assert 'recover_existing_lock()' in ipset_script
     assert 'Stopped stale unblock_ipset process pid' in ipset_script
     assert 'Removed stale unblock_ipset lock with non-refresh pid' in ipset_script
+    assert 'Removed stale unblock_ipset lock without active pid' in ipset_script
     assert 'Removed stale unblock_ipset lock' in ipset_script
     assert 'printf \'%s\\n\' "$$" > "$LOCK_DIR/pid"' in ipset_script
     assert 'rm -f "$LOCK_DIR/pid" "$LOCK_DIR/started_at"' in ipset_script

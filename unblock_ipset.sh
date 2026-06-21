@@ -76,14 +76,36 @@ stop_stale_lock_process() {
 	return 0
 }
 
-if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+recover_existing_lock() {
 	lock_age="$(lock_age_seconds)"
-	if [ "$lock_age" -ge "$LOCK_STALE_SECONDS" ] 2>/dev/null; then
-		if lock_pid_is_active; then
+	if lock_pid_is_active; then
+		if [ "$lock_age" -ge "$LOCK_STALE_SECONDS" ] 2>/dev/null; then
 			stop_stale_lock_process
+			return 0
 		fi
+		return 1
+	fi
+
+	# Avoid racing a just-started refresh between mkdir and pid write.
+	sleep 1
+	if lock_pid_is_active; then
+		lock_age="$(lock_age_seconds)"
+		if [ "$lock_age" -ge "$LOCK_STALE_SECONDS" ] 2>/dev/null; then
+			stop_stale_lock_process
+			return 0
+		fi
+		return 1
+	fi
+
+	echo "Removed stale unblock_ipset lock without active pid."
+	return 0
+}
+
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+	if recover_existing_lock; then
 		rm -rf "$LOCK_DIR" >/dev/null 2>&1 || true
 		if mkdir "$LOCK_DIR" 2>/dev/null; then
+			lock_age="$(lock_age_seconds)"
 			echo "Removed stale unblock_ipset lock (${lock_age}s old)."
 		else
 			echo "unblock_ipset is already running."
