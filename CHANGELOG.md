@@ -1,3 +1,8 @@
+<a name="1.750"></a>
+# [1.750] - 21 Jun 2026
+
+- Removes unused legacy root assets and obsolete helper docs, and ignores local Codex/agent workspace files to keep GitHub releases clean.
+
 <a name="1.744"></a>
 # [1.744] - 21 Jun 2026
 

@@ -1,3 +1,7 @@
+*v1.750 (21 Jun 2026) -* main
+
+*Removes unused legacy root assets and obsolete helper docs, and keeps local Codex/agent workspace files ignored so they cannot slip into GitHub releases.*
+
 *v1.749 (21 Jun 2026) -* main
 
 *Clears completed web update command blocks on the first post-update render, so the green "last command" panel no longer remains visible until the page is manually refreshed.*
