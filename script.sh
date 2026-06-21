@@ -672,6 +672,8 @@ chmod 755 /opt/bin/unblock_*.sh /opt/etc/ndm/fs.d/100-ipset.sh /opt/etc/ndm/netf
 [ -f "\$INSTALLER_MAIN_PATH" ] && chmod 755 "\$INSTALLER_MAIN_PATH" || true
 [ -f "\$BOT_SERVICE_PATH" ] && chmod 755 "\$BOT_SERVICE_PATH" || true
 [ -f "\$INSTALLER_SERVICE_PATH" ] && chmod 755 "\$INSTALLER_SERVICE_PATH" || true
+restore_file script.sh /opt/root/script.sh
+[ -f /opt/root/script.sh ] && chmod 755 /opt/root/script.sh || true
 ensure_runtime_legacy_paths
 
 /opt/bin/unblock_update.sh >/dev/null 2>&1 || true
@@ -1257,6 +1259,7 @@ if [ "$1" = "-update" ]; then
 
     echo "Скачиваем обновления во временную папку и проверяем файлы."
     write_cli_update_status update true 10 Downloading "Downloading update files"
+    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/script.sh" "$stage_dir/script.sh" "#!/bin/sh" "script.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-ipset.sh" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-redirect.sh" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_ipset.sh" "$stage_dir/unblock_ipset.sh" "#!/bin/sh" "unblock_ipset.sh" || exit 1
@@ -1336,6 +1339,9 @@ if [ "$1" = "-update" ]; then
     if [ -f "$BOT_MAIN_PATH" ]; then
       mv "$BOT_MAIN_PATH" "$backup_dir"/bot.py
     fi
+    if [ -f /opt/root/script.sh ]; then
+      mv /opt/root/script.sh "$backup_dir"/script.sh
+    fi
     if [ -f "$INSTALLER_MAIN_PATH" ]; then
       mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py
     fi
@@ -1354,6 +1360,8 @@ if [ "$1" = "-update" ]; then
     write_cli_update_status update true 65 Installing "Installing staged files"
 
     touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts
+    mv "$stage_dir/script.sh" /opt/root/script.sh
+    chmod 755 /opt/root/script.sh || chmod +x /opt/root/script.sh
     mv "$stage_dir/100-ipset.sh" /opt/etc/ndm/fs.d/100-ipset.sh
     chmod 755 /opt/etc/ndm/fs.d/100-ipset.sh || chmod +x /opt/etc/ndm/fs.d/100-ipset.sh
     mv "$stage_dir/100-redirect.sh" /opt/etc/ndm/netfilter.d/100-redirect.sh

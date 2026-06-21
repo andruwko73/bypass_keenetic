@@ -1489,6 +1489,11 @@ def test_direct_update_script_records_update_status():
     assert "path = '/opt/etc/bot/update_status.json'" in script
     assert 'write_cli_update_status update true 3 Preparing "CLI update started"' in script
     assert 'write_cli_update_status update true 10 Downloading "Downloading update files"' in script
+    assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/script.sh"' in script
+    assert '"$stage_dir/script.sh" "#!/bin/sh" "script.sh"' in script
+    assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script
+    assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
+    assert 'restore_file script.sh /opt/root/script.sh' in script
     assert 'write_cli_update_status update true 85 Restarting "Restarting services"' in script
     assert 'write_cli_update_status update false 100 Done "CLI update complete"' in script
     assert 'write_cli_update_status update false 100 Done "CLI update complete; installer started"' in script
@@ -1968,10 +1973,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py' in script_source
     assert 'mv "$INSTALLER_SERVICE_PATH" "$backup_dir"/S98telegram_bot_installer' in script_source
     assert 'mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot' in script_source
+    assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script_source
     assert 'restore_file S99telegram_bot "\\$BOT_SERVICE_PATH"' in script_source
+    assert 'restore_file script.sh /opt/root/script.sh' in script_source
     assert "for name in ('version.md', 'README.md')" in source
     assert "'crontab': ('/opt/etc/crontab', 0o644)" in source
     assert "'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755)" in source
+    assert "'script.sh': ('/opt/root/script.sh', 0o755)" in source
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
     assert 'for key_name, key_value in (current_keys or {}).items()' in source

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.756, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.757, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -5330,6 +5330,7 @@ def _rollback_last_update():
         'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755),
         '100-ipset.sh': ('/opt/etc/ndm/fs.d/100-ipset.sh', 0o755),
         '100-redirect.sh': ('/opt/etc/ndm/netfilter.d/100-redirect.sh', 0o755),
+        'script.sh': ('/opt/root/script.sh', 0o755),
     }
     for name, (target, mode) in fixed_targets.items():
         if _restore_backup_file(os.path.join(backup_dir, name), target, mode):

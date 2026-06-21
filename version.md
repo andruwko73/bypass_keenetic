@@ -1,3 +1,7 @@
+*v1.757 (21 Jun 2026) -* main
+
+*Self-updates the router-side /opt/root/script.sh during direct SSH updates so the update_status fix is deployed for future script.sh -update runs and rollback can restore the previous updater script.*
+
 *v1.756 (21 Jun 2026) -* main
 
 *Redacts credential IDs from install/apply failure diagnostics while preserving copyable full keys in the web UI, records direct SSH script updates in update_status.json, and rejects out-of-range browser_port values during installer setup.*

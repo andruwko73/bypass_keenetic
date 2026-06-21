@@ -1,3 +1,8 @@
+<a name="1.757"></a>
+# [1.757] - 21 Jun 2026
+
+- Self-updates the router-side /opt/root/script.sh during direct SSH updates so the update_status fix is deployed for future script.sh -update runs and rollback can restore the previous updater script.
+
 <a name="1.756"></a>
 # [1.756] - 21 Jun 2026
 
