@@ -16,8 +16,6 @@ POOL_PROTOCOL_LABELS = {
 _ACTIVE_KEYS_TEXT = '\u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043a\u043b\u044e\u0447\u0435\u0439'
 _POOL_TOTAL_TEXT = '\u0412 \u043f\u0443\u043b\u0430\u0445'
 _CHECKED_TEXT = '\u041f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043e'
-_ALL_SERVICES_TEXT = '\u0412\u0441\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b'
-_ANY_SERVICE_TEXT = '\u0425\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d'
 CORE_SERVICE_ROUTE_KEYS = {
     'tg_ok': 'telegram',
     'yt_ok': 'youtube',
@@ -135,6 +133,14 @@ def core_service_applicability(route_states, protocol):
     }
 
 
+def core_services_for_protocol(route_states, protocol):
+    applicability = core_service_applicability(route_states, protocol)
+    return [
+        service_id for service_id in ('telegram', 'youtube')
+        if applicability.get(service_id, True)
+    ]
+
+
 def core_probe_state(probe, key, route_states=None, protocol=''):
     service_id = CORE_SERVICE_ROUTE_KEYS.get(key)
     if service_id and not service_applies_to_protocol(route_states, service_id, protocol):
@@ -207,8 +213,6 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
     ]
     if service_text:
         note_parts.append(service_text)
-    note_parts.append(f'{_ALL_SERVICES_TEXT}: {all_services_count}')
-    note_parts.append(f'{_ANY_SERVICE_TEXT}: {any_service_count}')
     note = '; '.join(note_parts)
     return {
         'active_key_count': active_key_count,
@@ -667,6 +671,7 @@ def web_pool_snapshot(
     ]
     for proto in protocol_order:
         current_key = current_keys.get(proto, '')
+        core_services = core_services_for_protocol(route_states, proto)
         protocol_checks = protocol_custom_checks(custom_checks, route_states, proto)
         rows = []
         for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
@@ -698,6 +703,7 @@ def web_pool_snapshot(
         result[proto] = {
             'label': pool_proto_label(proto),
             'count': len(rows),
+            'core_services': core_services,
             'rows': rows,
         }
     return result

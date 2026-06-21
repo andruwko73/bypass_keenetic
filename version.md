@@ -1,3 +1,7 @@
+*v1.759 (21 Jun 2026) -* main
+
+*Shows only route-assigned Telegram/YouTube columns in key pool tables and removes all/any-service pool summary wording, so split VLESS/VLESS2 pools are not presented as partial.*
+
 *v1.758 (21 Jun 2026) -* main
 
 *Scopes Telegram and YouTube pool status badges to the protocols where those services are actually routed, so unrelated protocol pools show not-applicable instead of misleading ok/fail states.*

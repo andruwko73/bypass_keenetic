@@ -887,6 +887,74 @@ def render_web_scripts(
             return '<span class="service-probe-mark service-probe-unknown">?</span>';
         }}
 
+        function poolCoreServices(pool) {{
+            if (!pool || !Array.isArray(pool.core_services)) {{
+                return ['telegram', 'youtube'];
+            }}
+            return pool.core_services.filter(function(service) {{
+                return service === 'telegram' || service === 'youtube';
+            }});
+        }}
+
+        function poolCoreColspan(coreServices) {{
+            return 4 + (Array.isArray(coreServices) ? coreServices.length : 2);
+        }}
+
+        function poolCoreServiceCells(row, coreServices) {{
+            let html = '';
+            (coreServices || []).forEach(function(service) {{
+                if (service === 'telegram') {{
+                    html += '<td class="pool-service-cell" data-pool-tg>' + probeBadge(row.tg, 'tg') + '</td>';
+                }} else if (service === 'youtube') {{
+                    html += '<td class="pool-service-cell" data-pool-yt>' + probeBadge(row.yt, 'yt') + '</td>';
+                }}
+            }});
+            return html;
+        }}
+
+        function poolPanelCoreServices(proto) {{
+            const panel = document.querySelector('[data-protocol-panel="' + proto + '"]');
+            const hasCoreServices = !!(panel && panel.hasAttribute('data-core-services'));
+            const raw = panel ? String(panel.dataset.coreServices || '') : '';
+            if (!hasCoreServices) {{
+                return ['telegram', 'youtube'];
+            }}
+            if (!raw) {{
+                return [];
+            }}
+            return raw.split(',').filter(function(service) {{
+                return service === 'telegram' || service === 'youtube';
+            }});
+        }}
+
+        function updatePoolSortOptions(proto) {{
+            const coreServices = poolPanelCoreServices(proto);
+            const hasTelegram = coreServices.indexOf('telegram') !== -1;
+            const hasYoutube = coreServices.indexOf('youtube') !== -1;
+            const menu = document.querySelector('[data-pool-sort-menu="' + proto + '"]');
+            const input = document.querySelector('[data-pool-sort="' + proto + '"]');
+            const button = document.querySelector('[data-pool-sort-button="' + proto + '"]');
+            if (!menu) {{
+                return;
+            }}
+            menu.querySelectorAll('[data-pool-sort-value]').forEach(function(option) {{
+                const value = option.dataset.poolSortValue || 'original';
+                const hidden = (value === 'telegram' && !hasTelegram) ||
+                    ((value === 'youtube' || value === 'quality') && !hasYoutube);
+                option.classList.toggle('hidden', hidden);
+            }});
+            if (input) {{
+                const selected = menu.querySelector('[data-pool-sort-value="' + input.value + '"]');
+                if (selected && selected.classList.contains('hidden')) {{
+                    input.value = 'original';
+                    const fallback = menu.querySelector('[data-pool-sort-value="original"]');
+                    if (button && fallback) {{
+                        button.textContent = fallback.textContent || button.textContent;
+                    }}
+                }}
+            }}
+        }}
+
         function customCheckById(id) {{
             for (let i = 0; i < customChecks.length; i += 1) {{
                 if (customChecks[i].id === id) {{
@@ -1093,16 +1161,18 @@ def render_web_scripts(
             if (!state || state === 'all') {{
                 return true;
             }}
-            const tg = row.dataset.tgState || 'unknown';
-            const yt = row.dataset.ytState || 'unknown';
+            const states = [row.dataset.tgState || 'unknown', row.dataset.ytState || 'unknown'].filter(function(value) {{
+                return value && value !== 'na';
+            }});
+            const relevantStates = states.length ? states : ['unknown'];
             if (state === 'working') {{
-                return tg === 'ok' || yt === 'ok' || yt === 'warn';
+                return relevantStates.some(function(value) {{ return value === 'ok' || value === 'warn'; }});
             }}
             if (state === 'problem') {{
-                return tg === 'fail' || yt === 'fail';
+                return relevantStates.some(function(value) {{ return value === 'fail'; }});
             }}
             if (state === 'unknown') {{
-                return tg === 'unknown' && yt === 'unknown';
+                return relevantStates.every(function(value) {{ return value === 'unknown'; }});
             }}
             return true;
         }}
@@ -1232,6 +1302,7 @@ def render_web_scripts(
                 }}
                 control.dataset.poolControlReady = '1';
                 const proto = control.dataset.poolFilter || control.dataset.poolSort || '';
+                updatePoolSortOptions(proto);
                 control.addEventListener(control.matches('input') ? 'input' : 'change', function() {{
                     if (control.matches('input')) {{
                         schedulePoolView(proto, 120);
@@ -1307,12 +1378,19 @@ def render_web_scripts(
                 return;
             }}
             const rows = pool.rows || [];
+            const coreServices = poolCoreServices(pool);
+            const panel = body.closest('[data-protocol-panel]');
+            if (panel) {{
+                panel.dataset.coreServices = coreServices.join(',');
+            }}
+            updatePoolSortOptions(proto);
             const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');
             if (tab) {{
                 tab.textContent = String(pool.count || rows.length);
             }}
             if (!rows.length) {{
                 body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите subscription.</td></tr>';
+                body.innerHTML = body.innerHTML.replace('colspan="6"', 'colspan="' + poolCoreColspan(coreServices) + '"');
                 body.dataset.poolAppliedSort = '';
                 setupPoolControls(body.closest('[data-protocol-panel]') || document);
                 return;
@@ -1324,6 +1402,7 @@ def render_web_scripts(
                 const keyId = escapeHtml(row.key_id || '');
                 const rowIndex = Number(row.index || (position + 1)) - 1;
                 const displayName = escapeHtml(row.display_name || '');
+                const coreCells = poolCoreServiceCells(row, coreServices);
                 return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + keyId + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-quality-score="' + Number(row.yt_score || 0) + '" data-quality-class="' + escapeHtml(row.yt_quality || '') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + keyId + '">' +
                     '<td class="pool-key-cell">' +
                         '<form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">' +
@@ -1335,8 +1414,7 @@ def render_web_scripts(
                         '<span class="pool-mobile-checked" data-pool-mobile-checked>' + escapeHtml(row.checked_at || '') + '</span>' +
                         '<span class="pool-hash">' + escapeHtml(row.key_id) + '</span>' +
                     '</td>' +
-                    '<td class="pool-service-cell" data-pool-tg>' + probeBadge(row.tg, 'tg') + '</td>' +
-                    '<td class="pool-service-cell" data-pool-yt>' + probeBadge(row.yt, 'yt') + '</td>' +
+                    coreCells +
                     '<td class="pool-custom-cell" data-pool-custom>' + renderCustomBadges(row.custom) + '</td>' +
                     '<td class="pool-checked-cell" data-pool-checked>' + escapeHtml(row.checked_at) + '</td>' +
                     '<td class="pool-actions-cell">' +
@@ -1359,6 +1437,12 @@ def render_web_scripts(
                 return;
             }}
             const rows = pool.rows || [];
+            const coreServices = poolCoreServices(pool);
+            const panel = body.closest('[data-protocol-panel]');
+            if (panel) {{
+                panel.dataset.coreServices = coreServices.join(',');
+            }}
+            updatePoolSortOptions(proto);
             const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');
             if (tab) {{
                 tab.textContent = String(pool.count || rows.length);

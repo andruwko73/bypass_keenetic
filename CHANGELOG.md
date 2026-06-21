@@ -1,3 +1,8 @@
+<a name="1.759"></a>
+# [1.759] - 21 Jun 2026
+
+- Shows only route-assigned Telegram/YouTube columns in key pool tables and removes all/any-service pool summary wording, so split VLESS/VLESS2 pools are not presented as partial.
+
 <a name="1.758"></a>
 # [1.758] - 21 Jun 2026
 

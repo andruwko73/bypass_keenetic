@@ -674,6 +674,7 @@ def test_key_pool_web():
     assert row['display_name'] == 'VLESS-KEY'
     assert row['custom'] == {'custom': 'ok'}
     assert row['key'] == 'vless-key'
+    assert snapshot['vless']['core_services'] == ['telegram', 'youtube']
     scoped_snapshot = key_pool_web.web_pool_snapshot(
         current,
         pools,
@@ -791,6 +792,8 @@ def test_key_pool_web():
     assert scoped_core_snapshot['vless']['rows'][0]['yt'] == 'na'
     assert scoped_core_snapshot['vless']['rows'][0]['yt_score'] == 0
     assert scoped_core_snapshot['vless']['rows'][0]['quality_summary'] == 'YouTube не назначен на этот протокол'
+    assert scoped_core_snapshot['vless']['core_services'] == ['telegram']
+    assert scoped_core_snapshot['vless2']['core_services'] == ['youtube']
     assert scoped_core_snapshot['vless2']['rows'][0]['tg'] == 'na'
     assert scoped_core_snapshot['vless2']['rows'][0]['yt'] == 'warn'
     scoped_summary = key_pool_web.pool_status_summary(
@@ -809,6 +812,8 @@ def test_key_pool_web():
         {'label': 'YouTube', 'count': 1},
     ]
     assert scoped_summary['all_services_count'] == 2
+    assert '\u0412\u0441\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b' not in scoped_summary['note']
+    assert '\u0425\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d' not in scoped_summary['note']
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
     assert key_pool_web.web_probe_quality_label({'yt_quality': 'stable', 'yt_latency_ms': 800}) == ''
     history_html = key_pool_web.web_event_history_html([
@@ -5071,7 +5076,9 @@ def test_web_pool_form_blocks_helpers():
     assert 'data-tg-state="na"' in not_applicable_rows
     assert 'data-yt-state="na"' in not_applicable_rows
     assert 'data-quality-score="0"' in not_applicable_rows
-    assert not_applicable_rows.count('service-probe-na') == 2
+    assert 'data-pool-tg' not in not_applicable_rows
+    assert 'data-pool-yt' not in not_applicable_rows
+    assert 'service-probe-na' not in not_applicable_rows
     assert 'pool-quality-' not in not_applicable_rows
     panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
@@ -5094,6 +5101,7 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
     )
     assert 'protocol-workspace active' in panel
+    assert 'data-core-services="telegram,youtube"' in panel
     assert 'vless://sample' in panel
     assert 'pool-sort-control' in panel
     assert 'data-pool-sort-value="telegram"' in panel
@@ -5103,6 +5111,30 @@ def test_web_pool_form_blocks_helpers():
     assert 'custom-check-form' in panel
     assert 'data-pool-probe-start-button aria-disabled="false"' in panel
     assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in panel
+    youtube_panel = web_pool_form_blocks.render_protocol_panel(
+        key_name='vless2',
+        title='Vless 2',
+        rows=3,
+        placeholder='vless://...',
+        current_key_value='',
+        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        active_status_icons='',
+        pool_items_html=web_pool_form_blocks.pool_empty_row_html(5),
+        pool_table_class='pool-table',
+        pool_custom_col_width=32,
+        pool_mobile_custom_col_width=28,
+        custom_header_icons='',
+        custom_presets_html='',
+        custom_checks_html='',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        core_services=['youtube'],
+        csrf_input_html='<input name="csrf_token" value="token">',
+    )
+    assert 'data-core-services="youtube"' in youtube_panel
+    assert 'data-core-service-head="telegram"' not in youtube_panel
+    assert 'data-core-service-head="youtube"' in youtube_panel
+    assert 'colspan="5"' in youtube_panel
     main_panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
         title='Vless 1',
