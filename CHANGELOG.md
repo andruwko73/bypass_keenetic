@@ -1,3 +1,8 @@
+<a name="1.744"></a>
+# [1.744] - 21 Jun 2026
+
+- Keeps Android/OS connectivity-check domains out of route files, dnsmasq rules, and static ipset refreshes, and cleans stale entries during route repair so clients do not report Wi-Fi without internet after updates.
+
 <a name="1.743"></a>
 # [1.743] - 21 Jun 2026
 

@@ -2,7 +2,13 @@ import math
 import os
 import subprocess
 
-from service_catalog import CUSTOM_CHECK_PRESETS, SERVICE_LIST_SOURCES, service_route_entries
+from service_catalog import (
+    CUSTOM_CHECK_PRESETS,
+    SERVICE_LIST_SOURCES,
+    global_route_exclude_entries,
+    normalize_route_entry,
+    service_route_entries,
+)
 from unblock_lists import (
     BASE_LABELS,
     UNBLOCK_DIR,
@@ -121,6 +127,21 @@ def _write_routes(route_entries, unblock_dir):
         write_unblock_list_entries(route, entries, unblock_dir=unblock_dir)
 
 
+def _remove_global_route_excludes(route_entries):
+    excluded = {
+        normalize_route_entry(value)
+        for value in global_route_exclude_entries()
+        if str(value or '').strip()
+    }
+    removed = 0
+    for values in route_entries.values():
+        stale = {entry for entry in values if normalize_route_entry(entry) in excluded}
+        if stale:
+            values.difference_update(stale)
+            removed += len(stale)
+    return removed
+
+
 def _run_update(update_script):
     if update_script:
         subprocess.run([update_script], check=False)
@@ -183,8 +204,8 @@ def apply_service_route(
     entries = set(_service_entries(service_key))
     target_route = PROTOCOL_ROUTES[target_protocol]
     route_entries = {route: _read_route(route, unblock_dir) for route in PROTOCOL_ROUTES.values()}
+    removed = _remove_global_route_excludes(route_entries)
     before_target = set(route_entries[target_route])
-    removed = 0
     if remove_from_others:
         for route, values in route_entries.items():
             if route == target_route:
@@ -222,6 +243,7 @@ def repair_service_route_catalog_drift(
     service_items = service_items or route_service_items()
     route_entries = {route: _read_route(route, unblock_dir) for route in PROTOCOL_ROUTES.values()}
     repaired = []
+    global_removed = _remove_global_route_excludes(route_entries)
     threshold_ratio = max(0.0, min(1.0, float(min_coverage)))
 
     for item in service_items:
@@ -287,7 +309,7 @@ def repair_service_route_catalog_drift(
                 'reason': reason,
             })
 
-    if repaired:
+    if repaired or global_removed:
         _write_routes(route_entries, unblock_dir)
         if callable(before_update):
             before_update()
@@ -296,7 +318,8 @@ def repair_service_route_catalog_drift(
     return {
         'services': len(repaired),
         'entries_added': sum(item.get('added', 0) for item in repaired),
-        'entries_removed': sum(item.get('removed', 0) for item in repaired),
+        'entries_removed': global_removed + sum(item.get('removed', 0) for item in repaired),
+        'global_entries_removed': global_removed,
         'repaired': repaired,
     }
 

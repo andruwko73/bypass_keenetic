@@ -225,6 +225,16 @@ normalize_domain() {
 		| trim_line
 }
 
+connectivity_check_domain() {
+	domain="$(normalize_domain "$1" | tr '[:upper:]' '[:lower:]')"
+	case "$domain" in
+		connectivitycheck.gstatic.com|connectivitycheck.android.com|clients3.google.com|clients4.google.com|www.google.com|www.gstatic.com)
+			return 0
+			;;
+	esac
+	return 1
+}
+
 udp_quic_policy_source() {
 	if [ -s "$UDP_QUIC_POLICY_FILE" ]; then
 		printf '%s\n' "$UDP_QUIC_POLICY_FILE"
@@ -525,6 +535,7 @@ load_file_to_set() {
 
 		domain="$(normalize_domain "$line")"
 		if [ -n "$domain" ]; then
+			connectivity_check_domain "$domain" && continue
 			: > "$source_file"
 			printf '%s\n' "$domain" >> "$domain_file"
 			[ -n "$ipv6_set_name" ] && : > "$ipv6_source_file"

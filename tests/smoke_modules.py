@@ -1384,6 +1384,8 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert "normalize_line()" in unblock_dnsmasq
     assert "s/\\r//g" in unblock_dnsmasq
     assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
+    assert 'connectivity_check_domain()' in unblock_dnsmasq
+    assert 'connectivity_check_domain "$line" && continue' in unblock_dnsmasq
     assert 'udp_quic_domain()' in unblock_dnsmasq
     assert 'call_signal_domain()' in unblock_dnsmasq
     assert 'ipset_targets "$line" unblocksh unblockshudp bypass_call_signal_sh' in unblock_dnsmasq
@@ -1596,6 +1598,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'unblockvless6 "tmp_unblockvless6_$$"' in ipset_script
     assert 'unblockvless2v6 "tmp_unblockvless2v6_$$"' in ipset_script
     assert 'udp_quic_domain "$domain"' in ipset_script
+    assert 'connectivity_check_domain "$domain" && continue' in ipset_script
     assert 'udp_quic_direct_entry "$direct_entry"' in ipset_script
     assert 'extract_ipv6_direct_entry()' in ipset_script
     assert 'append_restore "$ipv6_tmp_set" "$direct_ipv6_entry"' in ipset_script
@@ -3793,7 +3796,7 @@ def test_vless2_youtube_routes_are_scoped():
         for line in (ROOT / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
-    assert set(service_catalog.YOUTUBE_UNBLOCK_ENTRIES) <= entries
+    assert set(service_catalog.service_route_entries('youtube')) <= entries
     assert 'googleapis.com' not in entries
     assert 'googleusercontent.com' not in entries
     assert 'remotedesktop-pa.googleapis.com' not in entries
@@ -3801,11 +3804,10 @@ def test_vless2_youtube_routes_are_scoped():
     assert {
         'apis.google.com',
         'client-channel.google.com',
-        'clients4.google.com',
         'fonts.googleapis.com',
-        'www.gstatic.com',
         'youtubei-att.googleapis.com',
     } <= entries
+    assert not set(service_catalog.global_route_exclude_entries()) & entries
     assert {
         '173.194.10.0/24',
         '173.194.18.0/24',
@@ -3824,7 +3826,8 @@ def test_vless2_youtube_routes_are_scoped():
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
-    assert {'accounts.google.com', 'www.google.com'} <= vless_entries
+    assert 'accounts.google.com' in vless_entries
+    assert not set(service_catalog.global_route_exclude_entries()) & vless_entries
     assert 'rutracker.org' in entries
     assert 'rutracker.wiki' in entries
     assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
@@ -3887,8 +3890,7 @@ def test_chrome_remote_desktop_routes_stay_on_vless():
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
-    source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
-    state_entries = set(source['entries']) - set(source.get('route_state_exclude') or [])
+    state_entries = set(service_catalog.service_route_entries('chrome_remote_desktop'))
     assert state_entries <= entries
     assert 'full:instantmessaging-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
@@ -3900,12 +3902,13 @@ def test_chatgpt_codex_routes_are_synced():
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
-    assert set(service_catalog.CHATGPT_ROUTE_ENTRIES) <= entries
+    assert set(service_catalog.service_route_entries('chatgpt_services')) <= entries
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= entries
     assert {'ab.chatgpt.com', 'api.chatgpt.com', 'api.statsig.com', 'browser-intake-datadoghq.com'} <= entries
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
     assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
-    assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com', 'www.google.com'} <= entries
+    assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com'} <= entries
+    assert 'www.google.com' not in entries
     assert 'google.com' not in entries
     assert {'cdn.auth0.com', 'assets.auth0.com', 'static.auth0.com', 'login.openai.com'} <= entries
     assert {'js.hcaptcha.com', 'client-api.arkoselabs.com', 'openai-api.arkoselabs.com'} <= entries
@@ -3953,7 +3956,7 @@ def test_ai_assistant_custom_routes_are_synced():
 
     assert set(service_catalog.CLAUDE_ROUTE_ENTRIES) <= entries
     gemini_source = service_catalog.SERVICE_LIST_SOURCES['gemini']
-    gemini_state_entries = set(gemini_source['entries']) - set(gemini_source.get('route_state_exclude') or [])
+    gemini_state_entries = set(service_catalog.service_route_entries('gemini'))
     assert gemini_state_entries <= entries
     assert presets['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
     assert presets['gemini']['routes'] == service_catalog.GEMINI_ROUTE_ENTRIES
@@ -4127,7 +4130,7 @@ def test_chrome_remote_desktop_routes_are_in_vless():
         if line.split('#', 1)[0].strip()
     }
     source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
-    state_entries = set(source['entries']) - set(source.get('route_state_exclude') or [])
+    state_entries = set(service_catalog.service_route_entries('chrome_remote_desktop'))
     assert state_entries <= entries
     assert service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']['entries'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
@@ -5614,7 +5617,10 @@ def test_service_routes_apply_and_profile():
         for route_file in ('vless.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
             (drift_dir / route_file).write_text('', encoding='utf-8')
         (drift_dir / 'vless-2.txt').write_text('\n'.join(old_youtube) + '\n', encoding='utf-8')
-        (drift_dir / 'vless.txt').write_text(service_catalog.YOUTUBE_UNBLOCK_ENTRIES[-1] + '\n', encoding='utf-8')
+        (drift_dir / 'vless.txt').write_text(
+            service_catalog.YOUTUBE_UNBLOCK_ENTRIES[-1] + '\nclients3.google.com\n',
+            encoding='utf-8',
+        )
         before = service_routes.service_route_state('youtube', unblock_dir=str(drift_dir))
         assert before['complete_protocols'] == []
         assert set(before['partial_protocols']) == {'vless', 'vless2'}
@@ -5625,9 +5631,15 @@ def test_service_routes_apply_and_profile():
         )
         assert repaired['services'] == 1
         assert repaired['entries_added'] == 4
-        assert repaired['entries_removed'] == 1
+        assert repaired['global_entries_removed'] == 3
+        assert repaired['entries_removed'] == 4
         after = service_routes.service_route_state('youtube', unblock_dir=str(drift_dir))
         assert after['label'] == 'Vless 2'
+        repaired_text = '\n'.join(
+            (drift_dir / route_file).read_text(encoding='utf-8')
+            for route_file in ('vless.txt', 'vless-2.txt')
+        )
+        assert not set(service_catalog.global_route_exclude_entries()) & set(repaired_text.splitlines())
         assert route_intersections.analyze_route_intersections(
             unblock_dir=str(drift_dir),
             include_runtime=False,

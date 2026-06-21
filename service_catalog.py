@@ -485,6 +485,15 @@ GOOGLE_SHARED_ROUTE_STATE_ENTRIES = [
     'www.gstatic.com',
 ]
 
+CONNECTIVITY_CHECK_ROUTE_EXCLUDE_ENTRIES = [
+    'connectivitycheck.gstatic.com',
+    'connectivitycheck.android.com',
+    'clients3.google.com',
+    'clients4.google.com',
+    'www.google.com',
+    'www.gstatic.com',
+]
+
 CUSTOM_CHECK_PRESETS = [
     {
         'id': 'chatgpt_services',
@@ -596,11 +605,8 @@ CUSTOM_CHECK_PRESETS = [
 ]
 
 CONNECTIVITY_CHECK_DOMAINS = [
-    'full:connectivitycheck.gstatic.com',
-    'full:connectivitycheck.android.com',
-    'full:clients3.google.com',
-    'full:clients4.google.com',
-    'full:www.google.com',
+    f'full:{entry}'
+    for entry in CONNECTIVITY_CHECK_ROUTE_EXCLUDE_ENTRIES
 ]
 
 APPLE_PUSH_ROUTE_ENTRIES = [
@@ -913,6 +919,19 @@ def _dedupe_policy_entries(values):
     return result
 
 
+def normalize_route_entry(value):
+    entry = str(value or '').strip().lower()
+    for prefix in ('full:', 'domain:', 'domain-suffix,', 'domain,', 'host-suffix,'):
+        if entry.startswith(prefix):
+            entry = entry[len(prefix):]
+    entry = entry.lstrip('*.').strip('/')
+    return entry
+
+
+def global_route_exclude_entries():
+    return list(CONNECTIVITY_CHECK_ROUTE_EXCLUDE_ENTRIES)
+
+
 def service_route_entries(service_key, service_sources=None):
     sources = service_sources or SERVICE_LIST_SOURCES
     source = sources.get(service_key) or {}
@@ -924,11 +943,14 @@ def service_route_entries(service_key, service_sources=None):
             seen.add(entry)
             entries.append(entry)
     excluded = {
-        str(value or '').strip()
-        for value in source.get('route_state_exclude') or []
+        normalize_route_entry(value)
+        for value in [
+            *(source.get('route_state_exclude') or []),
+            *global_route_exclude_entries(),
+        ]
         if str(value or '').strip()
     }
-    scoped_entries = [entry for entry in entries if entry not in excluded]
+    scoped_entries = [entry for entry in entries if normalize_route_entry(entry) not in excluded]
     return scoped_entries or entries
 
 

@@ -96,7 +96,6 @@
 74.125.96.0/24
 apis.google.com
 client-channel.google.com
-clients4.google.com
 c.youtube.com
 families.google.com
 feed.rutracker.cc
@@ -124,7 +123,6 @@ support.google.com
 tv.youtube.com
 video.google.com
 wide-youtube.l.google.com
-www.gstatic.com
 www.youtube-nocookie.com
 www.youtube.com
 www.youtubeeducation.com

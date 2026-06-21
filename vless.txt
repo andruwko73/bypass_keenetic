@@ -223,7 +223,6 @@ claude.com
 claudeusercontent.com
 client-api.arkoselabs.com
 clients2.google.com
-clients3.google.com
 clients6.google.com
 cloudchain.space
 cloudflare-dns.com
@@ -522,7 +521,6 @@ www.anthropic.com
 www.bing.com
 www.facebook.com
 www.google-analytics.com
-www.google.com
 www.googleapis.com
 www.googletagmanager.com
 www.instagram.com

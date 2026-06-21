@@ -31,6 +31,16 @@ normalize_domain() {
     | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
+connectivity_check_domain() {
+  domain=$(normalize_domain "$1")
+  case "$domain" in
+    connectivitycheck.gstatic.com|connectivitycheck.android.com|clients3.google.com|clients4.google.com|www.google.com|www.gstatic.com)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 udp_quic_policy_source() {
   if [ -s "$UDP_QUIC_POLICY_FILE" ]; then
     printf '%s\n' "$UDP_QUIC_POLICY_FILE"
@@ -136,6 +146,7 @@ while read -r line || [ -n "$line" ]; do
   [ -z "$line" ] && continue
   [ "${line#\#}" != "$line" ] && continue
   echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
+  connectivity_check_domain "$line" && continue
 
   host=$(echo "${line}" | sed 's/^.*\.\(.*\.\w\{2,6\}\)$/\1/')
   if echo "${host}" | grep -q '\*' ; then
@@ -166,6 +177,7 @@ while read -r line || [ -n "$line" ]; do
   [ -z "$line" ] && continue
   [ "${line#\#}" != "$line" ] && continue
   echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
+  connectivity_check_domain "$line" && continue
   echo "ipset=/$line/$(ipset_targets "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess)" >> /opt/etc/unblock.dnsmasq
   echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
 done < /opt/etc/unblock/vmess.txt
@@ -176,6 +188,7 @@ while read -r line || [ -n "$line" ]; do
   [ -z "$line" ] && continue
   [ "${line#\#}" != "$line" ] && continue
   echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
+  connectivity_check_domain "$line" && continue
   echo "ipset=/$line/$(ipset_targets "$line" unblockvless unblockvlessudp bypass_call_signal_vless)" >> /opt/etc/unblock.dnsmasq
   echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
 done < /opt/etc/unblock/vless.txt
@@ -186,6 +199,7 @@ while read -r line || [ -n "$line" ]; do
   [ -z "$line" ] && continue
   [ "${line#\#}" != "$line" ] && continue
   echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
+  connectivity_check_domain "$line" && continue
   echo "ipset=/$line/$(ipset_targets "$line" unblockvless2 unblockvless2udp bypass_call_signal_vless2)" >> /opt/etc/unblock.dnsmasq
   echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
 done < /opt/etc/unblock/vless-2.txt
@@ -196,6 +210,7 @@ while read -r line || [ -n "$line" ]; do
   [ -z "$line" ] && continue
   [ "${line#\#}" != "$line" ] && continue
   echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
+  connectivity_check_domain "$line" && continue
   echo "ipset=/$line/$(ipset_targets "$line" unblocktroj unblocktrojudp bypass_call_signal_troj)" >> /opt/etc/unblock.dnsmasq
   echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
 done < /opt/etc/unblock/trojan.txt

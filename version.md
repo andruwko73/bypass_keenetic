@@ -1,3 +1,7 @@
+*v1.744 (21 Jun 2026) -* main
+
+*Keeps Android/OS connectivity-check domains out of route files, dnsmasq rules, and static ipset refreshes, and cleans stale entries during route repair so clients do not report Wi-Fi without internet after updates.*
+
 *v1.743 (21 Jun 2026) -* main
 
 *Redacts IPv4 addresses from Telegram call learning events while preserving compact counts, so event history no longer exposes learned call IPs.*
