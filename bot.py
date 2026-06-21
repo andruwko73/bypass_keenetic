@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.748, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.749, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -6036,7 +6036,11 @@ def _get_web_command_state():
 
 def _consume_web_command_state_for_render():
     _get_web_command_state()
-    consumed = _consume_command_state_for_render_impl(web_command_lock, web_command_state)
+    consumed = _consume_command_state_for_render_impl(
+        web_command_lock,
+        web_command_state,
+        clear_finished_commands=WEB_UPDATE_COMMANDS,
+    )
     _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
     return consumed
 

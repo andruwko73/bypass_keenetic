@@ -4246,6 +4246,42 @@ def test_web_command_state_helpers():
     web_command_state.set_flash_message(lock, state, 'ok')
     assert web_command_state.consume_flash_message(lock, state) == 'ok'
     assert web_command_state.consume_flash_message(lock, state) == ''
+    state = {
+        'running': False,
+        'command': 'update',
+        'label': 'Обновить до последнего релиза',
+        'result': 'done',
+        'progress': 100,
+        'progress_label': 'Завершено',
+        'started_at': 10,
+        'finished_at': 20,
+        'shown_after_finish': False,
+    }
+    consumed = web_command_state.consume_command_state_for_render(
+        lock,
+        state,
+        clear_finished_commands=('update',),
+    )
+    assert consumed['label'] == ''
+    assert state['label'] == ''
+    state = {
+        'running': False,
+        'command': 'restart',
+        'label': 'Перезапустить сервисы',
+        'result': 'done',
+        'progress': 100,
+        'progress_label': 'Завершено',
+        'started_at': 10,
+        'finished_at': 20,
+        'shown_after_finish': False,
+    }
+    consumed = web_command_state.consume_command_state_for_render(
+        lock,
+        state,
+        clear_finished_commands=('update',),
+    )
+    assert consumed['label'] == 'Перезапустить сервисы'
+    assert state['shown_after_finish'] is True
 
 
 def test_web_http_common_helpers():

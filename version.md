@@ -1,3 +1,7 @@
+*v1.749 (21 Jun 2026) -* main
+
+*Clears completed web update command blocks on the first post-update render, so the green "last command" panel no longer remains visible until the page is manually refreshed.*
+
 *v1.748 (21 Jun 2026) -* main
 
 *Makes the web update timer use a conservative successful-update median instead of a misleading remaining-time countdown, and suppresses background status refresh checks while a web update command is running to reduce router CPU spikes during installation.*

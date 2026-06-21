@@ -24,9 +24,13 @@ def command_state_snapshot(lock, state):
         return dict(state)
 
 
-def consume_command_state_for_render(lock, state):
+def consume_command_state_for_render(lock, state, clear_finished_commands=()):
     with lock:
         snapshot = dict(state)
+        clear_finished_commands = tuple(clear_finished_commands or ())
+        if (snapshot.get('label') and not snapshot.get('running') and
+                snapshot.get('finished_at') and snapshot.get('command') in clear_finished_commands):
+            snapshot['shown_after_finish'] = True
         if (snapshot.get('label') and not snapshot.get('running') and
                 snapshot.get('finished_at') and snapshot.get('shown_after_finish')):
             cleared = {
