@@ -1,3 +1,7 @@
+*v1.756 (21 Jun 2026) -* main
+
+*Redacts credential IDs from install/apply failure diagnostics while preserving copyable full keys in the web UI, records direct SSH script updates in update_status.json, and rejects out-of-range browser_port values during installer setup.*
+
 *v1.755 (21 Jun 2026) -* main
 
 *Keeps raw proxy keys out of web action JSON responses, moves local secret-literal checks to an optional private denylist, and rejects HTTP 4xx deny responses in core YouTube/Telegram healthchecks so pool probes do not mark blocked service pages as working access.*

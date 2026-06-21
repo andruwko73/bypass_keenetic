@@ -1483,6 +1483,18 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert 'ipset_targets "$line" unblocktroj unblocktrojudp bypass_call_signal_troj' in unblock_dnsmasq
 
 
+def test_direct_update_script_records_update_status():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'write_cli_update_status()' in script
+    assert "path = '/opt/etc/bot/update_status.json'" in script
+    assert 'write_cli_update_status update true 3 Preparing "CLI update started"' in script
+    assert 'write_cli_update_status update true 10 Downloading "Downloading update files"' in script
+    assert 'write_cli_update_status update true 85 Restarting "Restarting services"' in script
+    assert 'write_cli_update_status update false 100 Done "CLI update complete"' in script
+    assert 'write_cli_update_status update false 100 Done "CLI update complete; installer started"' in script
+    assert 'write_cli_update_status update false 100 Error "CLI update failed"' in script
+
+
 def test_realtime_call_signal_catalog_is_call_specific():
     entries = set(service_catalog.REALTIME_CALL_SIGNAL_ROUTE_ENTRIES)
     assert 'api.telegram.org' in entries
@@ -2366,6 +2378,70 @@ def test_telegram_key_ui_helpers():
     assert telegram_key_ui.key_install_protocol(13, trojan_level=13) == 'trojan'
     assert telegram_key_ui.key_install_protocol(12, trojan_level=13) == 'vless2'
     assert 'http://192.168.1.1:8080/' in telegram_key_ui.browser_hint('192.168.1.1', 8080)
+
+
+def test_proxy_diagnostics_redact_credential_ids():
+    old_worker = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER')
+    old_config = sys.modules.get('bot_config')
+    old_bot_module = sys.modules.pop('bot', None)
+    os.environ['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    sys.modules['bot_config'] = py_types.SimpleNamespace(
+        token='123456:test-token',
+        usernames=['AllowedUser'],
+        routerip='192.168.1.1',
+        browser_port='8080',
+        localportsh='1082',
+        localporttrojan='10829',
+        localportvmess='10810',
+        localportvless='10811',
+        dnsovertlsport='40500',
+        dnsoverhttpsport='40508',
+        default_proxy_mode='none',
+        app_runtime_mode='advanced',
+        fork_repo_owner='andruwko73',
+        fork_repo_name='bypass_keenetic',
+        fork_button_label='Fork by andruwko73',
+        web_auth_token='',
+        web_auth_disabled=True,
+    )
+    try:
+        bot_module = importlib.import_module('bot')
+        vless_id = '11111111-2222-3333-4444-555555555555'
+        vless_key = f'vless://{vless_id}@example.com:443?security=tls&type=tcp&sni=sni.example#sample'
+        vless_diag = bot_module._build_proxy_diagnostics('vless', vless_key)
+        assert vless_id not in vless_diag
+        assert 'uuid=' not in vless_diag
+        assert 'key_hash=sha256:' in vless_diag
+
+        vmess_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        vmess_key = 'vmess://' + base64.b64encode(json.dumps({
+            'v': '2',
+            'ps': 'sample',
+            'add': 'vmess.example.com',
+            'port': '443',
+            'id': vmess_id,
+            'aid': '0',
+            'net': 'tcp',
+            'type': 'none',
+            'host': '',
+            'tls': 'tls',
+        }).encode('utf-8')).decode('ascii').rstrip('=')
+        vmess_diag = bot_module._build_proxy_diagnostics('vmess', vmess_key)
+        assert vmess_id not in vmess_diag
+        assert 'id=' not in vmess_diag
+        assert 'key_hash=sha256:' in vmess_diag
+    finally:
+        sys.modules.pop('bot', None)
+        if old_bot_module is not None:
+            sys.modules['bot'] = old_bot_module
+        if old_config is None:
+            sys.modules.pop('bot_config', None)
+        else:
+            sys.modules['bot_config'] = old_config
+        if old_worker is None:
+            os.environ.pop('BYPASS_KEENETIC_COMMAND_WORKER', None)
+        else:
+            os.environ['BYPASS_KEENETIC_COMMAND_WORKER'] = old_worker
 
 
 def test_telegram_bot_menu_button_smoke():
@@ -4548,12 +4624,24 @@ def test_installer_common_helpers():
         {'token': 'x', 'username': 'u', 'browser_port': '8080'},
         ['token', 'username'],
     ) == (True, '')
+    assert installer_common.browser_port_is_valid('1') is True
+    assert installer_common.browser_port_is_valid('65535') is True
+    assert installer_common.browser_port_is_valid('0') is False
+    assert installer_common.browser_port_is_valid('65536') is False
+    assert installer_common.browser_port_is_valid('99999') is False
+    assert installer_common.browser_port_is_valid('-1') is False
     ok, message = installer_common.validate_installer_form(
         {'token': 'x', 'username': 'u', 'browser_port': 'bad'},
         ['token', 'username'],
     )
     assert ok is False
     assert 'browser_port' in message
+    ok, message = installer_common.validate_installer_form(
+        {'token': 'x', 'username': 'u', 'browser_port': '99999'},
+        ['token', 'username'],
+    )
+    assert ok is False
+    assert '1-65535' in message
     assert installer_common.installer_target_url(
         {'routerip': '192.168.1.2', 'browser_port': '9090'},
         8080,
@@ -4931,6 +5019,7 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
     )
     assert 'protocol-workspace active' in panel
+    assert 'vless://sample' in panel
     assert 'pool-sort-control' in panel
     assert 'data-pool-sort-value="telegram"' in panel
     assert 'data-pool-sort-value="quality"' in panel
@@ -4974,6 +5063,7 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'protocol-tab active' in tabs_html
     assert 'protocol-workspace active' in panels_html
+    assert 'vless://sample' in panels_html
     assert 'csrf_token' in panels_html
     lazy_tabs_html, lazy_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         [
@@ -6180,6 +6270,7 @@ def main():
     test_ai_assistant_custom_routes_are_synced()
     test_primary_vless_does_not_capture_gmail_domains()
     test_custom_check_service_sources_are_synced()
+    test_direct_update_script_records_update_status()
     test_chatgpt_codex_custom_check_migration()
     test_preset_custom_checks_are_hydrated_from_catalog()
     test_meta_custom_check_migration()
@@ -6224,6 +6315,7 @@ def main():
     test_telegram_jobs_helpers()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
+    test_proxy_diagnostics_redact_credential_ids()
     test_telegram_bot_menu_button_smoke()
     test_telegram_info_runtime_helpers()
     test_auto_failover_runtime_helpers()

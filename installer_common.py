@@ -58,7 +58,15 @@ def escape_python(value):
 
 def browser_port_is_valid(value):
     port = (value or '').strip()
-    return not port or bool(re.fullmatch(r'\d{2,5}', port))
+    if not port:
+        return True
+    if not re.fullmatch(r'\d{1,5}', port):
+        return False
+    try:
+        port_number = int(port)
+    except ValueError:
+        return False
+    return 1 <= port_number <= 65535
 
 
 def form_value(form, key, default=''):
@@ -88,7 +96,7 @@ def validate_installer_form(form, required_fields):
         return False, 'Не заполнены обязательные поля: ' + ', '.join(missing)
 
     if not browser_port_is_valid(form_value(form, 'browser_port')):
-        return False, 'Поле browser_port должно содержать номер порта.'
+        return False, 'Поле browser_port должно содержать номер порта 1-65535.'
 
     return True, ''
 

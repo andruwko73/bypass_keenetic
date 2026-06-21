@@ -5,13 +5,14 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.755, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.756, последнее изменение: 21.06.2026
 
 import subprocess
 import os
 import re
 import sys
 import time
+import hashlib
 import threading
 import signal
 import shlex
@@ -6239,33 +6240,40 @@ def _load_proxy_mode():
 
 
 def _format_proxy_key_summary(key_type, key_value):
+    key_hash = hashlib.sha256((key_value or '').encode('utf-8')).hexdigest()[:12]
     if key_type == 'shadowsocks':
         server, port, method, password = _decode_shadowsocks_uri(key_value)
         return ('Параметры Shadowsocks: server={server}, port={port}, method={method}, '
-                'password_len={password_len}').format(
+                'password_len={password_len}, key_hash=sha256:{key_hash}').format(
                     server=server,
                     port=port,
                     method=method,
-                    password_len=len(password))
+                    password_len=len(password),
+                    key_hash=key_hash)
     if key_type in ['vless', 'vless2']:
         data = _parse_vless_key(key_value)
-        return ('Параметры VLESS: address={address}, host={host}, port={port}, uuid={id}, network={type}, '
-                'serviceName={serviceName}, sni={sni}, security={security}, flow={flow}').format(**data)
+        return ('Параметры VLESS: address={address}, host={host}, port={port}, network={type}, '
+                'serviceName={serviceName}, sni={sni}, security={security}, flow={flow}, '
+                'key_hash=sha256:{key_hash}').format(key_hash=key_hash, **data)
     if key_type == 'vmess':
         data = _parse_vmess_key(key_value)
         service_name = data.get('serviceName') or data.get('grpcSettings', {}).get('serviceName', '')
-        return ('Параметры VMESS: host={add}, port={port}, id={id}, network={net}, tls={tls}, '
-                'serviceName={service_name}').format(service_name=service_name, **data)
+        return ('Параметры VMESS: host={add}, port={port}, network={net}, tls={tls}, '
+                'serviceName={service_name}, key_hash=sha256:{key_hash}').format(
+                    service_name=service_name,
+                    key_hash=key_hash,
+                    **data)
     if key_type == 'trojan':
         data = _parse_trojan_key(key_value)
         return ('Параметры Trojan: address={address}, port={port}, sni={sni}, security={security}, '
-                'network={type}, password_len={password_len}').format(
+                'network={type}, password_len={password_len}, key_hash=sha256:{key_hash}').format(
                     address=data['address'],
                     port=data['port'],
                     sni=data['sni'],
                     security=data['security'],
                     type=data['type'],
-                    password_len=len(data['password']))
+                    password_len=len(data['password']),
+                    key_hash=key_hash)
     return ''
 
 

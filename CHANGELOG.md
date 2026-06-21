@@ -1,3 +1,8 @@
+<a name="1.756"></a>
+# [1.756] - 21 Jun 2026
+
+- Redacts credential IDs from install/apply failure diagnostics while preserving copyable full keys in the web UI, records direct SSH script updates in update_status.json, and rejects out-of-range browser_port values during installer setup.
+
 <a name="1.755"></a>
 # [1.755] - 21 Jun 2026
 

@@ -709,6 +709,56 @@ ensure_runtime_legacy_paths() {
   fi
 }
 
+write_cli_update_status() {
+  command="${1:-update}"
+  running="${2:-true}"
+  progress="${3:-0}"
+  progress_label="${4:-}"
+  message="${5:-}"
+  python3 - "$command" "$running" "$progress" "$progress_label" "$message" <<'PY' >/dev/null 2>&1 || true
+import json
+import os
+import sys
+import time
+
+path = '/opt/etc/bot/update_status.json'
+command, running, progress, progress_label, message = sys.argv[1:6]
+try:
+    progress = max(0, min(100, int(progress or 0)))
+except Exception:
+    progress = 0
+now = time.time()
+current = {}
+try:
+    with open(path, 'r', encoding='utf-8') as file:
+        current = json.load(file)
+except Exception:
+    current = {}
+started_at = now
+if current.get('running') and current.get('command') == command:
+    started_at = current.get('started_at') or now
+is_running = str(running).lower() in ('1', 'true', 'yes', 'y')
+status = {
+    'running': is_running,
+    'command': command,
+    'progress': progress,
+    'progress_label': progress_label,
+    'message': message,
+    'started_at': started_at,
+    'updated_at': now,
+    'finished_at': 0 if is_running else now,
+}
+try:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = path + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as file:
+        json.dump(status, file, ensure_ascii=False, separators=(',', ':'))
+    os.replace(tmp_path, path)
+except Exception:
+    pass
+PY
+}
+
 migrate_runtime_config_defaults() {
   [ -f "$BOT_CONFIG_PATH" ] || return 0
   if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(61440|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
@@ -1185,6 +1235,9 @@ fi
 
 if [ "$1" = "-update" ]; then
     echo "Начинаем обновление."
+    cli_update_status_active=1
+    write_cli_update_status update true 3 Preparing "CLI update started"
+    trap 'rc=$?; if [ "${cli_update_status_active:-0}" = "1" ] && [ "$rc" -ne 0 ]; then write_cli_update_status update false 100 Error "CLI update failed"; fi' EXIT
   ensure_entware_dns
     opkg update > /dev/null 2>&1
     core_proxy_pkg=$(detect_core_proxy_package)
@@ -1203,6 +1256,7 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$stage_dir"
 
     echo "Скачиваем обновления во временную папку и проверяем файлы."
+    write_cli_update_status update true 10 Downloading "Downloading update files"
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-ipset.sh" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-redirect.sh" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
     download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_ipset.sh" "$stage_dir/unblock_ipset.sh" "#!/bin/sh" "unblock_ipset.sh" || exit 1
@@ -1258,6 +1312,7 @@ if [ "$1" = "-update" ]; then
     sed -i "s/40500/${dnsovertlsport}/g" "$stage_dir/dnsmasq.conf"
     sed -i "s/40508/${dnsoverhttpsport}/g" "$stage_dir/dnsmasq.conf"
     echo "Файлы успешно скачаны и подготовлены."
+    write_cli_update_status update true 40 Staged "Update files staged"
     echo "Further update output is saved to $stage_dir/update.log."
     exec >> "$stage_dir/update.log" 2>&1
 
@@ -1267,6 +1322,7 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S22trojan stop > /dev/null 2>&1
     /opt/etc/init.d/S99unblock stop > /dev/null 2>&1 || true
     echo "Сервисы остановлены."
+    write_cli_update_status update true 55 Backup "Services stopped, creating backup"
 
     mkdir -p "$backup_dir"
     [ -f /opt/bin/unblock_ipset.sh ] && mv /opt/bin/unblock_ipset.sh "$backup_dir"/unblock_ipset.sh
@@ -1295,6 +1351,7 @@ if [ "$1" = "-update" ]; then
     cleanup_removed_connection_artifacts
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
+    write_cli_update_status update true 65 Installing "Installing staged files"
 
     touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts
     mv "$stage_dir/100-ipset.sh" /opt/etc/ndm/fs.d/100-ipset.sh
@@ -1340,6 +1397,7 @@ if [ "$1" = "-update" ]; then
     rmdir "$stage_dir" 2>/dev/null || true
     cleanup_update_artifacts 3
     echo "Обновления скачены, права настроены."
+    write_cli_update_status update true 85 Restarting "Restarting services"
 
     /opt/etc/init.d/S10cron restart > /dev/null 2>&1 || /opt/etc/init.d/S10cron start > /dev/null 2>&1 || true
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
@@ -1370,6 +1428,9 @@ if [ "$1" = "-update" ]; then
     cleanup_web_only_runtime
     cleanup_pool_probe_runtime
     if ! telegram_config_complete; then
+      write_cli_update_status update false 100 Done "CLI update complete; installer started"
+      cli_update_status_active=0
+      trap - EXIT
       start_telegram_installer
       exit 0
     fi
@@ -1395,6 +1456,9 @@ if [ "$1" = "-update" ]; then
       fi
     fi
 
+    write_cli_update_status update false 100 Done "CLI update complete"
+    cli_update_status_active=0
+    trap - EXIT
     exit 0
 fi
 
