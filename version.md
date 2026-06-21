@@ -1,3 +1,7 @@
+*v1.747 (21 Jun 2026) -* main
+
+*Accepts and stores the YouTube short-link health metric in the key probe cache, fixing active key status refresh after the YouTube warn-state metrics were added.*
+
 *v1.746 (21 Jun 2026) -* main
 
 *Compacts legacy stream-guard route diagnostics when reading event history, so older reconnect diagnostics no longer expand into long rows after updating.*

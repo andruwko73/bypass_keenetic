@@ -4998,6 +4998,7 @@ def test_probe_cache_quality_metrics():
         yt_latency_ms=510.1,
         googlevideo_latency_ms=630.8,
         yt_watch_ok=True,
+        yt_short_ok=True,
         yt_throughput_mbps=52.6,
         now=100,
         min_1600p_mbps=25.0,
@@ -5008,6 +5009,7 @@ def test_probe_cache_quality_metrics():
     assert entry['yt_latency_ms'] == 510
     assert entry['googlevideo_latency_ms'] == 631
     assert entry['yt_watch_ok'] is True
+    assert entry['yt_short_ok'] is True
     assert entry['yt_throughput_mbps'] == 52.6
     assert entry['yt_throughput_ts'] == 100
     assert entry['yt_quality'] == 'fast'
