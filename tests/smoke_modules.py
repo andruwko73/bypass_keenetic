@@ -5506,6 +5506,43 @@ def test_event_history_helpers():
     assert redacted_events[-1]['details']['last_activity_age_s'] == '0'
 
 
+def test_telegram_call_learning_event_history_redacts_ip_addresses():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'events.jsonl'
+        assert event_history.record_event(
+            action='telegram_call_learning_apply',
+            message='added 149.154.167.91 from 192.168.1.23',
+            protocol='vless',
+            service='telegram',
+            details={
+                'address': '149.154.167.91',
+                'clients': ['192.168.1.23'],
+                'count': 1,
+            },
+            event_path=str(path),
+        )
+        with path.open('a', encoding='utf-8') as file:
+            file.write(json.dumps({
+                'ts': 2,
+                'level': 'info',
+                'action': 'telegram_call_learning_finish',
+                'source': 'web',
+                'protocol': 'vless',
+                'service': 'telegram',
+                'key_hash': '',
+                'message': 'finished for 149.154.167.92 and 192.168.1.24',
+                'details': {'device_ip': '192.168.1.24', 'address': '149.154.167.92'},
+            }, ensure_ascii=False) + '\n')
+        events = event_history.load_events(event_path=str(path))
+    serialized = json.dumps(events, ensure_ascii=False)
+    assert '149.154.167.91' not in serialized
+    assert '149.154.167.92' not in serialized
+    assert '192.168.1.23' not in serialized
+    assert '192.168.1.24' not in serialized
+    assert '<ip-hidden>' in serialized
+    assert events[1]['details']['count'] == '1'
+
+
 def test_update_status_helpers():
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / 'update.json'

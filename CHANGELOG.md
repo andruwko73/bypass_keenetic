@@ -1,3 +1,8 @@
+<a name="1.743"></a>
+# [1.743] - 21 Jun 2026
+
+- Redacts IPv4 addresses from Telegram call learning events while preserving compact counts, so event history no longer exposes learned call IPs.
+
 <a name="1.742"></a>
 # [1.742] - 21 Jun 2026
 

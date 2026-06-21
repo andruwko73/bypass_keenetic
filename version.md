@@ -1,3 +1,7 @@
+*v1.743 (21 Jun 2026) -* main
+
+*Redacts IPv4 addresses from Telegram call learning events while preserving compact counts, so event history no longer exposes learned call IPs.*
+
 *v1.742 (21 Jun 2026) -* main
 
 *Stops optional quick pool probes after the first short YouTube pass instead of retrying the whole quick profile, so slow Vless 2 candidates are recorded and skipped faster while full diagnostics remain available for active-key checks.*

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.742, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.743, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -2476,18 +2476,18 @@ def _telegram_call_learning_auto_scan(
         error='',
     )
     if applied_now:
-        addresses = ', '.join(item.get('address') or '' for item in applied_now[:5])
+        applied_count = len(applied_now)
         _record_event(
             'telegram_call_learning_apply',
-            f'Conntrack-learning добавил IP для Telegram-звонка: {addresses}',
+            f'Conntrack-learning добавил адреса для Telegram-звонка: {applied_count}.',
             source='watchdog',
             protocol=','.join(protocols) if protocols else 'system',
             service='telegram',
             details={
-                'count': len(applied_now),
+                'count': applied_count,
                 'protocols': protocols,
                 'route_protocols': route_protocols,
-                'clients': active_clients or seen_clients,
+                'clients_count': len(active_clients or seen_clients),
             },
         )
         try:
@@ -2687,7 +2687,6 @@ def _telegram_call_learning_worker(device_ip, protocol, apply_entries, duration_
             protocol=protocol,
             service='telegram',
             details={
-                'device_ip': device_ip,
                 'apply': bool(apply_entries),
                 'added_count': len(added_payload),
                 'error': error,
@@ -2765,7 +2764,7 @@ def _start_telegram_call_learning(device_ip, protocol='', apply_entries=None, du
         source='web',
         protocol=selected_protocol,
         service='telegram',
-        details={'device_ip': device_ip, 'apply': bool(apply_entries), 'route_protocols': route_protocols},
+        details={'apply': bool(apply_entries), 'route_protocols': route_protocols, 'duration_seconds': duration},
     )
     try:
         _invalidate_web_status_cache()

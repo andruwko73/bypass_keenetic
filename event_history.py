@@ -24,6 +24,10 @@ SECRET_PATTERNS = [
     (re.compile(r'\bbot\d{6,}:[A-Za-z0-9_-]{20,}\b'), 'bot<token-hidden>'),
     (re.compile(r'((?:token|password|secret|passwd|web_auth_token)\s*[=:]\s*)[^\s\'"]+', re.I), r'\1<hidden>'),
 ]
+IPV4_PATTERN = re.compile(
+    r'\b(?:25[0-5]|2[0-4]\d|1?\d?\d)'
+    r'(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b'
+)
 
 
 def redact_sensitive_text(value):
@@ -44,8 +48,10 @@ def _normalize_protocol(protocol):
     return protocol or 'system'
 
 
-def _limit_text(value, max_len=800):
+def _limit_text(value, max_len=800, redact_ip=False):
     text = redact_sensitive_text(value)
+    if redact_ip:
+        text = IPV4_PATTERN.sub('<ip-hidden>', text)
     if len(text) <= max_len:
         return text
     return text[:max_len].rstrip() + '...'
@@ -90,20 +96,22 @@ def record_event(
     time_provider=time.time,
 ):
     path = _event_path(event_path)
+    action_text = _limit_text(action, 80)
+    redact_ip = action_text.startswith('telegram_call_learning')
     event = {
         'ts': int(time_provider()),
         'level': _limit_text(level, 40),
-        'action': _limit_text(action, 80),
+        'action': action_text,
         'source': _limit_text(source, 80),
         'protocol': _normalize_protocol(protocol),
         'service': _limit_text(service, 120),
         'key_hash': _limit_text(key_hash, 80),
-        'message': _limit_text(message, 800),
+        'message': _limit_text(message, 800, redact_ip=redact_ip),
         'details': {},
     }
     if isinstance(details, dict):
         event['details'] = {
-            _limit_text(key, 80): _limit_text(value, 300)
+            _limit_text(key, 80): _limit_text(value, 300, redact_ip=redact_ip)
             for key, value in details.items()
             if value is not None
         }
@@ -115,6 +123,23 @@ def record_event(
     except Exception:
         return False
     return True
+
+
+def _redact_loaded_event(event):
+    if not isinstance(event, dict):
+        return event
+    action_text = _limit_text(event.get('action'), 80)
+    if not action_text.startswith('telegram_call_learning'):
+        return event
+    event['message'] = _limit_text(event.get('message', ''), 800, redact_ip=True)
+    details = event.get('details')
+    if isinstance(details, dict):
+        event['details'] = {
+            _limit_text(key, 80): _limit_text(value, 300, redact_ip=True)
+            for key, value in details.items()
+            if value is not None
+        }
+    return event
 
 
 def load_events(limit=50, *, event_path=None):
@@ -131,6 +156,7 @@ def load_events(limit=50, *, event_path=None):
         except Exception:
             continue
         if isinstance(event, dict):
+            event = _redact_loaded_event(event)
             event['protocol_label'] = PROTOCOL_LABELS.get(event.get('protocol'), event.get('protocol') or 'Система')
             events.append(event)
         if len(events) >= int(limit or 50):
