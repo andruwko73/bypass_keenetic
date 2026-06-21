@@ -3071,6 +3071,7 @@ def test_pool_probe_controller_helpers():
     assert optional_tg_calls[:1] == [
         {'url': 'https://web.telegram.org/', 'connect_timeout': 1.0, 'read_timeout': 1.5},
     ]
+    assert len(optional_tg_calls) == 1 + len(youtube_healthcheck.YOUTUBE_HEALTHCHECK_QUICK_URLS)
     assert all(
         call['connect_timeout'] == 3 and call['read_timeout'] == 4
         for call in optional_tg_calls[1:]

@@ -1,3 +1,8 @@
+<a name="1.742"></a>
+# [1.742] - 21 Jun 2026
+
+- Stops optional quick pool probes after the first short YouTube pass instead of retrying the whole quick profile, reducing the time spent on slow Vless 2 candidates.
+
 <a name="1.741"></a>
 # [1.741] - 21 Jun 2026
 

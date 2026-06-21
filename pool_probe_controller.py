@@ -159,16 +159,17 @@ def check_pool_key_through_proxy(
                 http_timeouts=(retry_http_connect, retry_http_read),
                 metrics=tg_metrics if collect_quality else None,
             )
-        yt_ok, _ = check_youtube_through_proxy(
-            check_http,
-            proxy_url,
-            http_timeouts=youtube_retry_timeouts,
-            http_retry_timeouts=youtube_retry_timeouts,
-            retry_delay_seconds=retry_delay_seconds,
-            profile=youtube_profile,
-            metrics=yt_metrics,
-            sleep=sleep,
-        )
+        if telegram_required or not quick_youtube_profile:
+            yt_ok, _ = check_youtube_through_proxy(
+                check_http,
+                proxy_url,
+                http_timeouts=youtube_retry_timeouts,
+                http_retry_timeouts=youtube_retry_timeouts,
+                retry_delay_seconds=retry_delay_seconds,
+                profile=youtube_profile,
+                metrics=yt_metrics,
+                sleep=sleep,
+            )
     elif not tg_ok and telegram_required:
         sleep(retry_delay_seconds)
         tg_ok, _ = check_telegram_service_through_proxy(
@@ -179,7 +180,7 @@ def check_pool_key_through_proxy(
             http_timeouts=(retry_http_connect, retry_http_read),
             metrics=tg_metrics if collect_quality else None,
         )
-    elif not yt_ok:
+    elif not yt_ok and not quick_youtube_profile:
         sleep(retry_delay_seconds)
         yt_ok, _ = check_youtube_through_proxy(
             check_http,

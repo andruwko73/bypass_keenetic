@@ -1,3 +1,7 @@
+*v1.742 (21 Jun 2026) -* main
+
+*Stops optional quick pool probes after the first short YouTube pass instead of retrying the whole quick profile, so slow Vless 2 candidates are recorded and skipped faster while full diagnostics remain available for active-key checks.*
+
 *v1.741 (21 Jun 2026) -* main
 
 *Separates the active pool-probe RSS ceiling from the lower post-pool restart threshold, so quick Vless 2 checks can continue past the first warmup keys while the bot still cleans up after the pool finishes.*
