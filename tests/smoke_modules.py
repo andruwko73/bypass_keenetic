@@ -789,12 +789,11 @@ def test_key_pool_web():
         route_states=core_route_states,
     )
     assert scoped_core_snapshot['vless']['rows'][0]['tg'] == 'ok'
-    assert scoped_core_snapshot['vless']['rows'][0]['yt'] == 'na'
-    assert scoped_core_snapshot['vless']['rows'][0]['yt_score'] == 0
-    assert scoped_core_snapshot['vless']['rows'][0]['quality_summary'] == 'YouTube не назначен на этот протокол'
+    assert scoped_core_snapshot['vless']['rows'][0]['yt'] == 'fail'
+    assert scoped_core_snapshot['vless']['rows'][0]['yt_score'] == 91
     assert scoped_core_snapshot['vless']['core_services'] == ['telegram']
     assert scoped_core_snapshot['vless2']['core_services'] == ['youtube']
-    assert scoped_core_snapshot['vless2']['rows'][0]['tg'] == 'na'
+    assert scoped_core_snapshot['vless2']['rows'][0]['tg'] == 'ok'
     assert scoped_core_snapshot['vless2']['rows'][0]['yt'] == 'warn'
     scoped_summary = key_pool_web.pool_status_summary(
         {'vless2': 'yt-key', 'vless': 'tg-key'},
@@ -5073,11 +5072,11 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
         service_applicability={'telegram': False, 'youtube': False},
     )
-    assert 'data-tg-state="na"' in not_applicable_rows
-    assert 'data-yt-state="na"' in not_applicable_rows
-    assert 'data-quality-score="0"' in not_applicable_rows
-    assert 'data-pool-tg' not in not_applicable_rows
-    assert 'data-pool-yt' not in not_applicable_rows
+    assert 'data-tg-state="ok"' in not_applicable_rows
+    assert 'data-yt-state="fail"' in not_applicable_rows
+    assert 'data-quality-score="91"' in not_applicable_rows
+    assert 'data-pool-tg' in not_applicable_rows
+    assert 'data-pool-yt' in not_applicable_rows
     assert 'service-probe-na' not in not_applicable_rows
     assert 'pool-quality-' not in not_applicable_rows
     panel = web_pool_form_blocks.render_protocol_panel(
@@ -5101,7 +5100,6 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
     )
     assert 'protocol-workspace active' in panel
-    assert 'data-core-services="telegram,youtube"' in panel
     assert 'vless://sample' in panel
     assert 'pool-sort-control' in panel
     assert 'data-pool-sort-value="telegram"' in panel
@@ -5119,7 +5117,7 @@ def test_web_pool_form_blocks_helpers():
         current_key_value='',
         status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
         active_status_icons='',
-        pool_items_html=web_pool_form_blocks.pool_empty_row_html(5),
+        pool_items_html=web_pool_form_blocks.POOL_EMPTY_ROW_HTML,
         pool_table_class='pool-table',
         pool_custom_col_width=32,
         pool_mobile_custom_col_width=28,
@@ -5128,13 +5126,11 @@ def test_web_pool_form_blocks_helpers():
         custom_checks_html='',
         telegram_icon_html=lambda opacity=1.0: 'TG',
         youtube_icon_html=lambda opacity=1.0: 'YT',
-        core_services=['youtube'],
         csrf_input_html='<input name="csrf_token" value="token">',
     )
-    assert 'data-core-services="youtube"' in youtube_panel
-    assert 'data-core-service-head="telegram"' not in youtube_panel
+    assert 'data-core-service-head="telegram"' in youtube_panel
     assert 'data-core-service-head="youtube"' in youtube_panel
-    assert 'colspan="5"' in youtube_panel
+    assert 'colspan="6"' in youtube_panel
     main_panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
         title='Vless 1',
@@ -5243,6 +5239,24 @@ def test_web_status_builder_helpers():
     )
     assert cached['tone'] == 'warn'
     assert 'YouTube: работает' in cached['details']
+    telegram_scoped = web_status_builder.cached_protocol_status(
+        'key',
+        {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'unstable'},
+        [],
+        {},
+        required_services=['telegram'],
+    )
+    assert telegram_scoped['tone'] == 'ok'
+    assert telegram_scoped['label'] == 'Работает'
+    youtube_scoped = web_status_builder.cached_protocol_status(
+        'key',
+        {'tg_ok': False, 'yt_ok': False, 'yt_stability': 'unstable'},
+        [],
+        {},
+        required_services=['youtube'],
+    )
+    assert youtube_scoped['tone'] == 'ok'
+    assert youtube_scoped['label'] == 'Работает'
     youtube_only = web_status_builder.cached_protocol_status(
         'key',
         {'tg_ok': False, 'yt_ok': True},

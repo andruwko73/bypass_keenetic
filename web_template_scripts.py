@@ -888,12 +888,7 @@ def render_web_scripts(
         }}
 
         function poolCoreServices(pool) {{
-            if (!pool || !Array.isArray(pool.core_services)) {{
-                return ['telegram', 'youtube'];
-            }}
-            return pool.core_services.filter(function(service) {{
-                return service === 'telegram' || service === 'youtube';
-            }});
+            return ['telegram', 'youtube'];
         }}
 
         function poolCoreColspan(coreServices) {{
@@ -913,24 +908,10 @@ def render_web_scripts(
         }}
 
         function poolPanelCoreServices(proto) {{
-            const panel = document.querySelector('[data-protocol-panel="' + proto + '"]');
-            const hasCoreServices = !!(panel && panel.hasAttribute('data-core-services'));
-            const raw = panel ? String(panel.dataset.coreServices || '') : '';
-            if (!hasCoreServices) {{
-                return ['telegram', 'youtube'];
-            }}
-            if (!raw) {{
-                return [];
-            }}
-            return raw.split(',').filter(function(service) {{
-                return service === 'telegram' || service === 'youtube';
-            }});
+            return ['telegram', 'youtube'];
         }}
 
         function updatePoolSortOptions(proto) {{
-            const coreServices = poolPanelCoreServices(proto);
-            const hasTelegram = coreServices.indexOf('telegram') !== -1;
-            const hasYoutube = coreServices.indexOf('youtube') !== -1;
             const menu = document.querySelector('[data-pool-sort-menu="' + proto + '"]');
             const input = document.querySelector('[data-pool-sort="' + proto + '"]');
             const button = document.querySelector('[data-pool-sort-button="' + proto + '"]');
@@ -938,10 +919,7 @@ def render_web_scripts(
                 return;
             }}
             menu.querySelectorAll('[data-pool-sort-value]').forEach(function(option) {{
-                const value = option.dataset.poolSortValue || 'original';
-                const hidden = (value === 'telegram' && !hasTelegram) ||
-                    ((value === 'youtube' || value === 'quality') && !hasYoutube);
-                option.classList.toggle('hidden', hidden);
+                option.classList.remove('hidden');
             }});
             if (input) {{
                 const selected = menu.querySelector('[data-pool-sort-value="' + input.value + '"]');
@@ -2194,6 +2172,16 @@ def render_web_scripts(
             }}
         }}
 
+        function scheduleServiceRouteMenuPosition(menu) {{
+            positionServiceRouteMenu(menu);
+            window.requestAnimationFrame(function() {{
+                positionServiceRouteMenu(menu);
+            }});
+            window.setTimeout(function() {{
+                positionServiceRouteMenu(menu);
+            }}, 80);
+        }}
+
         function setupServiceRouteMenus(root) {{
             const scope = root || document;
             scope.querySelectorAll('.service-route-menu').forEach(function(menu) {{
@@ -2204,7 +2192,7 @@ def render_web_scripts(
                 menu.addEventListener('toggle', function() {{
                     if (menu.open) {{
                         closeServiceRouteMenus(menu);
-                        positionServiceRouteMenu(menu);
+                        scheduleServiceRouteMenuPosition(menu);
                     }} else {{
                         menu.classList.remove('drop-up');
                     }}

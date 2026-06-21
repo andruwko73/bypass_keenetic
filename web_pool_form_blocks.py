@@ -20,22 +20,6 @@ def pool_empty_row_html(colspan=6):
     return POOL_EMPTY_ROW_HTML.replace('colspan="6"', f'colspan="{safe_colspan}"')
 
 
-def _core_services_from_applicability(service_applicability):
-    if service_applicability is None:
-        return ['telegram', 'youtube']
-    return [
-        service_id for service_id in ('telegram', 'youtube')
-        if bool((service_applicability or {}).get(service_id, True))
-    ]
-
-
-def _normalize_core_services(core_services):
-    if core_services is None:
-        return ['telegram', 'youtube']
-    selected = set(core_services or [])
-    return [service_id for service_id in ('telegram', 'youtube') if service_id in selected]
-
-
 def _display_note_text(text):
     return str(text or '').strip().rstrip('.')
 
@@ -174,10 +158,6 @@ def render_pool_items(
     safe_key_name = html.escape(key_name, quote=True)
     safe_title = html.escape(title)
     current_key = current_key or ''
-    service_applicability = service_applicability or {}
-    core_services = _core_services_from_applicability(service_applicability)
-    telegram_applicable = 'telegram' in core_services
-    youtube_applicable = 'youtube' in core_services
     for index, pool_key in enumerate(pool_keys or []):
         key_hash = hash_key(pool_key)
         key_id = html.escape(str(key_hash[:12]), quote=True)
@@ -190,8 +170,8 @@ def render_pool_items(
         probe = key_probe_cache.get(key_hash, {})
         if not isinstance(probe, dict):
             probe = {}
-        tg_state = 'na' if not telegram_applicable else _probe_state(probe, 'tg_ok')
-        yt_state = 'na' if not youtube_applicable else _probe_state(probe, 'yt_ok')
+        tg_state = _probe_state(probe, 'tg_ok')
+        yt_state = _probe_state(probe, 'yt_ok')
         safe_tg_state = html.escape(tg_state, quote=True)
         safe_yt_state = html.escape(yt_state, quote=True)
         try:
@@ -202,35 +182,22 @@ def render_pool_items(
             probe,
             'tg_ok',
             telegram_icon_html(opacity=1.0),
-            applicable=telegram_applicable,
         )
         yt_badge = _service_probe_badge(
             probe,
             'yt_ok',
             youtube_icon_html(opacity=1.0),
-            applicable=youtube_applicable,
         )
-        core_cells = []
-        if telegram_applicable:
-            core_cells.append(f'<td class="pool-service-cell" data-pool-tg>{tg_badge}</td>')
-        if youtube_applicable:
-            core_cells.append(f'<td class="pool-service-cell" data-pool-yt>{yt_badge}</td>')
-        core_cells_html = ''.join(core_cells)
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
-        quality_probe = probe if youtube_applicable else {}
-        quality_score = _probe_int(quality_probe, 'yt_score', 0)
-        quality_class = html.escape(_quality_class(quality_probe), quote=True)
-        quality_label = _quality_label(quality_probe)
+        quality_score = _probe_int(probe, 'yt_score', 0)
+        quality_class = html.escape(_quality_class(probe), quote=True)
+        quality_label = _quality_label(probe)
         quality_badge = (
             f'<span class="pool-quality-badge pool-quality-{quality_class}">{html.escape(quality_label)}</span>'
             if quality_label else ''
         )
-        quality_title_text = (
-            _quality_summary(probe, probe_checked_at(probe))
-            if youtube_applicable else
-            'YouTube не назначен на этот протокол'
-        )
+        quality_title_text = _quality_summary(probe, probe_checked_at(probe))
         quality_title = html.escape(quality_title_text, quote=True)
         rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{safe_tg_state}" data-yt-state="{safe_yt_state}" data-quality-score="{int(quality_score)}" data-quality-class="{quality_class}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
                         <td class="pool-key-cell">
@@ -244,7 +211,8 @@ def render_pool_items(
                             <span class="pool-mobile-checked" data-pool-mobile-checked>{checked_at}</span>
                             <span class="pool-hash">{key_id}</span>
                         </td>
-                        {core_cells_html}
+                        <td class="pool-service-cell" data-pool-tg>{tg_badge}</td>
+                        <td class="pool-service-cell" data-pool-yt>{yt_badge}</td>
                         <td class="pool-custom-cell" data-pool-custom>{custom_badges}</td>
                         <td class="pool-checked-cell" data-pool-checked>{checked_at}</td>
                         <td class="pool-actions-cell">
@@ -256,7 +224,7 @@ def render_pool_items(
                             </form>
                         </td>
                     </tr>''')
-    return ''.join(rows) if rows else pool_empty_row_html(4 + len(core_services))
+    return ''.join(rows) if rows else POOL_EMPTY_ROW_HTML
 
 
 def render_protocol_tab(key_name, title, pool_count, *, active=False):
@@ -297,7 +265,6 @@ def render_protocol_panel(
     custom_checks_html,
     telegram_icon_html,
     youtube_icon_html,
-    core_services=None,
     route_tools_html='',
     active=False,
     csrf_input_html='',
@@ -310,19 +277,6 @@ def render_protocol_panel(
     safe_title = html.escape(title)
     safe_value = html.escape(current_key_value or '')
     safe_placeholder = html.escape(placeholder)
-    core_services = _normalize_core_services(core_services)
-    safe_core_services = html.escape(','.join(core_services), quote=True)
-    core_colgroup_html = ''.join('<col class="pool-col-icon">' for _service in core_services)
-    core_header_parts = []
-    if 'telegram' in core_services:
-        core_header_parts.append(
-            f'<th class="pool-icon-head" data-core-service-head="telegram">{telegram_icon_html(opacity=1.0)}</th>'
-        )
-    if 'youtube' in core_services:
-        core_header_parts.append(
-            f'<th class="pool-icon-head" data-core-service-head="youtube">{youtube_icon_html(opacity=1.0)}</th>'
-        )
-    core_header_html = ''.join(core_header_parts)
     safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
     safe_label = html.escape(status_info.get('label', ''))
     safe_details = html.escape(_display_note_text(status_info.get('details', '')))
@@ -386,12 +340,13 @@ def render_protocol_panel(
                 <table class="{html.escape(pool_table_class, quote=True)}" style="--custom-col-mobile:{int(pool_mobile_custom_col_width)}px">
                     <colgroup>
                         <col class="pool-col-key">
-                        {core_colgroup_html}
+                        <col class="pool-col-icon">
+                        <col class="pool-col-icon">
                         <col class="pool-col-custom" style="width:{int(pool_custom_col_width)}px">
                         <col class="pool-col-checked">
                         <col class="pool-col-actions">
                     </colgroup>
-                    <thead><tr><th class="pool-key-head">Ключ</th>{core_header_html}<th class="pool-icon-head pool-custom-head" data-custom-check-head>{custom_header_icons}</th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
+                    <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head" data-core-service-head="telegram">{telegram_icon_html(opacity=1.0)}</th><th class="pool-icon-head" data-core-service-head="youtube">{youtube_icon_html(opacity=1.0)}</th><th class="pool-icon-head pool-custom-head" data-custom-check-head>{custom_header_icons}</th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
                     <tbody data-pool-body="{safe_key_name}">{pool_items_html}</tbody>
                 </table>
             </div>
@@ -467,7 +422,7 @@ def render_protocol_panel(
             {custom_check_card_html}
             {check_probe_form_html}
         </div>'''
-    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}" data-core-services="{safe_core_services}">
+    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
         <div class="workspace-head">
             <div>
                 <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
@@ -582,7 +537,6 @@ def render_protocol_tabs_and_panels(
         tab_count = len(pool_keys) if enable_key_pool else (1 if current_keys.get(key_name, '').strip() else 0)
         active_status_icons = ''
         pool_items_html = ''
-        core_services = ['telegram', 'youtube']
         tabs.append(
             render_protocol_tab(
                 key_name,
@@ -596,7 +550,6 @@ def render_protocol_tabs_and_panels(
             continue
         if enable_key_pool:
             core_applicability = core_service_applicability_for_protocol(key_name) or {}
-            core_services = _core_services_from_applicability(core_applicability)
             telegram_applicable = bool(core_applicability.get('telegram', True))
             youtube_applicable = bool(core_applicability.get('youtube', True))
             current_probe = key_probe_cache.get(hash_key(current_keys.get(key_name, '')), {})
@@ -644,7 +597,6 @@ def render_protocol_tabs_and_panels(
                 pool_custom_col_width=protocol_custom_col_width,
                 pool_mobile_custom_col_width=protocol_mobile_custom_col_width,
                 custom_header_icons=protocol_custom_header_icons,
-                core_services=core_services,
                 custom_presets_html=custom_presets_html,
                 custom_checks_html=custom_checks_html,
                 route_tools_html=route_tools_html,

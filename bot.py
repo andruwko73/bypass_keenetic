@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.759, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.760, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -5892,8 +5892,9 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
     yt_metrics = {}
     yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    if route_states is None and custom_checks:
+    if route_states is None:
         route_states = _service_route_summary()
+    required_services = key_pool_web.core_services_for_protocol(route_states, key_name)
     protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     cached_probe = cache.get(_hash_key(key_value), {})
@@ -5921,7 +5922,8 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
         yt_state=yt_state,
         custom_states=custom_states,
         custom_checks=protocol_custom_checks,
-        api_required=_telegram_required_for_protocol(key_name),
+        api_required='telegram' in required_services,
+        required_services=required_services,
     )
 
 
@@ -5936,8 +5938,9 @@ def _cached_protocol_status_for_key(
     if not key_value.strip():
         return _status_empty_protocol_status()
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    if route_states is None and custom_checks:
+    if route_states is None:
         route_states = _service_route_summary()
+    required_services = key_pool_web.core_services_for_protocol(route_states, key_name)
     protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     probe = cache.get(_hash_key(key_value), {})
@@ -5953,7 +5956,8 @@ def _cached_protocol_status_for_key(
         probe,
         protocol_custom_checks,
         custom_states,
-        api_required=_telegram_required_for_protocol(key_name),
+        api_required='telegram' in required_services,
+        required_services=required_services,
     )
 
 

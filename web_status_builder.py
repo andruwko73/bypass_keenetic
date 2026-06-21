@@ -37,7 +37,26 @@ def service_status_parts(api_ok, yt_ok, custom_states, custom_checks, *, api_tra
     return parts
 
 
-def tone_label(api_ok, yt_ok, custom_states, *, api_required=True):
+def _normalize_required_services(required_services):
+    if required_services is None:
+        return None
+    selected = set(required_services or [])
+    return tuple(service for service in ('telegram', 'youtube') if service in selected)
+
+
+def tone_label(api_ok, yt_ok, custom_states, *, api_required=True, required_services=None):
+    required_services = _normalize_required_services(required_services)
+    if required_services:
+        states = []
+        if 'telegram' in required_services:
+            states.append(bool(api_ok))
+        if 'youtube' in required_services:
+            states.append(bool(yt_ok))
+        if states and all(states):
+            return 'ok', 'Работает'
+        if any(states) or any(state == 'ok' for state in custom_states.values()):
+            return 'warn', 'Частично работает'
+        return 'fail', 'Не работает'
     any_ok = api_ok or yt_ok or any(state == 'ok' for state in custom_states.values())
     if not api_required and any_ok:
         return 'ok', 'Работает'
@@ -60,8 +79,15 @@ def active_protocol_status(
     custom_checks,
     api_required=True,
     yt_state='',
+    required_services=None,
 ):
-    if endpoint_ok and api_transient:
+    required_services = _normalize_required_services(required_services)
+    telegram_required = (
+        'telegram' in required_services
+        if required_services is not None else
+        bool(api_required)
+    )
+    if endpoint_ok and api_transient and telegram_required:
         return {
             'tone': 'warn',
             'label': 'Проверяется',
@@ -86,8 +112,14 @@ def active_protocol_status(
         api_required=api_required,
         yt_state=yt_state,
     )
-    tone, label = tone_label(api_ok, yt_ok, custom_states, api_required=api_required)
-    if yt_state == 'warn' and tone == 'ok':
+    tone, label = tone_label(
+        api_ok,
+        yt_ok,
+        custom_states,
+        api_required=api_required,
+        required_services=required_services,
+    )
+    if yt_state == 'warn' and tone == 'ok' and required_services is None:
         tone = 'warn'
         label = 'Частично работает'
     endpoint_text = _strip_status_period(endpoint_message)
@@ -111,7 +143,15 @@ def active_protocol_status(
     }
 
 
-def cached_protocol_status(key_value, probe, custom_checks, custom_states, *, api_required=True):
+def cached_protocol_status(
+    key_value,
+    probe,
+    custom_checks,
+    custom_states,
+    *,
+    api_required=True,
+    required_services=None,
+):
     if not str(key_value or '').strip():
         return empty_protocol_status()
     has_probe_result = (
@@ -149,8 +189,15 @@ def cached_protocol_status(key_value, probe, custom_checks, custom_states, *, ap
     details = 'Показан последний результат проверки пула'
     if service_parts:
         details += '; ' + ', '.join(service_parts)
-    tone, label = tone_label(api_ok, yt_ok, custom_states, api_required=api_required)
-    if yt_state == 'warn' and tone == 'ok':
+    required_services = _normalize_required_services(required_services)
+    tone, label = tone_label(
+        api_ok,
+        yt_ok,
+        custom_states,
+        api_required=api_required,
+        required_services=required_services,
+    )
+    if yt_state == 'warn' and tone == 'ok' and required_services is None:
         tone = 'warn'
         label = 'Частично работает'
     return {
