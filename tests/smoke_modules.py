@@ -2933,6 +2933,15 @@ def test_pool_probe_controller_helpers():
     )
     assert selected == [('vless', 'new')]
     assert checks == [{'id': 'tg'}]
+    selected, _ = pool_probe_controller.select_pool_probe_tasks(
+        [('vless', 'same-key'), ('vless2', 'same-key'), ('vless2', 'other-key')],
+        protocol_order=('vless', 'vless2'),
+        custom_checks=[],
+        cache={},
+        hash_key=lambda value: 'h:' + value,
+        is_fresh=lambda probe, **kwargs: False,
+    )
+    assert selected == [('vless', 'same-key'), ('vless2', 'other-key')]
     assert pool_probe_controller.filter_active_probe_tasks(
         [('vless', 'active'), ('vmess', 'old')],
         {'vless': 'active', 'vmess': 'new'},
@@ -3817,6 +3826,22 @@ def test_proxy_status_runtime_helpers():
 def test_unblock_list_helpers():
     assert unblock_lists.normalize_unblock_route_name('vless.txt') == 'vless'
     assert unblock_lists.entries_from_service_text('one\n#comment\ntwo # note\none', {'skip'}) == ['one', 'two']
+    old_dir = unblock_lists.UNBLOCK_DIR
+    old_popen = unblock_lists.subprocess.Popen
+    old_run = unblock_lists.subprocess.run
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        popen_calls = []
+        try:
+            unblock_lists.UNBLOCK_DIR = tmp_dir
+            unblock_lists.subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('save should not wait for unblock_update.sh'))
+            unblock_lists.subprocess.Popen = lambda cmd, **kwargs: popen_calls.append((cmd, kwargs))
+            assert unblock_lists.save_unblock_list_file('vless.txt', 'b.example\na.example\n', async_update=True) == 'vless.txt'
+        finally:
+            unblock_lists.UNBLOCK_DIR = old_dir
+            unblock_lists.subprocess.Popen = old_popen
+            unblock_lists.subprocess.run = old_run
+    assert popen_calls and popen_calls[0][0] == [unblock_lists.UNBLOCK_UPDATE_SCRIPT]
+    assert popen_calls[0][1]['stdout'] is unblock_lists.subprocess.DEVNULL
 
 
 def test_unblock_lists_hide_legacy_txt_files():
@@ -4925,6 +4950,9 @@ def test_web_template_styles_helpers():
     assert 'z-index:300;' in styles
     assert '[data-theme="glass"] .liquid-global-lens{width:88px;height:88px;}' in styles
     assert '.api-pill{display:flex;align-items:center;width:100%;height:auto;min-height:calc(var(--control-height) + 8px);' in styles
+    assert '.topbar-status{justify-content:flex-start;gap:8px;text-align:left;overflow:hidden;white-space:normal;max-height:60px;}' in styles
+    assert '.topbar-status-copy span{display:-webkit-box;min-width:0;color:#b9c6d3;font-size:11px;font-weight:700;line-height:1.22;max-height:calc(1.22em * 2);white-space:normal;overflow:hidden;text-overflow:ellipsis;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;word-break:normal;}' in styles
+    assert '.topbar-status{white-space:normal;text-overflow:clip;}' in styles
     assert '.attention-telegram-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;' in styles
     assert '.attention-ok{grid-template-columns:minmax(0,1fr);}' in styles
     assert '.attention-ok .attention-dot{display:none;}' in styles

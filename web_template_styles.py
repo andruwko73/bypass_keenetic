@@ -326,10 +326,10 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .mode-toggle span:first-child,.theme-toggle span:first-child{flex:none;}
         .mode-toggle span:last-child,.theme-toggle span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
         .api-pill{display:flex;align-items:center;width:100%;height:auto;min-height:calc(var(--control-height) + 8px);max-width:none;padding-top:6px;padding-bottom:6px;font-size:12px;line-height:1.25;color:#d9e6ef;}
-        .topbar-status{justify-content:flex-start;gap:8px;text-align:left;overflow:hidden;}
+        .topbar-status{justify-content:flex-start;gap:8px;text-align:left;overflow:hidden;white-space:normal;max-height:60px;}
         .topbar-status-copy{display:grid;gap:1px;min-width:0;}
         .topbar-status-copy strong{min-width:0;color:#edf5fb;font-size:12px;font-weight:800;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-        .topbar-status-copy span{min-width:0;color:#b9c6d3;font-size:11px;font-weight:700;line-height:1.22;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .topbar-status-copy span{display:-webkit-box;min-width:0;color:#b9c6d3;font-size:11px;font-weight:700;line-height:1.22;max-height:calc(1.22em * 2);white-space:normal;overflow:hidden;text-overflow:ellipsis;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;word-break:normal;}
         .topbar-status-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;border-radius:7px;background-color:rgba(48,191,181,.14);background-repeat:no-repeat;background-position:center;background-size:16px 16px;border:1px solid rgba(78,216,205,.28);}
         .topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,{TELEGRAM_SVG_B64}");}
         .topbar-status-ok{border-color:rgba(78,216,205,.36);background:rgba(31,122,106,.12);}
@@ -790,6 +790,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .topbar-actions{grid-template-columns:max-content minmax(300px,1fr) max-content max-content;justify-content:stretch;width:100%;gap:8px;}
             .app-caption{max-width:none;}
             .api-pill{justify-self:stretch;min-height:var(--control-height);max-width:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+            .topbar-status{white-space:normal;text-overflow:clip;}
             .theme-control{justify-self:start;width:auto;}
             .theme-control .theme-toggle{width:auto;min-width:180px;}
             .version-badge{justify-self:start;align-self:center;}

@@ -1,3 +1,8 @@
+<a name="1.753"></a>
+# [1.753] - 21 Jun 2026
+
+- Allows the topbar status message to wrap to a bounded two-line note, saves route lists with background route application to avoid mobile fetch failures, and skips duplicate identical keys during pool probes.
+
 <a name="1.752"></a>
 # [1.752] - 21 Jun 2026
 

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.752, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.753, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -5386,8 +5386,8 @@ def _current_bot_version():
 def _save_unblock_list(list_name, text):
     if not os.path.basename(list_name).endswith('.txt'):
         raise ValueError('Список должен быть .txt файлом')
-    safe_name = _save_unblock_list_file(list_name, text, before_update=_sync_udp_policy_config)
-    return f'✅ Список {safe_name} сохранён и применён.'
+    safe_name = _save_unblock_list_file(list_name, text, before_update=_sync_udp_policy_config, async_update=True)
+    return f'Список {safe_name} сохранён. Применение маршрутов запущено в фоне.'
 
 
 def _route_tools_runtime():

@@ -31,7 +31,22 @@ def normalize_unblock_list(text):
     return '\n'.join(items)
 
 
-def save_unblock_list_file(list_name, text, before_update=None):
+def _run_unblock_update(async_update=False):
+    if async_update:
+        popen_kwargs = {
+            'stdout': subprocess.DEVNULL,
+            'stderr': subprocess.DEVNULL,
+            'close_fds': True,
+        }
+        try:
+            subprocess.Popen([UNBLOCK_UPDATE_SCRIPT], start_new_session=True, **popen_kwargs)
+        except TypeError:
+            subprocess.Popen([UNBLOCK_UPDATE_SCRIPT], **popen_kwargs)
+        return
+    subprocess.run([UNBLOCK_UPDATE_SCRIPT], check=False)
+
+
+def save_unblock_list_file(list_name, text, before_update=None, async_update=False):
     safe_name = os.path.basename(list_name)
     target_path = os.path.join(UNBLOCK_DIR, safe_name)
     if not target_path.endswith('.txt'):
@@ -43,7 +58,7 @@ def save_unblock_list_file(list_name, text, before_update=None):
             file.write(normalized + '\n')
     if callable(before_update):
         before_update()
-    subprocess.run([UNBLOCK_UPDATE_SCRIPT], check=False)
+    _run_unblock_update(async_update=async_update)
     return safe_name
 
 

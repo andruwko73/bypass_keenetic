@@ -1,3 +1,7 @@
+*v1.753 (21 Jun 2026) -* main
+
+*Lets the topbar status use a bounded multi-line note, makes web route-list saves return before background route application, and avoids checking identical pool keys twice.*
+
 *v1.752 (21 Jun 2026) -* main
 
 *Recovers empty ipset refresh lock directories that have no active PID, covering routers where the lock mtime is not enough to identify a stale refresh.*

@@ -237,16 +237,16 @@ def check_pool_key_through_proxy(
 def select_pool_probe_tasks(tasks, *, protocol_order, custom_checks, cache, hash_key, is_fresh, max_keys=None, stale_only=False, now=None):
     now = time.time() if now is None else now
     selected = []
-    seen = set()
+    seen_keys = set()
     for proto, key_value in tasks:
         key_value = (key_value or '').strip()
         if proto not in protocol_order or not key_value:
             continue
-        task_id = (proto, hash_key(key_value))
-        if task_id in seen:
+        key_id = hash_key(key_value)
+        if key_id in seen_keys:
             continue
-        seen.add(task_id)
-        if stale_only and is_fresh(cache.get(hash_key(key_value)), now=now, custom_checks=custom_checks):
+        seen_keys.add(key_id)
+        if stale_only and is_fresh(cache.get(key_id), now=now, custom_checks=custom_checks):
             continue
         selected.append((proto, key_value))
         if max_keys is not None and len(selected) >= max_keys:
