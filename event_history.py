@@ -210,14 +210,41 @@ def load_events(limit=50, *, event_path=None):
     return events
 
 
+def _web_update_finish_failed(event):
+    message = str((event or {}).get('message') or '').lower()
+    failure_markers = (
+        'error:',
+        ' failed',
+        'failed ',
+        'traceback',
+        'return_code=1',
+        'command exited with code 1',
+        'команда завершилась с кодом 1',
+        'ошибка',
+    )
+    return any(marker in message for marker in failure_markers)
+
+
+def _median_seconds(values):
+    ordered = sorted(int(value) for value in values)
+    count = len(ordered)
+    if not count:
+        return 0
+    middle = count // 2
+    if count % 2:
+        return ordered[middle]
+    return int(round((ordered[middle - 1] + ordered[middle]) / 2.0))
+
+
 def estimate_update_duration(
     command='update',
     *,
     event_path=None,
     limit=300,
-    default_seconds=180,
+    default_seconds=240,
     min_seconds=30,
     max_seconds=900,
+    min_samples=2,
 ):
     events = list(reversed(load_events(limit=limit, event_path=event_path)))
     durations = []
@@ -238,11 +265,13 @@ def estimate_update_duration(
         if action == 'web_command_finish' and current_start:
             duration = ts - current_start
             current_start = None
-            if min_seconds <= duration <= max_seconds:
+            if min_seconds <= duration <= max_seconds and not _web_update_finish_failed(event):
                 durations.append(duration)
     if not durations:
         return int(default_seconds), 0
+    if len(durations) < int(min_samples or 1):
+        return int(default_seconds), len(durations)
     recent = durations[-8:]
     if len(recent) >= 5:
         recent = sorted(recent)[1:-1]
-    return int(round(sum(recent) / float(len(recent)))), len(durations)
+    return _median_seconds(recent), len(durations)

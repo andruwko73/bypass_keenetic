@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.747, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.748, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -7960,6 +7960,11 @@ def _placeholder_status_snapshot(current_keys):
 def _refresh_status_caches_async(current_keys):
     if pool_probe_lock.locked():
         return
+    try:
+        if _read_web_command_state_file().get('running') or _shared_command_job_running(source='web'):
+            return
+    except Exception:
+        pass
     signature = _status_snapshot_signature(current_keys)
     with status_refresh_lock:
         if signature in status_refresh_in_progress:

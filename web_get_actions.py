@@ -60,6 +60,11 @@ def _status_payload(ctx):
     progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})() if pool_enabled else {}
     pool_probe_running = _pool_probe_running(progress)
     pool_probe_paused = _pool_probe_paused(ctx, progress) if pool_enabled else False
+    command_state_getter = _ctx(ctx, 'get_web_command_state')
+    try:
+        web_command_running = bool(command_state_getter and command_state_getter().get('running'))
+    except Exception:
+        web_command_running = False
     cache_getter = _ctx(ctx, 'get_status_api_cache')
     if cache_ttl > 0 and cache_getter and not pool_probe_running and not pool_probe_paused:
         cached = cache_getter()
@@ -77,21 +82,21 @@ def _status_payload(ctx):
         if placeholder_snapshot:
             snapshot = placeholder_snapshot(current_keys)
             pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
-            if not pool_probe_locked():
+            if not web_command_running and not pool_probe_locked():
                 _call(ctx, 'refresh_status_caches_async', current_keys)
         else:
             active_snapshot = _ctx(ctx, 'active_mode_status_snapshot')
             if active_snapshot:
                 snapshot = active_snapshot(current_keys)
                 pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
-                if not pool_probe_locked():
+                if not web_command_running and not pool_probe_locked():
                     _call(ctx, 'refresh_status_caches_async', current_keys)
             else:
                 snapshot = {
                     'web': _ctx(ctx, 'placeholder_web_status_snapshot')(),
                     'protocols': _ctx(ctx, 'placeholder_protocol_statuses')(current_keys),
                 }
-    if _ctx(ctx, 'refresh_status_on_api', False):
+    if _ctx(ctx, 'refresh_status_on_api', False) and not web_command_running:
         _call(ctx, 'refresh_status_caches_async', current_keys)
 
     payload = {

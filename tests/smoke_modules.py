@@ -4204,7 +4204,43 @@ def test_web_command_state_helpers():
             event_path=str(path),
             time_provider=lambda: 280,
         )
-        assert event_history.estimate_update_duration(event_path=str(path)) == (180, 1)
+        assert event_history.estimate_update_duration(event_path=str(path)) == (240, 1)
+        event_history.record_event(
+            action='web_command_start',
+            source='web',
+            protocol='system',
+            service='update',
+            event_path=str(path),
+            time_provider=lambda: 300,
+        )
+        event_history.record_event(
+            action='web_command_finish',
+            message='Error: crontab failed content validation',
+            source='web',
+            protocol='system',
+            service='update',
+            event_path=str(path),
+            time_provider=lambda: 900,
+        )
+        assert event_history.estimate_update_duration(event_path=str(path)) == (240, 1)
+        event_history.record_event(
+            action='web_command_start',
+            source='web',
+            protocol='system',
+            service='update',
+            event_path=str(path),
+            time_provider=lambda: 1000,
+        )
+        event_history.record_event(
+            action='web_command_finish',
+            message='Further update output is saved',
+            source='web',
+            protocol='system',
+            service='update',
+            event_path=str(path),
+            time_provider=lambda: 1240,
+        )
+        assert event_history.estimate_update_duration(event_path=str(path)) == (210, 2)
     state = {}
     lock = threading.Lock()
     web_command_state.set_flash_message(lock, state, 'ok')
@@ -4446,6 +4482,16 @@ def test_web_get_actions_helpers():
     placeholder_status = web_get_actions.dispatch(placeholder_ctx, '/api/status')
     assert placeholder_status['payload']['web'] == {'state': 'placeholder'}
     assert placeholder_refreshed == [current_keys]
+    command_refreshed = []
+    command_ctx = dict(placeholder_ctx)
+    command_ctx.update({
+        'refresh_status_caches_async': lambda keys: command_refreshed.append(keys),
+        'get_web_command_state': lambda: {'running': True, 'command': 'update'},
+        'refresh_status_on_api': True,
+    })
+    command_status = web_get_actions.dispatch(command_ctx, '/api/status')
+    assert command_status['payload']['web'] == {'state': 'placeholder'}
+    assert command_refreshed == []
     pools = web_get_actions.dispatch(ctx, '/api/pools')
     assert pools['payload']['pools'] == {'vless': {'rows': []}}
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
@@ -5306,7 +5352,8 @@ def test_web_template_scripts_helpers():
     assert "document.documentElement.classList.toggle('command-running', !!running);" in scripts
     assert 'function commandTimerText(state)' in scripts
     assert 'expected_seconds' in scripts
-    assert 'обычно осталось около' in scripts
+    assert 'обычно около' in scripts
+    assert 'осталось около' not in scripts
     assert 'elapsed * (100 - progress) / progress' not in scripts
     assert 'data-command-progress-fill' not in scripts
     assert "sortMode === 'quality'" in scripts

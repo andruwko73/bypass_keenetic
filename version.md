@@ -1,3 +1,7 @@
+*v1.748 (21 Jun 2026) -* main
+
+*Makes the web update timer use a conservative successful-update median instead of a misleading remaining-time countdown, and suppresses background status refresh checks while a web update command is running to reduce router CPU spikes during installation.*
+
 *v1.747 (21 Jun 2026) -* main
 
 *Accepts and stores the YouTube short-link health metric in the key probe cache, fixing active key status refresh after the YouTube warn-state metrics were added.*

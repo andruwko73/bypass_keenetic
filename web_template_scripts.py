@@ -1805,14 +1805,10 @@ def render_web_scripts(
             const elapsed = commandElapsedSeconds(state);
             const expected = Math.max(0, Number(state.expected_seconds || 0));
             if (expected > 0) {{
-                const remaining = Math.max(0, expected - elapsed);
-                if (remaining > 0) {{
-                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · обычно осталось около ' + formatCommandDuration(remaining);
-                }}
                 if (elapsed <= expected + 90) {{
-                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · обычно уже завершается';
+                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · обычно около ' + formatCommandDuration(expected) + ' всего';
                 }}
-                return 'Прошло ' + formatCommandDuration(elapsed) + ' · дольше обычного ' + formatCommandDuration(expected);
+                return 'Прошло ' + formatCommandDuration(elapsed) + ' · дольше обычных ' + formatCommandDuration(expected);
             }}
             return 'Прошло ' + formatCommandDuration(elapsed);
         }}
