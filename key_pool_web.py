@@ -2,6 +2,8 @@ import html
 import time
 from urllib.parse import urlparse
 
+from probe_cache import youtube_probe_state
+
 
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
 POOL_PROTOCOL_LABELS = {
@@ -134,6 +136,15 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                     if service['field'] not in probe:
                         continue
                     raw_value = probe.get(service['field'])
+                    if service['field'] == 'yt_ok':
+                        state = youtube_probe_state(probe)
+                        if state == 'unknown':
+                            continue
+                        ok = state in ('ok', 'warn')
+                        results.append(ok)
+                        if ok:
+                            service['count'] += 1
+                        continue
                 else:
                     if service['id'] not in custom:
                         continue
@@ -218,6 +229,8 @@ def protocol_custom_checks(custom_checks, route_states, protocol):
 
 
 def web_probe_state(probe, key):
+    if key == 'yt_ok':
+        return youtube_probe_state(probe)
     if not probe or key not in probe:
         return 'unknown'
     value = probe.get(key)

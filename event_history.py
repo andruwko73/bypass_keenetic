@@ -5,7 +5,7 @@ import time
 
 
 EVENT_HISTORY_PATH = '/opt/etc/bot/event_history.jsonl'
-MAX_EVENTS = 300
+MAX_EVENTS = 120
 
 PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
@@ -28,6 +28,16 @@ IPV4_PATTERN = re.compile(
     r'\b(?:25[0-5]|2[0-4]\d|1?\d?\d)'
     r'(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b'
 )
+IP_REDACT_ACTION_PREFIXES = (
+    'telegram_call_learning',
+    'stream_guard',
+    'udp_quic_drift',
+)
+
+
+def _action_redacts_ip(action):
+    action_text = str(action or '')
+    return any(action_text.startswith(prefix) for prefix in IP_REDACT_ACTION_PREFIXES)
 
 
 def redact_sensitive_text(value):
@@ -55,6 +65,24 @@ def _limit_text(value, max_len=800, redact_ip=False):
     if len(text) <= max_len:
         return text
     return text[:max_len].rstrip() + '...'
+
+
+def _compact_event_detail(action, key, value):
+    key_text = str(key or '')
+    if key_text == 'route_diagnostic' and isinstance(value, dict):
+        ports = value.get('proxy_ports') or []
+        proxy_samples = value.get('proxy_samples') or []
+        fastnat_samples = value.get('fastnat_samples') or []
+        return (
+            f'proxy_ports={len(ports)}; '
+            f'proxy_samples={len(proxy_samples)}; '
+            f'fastnat_samples={len(fastnat_samples)}'
+        )
+    if key_text in ('proxy_samples', 'fastnat_samples') and isinstance(value, (list, tuple)):
+        return f'{key_text}={len(value)}'
+    if key_text == 'sample' and _action_redacts_ip(action):
+        return _limit_text(value, 180, redact_ip=True)
+    return value
 
 
 def _trim_history(path, max_events):
@@ -97,7 +125,7 @@ def record_event(
 ):
     path = _event_path(event_path)
     action_text = _limit_text(action, 80)
-    redact_ip = action_text.startswith('telegram_call_learning')
+    redact_ip = _action_redacts_ip(action_text)
     event = {
         'ts': int(time_provider()),
         'level': _limit_text(level, 40),
@@ -111,7 +139,11 @@ def record_event(
     }
     if isinstance(details, dict):
         event['details'] = {
-            _limit_text(key, 80): _limit_text(value, 300, redact_ip=redact_ip)
+            _limit_text(key, 80): _limit_text(
+                _compact_event_detail(action_text, key, value),
+                220,
+                redact_ip=redact_ip,
+            )
             for key, value in details.items()
             if value is not None
         }
@@ -129,13 +161,17 @@ def _redact_loaded_event(event):
     if not isinstance(event, dict):
         return event
     action_text = _limit_text(event.get('action'), 80)
-    if not action_text.startswith('telegram_call_learning'):
+    if not _action_redacts_ip(action_text):
         return event
     event['message'] = _limit_text(event.get('message', ''), 800, redact_ip=True)
     details = event.get('details')
     if isinstance(details, dict):
         event['details'] = {
-            _limit_text(key, 80): _limit_text(value, 300, redact_ip=True)
+            _limit_text(key, 80): _limit_text(
+                _compact_event_detail(action_text, key, value),
+                220,
+                redact_ip=True,
+            )
             for key, value in details.items()
             if value is not None
         }

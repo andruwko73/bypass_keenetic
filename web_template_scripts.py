@@ -875,6 +875,9 @@ def render_web_scripts(
             if (state === 'ok') {{
                 return serviceIcon(service === 'tg' ? TELEGRAM_ICON_SRC : YOUTUBE_ICON_SRC, service === 'tg' ? 'Telegram' : 'YouTube');
             }}
+            if (state === 'warn') {{
+                return '<span class="service-probe-mark service-probe-warn">!</span>';
+            }}
             if (state === 'fail') {{
                 return '<span class="service-probe-mark service-probe-fail">✕</span>';
             }}
@@ -1061,6 +1064,9 @@ def render_web_scripts(
             if (value === 'ok') {{
                 return 3;
             }}
+            if (value === 'warn') {{
+                return 2.5;
+            }}
             if (value === 'unknown') {{
                 return 2;
             }}
@@ -1084,7 +1090,7 @@ def render_web_scripts(
             const tg = row.dataset.tgState || 'unknown';
             const yt = row.dataset.ytState || 'unknown';
             if (state === 'working') {{
-                return tg === 'ok' || yt === 'ok';
+                return tg === 'ok' || yt === 'ok' || yt === 'warn';
             }}
             if (state === 'problem') {{
                 return tg === 'fail' || yt === 'fail';

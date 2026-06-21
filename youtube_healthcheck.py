@@ -196,7 +196,8 @@ def check_youtube_through_proxy(
     watch_ok = 'watch' not in seen_kinds or 'watch' in ok_kinds
     short_ok = 'short' not in seen_kinds or 'short' in ok_kinds
     bootstrap_ok = 'bootstrap' not in seen_kinds or 'bootstrap' not in failed_kinds
-    googlevideo_ok = 'googlevideo' not in seen_kinds or (
+    googlevideo_ok = 'googlevideo' not in seen_kinds or googlevideo_ok_count > 0
+    googlevideo_stable = 'googlevideo' not in seen_kinds or (
         googlevideo_ok_count > 0 and googlevideo_fail_count == 0
     )
     success_required = min(total_count, max(1, int(min_ok or 1)))
@@ -217,7 +218,7 @@ def check_youtube_through_proxy(
         watch_ok and
         short_ok and
         bootstrap_ok and
-        googlevideo_ok and
+        googlevideo_stable and
         failure_count <= max(0, int(max_failures or 0)) and
         unstable_failures == 0
     )
@@ -251,7 +252,7 @@ def check_youtube_through_proxy(
         return True, f'YouTube first-load endpoints confirmed with transient soft check: {detail}'
     if partially_ok:
         detail = '; '.join(failed[-3:]) or 'intermittent YouTube endpoint failure'
-        return False, f'YouTube is unstable: {detail}'
+        return True, f'YouTube is unstable but usable, scheduling background recheck: {detail}'
     if required_missing:
         detail = '; '.join(failed[:3])
         if detail:

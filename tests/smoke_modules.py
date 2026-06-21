@@ -700,6 +700,16 @@ def test_key_pool_web():
     assert 'custom-service-ok' in key_pool_web.web_custom_check_badges({'custom': {'custom': True}}, check_defs, icon_html)
     assert key_pool_web.web_probe_state({'tg_ok': True}, 'tg_ok') == 'ok'
     assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
+    assert key_pool_web.web_probe_state({'yt_ok': False, 'yt_stability': 'unstable'}, 'yt_ok') == 'warn'
+    warn_summary = key_pool_web.pool_status_summary(
+        {'vless2': 'warn-key'},
+        {'vless2': ['warn-key']},
+        {_hash_key('warn-key'): {'yt_ok': False, 'yt_stability': 'unstable', 'ts': 5}},
+        [],
+        _hash_key,
+    )
+    assert warn_summary['services'][1] == {'label': 'YouTube', 'count': 1}
+    assert warn_summary['any_service_count'] == 1
     assert key_pool_web.web_custom_probe_states({'custom': {'custom': None}}, checks)['custom'] == 'unknown'
     scoped_checks = [
         {'id': 'discord', 'label': 'Discord'},
@@ -965,6 +975,30 @@ def test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure():
     assert metrics['googlevideo_ok'] is True
     assert metrics['yt_bootstrap_ok'] is False
     assert metrics['yt_stability'] == 'unstable'
+
+
+def test_youtube_healthcheck_warns_on_partial_googlevideo_success():
+    calls_by_url = {}
+
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        calls_by_url[url] = calls_by_url.get(url, 0) + 1
+        if url == youtube_healthcheck.YOUTUBE_GOOGLEVIDEO_URL and calls_by_url[url] <= 2:
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10813',
+        http_timeouts=(1, 2),
+        metrics=metrics,
+    )
+
+    assert ok is True
+    assert 'transient soft check' in message
+    assert metrics['googlevideo_ok'] is True
+    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_error_rate'] > 0
 
 
 def test_telegram_call_learning_helpers():
@@ -2084,7 +2118,7 @@ def test_telegram_call_router_health_note():
     )
     assert health['ok'] is True
     assert health['ports'] == {'vless': 11812}
-    assert router_health_runtime.telegram_call_proxy_note(health) == 'Calls: alive, TPROXY, порты: Vless 11812:ok'
+    assert router_health_runtime.telegram_call_proxy_note(health) == 'Calls: alive, TPROXY, Telegram/WhatsApp/Discord, порты: Vless 11812:ok'
     assert ('netstat', '-lnp') in commands
 
 
@@ -2110,6 +2144,16 @@ def test_cached_protocol_status_description_has_no_static_trailing_period():
     )
     assert status['details'].endswith('Discord: работает')
     assert not status['details'].endswith('.')
+    warn_status = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'unstable'},
+        [],
+        {},
+    )
+    assert warn_status['tone'] == 'warn'
+    assert warn_status['yt_ok'] is True
+    assert warn_status['yt_state'] == 'warn'
+    assert 'YouTube:' in warn_status['details']
 
 
 def test_active_protocol_status_description_has_no_trailing_period():
@@ -4580,6 +4624,23 @@ def test_web_pool_form_blocks_helpers():
     assert '&times;' in pool_rows
     assert 'data-pool-mobile-checked' in pool_rows
     assert '>now</span>' in pool_rows
+    warn_rows = web_pool_form_blocks.render_pool_items(
+        key_name='vless2',
+        title='Vless 2',
+        pool_keys=['warn-key-value'],
+        current_key='',
+        key_probe_cache={'hash-warn': {'yt_ok': False, 'yt_stability': 'unstable'}},
+        custom_checks=[],
+        key_display_name=lambda key: 'warn-key',
+        hash_key=lambda key: 'hash-warn',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        custom_check_badges=lambda probe, checks: '',
+        probe_checked_at=lambda probe: '',
+        csrf_input_html='<input name="csrf_token" value="token">',
+    )
+    assert 'data-yt-state="warn"' in warn_rows
+    assert 'service-probe-warn' in warn_rows
     panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
         title='Vless 1',
@@ -5002,8 +5063,17 @@ def test_probe_cache_quality_metrics():
         min_1600p_mbps=25.0,
         min_4k_mbps=45.0,
     )
-    assert unstable['yt_score'] == 0
+    assert 0 < unstable['yt_score'] <= 55
     assert unstable['yt_quality'] == ''
+    warn_entry = {
+        'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+        'ts': 100,
+        'yt_ok': False,
+        'yt_stability': 'unstable',
+    }
+    assert probe_cache.youtube_probe_state(warn_entry) == 'warn'
+    assert probe_cache.youtube_probe_effective_ok(warn_entry) is True
+    assert probe_cache.key_probe_is_fresh(warn_entry, now=100 + probe_cache.KEY_PROBE_FAILURE_TTL + 10) is True
 
 
 def test_probe_cache_ignores_stale_schema(tmp_path):
@@ -5238,6 +5308,8 @@ def test_web_template_scripts_helpers():
     assert 'elapsed * (100 - progress) / progress' not in scripts
     assert 'data-command-progress-fill' not in scripts
     assert "sortMode === 'quality'" in scripts
+    assert "state === 'warn'" in scripts
+    assert 'service-probe-warn' in scripts
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
     assert 'activeCommandName' in scripts
@@ -5469,7 +5541,7 @@ def test_telegram_pool_ui():
 def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     assert 'key_name == _youtube_route_protocol()' in source
-    assert "probe.get('yt_ok') is not True" in source
+    assert "_youtube_probe_state(probe) != 'ok'" in source
     assert "def _schedule_youtube_cache_confirm" in source
     assert "def _schedule_vless2_youtube_cache_confirm" in source
     assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
@@ -5544,6 +5616,31 @@ def test_telegram_call_learning_event_history_redacts_ip_addresses():
     assert '192.168.1.24' not in serialized
     assert '<ip-hidden>' in serialized
     assert events[1]['details']['count'] == '1'
+
+
+def test_stream_guard_event_history_redacts_ip_samples_and_compacts_details():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'events.jsonl'
+        assert event_history.record_event(
+            action='stream_guard_defer',
+            message='active flow 192.168.1.23 -> 142.250.74.110',
+            details={
+                'reason': 'active_stream',
+                'route_diagnostic': {
+                    'proxy_ports': [10812, 11812],
+                    'proxy_samples': ['192.168.1.23:51000 -> 142.250.74.110:443'],
+                    'fastnat_samples': ['142.250.74.110:443'],
+                },
+                'sample': '192.168.1.23 -> 142.250.74.110',
+            },
+            event_path=str(path),
+        )
+        events = event_history.load_events(event_path=str(path))
+    serialized = json.dumps(events, ensure_ascii=False)
+    assert '192.168.1.23' not in serialized
+    assert '142.250.74.110' not in serialized
+    assert '<ip-hidden>' in serialized
+    assert events[0]['details']['route_diagnostic'] == 'proxy_ports=2; proxy_samples=1; fastnat_samples=1'
 
 
 def test_update_status_helpers():

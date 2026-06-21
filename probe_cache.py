@@ -95,7 +95,7 @@ def youtube_quality_score(
     if yt_ok is not True:
         return {'yt_score': 0 if yt_ok is False else 20, 'yt_quality': '', 'yt_stream_tier': ''}
     stability = str(yt_stability or '').strip().lower()
-    if stability == 'fail' or googlevideo_ok is False:
+    if stability == 'fail' or (googlevideo_ok is False and stability != 'unstable'):
         return {'yt_score': 0, 'yt_quality': '', 'yt_stream_tier': ''}
 
     stable_latency_ms = max(1, _stored_int(stable_latency_ms) or YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS)
@@ -146,9 +146,26 @@ def youtube_quality_score(
         elif throughput >= min_1600p_mbps and latency_is_stable:
             quality = YOUTUBE_QUALITY_STABLE
     if stability == 'unstable' or error_rate > 0:
-        score = max(0, score - max(18, int(round(error_rate * 100))))
+        score = max(0, min(55, score - max(18, int(round(error_rate * 100)))))
         quality = ''
     return {'yt_score': score, 'yt_quality': quality, 'yt_stream_tier': stream_tier}
+
+
+def youtube_probe_state(entry):
+    if not isinstance(entry, dict):
+        return 'unknown'
+    stability = str(entry.get('yt_stability') or '').strip().lower()
+    if entry.get('yt_ok') is True:
+        return 'warn' if stability == 'unstable' else 'ok'
+    if stability == 'unstable':
+        return 'warn'
+    if entry.get('yt_ok') is False:
+        return 'fail'
+    return 'unknown'
+
+
+def youtube_probe_effective_ok(entry):
+    return youtube_probe_state(entry) in ('ok', 'warn')
 
 
 def _set_entry_metric(entry, key, value, *, digits=2):
@@ -565,7 +582,7 @@ def key_probe_is_fresh(entry, now=None, custom_checks=None):
         age >= KEY_PROBE_FAILURE_TTL and
         (
             entry.get('tg_ok') is False or
-            entry.get('yt_ok') is False or
+            youtube_probe_state(entry) == 'fail' or
             any(value is False for value in (entry.get('custom') or {}).values())
         )
     ):

@@ -1,5 +1,7 @@
 import html
 
+from probe_cache import youtube_probe_state
+
 
 POOL_EMPTY_ROW_HTML = (
     '<tr class="pool-row pool-empty-row"><td colspan="6">'
@@ -46,6 +48,8 @@ def pool_table_layout(custom_checks):
 
 
 def _service_probe_badge(probe, probe_key, ok_html):
+    if probe_key == 'yt_ok' and youtube_probe_state(probe) == 'warn':
+        return '<span class="service-probe-mark service-probe-warn">!</span>'
     if probe.get(probe_key):
         return ok_html
     if probe_key in probe:
@@ -54,6 +58,8 @@ def _service_probe_badge(probe, probe_key, ok_html):
 
 
 def _probe_state(probe, probe_key):
+    if probe_key == 'yt_ok':
+        return youtube_probe_state(probe)
     if not isinstance(probe, dict) or probe_key not in probe or probe.get(probe_key) is None:
         return 'unknown'
     return 'ok' if probe.get(probe_key) else 'fail'

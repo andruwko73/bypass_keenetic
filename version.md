@@ -1,3 +1,7 @@
+*v1.745 (21 Jun 2026) -* main
+
+*Treat transient YouTube googlevideo failures as a warning instead of a broken key, compact reconnect diagnostics in event history without exposing IP addresses, and show generalized realtime call TPROXY status for Telegram, WhatsApp, and Discord.*
+
 *v1.744 (21 Jun 2026) -* main
 
 *Keeps Android/OS connectivity-check domains out of route files, dnsmasq rules, and static ipset refreshes, and cleans stale entries during route repair so clients do not report Wi-Fi without internet after updates.*

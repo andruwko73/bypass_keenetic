@@ -67,6 +67,7 @@ TELEGRAM_CALL_PROTOCOL_LABELS = {
     'vless2': 'Vless 2',
     'trojan': 'Trojan',
 }
+REALTIME_CALL_SERVICE_LABELS = ('Telegram', 'WhatsApp', 'Discord')
 
 
 def read_proc_text(path, max_bytes=16384):
@@ -242,6 +243,7 @@ def telegram_call_proxy_health(
         'enabled': enabled,
         'tproxy_enabled': tproxy_enabled,
         'chain_ok': chain_ok,
+        'services': list(REALTIME_CALL_SERVICE_LABELS),
         'protocols': protocols,
         'ports': {proto: ports_by_protocol[proto] for proto in protocols},
         'port_states': {str(port): bool(port_states.get(port, False)) for port in active_ports},
@@ -263,10 +265,12 @@ def telegram_call_proxy_note(health):
         f'{TELEGRAM_CALL_PROTOCOL_LABELS.get(proto, proto)} {ports.get(proto)}:{"ok" if port_states.get(str(ports.get(proto))) else "down"}'
         for proto in protocols
     )
+    services = '/'.join(str(item) for item in (health.get('services') or []) if str(item or '').strip())
     state = 'alive' if health.get('ok') else 'down'
     suffix = f', порты: {ports_text}' if ports_text else ''
+    service_text = f', {services}' if services else ''
     chain_text = '' if health.get('chain_ok') else ', chain down'
-    return f'Calls: {state}, TPROXY{chain_text}{suffix}'
+    return f'Calls: {state}, TPROXY{chain_text}{service_text}{suffix}'
 
 
 def parse_dns_backend(netstat_text):

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.744, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.745, последнее изменение: 21.06.2026
 
 import subprocess
 import os
@@ -167,6 +167,7 @@ from probe_cache import (
     key_probe_is_fresh as _key_probe_is_fresh,
     load_key_probe_cache as _load_key_probe_cache,
     record_key_probe as _record_key_probe,
+    youtube_probe_state as _youtube_probe_state,
 )
 from service_catalog import (
     CONNECTIVITY_CHECK_DOMAINS,
@@ -1024,7 +1025,13 @@ def _attempt_youtube_failover():
         return False
     cached_active_probe = _load_key_probe_cache().get(_hash_key(active_key), {})
     cached_fail_since = 0.0
-    if isinstance(cached_active_probe, dict) and cached_active_probe.get('yt_ok') is False:
+    cached_youtube_state = _youtube_probe_state(cached_active_probe)
+    if cached_youtube_state == 'warn':
+        state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
+        _schedule_youtube_cache_confirm(route_proto, active_key)
+        return False
+    if isinstance(cached_active_probe, dict) and cached_youtube_state == 'fail':
         try:
             cached_fail_since = float(cached_active_probe.get('ts') or 0.0)
         except Exception:
@@ -5732,7 +5739,7 @@ def _measure_quality_download_through_proxy(proxy_url, url='', bytes_limit=0, co
         session.close()
 
 
-def _check_youtube_health_through_proxy(proxy_url):
+def _check_youtube_health_through_proxy(proxy_url, metrics=None):
     return _controller_check_youtube_through_proxy(
         _check_http_through_proxy,
         proxy_url,
@@ -5741,6 +5748,7 @@ def _check_youtube_health_through_proxy(proxy_url):
         http_timeouts=(POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT),
         http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
         retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+        metrics=metrics,
     )
 
 
@@ -5868,7 +5876,8 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
         authenticated=False,
     )
     api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
-    yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url)
+    yt_metrics = {}
+    yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     if route_states is None and custom_checks:
         route_states = _service_route_summary()
@@ -5881,9 +5890,13 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
         api_transient = False
         api_message = f'Последняя успешная проверка Telegram сохранена; свежая проверка временно не ответила: {api_message}'
     if api_transient:
-        _record_key_probe(key_name, key_value, yt_ok=yt_ok)
+        _record_key_probe(key_name, key_value, yt_ok=yt_ok, **yt_metrics)
     else:
-        _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok)
+        _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok, **yt_metrics)
+    yt_state = 'warn' if yt_ok and (
+        str(yt_metrics.get('yt_stability') or '').lower() == 'unstable' or
+        'unstable' in str(yt_message or '').lower()
+    ) else ('ok' if yt_ok else 'fail')
     return _status_active_protocol_status(
         endpoint_ok=endpoint_ok,
         endpoint_message=endpoint_message,
@@ -5892,6 +5905,7 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
         api_transient=api_transient,
         yt_ok=yt_ok,
         yt_message=yt_message,
+        yt_state=yt_state,
         custom_states=custom_states,
         custom_checks=protocol_custom_checks,
         api_required=_telegram_required_for_protocol(key_name),
@@ -5917,7 +5931,7 @@ def _cached_protocol_status_for_key(
     if (
         allow_youtube_confirm and
         key_name == _youtube_route_protocol() and
-        (not isinstance(probe, dict) or probe.get('yt_ok') is not True)
+        _youtube_probe_state(probe) != 'ok'
     ):
         _schedule_youtube_cache_confirm(key_name, key_value)
     custom_states = key_pool_web.web_custom_probe_states(probe, protocol_custom_checks)
