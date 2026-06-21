@@ -1,3 +1,8 @@
+<a name="1.751"></a>
+# [1.751] - 21 Jun 2026
+
+- Recovers stale ipset refresh locks even when an old unblock_ipset process is still alive, preventing automatic dnsmasq/ipset refreshes from staying blocked for days.
+
 <a name="1.750"></a>
 # [1.750] - 21 Jun 2026
 

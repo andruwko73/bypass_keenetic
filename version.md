@@ -1,3 +1,7 @@
+*v1.751 (21 Jun 2026) -* main
+
+*Lets stale ipset refresh locks recover when an old unblock_ipset process is still alive, so automatic route refreshes do not stay stuck for days after a hung resolver run.*
+
 *v1.750 (21 Jun 2026) -* main
 
 *Removes unused legacy root assets and obsolete helper docs, and keeps local Codex/agent workspace files ignored so they cannot slip into GitHub releases.*

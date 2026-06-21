@@ -22,11 +22,29 @@ IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
 
 lock_pid_is_active() {
-	pid_file="$LOCK_DIR/pid"
-	[ -s "$pid_file" ] || return 1
-	pid="$(sed -n '1p' "$pid_file" 2>/dev/null | tr -cd '0-9')"
+	pid="$(lock_pid)"
 	[ -n "$pid" ] || return 1
 	kill -0 "$pid" 2>/dev/null
+}
+
+lock_pid() {
+	pid_file="$LOCK_DIR/pid"
+	[ -s "$pid_file" ] || return 1
+	sed -n '1p' "$pid_file" 2>/dev/null | tr -cd '0-9'
+}
+
+lock_pid_command() {
+	pid="$(lock_pid)"
+	[ -n "$pid" ] || return 1
+	tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null
+}
+
+lock_pid_is_unblock_refresh() {
+	cmdline="$(lock_pid_command)"
+	case "$cmdline" in
+		*unblock_ipset.sh*) return 0 ;;
+	esac
+	return 1
 }
 
 lock_age_seconds() {
@@ -42,9 +60,28 @@ lock_age_seconds() {
 	fi
 }
 
+stop_stale_lock_process() {
+	pid="$(lock_pid)"
+	[ -n "$pid" ] || return 1
+	if lock_pid_is_unblock_refresh; then
+		kill "$pid" >/dev/null 2>&1 || true
+		sleep 2
+		if kill -0 "$pid" >/dev/null 2>&1; then
+			kill -9 "$pid" >/dev/null 2>&1 || true
+		fi
+		echo "Stopped stale unblock_ipset process pid ${pid}."
+		return 0
+	fi
+	echo "Removed stale unblock_ipset lock with non-refresh pid ${pid}."
+	return 0
+}
+
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
 	lock_age="$(lock_age_seconds)"
-	if [ "$lock_age" -ge "$LOCK_STALE_SECONDS" ] 2>/dev/null && ! lock_pid_is_active; then
+	if [ "$lock_age" -ge "$LOCK_STALE_SECONDS" ] 2>/dev/null; then
+		if lock_pid_is_active; then
+			stop_stale_lock_process
+		fi
 		rm -rf "$LOCK_DIR" >/dev/null 2>&1 || true
 		if mkdir "$LOCK_DIR" 2>/dev/null; then
 			echo "Removed stale unblock_ipset lock (${lock_age}s old)."
