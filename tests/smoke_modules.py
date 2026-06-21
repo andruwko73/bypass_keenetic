@@ -961,6 +961,28 @@ def test_youtube_healthcheck_tolerates_transient_primary_generate_204():
     assert metrics['yt_error_rate'] > 0
 
 
+def test_youtube_healthcheck_rejects_http_client_error_status():
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        if url == youtube_healthcheck.YOUTUBE_HOME_URL:
+            return True, 'Веб-доступ через ключ подтверждён (HTTP 451).'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10811',
+        http_timeouts=(1, 2),
+        profile='quick',
+        metrics=metrics,
+    )
+
+    assert ok is False
+    assert 'Required YouTube endpoint' in message
+    assert metrics['yt_home_ok'] is False
+    assert metrics['googlevideo_ok'] is True
+    assert metrics['yt_stability'] == 'fail'
+
+
 def test_youtube_healthcheck_warns_on_single_required_timeout():
     def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
         if url == youtube_healthcheck.YOUTUBE_HOME_URL:
@@ -1232,8 +1254,11 @@ def test_web_post_actions_helpers():
     assert apply_result['success'] is True
     assert active == [('vless', 'vless://one')]
     assert apply_result['extra']['key_id'] == 'id-one-1234'
-    assert apply_result['extra']['key'] == 'vless://one'
+    assert 'key' not in apply_result['extra']
     assert snapshots[-1] is False
+    install_result = web_post_actions.dispatch(pool_ctx, '/install', {'type': ['vless'], 'key': ['vless://one']})
+    assert install_result['success'] is True
+    assert 'key' not in install_result['extra']
     assert web_post_actions.dispatch(ctx, '/telegram_call_learn', {}) is None
 
 
@@ -3122,6 +3147,17 @@ def test_pool_probe_controller_helpers():
     assert tg_message == 'telegram dc ok'
     assert tcp_calls and tcp_calls[0][0] == 'socks5h://127.0.0.1:10811'
     assert 'tg_latency_ms' in metrics
+
+    tg_ok, tg_message = telegram_healthcheck.check_telegram_service_through_proxy(
+        lambda proxy, **kwargs: (True, 'bot api ok'),
+        lambda proxy, **kwargs: (True, 'Веб-доступ через ключ подтверждён (HTTP 403).'),
+        'socks5h://127.0.0.1:10811',
+        telegram_timeouts=(1, 2),
+        http_timeouts=(1, 1),
+        allow_app_endpoints_without_api=False,
+    )
+    assert tg_ok is False
+    assert 'HTTP 403' in tg_message
 
     records = []
     full_http_calls = []
@@ -5527,6 +5563,8 @@ def test_web_template_scripts_helpers():
     assert "element.classList.remove('liquid-resetting')" in scripts
     assert 'button[type="button"], a[href], [role="button"]' in scripts
     assert 'liquidSyntheticTarget' in scripts
+    assert 'payload.key;' not in scripts
+    assert 'payload.key ||' not in scripts
     assert 'lastLensPoint' not in scripts
     assert "globalLens.style.setProperty('--lr'" not in scripts
     assert "globalLens.style.setProperty('--lsx'" not in scripts

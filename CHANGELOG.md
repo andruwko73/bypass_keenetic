@@ -1,3 +1,8 @@
+<a name="1.755"></a>
+# [1.755] - 21 Jun 2026
+
+- Keeps raw proxy keys out of web action JSON responses, removes a local secret signature from the tracked secret scanner in favor of an optional local denylist, and makes core YouTube/Telegram service healthchecks reject HTTP 4xx responses instead of treating deny pages as working service access.
+
 <a name="1.754"></a>
 # [1.754] - 21 Jun 2026
 

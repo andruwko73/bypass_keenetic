@@ -2225,8 +2225,9 @@ def render_web_scripts(
                                 markPoolKeyActive(proto, String(payload.key_id || keyId || ''));
                                 const card = form.closest('[data-protocol-card]');
                                 const textarea = card ? card.querySelector('[data-key-textarea]') : null;
-                                if (textarea && payload.key) {{
-                                    textarea.value = payload.key;
+                                if (textarea) {{
+                                    textarea.value = '';
+                                    textarea.placeholder = 'Ключ применён из пула; значение скрыто в ответе. Обновите страницу, чтобы открыть активный ключ.';
                                 }}
                             }}
                             if (payload.route_tools_html) {{

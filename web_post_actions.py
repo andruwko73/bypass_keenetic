@@ -462,7 +462,7 @@ def _pool_apply(ctx, data):
             lock.release()
         if should_resume_probe:
             _call(ctx, 'resume_cancelled_pool_probe')
-    extra = {'protocol': proto, 'key': key_to_apply, 'key_id': key_id}
+    extra = {'protocol': proto, 'key_id': key_id}
     extra.update(_pool_payload(ctx))
     return _result(result, success=success, extra=extra)
 
@@ -537,7 +537,7 @@ def _install(ctx, data):
             lock.release()
         if should_resume_probe:
             _call(ctx, 'resume_cancelled_pool_probe')
-    extra = {'protocol': key_type, 'key': key_value}
+    extra = {'protocol': key_type}
     extra.update(_pool_payload(ctx))
     return _result(result, success=success, extra=extra)
 

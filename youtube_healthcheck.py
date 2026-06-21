@@ -1,3 +1,4 @@
+import re
 import time
 from urllib.parse import urlparse
 
@@ -64,6 +65,7 @@ YOUTUBE_UNSTABLE_ERROR_MARKERS = (
     'не ответил',
     'вовремя',
 )
+YOUTUBE_DENIED_HTTP_STATUS_RE = re.compile(r'\bHTTP\s+4\d\d\b', re.I)
 
 
 def youtube_url_host(url):
@@ -95,6 +97,10 @@ def youtube_url_kind(url):
 def youtube_error_is_unstable(message):
     text = str(message or '').casefold()
     return any(marker in text for marker in YOUTUBE_UNSTABLE_ERROR_MARKERS)
+
+
+def youtube_http_status_is_denied(message):
+    return bool(YOUTUBE_DENIED_HTTP_STATUS_RE.search(str(message or '')))
 
 
 def _elapsed_ms(started_at):
@@ -157,6 +163,8 @@ def check_youtube_through_proxy(
             connect_timeout=connect_timeout,
             read_timeout=read_timeout,
         )
+        if ok and youtube_http_status_is_denied(message):
+            ok = False
         if (
             not ok and
             kind in ('primary', 'home', 'watch', 'short', 'bootstrap', 'googlevideo') and
@@ -170,6 +178,8 @@ def check_youtube_through_proxy(
                 connect_timeout=retry_http_connect,
                 read_timeout=retry_http_read,
             )
+            if ok and youtube_http_status_is_denied(message):
+                ok = False
         elapsed_ms = _elapsed_ms(started_at)
         if kind == 'home' and first_home_ms is None:
             first_home_ms = elapsed_ms

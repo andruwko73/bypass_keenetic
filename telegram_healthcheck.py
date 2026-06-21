@@ -1,3 +1,4 @@
+import re
 import socket
 import time
 from urllib.parse import urlparse
@@ -28,6 +29,7 @@ TELEGRAM_TRANSIENT_FAILURE_MARKERS = (
     'врем',
     'разорвал',
 )
+TELEGRAM_DENIED_HTTP_STATUS_RE = re.compile(r'\bHTTP\s+4\d\d\b', re.I)
 
 
 def _elapsed_ms(started_at):
@@ -37,6 +39,10 @@ def _elapsed_ms(started_at):
 def telegram_failure_is_transient(message):
     text = str(message or '').strip().lower()
     return bool(text and any(marker in text for marker in TELEGRAM_TRANSIENT_FAILURE_MARKERS))
+
+
+def telegram_http_status_is_denied(message):
+    return bool(TELEGRAM_DENIED_HTTP_STATUS_RE.search(str(message or '')))
 
 
 def _recv_exact(sock, length):
@@ -140,6 +146,8 @@ def check_telegram_service_through_proxy(
             connect_timeout=connect_timeout,
             read_timeout=read_timeout,
         )
+        if ok and telegram_http_status_is_denied(message):
+            ok = False
         if ok:
             ok_hosts.append(host)
             if len(ok_hosts) >= max(1, int(min_ok or 1)):

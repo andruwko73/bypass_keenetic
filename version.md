@@ -1,3 +1,7 @@
+*v1.755 (21 Jun 2026) -* main
+
+*Keeps raw proxy keys out of web action JSON responses, moves local secret-literal checks to an optional private denylist, and rejects HTTP 4xx deny responses in core YouTube/Telegram healthchecks so pool probes do not mark blocked service pages as working access.*
+
 *v1.754 (21 Jun 2026) -* main
 
 *Marks one-off YouTube endpoint timeouts as unstable when other YouTube signals pass, confirms Telegram with lightweight SOCKS TCP probes to app endpoints when API/web checks are inconclusive, keeps temporary pool-probe infrastructure failures from poisoning key status, and fixes router refresh scripts when system utilities are missing from PATH.*
