@@ -5766,15 +5766,18 @@ def test_web_template_scripts_helpers():
     assert 'function applyLiquidAction(clientX, clientY)' in scripts
     assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
     assert 'function resetLiquidState()' in scripts
-    assert 'function loadedPoolProtocolQuery()' in scripts
+    assert 'function protocolQuery(protocols)' in scripts
+    assert 'function loadedPoolProtocolQuery(requestedProtocols)' in scripts
+    assert 'function deferredPoolProtocols()' in scripts
     assert 'function clearPoolDeferred(body)' in scripts
     assert 'body.removeAttribute(\'data-pool-deferred\')' in scripts
     assert '[data-pool-deferred="1"]' in scripts
-    assert 'refreshPoolData(0)' in scripts
+    assert 'refreshPoolData(0, protocol)' in scripts
+    assert 'refreshPoolData(0, deferredProtocols)' in scripts
     assert 'function schedulePoolView(proto, delayMs)' in scripts
     assert 'const rowByKeyId = new Map();' in scripts
     assert 'Object.prototype.hasOwnProperty.call(stateMap, check.id)' in scripts
-    assert "fetch('/api/pools' + loadedPoolProtocolQuery()" in scripts
+    assert "fetch('/api/pools' + loadedPoolProtocolQuery(protocols)" in scripts
     assert "proto === web.proxy_mode && status && (status.label === 'Проверяется' || status.api_pending)" in scripts
     assert 'function updateTelegramCallLearning(state)' not in scripts
     assert "fetch('/api/telegram_call_learning'" not in scripts

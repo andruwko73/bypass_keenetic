@@ -760,7 +760,7 @@ def render_web_scripts(
                         setupPoolControls(loadedPanel);
                         setupServiceRouteMenus(loadedPanel);
                         setupAsyncForms(loadedPanel);
-                        refreshPoolData(0);
+                        refreshPoolData(0, protocol);
                     }})
                     .catch(function(error) {{
                         showLoadError(panel, error);
@@ -1169,7 +1169,22 @@ def render_web_scripts(
             }}, Math.max(0, Number(delayMs || 0)));
         }}
 
-        function loadedPoolProtocolQuery() {{
+        function protocolQuery(protocols) {{
+            const selected = [];
+            const source = Array.isArray(protocols) ? protocols : [protocols];
+            source.forEach(function(proto) {{
+                proto = String(proto || '').trim();
+                if (proto && selected.indexOf(proto) === -1) {{
+                    selected.push(proto);
+                }}
+            }});
+            return selected.length ? '?protocols=' + encodeURIComponent(selected.join(',')) : '';
+        }}
+
+        function loadedPoolProtocolQuery(requestedProtocols) {{
+            if (requestedProtocols) {{
+                return protocolQuery(requestedProtocols);
+            }}
             const protocols = [];
             document.querySelectorAll('[data-protocol-panel]').forEach(function(panel) {{
                 const proto = panel.getAttribute('data-protocol-panel') || '';
@@ -1183,7 +1198,18 @@ def render_web_scripts(
                     protocols.push(proto);
                 }}
             }});
-            return protocols.length ? '?protocols=' + encodeURIComponent(protocols.join(',')) : '';
+            return protocolQuery(protocols);
+        }}
+
+        function deferredPoolProtocols() {{
+            const protocols = [];
+            document.querySelectorAll('[data-pool-deferred="1"]').forEach(function(body) {{
+                const proto = body.dataset.poolBody || '';
+                if (proto && protocols.indexOf(proto) === -1) {{
+                    protocols.push(proto);
+                }}
+            }});
+            return protocols;
         }}
 
         function clearPoolDeferred(body) {{
@@ -1566,7 +1592,7 @@ def render_web_scripts(
             }}
         }}
 
-        function refreshPoolData(delayMs) {{
+        function refreshPoolData(delayMs, protocols) {{
             if (!ENABLE_KEY_POOL) {{
                 return;
             }}
@@ -1575,7 +1601,7 @@ def render_web_scripts(
             }}
             poolDataRefreshTimer = window.setTimeout(function() {{
                 poolDataRefreshTimer = null;
-                fetch('/api/pools' + loadedPoolProtocolQuery(), {{
+                fetch('/api/pools' + loadedPoolProtocolQuery(protocols), {{
                     headers: {{'Accept': 'application/json'}},
                     cache: 'no-store'
                 }})
@@ -2447,8 +2473,9 @@ def render_web_scripts(
             setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
             setupProtocolSubtabs();
             setupPoolControls();
-            if (document.querySelector('[data-pool-deferred="1"]')) {{
-                refreshPoolData(0);
+            const deferredProtocols = deferredPoolProtocols();
+            if (deferredProtocols.length) {{
+                refreshPoolData(0, deferredProtocols);
             }}
             setupServiceRouteMenus();
             setupEventHistoryPanel();

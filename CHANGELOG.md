@@ -1,3 +1,8 @@
+<a name="1.762"></a>
+# [1.762] - 22 Jun 2026
+
+- Scopes deferred key-pool refreshes to only the protocol that needs rows, reducing `/api/pools` payload churn during protocol tab transitions.
+
 <a name="1.761"></a>
 # [1.761] - 22 Jun 2026
 

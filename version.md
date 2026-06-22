@@ -1,3 +1,7 @@
+*v1.762 (22 Jun 2026) -* main
+
+*Scopes deferred key-pool refreshes to only the protocol that needs rows, reducing `/api/pools` payload churn during protocol tab transitions.*
+
 *v1.761 (22 Jun 2026) -* main
 
 *Defers key-pool row HTML rendering to `/api/pools` for protocol panels and the initial key page, lowering web UI memory spikes while preserving Telegram/YouTube pool badges.*
