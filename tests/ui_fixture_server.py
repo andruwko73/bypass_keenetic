@@ -291,19 +291,9 @@ def _protocol_panel(protocol):
         raise ValueError("unknown protocol")
     cache = _probe_cache()
     csrf_input_html = web_form_blocks.render_csrf_input("fixture-token")
-    custom_presets_html = key_pool_web.web_custom_presets_html(
-        CUSTOM_CHECKS,
-        [],
-        _service_icon_html,
-        csrf_input_html,
-    )
-    custom_checks_html = key_pool_web.web_custom_checks_html(
-        [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
-        _service_icon_html,
-        csrf_input_html,
-        empty_message="",
-    )
-    route_tools_html = _route_tools_html(csrf_input_html)
+    custom_presets_html = ""
+    custom_checks_html = ""
+    route_tools_html = ""
     table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
     _tabs, panels = web_pool_form_blocks.render_protocol_tabs_and_panels(
         protocol_sections,
@@ -335,8 +325,42 @@ def _protocol_panel(protocol):
         active_protocol=protocol,
         pool_probe_pending=False,
         defer_pool_rows=True,
+        defer_check_content=True,
     )
     return panels
+
+
+def _protocol_check_panel(protocol):
+    protocol_sections = [section for section in web_form_blocks.PROTOCOL_SECTIONS if section[0] == protocol]
+    if not protocol_sections:
+        raise ValueError("unknown protocol")
+    _key_name, title, _rows, _placeholder = protocol_sections[0]
+    csrf_input_html = web_form_blocks.render_csrf_input("fixture-token")
+    custom_presets_html = key_pool_web.web_custom_presets_html(
+        CUSTOM_CHECKS,
+        [],
+        _service_icon_html,
+        csrf_input_html,
+    )
+    custom_checks_html = key_pool_web.web_custom_checks_html(
+        [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
+        _service_icon_html,
+        csrf_input_html,
+        empty_message="",
+    )
+    route_tools_html = _route_tools_html(csrf_input_html)
+    return web_pool_form_blocks.render_protocol_check_content(
+        key_name=protocol,
+        title=title,
+        status_info=_protocol_statuses().get(protocol, {}),
+        custom_presets_html=custom_presets_html,
+        custom_checks_html=custom_checks_html,
+        route_tools_html=route_tools_html,
+        csrf_input_html=csrf_input_html,
+        enable_key_pool=True,
+        enable_custom_checks=True,
+        pool_probe_pending=False,
+    )
 
 
 def _page_html(mode="advanced"):
@@ -358,19 +382,9 @@ def _page_html(mode="advanced"):
         live=True,
     )
     if enable_custom_checks:
-        custom_presets_html = key_pool_web.web_custom_presets_html(
-            CUSTOM_CHECKS,
-            [],
-            _service_icon_html,
-            csrf_input_html,
-        )
-        custom_checks_html = key_pool_web.web_custom_checks_html(
-            [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
-            _service_icon_html,
-            csrf_input_html,
-            empty_message="",
-        )
-        route_tools_html = _route_tools_html(csrf_input_html)
+        custom_presets_html = ""
+        custom_checks_html = ""
+        route_tools_html = ""
         table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
     else:
         custom_presets_html = ""
@@ -410,6 +424,7 @@ def _page_html(mode="advanced"):
         enable_custom_checks=enable_custom_checks,
         pool_probe_pending=False,
         defer_pool_rows=enable_key_pool,
+        defer_check_content=enable_key_pool,
     )
     unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
         [
@@ -594,6 +609,14 @@ class FixtureHandler(BaseHTTPRequestHandler):
             protocol = (params.get("proto") or params.get("protocol") or [""])[0]
             try:
                 self._json({"ok": True, "protocol": protocol, "html": _protocol_panel(protocol)})
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, status=400)
+            return
+        if path == "/api/protocol_check_panel":
+            params = parse_qs(parsed.query or "", keep_blank_values=True)
+            protocol = (params.get("proto") or params.get("protocol") or [""])[0]
+            try:
+                self._json({"ok": True, "protocol": protocol, "html": _protocol_check_panel(protocol)})
             except ValueError as exc:
                 self._json({"ok": False, "error": str(exc)}, status=400)
             return

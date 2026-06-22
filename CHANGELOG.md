@@ -1,3 +1,8 @@
+<a name="1.763"></a>
+# [1.763] - 22 Jun 2026
+
+- Lazy-loads protocol check panels and calls libc `malloc_trim` after heavy web cleanups, reducing router RSS spikes during web UI navigation.
+
 <a name="1.762"></a>
 # [1.762] - 22 Jun 2026
 

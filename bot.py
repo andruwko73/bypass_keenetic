@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.762, последнее изменение: 22.06.2026
+#  Файл: bot.py, Версия v1.763, последнее изменение: 22.06.2026
 
 import subprocess
 import os
@@ -20,6 +20,7 @@ import ipaddress
 import socket
 import tempfile
 import gc
+import ctypes
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
 
@@ -1446,6 +1447,15 @@ MEMORY_TIMELINE_INTERVAL_SECONDS = max(
     float(getattr(config, 'memory_timeline_interval_seconds', 60.0)),
 )
 MEMORY_TIMELINE_MAX_EVENTS = max(30, int(getattr(config, 'memory_timeline_max_events', 240)))
+MEMORY_MALLOC_TRIM_ENABLED = bool(getattr(config, 'memory_malloc_trim_enabled', True))
+MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS = max(
+    5.0,
+    float(getattr(config, 'memory_malloc_trim_cooldown_seconds', 20.0)),
+)
+MEMORY_MALLOC_TRIM_MIN_RSS_KB = max(
+    0,
+    int(getattr(config, 'memory_malloc_trim_min_rss_kb', 60 * 1024)),
+)
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
 APP_MODE_LABEL = 'Режим бота'
@@ -1692,6 +1702,10 @@ memory_watchdog_high_rss_since = 0.0
 memory_timeline_lock = threading.Lock()
 memory_timeline_last_sample_at = 0.0
 memory_timeline_last_error_at = 0.0
+memory_malloc_trim_lock = threading.Lock()
+memory_malloc_trim_last_at = 0.0
+memory_malloc_trim_libc = None
+memory_malloc_trim_available = None
 post_pool_memory_cleanup_lock = threading.Lock()
 post_pool_memory_cleanup_state = {
     'scheduled': False,
@@ -3668,6 +3682,71 @@ def _start_memory_timeline_thread():
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _load_malloc_trim():
+    global memory_malloc_trim_libc, memory_malloc_trim_available
+    if memory_malloc_trim_available is not None:
+        return memory_malloc_trim_libc
+    memory_malloc_trim_available = False
+    memory_malloc_trim_libc = None
+    for libc_name in (None, 'libc.so.6', 'libc.so'):
+        try:
+            libc = ctypes.CDLL(libc_name) if libc_name else ctypes.CDLL(None)
+            trim = getattr(libc, 'malloc_trim', None)
+            if trim is None:
+                continue
+            try:
+                trim.argtypes = [ctypes.c_size_t]
+                trim.restype = ctypes.c_int
+            except Exception:
+                pass
+            memory_malloc_trim_libc = trim
+            memory_malloc_trim_available = True
+            return memory_malloc_trim_libc
+        except Exception:
+            continue
+    return None
+
+
+def _malloc_trim(reason='', force=False, rss_kb=None):
+    global memory_malloc_trim_last_at
+    result = {
+        'attempted': False,
+        'ok': False,
+        'result': None,
+        'available': None,
+    }
+    if not MEMORY_MALLOC_TRIM_ENABLED:
+        result['available'] = False
+        return result
+    rss_kb = int(rss_kb or _process_rss_kb() or 0)
+    if not force and MEMORY_MALLOC_TRIM_MIN_RSS_KB > 0 and rss_kb < MEMORY_MALLOC_TRIM_MIN_RSS_KB:
+        return result
+    now = time.time()
+    with memory_malloc_trim_lock:
+        if (
+            not force and
+            memory_malloc_trim_last_at and
+            now - memory_malloc_trim_last_at < MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS
+        ):
+            result['available'] = memory_malloc_trim_available
+            return result
+        trim = _load_malloc_trim()
+        result['available'] = bool(trim)
+        if not trim:
+            return result
+        memory_malloc_trim_last_at = now
+        result['attempted'] = True
+        try:
+            trim_result = int(trim(0))
+            result['result'] = trim_result
+            result['ok'] = True
+        except Exception as exc:
+            result['error'] = type(exc).__name__
+            if reason:
+                _write_runtime_log(f'Memory malloc_trim failed during {reason}: {exc}')
+    return result
+
+
 def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
     _clear_runtime_memory_caches(clear_status=clear_status)
     rss_before = _process_rss_kb()
@@ -3675,6 +3754,16 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
     if not should_collect and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB:
         should_collect = True
     collected = gc.collect() if should_collect else 0
+    malloc_trim_info = {'attempted': False, 'ok': False, 'result': None, 'available': None}
+    trim_requested = bool(force or clear_status or should_collect)
+    if not trim_requested and MEMORY_MALLOC_TRIM_MIN_RSS_KB > 0 and rss_before and rss_before >= MEMORY_MALLOC_TRIM_MIN_RSS_KB:
+        trim_requested = True
+    if trim_requested:
+        malloc_trim_info = _malloc_trim(
+            reason or 'memory cleanup',
+            force=bool(force or clear_status),
+            rss_kb=rss_before,
+        )
     rss_after = _process_rss_kb()
     if should_collect or force or clear_status:
         _record_memory_timeline(
@@ -3684,17 +3773,22 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
                 'rss_before_kb': int(rss_before or 0),
                 'rss_after_kb': int(rss_after or 0),
                 'gc_collected': int(collected or 0),
+                'malloc_trim_attempted': bool(malloc_trim_info.get('attempted')),
+                'malloc_trim_ok': bool(malloc_trim_info.get('ok')),
+                'malloc_trim_result': malloc_trim_info.get('result'),
             },
             force=True,
         )
     if log and reason and should_collect and (force or rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB):
         _write_runtime_log(
-            f'Memory cleanup ({reason}): rss {rss_before} -> {rss_after} KB, gc={collected}'
+            f'Memory cleanup ({reason}): rss {rss_before} -> {rss_after} KB, '
+            f'gc={collected}, malloc_trim={malloc_trim_info.get("result")}'
         )
     return {
         'rss_before_kb': rss_before,
         'rss_after_kb': rss_after,
         'collected': collected,
+        'malloc_trim': malloc_trim_info,
     }
 
 
@@ -8336,6 +8430,7 @@ def _web_get_context(handler):
     return {
         'build_form': handler._build_form,
         'build_protocol_panel': handler._build_protocol_panel,
+        'build_protocol_check_panel': handler._build_protocol_check_panel,
         'build_style_asset': handler._build_style_asset,
         'build_script_asset': handler._build_script_asset,
         'consume_flash_message': _consume_web_flash_message,
@@ -8382,21 +8477,10 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
     key_pools = _ensure_current_keys_in_pools(current_keys)
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
-    custom_checks_html = key_pool_web.web_custom_checks_html(
-        _standalone_custom_checks(custom_checks),
-        _service_icon_html,
-        csrf_input_html=csrf_input_html,
-        empty_message='',
-    )
+    custom_checks_html = ''
     route_states = _service_route_summary()
-    custom_presets_html = key_pool_web.web_custom_presets_html(
-        custom_checks,
-        _custom_check_presets(),
-        _service_icon_html,
-        csrf_input_html=csrf_input_html,
-        route_states=route_states,
-    )
-    route_tools_html = _route_tools_html(csrf_input_html, custom_checks)
+    custom_presets_html = ''
+    route_tools_html = ''
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
@@ -8442,13 +8526,16 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         active_protocol=protocol,
         pool_probe_pending=bool(_get_pool_probe_progress().get('running')),
         defer_pool_rows=True,
+        defer_check_content=True,
     )
     return panel_html
 
 
-def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
-    key_pools = _ensure_current_keys_in_pools(current_keys)
-    key_probe_cache = _load_key_probe_cache()
+def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_input_html):
+    protocol_sections = [section for section in web_form_blocks.PROTOCOL_SECTIONS if section[0] == protocol]
+    if not protocol_sections:
+        raise ValueError('Неизвестный протокол')
+    _key_name, title, _rows, _placeholder = protocol_sections[0]
     custom_checks = _load_custom_checks()
     custom_checks_html = key_pool_web.web_custom_checks_html(
         _standalone_custom_checks(custom_checks),
@@ -8465,6 +8552,28 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         route_states=route_states,
     )
     route_tools_html = _route_tools_html(csrf_input_html, custom_checks)
+    return web_pool_form_blocks.render_protocol_check_content(
+        key_name=protocol,
+        title=title,
+        status_info=(protocol_statuses or {}).get(protocol) or _status_empty_protocol_status(),
+        custom_presets_html=custom_presets_html,
+        custom_checks_html=custom_checks_html,
+        route_tools_html=route_tools_html,
+        csrf_input_html=csrf_input_html,
+        enable_key_pool=True,
+        enable_custom_checks=True,
+        pool_probe_pending=bool(_get_pool_probe_progress().get('running')),
+    )
+
+
+def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
+    key_pools = _ensure_current_keys_in_pools(current_keys)
+    key_probe_cache = _load_key_probe_cache()
+    custom_checks = _load_custom_checks()
+    custom_checks_html = ''
+    route_states = _service_route_summary()
+    custom_presets_html = ''
+    route_tools_html = ''
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
         web_pool_form_blocks.pool_table_layout(custom_checks)
     )
@@ -8511,6 +8620,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         lazy_protocol_panels=True,
         pool_probe_pending=pool_probe_pending,
         defer_pool_rows=True,
+        defer_check_content=True,
     )
     pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)
     return {
@@ -8562,6 +8672,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         '/api/event_history',
         '/api/telegram_call_learning',
         '/api/route_intersections',
+        '/api/protocol_check_panel',
         '/static/',
     )
     local_client_checker = staticmethod(_web_is_local_client)
@@ -8727,6 +8838,23 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return _web_protocol_panel_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
         finally:
             _memory_cleanup('protocol panel render', force=True, log=False)
+
+    def _build_protocol_check_panel(self, protocol):
+        app_runtime_mode = _load_app_runtime_mode()
+        if not _app_mode_pool_enabled(app_runtime_mode):
+            raise ValueError('Пул ключей отключён в текущем режиме программы')
+        current_keys = _load_current_keys()
+        snapshot = _cached_status_snapshot(current_keys)
+        if snapshot is None:
+            snapshot = _placeholder_status_snapshot(current_keys)
+            if not pool_probe_lock.locked():
+                _refresh_status_caches_async(current_keys)
+        csrf_token = self._get_or_create_csrf_token()
+        csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
+        try:
+            return _web_protocol_check_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
+        finally:
+            _memory_cleanup('protocol check render', force=True, log=False)
 
     def do_GET(self):
         if not self._ensure_request_allowed():

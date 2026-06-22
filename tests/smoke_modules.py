@@ -1979,6 +1979,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'автоперезапуск уже запрошен' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
+    assert 'def _malloc_trim' in source
+    assert "getattr(config, 'memory_malloc_trim_enabled', True)" in source
+    assert 'malloc_trim_attempted' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
     assert 'process_rss_kb=_process_rss_kb' in source
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
@@ -1989,6 +1992,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
+    assert 'memory_malloc_trim_enabled = True' in script_source
+    assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
     assert "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'" in script_source
     assert '/opt/tmp/bypass_telegram_call_learning.json' in source
@@ -4813,6 +4818,7 @@ def test_web_get_actions_helpers():
     ctx = {
         'build_form': lambda message: 'form:' + message,
         'build_protocol_panel': lambda proto: 'panel:' + proto,
+        'build_protocol_check_panel': lambda proto: 'check:' + proto,
         'consume_flash_message': lambda: 'saved',
         'load_current_keys': lambda: current_keys,
         'cached_status_snapshot': lambda keys: None,
@@ -4892,6 +4898,8 @@ def test_web_get_actions_helpers():
     assert panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'panel:vless'}
     alias_panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'protocol=vless2')
     assert alias_panel['payload'] == {'ok': True, 'protocol': 'vless2', 'html': 'panel:vless2'}
+    check_panel = web_get_actions.dispatch(ctx, '/api/protocol_check_panel', 'proto=vless')
+    assert check_panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'check:vless'}
     script_asset = web_get_actions.dispatch({'build_script_asset': lambda: 'js'}, '/static/app.js')
     assert script_asset['cache_seconds'] == 86400
     static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
@@ -5109,6 +5117,44 @@ def test_web_pool_form_blocks_helpers():
     assert 'custom-check-form' in panel
     assert 'data-pool-probe-start-button aria-disabled="false"' in panel
     assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in panel
+    check_content = web_pool_form_blocks.render_protocol_check_content(
+        key_name='vless',
+        title='Vless 1',
+        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        custom_presets_html='<div>preset</div>',
+        custom_checks_html='<div>checks</div>',
+        route_tools_html='<div>routes</div>',
+        csrf_input_html='<input name="csrf_token" value="token">',
+    )
+    assert 'custom-check-form' in check_content
+    assert 'data-route-tools-root' in check_content
+    assert '<div>routes</div>' in check_content
+    assert '<div>checks</div>' in check_content
+    deferred_check_panel = web_pool_form_blocks.render_protocol_panel(
+        key_name='vless',
+        title='Vless 1',
+        rows=3,
+        placeholder='vless://...',
+        current_key_value='vless://sample',
+        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        active_status_icons='',
+        pool_items_html=pool_rows,
+        pool_table_class='pool-table',
+        pool_custom_col_width=32,
+        pool_mobile_custom_col_width=28,
+        custom_header_icons='',
+        custom_presets_html='<div>preset</div>',
+        custom_checks_html='<div>checks</div>',
+        route_tools_html='<div>routes</div>',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        csrf_input_html='<input name="csrf_token" value="token">',
+        defer_check_content=True,
+    )
+    assert 'data-protocol-check-deferred="vless"' in deferred_check_panel
+    assert 'custom-check-form' not in deferred_check_panel
+    assert '<div>routes</div>' not in deferred_check_panel
+    assert '<div>checks</div>' not in deferred_check_panel
     youtube_panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless2',
         title='Vless 2',
@@ -5196,9 +5242,11 @@ def test_web_pool_form_blocks_helpers():
         telegram_icon_html=lambda opacity=1.0: 'TG',
         youtube_icon_html=lambda opacity=1.0: 'YT',
         defer_pool_rows=True,
+        defer_check_content=True,
     )
     assert 'tab-count">1</span>' in deferred_tabs_html
     assert 'data-pool-deferred="1"' in deferred_panels_html
+    assert 'data-protocol-check-deferred="vless"' in deferred_panels_html
     assert 'pool-empty-row' in deferred_panels_html
     assert 'deferred-pool-key' not in deferred_panels_html
     assert 'deferred display' not in deferred_panels_html
@@ -5834,6 +5882,11 @@ def test_web_template_scripts_helpers():
     assert 'function setupAsyncForms' in scripts
     assert 'function setupProtocolTabs()' in scripts
     assert "fetch('/api/protocol_panel?proto='" in scripts
+    assert 'function loadProtocolCheck(panel)' in scripts
+    assert "fetch('/api/protocol_check_panel?proto='" in scripts
+    assert 'data-protocol-check-deferred' in scripts
+    assert 'setupServiceRouteMenus(subview)' in scripts
+    assert 'setupAsyncForms(subview)' in scripts
     assert 'data-key="' not in scripts
     assert 'name="key_id"' in scripts
     assert 'function setupProtocolSubtabs(root)' in scripts

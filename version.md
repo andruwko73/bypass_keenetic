@@ -1,3 +1,7 @@
+*v1.763 (22 Jun 2026) -* main
+
+*Lazy-loads protocol check panels and calls libc `malloc_trim` after heavy web cleanups, reducing router RSS spikes during web UI navigation.*
+
 *v1.762 (22 Jun 2026) -* main
 
 *Scopes deferred key-pool refreshes to only the protocol that needs rows, reducing `/api/pools` payload churn during protocol tab transitions.*

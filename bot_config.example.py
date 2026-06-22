@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.762
+# ВЕРСИЯ СКРИПТА v1.763
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -55,6 +55,9 @@ memory_timeline_enabled = True
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0
 memory_timeline_max_events = 240
+memory_malloc_trim_enabled = True  # после тяжёлой очистки просит libc вернуть свободные арены памяти системе
+memory_malloc_trim_min_rss_kb = 61440
+memory_malloc_trim_cooldown_seconds = 20.0
 udp_quic_block_shadowsocks_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Shadowsocks list
 udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Vmess list
 udp_quic_block_vless_enabled = True  # smart QUIC/UDP 443 fallback for non-YouTube routes

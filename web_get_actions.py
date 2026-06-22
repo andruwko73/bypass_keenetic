@@ -204,6 +204,19 @@ def _protocol_panel_payload(ctx, query):
     return {'ok': True, 'protocol': protocol, 'html': panel_html}
 
 
+def _protocol_check_panel_payload(ctx, query):
+    params = parse_qs(query or '', keep_blank_values=True)
+    protocol = (params.get('proto') or params.get('protocol') or [''])[0]
+    build_protocol_check_panel = _ctx(ctx, 'build_protocol_check_panel')
+    if not protocol or not build_protocol_check_panel:
+        return {'ok': False, 'error': 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РїСЂРѕС‚РѕРєРѕР»'}
+    try:
+        check_html = build_protocol_check_panel(protocol)
+    except ValueError as exc:
+        return {'ok': False, 'error': str(exc)}
+    return {'ok': True, 'protocol': protocol, 'html': check_html}
+
+
 def dispatch(ctx, path, query=''):
     if path in PAGE_ROUTES:
         build_form = _ctx(ctx, 'build_form')
@@ -243,6 +256,9 @@ def dispatch(ctx, path, query=''):
         return {'kind': 'json', 'payload': _telegram_call_learning_payload(ctx), 'status': 200}
     if path == '/api/protocol_panel' and _ctx(ctx, 'pool_enabled', False):
         payload = _protocol_panel_payload(ctx, query)
+        return {'kind': 'json', 'payload': payload, 'status': 200 if payload.get('ok') else 400}
+    if path == '/api/protocol_check_panel' and _ctx(ctx, 'pool_enabled', False):
+        payload = _protocol_check_panel_payload(ctx, query)
         return {'kind': 'json', 'payload': payload, 'status': 200 if payload.get('ok') else 400}
 
     filepath = _static_file(ctx, path)

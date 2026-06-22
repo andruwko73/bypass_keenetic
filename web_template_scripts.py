@@ -801,6 +801,47 @@ def render_web_scripts(
             activate(localStorage.getItem(storageKey));
         }}
 
+        function loadProtocolCheck(panel) {{
+            if ((!ENABLE_KEY_POOL && !ENABLE_CUSTOM_CHECKS) || !panel || panel.dataset.protocolCheckLoaded === '1' || panel.dataset.protocolCheckLoading === '1') {{
+                return;
+            }}
+            const protocol = panel.getAttribute('data-protocol-panel');
+            const target = panel.querySelector('[data-protocol-check-deferred]');
+            if (!protocol || !target) {{
+                return;
+            }}
+            panel.dataset.protocolCheckLoading = '1';
+            fetch('/api/protocol_check_panel?proto=' + encodeURIComponent(protocol), {{
+                headers: {{ 'Accept': 'application/json' }},
+                cache: 'no-store'
+            }})
+                .then(function(response) {{
+                    return response.json().then(function(payload) {{
+                        if (!response.ok || !payload.ok) {{
+                            throw new Error((payload && payload.error) || 'HTTP ' + response.status);
+                        }}
+                        return payload;
+                    }});
+                }})
+                .then(function(payload) {{
+                    const subview = panel.querySelector('[data-subview="check"]');
+                    if (!subview) {{
+                        throw new Error('Check panel not found');
+                    }}
+                    subview.innerHTML = String(payload.html || '');
+                    panel.dataset.protocolCheckLoaded = '1';
+                    setupServiceRouteMenus(subview);
+                    setupAsyncForms(subview);
+                }})
+                .catch(function(error) {{
+                    const message = error && error.message ? error.message : 'Loading failed';
+                    target.innerHTML = '<span class="status-label">Checks</span><p class="status-note">' + escapeHtml(message) + '</p>';
+                }})
+                .finally(function() {{
+                    panel.dataset.protocolCheckLoading = '0';
+                }});
+        }}
+
         function setupProtocolSubtabs(root) {{
             const panels = [];
             if (root && root.matches && root.matches('[data-protocol-panel]')) {{
@@ -826,6 +867,9 @@ def render_web_scripts(
                     panel.querySelectorAll('[data-subview]').forEach(function(subview) {{
                         subview.classList.toggle('active', subview.dataset.subview === selected);
                     }});
+                    if (selected === 'check') {{
+                        loadProtocolCheck(panel);
+                    }}
                 }}
                 buttons.forEach(function(button) {{
                     button.addEventListener('click', function() {{
