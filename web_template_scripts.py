@@ -2274,17 +2274,27 @@ def render_web_scripts(
             if (!menu || !menu.open) {{
                 return;
             }}
-            menu.classList.remove('drop-up');
             if (window.matchMedia && window.matchMedia('(max-width: 720px)').matches) {{
+                menu.classList.remove('drop-up');
                 return;
             }}
             const list = menu.querySelector('.service-route-menu-list');
             if (!list) {{
                 return;
             }}
+            menu.classList.remove('drop-up');
+            list.style.maxHeight = '';
+            list.style.overflowY = '';
             const rect = list.getBoundingClientRect();
-            if (rect.bottom > window.innerHeight - 12) {{
+            const viewportPadding = 12;
+            if (rect.bottom > window.innerHeight - viewportPadding) {{
                 menu.classList.add('drop-up');
+            }}
+            const adjustedRect = list.getBoundingClientRect();
+            if (adjustedRect.top < viewportPadding || adjustedRect.bottom > window.innerHeight - viewportPadding) {{
+                const available = Math.max(96, window.innerHeight - (viewportPadding * 2));
+                list.style.maxHeight = available + 'px';
+                list.style.overflowY = 'auto';
             }}
         }}
 

@@ -1,3 +1,7 @@
+*v1.772 (22 Jun 2026) -* main
+
+*Keeps desktop service-route popovers inside the viewport in GitHub UI smoke by rechecking placement after drop-up positioning and limiting popover height as a fallback.*
+
 *v1.771 (22 Jun 2026) -* main
 
 *Adds the overnight router memory and YouTube timing monitor to the repository and syncs version metadata so GitHub CI passes after the diagnostics commit.*

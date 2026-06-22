@@ -1,3 +1,8 @@
+<a name="1.772"></a>
+# [1.772] - 22 Jun 2026
+
+- Keeps desktop service-route popovers inside the viewport in GitHub UI smoke by rechecking placement after drop-up positioning and limiting popover height as a fallback.
+
 <a name="1.771"></a>
 # [1.771] - 22 Jun 2026
 
