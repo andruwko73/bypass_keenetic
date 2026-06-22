@@ -4,8 +4,12 @@ YOUTUBE_CDN_IP_RANGES = [
     '64.233.164.198',
     '64.233.161.0/24',
     '64.233.162.0/24',
+    '64.233.162.95',
+    '64.233.162.188',
     '64.233.163.0/24',
+    '64.233.163.95',
     '64.233.164.0/24',
+    '64.233.164.188',
     '64.233.165.0/24',
     '74.125.10.0/24',
     '74.125.11.0/24',
@@ -22,11 +26,13 @@ YOUTUBE_CDN_IP_RANGES = [
     '74.125.174.0/24',
     '108.177.14.0/24',
     '142.251.1.0/24',
+    '142.251.1.95',
     '142.251.156.0/24',
     '142.251.84.0/24',
     '142.251.90.0/24',
     '142.251.91.0/24',
     '172.253.152.0/24',
+    '172.253.152.95',
     '172.217.137.0/24',
     '172.217.145.0/24',
     '173.194.6.0/24',
@@ -44,8 +50,11 @@ YOUTUBE_CDN_IP_RANGES = [
     '173.194.220.0/24',
     '173.194.221.0/24',
     '173.194.222.0/24',
+    '173.194.222.95',
+    '173.194.222.188',
     '209.85.229.0/24',
     '74.125.205.0/24',
+    '74.125.205.95',
     '2a00:1450:4001:9::/64',
     '2a00:1450:4010:c01::/64',
     '2a00:1450:4010:c03::/64',
@@ -109,13 +118,24 @@ YOUTUBE_UNBLOCK_ENTRIES = [
     'www.youtube-nocookie.com',
     'youtubeeducation.com',
     'www.youtubeeducation.com',
+    'youtubefanfest.com',
+    'youtubegaming.com',
+    'youtubego.com',
+    'youtubego.co.id',
+    'youtubego.co.in',
+    'youtubego.com.br',
+    'youtubego.id',
+    'youtubego.in',
     'youtubekids.com',
+    'youtubemobilesupport.com',
+    'accounts.google.com',
     'apis.google.com',
     'client-channel.google.com',
     'clients4.google.com',
     'families.google.com',
     'fonts.googleapis.com',
     'support.google.com',
+    'www.google.com',
     'www.gstatic.com',
     'youtubei.googleapis.com',
     'youtubei-att.googleapis.com',
@@ -124,6 +144,7 @@ YOUTUBE_UNBLOCK_ENTRIES = [
     'youtube-ui.l.google.com',
     'wide-youtube.l.google.com',
     'yt-video-upload.l.google.com',
+    'withyoutube.com',
     'ytimg.com',
     'i.ytimg.com',
     's.ytimg.com',
@@ -133,6 +154,7 @@ YOUTUBE_UNBLOCK_ENTRIES = [
     'yt4.googleusercontent.com',
     'ytimg.l.google.com',
     'ggpht.com',
+    'ggpht.cn',
     'googlevideo.com',
     'manifest.googlevideo.com',
     'redirector.googlevideo.com',
@@ -631,8 +653,11 @@ TELEGRAM_UNBLOCK_ENTRIES = [
     '5.28.192.0/21',
     '95.161.64.0/20',
     '2001:67c:4e8::/48',
+    '2001:b28:f23c::/48',
     '2001:b28:f23d::/48',
     '2001:b28:f23f::/48',
+    '2a0a:f280::/32',
+    '2a0a:f280:203::/48',
     *APPLE_PUSH_ROUTE_ENTRIES,
     *CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES,
     'api.telegram.org',
@@ -680,6 +705,7 @@ TELEGRAM_UNBLOCK_ENTRIES = [
     'telegram.us',
     'telegram.website',
     'telegram.xyz',
+    'stel.com',
     'telesco.pe',
     'comments.app',
     'contest.com',
@@ -766,6 +792,12 @@ TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES = [
     '185.76.151.0/24',
     '5.28.192.0/21',
     '95.161.64.0/20',
+    '2001:67c:4e8::/48',
+    '2001:b28:f23c::/48',
+    '2001:b28:f23d::/48',
+    '2001:b28:f23f::/48',
+    '2a0a:f280::/32',
+    '2a0a:f280:203::/48',
     'api.telegram.org',
     'web.telegram.org',
     'my.telegram.org',
@@ -782,6 +814,7 @@ TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES = [
     'telegramapp.org',
     'telegramdownload.com',
     'cdn-telegram.org',
+    'stel.com',
 ]
 
 WHATSAPP_CALL_SIGNAL_ROUTE_ENTRIES = [
@@ -854,6 +887,11 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['youtube', 'yt', 'ютуб'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/youtube.lst',
         'entries': YOUTUBE_UNBLOCK_ENTRIES,
+        'route_global_exclude_allow': [
+            'clients4.google.com',
+            'www.google.com',
+            'www.gstatic.com',
+        ],
         'udp_quic': True,
     },
     'telegram': {
@@ -942,11 +980,20 @@ def service_route_entries(service_key, service_sources=None):
         if entry and entry not in seen:
             seen.add(entry)
             entries.append(entry)
+    global_exclude_allow = {
+        normalize_route_entry(value)
+        for value in source.get('route_global_exclude_allow') or []
+        if str(value or '').strip()
+    }
+    global_excludes = [
+        value for value in global_route_exclude_entries()
+        if normalize_route_entry(value) not in global_exclude_allow
+    ]
     excluded = {
         normalize_route_entry(value)
         for value in [
             *(source.get('route_state_exclude') or []),
-            *global_route_exclude_entries(),
+            *global_excludes,
         ]
         if str(value or '').strip()
     }

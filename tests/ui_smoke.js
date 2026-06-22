@@ -73,6 +73,55 @@ async function assertNoHorizontalOverflow(page, label) {
   }
 }
 
+async function assertMobileStatusGaps(page, label) {
+  const expected = 8;
+  const gaps = await page.evaluate(() => {
+    const visibleBox = (node) => {
+      if (!node) {
+        return null;
+      }
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      if (style.display === 'none' || style.visibility === 'hidden' || rect.width < 2 || rect.height < 2) {
+        return null;
+      }
+      return { top: rect.top, bottom: rect.bottom };
+    };
+    const labelFor = (node) => (
+      node.className && typeof node.className === 'string'
+        ? node.className.split(/\s+/).filter(Boolean).slice(0, 3).join('.')
+        : node.tagName.toLowerCase()
+    );
+    const result = [];
+    const topbar = visibleBox(document.querySelector('.topbar'));
+    const statusView = document.querySelector('[data-view="status"].active');
+    const children = statusView ? Array.from(statusView.children).map((node) => ({ node, box: visibleBox(node) })).filter((item) => item.box) : [];
+    if (topbar && children[0]) {
+      result.push({ name: 'topbar/status', value: Math.round(children[0].box.top - topbar.bottom) });
+    }
+    for (let index = 1; index < children.length; index += 1) {
+      result.push({
+        name: `${labelFor(children[index - 1].node)}/${labelFor(children[index].node)}`,
+        value: Math.round(children[index].box.top - children[index - 1].box.bottom),
+      });
+    }
+    document.querySelectorAll('[data-view="status"].active .status-dashboard-column').forEach((column, columnIndex) => {
+      const cards = Array.from(column.children).map((node) => ({ node, box: visibleBox(node) })).filter((item) => item.box);
+      for (let index = 1; index < cards.length; index += 1) {
+        result.push({
+          name: `dashboard-${columnIndex}:${labelFor(cards[index - 1].node)}/${labelFor(cards[index].node)}`,
+          value: Math.round(cards[index].box.top - cards[index - 1].box.bottom),
+        });
+      }
+    });
+    return result;
+  });
+  const bad = gaps.filter((gap) => Math.abs(gap.value - expected) > 2);
+  if (bad.length) {
+    throw new Error(`${label}: mobile status gaps should be ${expected}px: ${JSON.stringify({ gaps, bad })}`);
+  }
+}
+
 async function assertVisibleBox(page, selector, label) {
   const box = await page.locator(selector).boundingBox();
   if (!box || box.width < 2 || box.height < 2) {
@@ -93,7 +142,12 @@ async function assertPoolKeysAreMasked(page, label) {
 }
 
 async function assertActivePoolRowPinned(page, protocol, label) {
-  const rows = await page.locator(`[data-protocol-panel="${protocol}"].active [data-pool-body="${protocol}"]`).evaluate((body) => (
+  const selector = `[data-protocol-panel="${protocol}"].active [data-pool-body="${protocol}"]`;
+  await page.waitForFunction((bodySelector) => {
+    const body = document.querySelector(bodySelector);
+    return body && !body.hasAttribute('data-pool-deferred') && body.querySelector('[data-pool-row]');
+  }, selector, { timeout: 10000 });
+  const rows = await page.locator(selector).evaluate((body) => (
     Array.from(body.querySelectorAll('[data-pool-row]')).slice(0, 3).map((row) => ({
       active: row.dataset.active,
       poolIndex: Number(row.dataset.poolIndex || 0),
@@ -156,6 +210,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
   await assertNoHorizontalOverflow(page, name);
+  if (isMobile) {
+    await assertMobileStatusGaps(page, name);
+  }
 
   const titleFits = await page.locator('.app-caption strong').evaluate((node) => node.scrollWidth <= node.clientWidth + 2);
   if (!titleFits) {

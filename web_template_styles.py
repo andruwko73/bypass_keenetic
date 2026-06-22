@@ -823,10 +823,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
         @media (max-width: 760px){
             :root{--control-height:38px;}
+            :root{--mobile-status-gap:8px;}
             html,body{max-width:100%;overflow-x:hidden;}
             body{padding:10px 10px calc(128px + env(safe-area-inset-bottom, 0px));scroll-padding-bottom:calc(128px + env(safe-area-inset-bottom, 0px));}
                         .hero{padding:16px;border-radius:20px;}
-            .topbar{position:relative;z-index:260;top:0;align-items:stretch;flex-direction:column;margin-bottom:12px;padding:10px;}
+            .topbar{position:relative;z-index:260;top:0;align-items:stretch;flex-direction:column;margin-bottom:var(--mobile-status-gap);padding:10px;}
             .app-shell,.topbar,.app-main,.app-view,.view-head,.status-card,.service-panel,.overview-key-panel,.mobile-nav{box-sizing:border-box;max-width:100%;}
             .topbar-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch;gap:8px;}
             .topbar-actions.topbar-actions-web-only{grid-template-columns:repeat(2,minmax(0,1fr));}
@@ -852,6 +853,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .workspace-layout{display:block;}
             .side-nav{display:none;}
             .app-main{padding-bottom:calc(126px + env(safe-area-inset-bottom, 0px));}
+            .app-view[data-view="status"].active{display:grid;grid-template-columns:1fr;gap:var(--mobile-status-gap);align-content:start;}
+            .app-view[data-view="status"].active > .view-head,
+            .app-view[data-view="status"].active > .status-dashboard,
+            .app-view[data-view="status"].active > .overview-service-grid,
+            .app-view[data-view="status"].active > .overview-key-panel{margin-top:0;margin-bottom:0;}
             .mobile-nav{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom, 0px));z-index:240;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;padding:6px;border:1px solid rgba(91,124,150,.34);border-radius:var(--radius-panel);background:rgba(12,18,26,.96);box-shadow:0 14px 34px rgba(0,0,0,.34);}
             .mobile-nav .nav-item{justify-content:center;flex-direction:column;gap:3px;min-height:50px;font-size:11px;padding:6px;border-radius:var(--radius-control);}
             .event-history-backdrop{z-index:720;align-items:stretch;justify-content:stretch;padding:0;}
@@ -863,8 +869,10 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .status-overview-head{gap:8px;padding:12px;}
             .status-overview-copy{display:block;}
             .status-head-attention{grid-template-columns:1fr;}
-            .status-dashboard,.overview-service-grid{grid-template-columns:1fr;}
-            .status-dashboard-column{display:grid;gap:8px;}
+            .status-dashboard,.overview-service-grid{grid-template-columns:1fr;gap:var(--mobile-status-gap);}
+            .status-dashboard-column{display:grid;gap:var(--mobile-status-gap);}
+            .overview-service-grid{gap:var(--mobile-status-gap);margin-top:0;}
+            .overview-key-panel{margin-top:0;}
             .attention-list{grid-template-columns:1fr;}
             .status-card-actions{grid-template-columns:1fr;}
             .status-card-wide{grid-column:auto;}

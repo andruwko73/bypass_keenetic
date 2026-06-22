@@ -6,6 +6,7 @@
 104.17.79.30
 104.18.32.0/20
 104.18.32.47
+104.21.0.0/16
 104.21.72.109
 104.237.0.0/16
 104.244.40.0/21
@@ -50,6 +51,7 @@
 172.64.144.0/20
 172.64.155.209
 172.66.0.0/24
+172.67.0.0/16
 173.194.43.188
 173.194.73.95
 173.252.0.0/16
@@ -66,6 +68,7 @@
 185.76.151.0/24
 185.89.0.0/16
 185.89.216.0/22
+188.114.0.0/16
 188.114.98.224
 188.114.99.224
 190.115.0.0/16
@@ -78,6 +81,7 @@
 195.123.0.0/16
 199.192.0.0/16
 2001:67c:4e8::/48
+2001:b28:f23c::/48
 2001:b28:f23d::/48
 2001:b28:f23f::/48
 204.15.0.0/16
@@ -91,6 +95,8 @@
 217.168.0.0/16
 23.216.134.15
 23.36.235.194
+2a0a:f280::/32
+2a0a:f280:203::/48
 3.248.1.23
 3.grouple.co
 31.13.0.0/16
@@ -223,6 +229,7 @@ claude.com
 claudeusercontent.com
 client-api.arkoselabs.com
 clients2.google.com
+clients3.google.com
 clients6.google.com
 cloudchain.space
 cloudflare-dns.com
@@ -278,6 +285,7 @@ fbsbx.com
 fc-api.arkoselabs.com
 featureassets.org
 featuregates.org
+feed.rutracker.cc
 files.oaiusercontent.com
 fonts.gstatic.com
 forwarder.workos.com
@@ -379,11 +387,14 @@ remotedesktop.google.com
 rum.browser-intake-datadoghq.com
 rutor.info
 rutor.is
+rutracker.org
+rutracker.wiki
 setup.auth.openai.com
 setup.workos.com
 sr-client-cfg.amplitude.com
 ssl.gstatic.com
 stable.dl2.discordapp.net
+stel.com
 static.ads-twitter.com
 static.auth0.com
 static.doubleclick.net
@@ -513,6 +524,7 @@ web.telegram.org
 web.usagi.one
 whatsapp.biz
 whatsapp.com
+www.google.com
 whatsapp.net
 widgets.telegram.org
 workos.imgix.net

@@ -4177,7 +4177,11 @@ def test_vless2_youtube_routes_are_scoped():
         'fonts.googleapis.com',
         'youtubei-att.googleapis.com',
     } <= entries
-    assert not set(service_catalog.global_route_exclude_entries()) & entries
+    youtube_allowed_global = set(
+        service_catalog.SERVICE_LIST_SOURCES['youtube'].get('route_global_exclude_allow') or []
+    )
+    assert set(service_catalog.global_route_exclude_entries()) & entries <= youtube_allowed_global
+    assert {'accounts.google.com', 'clients4.google.com', 'www.google.com', 'www.gstatic.com'} <= entries
     assert {
         '173.194.10.0/24',
         '173.194.18.0/24',
@@ -4189,15 +4193,14 @@ def test_vless2_youtube_routes_are_scoped():
         '74.125.160.0/24',
         '74.125.162.0/24',
     } <= entries
-    assert 'accounts.google.com' not in entries
-    assert 'www.google.com' not in entries
     vless_entries = {
         line.strip()
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
     assert 'accounts.google.com' in vless_entries
-    assert not set(service_catalog.global_route_exclude_entries()) & vless_entries
+    router_preserved_global = {'clients3.google.com', 'www.google.com'}
+    assert set(service_catalog.global_route_exclude_entries()) & vless_entries <= router_preserved_global
     assert 'rutracker.org' in entries
     assert 'rutracker.wiki' in entries
     assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
@@ -4206,15 +4209,28 @@ def test_vless2_youtube_routes_are_scoped():
     assert service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert 'static.rutracker.cc' not in entries
     assert 'feed.rutracker.cc' in entries
-    assert 'rutracker.org' not in vless_entries
-    assert 'rutracker.wiki' not in vless_entries
+    assert 'rutracker.org' in vless_entries
+    assert 'rutracker.wiki' in vless_entries
     assert 'static.rutracker.cc' in vless_entries
-    assert 'feed.rutracker.cc' not in vless_entries
+    assert 'feed.rutracker.cc' in vless_entries
     assert 'thepiratebay.org' not in entries
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
     assert 'redirector.googlevideo.com' in entries
     assert 'yt4.ggpht.com' in entries
     assert 'yt4.googleusercontent.com' in entries
+    assert {
+        'ggpht.cn',
+        'withyoutube.com',
+        'youtubefanfest.com',
+        'youtubegaming.com',
+        'youtubego.com',
+        'youtubego.co.id',
+        'youtubego.co.in',
+        'youtubego.com.br',
+        'youtubego.id',
+        'youtubego.in',
+        'youtubemobilesupport.com',
+    } <= entries
     assert set(service_catalog.YOUTUBE_PLAYER_API_IP_ENTRIES) <= entries
     assert not (set(service_catalog.YOUTUBE_PLAYER_API_IP_ENTRIES) & vless_entries)
     assert set(service_catalog.YOUTUBE_EDGE_IP_ENTRIES) <= entries
@@ -4228,7 +4244,7 @@ def test_vless2_youtube_routes_are_scoped():
         'thepiratebay.org',
         'discord-attachments-uploads-prd.storage.googleapis.com',
     } <= vless_entries
-    assert '104.21.0.0/16' not in vless_entries
+    assert {'104.21.0.0/16', '172.67.0.0/16', '188.114.0.0/16'} <= vless_entries
     assert not {
         '64.233.0.0/16',
         '72.14.0.0/16',
@@ -4278,7 +4294,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
     assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
     assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com'} <= entries
-    assert 'www.google.com' not in entries
+    assert 'www.google.com' in entries
     assert 'google.com' not in entries
     assert {'cdn.auth0.com', 'assets.auth0.com', 'static.auth0.com', 'login.openai.com'} <= entries
     assert {'js.hcaptcha.com', 'client-api.arkoselabs.com', 'openai-api.arkoselabs.com'} <= entries
@@ -4434,6 +4450,8 @@ def test_telegram_routes_include_mini_app_dependencies():
         'queuev4.vk.ru', 'tracker-api.vk-analytics.ru',
         '17.249.0.0/16', '17.252.0.0/16', '17.188.128.0/18',
         '142.251.169.188', '172.253.145.188',
+        'stel.com', '2001:b28:f23c::/48', '2a0a:f280::/32',
+        '2a0a:f280:203::/48',
     }
     assert expected <= set(service_catalog.TELEGRAM_UNBLOCK_ENTRIES)
     assert expected <= entries
@@ -6306,16 +6324,18 @@ def test_service_routes_apply_and_profile():
             update_script='',
         )
         assert repaired['services'] == 1
-        assert repaired['entries_added'] == 4
-        assert repaired['global_entries_removed'] == 3
-        assert repaired['entries_removed'] == 4
+        assert repaired['entries_added'] == 7
+        assert repaired['global_entries_removed'] == 4
+        assert repaired['entries_removed'] == 5
         after = service_routes.service_route_state('youtube', unblock_dir=str(drift_dir))
         assert after['label'] == 'Vless 2'
         repaired_text = '\n'.join(
             (drift_dir / route_file).read_text(encoding='utf-8')
             for route_file in ('vless.txt', 'vless-2.txt')
         )
-        assert not set(service_catalog.global_route_exclude_entries()) & set(repaired_text.splitlines())
+        assert set(service_catalog.global_route_exclude_entries()) & set(repaired_text.splitlines()) <= set(
+            service_catalog.SERVICE_LIST_SOURCES['youtube'].get('route_global_exclude_allow') or []
+        )
         assert route_intersections.analyze_route_intersections(
             unblock_dir=str(drift_dir),
             include_runtime=False,

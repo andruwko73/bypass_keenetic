@@ -1,3 +1,7 @@
+*v1.765 (22 Jun 2026) -* main
+
+*Refreshes Telegram and YouTube service route catalogs from current public lists, preserves router-verified route entries for GitHub reinstalls, and normalizes mobile status-page spacing to an 8px rhythm without changing desktop layout.*
+
 *v1.764 (22 Jun 2026) -* main
 
 *Keeps the 1.763 lazy check-panel memory work and makes the CI UI smoke scroll desktop route popovers before measuring viewport clipping.*

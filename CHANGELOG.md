@@ -1,3 +1,8 @@
+<a name="1.765"></a>
+# [1.765] - 22 Jun 2026
+
+- Refreshes Telegram and YouTube service route catalogs from current public lists, preserves router-verified route entries for GitHub reinstalls, and normalizes mobile status-page spacing to an 8px rhythm without changing desktop layout.
+
 <a name="1.764"></a>
 # [1.764] - 22 Jun 2026
 

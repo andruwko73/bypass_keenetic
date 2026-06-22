@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'topbar-status-wrap-1752-1'
+ASSET_CACHE_REVISION = 'mobile-status-gap-1765-1'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
