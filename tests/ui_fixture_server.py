@@ -334,6 +334,7 @@ def _protocol_panel(protocol):
         route_tools_html=route_tools_html,
         active_protocol=protocol,
         pool_probe_pending=False,
+        defer_pool_rows=True,
     )
     return panels
 
@@ -408,6 +409,7 @@ def _page_html(mode="advanced"):
         enable_key_pool=enable_key_pool,
         enable_custom_checks=enable_custom_checks,
         pool_probe_pending=False,
+        defer_pool_rows=enable_key_pool,
     )
     unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
         [

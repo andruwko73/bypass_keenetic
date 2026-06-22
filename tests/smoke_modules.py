@@ -5185,6 +5185,23 @@ def test_web_pool_form_blocks_helpers():
     assert lazy_tabs_html.count('protocol-tab') == 2
     assert 'data-protocol-panel-lazy="1"' in lazy_panels_html
     assert 'vless://hidden' not in lazy_panels_html
+    deferred_tabs_html, deferred_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        [('vless', 'Vless 1', 3, 'vless://...')],
+        {'vless': ''},
+        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'}},
+        '<input name="csrf_token" value="token">',
+        key_pools={'vless': ['deferred-pool-key']},
+        key_display_name=lambda key: 'deferred display',
+        hash_key=lambda key: 'deferredhash',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        defer_pool_rows=True,
+    )
+    assert 'tab-count">1</span>' in deferred_tabs_html
+    assert 'data-pool-deferred="1"' in deferred_panels_html
+    assert 'pool-empty-row' in deferred_panels_html
+    assert 'deferred-pool-key' not in deferred_panels_html
+    assert 'deferred display' not in deferred_panels_html
     scoped_tabs_html, scoped_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         [
             ('vless', 'Vless 1', 3, 'vless://...'),
@@ -5750,6 +5767,10 @@ def test_web_template_scripts_helpers():
     assert 'function trackLiquidMovement(state, clientX, clientY)' in scripts
     assert 'function resetLiquidState()' in scripts
     assert 'function loadedPoolProtocolQuery()' in scripts
+    assert 'function clearPoolDeferred(body)' in scripts
+    assert 'body.removeAttribute(\'data-pool-deferred\')' in scripts
+    assert '[data-pool-deferred="1"]' in scripts
+    assert 'refreshPoolData(0)' in scripts
     assert 'function schedulePoolView(proto, delayMs)' in scripts
     assert 'const rowByKeyId = new Map();' in scripts
     assert 'Object.prototype.hasOwnProperty.call(stateMap, check.id)' in scripts

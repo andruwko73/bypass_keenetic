@@ -760,6 +760,7 @@ def render_web_scripts(
                         setupPoolControls(loadedPanel);
                         setupServiceRouteMenus(loadedPanel);
                         setupAsyncForms(loadedPanel);
+                        refreshPoolData(0);
                     }})
                     .catch(function(error) {{
                         showLoadError(panel, error);
@@ -1185,6 +1186,14 @@ def render_web_scripts(
             return protocols.length ? '?protocols=' + encodeURIComponent(protocols.join(',')) : '';
         }}
 
+        function clearPoolDeferred(body) {{
+            if (!body) {{
+                return;
+            }}
+            body.removeAttribute('data-pool-deferred');
+            delete body.dataset.poolDeferred;
+        }}
+
         function applyPoolView(proto, forceSort) {{
             if (!proto) {{
                 return;
@@ -1366,6 +1375,7 @@ def render_web_scripts(
             if (tab) {{
                 tab.textContent = String(pool.count || rows.length);
             }}
+            clearPoolDeferred(body);
             if (!rows.length) {{
                 body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите subscription.</td></tr>';
                 body.innerHTML = body.innerHTML.replace('colspan="6"', 'colspan="' + poolCoreColspan(coreServices) + '"');
@@ -1425,6 +1435,7 @@ def render_web_scripts(
             if (tab) {{
                 tab.textContent = String(pool.count || rows.length);
             }}
+            clearPoolDeferred(body);
             const rowElements = Array.from(body.querySelectorAll('[data-pool-row]'));
             const rowByKeyId = new Map();
             rowElements.forEach(function(item) {{
@@ -2436,6 +2447,9 @@ def render_web_scripts(
             setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
             setupProtocolSubtabs();
             setupPoolControls();
+            if (document.querySelector('[data-pool-deferred="1"]')) {{
+                refreshPoolData(0);
+            }}
             setupServiceRouteMenus();
             setupEventHistoryPanel();
             setupLiquidPointer();

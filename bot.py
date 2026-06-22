@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.760, последнее изменение: 21.06.2026
+#  Файл: bot.py, Версия v1.761, последнее изменение: 22.06.2026
 
 import subprocess
 import os
@@ -8441,6 +8441,7 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         route_tools_html=route_tools_html,
         active_protocol=protocol,
         pool_probe_pending=bool(_get_pool_probe_progress().get('running')),
+        defer_pool_rows=True,
     )
     return panel_html
 
@@ -8509,6 +8510,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         active_protocol=_default_web_protocol(),
         lazy_protocol_panels=True,
         pool_probe_pending=pool_probe_pending,
+        defer_pool_rows=True,
     )
     pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)
     return {

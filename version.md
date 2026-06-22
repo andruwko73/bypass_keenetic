@@ -1,3 +1,7 @@
+*v1.761 (22 Jun 2026) -* main
+
+*Defers key-pool row HTML rendering to `/api/pools` for protocol panels and the initial key page, lowering web UI memory spikes while preserving Telegram/YouTube pool badges.*
+
 *v1.760 (21 Jun 2026) -* main
 
 *Restores Telegram and YouTube badges in every key-pool row while making protocol status route-scoped, so VLESS can be working by Telegram and VLESS2 by YouTube without showing a misleading partial badge.*

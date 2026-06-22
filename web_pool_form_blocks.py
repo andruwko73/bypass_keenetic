@@ -271,6 +271,7 @@ def render_protocol_panel(
     enable_key_pool=True,
     enable_custom_checks=True,
     pool_probe_pending=False,
+    defer_pool_rows=False,
 ):
     active_class = ' active' if active else ''
     safe_key_name = html.escape(key_name, quote=True)
@@ -300,6 +301,7 @@ def render_protocol_panel(
     pool_subview_html = ''
     subscription_subview_html = ''
     if enable_key_pool:
+        deferred_attr = ' data-pool-deferred="1"' if defer_pool_rows else ''
         pool_subview_html = f'''
         <div class="protocol-subview" data-subview="pool">
             <div class="pool-toolbar">
@@ -347,7 +349,7 @@ def render_protocol_panel(
                         <col class="pool-col-actions">
                     </colgroup>
                     <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head" data-core-service-head="telegram">{telegram_icon_html(opacity=1.0)}</th><th class="pool-icon-head" data-core-service-head="youtube">{youtube_icon_html(opacity=1.0)}</th><th class="pool-icon-head pool-custom-head" data-custom-check-head>{custom_header_icons}</th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
-                    <tbody data-pool-body="{safe_key_name}">{pool_items_html}</tbody>
+                    <tbody data-pool-body="{safe_key_name}"{deferred_attr}>{pool_items_html}</tbody>
                 </table>
             </div>
         </div>'''
@@ -480,6 +482,7 @@ def render_protocol_tabs_and_panels(
     lazy_protocol_panels=False,
     pool_probe_pending=False,
     core_service_applicability_for_protocol=None,
+    defer_pool_rows=False,
 ):
     current_keys = current_keys or {}
     protocol_statuses = protocol_statuses or {}
@@ -570,7 +573,7 @@ def render_protocol_tabs_and_panels(
             pool_items_html = render_pool_items(
                 key_name=key_name,
                 title=title,
-                pool_keys=pool_keys,
+                pool_keys=[] if defer_pool_rows else pool_keys,
                 current_key=current_keys.get(key_name, ''),
                 key_probe_cache=key_probe_cache,
                 custom_checks=protocol_custom_checks,
@@ -607,6 +610,7 @@ def render_protocol_tabs_and_panels(
                 enable_key_pool=enable_key_pool,
                 enable_custom_checks=enable_custom_checks,
                 pool_probe_pending=pool_probe_pending,
+                defer_pool_rows=defer_pool_rows,
             )
         )
     return ''.join(tabs), ''.join(panels)
