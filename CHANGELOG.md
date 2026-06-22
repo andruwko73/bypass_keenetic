@@ -1,3 +1,8 @@
+<a name="1.766"></a>
+# [1.766] - 22 Jun 2026
+
+- Keeps shared service route entries such as accounts.google.com in every service route that needs them, preventing GitHub updates from moving YouTube bootstrap domains back to Vless 1 and making YouTube look partial.
+
 <a name="1.765"></a>
 # [1.765] - 22 Jun 2026
 

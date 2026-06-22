@@ -1,3 +1,7 @@
+*v1.766 (22 Jun 2026) -* main
+
+*Keeps shared service route entries such as accounts.google.com in every service route that needs them, preventing GitHub updates from moving YouTube bootstrap domains back to Vless 1 and making YouTube look partial.*
+
 *v1.765 (22 Jun 2026) -* main
 
 *Refreshes Telegram and YouTube service route catalogs from current public lists, preserves router-verified route entries for GitHub reinstalls, and normalizes mobile status-page spacing to an 8px rhythm without changing desktop layout.*

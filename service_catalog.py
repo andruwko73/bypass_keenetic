@@ -1001,6 +1001,24 @@ def service_route_entries(service_key, service_sources=None):
     return scoped_entries or entries
 
 
+def shared_service_route_entries(service_sources=None):
+    sources = service_sources or SERVICE_LIST_SOURCES
+    owners = {}
+    original = {}
+    for service_key in sources:
+        for entry in service_route_entries(service_key, sources):
+            normalized = normalize_route_entry(entry)
+            if not normalized:
+                continue
+            owners.setdefault(normalized, set()).add(service_key)
+            original.setdefault(normalized, entry)
+    return [
+        original[entry]
+        for entry, service_keys in owners.items()
+        if len(service_keys) > 1
+    ]
+
+
 def udp_quic_policy_entries(service_sources=None):
     sources = service_sources or SERVICE_LIST_SOURCES
     entries = []

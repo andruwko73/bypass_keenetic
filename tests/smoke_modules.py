@@ -6361,6 +6361,38 @@ def test_route_intersections_helpers():
         assert 'example.com' not in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
 
 
+def test_service_route_repair_preserves_shared_entries():
+    shared_entry = 'accounts.google.com'
+    assert shared_entry in service_catalog.shared_service_route_entries()
+    with tempfile.TemporaryDirectory() as tmp:
+        for route_file in ('vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        youtube_entries = service_catalog.service_route_entries('youtube')
+        chatgpt_entries = service_catalog.service_route_entries('chatgpt_services')
+        (Path(tmp) / 'vless-2.txt').write_text(
+            '\n'.join(entry for entry in youtube_entries if entry != shared_entry) + '\n',
+            encoding='utf-8',
+        )
+        (Path(tmp) / 'vless.txt').write_text('\n'.join(chatgpt_entries) + '\n', encoding='utf-8')
+
+        before = service_routes.service_route_state('youtube', unblock_dir=str(tmp))
+        assert before['complete_protocols'] == []
+        assert 'vless2' in before['partial_protocols']
+        repaired = service_routes.repair_service_route_catalog_drift(unblock_dir=str(tmp), update_script='')
+        assert repaired['services'] >= 1
+
+        vless_entries = set((Path(tmp) / 'vless.txt').read_text(encoding='utf-8').splitlines())
+        vless2_entries = set((Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8').splitlines())
+        assert shared_entry in vless_entries
+        assert shared_entry in vless2_entries
+        assert service_routes.service_route_state('youtube', unblock_dir=str(tmp))['label'] == 'Vless 2'
+        assert service_routes.service_route_state('chatgpt_services', unblock_dir=str(tmp))['label'] == 'Vless 1'
+        assert route_intersections.analyze_route_intersections(
+            unblock_dir=str(tmp),
+            include_runtime=False,
+        )['count'] == 0
+
+
 def test_route_intersections_detect_runtime_ipset_overlap():
     with tempfile.TemporaryDirectory() as tmp:
         for route_file, content in (

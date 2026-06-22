@@ -2,6 +2,7 @@ import ipaddress
 import os
 import subprocess
 
+from service_catalog import normalize_route_entry, shared_service_route_entries
 from unblock_lists import DEFAULT_ORDER, UNBLOCK_DIR, UNBLOCK_UPDATE_SCRIPT, read_unblock_list_entries, write_unblock_list_entries
 
 
@@ -191,12 +192,17 @@ def analyze_route_intersections(
 ):
     entries_by_route = _read_all(unblock_dir)
     issues = []
+    shared_entries = {
+        normalize_route_entry(entry)
+        for entry in shared_service_route_entries()
+        if str(entry or '').strip()
+    }
     exact_seen = {}
     for route, entries in entries_by_route.items():
         for entry in entries:
             exact_seen.setdefault(entry, []).append(route)
     for entry, routes in exact_seen.items():
-        if len(routes) > 1:
+        if len(routes) > 1 and normalize_route_entry(entry) not in shared_entries:
             issues.append({
                 'kind': 'exact',
                 'entry': entry,
@@ -222,6 +228,11 @@ def analyze_route_intersections(
                 or other_domain.endswith('.' + domain)
                 or domain.endswith('.' + other_domain)
             ):
+                if (
+                    normalize_route_entry(entry) in shared_entries
+                    and normalize_route_entry(other_entry) in shared_entries
+                ):
+                    continue
                 pair = tuple(sorted((entry, other_entry))) + tuple(sorted((route, other_route)))
                 if pair not in suffix_pairs:
                     suffix_pairs.add(pair)

@@ -8,6 +8,7 @@ from service_catalog import (
     global_route_exclude_entries,
     normalize_route_entry,
     service_route_entries,
+    shared_service_route_entries,
 )
 from unblock_lists import (
     BASE_LABELS,
@@ -142,6 +143,21 @@ def _remove_global_route_excludes(route_entries):
     return removed
 
 
+def _shared_service_entry_set():
+    return {
+        normalize_route_entry(value)
+        for value in shared_service_route_entries()
+        if str(value or '').strip()
+    }
+
+
+def _removable_service_entries(entries, shared_entries):
+    return {
+        entry for entry in entries
+        if normalize_route_entry(entry) not in shared_entries
+    }
+
+
 def _run_update(update_script):
     if update_script:
         subprocess.run([update_script], check=False)
@@ -204,6 +220,8 @@ def apply_service_route(
     entries = set(_service_entries(service_key))
     target_route = PROTOCOL_ROUTES[target_protocol]
     route_entries = {route: _read_route(route, unblock_dir) for route in PROTOCOL_ROUTES.values()}
+    shared_entries = _shared_service_entry_set()
+    removable_entries = _removable_service_entries(entries, shared_entries)
     removed = _remove_global_route_excludes(route_entries)
     before_target = set(route_entries[target_route])
     if remove_from_others:
@@ -211,7 +229,7 @@ def apply_service_route(
             if route == target_route:
                 continue
             size_before = len(values)
-            values.difference_update(entries)
+            values.difference_update(removable_entries)
             removed += size_before - len(values)
     route_entries[target_route].update(entries)
     added = len(route_entries[target_route] - before_target)
@@ -244,6 +262,7 @@ def repair_service_route_catalog_drift(
     route_entries = {route: _read_route(route, unblock_dir) for route in PROTOCOL_ROUTES.values()}
     repaired = []
     global_removed = _remove_global_route_excludes(route_entries)
+    shared_entries = _shared_service_entry_set()
     threshold_ratio = max(0.0, min(1.0, float(min_coverage)))
 
     for item in service_items:
@@ -286,11 +305,12 @@ def repair_service_route_catalog_drift(
         before_target = set(route_entries[target_route])
         removed = 0
         if remove_from_others:
+            removable_entries = _removable_service_entries(entries, shared_entries)
             for route, values in route_entries.items():
                 if route == target_route:
                     continue
                 size_before = len(values)
-                values.difference_update(entries)
+                values.difference_update(removable_entries)
                 removed += size_before - len(values)
 
         route_entries[target_route].update(entries)
