@@ -1,4 +1,4 @@
-*v1.767 (22 Jun 2026) -* main
+*v1.768 (22 Jun 2026) -* main
 
 *Keeps shared service route entries such as accounts.google.com in every service route that needs them, preventing GitHub updates from moving YouTube bootstrap domains back to Vless 1 and making YouTube look partial.*
 

@@ -1,3 +1,8 @@
+<a name="1.768"></a>
+# [1.768] - 22 Jun 2026
+
+- Scopes custom pool-check columns to complete service routes only, so services that only have partial/shared route overlap in Vless 2 do not appear as Vless 2 pool checks.
+
 <a name="1.767"></a>
 # [1.767] - 22 Jun 2026
 

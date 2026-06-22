@@ -722,20 +722,22 @@ def test_key_pool_web():
     scoped_checks = [
         {'id': 'discord', 'label': 'Discord'},
         {'id': 'claude', 'label': 'Claude'},
+        {'id': 'chatgpt', 'label': 'ChatGPT'},
         {'id': 'manual', 'label': 'Manual'},
     ]
     route_states = {
         'discord': {'complete_protocols': ['vless'], 'partial_protocols': []},
         'claude': {'complete_protocols': [], 'partial_protocols': ['vless2']},
+        'chatgpt': {'complete_protocols': ['vless'], 'partial_protocols': ['vless2']},
     }
     assert [
         check['id']
         for check in key_pool_web.protocol_custom_checks(scoped_checks, route_states, 'vless')
-    ] == ['discord', 'manual']
+    ] == ['discord', 'chatgpt', 'manual']
     assert [
         check['id']
         for check in key_pool_web.protocol_custom_checks(scoped_checks, route_states, 'vless2')
-    ] == ['claude', 'manual']
+    ] == ['manual']
     assert [
         check['id']
         for check in key_pool_web.protocol_custom_checks(scoped_checks, route_states, 'vmess')

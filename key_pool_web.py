@@ -188,6 +188,8 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                             service['count'] += 1
                         continue
                 else:
+                    if service['id'] and not custom_check_applies_to_protocol(route_states, service['id'], proto):
+                        continue
                     expected_count += 1
                     if service['id'] not in custom:
                         continue
@@ -247,6 +249,18 @@ def web_custom_probe_states(probe, custom_checks):
     return result
 
 
+def custom_check_applies_to_protocol(route_states, check_id, protocol):
+    if not isinstance(route_states, dict):
+        return True
+    route_state = route_states.get(str(check_id or '').strip())
+    if not isinstance(route_state, dict):
+        return True
+    complete_protocols = set(route_state.get('complete_protocols') or [])
+    if complete_protocols:
+        return str(protocol or '').strip() in complete_protocols
+    return False
+
+
 def protocol_custom_checks(custom_checks, route_states, protocol):
     if not custom_checks:
         return []
@@ -258,13 +272,7 @@ def protocol_custom_checks(custom_checks, route_states, protocol):
         check_id = str(check.get('id') or '').strip()
         if not check_id:
             continue
-        route_state = route_states.get(check_id)
-        if not isinstance(route_state, dict):
-            result.append(check)
-            continue
-        route_protocols = set(route_state.get('complete_protocols') or [])
-        route_protocols.update(route_state.get('partial_protocols') or [])
-        if protocol in route_protocols:
+        if custom_check_applies_to_protocol(route_states, check_id, protocol):
             result.append(check)
     return result
 
