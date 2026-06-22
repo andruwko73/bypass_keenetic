@@ -764,6 +764,10 @@ def test_key_pool_web():
     assert scoped_row['tg'] == 'ok'
     assert scoped_row['yt'] == 'ok'
     assert scoped_row['custom'] == {'manual': 'ok'}
+    assert [
+        check['id']
+        for check in scoped_service_snapshot['vmess']['custom_checks']
+    ] == ['manual']
     core_route_states = {
         'telegram': {'complete_protocols': ['vless'], 'partial_protocols': []},
         'youtube': {'complete_protocols': ['vless2'], 'partial_protocols': []},
@@ -5082,6 +5086,9 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'data-yt-state="warn"' in warn_rows
     assert 'service-probe-warn' in warn_rows
+    assert 'service-probe-icon-warn' in warn_rows
+    assert 'YT</span>' in warn_rows
+    assert 'service-probe-warn">!</span>' not in warn_rows
     not_applicable_rows = web_pool_form_blocks.render_pool_items(
         key_name='vless2',
         title='Vless 2',
@@ -5888,6 +5895,11 @@ def test_web_template_scripts_helpers():
     assert "sortMode === 'quality'" in scripts
     assert "state === 'warn'" in scripts
     assert 'service-probe-warn' in scripts
+    assert 'service-probe-icon-warn' in scripts
+    assert 'function poolCustomChecks(pool)' in scripts
+    assert 'pool && Array.isArray(pool.custom_checks)' in scripts
+    assert 'renderCustomBadges(row.custom, checks)' in scripts
+    assert 'head.innerHTML = customHeaderIcons(checks)' in scripts
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
     assert 'activeCommandName' in scripts

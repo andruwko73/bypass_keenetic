@@ -924,6 +924,10 @@ def render_web_scripts(
                 return serviceIcon(service === 'tg' ? TELEGRAM_ICON_SRC : YOUTUBE_ICON_SRC, service === 'tg' ? 'Telegram' : 'YouTube');
             }}
             if (state === 'warn') {{
+                if (service === 'yt') {{
+                    return '<span class="service-probe-mark service-probe-warn service-probe-icon-warn" title="YouTube works, probe is unstable">' +
+                        serviceIcon(YOUTUBE_ICON_SRC, 'YouTube') + '</span>';
+                }}
                 return '<span class="service-probe-mark service-probe-warn">!</span>';
             }}
             if (state === 'fail') {{
@@ -1003,12 +1007,13 @@ def render_web_scripts(
                 escapeHtml(label + (url ? ': ' + url : '')) + '">' + content + '</span>';
         }}
 
-        function renderCustomBadges(states) {{
-            if (!customChecks.length) {{
+        function renderCustomBadges(states, checks) {{
+            const activeChecks = Array.isArray(checks) ? checks : customChecks;
+            if (!activeChecks.length) {{
                 return '';
             }}
             const stateMap = states || {{}};
-            return customChecks.filter(function(check) {{
+            return activeChecks.filter(function(check) {{
                 return Object.prototype.hasOwnProperty.call(stateMap, check.id);
             }}).map(function(check) {{
                 const state = stateMap[check.id] || 'unknown';
@@ -1068,11 +1073,12 @@ def render_web_scripts(
             return '<span class="custom-service-badge custom-service-neutral">' + escapeHtml((check && check.badge) || 'WEB') + '</span>';
         }}
 
-        function customHeaderIcons() {{
-            if (!customChecks.length) {{
+        function customHeaderIcons(checks) {{
+            const activeChecks = Array.isArray(checks) ? checks : customChecks;
+            if (!activeChecks.length) {{
                 return '';
             }}
-            return customChecks.map(function(check) {{
+            return activeChecks.map(function(check) {{
                 const label = check.label || 'Service';
                 const content = check.icon
                     ? serviceIcon(serviceIconSrc(check.icon), label)
@@ -1081,11 +1087,20 @@ def render_web_scripts(
             }}).join('');
         }}
 
-        function syncCustomCheckColumns() {{
-            const hasChecks = customChecks.length > 0;
-            const mobileWidth = Math.max(28, 28 * customChecks.length) + 'px';
-            const desktopWidth = (32 * Math.max(1, customChecks.length)) + 'px';
-            document.querySelectorAll('.pool-table').forEach(function(table) {{
+        function syncCustomCheckColumns(checks, root) {{
+            const activeChecks = Array.isArray(checks) ? checks : customChecks;
+            const hasChecks = activeChecks.length > 0;
+            const mobileWidth = Math.max(28, 28 * activeChecks.length) + 'px';
+            const desktopWidth = (32 * Math.max(1, activeChecks.length)) + 'px';
+            const scope = root && root.querySelectorAll ? root : document;
+            const tables = [];
+            if (scope.matches && scope.matches('.pool-table')) {{
+                tables.push(scope);
+            }}
+            scope.querySelectorAll('.pool-table').forEach(function(table) {{
+                tables.push(table);
+            }});
+            tables.forEach(function(table) {{
                 table.classList.toggle('has-custom-checks', hasChecks);
                 table.style.setProperty('--custom-col-mobile', mobileWidth);
                 const customCol = table.querySelector('.pool-col-custom');
@@ -1093,6 +1108,26 @@ def render_web_scripts(
                     customCol.style.width = desktopWidth;
                 }}
             }});
+        }}
+
+        function poolCustomChecks(pool) {{
+            if (pool && Array.isArray(pool.custom_checks)) {{
+                return pool.custom_checks;
+            }}
+            return customChecks;
+        }}
+
+        function syncPoolCustomCheckColumns(proto, checks) {{
+            const body = document.querySelector('[data-pool-body="' + proto + '"]');
+            const table = body ? body.closest('.pool-table') : null;
+            if (!table) {{
+                return;
+            }}
+            syncCustomCheckColumns(checks, table);
+            const head = table.querySelector('[data-custom-check-head]');
+            if (head) {{
+                head.innerHTML = customHeaderIcons(checks);
+            }}
         }}
 
         function routeServiceIds() {{
@@ -1148,10 +1183,6 @@ def render_web_scripts(
                 button.disabled = active;
                 button.title = active ? 'Уже добавлено' : 'Добавить проверку';
             }});
-            document.querySelectorAll('[data-custom-check-head]').forEach(function(head) {{
-                head.innerHTML = customHeaderIcons();
-            }});
-            syncCustomCheckColumns();
         }}
 
         function poolStateRank(value) {{
@@ -1436,10 +1467,12 @@ def render_web_scripts(
             }}
             const rows = pool.rows || [];
             const coreServices = poolCoreServices(pool);
+            const checks = poolCustomChecks(pool);
             const panel = body.closest('[data-protocol-panel]');
             if (panel) {{
                 panel.dataset.coreServices = coreServices.join(',');
             }}
+            syncPoolCustomCheckColumns(proto, checks);
             updatePoolSortOptions(proto);
             const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');
             if (tab) {{
@@ -1473,7 +1506,7 @@ def render_web_scripts(
                         '<span class="pool-hash">' + escapeHtml(row.key_id) + '</span>' +
                     '</td>' +
                     coreCells +
-                    '<td class="pool-custom-cell" data-pool-custom>' + renderCustomBadges(row.custom) + '</td>' +
+                    '<td class="pool-custom-cell" data-pool-custom>' + renderCustomBadges(row.custom, checks) + '</td>' +
                     '<td class="pool-checked-cell" data-pool-checked>' + escapeHtml(row.checked_at) + '</td>' +
                     '<td class="pool-actions-cell">' +
                         '<form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула?">' +
@@ -1496,10 +1529,12 @@ def render_web_scripts(
             }}
             const rows = pool.rows || [];
             const coreServices = poolCoreServices(pool);
+            const checks = poolCustomChecks(pool);
             const panel = body.closest('[data-protocol-panel]');
             if (panel) {{
                 panel.dataset.coreServices = coreServices.join(',');
             }}
+            syncPoolCustomCheckColumns(proto, checks);
             updatePoolSortOptions(proto);
             const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');
             if (tab) {{
@@ -1551,7 +1586,7 @@ def render_web_scripts(
                 }}
                 const custom = item.querySelector('[data-pool-custom]');
                 if (custom) {{
-                    custom.innerHTML = renderCustomBadges(row.custom);
+                    custom.innerHTML = renderCustomBadges(row.custom, checks);
                 }}
                 const checked = item.querySelector('[data-pool-checked]');
                 if (checked) {{

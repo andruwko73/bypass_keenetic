@@ -703,6 +703,7 @@ def web_pool_snapshot(
             'label': pool_proto_label(proto),
             'count': len(rows),
             'core_services': core_services,
+            'custom_checks': web_custom_checks(protocol_checks),
             'rows': rows,
         }
     return result

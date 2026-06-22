@@ -445,6 +445,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .service-probe-mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;border:1px solid rgba(91,124,150,.34);font-size:11px;font-weight:800;line-height:1;}
         .service-probe-fail{color:var(--muted);background:transparent;border-color:transparent;}
         .service-probe-warn{color:#ffd38a;background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.38);}
+        .service-probe-icon-warn{padding:0;}
+        .service-probe-icon-warn .service-icon-img{width:14px!important;height:14px!important;border-radius:4px;}
         .service-probe-unknown{color:#9fb0c8;background:rgba(91,124,150,.12);}
         .service-probe-na{color:#6f7d8f;background:transparent;border-color:rgba(91,124,150,.18);}
         .custom-service-ok{background:rgba(31,122,106,.18);border-color:rgba(78,216,205,.38);color:#95f3ec;}

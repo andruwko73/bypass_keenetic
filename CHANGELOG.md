@@ -1,3 +1,8 @@
+<a name="1.767"></a>
+# [1.767] - 22 Jun 2026
+
+- Renders unstable-but-working YouTube pool probes with the YouTube icon instead of a misleading exclamation mark and scopes custom service columns to each protocol's pool, so Vless 2 no longer inherits ChatGPT/Discord/Cloud columns that are not assigned to it.
+
 <a name="1.766"></a>
 # [1.766] - 22 Jun 2026
 

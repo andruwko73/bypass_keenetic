@@ -61,7 +61,11 @@ def _service_probe_badge(probe, probe_key, ok_html, applicable=True):
     if not applicable:
         return '<span class="service-probe-mark service-probe-na">-</span>'
     if probe_key == 'yt_ok' and youtube_probe_state(probe) == 'warn':
-        return '<span class="service-probe-mark service-probe-warn">!</span>'
+        return (
+            '<span class="service-probe-mark service-probe-warn service-probe-icon-warn" '
+            'title="YouTube works, probe is unstable">'
+            f'{ok_html}</span>'
+        )
     if probe.get(probe_key):
         return ok_html
     if probe_key in probe:
