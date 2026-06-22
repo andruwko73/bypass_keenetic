@@ -184,8 +184,12 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-telegram-icon', `${name} Telegram route icon`);
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-youtube-icon', `${name} YouTube route icon`);
+    const firstRouteTrigger = page.locator('[data-protocol-panel].active .service-route-trigger').first();
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-card:first-child .service-route-trigger', `${name} service route trigger`);
-    await page.locator('[data-protocol-panel].active .service-route-trigger').first().click();
+    if (!isMobile) {
+      await firstRouteTrigger.evaluate((node) => node.scrollIntoView({ block: 'center', inline: 'nearest' }));
+    }
+    await firstRouteTrigger.click();
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-menu[open] .service-route-form:first-child .service-route-menu-item', `${name} service route menu`);
     const routeMenuPosition = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => getComputedStyle(node).position);
     if (!isMobile && routeMenuPosition !== 'absolute') {
@@ -194,10 +198,25 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (isMobile && routeMenuPosition === 'absolute') {
       throw new Error(`${name}: service route menu should stay in-flow on mobile`);
     }
-    const routeMenuViewport = await page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first().evaluate((node) => {
+    const routeMenuList = page.locator('[data-protocol-panel].active .service-route-menu[open] .service-route-menu-list').first();
+    let routeMenuViewport = await routeMenuList.evaluate((node) => {
       const rect = node.getBoundingClientRect();
       return { top: rect.top, bottom: rect.bottom, height: window.innerHeight };
     });
+    if (!isMobile && (routeMenuViewport.top < -2 || routeMenuViewport.bottom > routeMenuViewport.height + 2)) {
+      await routeMenuList.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        if (rect.bottom > window.innerHeight) {
+          window.scrollBy(0, rect.bottom - window.innerHeight + 16);
+        } else if (rect.top < 0) {
+          window.scrollBy(0, rect.top - 16);
+        }
+      });
+      routeMenuViewport = await routeMenuList.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, height: window.innerHeight };
+      });
+    }
     if (!isMobile && (routeMenuViewport.top < -2 || routeMenuViewport.bottom > routeMenuViewport.height + 2)) {
       throw new Error(`${name}: service route popover is clipped by viewport ${JSON.stringify(routeMenuViewport)}`);
     }

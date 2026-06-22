@@ -1,3 +1,7 @@
+*v1.764 (22 Jun 2026) -* main
+
+*Keeps the 1.763 lazy check-panel memory work and makes the CI UI smoke scroll desktop route popovers before measuring viewport clipping.*
+
 *v1.763 (22 Jun 2026) -* main
 
 *Lazy-loads protocol check panels and calls libc `malloc_trim` after heavy web cleanups, reducing router RSS spikes during web UI navigation.*

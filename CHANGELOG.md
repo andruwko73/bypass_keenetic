@@ -1,3 +1,8 @@
+<a name="1.764"></a>
+# [1.764] - 22 Jun 2026
+
+- Keeps the 1.763 lazy check-panel memory work and makes the CI UI smoke scroll desktop route popovers before measuring viewport clipping.
+
 <a name="1.763"></a>
 # [1.763] - 22 Jun 2026
 
