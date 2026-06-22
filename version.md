@@ -1,3 +1,7 @@
+*v1.771 (22 Jun 2026) -* main
+
+*Adds the overnight router memory and YouTube timing monitor to the repository and syncs version metadata so GitHub CI passes after the diagnostics commit.*
+
 *v1.769 (22 Jun 2026) -* main
 
 *Reduces key-pool probe RSS peaks with in-run cleanup checkpoints, RSS-guard retry/trim, final temporary xray cleanup, compact probe-cache error text, and extra memory timeline markers.*

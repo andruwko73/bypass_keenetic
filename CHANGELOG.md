@@ -1,3 +1,8 @@
+<a name="1.771"></a>
+# [1.771] - 22 Jun 2026
+
+- Adds the overnight router memory and YouTube timing monitor to the repository and syncs version metadata so GitHub CI passes after the diagnostics commit.
+
 <a name="1.769"></a>
 # [1.769] - 22 Jun 2026
 
