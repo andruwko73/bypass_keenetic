@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.768, последнее изменение: 22.06.2026
+#  Файл: bot.py, Версия v1.769, последнее изменение: 22.06.2026
 
 import subprocess
 import os
@@ -3790,6 +3790,34 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
         'collected': collected,
         'malloc_trim': malloc_trim_info,
     }
+
+
+def _pool_probe_memory_checkpoint(reason='', force=False, clear_status=False):
+    cleanup = _memory_cleanup(
+        reason or 'pool probe memory checkpoint',
+        force=force,
+        clear_status=clear_status,
+        log=bool(force),
+    )
+    rss_after = int(cleanup.get('rss_after_kb') or _process_rss_kb() or 0)
+    if (
+        not force and
+        MEMORY_POST_POOL_RESTART_RSS_KB > 0 and
+        rss_after >= MEMORY_POST_POOL_RESTART_RSS_KB
+    ):
+        _record_memory_timeline(
+            reason or 'pool probe memory checkpoint',
+            marker='pool_probe_memory_checkpoint',
+            extra={
+                'rss_before_kb': int(cleanup.get('rss_before_kb') or 0),
+                'rss_after_kb': rss_after,
+                'gc_collected': int(cleanup.get('collected') or 0),
+                'malloc_trim_attempted': bool((cleanup.get('malloc_trim') or {}).get('attempted')),
+                'malloc_trim_ok': bool((cleanup.get('malloc_trim') or {}).get('ok')),
+            },
+            force=True,
+        )
+    return cleanup
 
 
 def _memory_sensitive_operation_running():
@@ -7712,9 +7740,14 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             slow_memory_delay_seconds=POOL_PROBE_SLOW_MEMORY_DELAY_SECONDS,
             process_rss_kb=_process_rss_kb,
             max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB,
+            memory_cleanup=_pool_probe_memory_checkpoint,
+            rss_cleanup_delay_seconds=min(3.0, max(0.0, POOL_PROBE_LOW_MEMORY_DELAY_SECONDS)),
+            max_rss_cleanup_attempts=3,
         )
     finally:
         probe_recorder.flush()
+        _runner_cleanup_pool_probe_runtime(kill_processes=True)
+        _cleanup_pool_probe_runtime_light(kill_processes=True)
         _memory_cleanup('pool probe finished', force=True, clear_status=True)
         _record_memory_timeline(
             'pool probe finished',

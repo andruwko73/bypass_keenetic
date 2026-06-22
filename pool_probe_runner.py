@@ -333,6 +333,9 @@ def run_pool_probe_worker(
     slow_memory_delay_seconds=0,
     process_rss_kb=None,
     max_process_rss_kb=0,
+    memory_cleanup=None,
+    rss_cleanup_delay_seconds=3.0,
+    max_rss_cleanup_attempts=2,
     sleep=time.sleep,
     time_provider=time.time,
 ):
@@ -358,6 +361,7 @@ def run_pool_probe_worker(
         marked_tasks.add(checked_task_id)
         checked += 1
         set_checked(checked)
+        run_memory_cleanup('pool probe key checkpoint', force=False, clear_status=False)
 
     def ignore_late_result(proto, key_value):
         with ignored_result_lock:
@@ -403,6 +407,7 @@ def run_pool_probe_worker(
     low_memory_since = None
     high_cpu_since = None
     paused_remaining = False
+    rss_cleanup_attempts = 0
 
     def update_note(text):
         if set_note:
@@ -410,6 +415,22 @@ def run_pool_probe_worker(
                 set_note(text)
             except Exception:
                 pass
+
+    def run_memory_cleanup(reason, *, force=False, clear_status=False):
+        if not memory_cleanup:
+            return {}
+        try:
+            result = memory_cleanup(reason=reason, force=force, clear_status=clear_status)
+        except TypeError:
+            try:
+                result = memory_cleanup(reason, force)
+            except Exception as exc:
+                log(f'Pool probe memory cleanup failed: {exc}')
+                return {}
+        except Exception as exc:
+            log(f'Pool probe memory cleanup failed: {exc}')
+            return {}
+        return result if isinstance(result, dict) else {}
 
     def unknown_custom_results(custom_checks):
         return {
@@ -475,6 +496,21 @@ def run_pool_probe_worker(
                 break
             high_rss_kb = rss_above_limit()
             if high_rss_kb is not None:
+                max_cleanup_attempts = max(0, int(max_rss_cleanup_attempts or 0))
+                if memory_cleanup and rss_cleanup_attempts < max_cleanup_attempts:
+                    rss_cleanup_attempts += 1
+                    note = (
+                        f'Проверка пула освобождает память: RSS бота {int(high_rss_kb)} KB, '
+                        f'порог {int(max_process_rss_kb)} KB.'
+                    )
+                    log(note)
+                    update_note(note)
+                    run_memory_cleanup('pool probe rss guard', force=True, clear_status=False)
+                    sleep(max(0.0, float(rss_cleanup_delay_seconds or 0.0)))
+                    if rss_above_limit() is None:
+                        update_note('')
+                        continue
+                    continue
                 note = (
                     f'Проверка пула приостановлена: RSS бота {int(high_rss_kb)} KB, '
                     f'порог {int(max_process_rss_kb)} KB.'
@@ -483,6 +519,7 @@ def run_pool_probe_worker(
                 update_note(note)
                 paused_remaining = True
                 break
+            rss_cleanup_attempts = 0
             high_cpu_percent = cpu_above_limit()
             if high_cpu_percent is not None:
                 if high_cpu_since is None:
@@ -664,6 +701,7 @@ def run_pool_probe_worker(
                 del raw_batch
                 del valid_batch
                 gc.collect()
+                run_memory_cleanup('pool probe batch checkpoint', force=False, clear_status=False)
 
             if checked < total and pending_tasks:
                 sleep(delay_seconds)
@@ -677,5 +715,6 @@ def run_pool_probe_worker(
                 log(f'Не удалось сохранить очередь продолжения проверки пула: {exc}')
         invalidate_caches()
         gc.collect()
+        run_memory_cleanup('pool probe worker final checkpoint', force=False, clear_status=False)
 
     return checked, total

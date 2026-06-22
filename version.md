@@ -1,3 +1,7 @@
+*v1.769 (22 Jun 2026) -* main
+
+*Reduces key-pool probe RSS peaks with in-run cleanup checkpoints, RSS-guard retry/trim, final temporary xray cleanup, compact probe-cache error text, and extra memory timeline markers.*
+
 *v1.768 (22 Jun 2026) -* main
 
 *Keeps shared service route entries such as accounts.google.com in every service route that needs them, preventing GitHub updates from moving YouTube bootstrap domains back to Vless 1 and making YouTube look partial.*

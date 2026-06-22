@@ -12,6 +12,7 @@ KEY_PROBE_MIN_WRITE_INTERVAL = 30
 KEY_PROBE_CACHE_SCHEMA_VERSION = 8
 KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7, 8)
 KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
+KEY_PROBE_ERROR_TEXT_MAX_CHARS = 120
 YOUTUBE_QUALITY_STABLE = 'stable'
 YOUTUBE_QUALITY_FAST = 'fast'
 YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
@@ -76,6 +77,14 @@ def _stored_int(value):
     if numeric is None:
         return None
     return int(round(numeric))
+
+
+def _stored_error_text(value, fallback='', max_chars=KEY_PROBE_ERROR_TEXT_MAX_CHARS):
+    text = str(value or '').strip() or str(fallback or '').strip()
+    if not text:
+        return ''
+    text = ' '.join(text.split())
+    return text[:max(1, int(max_chars or KEY_PROBE_ERROR_TEXT_MAX_CHARS))]
 
 
 def youtube_quality_score(
@@ -277,7 +286,7 @@ def update_key_probe_cache_entry(
     )
     timeout = bool(timeout)
     if timeout:
-        reason = str(timeout_reason or 'timeout').strip() or 'timeout'
+        reason = _stored_error_text(timeout_reason, fallback='timeout')
         if entry.get('timeout') is not True:
             entry['timeout'] = True
             changed = True
@@ -337,7 +346,7 @@ def update_key_probe_cache_entry(
                     entry.pop('yt_stability', None)
                 changed = True
         if yt_last_error:
-            error_value = str(yt_last_error or '').strip()[:180]
+            error_value = _stored_error_text(yt_last_error)
             if entry.get('yt_last_error') != error_value:
                 entry['yt_last_error'] = error_value
                 changed = True
@@ -409,7 +418,7 @@ def update_key_probe_cache_entry(
                     entry.pop('yt_stream_tier', None)
                 changed = True
         if quality_error:
-            error_value = str(quality_error or '').strip()[:180]
+            error_value = _stored_error_text(quality_error)
             if entry.get('quality_error') != error_value:
                 entry['quality_error'] = error_value
                 changed = True

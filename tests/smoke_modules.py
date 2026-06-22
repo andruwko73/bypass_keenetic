@@ -1986,11 +1986,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert 'def _malloc_trim' in source
+    assert 'def _pool_probe_memory_checkpoint' in source
     assert "getattr(config, 'memory_malloc_trim_enabled', True)" in source
     assert 'malloc_trim_attempted' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
     assert 'process_rss_kb=_process_rss_kb' in source
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
+    assert 'memory_cleanup=_pool_probe_memory_checkpoint' in source
+    assert 'max_rss_cleanup_attempts=3' in source
+    assert "_cleanup_pool_probe_runtime_light(kill_processes=True)" in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
     assert "update_proxy('none', persist=False)" not in startup_restore
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -3745,6 +3749,44 @@ def test_pool_probe_runner_failover_candidate():
     assert rss_remaining == [('vless2', 'rss-high'), ('vless2', 'rss-next')]
     assert any('RSS' in note and '71680' in note for note in rss_notes)
     assert any('RSS' in item for item in rss_logs)
+
+    rss_values = iter([73000, 70000, 70000])
+    rss_cleanup_calls = []
+    rss_processed = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless2', 'rss-recovers')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: rss_processed.append((proto, key)),
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+        process_rss_kb=lambda: next(rss_values),
+        max_process_rss_kb=71680,
+        memory_cleanup=lambda **kwargs: rss_cleanup_calls.append(kwargs) or {'rss_after_kb': 70000},
+        rss_cleanup_delay_seconds=0,
+        max_rss_cleanup_attempts=2,
+    )
+    assert (checked, total) == (1, 1)
+    assert rss_processed == [('vless2', 'rss-recovers')]
+    assert any(call.get('reason') == 'pool probe rss guard' and call.get('force') is True for call in rss_cleanup_calls)
+    assert any(call.get('reason') == 'pool probe key checkpoint' for call in rss_cleanup_calls)
+    assert any(call.get('reason') == 'pool probe batch checkpoint' for call in rss_cleanup_calls)
 
     slow_notes = []
     slow_sleeps = []
@@ -5559,6 +5601,28 @@ def test_probe_cache_update_entry_min_interval():
         cache[key_id],
         custom_checks=[{'id': 'custom', 'urls': ['https://example.test']}],
     )
+
+
+def test_probe_cache_trims_error_text_fields():
+    cache = {}
+    long_error = 'network error\n' + ('x' * 300)
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'error-key',
+        yt_ok=False,
+        timeout=True,
+        timeout_reason=long_error,
+        yt_last_error=long_error,
+        quality_error=long_error,
+        now=100,
+    )
+    entry = cache[probe_cache.hash_key('error-key')]
+    assert len(entry['timeout_reason']) <= probe_cache.KEY_PROBE_ERROR_TEXT_MAX_CHARS
+    assert len(entry['yt_last_error']) <= probe_cache.KEY_PROBE_ERROR_TEXT_MAX_CHARS
+    assert len(entry['quality_error']) <= probe_cache.KEY_PROBE_ERROR_TEXT_MAX_CHARS
+    assert '\n' not in entry['timeout_reason']
+    assert entry['timeout_reason'].startswith('network error')
 
 
 def test_probe_cache_quality_metrics():

@@ -1,3 +1,8 @@
+<a name="1.769"></a>
+# [1.769] - 22 Jun 2026
+
+- Reduces key-pool probe RSS peaks with per-key and per-batch memory checkpoints, retry/trim handling before pausing on high RSS, final temporary xray cleanup, compact probe-cache error text, and extra memory timeline markers.
+
 <a name="1.768"></a>
 # [1.768] - 22 Jun 2026
 
