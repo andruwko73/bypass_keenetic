@@ -577,7 +577,9 @@ def test_proxy_config_builder():
     assert transparent_inbounds
     assert all(inbound['settings']['network'] == 'tcp,udp' for inbound in transparent_inbounds)
     assert all(inbound['streamSettings']['sockopt']['tproxy'] == 'redirect' for inbound in transparent_inbounds)
-    assert all(inbound['sniffing']['enabled'] is False for inbound in transparent_inbounds)
+    assert all(inbound['sniffing']['enabled'] is True for inbound in transparent_inbounds)
+    assert all(inbound['sniffing']['destOverride'] == ['http', 'tls', 'quic'] for inbound in transparent_inbounds)
+    assert all(inbound['sniffing']['routeOnly'] is False for inbound in transparent_inbounds)
     tproxy_inbounds = [
         inbound for inbound in core_config['inbounds']
         if inbound.get('protocol') == 'dokodemo-door'
@@ -590,6 +592,9 @@ def test_proxy_config_builder():
     }
     assert {inbound['port'] for inbound in tproxy_inbounds} == {11802, 11812, 11829}
     assert all(inbound['settings']['network'] == 'udp' for inbound in tproxy_inbounds)
+    assert all(inbound['sniffing']['enabled'] is True for inbound in tproxy_inbounds)
+    assert all(inbound['sniffing']['destOverride'] == ['http', 'tls', 'quic'] for inbound in tproxy_inbounds)
+    assert all(inbound['sniffing']['routeOnly'] is False for inbound in tproxy_inbounds)
     reality_outbound = proxy_protocols.proxy_outbound_from_key(
         'vless',
         'vless://00000000-0000-0000-0000-000000000000@example.com:443'

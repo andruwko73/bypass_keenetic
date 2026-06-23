@@ -1,3 +1,8 @@
+<a name="1.785"></a>
+# [1.785] - 23 Jun 2026
+
+- Enables HTTP/TLS/QUIC sniffing on transparent Xray inbounds so routed YouTube traffic keeps domain context instead of relying only on locally resolved IPs, reducing slow TLS startup on transparent routing.
+
 <a name="1.784"></a>
 # [1.784] - 23 Jun 2026
 

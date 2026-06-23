@@ -20,6 +20,14 @@ def socks_inbound(port, tag, listen='127.0.0.1'):
     }
 
 
+def transparent_sniffing():
+    return {
+        'enabled': True,
+        'destOverride': ['http', 'tls', 'quic'],
+        'routeOnly': False,
+    }
+
+
 def transparent_inbound(port, tag):
     return {
         'port': int(port),
@@ -32,7 +40,7 @@ def transparent_inbound(port, tag):
         'streamSettings': {
             'sockopt': {'tproxy': 'redirect'},
         },
-        'sniffing': {'enabled': False},
+        'sniffing': transparent_sniffing(),
         'tag': tag,
     }
 
@@ -49,7 +57,7 @@ def tproxy_inbound(port, tag):
         'streamSettings': {
             'sockopt': {'tproxy': 'tproxy'},
         },
-        'sniffing': {'enabled': False},
+        'sniffing': transparent_sniffing(),
         'tag': tag,
     }
 

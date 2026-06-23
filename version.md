@@ -1,3 +1,7 @@
+*v1.785 (23 Jun 2026) -* main
+
+*Enables HTTP/TLS/QUIC sniffing on transparent Xray inbounds so routed YouTube traffic keeps domain context instead of relying only on locally resolved IPs, reducing slow TLS startup on transparent routing.*
+
 *v1.784 (23 Jun 2026) -* main
 
 *Reduces router memory drift from repeated status refreshes, repeated UDP/QUIC fast-add events, Telegram polling errors, event-history trimming, and orphaned ipset scheduler processes.*
