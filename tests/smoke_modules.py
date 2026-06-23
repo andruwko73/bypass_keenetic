@@ -3406,6 +3406,7 @@ def test_pool_probe_controller_helpers():
         call['connect_timeout'] == 3 and call['read_timeout'] == 4
         for call in optional_tg_calls[1:]
     )
+    assert records[0][2]['tg_ok'] is False
 
     records = []
     pool_probe_controller.check_pool_key_through_proxy(
@@ -3468,7 +3469,7 @@ def test_pool_probe_controller_helpers():
     assert http_calls[:1] == [{'url': 'https://web.telegram.org/', 'connect_timeout': 1.0, 'read_timeout': 1.5}]
     assert len(records) == 1
     assert records[0][0:2] == ('vless', 'app-telegram-key')
-    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['tg_ok'] is False
     assert records[0][2]['yt_ok'] is True
     assert records[0][2]['yt_stability'] == 'stable'
 
@@ -3495,7 +3496,7 @@ def test_pool_probe_controller_helpers():
     )
     assert len(records) == 1
     assert records[0][0:2] == ('vless2', 'youtube-only')
-    assert records[0][2]['tg_ok'] == 'unknown'
+    assert records[0][2]['tg_ok'] is False
     assert records[0][2]['yt_ok'] is True
     assert records[0][2]['yt_stability'] == 'stable'
 
@@ -3574,7 +3575,7 @@ def test_pool_probe_controller_helpers():
     )
     assert len(records) == 1
     assert records[0][0:2] == ('vless', 'bot-mode-retry')
-    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['tg_ok'] is False
     assert records[0][2]['yt_ok'] is True
     assert records[0][2]['yt_stability'] == 'stable'
     assert telegram_web_attempts == [
@@ -5386,6 +5387,19 @@ def test_web_pool_form_blocks_helpers():
     vmess_panel_html = scoped_panels_html.split('data-protocol-panel="vmess"', 1)[1]
     assert 'H-discord' not in vmess_panel_html
     assert 'B-discord' not in vmess_panel_html
+    status_tabs_html, status_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        [('vless', 'Vless 1', 3, 'vless://...')],
+        {'vless': 'vless://sample'},
+        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details', 'api_ok': True, 'yt_ok': True}},
+        '<input name="csrf_token" value="token">',
+        key_pools={'vless': ['vless://sample']},
+        key_probe_cache={'vless://sample': {'tg_ok': False, 'yt_ok': True}},
+        core_service_applicability_for_protocol=lambda protocol: {'telegram': True, 'youtube': False},
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+    )
+    assert 'protocol-tab active' in status_tabs_html
+    assert '<span class="key-status-icons" data-protocol-status-icons>TGYT</span>' in status_panels_html
 
 
 def test_web_status_builder_helpers():

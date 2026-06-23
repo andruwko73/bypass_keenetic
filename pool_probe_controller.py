@@ -138,6 +138,7 @@ def check_pool_key_through_proxy(
         http_timeouts=tg_http_timeouts,
         urls=tg_urls,
         metrics=tg_metrics if collect_quality else None,
+        allow_app_endpoints_without_api=False,
     )
     yt_ok, _ = check_youtube_through_proxy(
         check_http,
@@ -159,6 +160,7 @@ def check_pool_key_through_proxy(
                 telegram_timeouts=(tg_connect, tg_read),
                 http_timeouts=(retry_http_connect, retry_http_read),
                 metrics=tg_metrics if collect_quality else None,
+                allow_app_endpoints_without_api=False,
             )
         if telegram_required or not quick_youtube_profile:
             yt_ok, _ = check_youtube_through_proxy(
@@ -180,6 +182,7 @@ def check_pool_key_through_proxy(
             telegram_timeouts=(tg_connect, tg_read),
             http_timeouts=(retry_http_connect, retry_http_read),
             metrics=tg_metrics if collect_quality else None,
+            allow_app_endpoints_without_api=False,
         )
     elif not yt_ok and not quick_youtube_profile:
         sleep(retry_delay_seconds)
@@ -198,7 +201,7 @@ def check_pool_key_through_proxy(
     if tg_transient:
         record_tg_ok = 'unknown'
     else:
-        record_tg_ok = tg_ok if (telegram_required or tg_ok or not yt_ok) else 'unknown'
+        record_tg_ok = tg_ok
     quality_kwargs = {}
     if collect_quality:
         quality_kwargs.update(tg_metrics)

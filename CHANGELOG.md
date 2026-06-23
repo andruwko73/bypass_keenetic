@@ -1,3 +1,8 @@
+<a name="1.777"></a>
+# [1.777] - 23 Jun 2026
+
+- Shows active-key Telegram and YouTube icons from the actual key probe/status even when service routes are split across protocols, and makes pool Telegram checks require Bot API success so non-working Telegram keys no longer appear green.
+
 <a name="1.776"></a>
 # [1.776] - 23 Jun 2026
 

@@ -1,3 +1,7 @@
+*v1.777 (23 Jun 2026) -* main
+
+*Shows active-key Telegram and YouTube icons from the actual key probe/status even when service routes are split across protocols, and makes pool Telegram checks require Bot API success so non-working Telegram keys no longer appear green.*
+
 *v1.776 (23 Jun 2026) -* main
 
 *Keeps Telegram and YouTube as permanent pool-row columns while protocol summaries use only complete route-list assignments, so partial route overlaps no longer make a protocol look partially working.*

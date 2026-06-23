@@ -634,14 +634,12 @@ def render_protocol_tabs_and_panels(
             continue
         if enable_key_pool:
             core_applicability = core_service_applicability_for_protocol(key_name) or {}
-            telegram_applicable = bool(core_applicability.get('telegram', True))
-            youtube_applicable = bool(core_applicability.get('youtube', True))
             current_probe = key_probe_cache.get(hash_key(current_keys.get(key_name, '')), {})
             if not isinstance(current_probe, dict):
                 current_probe = {}
             api_ok = status_info.get('api_ok', False)
-            current_tg_ok = telegram_applicable and (api_ok or bool(current_probe.get('tg_ok')))
-            current_yt_ok = youtube_applicable and bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
+            current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
+            current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
             custom_states = status_info.get('custom') or custom_probe_states(current_probe, protocol_custom_checks)
             active_status_icons = ''.join([
                 telegram_icon_html(opacity=1.0) if current_tg_ok else '',
