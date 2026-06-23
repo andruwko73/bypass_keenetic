@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.783
+# ВЕРСИЯ СКРИПТА v1.784
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -46,6 +46,7 @@ memory_watchdog_idle_restart_hold_seconds = 120.0
 memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
+status_refresh_min_interval_seconds = 180.0  # minimum delay between heavy web status refreshes
 memory_post_pool_restart_enabled = True  # после проверки пула бот сам снизит память и перезапустится, если Python RSS остался высоким
 memory_post_pool_restart_rss_kb = 71680
 memory_post_pool_restart_delay_seconds = 20.0

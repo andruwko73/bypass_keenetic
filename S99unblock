@@ -22,6 +22,40 @@ is_running() {
     kill -0 "$pid" 2>/dev/null
 }
 
+scheduler_pids() {
+    ps w 2>/dev/null | while IFS= read -r line; do
+        pid="$(printf '%s\n' "$line" | sed 's/^[[:space:]]*//;s/[[:space:]].*//')"
+        case "$pid" in
+            ''|PID|*[!0-9]*) continue ;;
+        esac
+        case "$line" in
+            *"/opt/etc/init.d/S99unblock start"*|*"/opt/etc/init.d/S99unblock restart"*) printf '%s\n' "$pid" ;;
+        esac
+    done
+}
+
+stop_scheduler_pid() {
+    target_pid="$1"
+    [ -n "$target_pid" ] || return 0
+    for child in $(pgrep -P "$target_pid" 2>/dev/null); do
+        child_cmd="$(tr '\0' ' ' < "/proc/$child/cmdline" 2>/dev/null || true)"
+        case "$child_cmd" in
+            *unblock_ipset.sh*) continue ;;
+        esac
+        kill "$child" >/dev/null 2>&1 || true
+    done
+    kill "$target_pid" >/dev/null 2>&1 || true
+}
+
+cleanup_orphan_schedulers() {
+    current_pid="$(sed -n '1p' "$PID_FILE" 2>/dev/null | tr -cd '0-9')"
+    for candidate_pid in $(scheduler_pids); do
+        [ "$candidate_pid" = "$$" ] && continue
+        [ -n "$current_pid" ] && [ "$candidate_pid" = "$current_pid" ] && continue
+        stop_scheduler_pid "$candidate_pid"
+    done
+}
+
 run_refresh() {
     [ -x /opt/bin/unblock_ipset.sh ] || return 0
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
@@ -196,6 +230,7 @@ run_runtime_dedupe() {
 }
 
 start_scheduler() {
+    cleanup_orphan_schedulers
     if is_running; then
         exit 0
     fi
@@ -217,15 +252,9 @@ start_scheduler() {
 stop_scheduler() {
     if is_running; then
         pid="$(sed -n '1p' "$PID_FILE" 2>/dev/null | tr -cd '0-9')"
-        for child in $(pgrep -P "$pid" 2>/dev/null); do
-            child_cmd="$(tr '\0' ' ' < "/proc/$child/cmdline" 2>/dev/null || true)"
-            case "$child_cmd" in
-                *unblock_ipset.sh*) continue ;;
-            esac
-            kill "$child" >/dev/null 2>&1 || true
-        done
-        kill "$pid" >/dev/null 2>&1 || true
+        stop_scheduler_pid "$pid"
     fi
+    cleanup_orphan_schedulers
     rm -f "$PID_FILE"
 }
 

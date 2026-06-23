@@ -1,3 +1,8 @@
+<a name="1.784"></a>
+# [1.784] - 23 Jun 2026
+
+- Reduces router memory drift from repeated status refreshes, repeated UDP/QUIC fast-add events, Telegram polling errors, event-history trimming, and orphaned ipset scheduler processes.
+
 <a name="1.783"></a>
 # [1.783] - 23 Jun 2026
 

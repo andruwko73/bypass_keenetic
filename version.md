@@ -1,3 +1,7 @@
+*v1.784 (23 Jun 2026) -* main
+
+*Reduces router memory drift from repeated status refreshes, repeated UDP/QUIC fast-add events, Telegram polling errors, event-history trimming, and orphaned ipset scheduler processes.*
+
 *v1.783 (23 Jun 2026) -* main
 
 *Stops including Telegram call-learning state in the frequently polled status API; the dedicated endpoint remains available while status payloads stay smaller.*

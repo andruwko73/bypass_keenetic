@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.783, последнее изменение: 23.06.2026
+#  Файл: bot.py, Версия v1.784, последнее изменение: 23.06.2026
 
 import subprocess
 import os
@@ -504,6 +504,8 @@ youtube_hard_failure_recovery_state = {
 udp_quic_drift_state = {
     'last_refresh': 0.0,
     'last_log': 0.0,
+    'last_fast_add_signature': (),
+    'last_fast_add_event': 0.0,
 }
 
 def _add_custom_check(label='', url='', preset_id=''):
@@ -1303,6 +1305,10 @@ TELEGRAM_RESULT_RETRY_INTERVAL = 30
 WEB_STATUS_CACHE_TTL = 60
 KEY_STATUS_CACHE_TTL = 60
 STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
+STATUS_REFRESH_MIN_INTERVAL_SECONDS = max(
+    60.0,
+    float(getattr(config, 'status_refresh_min_interval_seconds', 180.0)),
+)
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 10.0))
@@ -1683,6 +1689,8 @@ web_status_api_cache_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
+status_refresh_last_started_at = {}
+status_refresh_last_finished_at = {}
 key_pool_lock = threading.RLock()
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
@@ -3090,21 +3098,30 @@ def _apply_priority_udp_quic_drift_findings(findings):
     for address in sorted(added_addresses):
         conntrack_deleted += _delete_conntrack_for_address(address)
     if added:
+        now = time.time()
+        event_signature = tuple(sorted((proto, domain, set_name) for proto, domain, _address, set_name in added))
+        suppress_repeated_event = (
+            event_signature == tuple(udp_quic_drift_state.get('last_fast_add_signature') or ()) and
+            now - float(udp_quic_drift_state.get('last_fast_add_event') or 0.0) < 1800
+        )
+        udp_quic_drift_state['last_fast_add_signature'] = event_signature
+        udp_quic_drift_state['last_fast_add_event'] = now
         sample = ', '.join(f'{proto}:{domain}:{address}->{set_name}' for proto, domain, address, set_name in added[:4])
         message = (
             f'UDP/QUIC priority drift fast ipset add: {len(added)} entries, '
             f'conntrack cleared={conntrack_deleted}. {sample}'
         )
-        _write_runtime_log(message)
-        _record_event(
-            'udp_quic_drift_fast_add',
-            message,
-            level='info',
-            source='watchdog',
-            protocol=added[0][0],
-            service='youtube',
-            details={'added': str(len(added)), 'conntrack_cleared': str(conntrack_deleted), 'sample': sample},
-        )
+        if not suppress_repeated_event:
+            _write_runtime_log(message)
+            _record_event(
+                'udp_quic_drift_fast_add',
+                message,
+                level='info',
+                source='watchdog',
+                protocol=added[0][0],
+                service='youtube',
+                details={'added': str(len(added)), 'conntrack_cleared': str(conntrack_deleted), 'sample': sample},
+            )
     if failed:
         sample = ', '.join(f'{proto}:{domain}:{address}->{set_name}:{output}' for proto, domain, address, set_name, output in failed[:3])
         _write_runtime_log(f'UDP/QUIC priority drift fast ipset add failed: {sample}')
@@ -3484,8 +3501,15 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
             state['last_log'] = now
             age = max(0, int(now - last_active))
             count = int(state.get('last_count') or active_count or 0)
+            reason_text = str(reason or 'operation')
+            service_name = (
+                'youtube'
+                if proto == _youtube_route_protocol() and ('YouTube' in reason_text or 'UDP/QUIC drift' in reason_text)
+                else 'network'
+            )
+            guard_label = 'YouTube stream guard' if service_name == 'youtube' else 'Traffic stream guard'
             message = (
-                f'YouTube stream guard: deferred {reason or "operation"}; '
+                f'{guard_label}: deferred {reason_text}; '
                 f'active {_pool_proto_label(proto)} connections={count}, last activity {age}s ago.'
             )
             route_diagnostic = _conntrack_route_diagnostic(proto)
@@ -3496,7 +3520,7 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
                 level='info',
                 source='watchdog',
                 protocol=proto,
-                service='telegram' if 'Telegram' in str(reason or '') else 'youtube',
+                service=service_name,
                 details={
                     'reason': reason or 'operation',
                     'active_connections': count,
@@ -3524,6 +3548,9 @@ def _clear_runtime_memory_caches(clear_status=False):
     if not clear_status:
         return
     status_snapshot_cache.update({'timestamp': 0, 'data': None, 'signature': None})
+    with status_refresh_lock:
+        status_refresh_last_started_at.clear()
+        status_refresh_last_finished_at.clear()
     with web_status_api_cache_lock:
         web_status_api_cache.update({'timestamp': 0, 'payload': None})
     with active_mode_status_cache_lock:
@@ -5666,6 +5693,9 @@ def _invalidate_status_snapshot_cache():
     status_snapshot_cache['timestamp'] = 0
     status_snapshot_cache['data'] = None
     status_snapshot_cache['signature'] = None
+    with status_refresh_lock:
+        status_refresh_last_started_at.clear()
+        status_refresh_last_finished_at.clear()
     _invalidate_web_status_api_cache()
 
 
@@ -8046,6 +8076,14 @@ def _cached_status_snapshot(current_keys):
     )
 
 
+def _stale_status_snapshot(current_keys):
+    signature = _status_snapshot_signature(current_keys)
+    if status_snapshot_cache.get('signature') != signature:
+        return None
+    snapshot = status_snapshot_cache.get('data')
+    return snapshot if isinstance(snapshot, dict) else None
+
+
 def _active_mode_status_signature(current_keys):
     return _status_active_mode_signature(proxy_mode, current_keys, _load_custom_checks())
 
@@ -8125,10 +8163,23 @@ def _refresh_status_caches_async(current_keys):
     except Exception:
         pass
     signature = _status_snapshot_signature(current_keys)
+    now = time.time()
     with status_refresh_lock:
         if signature in status_refresh_in_progress:
             return
+        last_refresh = max(
+            float(status_refresh_last_started_at.get(signature) or 0.0),
+            float(status_refresh_last_finished_at.get(signature) or 0.0),
+        )
+        if (
+            last_refresh and
+            now - last_refresh < STATUS_REFRESH_MIN_INTERVAL_SECONDS and
+            status_snapshot_cache.get('signature') == signature and
+            isinstance(status_snapshot_cache.get('data'), dict)
+        ):
+            return
         status_refresh_in_progress.add(signature)
+        status_refresh_last_started_at[signature] = now
 
     def worker():
         _record_memory_timeline(
@@ -8144,6 +8195,11 @@ def _refresh_status_caches_async(current_keys):
         finally:
             with status_refresh_lock:
                 status_refresh_in_progress.discard(signature)
+                status_refresh_last_finished_at[signature] = time.time()
+                for cache in (status_refresh_last_started_at, status_refresh_last_finished_at):
+                    for old_signature in list(cache):
+                        if old_signature != signature:
+                            cache.pop(old_signature, None)
             _memory_cleanup('status refresh', force=True, clear_status=False)
             _record_memory_timeline(
                 'status refresh finished',
@@ -8471,6 +8527,7 @@ def _web_get_context(handler):
         'consume_flash_message': _consume_web_flash_message,
         'load_current_keys': _load_current_keys,
         'cached_status_snapshot': _cached_status_snapshot,
+        'stale_status_snapshot': _stale_status_snapshot,
         'placeholder_status_snapshot': _placeholder_status_snapshot,
         'active_mode_status_snapshot': _active_mode_status_snapshot,
         'refresh_status_caches_async': _refresh_status_caches_async,
@@ -9408,6 +9465,7 @@ def _run_telegram_polling_loop():
             bot_polling = False
             _write_runtime_log(err)
             _reset_telegram_http_session('polling error')
+            _memory_cleanup('telegram polling error', force=True, clear_status=False)
             if shutdown_requested.is_set():
                 break
             if _is_polling_conflict(err):

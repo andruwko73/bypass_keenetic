@@ -6,6 +6,9 @@ import time
 
 EVENT_HISTORY_PATH = '/opt/etc/bot/event_history.jsonl'
 MAX_EVENTS = 120
+TRIM_EVERY_WRITES = 10
+TRIM_SIZE_BYTES = 96 * 1024
+_trim_write_counts = {}
 
 PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
@@ -95,7 +98,15 @@ def _compact_event_detail(action, key, value):
     return value
 
 
-def _trim_history(path, max_events):
+def _trim_history(path, max_events, *, force=False):
+    if not force:
+        _trim_write_counts[path] = int(_trim_write_counts.get(path, 0) or 0) + 1
+        try:
+            file_size = os.path.getsize(path)
+        except Exception:
+            file_size = 0
+        if _trim_write_counts[path] % TRIM_EVERY_WRITES and file_size < TRIM_SIZE_BYTES:
+            return
     try:
         with open(path, 'r', encoding='utf-8', errors='ignore') as file:
             lines = [line for line in file if line.strip()]
@@ -106,6 +117,7 @@ def _trim_history(path, max_events):
     max_events = max(1, int(max_events or MAX_EVENTS))
     if len(lines) <= max_events:
         return
+    _trim_write_counts[path] = 0
     tmp_path = path + '.tmp'
     try:
         with open(tmp_path, 'w', encoding='utf-8') as file:

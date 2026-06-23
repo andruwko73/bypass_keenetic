@@ -776,6 +776,7 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_min_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_min_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_udp_policy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "telegram_udp_policy = 'auto'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_call_learning_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_call_learning_enabled = True\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq "^telegram_call_learning_state_path[[:space:]]*=[[:space:]]*['\"]?/opt/tmp/bypass_telegram_call_learning\\.json['\"]?([[:space:]#]|$)" "$BOT_CONFIG_PATH"; then

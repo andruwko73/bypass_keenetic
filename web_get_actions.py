@@ -78,6 +78,13 @@ def _status_payload(ctx):
     current_keys = _ctx(ctx, 'load_current_keys')()
     snapshot = _ctx(ctx, 'cached_status_snapshot')(current_keys)
     if snapshot is None:
+        stale_snapshot = _ctx(ctx, 'stale_status_snapshot')
+        if stale_snapshot:
+            snapshot = stale_snapshot(current_keys)
+            pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
+            if snapshot is not None and not web_command_running and not pool_probe_locked():
+                _call(ctx, 'refresh_status_caches_async', current_keys)
+    if snapshot is None:
         placeholder_snapshot = _ctx(ctx, 'placeholder_status_snapshot')
         if placeholder_snapshot:
             snapshot = placeholder_snapshot(current_keys)

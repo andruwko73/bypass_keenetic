@@ -1448,6 +1448,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_timeline_enabled = True' in example
     assert 'memory_timeline_enabled = True' in installer
     assert 'memory_timeline_enabled = True' in bootstrap
+    assert 'status_refresh_min_interval_seconds = 180.0' in example
+    assert 'status_refresh_min_interval_seconds = 180.0' in installer
+    assert 'status_refresh_min_interval_seconds = 180.0' in bootstrap
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in example
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in installer
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in bootstrap
@@ -1653,6 +1656,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'last_refresh_check=0' in s99unblock
     assert 'refresh)' in s99unblock
     assert 'while :' in s99unblock
+    assert 'scheduler_pids()' in s99unblock
+    assert 'cleanup_orphan_schedulers' in s99unblock
+    assert 'stop_scheduler_pid "$pid"' in s99unblock
     assert '/opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
     assert 'ipset test "$winner_set" "$entry"' in s99unblock
@@ -1786,6 +1792,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'stop_stale_lock_process()' in ipset_script
     assert 'recover_existing_lock()' in ipset_script
     assert 'Stopped stale unblock_ipset process pid' in ipset_script
+    assert 'cleanup_stale_tmp_unblock_sets' in ipset_script
+    assert "grep '^tmp_unblock'" in ipset_script
+    assert 'ipset_references "$stale_set"' in ipset_script
     assert 'Removed stale unblock_ipset lock with non-refresh pid' in ipset_script
     assert 'Removed stale unblock_ipset lock without active pid' in ipset_script
     assert 'Removed stale unblock_ipset lock' in ipset_script
@@ -1977,6 +1986,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _record_memory_timeline' in source
     assert 'def _start_memory_timeline_thread' in source
     assert "_start_memory_timeline_thread()" in source
+    assert "getattr(config, 'status_refresh_min_interval_seconds', 180.0)" in source
+    assert 'status_refresh_last_finished_at' in source
+    assert 'def _stale_status_snapshot' in source
     assert 'def _sync_udp_policy_config' in source
     assert 'YOUTUBE_UNBLOCK_ENTRIES' in source
     assert 'TELEGRAM_UNBLOCK_ENTRIES' in source
@@ -2008,6 +2020,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "['conntrack', '-D', '-p', proto, direction, address]" in source
     assert "['ipset', 'add', set_name, address, '-exist']" in source
     assert "'udp_quic_drift_fast_add'" in source
+    assert 'last_fast_add_signature' in source
     assert "'conntrack_cleared': str(conntrack_deleted)" in source
     assert "if _apply_priority_udp_quic_drift_findings(priority_findings):" in source
     assert source.find('if _apply_priority_udp_quic_drift_findings(priority_findings):') < source.find('if _udp_quic_drift_refresh_deferred_for_stream(findings):')
@@ -2025,6 +2038,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'автоперезапуск уже запрошен' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
+    assert "_memory_cleanup('telegram polling error', force=True, clear_status=False)" in source
     assert 'def _malloc_trim' in source
     assert 'def _pool_probe_memory_checkpoint' in source
     assert "getattr(config, 'memory_malloc_trim_enabled', True)" in source
@@ -5016,6 +5030,17 @@ def test_web_get_actions_helpers():
     placeholder_status = web_get_actions.dispatch(placeholder_ctx, '/api/status')
     assert placeholder_status['payload']['web'] == {'state': 'placeholder'}
     assert placeholder_refreshed == [current_keys]
+    stale_refreshed = []
+    stale_ctx = dict(ctx)
+    stale_ctx.update({
+        'stale_status_snapshot': lambda keys: {'web': {'state': 'stale'}, 'protocols': {'vless': {'label': 'cached'}}},
+        'placeholder_status_snapshot': lambda keys: (_ for _ in ()).throw(AssertionError('stale status should avoid placeholder')),
+        'refresh_status_caches_async': lambda keys: stale_refreshed.append(keys),
+        'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
+    })
+    stale_status = web_get_actions.dispatch(stale_ctx, '/api/status')
+    assert stale_status['payload']['web'] == {'state': 'stale'}
+    assert stale_refreshed == [current_keys]
     command_refreshed = []
     command_ctx = dict(placeholder_ctx)
     command_ctx.update({

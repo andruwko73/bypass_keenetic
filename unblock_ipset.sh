@@ -147,6 +147,18 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+ipset_references() {
+	set_name="$1"
+	ipset list "$set_name" 2>/dev/null | sed -n 's/^References:[[:space:]]*//p' | head -n 1
+}
+
+cleanup_stale_tmp_unblock_sets() {
+	for stale_set in $(ipset list -n 2>/dev/null | grep '^tmp_unblock' || true); do
+		refs="$(ipset_references "$stale_set")"
+		[ "$refs" = "0" ] && ipset destroy "$stale_set" >/dev/null 2>&1 || true
+	done
+}
+
 cut_local() {
 	grep -vE "$LOCAL_RE"
 }
@@ -749,6 +761,8 @@ swap_or_preserve_set() {
 
 UDP_QUIC_POLICY_SOURCE="$(udp_quic_policy_source || true)"
 UDP_QUIC_EXCLUDE_SOURCE="$(udp_quic_exclude_source || true)"
+
+cleanup_stale_tmp_unblock_sets
 
 wait_for_dns || fail_status "DNS $DNS_HOST:$DNS_PORT did not answer in ${DNS_WAIT_SECONDS}s; old ipset contents preserved."
 
