@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.788, последнее изменение: 23.06.2026
+#  Файл: bot.py, Версия v1.789, последнее изменение: 23.06.2026
 
 import subprocess
 import os
@@ -3438,7 +3438,7 @@ def _run_youtube_edge_prefetch_once():
                 'failed_sets': 0,
             }
             if skip_reason == 'high_rss':
-                _memory_cleanup('youtube edge prefetch skipped high RSS', clear_status=False, log=False)
+                _memory_cleanup('youtube edge prefetch skipped high RSS', force=True, clear_status=False, log=False)
         else:
             status = youtube_edge_prefetch.prefetch_once(
                 route_protocol=_youtube_route_protocol(),

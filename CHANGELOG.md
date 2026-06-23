@@ -1,3 +1,9 @@
+<a name="1.789"></a>
+# [1.789] - 23 Jun 2026
+
+- Forces memory cleanup when YouTube edge prefetch is skipped because bot RSS is above the prefetch guard.
+- Keeps the high-RSS path from doing DNS/ipset work while still giving the bot a chance to return memory before the idle restart threshold.
+
 <a name="1.788"></a>
 # [1.788] - 23 Jun 2026
 

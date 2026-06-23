@@ -2075,6 +2075,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _start_youtube_edge_prefetch_thread' in source
     assert '_start_youtube_edge_prefetch_thread()' in source
     assert 'youtube_edge_prefetch.prefetch_once(' in source
+    assert "_memory_cleanup('youtube edge prefetch skipped high RSS', force=True" in source
     assert "['ipset', 'del', set_name, address]" in source
     assert "payload['youtube_edge_prefetch'] = _youtube_edge_prefetch_snapshot()" in source
     assert 'def _udp_quic_drift_priority_findings' in source

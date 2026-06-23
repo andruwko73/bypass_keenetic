@@ -1,3 +1,7 @@
+*v1.789 (23 Jun 2026) -* main
+
+*Forces a lightweight memory cleanup when YouTube edge prefetch is skipped because bot RSS is already above the prefetch guard, so the guard can actually reduce pressure instead of only skipping DNS/ipset work.*
+
 *v1.788 (23 Jun 2026) -* main
 
 *Keeps visible YouTube status as working when a pool probe has `yt_ok=true`; unstable diagnostic metrics still affect quality scoring, but no longer downgrade the web status to "unstable, rechecking".*
