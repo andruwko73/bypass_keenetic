@@ -6066,6 +6066,13 @@ def test_probe_cache_quality_metrics():
     )
     assert 0 < unstable['yt_score'] <= 55
     assert unstable['yt_quality'] == ''
+    ok_with_unstable_metrics = {
+        'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+        'ts': 100,
+        'yt_ok': True,
+        'yt_stability': 'unstable',
+    }
+    assert probe_cache.youtube_probe_state(ok_with_unstable_metrics) == 'ok'
     warn_entry = {
         'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
         'ts': 100,

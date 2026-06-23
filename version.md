@@ -1,3 +1,7 @@
+*v1.788 (23 Jun 2026) -* main
+
+*Keeps visible YouTube status as working when a pool probe has `yt_ok=true`; unstable diagnostic metrics still affect quality scoring, but no longer downgrade the web status to "unstable, rechecking".*
+
 *v1.787 (23 Jun 2026) -* main
 
 *Adds a bounded YouTube edge prefetcher that warms the active YouTube route ipsets from a tiny DNS/cache sample, skips work under high bot RSS or low router memory, and exposes compact runtime status without switching keys.*

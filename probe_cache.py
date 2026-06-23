@@ -184,7 +184,7 @@ def youtube_probe_state(entry):
         return 'unknown'
     stability = str(entry.get('yt_stability') or '').strip().lower()
     if entry.get('yt_ok') is True:
-        return 'warn' if stability == 'unstable' else 'ok'
+        return 'ok'
     if stability == 'unstable':
         return 'warn'
     if entry.get('yt_ok') is False:

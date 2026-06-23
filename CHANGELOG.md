@@ -1,3 +1,9 @@
+<a name="1.788"></a>
+# [1.788] - 23 Jun 2026
+
+- Keeps visible YouTube status as working when a pool probe has `yt_ok=true`, even if diagnostic stability metrics are marked unstable.
+- Leaves YouTube quality score penalties intact so sorting can still prefer cleaner keys without showing a false web warning.
+
 <a name="1.787"></a>
 # [1.787] - 23 Jun 2026
 
