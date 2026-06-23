@@ -67,6 +67,7 @@ import service_routes
 import update_status
 import youtube_healthcheck
 import youtube_edge_prefetch
+import youtube_edge_prefetch_runner
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -1528,9 +1529,12 @@ def test_codex_version_matches_commit_count():
     assert "telegram_udp_policy = 'auto'" in bootstrap
     for config_line in (
         'youtube_edge_prefetch_enabled = True',
+        "youtube_edge_prefetch_mode = 'external'",
         'youtube_edge_prefetch_start_delay_seconds = 120',
         'youtube_edge_prefetch_interval_seconds = 900',
         "youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'",
+        "youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'",
+        "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'",
         'youtube_edge_prefetch_cache_ttl_seconds = 259200',
         'youtube_edge_prefetch_max_cache_entries = 128',
         'youtube_edge_prefetch_max_hosts_per_run = 4',
@@ -1709,6 +1713,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'dedupe_lock_age_seconds()' in s99unblock
     assert 'run_refresh_if_due()' in s99unblock
     assert 'run_refresh_if_check_due()' in s99unblock
+    assert 'run_youtube_edge_prefetch_if_due()' in s99unblock
+    assert 'YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtube_edge_prefetch_runner.py}"' in s99unblock
+    assert 'PYTHONPATH="/opt/etc/bot" "$python_bin" "$YOUTUBE_EDGE_PREFETCH_RUNNER" --trigger "$trigger"' in s99unblock
     assert 'last_refresh_check=0' in s99unblock
     assert 'refresh)' in s99unblock
     assert 'while :' in s99unblock
@@ -1730,6 +1737,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
     assert 'continuing update while refresh finishes in background' in script
     assert 'run_update_ipset_refresh "Post-update"' in script
+    assert 'run_youtube_edge_prefetch_once "Post-update"' in script
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source
     assert 'def _refresh_dns_override_runtime(restart_dnsmasq=False)' in bot_source
@@ -2070,9 +2078,14 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'UDP_QUIC_DRIFT_PRIORITY_DOMAINS' in source
     assert 'import youtube_edge_prefetch' in source
     assert "getattr(config, 'youtube_edge_prefetch_enabled', True)" in source
+    assert "getattr(config, 'youtube_edge_prefetch_mode', 'external')" in source
+    assert "getattr(config, 'youtube_edge_prefetch_status_path', '/opt/etc/bot/youtube_edge_prefetch_status.json')" in source
+    assert "getattr(config, 'youtube_edge_prefetch_lock_dir', '/tmp/bypass-youtube-edge-prefetch.lock')" in source
     assert "getattr(config, 'youtube_edge_prefetch_max_rss_kb', 65 * 1024)" in source
     assert "getattr(config, 'youtube_edge_prefetch_min_available_kb', 160000)" in source
     assert 'def _start_youtube_edge_prefetch_thread' in source
+    assert "if YOUTUBE_EDGE_PREFETCH_MODE != 'thread':" in source
+    assert 'def _load_youtube_edge_prefetch_external_status' in source
     assert '_start_youtube_edge_prefetch_thread()' in source
     assert 'youtube_edge_prefetch.prefetch_once(' in source
     assert "_memory_cleanup('youtube edge prefetch skipped high RSS', force=True" in source
@@ -2296,6 +2309,26 @@ def test_runtime_modules_are_installed_by_update_scripts():
         assert f'$RAW_BASE/{module}' in bootstrap
         assert f'$BOT_DIR/{module}' in bootstrap
     assert 'youtube_edge_prefetch.py' in script_modules
+    assert 'youtube_edge_prefetch_runner.py' in script_modules
+    assert 'youtube_edge_prefetch_runner.py' in bootstrap_modules
+
+
+def test_youtube_edge_prefetch_runner_detects_current_youtube_route(tmp_path):
+    unblock_dir = tmp_path / 'unblock'
+    unblock_dir.mkdir()
+    for _, file_name in youtube_edge_prefetch_runner.PROTOCOL_ROUTE_FILES:
+        (unblock_dir / file_name).write_text('example.com\n', encoding='utf-8')
+
+    (unblock_dir / 'vless.txt').write_text('www.youtube.com\ni.ytimg.com\n', encoding='utf-8')
+    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir)) == 'vless'
+
+    (unblock_dir / 'vless.txt').write_text('example.com\n', encoding='utf-8')
+    (unblock_dir / 'vless-2.txt').write_text('youtube.com\ngooglevideo.com\nyt3.ggpht.com\n', encoding='utf-8')
+    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir)) == 'vless2'
+
+    (unblock_dir / 'vless-2.txt').write_text('example.com\n', encoding='utf-8')
+    (unblock_dir / 'vmess.txt').write_text('domain:youtubei.googleapis.com\n', encoding='utf-8')
+    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir)) == 'vmess'
 
 
 def test_youtube_edge_prefetch_cache_is_bounded_and_public_only():

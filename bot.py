@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.789, последнее изменение: 23.06.2026
+#  Файл: bot.py, Версия v1.790, последнее изменение: 24.06.2026
 
 import subprocess
 import os
@@ -492,6 +492,7 @@ YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS = max(
     float(getattr(config, 'youtube_stream_guard_scan_cache_seconds', 8.0)),
 )
 YOUTUBE_EDGE_PREFETCH_ENABLED = bool(getattr(config, 'youtube_edge_prefetch_enabled', True))
+YOUTUBE_EDGE_PREFETCH_MODE = str(getattr(config, 'youtube_edge_prefetch_mode', 'external') or 'external').strip().lower()
 YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS = max(
     60,
     int(getattr(config, 'youtube_edge_prefetch_start_delay_seconds', 120)),
@@ -502,6 +503,12 @@ YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS = max(
 )
 YOUTUBE_EDGE_PREFETCH_CACHE_PATH = str(
     getattr(config, 'youtube_edge_prefetch_cache_path', '/opt/etc/bot/youtube_edge_cache.json') or ''
+).strip()
+YOUTUBE_EDGE_PREFETCH_STATUS_PATH = str(
+    getattr(config, 'youtube_edge_prefetch_status_path', '/opt/etc/bot/youtube_edge_prefetch_status.json') or ''
+).strip()
+YOUTUBE_EDGE_PREFETCH_LOCK_DIR = str(
+    getattr(config, 'youtube_edge_prefetch_lock_dir', '/tmp/bypass-youtube-edge-prefetch.lock') or ''
 ).strip()
 YOUTUBE_EDGE_PREFETCH_CACHE_TTL_SECONDS = max(
     3600,
@@ -3353,10 +3360,35 @@ def _youtube_edge_prefetch_hosts_for_run():
 def _youtube_edge_prefetch_snapshot():
     snapshot = dict(youtube_edge_prefetch_state)
     snapshot['enabled'] = bool(YOUTUBE_EDGE_PREFETCH_ENABLED)
+    snapshot['mode'] = YOUTUBE_EDGE_PREFETCH_MODE
+    if YOUTUBE_EDGE_PREFETCH_MODE == 'external':
+        external_status = _load_youtube_edge_prefetch_external_status()
+        if external_status:
+            snapshot.update(external_status)
+            snapshot['enabled'] = bool(YOUTUBE_EDGE_PREFETCH_ENABLED)
+            snapshot['mode'] = YOUTUBE_EDGE_PREFETCH_MODE
     snapshot.pop('last_log_signature', None)
     snapshot.pop('next_host_index', None)
-    snapshot['running'] = youtube_edge_prefetch_lock.locked()
+    if YOUTUBE_EDGE_PREFETCH_MODE == 'external':
+        snapshot['running'] = bool(YOUTUBE_EDGE_PREFETCH_LOCK_DIR and os.path.isdir(YOUTUBE_EDGE_PREFETCH_LOCK_DIR))
+        snapshot['last_message'] = str(snapshot.get('last_message') or _youtube_edge_prefetch_status_message(snapshot))
+    else:
+        snapshot['running'] = youtube_edge_prefetch_lock.locked()
     return snapshot
+
+
+def _load_youtube_edge_prefetch_external_status():
+    if not YOUTUBE_EDGE_PREFETCH_STATUS_PATH:
+        return {}
+    try:
+        if os.path.getsize(YOUTUBE_EDGE_PREFETCH_STATUS_PATH) > 65536:
+            return {}
+    except Exception:
+        return {}
+    status = _read_json_file(YOUTUBE_EDGE_PREFETCH_STATUS_PATH, default={})
+    if not isinstance(status, dict):
+        return {}
+    return status
 
 
 def _youtube_edge_prefetch_status_message(status):
@@ -3507,6 +3539,8 @@ def _run_youtube_edge_prefetch_once():
 
 def _start_youtube_edge_prefetch_thread():
     if not YOUTUBE_EDGE_PREFETCH_ENABLED:
+        return
+    if YOUTUBE_EDGE_PREFETCH_MODE != 'thread':
         return
 
     def worker():

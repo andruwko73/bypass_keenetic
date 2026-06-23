@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.789
+# ВЕРСИЯ СКРИПТА v1.790
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -66,10 +66,13 @@ udp_quic_block_vless2_enabled = True  # smart QUIC/UDP 443 fallback for non-YouT
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
 youtube_quic_policy = 'auto'  # auto blocks QUIC for routes that contain YouTube; allow permits QUIC; block forces TCP fallback
 telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so native calls can use relay/media traffic; block disables it
-youtube_edge_prefetch_enabled = True  # lightweight background DNS/IP prefetch for the active YouTube route
+youtube_edge_prefetch_enabled = True  # lightweight DNS/IP prefetch for the active YouTube route
+youtube_edge_prefetch_mode = 'external'  # external runner keeps this work out of the long-running bot process
 youtube_edge_prefetch_start_delay_seconds = 120
 youtube_edge_prefetch_interval_seconds = 900
 youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'
+youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'
+youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'
 youtube_edge_prefetch_cache_ttl_seconds = 259200
 youtube_edge_prefetch_max_cache_entries = 128
 youtube_edge_prefetch_max_hosts_per_run = 4

@@ -247,6 +247,16 @@ run_update_ipset_refresh() {
   return 0
 }
 
+run_youtube_edge_prefetch_once() {
+  trigger="${1:-update}"
+  python_bin="/opt/bin/python3"
+  [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+  [ -n "$python_bin" ] || return 0
+  runner="${BOT_RUNTIME_DIR}/youtube_edge_prefetch_runner.py"
+  [ -f "$runner" ] || return 0
+  PYTHONPATH="$BOT_RUNTIME_DIR" "$python_bin" "$runner" --trigger "$trigger" >/tmp/bypass-youtube-edge-prefetch.log 2>&1 || true
+}
+
 install_unblock_ipset_cron_job() {
   cron_tmp="/tmp/bypass-unblock-crontab.$$"
   {
@@ -698,7 +708,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_healthcheck.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -779,9 +789,12 @@ migrate_runtime_config_defaults() {
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_udp_policy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "telegram_udp_policy = 'auto'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_mode[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_mode = 'external'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_start_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_start_delay_seconds = 120\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_interval_seconds = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cache_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_status_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_lock_dir[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cache_ttl_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cache_ttl_seconds = 259200\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_max_cache_entries[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_cache_entries = 128\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_hosts_per_run = 4\n' >> "$BOT_CONFIG_PATH"
@@ -1442,6 +1455,7 @@ if [ "$1" = "-update" ]; then
     sleep 2
     echo "Refreshing ipset after proxy core startup."
     run_update_ipset_refresh "Post-update"
+    run_youtube_edge_prefetch_once "Post-update"
     /opt/etc/init.d/S99unblock restart > /dev/null 2>&1 || /opt/etc/init.d/S99unblock start > /dev/null 2>&1 || true
 
     bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)

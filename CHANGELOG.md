@@ -1,3 +1,10 @@
+<a name="1.790"></a>
+# [1.790] - 24 Jun 2026
+
+- Moves YouTube edge prefetch from the long-running bot thread into a short external runner.
+- Runs the YouTube edge prefetch after post-update ipset refresh and from the existing S99unblock scheduler.
+- Lets the web/router health status read the external runner status JSON while keeping the runner protected by a lock and low-memory guard.
+
 <a name="1.789"></a>
 # [1.789] - 23 Jun 2026
 

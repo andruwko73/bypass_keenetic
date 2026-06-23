@@ -1,3 +1,7 @@
+*v1.790 (24 Jun 2026) -* main
+
+*Moves YouTube edge prefetch out of the long-running bot process into a short external runner, and runs it after ipset/Xray update paths plus the existing scheduler. The bot now reads the runner status JSON instead of keeping a permanent prefetch thread in RSS.*
+
 *v1.789 (23 Jun 2026) -* main
 
 *Forces a lightweight memory cleanup when YouTube edge prefetch is skipped because bot RSS is already above the prefetch guard, so the guard can actually reduce pressure instead of only skipping DNS/ipset work.*

@@ -14,6 +14,10 @@ LOG_FILE="${BYPASS_UNBLOCK_REFRESH_LOG:-/opt/var/log/bypass-unblock-scheduler.lo
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 RUNTIME_DEDUPE_LOCK_DIR="${BYPASS_RUNTIME_DEDUPE_LOCK_DIR:-/tmp/bypass-runtime-dedupe.lock}"
+YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtube_edge_prefetch_runner.py}"
+YOUTUBE_EDGE_PREFETCH_STATUS_FILE="${YOUTUBE_EDGE_PREFETCH_STATUS_FILE:-/opt/etc/bot/youtube_edge_prefetch_status.json}"
+YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-900}"
+YOUTUBE_EDGE_PREFETCH_LOG="${YOUTUBE_EDGE_PREFETCH_LOG:-/opt/var/log/bypass-youtube-edge-prefetch.log}"
 
 is_running() {
     [ -s "$PID_FILE" ] || return 1
@@ -60,6 +64,43 @@ run_refresh() {
     [ -x /opt/bin/unblock_ipset.sh ] || return 0
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
     /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true
+    run_youtube_edge_prefetch "ipset-refresh"
+}
+
+youtube_edge_prefetch_last_run_at() {
+    [ -r "$YOUTUBE_EDGE_PREFETCH_STATUS_FILE" ] || {
+        printf '%s\n' 0
+        return
+    }
+    last_run_at="$(sed -n 's/.*"last_run_at"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$YOUTUBE_EDGE_PREFETCH_STATUS_FILE" 2>/dev/null | head -n 1)"
+    [ -n "$last_run_at" ] || last_run_at=0
+    printf '%s\n' "$last_run_at"
+}
+
+youtube_edge_prefetch_due() {
+    now="$(date +%s 2>/dev/null || echo 0)"
+    last_run_at="$(youtube_edge_prefetch_last_run_at)"
+    interval="$YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS"
+    case "$now:$last_run_at:$interval" in
+        *[!0-9:]*|0:*|*:0) return 0 ;;
+    esac
+    [ "$last_run_at" -eq 0 ] 2>/dev/null && return 0
+    [ $((now - last_run_at)) -ge "$interval" ] 2>/dev/null
+}
+
+run_youtube_edge_prefetch() {
+    trigger="${1:-scheduler}"
+    [ -f "$YOUTUBE_EDGE_PREFETCH_RUNNER" ] || return 0
+    python_bin="/opt/bin/python3"
+    [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+    [ -n "$python_bin" ] || return 0
+    mkdir -p "$(dirname "$YOUTUBE_EDGE_PREFETCH_LOG")" 2>/dev/null || true
+    PYTHONPATH="/opt/etc/bot" "$python_bin" "$YOUTUBE_EDGE_PREFETCH_RUNNER" --trigger "$trigger" >> "$YOUTUBE_EDGE_PREFETCH_LOG" 2>&1 || true
+}
+
+run_youtube_edge_prefetch_if_due() {
+    youtube_edge_prefetch_due || return 0
+    run_youtube_edge_prefetch "scheduler"
 }
 
 detect_dns_backend() {
@@ -239,6 +280,7 @@ start_scheduler() {
         last_refresh_check=0
         while :; do
             run_refresh_if_check_due
+            run_youtube_edge_prefetch_if_due
             run_runtime_dedupe
             sleep_seconds="$DEDUP_INTERVAL_SECONDS"
             [ "$sleep_seconds" -gt 0 ] 2>/dev/null || sleep_seconds="$INTERVAL_SECONDS"
@@ -271,6 +313,7 @@ case "$1" in
         ;;
     refresh)
         run_refresh_if_due
+        run_youtube_edge_prefetch_if_due
         run_runtime_dedupe
         ;;
     status)
