@@ -284,7 +284,11 @@ def web_probe_state(probe, key):
     value = probe.get(key)
     if value is None:
         return 'unknown'
-    return 'ok' if value else 'fail'
+    if value is True:
+        return 'ok'
+    if value is False:
+        return 'fail'
+    return 'unknown'
 
 
 def web_probe_checked_at(probe):

@@ -60,15 +60,25 @@ def pool_table_layout(custom_checks):
 def _service_probe_badge(probe, probe_key, ok_html, applicable=True):
     if not applicable:
         return '<span class="service-probe-mark service-probe-na">-</span>'
-    if probe_key == 'yt_ok' and youtube_probe_state(probe) == 'warn':
-        return (
-            '<span class="service-probe-mark service-probe-warn service-probe-icon-warn" '
-            'title="YouTube works, probe is unstable">'
-            f'{ok_html}</span>'
-        )
-    if probe.get(probe_key):
+    if probe_key == 'yt_ok':
+        yt_state = youtube_probe_state(probe)
+        if yt_state == 'warn':
+            return (
+                '<span class="service-probe-mark service-probe-warn service-probe-icon-warn" '
+                'title="YouTube works, probe is unstable">'
+                f'{ok_html}</span>'
+            )
+        if yt_state == 'ok':
+            return ok_html
+        if yt_state == 'fail':
+            return '<span class="service-probe-mark service-probe-fail">✕</span>'
+        return '<span class="service-probe-mark service-probe-unknown">?</span>'
+    if not isinstance(probe, dict) or probe_key not in probe:
+        return '<span class="service-probe-mark service-probe-unknown">?</span>'
+    value = probe.get(probe_key)
+    if value is True:
         return ok_html
-    if probe_key in probe:
+    if value is False:
         return '<span class="service-probe-mark service-probe-fail">✕</span>'
     return '<span class="service-probe-mark service-probe-unknown">?</span>'
 
@@ -78,7 +88,12 @@ def _probe_state(probe, probe_key):
         return youtube_probe_state(probe)
     if not isinstance(probe, dict) or probe_key not in probe or probe.get(probe_key) is None:
         return 'unknown'
-    return 'ok' if probe.get(probe_key) else 'fail'
+    value = probe.get(probe_key)
+    if value is True:
+        return 'ok'
+    if value is False:
+        return 'fail'
+    return 'unknown'
 
 
 def _probe_int(probe, key, default=0):

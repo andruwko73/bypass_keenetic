@@ -1,3 +1,7 @@
+*v1.778 (23 Jun 2026) -* main
+
+*Renders unknown pool-row Telegram and YouTube states as unknown instead of treating truthy cache sentinels as OK, keeping HTML and API pool tables consistent after a fresh probe.*
+
 *v1.777 (23 Jun 2026) -* main
 
 *Shows active-key Telegram and YouTube icons from the actual key probe/status even when service routes are split across protocols, and makes pool Telegram checks require Bot API success so non-working Telegram keys no longer appear green.*

@@ -701,7 +701,9 @@ def test_key_pool_web():
     assert 'service-preset-btn' in key_pool_web.web_custom_presets_html([], check_defs, icon_html)
     assert 'custom-service-ok' in key_pool_web.web_custom_check_badges({'custom': {'custom': True}}, check_defs, icon_html)
     assert key_pool_web.web_probe_state({'tg_ok': True}, 'tg_ok') == 'ok'
+    assert key_pool_web.web_probe_state({'tg_ok': False}, 'tg_ok') == 'fail'
     assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
+    assert key_pool_web.web_probe_state({'tg_ok': 'unknown'}, 'tg_ok') == 'unknown'
     assert key_pool_web.web_probe_state({'yt_ok': False, 'yt_stability': 'unstable'}, 'yt_ok') == 'warn'
     cache_key = probe_cache.hash_key('old-key')
     cache = {cache_key: {'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION, 'tg_ok': True, 'tg_latency_ms': 825, 'ts': 1}}
@@ -5172,6 +5174,25 @@ def test_web_pool_form_blocks_helpers():
     assert 'service-probe-icon-warn' in warn_rows
     assert 'YT</span>' in warn_rows
     assert 'service-probe-warn">!</span>' not in warn_rows
+    unknown_rows = web_pool_form_blocks.render_pool_items(
+        key_name='vless',
+        title='Vless 1',
+        pool_keys=['unknown-key-value'],
+        current_key='',
+        key_probe_cache={'hash-unknown': {'tg_ok': None, 'yt_ok': None}},
+        custom_checks=[],
+        key_display_name=lambda key: 'unknown-key',
+        hash_key=lambda key: 'hash-unknown',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+        custom_check_badges=lambda probe, checks: '',
+        probe_checked_at=lambda probe: '',
+        csrf_input_html='<input name="csrf_token" value="token">',
+    )
+    assert 'data-tg-state="unknown"' in unknown_rows
+    assert 'data-yt-state="unknown"' in unknown_rows
+    assert unknown_rows.count('service-probe-unknown">?</span>') >= 2
+    assert '>TG<' not in unknown_rows
     not_applicable_rows = web_pool_form_blocks.render_pool_items(
         key_name='vless2',
         title='Vless 2',

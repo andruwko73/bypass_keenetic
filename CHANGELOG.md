@@ -1,3 +1,8 @@
+<a name="1.778"></a>
+# [1.778] - 23 Jun 2026
+
+- Renders unknown pool-row Telegram and YouTube states as unknown instead of treating truthy cache sentinels as OK, keeping HTML and API pool tables consistent after a fresh probe.
+
 <a name="1.777"></a>
 # [1.777] - 23 Jun 2026
 
