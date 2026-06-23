@@ -43,6 +43,7 @@ YOUTUBE_HEALTHCHECK_REQUIRED_URLS = (
     YOUTUBE_PRIMARY_URL,
     YOUTUBE_HOME_URL,
     YOUTUBE_WATCH_URL,
+    YOUTUBE_SHORT_URL,
     YOUTUBE_GOOGLEVIDEO_URL,
 )
 YOUTUBE_BOOTSTRAP_HOSTS = frozenset((
@@ -217,38 +218,26 @@ def check_youtube_through_proxy(
     )
     success_required = min(total_count, max(1, int(min_ok or 1)))
     success_threshold = ok_count >= success_required
-    soft_unstable_failure = (
-        required_missing <= {YOUTUBE_PRIMARY_URL} and
-        failed_kinds <= {'primary', 'short', 'bootstrap', 'googlevideo'} and
-        home_ok and
-        watch_ok and
-        (googlevideo_ok or googlevideo_ok_count > 0) and
-        failure_count == 1 and
-        unstable_failures == 1
-    )
-    soft_required_endpoint_failure = (
-        not soft_unstable_failure and
-        len(required_missing) == 1 and
-        required_missing <= {YOUTUBE_PRIMARY_URL, YOUTUBE_HOME_URL, YOUTUBE_SHORT_URL} and
-        failed_kinds <= {'primary', 'home', 'short', 'bootstrap'} and
-        watch_ok and
-        googlevideo_ok and
-        ok_count >= max(1, success_required - 1) and
-        failure_count == 1 and
-        unstable_failures == 1
-    )
-    stable = (
-        success_threshold and
-        not required_missing and
+    critical_missing = required_missing - {YOUTUBE_PRIMARY_URL}
+    service_usable = (
+        not critical_missing and
         home_ok and
         watch_ok and
         short_ok and
-        bootstrap_ok and
-        googlevideo_stable and
-        failure_count <= max(0, int(max_failures or 0)) and
-        unstable_failures == 0
+        googlevideo_ok and
+        ok_count >= max(1, success_required - 1)
     )
+    soft_diagnostic_issue = service_usable and (
+        bool(required_missing) or
+        not success_threshold or
+        not bootstrap_ok or
+        not googlevideo_stable or
+        failure_count > max(0, int(max_failures or 0)) or
+        unstable_failures > 0
+    )
+    stable = service_usable
     partially_ok = (
+        not stable and
         success_threshold and
         not required_missing and
         home_ok and
@@ -256,9 +245,7 @@ def check_youtube_through_proxy(
         short_ok and
         googlevideo_ok_count > 0
     )
-    stability = 'stable' if stable else (
-        'unstable' if partially_ok or soft_unstable_failure or soft_required_endpoint_failure else 'fail'
-    )
+    stability = 'stable' if stable else ('unstable' if partially_ok else 'fail')
 
     if metrics is not None:
         metrics['yt_home_ok'] = home_ok
@@ -274,10 +261,10 @@ def check_youtube_through_proxy(
             metrics['yt_first_load_ms'] = first_home_ms
 
     if stable:
+        if soft_diagnostic_issue:
+            detail = '; '.join(failed[-3:]) or 'soft diagnostic endpoint is transient'
+            return True, f'YouTube first-load endpoints confirmed with soft diagnostic issue: {detail}'
         return True, 'YouTube first-load endpoints confirmed: ' + ', '.join(sorted(ok_kinds))
-    if soft_unstable_failure or soft_required_endpoint_failure:
-        detail = '; '.join(failed[-1:]) or 'soft endpoint is transient'
-        return True, f'YouTube first-load endpoints confirmed with transient soft check: {detail}'
     if partially_ok:
         detail = '; '.join(failed[-3:]) or 'intermittent YouTube endpoint failure'
         return True, f'YouTube is unstable but usable, scheduling background recheck: {detail}'

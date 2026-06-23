@@ -1,3 +1,8 @@
+<a name="1.780"></a>
+# [1.780] - 23 Jun 2026
+
+- Fixes pool-probe cache downgrades, strict probe boolean parsing, YouTube soft-diagnostic stability, unblock-list save whitelisting, subscription session cleanup, and Telegram auth log redaction.
+
 <a name="1.779"></a>
 # [1.779] - 23 Jun 2026
 

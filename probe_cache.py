@@ -59,7 +59,24 @@ def save_key_probe_cache(cache):
 
 
 def _stored_probe_value(value):
-    return None if value is None or value == 'unknown' else bool(value)
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
+    text = str(value).strip().casefold()
+    if text in ('', 'unknown', 'none', 'null'):
+        return None
+    if text in ('1', 'true', 'yes', 'y', 'ok', 'success', 'passed', 'stable'):
+        return True
+    if text in ('0', 'false', 'no', 'n', 'fail', 'failed', 'error', 'unstable'):
+        return False
+    return None
 
 
 def _stored_float(value, digits=2):
@@ -154,9 +171,11 @@ def youtube_quality_score(
             quality = YOUTUBE_QUALITY_FAST
         elif throughput >= min_1600p_mbps and latency_is_stable:
             quality = YOUTUBE_QUALITY_STABLE
-    if stability == 'unstable' or error_rate > 0:
+    if stability == 'unstable':
         score = max(0, min(55, score - max(18, int(round(error_rate * 100)))))
         quality = ''
+    elif error_rate > 0:
+        score = max(0, score - min(10, int(round(error_rate * 40))))
     return {'yt_score': score, 'yt_quality': quality, 'yt_stream_tier': stream_tier}
 
 
@@ -252,6 +271,7 @@ def update_key_probe_cache_entry(
     fast_latency_ms=YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS,
     min_1600p_mbps=YOUTUBE_QUALITY_DEFAULT_1600P_MBPS,
     min_4k_mbps=YOUTUBE_QUALITY_DEFAULT_4K_MBPS,
+    allow_recent_success_downgrade=False,
 ):
     cache = cache if isinstance(cache, dict) else {}
     key_id = hash_key(key_value)
@@ -301,7 +321,10 @@ def update_key_probe_cache_entry(
 
     if tg_ok is not None:
         value = _stored_probe_value(tg_ok)
-        if _skip_recent_success_downgrade(entry, 'tg_ok', value, now, previous_ts):
+        if (
+            not allow_recent_success_downgrade and
+            _skip_recent_success_downgrade(entry, 'tg_ok', value, now, previous_ts)
+        ):
             skipped_downgrade = True
         elif 'tg_ok' not in entry or entry.get('tg_ok') is not value:
             entry['tg_ok'] = value
@@ -311,7 +334,10 @@ def update_key_probe_cache_entry(
             changed = True
     if yt_ok is not None:
         value = _stored_probe_value(yt_ok)
-        if _skip_recent_success_downgrade(entry, 'yt_ok', value, now, previous_ts):
+        if (
+            not allow_recent_success_downgrade and
+            _skip_recent_success_downgrade(entry, 'yt_ok', value, now, previous_ts)
+        ):
             skipped_downgrade = True
         elif 'yt_ok' not in entry or entry.get('yt_ok') is not value:
             entry['yt_ok'] = value
@@ -435,6 +461,7 @@ def update_key_probe_cache_entry(
             check_key = str(check_id)
             value = _stored_probe_value(ok)
             if (
+                not allow_recent_success_downgrade and
                 value is False and
                 previous_ts and
                 now - previous_ts < KEY_PROBE_SUCCESS_DOWNGRADE_GRACE and
@@ -559,6 +586,7 @@ def record_key_probe(
     custom_checks=None,
     timeout=False,
     timeout_reason='',
+    allow_recent_success_downgrade=False,
     **quality_kwargs,
 ):
     with _cache_lock:
@@ -574,6 +602,7 @@ def record_key_probe(
             custom_checks=custom_checks,
             timeout=timeout,
             timeout_reason=timeout_reason,
+            allow_recent_success_downgrade=allow_recent_success_downgrade,
             **quality_kwargs,
         ):
             save_key_probe_cache(cache)

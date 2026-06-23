@@ -195,15 +195,17 @@ def failover_candidates(
                     score = 30
             stability = str(probe.get('yt_stability') or '').strip().lower()
             if stability == 'unstable':
-                score = min(score, 45)
+                score = min(score, 65)
             elif stability == 'fail':
                 score = 0
             try:
                 error_rate = float(probe.get('yt_error_rate') or 0)
             except Exception:
                 error_rate = 0.0
-            if error_rate > 0:
+            if error_rate > 0 and stability == 'unstable':
                 score = max(0, score - int(round(error_rate * 100)))
+            elif error_rate > 0:
+                score = max(0, score - min(10, int(round(error_rate * 40))))
         elif probe.get(service_field) is True:
             score = 3
         elif service_field in probe and probe.get(service_field) is False:

@@ -47,10 +47,8 @@ def _run_unblock_update(async_update=False):
 
 
 def save_unblock_list_file(list_name, text, before_update=None, async_update=False):
-    safe_name = os.path.basename(list_name)
+    safe_name = validate_visible_unblock_list_name(list_name)
     target_path = os.path.join(UNBLOCK_DIR, safe_name)
-    if not target_path.endswith('.txt'):
-        raise ValueError('List must be a .txt file')
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     normalized = normalize_unblock_list(text)
     with open(target_path, 'w', encoding='utf-8') as file:
@@ -88,6 +86,13 @@ def normalize_unblock_route_name(list_name):
         safe_name = safe_name[:-4]
     if not safe_name or not re.match(r'^[A-Za-z0-9_-]+$', safe_name):
         raise ValueError('Некорректное имя списка')
+    return safe_name
+
+
+def validate_visible_unblock_list_name(list_name):
+    safe_name = f'{normalize_unblock_route_name(list_name)}.txt'
+    if safe_name not in VISIBLE_UNBLOCK_LISTS:
+        raise ValueError('List is not editable from the web interface')
     return safe_name
 
 

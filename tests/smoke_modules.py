@@ -921,6 +921,8 @@ def test_key_pool_subscription_helpers():
         service='youtube',
     )
     assert youtube_stable_candidates[:2] == [('vless2', 'stable'), ('vless2', 'unstable')]
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert 'finally:\n            session.close()' in bot_source
 
 
 def test_youtube_healthcheck_detects_first_load_instability():
@@ -1011,11 +1013,11 @@ def test_youtube_healthcheck_tolerates_transient_primary_generate_204():
     )
 
     assert ok is True
-    assert 'transient soft check' in message
+    assert 'soft diagnostic issue' in message
     assert metrics['yt_home_ok'] is True
     assert metrics['yt_watch_ok'] is True
     assert metrics['googlevideo_ok'] is True
-    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_stability'] == 'stable'
     assert metrics['yt_error_rate'] > 0
 
 
@@ -1041,7 +1043,7 @@ def test_youtube_healthcheck_rejects_http_client_error_status():
     assert metrics['yt_stability'] == 'fail'
 
 
-def test_youtube_healthcheck_warns_on_single_required_timeout():
+def test_youtube_healthcheck_rejects_single_home_timeout():
     def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
         if url == youtube_healthcheck.YOUTUBE_HOME_URL:
             return False, 'Удалённый сервер не ответил вовремя через этот ключ.'
@@ -1056,11 +1058,11 @@ def test_youtube_healthcheck_warns_on_single_required_timeout():
         metrics=metrics,
     )
 
-    assert ok is True
-    assert 'transient soft check' in message
+    assert ok is False
+    assert 'Required YouTube endpoint' in message
     assert metrics['yt_home_ok'] is False
     assert metrics['googlevideo_ok'] is True
-    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_stability'] == 'fail'
 
 
 def test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure():
@@ -1078,12 +1080,12 @@ def test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure():
     )
 
     assert ok is True
-    assert 'transient soft check' in message
+    assert 'soft diagnostic issue' in message
     assert metrics['yt_home_ok'] is True
     assert metrics['yt_watch_ok'] is True
     assert metrics['googlevideo_ok'] is True
     assert metrics['yt_bootstrap_ok'] is False
-    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_stability'] == 'stable'
 
 
 def test_youtube_healthcheck_warns_on_partial_googlevideo_success():
@@ -1104,9 +1106,9 @@ def test_youtube_healthcheck_warns_on_partial_googlevideo_success():
     )
 
     assert ok is True
-    assert 'transient soft check' in message
+    assert 'soft diagnostic issue' in message
     assert metrics['googlevideo_ok'] is True
-    assert metrics['yt_stability'] == 'unstable'
+    assert metrics['yt_stability'] == 'stable'
     assert metrics['yt_error_rate'] > 0
 
 
@@ -2397,6 +2399,22 @@ def test_telegram_auth_state_helpers():
     assert telegram_auth_state.unauthorized_message_text('missing_username').startswith('У вашего Telegram-аккаунта')
 
 
+    secret_message = type('Message', (), {})()
+    secret_message.text = (
+        'vless://uuid@example.test:443?security=tls#secret '
+        'https://subscription.example.test/path?token=secret '
+        'bot=123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    )
+    debug_text = telegram_auth_state.message_debug_text(secret_message)
+    assert 'vless://' not in debug_text
+    assert 'subscription.example.test' not in debug_text
+    assert 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' not in debug_text
+    assert '<proxy-key-hidden>' in debug_text
+    logs = []
+    telegram_auth_state.authorize_message(secret_message, 'secret', set(), set(), log_callback=logs.append)
+    assert logs and 'vless://' not in logs[0] and 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' not in logs[0]
+
+
 def test_telegram_message_flow_helpers():
     message = _FakeMessage(chat_id=7)
     saved = []
@@ -3015,7 +3033,7 @@ def test_proxy_apply_runtime_helpers():
         timeouts=(1, 1),
     )
     assert primary_transient_ok is True
-    assert 'transient soft check' in primary_transient_message
+    assert 'soft diagnostic issue' in primary_transient_message
 
     short_transient_ok, short_transient_message = proxy_apply_runtime.check_youtube_health(
         lambda proxy, **kwargs: (
@@ -3025,8 +3043,8 @@ def test_proxy_apply_runtime_helpers():
         'proxy-url',
         timeouts=(1, 1),
     )
-    assert short_transient_ok is True
-    assert 'transient soft check' in short_transient_message
+    assert short_transient_ok is False
+    assert 'Required YouTube endpoint' in short_transient_message
 
     googlevideo_attempts = {'count': 0}
     def googlevideo_transient_check(proxy, **kwargs):
@@ -3280,7 +3298,15 @@ def test_pool_probe_controller_helpers():
     assert records[0][2]['tg_ok'] is False
     assert records[0][2]['yt_ok'] is False
     assert records[0][2]['yt_stability'] == 'fail'
-    assert records[1] == ('vless', 'key', {'custom': {'custom': False}, 'custom_checks': [{'id': 'custom'}]})
+    assert records[1] == (
+        'vless',
+        'key',
+        {
+            'custom': {'custom': False},
+            'custom_checks': [{'id': 'custom'}],
+            'allow_recent_success_downgrade': True,
+        },
+    )
 
     records = []
     http_calls = []
@@ -4220,6 +4246,11 @@ def test_unblock_list_helpers():
             unblock_lists.subprocess.run = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('save should not wait for unblock_update.sh'))
             unblock_lists.subprocess.Popen = lambda cmd, **kwargs: popen_calls.append((cmd, kwargs))
             assert unblock_lists.save_unblock_list_file('vless.txt', 'b.example\na.example\n', async_update=True) == 'vless.txt'
+            try:
+                unblock_lists.save_unblock_list_file('legacy.txt', 'example.org\n', async_update=True)
+                assert False, 'legacy.txt must not be editable from web save helper'
+            except ValueError:
+                pass
         finally:
             unblock_lists.UNBLOCK_DIR = old_dir
             unblock_lists.subprocess.Popen = old_popen
@@ -5602,6 +5633,22 @@ def test_probe_cache_update_entry_min_interval():
     assert cache[key_id]['tg_ok'] is True
     assert cache[key_id]['yt_ok'] is False
 
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'string-key',
+        tg_ok='false',
+        yt_ok='0',
+        custom={'custom': 'no'},
+        custom_checks=[{'id': 'custom', 'urls': ['https://example.test']}],
+        now=100,
+        min_write_interval=0,
+    )
+    string_entry = cache[probe_cache.hash_key('string-key')]
+    assert string_entry['tg_ok'] is False
+    assert string_entry['yt_ok'] is False
+    assert string_entry['custom']['custom'] is False
+
     assert not probe_cache.update_key_probe_cache_entry(
         cache,
         'vless',
@@ -5754,6 +5801,20 @@ def test_probe_cache_quality_metrics():
     )
     assert stable['yt_quality'] == 'stable'
     assert stable['yt_stream_tier'] == '1600p'
+
+    stable_with_soft_error = probe_cache.youtube_quality_score(
+        yt_ok=True,
+        yt_latency_ms=500,
+        googlevideo_latency_ms=600,
+        googlevideo_ok=True,
+        yt_error_rate=0.125,
+        yt_stability='stable',
+        yt_throughput_mbps=55.0,
+        min_1600p_mbps=25.0,
+        min_4k_mbps=45.0,
+    )
+    assert stable_with_soft_error['yt_score'] > 55
+    assert stable_with_soft_error['yt_quality'] == 'fast'
 
     latency_only = probe_cache.youtube_quality_score(
         yt_ok=True,
@@ -5908,6 +5969,33 @@ def test_probe_cache_keeps_recent_success_on_transient_downgrade():
     assert entry['yt_ok'] is True
     assert entry['custom']['chatgpt_services'] is True
     assert entry['ts'] == 100
+
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-override',
+        tg_ok=True,
+        yt_ok=True,
+        custom={'chatgpt_services': True},
+        custom_checks=checks,
+        now=100,
+    )
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'key-override',
+        tg_ok=False,
+        yt_ok=False,
+        custom={'chatgpt_services': False},
+        custom_checks=checks,
+        now=120,
+        min_write_interval=0,
+        allow_recent_success_downgrade=True,
+    )
+    override_entry = cache[probe_cache.hash_key('key-override')]
+    assert override_entry['tg_ok'] is False
+    assert override_entry['yt_ok'] is False
+    assert override_entry['custom']['chatgpt_services'] is False
 
     assert probe_cache.update_key_probe_cache_entry(
         cache,
@@ -6278,7 +6366,7 @@ def test_telegram_pool_ui():
 def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     assert 'key_name == _youtube_route_protocol()' in source
-    assert "_youtube_probe_state(probe) != 'ok'" in source
+    assert "_youtube_probe_state(probe) in ('fail', 'unknown')" in source
     assert "def _schedule_youtube_cache_confirm" in source
     assert "def _schedule_vless2_youtube_cache_confirm" in source
     assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
@@ -6686,6 +6774,14 @@ def main():
     test_installer_page_is_bot_setup_only()
     test_repo_update_helpers()
     test_key_pool_web()
+    test_youtube_healthcheck_detects_first_load_instability()
+    test_youtube_healthcheck_requires_watch_page()
+    test_youtube_healthcheck_retries_transient_watch_page()
+    test_youtube_healthcheck_tolerates_transient_primary_generate_204()
+    test_youtube_healthcheck_rejects_http_client_error_status()
+    test_youtube_healthcheck_rejects_single_home_timeout()
+    test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure()
+    test_youtube_healthcheck_warns_on_partial_googlevideo_success()
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()
     test_web_get_actions_helpers()

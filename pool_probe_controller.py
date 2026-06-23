@@ -218,13 +218,21 @@ def check_pool_key_through_proxy(
     for key in ('stable_latency_ms', 'fast_latency_ms', 'min_1600p_mbps', 'min_4k_mbps'):
         if key in quality_settings:
             quality_kwargs[key] = quality_settings[key]
-    record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok, **quality_kwargs)
+    record_key_probe(
+        proto,
+        key_value,
+        tg_ok=tg_ok,
+        yt_ok=yt_ok,
+        allow_recent_success_downgrade=True,
+        **quality_kwargs,
+    )
     if custom_checks and not tg_ok and not yt_ok:
         record_key_probe(
             proto,
             key_value,
             custom=failed_custom_probe_results(custom_checks),
             custom_checks=custom_checks,
+            allow_recent_success_downgrade=True,
         )
         return
     if custom_checks:
@@ -233,6 +241,7 @@ def check_pool_key_through_proxy(
             key_value,
             custom=probe_custom_targets(proxy_url, custom_checks=custom_checks),
             custom_checks=custom_checks,
+            allow_recent_success_downgrade=True,
         )
 
 

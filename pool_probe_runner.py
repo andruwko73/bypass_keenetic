@@ -388,6 +388,7 @@ def run_pool_probe_worker(
     def record_key_probe_if_current(proto, key_value, **kwargs):
         if result_is_ignored(proto, key_value):
             return
+        kwargs.setdefault('allow_recent_success_downgrade', True)
         record_key_probe(proto, key_value, **kwargs)
 
     def run_check_pool_key(proto, key_value, checks, proxy_url):
@@ -578,6 +579,7 @@ def run_pool_probe_worker(
                         tg_ok=False,
                         yt_ok=False,
                         custom=failed_custom_results(checks),
+                        allow_recent_success_downgrade=True,
                     )
                     mark_checked(proto, key_value)
 

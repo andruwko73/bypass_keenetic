@@ -1,4 +1,13 @@
+import re
+
+
 MENU_STATE_UNSET = object()
+SENSITIVE_MESSAGE_TEXT_PATTERNS = (
+    (re.compile(r'\b(?:vless|vmess|trojan|ss)://[^\s\'"<>]+', re.I), '<proxy-key-hidden>'),
+    (re.compile(r'\b\d{6,}:[A-Za-z0-9_-]{20,}\b'), '<bot-token-hidden>'),
+    (re.compile(r'https?://[^\s\'"<>]+', re.I), '<url-hidden>'),
+    (re.compile(r'((?:token|password|passwd|secret|credential|subscription)\s*[=:]\s*)[^\s\'"]+', re.I), r'\1<hidden>'),
+)
 
 
 def normalize_username(value):
@@ -57,11 +66,19 @@ def set_chat_menu_state(lock, states, chat_id, level=MENU_STATE_UNSET, bypass=ME
             state['bypass'] = bypass
 
 
+def _redact_message_debug_text(text):
+    redacted = str(text or '')
+    for pattern, replacement in SENSITIVE_MESSAGE_TEXT_PATTERNS:
+        redacted = pattern.sub(replacement, redacted)
+    return redacted
+
+
 def message_debug_text(message):
     text = getattr(message, 'text', None)
     if text is None:
         return '<non-text>'
     text = str(text).replace('\r', ' ').replace('\n', ' ')
+    text = _redact_message_debug_text(text)
     if len(text) > 120:
         return text[:117] + '...'
     return text

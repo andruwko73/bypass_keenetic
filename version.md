@@ -1,3 +1,7 @@
+*v1.780 (23 Jun 2026) -* main
+
+*Fixes pool-probe cache downgrades, strict probe boolean parsing, YouTube soft-diagnostic stability, unblock-list save whitelisting, subscription session cleanup, and Telegram auth log redaction.*
+
 *v1.779 (23 Jun 2026) -* main
 
 *Stores completed Telegram pool-probe failures as failed instead of unknown, so checked keys show a cross when Telegram API does not pass.*

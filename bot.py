@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.779, последнее изменение: 23.06.2026
+#  Файл: bot.py, Версия v1.780, последнее изменение: 23.06.2026
 
 import subprocess
 import os
@@ -619,13 +619,16 @@ def _fetch_keys_from_subscription(url):
         if not SUBSCRIPTION_ALLOW_PRIVATE_URLS and _private_subscription_address(parsed.hostname):
             raise ValueError('private, local and reserved subscription hosts are not allowed')
         session = requests.Session()
-        session.trust_env = False
-        resp = session.get(url, stream=True, timeout=(5, 15))
         try:
-            resp.raise_for_status()
-            raw = _read_limited_response(resp, SUBSCRIPTION_MAX_BYTES)
+            session.trust_env = False
+            resp = session.get(url, stream=True, timeout=(5, 15))
+            try:
+                resp.raise_for_status()
+                raw = _read_limited_response(resp, SUBSCRIPTION_MAX_BYTES)
+            finally:
+                resp.close()
         finally:
-            resp.close()
+            session.close()
         return key_pool_store.classify_subscription_keys(raw), None
     except requests.RequestException as exc:
         return None, f'Ошибка загрузки subscription: {exc}'
@@ -1031,7 +1034,6 @@ def _attempt_youtube_failover():
     if cached_youtube_state == 'warn':
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
-        _schedule_youtube_cache_confirm(route_proto, active_key)
         return False
     if isinstance(cached_active_probe, dict) and cached_youtube_state == 'fail':
         try:
@@ -6069,7 +6071,7 @@ def _cached_protocol_status_for_key(
     if (
         allow_youtube_confirm and
         key_name == _youtube_route_protocol() and
-        _youtube_probe_state(probe) != 'ok'
+        _youtube_probe_state(probe) in ('fail', 'unknown')
     ):
         _schedule_youtube_cache_confirm(key_name, key_value)
     custom_states = key_pool_web.web_custom_probe_states(probe, protocol_custom_checks)
