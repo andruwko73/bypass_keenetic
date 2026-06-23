@@ -685,9 +685,9 @@ def web_pool_snapshot(
         for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
             key_hash = hash_key(key_value)
             probe = cache.get(key_hash, {})
-            tg_state = web_probe_state(probe, 'tg_ok')
-            yt_state = web_probe_state(probe, 'yt_ok')
-            quality_label = web_probe_quality_label(probe)
+            tg_state = core_probe_state(probe, 'tg_ok', route_states=route_states, protocol=proto)
+            yt_state = core_probe_state(probe, 'yt_ok', route_states=route_states, protocol=proto)
+            quality_label = web_probe_quality_label(probe) if yt_state != 'na' else ''
             row = {
                 'index': index,
                 'key_id': key_hash[:12],
@@ -698,11 +698,11 @@ def web_pool_snapshot(
                 'custom': web_custom_probe_states(probe, protocol_checks),
                 'checked_at': probe_checked_at(probe),
                 'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,
-                'yt_score': int(probe.get('yt_score') or 0) if isinstance(probe, dict) else 0,
+                'yt_score': int(probe.get('yt_score') or 0) if quality_label and isinstance(probe, dict) else 0,
                 'yt_quality': str(probe.get('yt_quality') or '') if quality_label and isinstance(probe, dict) else '',
                 'yt_quality_label': quality_label,
                 'yt_stream_tier': str(probe.get('yt_stream_tier') or '') if quality_label and isinstance(probe, dict) else '',
-                'quality_summary': web_probe_quality_summary(probe),
+                'quality_summary': web_probe_quality_summary(probe) if yt_state != 'na' else 'YouTube не назначен этому протоколу',
             }
             if include_keys:
                 row['key'] = key_value

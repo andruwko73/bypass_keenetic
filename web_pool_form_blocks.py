@@ -174,8 +174,11 @@ def render_pool_items(
         probe = key_probe_cache.get(key_hash, {})
         if not isinstance(probe, dict):
             probe = {}
-        tg_state = _probe_state(probe, 'tg_ok')
-        yt_state = _probe_state(probe, 'yt_ok')
+        service_applicability = service_applicability or {}
+        tg_applicable = bool(service_applicability.get('telegram', True))
+        yt_applicable = bool(service_applicability.get('youtube', True))
+        tg_state = _probe_state(probe, 'tg_ok') if tg_applicable else 'na'
+        yt_state = _probe_state(probe, 'yt_ok') if yt_applicable else 'na'
         safe_tg_state = html.escape(tg_state, quote=True)
         safe_yt_state = html.escape(yt_state, quote=True)
         try:
@@ -186,22 +189,24 @@ def render_pool_items(
             probe,
             'tg_ok',
             telegram_icon_html(opacity=1.0),
+            applicable=tg_applicable,
         )
         yt_badge = _service_probe_badge(
             probe,
             'yt_ok',
             youtube_icon_html(opacity=1.0),
+            applicable=yt_applicable,
         )
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
-        quality_score = _probe_int(probe, 'yt_score', 0)
-        quality_class = html.escape(_quality_class(probe), quote=True)
-        quality_label = _quality_label(probe)
+        quality_score = _probe_int(probe, 'yt_score', 0) if yt_applicable else 0
+        quality_class = html.escape(_quality_class(probe), quote=True) if yt_applicable else ''
+        quality_label = _quality_label(probe) if yt_applicable else ''
         quality_badge = (
             f'<span class="pool-quality-badge pool-quality-{quality_class}">{html.escape(quality_label)}</span>'
             if quality_label else ''
         )
-        quality_title_text = _quality_summary(probe, probe_checked_at(probe))
+        quality_title_text = _quality_summary(probe, probe_checked_at(probe)) if yt_applicable else 'YouTube не назначен этому протоколу'
         quality_title = html.escape(quality_title_text, quote=True)
         rows.append(f'''<tr class="pool-row{active_class}" data-pool-row data-protocol="{safe_key_name}" data-key-id="{key_id}" data-pool-index="{int(index)}" data-active="{'1' if is_current_key else '0'}" data-tg-state="{safe_tg_state}" data-yt-state="{safe_yt_state}" data-quality-score="{int(quality_score)}" data-quality-class="{quality_class}" data-checked-ts="{int(checked_ts)}" data-search="{search_text}">
                         <td class="pool-key-cell">

@@ -1,3 +1,7 @@
+*v1.775 (23 Jun 2026) -* main
+
+*Scopes Telegram and YouTube pool-row statuses to the protocol route list, so cached checks from another service no longer show green icons where that service is not assigned.*
+
 *v1.774 (23 Jun 2026) -* main
 
 *Fixes false Telegram pending status when another service is still rechecking, limits live status polling to real pending states, adds a release metadata guard for CHANGELOG synchronization, and declares reproducible npm scripts for UI smoke tests.*

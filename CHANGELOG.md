@@ -1,3 +1,8 @@
+<a name="1.775"></a>
+# [1.775] - 23 Jun 2026
+
+- Scopes Telegram and YouTube pool-row statuses to the protocol route list, so cached checks from another service no longer show green icons where that service is not assigned.
+
 <a name="1.774"></a>
 # [1.774] - 23 Jun 2026
 
