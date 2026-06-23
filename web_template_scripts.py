@@ -891,7 +891,7 @@ def render_web_scripts(
         }}
 
         function cleanStatusText(text) {{
-            return String(text || '').replace(/\s*\.+\s*$/u, '');
+            return String(text || '').replace(/\\s*\\.+\\s*$/u, '');
         }}
 
         function serviceIcon(src, alt) {{

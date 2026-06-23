@@ -1,3 +1,7 @@
+*v1.781 (23 Jun 2026) -* main
+
+*Escapes the web JavaScript regex inside the Python template so router startup logs stay clean on Python versions that warn about invalid escape sequences.*
+
 *v1.780 (23 Jun 2026) -* main
 
 *Fixes pool-probe cache downgrades, strict probe boolean parsing, YouTube soft-diagnostic stability, unblock-list save whitelisting, subscription session cleanup, and Telegram auth log redaction.*

@@ -1,3 +1,8 @@
+<a name="1.781"></a>
+# [1.781] - 23 Jun 2026
+
+- Escapes the web JavaScript regex inside the Python template so router startup logs stay clean on Python versions that warn about invalid escape sequences.
+
 <a name="1.780"></a>
 # [1.780] - 23 Jun 2026
 
