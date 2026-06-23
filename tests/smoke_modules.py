@@ -1671,12 +1671,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert "BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" in script
     assert "TELEGRAM_CALL_TPROXY_PORT_VLESS" in script
     assert "TELEGRAM_CALL_TPROXY_PORT_VLESS2" in bootstrap
-    assert 'repair_service_route_catalog_drift()' in script
     service_routes_source = (ROOT / 'service_routes.py').read_text(encoding='utf-8')
     assert 'def repair_service_route_catalog_drift(' in service_routes_source
     assert 'update_script=UNBLOCK_UPDATE_SCRIPT' in service_routes_source
-    assert 'ensure_runtime_legacy_paths\n    repair_service_route_catalog_drift\n    generate_udp_quic_policy_file' in script
-    assert 'migrate_runtime_config_defaults\n    repair_service_route_catalog_drift\n    generate_udp_quic_policy_file' in script
+    assert 'ensure_runtime_legacy_paths\n    generate_udp_quic_policy_file' in script
+    assert 'migrate_runtime_config_defaults\n    generate_udp_quic_policy_file' in script
+    assert 'Service route catalog repaired:' in script
 
     for script_path in (ROOT / 'script.sh', ROOT / 'bootstrap' / 'install.sh'):
         auto_policy = _run_udp_policy_python(script_path, 'auto')
@@ -4247,7 +4247,7 @@ def test_vless2_youtube_routes_are_scoped():
         if line.strip() and not line.lstrip().startswith('#')
     }
     assert 'accounts.google.com' in vless_entries
-    router_preserved_global = {'clients3.google.com', 'www.google.com'}
+    router_preserved_global = {'clients3.google.com'}
     assert set(service_catalog.global_route_exclude_entries()) & vless_entries <= router_preserved_global
     assert 'rutracker.org' in entries
     assert 'rutracker.wiki' in entries
@@ -4255,12 +4255,12 @@ def test_vless2_youtube_routes_are_scoped():
     assert service_routes.service_route_state('youtube', unblock_dir=str(ROOT))['label'] == 'Vless 2'
     assert service_routes.service_route_state('gemini', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))['label'] == 'Vless 1'
-    assert 'static.rutracker.cc' not in entries
+    assert 'static.rutracker.cc' in entries
     assert 'feed.rutracker.cc' in entries
-    assert 'rutracker.org' in vless_entries
-    assert 'rutracker.wiki' in vless_entries
-    assert 'static.rutracker.cc' in vless_entries
-    assert 'feed.rutracker.cc' in vless_entries
+    assert 'rutracker.org' not in vless_entries
+    assert 'rutracker.wiki' not in vless_entries
+    assert 'static.rutracker.cc' not in vless_entries
+    assert 'feed.rutracker.cc' not in vless_entries
     assert 'thepiratebay.org' not in entries
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
     assert 'redirector.googlevideo.com' in entries
@@ -4342,7 +4342,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
     assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
     assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com'} <= entries
-    assert 'www.google.com' in entries
+    assert 'www.google.com' not in entries
     assert 'google.com' not in entries
     assert {'cdn.auth0.com', 'assets.auth0.com', 'static.auth0.com', 'login.openai.com'} <= entries
     assert {'js.hcaptcha.com', 'client-api.arkoselabs.com', 'openai-api.arkoselabs.com'} <= entries

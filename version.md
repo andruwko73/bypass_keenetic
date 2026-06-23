@@ -1,3 +1,7 @@
+*v1.773 (23 Jun 2026) -* main
+
+*Adds the current 173.194.73.198 YouTube CDN edge so www.youtube.com and redirector.googlevideo.com stay in the Vless2 route without overlapping Chrome Remote Desktop routes, keeps RuTracker only in Vless2, and stops GitHub updates from auto-repairing service route drift so user route lists are preserved unless changed explicitly.*
+
 *v1.772 (22 Jun 2026) -* main
 
 *Keeps desktop service-route popovers inside the viewport in GitHub UI smoke by rechecking placement after drop-up positioning and limiting popover height as a fallback.*

@@ -285,7 +285,6 @@ fbsbx.com
 fc-api.arkoselabs.com
 featureassets.org
 featuregates.org
-feed.rutracker.cc
 files.oaiusercontent.com
 fonts.gstatic.com
 forwarder.workos.com
@@ -387,8 +386,6 @@ remotedesktop.google.com
 rum.browser-intake-datadoghq.com
 rutor.info
 rutor.is
-rutracker.org
-rutracker.wiki
 setup.auth.openai.com
 setup.workos.com
 sr-client-cfg.amplitude.com
@@ -398,7 +395,6 @@ stel.com
 static.ads-twitter.com
 static.auth0.com
 static.doubleclick.net
-static.rutracker.cc
 statsig.anthropic.com
 statsig.com
 statsigapi.net
@@ -524,7 +520,6 @@ web.telegram.org
 web.usagi.one
 whatsapp.biz
 whatsapp.com
-www.google.com
 whatsapp.net
 widgets.telegram.org
 workos.imgix.net

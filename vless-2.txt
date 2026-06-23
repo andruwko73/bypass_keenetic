@@ -24,6 +24,7 @@
 173.194.51.0/24
 173.194.6.0/24
 173.194.73.119
+173.194.73.198
 173.194.176.0/24
 173.194.182.0/24
 173.194.187.0/24
@@ -128,6 +129,7 @@ redirector.googlevideo.com
 returnyoutubedislikeapi.com
 rutracker.org
 rutracker.wiki
+static.rutracker.cc
 s.ytimg.com
 studio.youtube.com
 support.google.com

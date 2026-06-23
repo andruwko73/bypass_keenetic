@@ -1206,7 +1206,6 @@ if [ "$1" = "-install" ]; then
     install_runtime_modules $BOT_RUNTIME_MODULES
     install_static_assets
     ensure_runtime_legacy_paths
-    repair_service_route_catalog_drift
     generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
     /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || /opt/etc/init.d/S99unblock start >/dev/null 2>&1 || true
@@ -1396,7 +1395,6 @@ if [ "$1" = "-update" ]; then
     activate_runtime_modules $BOT_RUNTIME_MODULES
     ensure_runtime_legacy_paths
     migrate_runtime_config_defaults
-    repair_service_route_catalog_drift
     generate_udp_quic_policy_file
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
