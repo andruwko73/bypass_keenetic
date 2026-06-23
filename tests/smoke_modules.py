@@ -3542,7 +3542,7 @@ def test_pool_probe_controller_helpers():
     )
     assert len(records) == 1
     assert records[0][0:2] == ('vless', 'bot-mode-transient-telegram')
-    assert records[0][2]['tg_ok'] == 'unknown'
+    assert records[0][2]['tg_ok'] is False
     assert records[0][2]['yt_ok'] is True
     assert telegram_healthcheck.telegram_failure_is_transient(records[0][2].get('tg_ok')) is False
     assert telegram_healthcheck.telegram_failure_is_transient('SOCKSHTTPSConnectionPool: Max retries exceeded') is True

@@ -1,3 +1,8 @@
+<a name="1.779"></a>
+# [1.779] - 23 Jun 2026
+
+- Stores completed Telegram pool-probe failures as failed instead of unknown, so checked keys show a cross when Telegram API does not pass.
+
 <a name="1.778"></a>
 # [1.778] - 23 Jun 2026
 

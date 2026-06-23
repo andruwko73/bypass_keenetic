@@ -13,7 +13,6 @@ from telegram_healthcheck import (
     TELEGRAM_HEALTHCHECK_MIN_OK,
     TELEGRAM_HEALTHCHECK_URLS,
     check_telegram_service_through_proxy,
-    telegram_failure_is_transient,
 )
 
 
@@ -197,11 +196,6 @@ def check_pool_key_through_proxy(
             sleep=sleep,
         )
 
-    tg_transient = (not tg_ok) and telegram_failure_is_transient(tg_message)
-    if tg_transient:
-        record_tg_ok = 'unknown'
-    else:
-        record_tg_ok = tg_ok
     quality_kwargs = {}
     if collect_quality:
         quality_kwargs.update(tg_metrics)
@@ -224,7 +218,7 @@ def check_pool_key_through_proxy(
     for key in ('stable_latency_ms', 'fast_latency_ms', 'min_1600p_mbps', 'min_4k_mbps'):
         if key in quality_settings:
             quality_kwargs[key] = quality_settings[key]
-    record_key_probe(proto, key_value, tg_ok=record_tg_ok, yt_ok=yt_ok, **quality_kwargs)
+    record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok, **quality_kwargs)
     if custom_checks and not tg_ok and not yt_ok:
         record_key_probe(
             proto,

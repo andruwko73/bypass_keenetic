@@ -1,3 +1,7 @@
+*v1.779 (23 Jun 2026) -* main
+
+*Stores completed Telegram pool-probe failures as failed instead of unknown, so checked keys show a cross when Telegram API does not pass.*
+
 *v1.778 (23 Jun 2026) -* main
 
 *Renders unknown pool-row Telegram and YouTube states as unknown instead of treating truthy cache sentinels as OK, keeping HTML and API pool tables consistent after a fresh probe.*
