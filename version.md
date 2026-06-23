@@ -1,3 +1,7 @@
+*v1.776 (23 Jun 2026) -* main
+
+*Keeps Telegram and YouTube as permanent pool-row columns while protocol summaries use only complete route-list assignments, so partial route overlaps no longer make a protocol look partially working.*
+
 *v1.775 (23 Jun 2026) -* main
 
 *Scopes Telegram and YouTube pool-row statuses to the protocol route list, so cached checks from another service no longer show green icons where that service is not assigned.*

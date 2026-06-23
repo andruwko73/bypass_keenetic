@@ -120,7 +120,6 @@ def service_applies_to_protocol(route_states, service_id, protocol):
     if not isinstance(state, dict):
         return True
     route_protocols = set(state.get('complete_protocols') or [])
-    route_protocols.update(state.get('partial_protocols') or [])
     if not route_protocols:
         return False
     return str(protocol or '').strip() in route_protocols
@@ -685,9 +684,9 @@ def web_pool_snapshot(
         for index, key_value in enumerate(pools.get(proto, []) or [], start=1):
             key_hash = hash_key(key_value)
             probe = cache.get(key_hash, {})
-            tg_state = core_probe_state(probe, 'tg_ok', route_states=route_states, protocol=proto)
-            yt_state = core_probe_state(probe, 'yt_ok', route_states=route_states, protocol=proto)
-            quality_label = web_probe_quality_label(probe) if yt_state != 'na' else ''
+            tg_state = web_probe_state(probe, 'tg_ok')
+            yt_state = web_probe_state(probe, 'yt_ok')
+            quality_label = web_probe_quality_label(probe)
             row = {
                 'index': index,
                 'key_id': key_hash[:12],
@@ -702,7 +701,7 @@ def web_pool_snapshot(
                 'yt_quality': str(probe.get('yt_quality') or '') if quality_label and isinstance(probe, dict) else '',
                 'yt_quality_label': quality_label,
                 'yt_stream_tier': str(probe.get('yt_stream_tier') or '') if quality_label and isinstance(probe, dict) else '',
-                'quality_summary': web_probe_quality_summary(probe) if yt_state != 'na' else 'YouTube не назначен этому протоколу',
+                'quality_summary': web_probe_quality_summary(probe),
             }
             if include_keys:
                 row['key'] = key_value

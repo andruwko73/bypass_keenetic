@@ -1,3 +1,8 @@
+<a name="1.776"></a>
+# [1.776] - 23 Jun 2026
+
+- Keeps Telegram and YouTube as permanent pool-row columns while scoping protocol summaries to complete route-list assignments, so partial route overlaps no longer make a protocol look partially working.
+
 <a name="1.775"></a>
 # [1.775] - 23 Jun 2026
 

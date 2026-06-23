@@ -772,7 +772,7 @@ def test_key_pool_web():
     ] == ['manual']
     core_route_states = {
         'telegram': {'complete_protocols': ['vless'], 'partial_protocols': []},
-        'youtube': {'complete_protocols': ['vless2'], 'partial_protocols': []},
+        'youtube': {'complete_protocols': ['vless2'], 'partial_protocols': ['vless']},
     }
     assert key_pool_web.core_service_applicability(core_route_states, 'vless') == {
         'telegram': True,
@@ -795,11 +795,11 @@ def test_key_pool_web():
         route_states=core_route_states,
     )
     assert scoped_core_snapshot['vless']['rows'][0]['tg'] == 'ok'
-    assert scoped_core_snapshot['vless']['rows'][0]['yt'] == 'na'
+    assert scoped_core_snapshot['vless']['rows'][0]['yt'] == 'fail'
     assert scoped_core_snapshot['vless']['rows'][0]['yt_score'] == 0
     assert scoped_core_snapshot['vless']['core_services'] == ['telegram']
     assert scoped_core_snapshot['vless2']['core_services'] == ['youtube']
-    assert scoped_core_snapshot['vless2']['rows'][0]['tg'] == 'na'
+    assert scoped_core_snapshot['vless2']['rows'][0]['tg'] == 'ok'
     assert scoped_core_snapshot['vless2']['rows'][0]['yt'] == 'warn'
     scoped_summary = key_pool_web.pool_status_summary(
         {'vless2': 'yt-key', 'vless': 'tg-key'},
@@ -5187,12 +5187,12 @@ def test_web_pool_form_blocks_helpers():
         csrf_input_html='<input name="csrf_token" value="token">',
         service_applicability={'telegram': False, 'youtube': False},
     )
-    assert 'data-tg-state="na"' in not_applicable_rows
-    assert 'data-yt-state="na"' in not_applicable_rows
-    assert 'data-quality-score="0"' in not_applicable_rows
+    assert 'data-tg-state="ok"' in not_applicable_rows
+    assert 'data-yt-state="fail"' in not_applicable_rows
+    assert 'data-quality-score="91"' in not_applicable_rows
     assert 'data-pool-tg' in not_applicable_rows
     assert 'data-pool-yt' in not_applicable_rows
-    assert not_applicable_rows.count('service-probe-na') == 2
+    assert 'service-probe-na' not in not_applicable_rows
     assert 'pool-quality-' not in not_applicable_rows
     panel = web_pool_form_blocks.render_protocol_panel(
         key_name='vless',
