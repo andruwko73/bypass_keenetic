@@ -1114,6 +1114,36 @@ def test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure():
     assert metrics['yt_stability'] == 'stable'
 
 
+def test_youtube_healthcheck_tolerates_multiple_transient_bootstrap_failures():
+    transient_urls = {
+        'https://youtubei.googleapis.com/generate_204',
+        'https://youtubei-att.googleapis.com/',
+        'https://i.ytimg.com/generate_204',
+    }
+
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        if url in transient_urls:
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10813',
+        http_timeouts=(1, 2),
+        metrics=metrics,
+    )
+
+    assert ok is True
+    assert 'soft diagnostic issue' in message
+    assert metrics['yt_home_ok'] is True
+    assert metrics['yt_watch_ok'] is True
+    assert metrics['googlevideo_ok'] is True
+    assert metrics['yt_bootstrap_ok'] is False
+    assert metrics['yt_stability'] == 'stable'
+    assert metrics['yt_error_rate'] >= 0.3
+
+
 def test_youtube_healthcheck_warns_on_partial_googlevideo_success():
     calls_by_url = {}
 
@@ -4353,6 +4383,12 @@ def test_vless2_youtube_routes_are_scoped():
         '74.125.160.0/24',
         '74.125.162.0/24',
     } <= entries
+    assert {
+        '142.251.38.106',
+        '142.251.38.110',
+        '142.251.142.234',
+        '172.217.20.170',
+    } <= entries
     vless_entries = {
         line.strip()
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
@@ -6832,6 +6868,7 @@ def main():
     test_youtube_healthcheck_rejects_http_client_error_status()
     test_youtube_healthcheck_rejects_single_home_timeout()
     test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure()
+    test_youtube_healthcheck_tolerates_multiple_transient_bootstrap_failures()
     test_youtube_healthcheck_warns_on_partial_googlevideo_success()
     test_key_pool_subscription_helpers()
     test_telegram_pool_ui()

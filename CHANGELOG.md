@@ -1,3 +1,10 @@
+<a name="1.786"></a>
+# [1.786] - 23 Jun 2026
+
+- Keeps YouTube keys marked stable when required YouTube endpoints pass but several bootstrap diagnostics hit transient TLS/EOF failures.
+- Preserves the diagnostic signal in metrics/error text so repeated bootstrap failures remain visible without incorrectly downgrading otherwise usable keys.
+- Adds observed YouTube edge IPs from the router drift log to the static Vless2 route catalog, reducing first-load misses before the UDP/QUIC watchdog catches up.
+
 <a name="1.785"></a>
 # [1.785] - 23 Jun 2026
 

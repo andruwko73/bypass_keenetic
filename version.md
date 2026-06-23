@@ -1,3 +1,7 @@
+*v1.786 (23 Jun 2026) -* main
+
+*Keeps YouTube keys marked stable when the required YouTube endpoints pass but several bootstrap diagnostics hit transient TLS/EOF failures, and adds observed YouTube edge IPs from the router drift log to the static Vless2 route catalog so first loads do not wait for the UDP/QUIC watchdog to catch up.*
+
 *v1.785 (23 Jun 2026) -* main
 
 *Enables HTTP/TLS/QUIC sniffing on transparent Xray inbounds so routed YouTube traffic keeps domain context instead of relying only on locally resolved IPs, reducing slow TLS startup on transparent routing.*

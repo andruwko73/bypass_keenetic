@@ -217,6 +217,9 @@ def check_youtube_through_proxy(
         googlevideo_ok_count > 0 and googlevideo_fail_count == 0
     )
     success_required = min(total_count, max(1, int(min_ok or 1)))
+    transient_failure_allowance = max(1, int(round(total_count * 0.3)))
+    soft_success_required = max(1, success_required - transient_failure_allowance)
+    only_transient_failures = failure_count == 0 or unstable_failures == failure_count
     success_threshold = ok_count >= success_required
     critical_missing = required_missing - {YOUTUBE_PRIMARY_URL}
     service_usable = (
@@ -225,7 +228,7 @@ def check_youtube_through_proxy(
         watch_ok and
         short_ok and
         googlevideo_ok and
-        ok_count >= max(1, success_required - 1)
+        ok_count >= (soft_success_required if only_transient_failures else max(1, success_required - 1))
     )
     soft_diagnostic_issue = service_usable and (
         bool(required_missing) or
