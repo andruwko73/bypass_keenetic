@@ -801,7 +801,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_resolved_addresses = 12\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_candidates = 32\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_addresses_per_run = 8\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_min_available_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_min_available_kb = 160000\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_min_available_kb[[:space:]]*=[[:space:]]*160000([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_min_available_kb[[:space:]]*=.*/youtube_edge_prefetch_min_available_kb = 125000/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_min_available_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_min_available_kb = 125000\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_max_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_exclusive_ipsets[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_exclusive_ipsets = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_dns_servers[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')\n" >> "$BOT_CONFIG_PATH"

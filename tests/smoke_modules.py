@@ -1541,7 +1541,7 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_max_resolved_addresses = 12',
         'youtube_edge_prefetch_max_candidates = 32',
         'youtube_edge_prefetch_max_addresses_per_run = 8',
-        'youtube_edge_prefetch_min_available_kb = 160000',
+        'youtube_edge_prefetch_min_available_kb = 125000',
         'youtube_edge_prefetch_max_rss_kb = 66560',
         'youtube_edge_prefetch_exclusive_ipsets = True',
         "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')",
@@ -1550,6 +1550,8 @@ def test_codex_version_matches_commit_count():
         assert config_line in example
         assert config_line in installer
         assert config_line in bootstrap
+    assert "youtube_edge_prefetch_min_available_kb[[:space:]]*=[[:space:]]*160000" in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_min_available_kb = 125000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
         'telegram_call_learning_enabled = True',
         "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",
@@ -2082,7 +2084,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "getattr(config, 'youtube_edge_prefetch_status_path', '/opt/etc/bot/youtube_edge_prefetch_status.json')" in source
     assert "getattr(config, 'youtube_edge_prefetch_lock_dir', '/tmp/bypass-youtube-edge-prefetch.lock')" in source
     assert "getattr(config, 'youtube_edge_prefetch_max_rss_kb', 65 * 1024)" in source
-    assert "getattr(config, 'youtube_edge_prefetch_min_available_kb', 160000)" in source
+    assert "getattr(config, 'youtube_edge_prefetch_min_available_kb', 125000)" in source
     assert 'def _start_youtube_edge_prefetch_thread' in source
     assert "if YOUTUBE_EDGE_PREFETCH_MODE != 'thread':" in source
     assert 'def _load_youtube_edge_prefetch_external_status' in source

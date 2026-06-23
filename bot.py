@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.790, последнее изменение: 24.06.2026
+#  Файл: bot.py, Версия v1.791, последнее изменение: 24.06.2026
 
 import subprocess
 import os
@@ -536,7 +536,7 @@ YOUTUBE_EDGE_PREFETCH_MAX_ADDRESSES_PER_RUN = max(
 )
 YOUTUBE_EDGE_PREFETCH_MIN_AVAILABLE_KB = max(
     0,
-    int(getattr(config, 'youtube_edge_prefetch_min_available_kb', 160000)),
+    int(getattr(config, 'youtube_edge_prefetch_min_available_kb', 125000)),
 )
 YOUTUBE_EDGE_PREFETCH_MAX_RSS_KB = max(
     0,

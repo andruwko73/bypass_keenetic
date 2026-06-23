@@ -1,3 +1,10 @@
+<a name="1.791"></a>
+# [1.791] - 24 Jun 2026
+
+- Lowers the external YouTube edge prefetch low-memory guard from 160 MB to 125 MB available.
+- Migrates the old 160 MB config value during update, so the short external runner can warm YouTube on routers where post-update available memory is around 135 MB.
+- Keeps the prefetch work outside the long-running bot process to avoid adding persistent bot RSS.
+
 <a name="1.790"></a>
 # [1.790] - 24 Jun 2026
 

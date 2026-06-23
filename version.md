@@ -1,3 +1,7 @@
+*v1.791 (24 Jun 2026) -* main
+
+*Lowers the external YouTube edge prefetch memory guard to 125 MB available so the short runner can still warm YouTube on routers where post-update available memory sits around 135 MB, without moving that work back into the bot RSS.*
+
 *v1.790 (24 Jun 2026) -* main
 
 *Moves YouTube edge prefetch out of the long-running bot process into a short external runner, and runs it after ipset/Xray update paths plus the existing scheduler. The bot now reads the runner status JSON instead of keeping a permanent prefetch thread in RSS.*

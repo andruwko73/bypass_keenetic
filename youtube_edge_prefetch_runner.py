@@ -20,7 +20,7 @@ STATUS_PATH = '/opt/etc/bot/youtube_edge_prefetch_status.json'
 CACHE_PATH = '/opt/etc/bot/youtube_edge_cache.json'
 LOCK_DIR = '/tmp/bypass-youtube-edge-prefetch.lock'
 UNBLOCK_DIR = '/opt/etc/unblock'
-MIN_AVAILABLE_KB = 160000
+MIN_AVAILABLE_KB = 125000
 LOCK_STALE_SECONDS = 300
 STATUS_MAX_BYTES = 65536
 
