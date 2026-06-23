@@ -1,3 +1,10 @@
+<a name="1.787"></a>
+# [1.787] - 23 Jun 2026
+
+- Adds a bounded YouTube edge prefetcher that warms the active YouTube route ipsets from a tiny DNS/cache sample.
+- Skips prefetch work while the bot is busy, router memory is low, or the bot RSS is near the idle restart threshold.
+- Keeps YouTube edge IPs exclusive to the active YouTube route ipsets and exposes compact prefetch status in router health.
+
 <a name="1.786"></a>
 # [1.786] - 23 Jun 2026
 

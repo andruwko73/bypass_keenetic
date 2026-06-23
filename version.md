@@ -1,3 +1,7 @@
+*v1.787 (23 Jun 2026) -* main
+
+*Adds a bounded YouTube edge prefetcher that warms the active YouTube route ipsets from a tiny DNS/cache sample, skips work under high bot RSS or low router memory, and exposes compact runtime status without switching keys.*
+
 *v1.786 (23 Jun 2026) -* main
 
 *Keeps YouTube keys marked stable when the required YouTube endpoints pass but several bootstrap diagnostics hit transient TLS/EOF failures, and adds observed YouTube edge IPs from the router drift log to the static Vless2 route catalog so first loads do not wait for the UDP/QUIC watchdog to catch up.*

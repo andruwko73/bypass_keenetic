@@ -66,6 +66,7 @@ import route_intersections
 import service_routes
 import update_status
 import youtube_healthcheck
+import youtube_edge_prefetch
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
 
 
@@ -1526,6 +1527,26 @@ def test_codex_version_matches_commit_count():
     assert "telegram_udp_policy = 'auto'" in installer
     assert "telegram_udp_policy = 'auto'" in bootstrap
     for config_line in (
+        'youtube_edge_prefetch_enabled = True',
+        'youtube_edge_prefetch_start_delay_seconds = 120',
+        'youtube_edge_prefetch_interval_seconds = 900',
+        "youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'",
+        'youtube_edge_prefetch_cache_ttl_seconds = 259200',
+        'youtube_edge_prefetch_max_cache_entries = 128',
+        'youtube_edge_prefetch_max_hosts_per_run = 4',
+        'youtube_edge_prefetch_max_resolved_addresses = 12',
+        'youtube_edge_prefetch_max_candidates = 32',
+        'youtube_edge_prefetch_max_addresses_per_run = 8',
+        'youtube_edge_prefetch_min_available_kb = 160000',
+        'youtube_edge_prefetch_max_rss_kb = 66560',
+        'youtube_edge_prefetch_exclusive_ipsets = True',
+        "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')",
+        'youtube_edge_prefetch_hosts = (',
+    ):
+        assert config_line in example
+        assert config_line in installer
+        assert config_line in bootstrap
+    for config_line in (
         'telegram_call_learning_enabled = True',
         "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",
         'telegram_call_learning_default_duration_seconds = 90',
@@ -2047,6 +2068,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'UDP_QUIC_DRIFT_SENTINEL_DOMAINS' in source
     assert 'UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS' in source
     assert 'UDP_QUIC_DRIFT_PRIORITY_DOMAINS' in source
+    assert 'import youtube_edge_prefetch' in source
+    assert "getattr(config, 'youtube_edge_prefetch_enabled', True)" in source
+    assert "getattr(config, 'youtube_edge_prefetch_max_rss_kb', 65 * 1024)" in source
+    assert "getattr(config, 'youtube_edge_prefetch_min_available_kb', 160000)" in source
+    assert 'def _start_youtube_edge_prefetch_thread' in source
+    assert '_start_youtube_edge_prefetch_thread()' in source
+    assert 'youtube_edge_prefetch.prefetch_once(' in source
+    assert "['ipset', 'del', set_name, address]" in source
+    assert "payload['youtube_edge_prefetch'] = _youtube_edge_prefetch_snapshot()" in source
     assert 'def _udp_quic_drift_priority_findings' in source
     assert 'def _udp_quic_drift_refresh_cooldown' in source
     assert 'def _udp_quic_drift_refresh_deferred_for_stream' in source
@@ -2094,6 +2124,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_malloc_trim_enabled = True' in script_source
     assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
+    assert 'youtube_edge_prefetch_enabled = True' in script_source
+    assert 'youtube_edge_prefetch_max_rss_kb = 66560' in script_source
+    assert "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')" in script_source
     assert "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'" in script_source
     assert '/opt/tmp/bypass_telegram_call_learning.json' in source
     assert "getattr(config, 'telegram_call_learning_default_duration_seconds', 90)" in source
@@ -2261,6 +2294,112 @@ def test_runtime_modules_are_installed_by_update_scripts():
         assert module in script
         assert f'$RAW_BASE/{module}' in bootstrap
         assert f'$BOT_DIR/{module}' in bootstrap
+    assert 'youtube_edge_prefetch.py' in script_modules
+
+
+def test_youtube_edge_prefetch_cache_is_bounded_and_public_only():
+    now = 1_800_000
+    cache = {
+        'version': 1,
+        'updated_at': now,
+        'entries': {
+            '142.250.150.119': {'host': 'www.youtube.com', 'source': 'dns', 'last_seen': now - 10, 'hits': 2},
+            '172.217.20.170': {'host': 'i.ytimg.com', 'source': 'dns', 'last_seen': now - 20, 'hits': 1},
+            '10.0.0.1': {'host': 'bad', 'source': 'dns', 'last_seen': now, 'hits': 9},
+            '142.251.38.106': {'host': 'old', 'source': 'dns', 'last_seen': now - 4000, 'hits': 1},
+            '142.251.38.110': {'host': 'extra', 'source': 'dns', 'last_seen': now - 5, 'hits': 1},
+        },
+    }
+
+    pruned = youtube_edge_prefetch.prune_cache(cache, now=now, ttl_seconds=3600, max_entries=2)
+
+    assert list(pruned['entries']) == ['142.251.38.110', '142.250.150.119']
+    assert '10.0.0.1' not in pruned['entries']
+    assert '142.251.38.106' not in pruned['entries']
+    assert youtube_edge_prefetch.parse_ipv4_tokens('A 142.250.150.119 private 192.168.1.10') == ['142.250.150.119']
+
+
+def test_youtube_edge_prefetch_collects_limited_dns_candidates():
+    class Result:
+        returncode = 0
+        stdout = '142.251.38.106\n10.0.0.1\n'
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        assert host == 'www.youtube.com'
+        return [(family, socktype, 0, '', ('142.250.150.119', port))]
+
+    def fake_run_command(args, timeout):
+        assert timeout == 3
+        assert args[0] in ('dig', 'nslookup')
+        return Result()
+
+    candidates, cache = youtube_edge_prefetch.collect_prefetch_candidates(
+        hosts=('www.youtube.com', 'i.ytimg.com'),
+        dns_servers=('local', '1.1.1.1'),
+        cache=None,
+        now=1_800_000,
+        max_hosts_per_run=1,
+        max_resolved_addresses=4,
+        getaddrinfo=fake_getaddrinfo,
+        run_command=fake_run_command,
+    )
+
+    addresses = [item['address'] for item in candidates]
+    assert addresses == ['142.250.150.119', '142.251.38.106']
+    assert set(cache['entries']) == set(addresses)
+
+
+def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
+    address = '142.250.150.119'
+    present = {
+        ('unblockvless', address),
+        ('unblockvlessudp', address),
+    }
+    added = []
+    deleted = []
+
+    def ipset_contains(set_name, ip):
+        return (set_name, ip) in present
+
+    def ipset_add(set_name, ip):
+        present.add((set_name, ip))
+        added.append((set_name, ip))
+        return True, ''
+
+    def ipset_delete(set_name, ip):
+        existed = (set_name, ip) in present
+        present.discard((set_name, ip))
+        if existed:
+            deleted.append((set_name, ip))
+        return existed
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        return [(family, socktype, 0, '', (address, port))]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        status = youtube_edge_prefetch.prefetch_once(
+            route_protocol='vless2',
+            cache_path=str(Path(tmp) / 'youtube_edge_cache.json'),
+            hosts=('www.youtube.com',),
+            dns_servers=('local',),
+            ipset_contains=ipset_contains,
+            ipset_add=ipset_add,
+            ipset_delete=ipset_delete,
+            delete_conntrack=lambda ip: 1,
+            now_provider=lambda: 1_800_000,
+            max_addresses_per_run=1,
+            getaddrinfo=fake_getaddrinfo,
+            run_command=lambda args, timeout: '',
+        )
+
+    assert status['ok'] is True
+    assert status['added_addresses'] == 1
+    assert ('unblockvless2', address) in added
+    assert ('unblockvless2udp', address) in added
+    assert ('unblockvless', address) in deleted
+    assert ('unblockvlessudp', address) in deleted
+    assert ('unblockvless', address) not in present
+    assert ('unblockvless2', address) in present
 
 
 def test_entware_dns_runtime_helpers():
@@ -6893,6 +7032,9 @@ def main():
     test_ipset_refresh_is_backend_aware_and_atomic()
     test_runtime_startup_limits_router_flash_and_overhead()
     test_web_response_body_ignores_client_disconnect()
+    test_youtube_edge_prefetch_cache_is_bounded_and_public_only()
+    test_youtube_edge_prefetch_collects_limited_dns_candidates()
+    test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_cached_protocol_status_description_has_no_static_trailing_period()

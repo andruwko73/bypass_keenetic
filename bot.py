@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.786, последнее изменение: 23.06.2026
+#  Файл: bot.py, Версия v1.787, последнее изменение: 23.06.2026
 
 import subprocess
 import os
@@ -107,6 +107,7 @@ import auto_failover_runtime
 import app_runtime_mode
 import router_health_runtime
 import telegram_call_learning
+import youtube_edge_prefetch
 try:
     import xray_compat_runtime
 except Exception:
@@ -221,6 +222,17 @@ import html
 import bot_config as config
 
 COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
+
+
+def _config_sequence(name, default=()):
+    value = getattr(config, name, default)
+    if isinstance(value, str):
+        return (value,)
+    try:
+        return tuple(value)
+    except Exception:
+        return tuple(default)
+
 
 _pool_probe_runner_module = None
 _repo_update_module = None
@@ -479,6 +491,59 @@ YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS = max(
     1.0,
     float(getattr(config, 'youtube_stream_guard_scan_cache_seconds', 8.0)),
 )
+YOUTUBE_EDGE_PREFETCH_ENABLED = bool(getattr(config, 'youtube_edge_prefetch_enabled', True))
+YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS = max(
+    60,
+    int(getattr(config, 'youtube_edge_prefetch_start_delay_seconds', 120)),
+)
+YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS = max(
+    300,
+    int(getattr(config, 'youtube_edge_prefetch_interval_seconds', 900)),
+)
+YOUTUBE_EDGE_PREFETCH_CACHE_PATH = str(
+    getattr(config, 'youtube_edge_prefetch_cache_path', '/opt/etc/bot/youtube_edge_cache.json') or ''
+).strip()
+YOUTUBE_EDGE_PREFETCH_CACHE_TTL_SECONDS = max(
+    3600,
+    int(getattr(config, 'youtube_edge_prefetch_cache_ttl_seconds', 72 * 3600)),
+)
+YOUTUBE_EDGE_PREFETCH_MAX_CACHE_ENTRIES = max(
+    16,
+    int(getattr(config, 'youtube_edge_prefetch_max_cache_entries', 128)),
+)
+YOUTUBE_EDGE_PREFETCH_MAX_HOSTS_PER_RUN = max(
+    1,
+    int(getattr(config, 'youtube_edge_prefetch_max_hosts_per_run', 4)),
+)
+YOUTUBE_EDGE_PREFETCH_MAX_RESOLVED_ADDRESSES = max(
+    1,
+    int(getattr(config, 'youtube_edge_prefetch_max_resolved_addresses', 12)),
+)
+YOUTUBE_EDGE_PREFETCH_MAX_CANDIDATES = max(
+    YOUTUBE_EDGE_PREFETCH_MAX_RESOLVED_ADDRESSES,
+    int(getattr(config, 'youtube_edge_prefetch_max_candidates', 32)),
+)
+YOUTUBE_EDGE_PREFETCH_MAX_ADDRESSES_PER_RUN = max(
+    1,
+    int(getattr(config, 'youtube_edge_prefetch_max_addresses_per_run', 8)),
+)
+YOUTUBE_EDGE_PREFETCH_MIN_AVAILABLE_KB = max(
+    0,
+    int(getattr(config, 'youtube_edge_prefetch_min_available_kb', 160000)),
+)
+YOUTUBE_EDGE_PREFETCH_MAX_RSS_KB = max(
+    0,
+    int(getattr(config, 'youtube_edge_prefetch_max_rss_kb', 65 * 1024)),
+)
+YOUTUBE_EDGE_PREFETCH_HOSTS = _config_sequence(
+    'youtube_edge_prefetch_hosts',
+    youtube_edge_prefetch.DEFAULT_PREFETCH_HOSTS,
+)
+YOUTUBE_EDGE_PREFETCH_DNS_SERVERS = _config_sequence(
+    'youtube_edge_prefetch_dns_servers',
+    youtube_edge_prefetch.DEFAULT_DNS_SERVERS,
+)
+YOUTUBE_EDGE_PREFETCH_EXCLUSIVE_IPSETS = bool(getattr(config, 'youtube_edge_prefetch_exclusive_ipsets', True))
 youtube_vless2_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
@@ -506,6 +571,23 @@ udp_quic_drift_state = {
     'last_log': 0.0,
     'last_fast_add_signature': (),
     'last_fast_add_event': 0.0,
+}
+youtube_edge_prefetch_state = {
+    'enabled': YOUTUBE_EDGE_PREFETCH_ENABLED,
+    'route_protocol': '',
+    'last_run_at': 0.0,
+    'last_success_at': 0.0,
+    'last_added_at': 0.0,
+    'skipped_reason': 'not_run',
+    'candidates': 0,
+    'cache_entries': 0,
+    'added_addresses': 0,
+    'added_sets': 0,
+    'deleted_sets': 0,
+    'failed_sets': 0,
+    'last_message': 'not run',
+    'last_log_signature': (),
+    'next_host_index': 0,
 }
 
 def _add_custom_check(label='', url='', preset_id=''):
@@ -1725,6 +1807,7 @@ post_pool_memory_cleanup_state = {
     'deadline_at': 0.0,
     'last_message': '',
 }
+youtube_edge_prefetch_lock = threading.Lock()
 telegram_call_learning_lock = threading.Lock()
 telegram_call_learning_cancel_event = threading.Event()
 telegram_call_learning_auto_thread = None
@@ -3007,6 +3090,20 @@ def _ipset_add_address(set_name, address):
         return False, str(exc)
 
 
+def _ipset_delete_address(set_name, address):
+    try:
+        result = subprocess.run(
+            ['ipset', 'del', set_name, address],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _delete_conntrack_for_address(address):
     deleted = 0
     for proto in ('tcp', 'udp'):
@@ -3238,6 +3335,185 @@ def _start_udp_quic_drift_watchdog_thread():
             except Exception as exc:
                 _write_runtime_log(f'UDP/QUIC drift check failed: {exc}')
             shutdown_requested.wait(UDP_QUIC_DRIFT_CHECK_INTERVAL_SECONDS)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _youtube_edge_prefetch_hosts_for_run():
+    hosts = list(youtube_edge_prefetch.normalize_hosts(YOUTUBE_EDGE_PREFETCH_HOSTS))
+    if not hosts:
+        return ()
+    max_hosts = min(len(hosts), YOUTUBE_EDGE_PREFETCH_MAX_HOSTS_PER_RUN)
+    start_index = int(youtube_edge_prefetch_state.get('next_host_index') or 0) % len(hosts)
+    selected = tuple(hosts[(start_index + offset) % len(hosts)] for offset in range(max_hosts))
+    youtube_edge_prefetch_state['next_host_index'] = (start_index + max_hosts) % len(hosts)
+    return selected
+
+
+def _youtube_edge_prefetch_snapshot():
+    snapshot = dict(youtube_edge_prefetch_state)
+    snapshot['enabled'] = bool(YOUTUBE_EDGE_PREFETCH_ENABLED)
+    snapshot.pop('last_log_signature', None)
+    snapshot.pop('next_host_index', None)
+    snapshot['running'] = youtube_edge_prefetch_lock.locked()
+    return snapshot
+
+
+def _youtube_edge_prefetch_status_message(status):
+    skipped = str((status or {}).get('skipped_reason') or '').strip()
+    if skipped:
+        return f'skipped: {skipped}'
+    protocol = str((status or {}).get('route_protocol') or '').strip() or 'unknown'
+    return (
+        f'{protocol}: added {int((status or {}).get("added_addresses") or 0)} addresses, '
+        f'candidates {int((status or {}).get("candidates") or 0)}, '
+        f'cache {int((status or {}).get("cache_entries") or 0)}'
+    )
+
+
+def _store_youtube_edge_prefetch_status(status):
+    now = time.time()
+    status = dict(status or {})
+    status['enabled'] = bool(YOUTUBE_EDGE_PREFETCH_ENABLED)
+    status['last_message'] = _youtube_edge_prefetch_status_message(status)
+    youtube_edge_prefetch_state.update(status)
+    youtube_edge_prefetch_state['last_run_at'] = float(status.get('last_run_at') or now)
+    if status.get('ok') and not status.get('skipped_reason'):
+        youtube_edge_prefetch_state['last_success_at'] = now
+    if int(status.get('added_addresses') or 0) > 0:
+        youtube_edge_prefetch_state['last_added_at'] = now
+    try:
+        router_health.invalidate()
+    except Exception:
+        pass
+    return youtube_edge_prefetch_state['last_message']
+
+
+def _youtube_edge_prefetch_skip_reason():
+    if not YOUTUBE_EDGE_PREFETCH_ENABLED:
+        return 'disabled'
+    try:
+        if _memory_sensitive_operation_running():
+            return 'busy'
+    except Exception:
+        pass
+    rss_kb = int(_process_rss_kb() or 0)
+    if YOUTUBE_EDGE_PREFETCH_MAX_RSS_KB > 0 and rss_kb >= YOUTUBE_EDGE_PREFETCH_MAX_RSS_KB:
+        return 'high_rss'
+    try:
+        available_kb = int(_available_memory_kb() or 0)
+    except Exception:
+        available_kb = 0
+    if (
+        YOUTUBE_EDGE_PREFETCH_MIN_AVAILABLE_KB > 0 and
+        available_kb > 0 and
+        available_kb < YOUTUBE_EDGE_PREFETCH_MIN_AVAILABLE_KB
+    ):
+        return 'low_available_memory'
+    return ''
+
+
+def _run_youtube_edge_prefetch_once():
+    if not youtube_edge_prefetch_lock.acquire(blocking=False):
+        status = {
+            'ok': False,
+            'last_run_at': time.time(),
+            'skipped_reason': 'already_running',
+        }
+        _store_youtube_edge_prefetch_status(status)
+        return status
+    try:
+        skip_reason = _youtube_edge_prefetch_skip_reason()
+        if skip_reason:
+            status = {
+                'ok': False,
+                'last_run_at': time.time(),
+                'route_protocol': _youtube_route_protocol() if skip_reason != 'disabled' else '',
+                'skipped_reason': skip_reason,
+                'candidates': 0,
+                'cache_entries': int(youtube_edge_prefetch_state.get('cache_entries') or 0),
+                'added_addresses': 0,
+                'added_sets': 0,
+                'deleted_sets': 0,
+                'failed_sets': 0,
+            }
+            if skip_reason == 'high_rss':
+                _memory_cleanup('youtube edge prefetch skipped high RSS', clear_status=False, log=False)
+        else:
+            status = youtube_edge_prefetch.prefetch_once(
+                route_protocol=_youtube_route_protocol(),
+                cache_path=YOUTUBE_EDGE_PREFETCH_CACHE_PATH,
+                hosts=_youtube_edge_prefetch_hosts_for_run(),
+                dns_servers=YOUTUBE_EDGE_PREFETCH_DNS_SERVERS,
+                ipset_contains=_ipset_contains,
+                ipset_add=_ipset_add_address,
+                ipset_delete=_ipset_delete_address,
+                delete_conntrack=_delete_conntrack_for_address,
+                cache_ttl_seconds=YOUTUBE_EDGE_PREFETCH_CACHE_TTL_SECONDS,
+                max_cache_entries=YOUTUBE_EDGE_PREFETCH_MAX_CACHE_ENTRIES,
+                max_hosts_per_run=YOUTUBE_EDGE_PREFETCH_MAX_HOSTS_PER_RUN,
+                max_resolved_addresses=YOUTUBE_EDGE_PREFETCH_MAX_RESOLVED_ADDRESSES,
+                max_candidates=YOUTUBE_EDGE_PREFETCH_MAX_CANDIDATES,
+                max_addresses_per_run=YOUTUBE_EDGE_PREFETCH_MAX_ADDRESSES_PER_RUN,
+                remove_from_other_sets=YOUTUBE_EDGE_PREFETCH_EXCLUSIVE_IPSETS,
+            )
+            if int(status.get('added_addresses') or 0) > 0:
+                _memory_cleanup('youtube edge prefetch', clear_status=False, log=False)
+
+        message = _store_youtube_edge_prefetch_status(status)
+        signature = (
+            str(status.get('skipped_reason') or ''),
+            str(status.get('route_protocol') or ''),
+            int(status.get('added_addresses') or 0),
+            int(status.get('failed_sets') or 0),
+        )
+        previous_signature = tuple(youtube_edge_prefetch_state.get('last_log_signature') or ())
+        should_log = (
+            int(status.get('added_addresses') or 0) > 0 or
+            int(status.get('failed_sets') or 0) > 0 or
+            (status.get('skipped_reason') and signature != previous_signature)
+        )
+        youtube_edge_prefetch_state['last_log_signature'] = signature
+        if should_log:
+            _write_runtime_log(f'YouTube edge prefetch: {message}')
+        _record_memory_timeline(
+            'youtube edge prefetch',
+            marker='youtube_edge_prefetch',
+            extra={
+                'route_protocol': str(status.get('route_protocol') or ''),
+                'skipped_reason': str(status.get('skipped_reason') or ''),
+                'added_addresses': int(status.get('added_addresses') or 0),
+                'added_sets': int(status.get('added_sets') or 0),
+                'deleted_sets': int(status.get('deleted_sets') or 0),
+                'failed_sets': int(status.get('failed_sets') or 0),
+                'cache_entries': int(status.get('cache_entries') or 0),
+            },
+            force=bool(status.get('skipped_reason') or int(status.get('added_addresses') or 0) > 0),
+        )
+        return status
+    except Exception as exc:
+        status = {
+            'ok': False,
+            'last_run_at': time.time(),
+            'skipped_reason': 'error',
+            'error': _redact_sensitive_text(exc),
+        }
+        _store_youtube_edge_prefetch_status(status)
+        _write_runtime_log(f'YouTube edge prefetch failed: {_redact_sensitive_text(exc)}')
+        return status
+    finally:
+        youtube_edge_prefetch_lock.release()
+
+
+def _start_youtube_edge_prefetch_thread():
+    if not YOUTUBE_EDGE_PREFETCH_ENABLED:
+        return
+
+    def worker():
+        shutdown_requested.wait(YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS)
+        while not shutdown_requested.is_set():
+            _run_youtube_edge_prefetch_once()
+            shutdown_requested.wait(YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -5768,6 +6044,7 @@ def _router_health_snapshot():
     payload['memory_timeline_enabled'] = bool(MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH)
     payload['memory_timeline_path'] = MEMORY_TIMELINE_PATH if MEMORY_TIMELINE_ENABLED else ''
     payload['memory_timeline_bytes'] = _safe_file_size(MEMORY_TIMELINE_PATH) if MEMORY_TIMELINE_ENABLED else 0
+    payload['youtube_edge_prefetch'] = _youtube_edge_prefetch_snapshot()
     idle_memory_state = _memory_watchdog_idle_snapshot(payload)
     payload.update(idle_memory_state)
     post_pool_state = _post_pool_memory_cleanup_snapshot()
@@ -9487,6 +9764,7 @@ def main():
     _cleanup_pool_probe_runtime_light(kill_processes=True)
     _sync_udp_policy_config()
     _start_udp_quic_drift_watchdog_thread()
+    _start_youtube_edge_prefetch_thread()
     _start_telegram_call_learning_auto_thread()
     _start_memory_timeline_thread()
     _start_memory_watchdog_thread()

@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.786
+# ВЕРСИЯ СКРИПТА v1.787
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -66,6 +66,28 @@ udp_quic_block_vless2_enabled = True  # smart QUIC/UDP 443 fallback for non-YouT
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
 youtube_quic_policy = 'auto'  # auto blocks QUIC for routes that contain YouTube; allow permits QUIC; block forces TCP fallback
 telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so native calls can use relay/media traffic; block disables it
+youtube_edge_prefetch_enabled = True  # lightweight background DNS/IP prefetch for the active YouTube route
+youtube_edge_prefetch_start_delay_seconds = 120
+youtube_edge_prefetch_interval_seconds = 900
+youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'
+youtube_edge_prefetch_cache_ttl_seconds = 259200
+youtube_edge_prefetch_max_cache_entries = 128
+youtube_edge_prefetch_max_hosts_per_run = 4
+youtube_edge_prefetch_max_resolved_addresses = 12
+youtube_edge_prefetch_max_candidates = 32
+youtube_edge_prefetch_max_addresses_per_run = 8
+youtube_edge_prefetch_min_available_kb = 160000
+youtube_edge_prefetch_max_rss_kb = 66560
+youtube_edge_prefetch_exclusive_ipsets = True
+youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')
+youtube_edge_prefetch_hosts = (
+    'www.youtube.com',
+    'youtubei.googleapis.com',
+    'youtubei-att.googleapis.com',
+    'i.ytimg.com',
+    'yt3.ggpht.com',
+    'redirector.googlevideo.com',
+)
 telegram_call_learning_enabled = True
 telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'
 telegram_call_learning_default_duration_seconds = 90

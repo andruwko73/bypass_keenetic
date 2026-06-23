@@ -23,7 +23,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_healthcheck.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_healthcheck.py version.md README.md"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -683,6 +683,28 @@ udp_quic_block_vless2_enabled = True
 udp_quic_block_trojan_enabled = True
 youtube_quic_policy = 'auto'
 telegram_udp_policy = 'auto'
+youtube_edge_prefetch_enabled = True
+youtube_edge_prefetch_start_delay_seconds = 120
+youtube_edge_prefetch_interval_seconds = 900
+youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'
+youtube_edge_prefetch_cache_ttl_seconds = 259200
+youtube_edge_prefetch_max_cache_entries = 128
+youtube_edge_prefetch_max_hosts_per_run = 4
+youtube_edge_prefetch_max_resolved_addresses = 12
+youtube_edge_prefetch_max_candidates = 32
+youtube_edge_prefetch_max_addresses_per_run = 8
+youtube_edge_prefetch_min_available_kb = 160000
+youtube_edge_prefetch_max_rss_kb = 66560
+youtube_edge_prefetch_exclusive_ipsets = True
+youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')
+youtube_edge_prefetch_hosts = (
+    'www.youtube.com',
+    'youtubei.googleapis.com',
+    'youtubei-att.googleapis.com',
+    'i.ytimg.com',
+    'yt3.ggpht.com',
+    'redirector.googlevideo.com',
+)
 telegram_call_learning_enabled = True
 telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'
 telegram_call_learning_default_duration_seconds = 90
