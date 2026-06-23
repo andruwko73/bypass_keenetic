@@ -1,3 +1,8 @@
+<a name="1.782"></a>
+# [1.782] - 23 Jun 2026
+
+- Compacts router health JSON by keeping full Xray diagnostics out of healthy status API responses and avoiding duplicate Telegram-call health data, reducing web status memory churn.
+
 <a name="1.781"></a>
 # [1.781] - 23 Jun 2026
 

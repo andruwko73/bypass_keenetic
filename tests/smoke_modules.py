@@ -313,12 +313,33 @@ def test_router_health_runtime_core_proxy_payload():
             'ok': True,
             'xray_state': 'alive',
             'xray_config_ok': True,
+            'xray_config_message': 'verbose config output that should not be echoed while healthy',
+            'telegram_call': {'ok': True},
             'ports': {10811: True, 10812: True, 10813: True, 10814: True},
         },
     )
     assert payload['core_proxy_health']['ok'] is True
+    assert 'xray_config_message' not in payload['core_proxy_health']
+    assert 'telegram_call' not in payload['core_proxy_health']
+    assert payload['telegram_call_health']['ok'] is True
     assert 'Xray: alive' in payload['core_proxy_note']
     assert '10813:ok' in payload['core_proxy_note']
+    error_payload = router_health_runtime.build_router_health_payload(
+        meminfo={'MemTotal': 64 * 1024, 'MemFree': 8 * 1024, 'MemAvailable': 32 * 1024},
+        ndmc_system={},
+        load_text='0.01 / 0.02 / 0.03',
+        bot_rss_kb=4 * 1024,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+        core_proxy_health={
+            'ok': False,
+            'xray_state': 'dead',
+            'xray_config_ok': False,
+            'xray_config_message': 'line 1\nline 2\nline 3\nline 4',
+            'ports': {10811: False},
+        },
+    )
+    assert error_payload['core_proxy_health']['xray_config_message'] == 'line 2\nline 3\nline 4'
     original_module = router_health_runtime.xray_compat_runtime
     try:
         router_health_runtime.xray_compat_runtime = None

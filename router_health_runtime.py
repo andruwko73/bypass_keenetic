@@ -273,6 +273,38 @@ def telegram_call_proxy_note(health):
     return f'Calls: {state}, TPROXY{chain_text}{service_text}{suffix}'
 
 
+def _compact_multiline_text(text, max_chars=360):
+    text = str(text or '').strip()
+    if not text:
+        return ''
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    compact = '\n'.join(lines[-3:]) if lines else text
+    if len(compact) > max_chars:
+        return compact[-max_chars:]
+    return compact
+
+
+def compact_core_proxy_health(health):
+    health = health or {}
+    if not isinstance(health, dict):
+        return {}
+    compact = {
+        'ok': bool(health.get('ok')),
+        'xray_state': health.get('xray_state') or '',
+        'v2ray_state': health.get('v2ray_state') or '',
+        'xray_config_ok': bool(health.get('xray_config_ok')),
+        'ports': dict(health.get('ports') or {}),
+    }
+    if not compact['ok']:
+        xray_status = _compact_multiline_text(health.get('xray_status'), max_chars=240)
+        xray_config_message = _compact_multiline_text(health.get('xray_config_message'), max_chars=360)
+        if xray_status:
+            compact['xray_status'] = xray_status
+        if xray_config_message:
+            compact['xray_config_message'] = xray_config_message
+    return compact
+
+
 def parse_dns_backend(netstat_text):
     lines = [
         line for line in (netstat_text or '').splitlines()
@@ -515,20 +547,22 @@ def build_router_health_payload(
         swap_total_mb = int(round(swap_total_kb / 1024.0))
         details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB')
     dns_note = dns_health_note(dns_health)
+    core_proxy_health = core_proxy_health or {}
     if xray_compat_runtime is not None and core_proxy_health:
         core_proxy_note = xray_compat_runtime.core_proxy_note(core_proxy_health)
     elif core_proxy_health:
         core_proxy_note = 'Xray: health module unavailable.'
     else:
         core_proxy_note = ''
-    telegram_call_health = dict((core_proxy_health or {}).get('telegram_call') or {})
+    telegram_call_health = dict(core_proxy_health.get('telegram_call') or {})
     telegram_call_note = telegram_call_proxy_note(telegram_call_health) if telegram_call_health else ''
+    compact_core_health = compact_core_proxy_health(core_proxy_health)
     return {
         'memory_text': memory_text,
         'note': '; '.join(details),
         'dns_note': dns_note,
         'core_proxy_note': core_proxy_note,
-        'core_proxy_health': dict(core_proxy_health or {}),
+        'core_proxy_health': compact_core_health,
         'telegram_call_note': telegram_call_note,
         'telegram_call_health': telegram_call_health,
         'available_kb': available_kb,

@@ -1,3 +1,7 @@
+*v1.782 (23 Jun 2026) -* main
+
+*Compacts router health JSON by keeping full Xray diagnostics out of healthy status API responses and avoiding duplicate Telegram-call health data, reducing web status memory churn.*
+
 *v1.781 (23 Jun 2026) -* main
 
 *Escapes the web JavaScript regex inside the Python template so router startup logs stay clean on Python versions that warn about invalid escape sequences.*
