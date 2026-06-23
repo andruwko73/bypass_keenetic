@@ -5002,7 +5002,7 @@ def test_web_get_actions_helpers():
     assert status['payload']['pool_probe_running'] is True
     assert status['payload']['bot_ready'] is True
     assert status['payload']['timestamp'] == 123.0
-    assert status['payload']['telegram_call_learning']['watching'] is True
+    assert 'telegram_call_learning' not in status['payload']
     assert 'pools' not in status['payload']
     assert refreshed == [current_keys]
     placeholder_refreshed = []

@@ -1,3 +1,7 @@
+*v1.783 (23 Jun 2026) -* main
+
+*Stops including Telegram call-learning state in the frequently polled status API; the dedicated endpoint remains available while status payloads stay smaller.*
+
 *v1.782 (23 Jun 2026) -* main
 
 *Compacts router health JSON by keeping full Xray diagnostics out of healthy status API responses and avoiding duplicate Telegram-call health data, reducing web status memory churn.*

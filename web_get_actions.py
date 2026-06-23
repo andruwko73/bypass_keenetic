@@ -103,7 +103,6 @@ def _status_payload(ctx):
         'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
         'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
         'router_health': _ctx(ctx, 'router_health_snapshot', lambda: {})(),
-        'telegram_call_learning': _call(ctx, 'telegram_call_learning_snapshot') or {},
     }
     bot_ready = _ctx(ctx, 'bot_ready')
     if bot_ready is not None:

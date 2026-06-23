@@ -1,3 +1,8 @@
+<a name="1.783"></a>
+# [1.783] - 23 Jun 2026
+
+- Stops including Telegram call-learning state in the frequently polled status API; the dedicated endpoint remains available while status payloads stay smaller.
+
 <a name="1.782"></a>
 # [1.782] - 23 Jun 2026
 
