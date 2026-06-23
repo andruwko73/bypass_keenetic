@@ -1379,12 +1379,14 @@ def test_codex_version_matches_commit_count():
     expected = _expected_codex_version_counter()
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     version_md = (ROOT / 'version.md').read_text(encoding='utf-8')
+    changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
     installer = (ROOT / 'installer.py').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     example = (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert app_version.APP_VERSION_COUNTER == expected
     assert re.search(rf'Версия\s+v{re.escape(expected)}\b', source)
     assert version_md.startswith(f'*v{expected} ')
+    assert changelog.startswith(f'<a name="{expected}"></a>\n# [{expected}] - ')
     assert f'v{{APP_VERSION_COUNTER}}' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in bootstrap
@@ -1514,6 +1516,17 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_vless2_failover_check_read_timeout = 10' in installer
     assert 'youtube_vless2_failover_check_read_timeout = 10' in bootstrap
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in example
+
+
+def test_ui_smoke_package_scripts_are_declared():
+    package = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))
+    scripts = package.get('scripts') or {}
+    dev_dependencies = package.get('devDependencies') or {}
+    assert package.get('private') is True
+    assert scripts.get('ui:check') == 'node --check tests/ui_smoke.js'
+    assert scripts.get('ui:smoke') == 'node tests/ui_smoke.js'
+    assert scripts.get('ui:install-browsers') == 'playwright install --with-deps chromium'
+    assert dev_dependencies.get('playwright') == '1.60.0'
 
 
 def test_update_script_socks_download_notice_is_not_repeated():
@@ -1677,6 +1690,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ensure_runtime_legacy_paths\n    generate_udp_quic_policy_file' in script
     assert 'migrate_runtime_config_defaults\n    generate_udp_quic_policy_file' in script
     assert 'Service route catalog repaired:' in script
+    assert script.count('repair_service_route_catalog_drift') == 2
+    assert bootstrap.count('repair_service_route_catalog_drift') == 0
 
     for script_path in (ROOT / 'script.sh', ROOT / 'bootstrap' / 'install.sh'):
         auto_policy = _run_udp_policy_python(script_path, 'auto')
@@ -2206,6 +2221,29 @@ def test_web_status_runtime_helpers():
     )
     assert pending['api_status'].startswith('⏳ Telegram API')
     assert pending['socks_details'] == 'SOCKS ok.'
+    ok_with_service_recheck = web_status_runtime.build_web_status_snapshot(
+        state_label='state',
+        proxy_mode='vless',
+        protocols={
+            'vless': {
+                'endpoint_ok': True,
+                'endpoint_message': 'SOCKS ok.',
+                'api_ok': True,
+                'api_message': 'Доступ к api.telegram.org подтверждён',
+                'details': 'Telegram: работает, YouTube: нестабильно, перепроверяется',
+            }
+        },
+        ports={'vless': 10811},
+        check_socks5=lambda port: False,
+        check_telegram_api=lambda **kwargs: 'unused',
+        is_transient=lambda text: False,
+        fallback_reason='',
+    )
+    assert ok_with_service_recheck['api_status'].startswith('✅')
+    assert not web_status_runtime.protocol_status_is_pending({
+        'api_ok': True,
+        'details': 'Telegram: работает, YouTube: нестабильно, перепроверяется',
+    })
     placeholder = web_status_runtime.build_web_status_snapshot(
         state_label='state',
         proxy_mode='vless',
@@ -5917,7 +5955,10 @@ def test_web_template_scripts_helpers():
     assert 'const rowByKeyId = new Map();' in scripts
     assert 'Object.prototype.hasOwnProperty.call(stateMap, check.id)' in scripts
     assert "fetch('/api/pools' + loadedPoolProtocolQuery(protocols)" in scripts
+    assert 'function webStatusIsPending(apiStatus)' in scripts
+    assert "let pending = webStatusIsPending(web.api_status || '')" in scripts
     assert "proto === web.proxy_mode && status && (status.label === 'Проверяется' || status.api_pending)" in scripts
+    assert "(web.api_status || '').indexOf('перепроверяется')" not in scripts
     assert 'function updateTelegramCallLearning(state)' not in scripts
     assert "fetch('/api/telegram_call_learning'" not in scripts
     assert "action === 'telegram-call-learn'" not in scripts
@@ -6629,6 +6670,7 @@ def main():
     test_web_action_feature_gates()
     test_service_route_apply_can_add_check()
     test_codex_version_matches_commit_count()
+    test_ui_smoke_package_scripts_are_declared()
     test_ipset_refresh_is_backend_aware_and_atomic()
     test_runtime_startup_limits_router_flash_and_overhead()
     test_web_response_body_ignores_client_disconnect()

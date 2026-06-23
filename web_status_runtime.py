@@ -15,6 +15,8 @@ def telegram_api_pending_message():
 
 def protocol_status_is_pending(protocol_status):
     status = protocol_status or {}
+    if status.get('api_ok') is True:
+        return False
     if status.get('api_pending'):
         return True
     label = str(status.get('label') or '').casefold()
@@ -51,13 +53,14 @@ def protocol_preflight_status(key_value, endpoint_ok, endpoint_message, *, proxy
 
 
 def api_status_from_protocol(proxy_mode, protocol_status, socks_ok, is_transient):
-    if protocol_status_is_pending(protocol_status):
-        return telegram_api_pending_message()
-    has_api_result = 'api_ok' in (protocol_status or {}) or 'api_message' in (protocol_status or {})
-    api_ok = bool((protocol_status or {}).get('api_ok'))
-    api_message = str((protocol_status or {}).get('api_message', '') or '')
+    status = protocol_status or {}
+    has_api_result = 'api_ok' in status or 'api_message' in status
+    api_ok = bool(status.get('api_ok'))
+    api_message = str(status.get('api_message', '') or '')
     if api_ok:
         return telegram_api_success_message()
+    if protocol_status_is_pending(status):
+        return telegram_api_pending_message()
     if socks_ok and is_transient(api_message):
         return telegram_api_pending_message()
     if not has_api_result:

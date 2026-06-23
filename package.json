@@ -1,0 +1,12 @@
+{
+  "name": "bypass-keenetic-ui-smoke",
+  "private": true,
+  "scripts": {
+    "ui:check": "node --check tests/ui_smoke.js",
+    "ui:smoke": "node tests/ui_smoke.js",
+    "ui:install-browsers": "playwright install --with-deps chromium"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0"
+  }
+}

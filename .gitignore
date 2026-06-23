@@ -11,6 +11,7 @@ test_proxy.py
 tmp_S24xray
 bot_config.py
 .vscode/
+node_modules/
 router_combined.txt
 router_data.txt
 router_output.html

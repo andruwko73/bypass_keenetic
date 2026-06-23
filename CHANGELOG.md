@@ -1,3 +1,13 @@
+<a name="1.774"></a>
+# [1.774] - 23 Jun 2026
+
+- Fixes false Telegram pending status when another service is still rechecking, limits live status polling to real pending states, adds a release metadata guard for CHANGELOG synchronization, and declares reproducible npm scripts for UI smoke tests.
+
+<a name="1.773"></a>
+# [1.773] - 23 Jun 2026
+
+- Adds the current 173.194.73.198 YouTube CDN edge so www.youtube.com and redirector.googlevideo.com stay in the Vless2 route without overlapping Chrome Remote Desktop routes, keeps RuTracker only in Vless2, and stops GitHub updates from auto-repairing service route drift so user route lists are preserved unless changed explicitly.
+
 <a name="1.772"></a>
 # [1.772] - 22 Jun 2026
 

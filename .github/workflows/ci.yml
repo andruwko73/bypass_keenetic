@@ -50,12 +50,12 @@ jobs:
             S99unblock
 
       - name: JavaScript syntax
-        run: node --check tests/ui_smoke.js
+        run: npm run ui:check
 
       - name: Install UI smoke dependencies
         run: |
-          npm install --no-save playwright@1.60.0
-          npx playwright install --with-deps chromium
+          npm install
+          npm run ui:install-browsers
 
       - name: UI smoke
         run: |
@@ -69,4 +69,4 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:18765/ > /dev/null
-          BYPASS_UI_URL=http://127.0.0.1:18765/ node tests/ui_smoke.js
+          BYPASS_UI_URL=http://127.0.0.1:18765/ npm run ui:smoke

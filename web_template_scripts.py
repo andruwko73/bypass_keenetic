@@ -1742,6 +1742,18 @@ def render_web_scripts(
             }});
         }}
 
+        function webStatusIsPending(apiStatus) {{
+            const text = String(apiStatus || '');
+            return [
+                'Проверяется связь текущего режима',
+                'Фоновая проверка связи выполняется',
+                'Telegram API не ответил вовремя',
+                'Статус обновится без перезагрузки страницы'
+            ].some(function(marker) {{
+                return text.indexOf(marker) !== -1;
+            }});
+        }}
+
         function topbarStatusFromSnapshot(snapshot) {{
             snapshot = snapshot || {{}};
             const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
@@ -1866,9 +1878,7 @@ def render_web_scripts(
             const poolProbeActive = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
             const poolProbePaused = ENABLE_KEY_POOL && !!snapshot.pool_probe_paused && Number(progress.total || 0) > 0;
             updatePoolProbeControls(poolProbeActive, poolProbePaused);
-            let pending = (web.api_status || '').indexOf('Проверяется связь текущего режима') !== -1 ||
-                (web.api_status || '').indexOf('Фоновая проверка') !== -1 ||
-                (web.api_status || '').indexOf('перепроверяется') !== -1;
+            let pending = webStatusIsPending(web.api_status || '');
             const protocols = snapshot.protocols || {{}};
             Object.keys(protocols).forEach(function(proto) {{
                 const status = protocols[proto];
