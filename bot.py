@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.805, последнее изменение: 24.06.2026
+#  Файл: bot.py, Версия v1.806, последнее изменение: 24.06.2026
 
 import subprocess
 import os
@@ -6101,7 +6101,7 @@ def _router_health_snapshot():
         payload['note'] = _append_status_note(note, idle_note)
     elif threshold_mb and payload.get('bot_rss_kb'):
         note = str(payload.get('note') or '').strip()
-        threshold_note = f'Автоперезапуск бота в простое: порог {threshold_mb} MB RSS'
+        threshold_note = f'Автоперезапуск бота в простое: порог {threshold_mb} MB'
         payload['note'] = _append_status_note(note, threshold_note)
     if post_pool_state.get('scheduled'):
         rss_mb = int(round((post_pool_state.get('rss_kb') or 0) / 1024.0))

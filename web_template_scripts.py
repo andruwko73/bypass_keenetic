@@ -2006,10 +2006,11 @@ def render_web_scripts(
             const elapsed = commandElapsedSeconds(state);
             const expected = Math.max(0, Number(state.expected_seconds || 0));
             if (expected > 0) {{
-                if (elapsed <= expected + 90) {{
-                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · обычно около ' + formatCommandDuration(expected) + ' всего';
+                const expectedWithRestart = expected + 15;
+                if (elapsed <= expectedWithRestart + 90) {{
+                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · в среднем ' + formatCommandDuration(expectedWithRestart);
                 }}
-                return 'Прошло ' + formatCommandDuration(elapsed) + ' · дольше обычных ' + formatCommandDuration(expected);
+                return 'Прошло ' + formatCommandDuration(elapsed) + ' · дольше среднего ' + formatCommandDuration(expectedWithRestart);
             }}
             return 'Прошло ' + formatCommandDuration(elapsed);
         }}

@@ -1,3 +1,10 @@
+<a name="1.806"></a>
+# [1.806] - 24 Jun 2026
+
+- Polishes web update timing text, router health notes, proxy/call status wording, and ipset count labels/order.
+- Makes the pool summary count checked rows and service successes per visible pool entry, including duplicate keys.
+- Moves RuTracker route entries from Vless 2 to Vless 1 after Vless 2 connectivity timeout and adds ZazaZa image CDN domains to Vless 1.
+
 <a name="1.805"></a>
 # [1.805] - 24 Jun 2026
 

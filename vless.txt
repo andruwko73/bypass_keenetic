@@ -521,4 +521,12 @@ www.tbank.ru
 www.vscode-unpkg.net
 x.ai
 x.com
+aaa200.one
+feed.rutracker.cc
+one-way.work
+rmr.rocks
+rutracker.org
+rutracker.wiki
+static.librebook.me
+static.rutracker.cc
 zazaza.me

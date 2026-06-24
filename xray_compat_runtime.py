@@ -226,18 +226,27 @@ def core_proxy_health(
 def core_proxy_note(health):
     health = health or {}
     port_states = health.get('ports') or {}
-    ports_text = ', '.join(
-        f'{port}:{"ok" if ok else "down"}'
-        for port, ok in sorted(port_states.items())
-    )
-    if health.get('ok'):
-        return f'Xray: alive, config OK, {PORTS_LABEL}: {ports_text}'
+    working_ports = [str(port) for port, ok in sorted(port_states.items()) if ok]
+    failed_ports = [str(port) for port, ok in sorted(port_states.items()) if not ok]
+    if health.get('xray_state') == 'alive' and health.get('xray_config_ok') and port_states:
+        if working_ports:
+            note = f'Прокси: Xray работает на портах: {", ".join(working_ports)}'
+        else:
+            note = 'Прокси: Xray запущен, но рабочие порты не найдены'
+        if failed_ports:
+            failed_label = 'Порт' if len(failed_ports) == 1 else 'Порты'
+            failed_state = 'не работает' if len(failed_ports) == 1 else 'не работают'
+            note += f'. {failed_label} {", ".join(failed_ports)} {failed_state}'
+        return note
     parts = [
-        f"Xray: {health.get('xray_state') or 'unknown'}",
-        f"config: {'OK' if health.get('xray_config_ok') else 'error'}",
+        f"Прокси: Xray {health.get('xray_state') or 'unknown'}",
+        f"конфигурация: {'OK' if health.get('xray_config_ok') else 'ошибка'}",
     ]
-    if ports_text:
-        parts.append(f'{PORTS_LABEL}: {ports_text}')
+    if working_ports:
+        parts.append(f'работает на портах: {", ".join(working_ports)}')
+    if failed_ports:
+        failed_label = 'порт' if len(failed_ports) == 1 else 'порты'
+        parts.append(f'{failed_label} не работают: {", ".join(failed_ports)}')
     message = str(health.get('xray_config_message') or '').strip().splitlines()
     if message:
         parts.append(message[-1][:180])

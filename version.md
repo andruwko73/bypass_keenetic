@@ -1,3 +1,7 @@
+*v1.806 (24 Jun 2026) -* main
+
+*Polishes web status wording, counts pool-summary services per visible pool row, moves RuTracker to Vless 1, and adds ZazaZa image CDN domains to Vless 1.*
+
 *v1.805 (24 Jun 2026) -* main
 
 *Restores recently quality-approved YouTube edge IPs from cache into the active ipset before the heavier warmup, reducing cold-start waits without persistent bot memory growth.*

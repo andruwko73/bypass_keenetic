@@ -23,6 +23,18 @@ IPSET_SET_NAMES = (
     'unblocktroj',
     'unblocktrojudp',
 )
+IPSET_DISPLAY_ORDER = (
+    ('unblockvless', 'VLESS'),
+    ('unblockvlessudp', 'VLESSUDP'),
+    ('unblockvless2', 'VLESS2'),
+    ('unblockvless2udp', 'VLESS2UDP'),
+    ('unblockvmess', 'VMESS'),
+    ('unblockvmessudp', 'VMESSUDP'),
+    ('unblocktroj', 'Trojan'),
+    ('unblocktrojudp', 'TrojanUDP'),
+    ('unblocksh', 'ShadowSocks'),
+    ('unblockshudp', 'ShadowSocksUDP'),
+)
 DNSMASQ_STATE_LABELS = {
     'running': 'запущен',
     'dead': 'не запущен',
@@ -253,24 +265,36 @@ def telegram_call_proxy_health(
 def telegram_call_proxy_note(health):
     health = health or {}
     if not health.get('enabled'):
-        return 'Calls: disabled'
+        return 'Звонки через TPROXY отключены'
     if not health.get('tproxy_enabled'):
-        return 'Calls: TPROXY disabled'
+        return 'Звонки через TPROXY отключены'
     protocols = list(health.get('protocols') or [])
     ports = health.get('ports') or {}
     port_states = health.get('port_states') or {}
     if not protocols:
-        return 'Telegram Call: standby, активный Telegram-маршрут не выбран'
-    ports_text = ', '.join(
-        f'{TELEGRAM_CALL_PROTOCOL_LABELS.get(proto, proto)} {ports.get(proto)}:{"ok" if port_states.get(str(ports.get(proto))) else "down"}'
-        for proto in protocols
-    )
+        return 'Звонки через TPROXY ожидают активный Telegram-маршрут'
+    working_ports = []
+    failed_ports = []
+    for proto in protocols:
+        port = ports.get(proto)
+        label = f'{TELEGRAM_CALL_PROTOCOL_LABELS.get(proto, proto)} {port}'
+        if port_states.get(str(port)):
+            working_ports.append(label)
+        else:
+            failed_ports.append(label)
     services = '/'.join(str(item) for item in (health.get('services') or []) if str(item or '').strip())
-    state = 'alive' if health.get('ok') else 'down'
-    suffix = f', порты: {ports_text}' if ports_text else ''
-    service_text = f', {services}' if services else ''
-    chain_text = '' if health.get('chain_ok') else ', chain down'
-    return f'Calls: {state}, TPROXY{chain_text}{service_text}{suffix}'
+    service_text = f' для {services}' if services else ''
+    if working_ports:
+        port_word = 'порте' if len(working_ports) == 1 else 'портах'
+        note = f'Звонки через TPROXY работают{service_text} на {port_word}: {", ".join(working_ports)}'
+    else:
+        note = f'Звонки через TPROXY не работают{service_text}'
+    if not health.get('chain_ok'):
+        note += '. Цепочка TPROXY не активна'
+    if failed_ports:
+        port_word = 'порт' if len(failed_ports) == 1 else 'порты'
+        note += f'. Не работает {port_word}: {", ".join(failed_ports)}'
+    return note
 
 
 def _compact_multiline_text(text, max_chars=360):
@@ -453,12 +477,20 @@ def dns_health_note(dns_health):
     refresh_status_label = IPSET_REFRESH_STATUS_LABELS.get(refresh_status, refresh_status)
     updated_at = int(dns_health.get('ipset_updated_at') or 0)
     if updated_at:
-        details.append(f'ipset обновлён: {_format_age(dns_health.get("ipset_refresh_age_seconds"))} ({refresh_status_label})')
+        age_text = _format_age(dns_health.get("ipset_refresh_age_seconds"))
+        if refresh_status and refresh_status != 'success':
+            details.append(f'ipset обновлён: {age_text} ({refresh_status_label})')
+        else:
+            details.append(f'ipset обновлён: {age_text}')
     else:
         details.append('ipset: нет файла состояния')
     counts = dns_health.get('ipset_counts') or {}
     if counts:
-        ordered = [f'{name}={int(counts.get(name) or 0)}' for name in IPSET_SET_NAMES if name in counts]
+        ordered = [
+            f'{label}={int(counts.get(name) or 0)}'
+            for name, label in IPSET_DISPLAY_ORDER
+            if name in counts
+        ]
         details.append('записи ipset: ' + ', '.join(ordered))
     raw_message = str(dns_health.get('ipset_refresh_message') or '').strip()
     message = IPSET_REFRESH_MESSAGE_LABELS.get(raw_message, raw_message)
@@ -467,6 +499,13 @@ def dns_health_note(dns_health):
     if message and not already_shown and message.rstrip('.') not in detail_texts:
         details.append(message.rstrip('.'))
     return '; '.join(part.rstrip('.') for part in details if part)
+
+
+def _current_load_text(load_text):
+    value = str(load_text or '').strip()
+    if not value:
+        return ''
+    return value.split('/', 1)[0].strip()
 
 
 def build_router_health_payload(
@@ -540,7 +579,7 @@ def build_router_health_payload(
     if cache_mb:
         details.append(f'Кэш и буферы: {cache_mb} MB')
     if load_text:
-        details.append(f'Нагрузка CPU за 1/5/15 мин: {load_text}')
+        details.append(f'Нагрузка CPU: {_current_load_text(load_text)}')
     if bot_rss_mb:
         details.append(f'Бот использует {bot_rss_mb} MB RAM')
     if swap_total_kb:

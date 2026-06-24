@@ -297,11 +297,13 @@ def test_router_health_runtime_dns_payload():
     assert 'DNS: ndnproxy (S56dnsmasq не используется)' in payload['dns_note']
     assert 'DNS: ndnproxy' not in payload['note']
     assert 'S56dnsmasq: не запущен' not in payload['note']
-    assert 'ipset обновлён: 1 мин назад (успешно)' in payload['dns_note']
+    assert 'ipset обновлён: 1 мин назад' in payload['dns_note']
+    assert '(успешно)' not in payload['dns_note']
     assert payload['dns_note'].count('ipset обновлён') == 1
-    assert 'unblockvless2=34' in payload['dns_note']
-    assert 'unblockvlessudp=5' in payload['dns_note']
-    assert 'unblockvless2udp=12' in payload['dns_note']
+    assert 'VLESS=12' in payload['dns_note']
+    assert 'VLESSUDP=5' in payload['dns_note']
+    assert 'VLESS2=34' in payload['dns_note']
+    assert 'VLESS2UDP=12' in payload['dns_note']
 
 
 def test_router_health_runtime_core_proxy_payload():
@@ -325,8 +327,14 @@ def test_router_health_runtime_core_proxy_payload():
     assert 'xray_config_message' not in payload['core_proxy_health']
     assert 'telegram_call' not in payload['core_proxy_health']
     assert payload['telegram_call_health']['ok'] is True
-    assert 'Xray: alive' in payload['core_proxy_note']
-    assert '10813:ok' in payload['core_proxy_note']
+    assert payload['core_proxy_note'] == 'Прокси: Xray работает на портах: 10811, 10812, 10813, 10814'
+    warning_note = xray_compat_runtime.core_proxy_note({
+        'ok': False,
+        'xray_state': 'alive',
+        'xray_config_ok': True,
+        'ports': {10811: True, 10812: True, 10813: True, 10814: False},
+    })
+    assert warning_note == 'Прокси: Xray работает на портах: 10811, 10812, 10813. Порт 10814 не работает'
     error_payload = router_health_runtime.build_router_health_payload(
         meminfo={'MemTotal': 64 * 1024, 'MemFree': 8 * 1024, 'MemAvailable': 32 * 1024},
         ndmc_system={},
@@ -844,10 +852,11 @@ def test_key_pool_web():
         route_states=core_route_states,
     )
     assert scoped_summary['services'][:2] == [
-        {'label': 'Telegram', 'count': 1},
+        {'label': 'Telegram', 'count': 2},
         {'label': 'YouTube', 'count': 1},
     ]
-    assert scoped_summary['all_services_count'] == 2
+    assert scoped_summary['checked_pool_count'] == 2
+    assert scoped_summary['all_services_count'] == 1
     assert '\u0412\u0441\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b' not in scoped_summary['note']
     assert '\u0425\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d' not in scoped_summary['note']
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
@@ -3047,7 +3056,7 @@ def test_telegram_call_router_health_note():
     )
     assert health['ok'] is True
     assert health['ports'] == {'vless': 11812}
-    assert router_health_runtime.telegram_call_proxy_note(health) == 'Calls: alive, TPROXY, Telegram/WhatsApp/Discord, порты: Vless 11812:ok'
+    assert router_health_runtime.telegram_call_proxy_note(health) == 'Звонки через TPROXY работают для Telegram/WhatsApp/Discord на порте: Vless 11812'
     assert ('netstat', '-lnp') in commands
 
 
@@ -5069,20 +5078,21 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'accounts.google.com' in vless_entries
     router_preserved_global = {'clients3.google.com'}
     assert set(service_catalog.global_route_exclude_entries()) & vless_entries <= router_preserved_global
-    assert 'rutracker.org' in entries
-    assert 'rutracker.wiki' in entries
+    assert 'rutracker.org' not in entries
+    assert 'rutracker.wiki' not in entries
     assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert service_routes.service_route_state('youtube', unblock_dir=str(ROOT))['label'] == 'Vless 2'
     assert service_routes.service_route_state('gemini', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     chrome_remote_desktop_state = service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))
     assert chrome_remote_desktop_state['complete_protocols'] == []
     assert chrome_remote_desktop_state['partial_protocols'] == []
-    assert 'static.rutracker.cc' in entries
-    assert 'feed.rutracker.cc' in entries
-    assert 'rutracker.org' not in vless_entries
-    assert 'rutracker.wiki' not in vless_entries
-    assert 'static.rutracker.cc' not in vless_entries
-    assert 'feed.rutracker.cc' not in vless_entries
+    assert 'static.rutracker.cc' not in entries
+    assert 'feed.rutracker.cc' not in entries
+    assert 'rutracker.org' in vless_entries
+    assert 'rutracker.wiki' in vless_entries
+    assert 'static.rutracker.cc' in vless_entries
+    assert 'feed.rutracker.cc' in vless_entries
+    assert {'one-way.work', 'rmr.rocks', 'aaa200.one', 'static.librebook.me'} <= vless_entries
     assert 'thepiratebay.org' not in entries
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
     assert 'redirector.googlevideo.com' in entries
@@ -6951,7 +6961,10 @@ def test_web_template_scripts_helpers():
     assert "document.documentElement.classList.toggle('command-running', !!running);" in scripts
     assert 'function commandTimerText(state)' in scripts
     assert 'expected_seconds' in scripts
-    assert 'обычно около' in scripts
+    assert 'в среднем' in scripts
+    assert 'expectedWithRestart = expected + 15' in scripts
+    assert 'обычно около' not in scripts
+    assert 'дольше среднего' in scripts
     assert 'осталось около' not in scripts
     assert 'elapsed * (100 - progress) / progress' not in scripts
     assert 'data-command-progress-fill' not in scripts

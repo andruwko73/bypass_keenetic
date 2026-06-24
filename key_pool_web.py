@@ -167,13 +167,8 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
             if not isinstance(custom, dict):
                 custom = {}
             results = []
-            expected_count = 0
             for service in services:
                 if service['field']:
-                    service_id = CORE_SERVICE_ROUTE_KEYS.get(service['field'])
-                    if service_id and not service_applies_to_protocol(route_states, service_id, proto):
-                        continue
-                    expected_count += 1
                     if service['field'] not in probe:
                         continue
                     raw_value = probe.get(service['field'])
@@ -187,9 +182,6 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                             service['count'] += 1
                         continue
                 else:
-                    if service['id'] and not custom_check_applies_to_protocol(route_states, service['id'], proto):
-                        continue
-                    expected_count += 1
                     if service['id'] not in custom:
                         continue
                     raw_value = custom.get(service['id'])
@@ -201,9 +193,9 @@ def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks,
                     service['count'] += 1
             if results and any(results):
                 any_service_count += 1
-            if expected_count and len(results) == expected_count:
+            if results:
                 checked_count += 1
-            if expected_count and len(results) == expected_count and all(results):
+            if results and all(results):
                 all_services_count += 1
 
     active_key_count = sum(1 for proto in POOL_PROTOCOL_ORDER if (current_keys.get(proto) or '').strip())
