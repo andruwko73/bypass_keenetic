@@ -381,6 +381,7 @@ def collect_prefetch_candidates(
     max_hosts_per_run=DEFAULT_MAX_HOSTS_PER_RUN,
     max_resolved_addresses=DEFAULT_MAX_RESOLVED_ADDRESSES,
     max_candidates=DEFAULT_MAX_CANDIDATES,
+    cache_before_dns=True,
     getaddrinfo=None,
     run_command=None,
 ):
@@ -415,23 +416,30 @@ def collect_prefetch_candidates(
 
     resolve_hosts(priority_hosts, 'watch')
 
-    cached_entries = sorted(
-        cache.get('entries', {}).items(),
-        key=lambda item: _entry_last_seen(item[1]),
-        reverse=True,
-    )
-    for address, entry in cached_entries:
-        _add_candidate(
-            candidates,
-            seen,
-            address,
-            (entry or {}).get('host'),
-            (entry or {}).get('source') or 'cache',
-            from_cache=True,
-            max_candidates=max_candidates,
+    def add_cached_entries():
+        cached_entries = sorted(
+            cache.get('entries', {}).items(),
+            key=lambda item: _entry_last_seen(item[1]),
+            reverse=True,
         )
+        for address, entry in cached_entries:
+            _add_candidate(
+                candidates,
+                seen,
+                address,
+                (entry or {}).get('host'),
+                (entry or {}).get('source') or 'cache',
+                from_cache=True,
+                max_candidates=max_candidates,
+            )
+
+    if cache_before_dns:
+        add_cached_entries()
 
     resolve_hosts(hosts, 'dns', limit=max_hosts_per_run)
+
+    if not cache_before_dns:
+        add_cached_entries()
 
     return candidates, prune_cache(cache, now=now)
 
@@ -536,10 +544,12 @@ def prefetch_once(
     max_resolved_addresses=DEFAULT_MAX_RESOLVED_ADDRESSES,
     max_candidates=DEFAULT_MAX_CANDIDATES,
     max_addresses_per_run=DEFAULT_MAX_ADDRESSES_PER_RUN,
+    cache_before_dns=True,
     remove_from_other_sets=True,
     protect_shared_google=True,
     quality_probe=None,
     quality_probe_enabled=False,
+    quality_probe_existing=False,
     quality_probe_target_ms=DEFAULT_QUALITY_TARGET_MS,
     quality_probe_bad_cooldown_seconds=DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS,
     quality_probe_max_candidates=DEFAULT_QUALITY_MAX_CANDIDATES,
@@ -606,6 +616,7 @@ def prefetch_once(
         max_hosts_per_run=max_hosts_per_run,
         max_resolved_addresses=max_resolved_addresses,
         max_candidates=max_candidates,
+        cache_before_dns=cache_before_dns,
         getaddrinfo=getaddrinfo,
         run_command=run_command,
     )
@@ -616,6 +627,32 @@ def prefetch_once(
     quality_latency_total = 0
     quality_latency_count = 0
 
+    def score_candidate(candidate, address):
+        nonlocal quality_latency_total, quality_latency_count
+        entry = (cache.get('entries') or {}).get(address) or {}
+        if _recent_quality_failure(entry, now, quality_bad_cooldown_seconds):
+            status['quality_rejected_cached'] += 1
+            return 'cached'
+        if status['quality_tested'] >= quality_max_candidates:
+            status['quality_skipped_limit'] += 1
+            return 'limit'
+        try:
+            quality_result = _normalize_quality_result(quality_probe(dict(candidate)))
+        except Exception as exc:
+            quality_result = {'ok': False, 'reason': str(exc)[:40] or 'failed', 'latency_ms': 0}
+        status['quality_tested'] += 1
+        if quality_result.get('latency_ms'):
+            quality_latency_total += int(quality_result.get('latency_ms') or 0)
+            quality_latency_count += 1
+        reject_reason = _quality_reject_reason(quality_result, quality_target_ms)
+        _update_quality_cache(cache, candidate, quality_result, now, accepted=not reject_reason)
+        if reject_reason:
+            counter = 'quality_rejected_' + reject_reason
+            status[counter] = int(status.get(counter) or 0) + 1
+            return reject_reason
+        status['quality_accepted'] += 1
+        return ''
+
     for candidate in candidates:
         if len(touched_addresses) >= max_addresses_per_run:
             break
@@ -625,6 +662,9 @@ def prefetch_once(
         if protect_shared_google and not youtube_owned_host(candidate.get('host')):
             status['shared_candidates_skipped'] += 1
             continue
+        quality_reject = ''
+        if quality_enabled and quality_probe_existing:
+            quality_reject = score_candidate(candidate, address)
         missing_sets = []
         for set_name in target_sets:
             try:
@@ -635,30 +675,12 @@ def prefetch_once(
                 missing_sets.append(set_name)
         if not missing_sets:
             continue
+        if quality_reject:
+            continue
 
-        if quality_enabled:
-            entry = (cache.get('entries') or {}).get(address) or {}
-            if _recent_quality_failure(entry, now, quality_bad_cooldown_seconds):
-                status['quality_rejected_cached'] += 1
+        if quality_enabled and not quality_probe_existing:
+            if score_candidate(candidate, address):
                 continue
-            if status['quality_tested'] >= quality_max_candidates:
-                status['quality_skipped_limit'] += 1
-                continue
-            try:
-                quality_result = _normalize_quality_result(quality_probe(dict(candidate)))
-            except Exception as exc:
-                quality_result = {'ok': False, 'reason': str(exc)[:40] or 'failed', 'latency_ms': 0}
-            status['quality_tested'] += 1
-            if quality_result.get('latency_ms'):
-                quality_latency_total += int(quality_result.get('latency_ms') or 0)
-                quality_latency_count += 1
-            reject_reason = _quality_reject_reason(quality_result, quality_target_ms)
-            _update_quality_cache(cache, candidate, quality_result, now, accepted=not reject_reason)
-            if reject_reason:
-                counter = 'quality_rejected_' + reject_reason
-                status[counter] = int(status.get(counter) or 0) + 1
-                continue
-            status['quality_accepted'] += 1
 
         if remove_from_other_sets and ipset_delete is not None:
             for set_name in _other_sets(protocol):

@@ -1,3 +1,9 @@
+<a name="1.802"></a>
+# [1.802] - 24 Jun 2026
+
+- Makes install/update YouTube fast-warm prefer fresh bootstrap DNS candidates before older cache entries, so stale cache cannot crowd out the speed scoring pass.
+- Scores already-present YouTube runtime ipset entries during fast-warm triggers, keeping the diagnostics internal while avoiding extra scheduler load.
+
 <a name="1.801"></a>
 # [1.801] - 24 Jun 2026
 

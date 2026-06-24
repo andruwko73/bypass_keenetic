@@ -681,6 +681,7 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 32 if fast_warm else youtube_edge_prefetch.DEFAULT_MAX_CANDIDATES,
                 minimum=1,
             ),
+            cache_before_dns=not fast_warm,
             max_addresses_per_run=_config_int(
                 'youtube_edge_prefetch_max_addresses_per_run',
                 youtube_edge_prefetch.DEFAULT_MAX_ADDRESSES_PER_RUN,
@@ -690,6 +691,7 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             protect_shared_google=_config_bool('youtube_edge_prefetch_protect_shared_google', True),
             quality_probe=quality_probe,
             quality_probe_enabled=quality_enabled,
+            quality_probe_existing=fast_warm,
             quality_probe_target_ms=quality_target_ms,
             quality_probe_bad_cooldown_seconds=_config_int(
                 'youtube_edge_prefetch_quality_bad_cooldown_seconds',

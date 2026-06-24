@@ -1,3 +1,7 @@
+*v1.802 (24 Jun 2026) -* main
+
+*Makes YouTube install/update fast-warm prefer fresh bootstrap DNS candidates over stale cache entries and score already-present runtime ipset entries without adding web UI output or scheduler load.*
+
 *v1.801 (24 Jun 2026) -* main
 
 *Scores YouTube edge prefetch IPs through the active route before adding them, uses a short fast-warm path for install/update triggers, and keeps shared Google/CRD hosts out of YouTube runtime ipsets.*
