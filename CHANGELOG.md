@@ -1,3 +1,10 @@
+<a name="1.809"></a>
+# [1.809] - 25 Jun 2026
+
+- Replaces the router-card `Swap` line with Flash/Entware storage usage from `/opt`, keeping the check inside the existing lightweight status cache.
+- Uses a text badge fallback for custom checks without an icon so protocol status rows never render a broken empty image.
+- Shortens README install, DNS, UDP/443, and realtime-call sections and refreshes the documented web UI behavior.
+
 <a name="1.808"></a>
 # [1.808] - 24 Jun 2026
 

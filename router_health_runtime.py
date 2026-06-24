@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -11,6 +12,7 @@ except Exception:
 
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
 UDP_POLICY_CONFIG_FILE = '/opt/etc/bot/udp_policy.conf'
+FLASH_STORAGE_PATHS = ('/opt/etc/bot', '/opt')
 IPSET_SET_NAMES = (
     'unblocksh',
     'unblockshudp',
@@ -104,6 +106,32 @@ def read_proc_meminfo(meminfo_path='/proc/meminfo'):
         except Exception:
             pass
     return values
+
+
+def read_flash_storage(
+    paths=FLASH_STORAGE_PATHS,
+    disk_usage=shutil.disk_usage,
+    path_exists=os.path.exists,
+):
+    for path in paths:
+        try:
+            if not path_exists(path):
+                continue
+            usage = disk_usage(path)
+        except Exception:
+            continue
+        total = int(getattr(usage, 'total', 0) or 0)
+        used = int(getattr(usage, 'used', 0) or 0)
+        free = int(getattr(usage, 'free', 0) or 0)
+        if total <= 0:
+            continue
+        return {
+            'path': path,
+            'total_kb': int(round(total / 1024.0)),
+            'used_kb': int(round(used / 1024.0)),
+            'free_kb': int(round(free / 1024.0)),
+        }
+    return {}
 
 
 def parse_cpu_stat(stat_text):
@@ -602,9 +630,11 @@ def build_router_health_payload(
     dns_health=None,
     core_proxy_health=None,
     cpu_percent=None,
+    flash_storage=None,
 ):
     meminfo = meminfo or {}
     ndmc_system = ndmc_system or {}
+    flash_storage = flash_storage or {}
     total_kb = int(meminfo.get('MemTotal') or 0)
     free_kb = int(meminfo.get('MemFree') or 0)
     buffers_kb = int(meminfo.get('Buffers') or 0)
@@ -612,8 +642,6 @@ def build_router_health_payload(
     reclaimable_kb = int(meminfo.get('SReclaimable') or 0)
     linux_cache_kb = max(0, buffers_kb + cached_kb + reclaimable_kb)
     available_kb = int(meminfo.get('MemAvailable') or (free_kb + linux_cache_kb) or free_kb or 0)
-    swap_total_kb = int(meminfo.get('SwapTotal') or 0)
-    swap_free_kb = int(meminfo.get('SwapFree') or 0)
     display_total_kb = int(ndmc_system.get('memory_total') or ndmc_system.get('memtotal') or total_kb or 0)
     ndmc_free_kb = int(ndmc_system.get('memfree') or 0)
     ndmc_buffers_kb = int(ndmc_system.get('membuffers') or 0)
@@ -648,7 +676,13 @@ def build_router_health_payload(
     probe_checked = int(probe_progress.get('checked') or 0)
     probe_total = int(probe_progress.get('total') or 0)
     probe_note = str(probe_progress.get('note') or '').strip()
-    swap_used_mb = int(round(max(0, swap_total_kb - swap_free_kb) / 1024.0)) if swap_total_kb else 0
+    flash_total_kb = int(flash_storage.get('total_kb') or 0)
+    flash_used_kb = int(flash_storage.get('used_kb') or 0)
+    flash_free_kb = int(flash_storage.get('free_kb') or 0)
+    flash_path = str(flash_storage.get('path') or '').strip()
+    flash_used_percent = int(round((flash_used_kb / float(flash_total_kb)) * 100)) if flash_total_kb else 0
+    flash_total_mb = int(round(flash_total_kb / 1024.0)) if flash_total_kb else 0
+    flash_used_mb = int(round(flash_used_kb / 1024.0)) if flash_used_kb else 0
     if total_mb:
         memory_text = f'Память: доступно {available_mb} MB, занято {used_mb} из {total_mb} MB'
     else:
@@ -670,9 +704,8 @@ def build_router_health_payload(
         details.append(f'Средняя нагрузка: {_current_load_text(load_text)}')
     if bot_rss_mb:
         details.append(f'Бот использует {bot_rss_mb} MB RAM')
-    if swap_total_kb:
-        swap_total_mb = int(round(swap_total_kb / 1024.0))
-        details.append(f'Swap: занято {swap_used_mb} из {swap_total_mb} MB')
+    if flash_total_mb:
+        details.append(f'Flash-носитель: занято {flash_used_mb} из {flash_total_mb} MB ({flash_used_percent}%)')
     dns_note = dns_health_note(dns_health)
     core_proxy_health = core_proxy_health or {}
     if xray_compat_runtime is not None and core_proxy_health:
@@ -702,6 +735,11 @@ def build_router_health_payload(
         'load_text': load_text,
         'cpu_percent': normalized_cpu_percent,
         'bot_rss_kb': bot_rss_kb or 0,
+        'flash_storage_path': flash_path,
+        'flash_total_kb': flash_total_kb,
+        'flash_used_kb': flash_used_kb,
+        'flash_free_kb': flash_free_kb,
+        'flash_used_percent': flash_used_percent,
         'pool_probe_running': probe_running,
         'pool_probe_text': (
             f'Проверяется {probe_checked}/{probe_total}'
@@ -810,6 +848,7 @@ class RouterHealthRuntime:
             temp_xray_count=count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0,
             dns_health=self._dns_snapshot(now),
             core_proxy_health=self._core_proxy_snapshot(now),
+            flash_storage=read_flash_storage(),
         )
         with self._lock:
             self._cache['timestamp'] = now

@@ -1,3 +1,7 @@
+*v1.809 (25 Jun 2026) -* main
+
+*Shows Flash/Entware storage usage instead of swap in the router web card, fixes empty custom-check icon fallbacks, and trims README guidance around YouTube warmup, DNS Override, UDP/443, and realtime-call behavior.*
+
 *v1.808 (24 Jun 2026) -* main
 
 *Stabilizes router CPU percentage sampling in web status while keeping YouTube route detection tied to the active service route list across redirect, scheduler, ipset refresh, and bot watchdog logic.*

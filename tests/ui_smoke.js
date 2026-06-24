@@ -130,6 +130,20 @@ async function assertVisibleBox(page, selector, label) {
   return box;
 }
 
+async function assertNoBrokenImages(page, label) {
+  const broken = await page.evaluate(() => (
+    Array.from(document.images)
+      .filter((img) => !img.complete || img.naturalWidth < 1 || img.naturalHeight < 1)
+      .map((img) => ({
+        alt: img.alt || '',
+        src: img.getAttribute('src') || '',
+      }))
+  ));
+  if (broken.length) {
+    throw new Error(`${label}: broken images ${JSON.stringify(broken)}`);
+  }
+}
+
 async function assertPoolKeysAreMasked(page, label) {
   const leakage = await page.evaluate((needles) => ({
     dataKeyCount: document.querySelectorAll('[data-key]').length,
@@ -236,6 +250,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);
   await assertPoolKeysAreMasked(page, `${name} initial keys`);
+  await assertNoBrokenImages(page, `${name} initial keys`);
   if (modeConfig.expectPool) {
     await page.locator('[data-protocol-panel].active [data-subview-target="check"]').click();
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
@@ -309,6 +324,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);
     await assertActivePoolRowPinned(page, 'vless2', `${name} original pool order`);
     await assertPoolKeysAreMasked(page, `${name} lazy keys`);
+    await assertNoBrokenImages(page, `${name} lazy keys`);
   } else {
     const poolOnlyControls = await page.locator('[data-pool-filter], .pool-toolbar, [data-subview-target="pool"], [data-subview-target="check"], .service-route-tools').count();
     if (poolOnlyControls) {
@@ -319,6 +335,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await page.locator('.side-nav .nav-item[data-view-target="lists"]:visible, .mobile-nav .nav-item[data-view-target="lists"]:visible').click();
   await assertVisibleBox(page, '[data-view="lists"].active', `${name} lists view`);
+  await assertNoBrokenImages(page, `${name} lists`);
   await assertNoHorizontalOverflow(page, `${name} lists`);
   assertNoPageFailures(failures);
 

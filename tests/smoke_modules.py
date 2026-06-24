@@ -261,6 +261,7 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
         bot_rss_kb=52 * 1024,
         probe_progress={'running': False, 'total': 0},
         temp_xray_count=0,
+        flash_storage={'path': '/opt', 'total_kb': 2048 * 1024, 'used_kb': 768 * 1024, 'free_kb': 1280 * 1024},
     )
     assert payload['memory_source'] == 'keenetic'
     assert payload['memory_text'] == 'Память: доступно 201 MB, занято 281 из 512 MB'
@@ -269,6 +270,10 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['pool_probe_text'] == 'Не запущена'
     assert 'Нагрузка CPU: 0.84%' in payload['note']
     assert 'Бот использует 52 MB RAM' in payload['note']
+    assert 'Flash-носитель: занято 768 из 2048 MB (38%)' in payload['note']
+    assert 'Swap:' not in payload['note']
+    assert payload['flash_storage_path'] == '/opt'
+    assert payload['flash_used_percent'] == 38
     assert not payload['note'].endswith('.')
     assert 'Проверка пула' not in payload['note']
 
@@ -453,11 +458,12 @@ def test_router_health_runtime_cpu_percent_parser():
 
 
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
-    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0, 'cpu': 0}
+    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0, 'cpu': 0, 'flash': 0}
     original = {
         'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
         'read_proc_text': router_health_runtime.read_proc_text,
         'read_cpu_percent': router_health_runtime.read_cpu_percent,
+        'read_flash_storage': router_health_runtime.read_flash_storage,
         'process_rss_kb': router_health_runtime.process_rss_kb,
         'count_proc_cmdline': router_health_runtime.count_proc_cmdline,
         'read_ndmc_system_snapshot': router_health_runtime.read_ndmc_system_snapshot,
@@ -486,11 +492,16 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
         calls['cpu'] += 1
         return 12.34
 
+    def fake_flash_storage():
+        calls['flash'] += 1
+        return {'path': '/opt', 'total_kb': 1024 * 1024, 'used_kb': 256 * 1024, 'free_kb': 768 * 1024}
+
     now = [100.0]
     try:
         router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
         router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
         router_health_runtime.read_cpu_percent = fake_cpu_percent
+        router_health_runtime.read_flash_storage = fake_flash_storage
         router_health_runtime.process_rss_kb = lambda pid='self': 64000
         router_health_runtime.count_proc_cmdline = lambda marker: 0
         router_health_runtime.read_ndmc_system_snapshot = fake_ndmc
@@ -518,7 +529,9 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     assert second['dns_backend'] == 'dnsmasq'
     assert first['cpu_percent'] == 12.34
     assert second['cpu_percent'] == 12.34
-    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu': 2}
+    assert first['flash_used_percent'] == 25
+    assert 'Flash-носитель: занято 256 из 1024 MB (25%)' in first['note']
+    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu': 2, 'flash': 2}
 
 
 def test_web_commands_runtime_dispatch():
@@ -2249,10 +2262,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "update_proxy('none', persist=False)" not in startup_restore
     readme_source = (ROOT / 'README.md').read_text(encoding='utf-8')
     assert 'https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh' in readme_source
-    assert 'youtube_edge_prefetch_runner.py' in readme_source
-    assert 'Post-install' in readme_source
-    assert 'Post-update' in readme_source
-    assert 'Post-update-late' in readme_source
+    assert 'Прогрев YouTube ставится сразу при чистой установке' in readme_source
+    assert 'не увеличивает постоянный RSS Telegram-бота' in readme_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source

@@ -896,8 +896,19 @@ def render_web_scripts(
             return String(text || '').replace(/\\s*\\.+\\s*$/u, '');
         }}
 
-        function serviceIcon(src, alt) {{
-            return '<img class="service-icon-img" src="' + src + '" width="16" height="16" alt="' + alt + '" style="vertical-align:middle;opacity:1">';
+        function serviceTextBadge(label, badge) {{
+            const text = String(badge || label || 'WEB').trim().slice(0, 4).toUpperCase() || 'WEB';
+            return '<span class="custom-service-badge custom-service-neutral" title="' +
+                escapeHtml(label || '') + '">' + escapeHtml(text) + '</span>';
+        }}
+
+        function serviceIcon(src, alt, badge) {{
+            const cleanSrc = String(src || '');
+            if (!cleanSrc) {{
+                return serviceTextBadge(alt, badge);
+            }}
+            return '<img class="service-icon-img" src="' + escapeHtml(cleanSrc) + '" width="16" height="16" alt="' +
+                escapeHtml(alt || 'Service') + '" style="vertical-align:middle;opacity:1">';
         }}
 
         function protocolIcons(status) {{
@@ -911,7 +922,7 @@ def render_web_scripts(
             if (status && status.custom) {{
                 customChecks.forEach(function(check) {{
                     if (status.custom[check.id] === 'ok') {{
-                        html += serviceIcon(serviceIconSrc(check.icon), check.label || 'Service');
+                        html += serviceIcon(serviceIconSrc(check.icon), check.label || 'Service', check.badge || '');
                     }}
                 }});
             }}
@@ -998,8 +1009,8 @@ def render_web_scripts(
             const label = check ? check.label : 'Проверка';
             const url = check ? check.url : '';
             let content = '?';
-            if (status === 'ok' && check && check.icon) {{
-                content = serviceIcon(serviceIconSrc(check.icon), label);
+            if (status === 'ok' && check) {{
+                content = serviceIcon(serviceIconSrc(check.icon), label, check.badge || '');
             }} else if (status === 'fail') {{
                 content = '<span class="service-probe-mark service-probe-fail">✕</span>';
             }} else {{
@@ -1083,7 +1094,7 @@ def render_web_scripts(
             return activeChecks.map(function(check) {{
                 const label = check.label || 'Service';
                 const content = check.icon
-                    ? serviceIcon(serviceIconSrc(check.icon), label)
+                    ? serviceIcon(serviceIconSrc(check.icon), label, check.badge || '')
                     : '<span class="custom-service-badge custom-service-neutral">' + escapeHtml(check.badge || 'WEB') + '</span>';
                 return '<span class="custom-service-slot custom-service-header" title="' + escapeHtml(label) + '">' + content + '</span>';
             }}).join('');
