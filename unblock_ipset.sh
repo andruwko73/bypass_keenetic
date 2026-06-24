@@ -752,6 +752,17 @@ swap_or_preserve_set() {
 
 	printf '%s\n' "$set_name" >> "$tmp_dir/fallback_sets"
 	awk -v from="$swap_tmp_set" -v to="$set_name" '$1 == "add" && $2 == from { print "add " to " " $3 }' "$sorted_restore_file" > "$tmp_dir/${set_name}.fallback"
+	ipset save "$set_name" > "$tmp_dir/${set_name}.backup" 2>/dev/null || true
+	if ipset flush "$set_name" >/dev/null 2>&1; then
+		if [ ! -s "$tmp_dir/${set_name}.fallback" ] || ipset restore -exist < "$tmp_dir/${set_name}.fallback" >/dev/null 2>&1; then
+			ipset destroy "$swap_tmp_set" >/dev/null 2>&1 || true
+			echo "$set_name: ipset swap failed, reloaded via flush/restore fallback."
+			return 0
+		fi
+		if [ -s "$tmp_dir/${set_name}.backup" ]; then
+			ipset restore -exist < "$tmp_dir/${set_name}.backup" >/dev/null 2>&1 || true
+		fi
+	fi
 	if [ -s "$tmp_dir/${set_name}.fallback" ]; then
 		ipset restore -exist < "$tmp_dir/${set_name}.fallback" >/dev/null 2>&1 || true
 	fi

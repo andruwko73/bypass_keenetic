@@ -1,3 +1,10 @@
+<a name="1.794"></a>
+# [1.794] - 24 Jun 2026
+
+- Extends the built-in memory timeline from 240 to 720 events, giving roughly 12 hours of one-minute samples without adding a separate monitor process.
+- Skips scheduled ipset refresh attempts while a fresh `unblock_ipset.sh` lock is active, reducing repeated `already running` log spam and refresh collisions.
+- Reworks the `ipset swap failed` fallback to save a backup, flush the target set, and restore the newly resolved entries before falling back to the old additive behavior.
+
 <a name="1.793"></a>
 # [1.793] - 24 Jun 2026
 

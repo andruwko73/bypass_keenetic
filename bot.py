@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.793, последнее изменение: 24.06.2026
+#  Файл: bot.py, Версия v1.794, последнее изменение: 24.06.2026
 
 import subprocess
 import os
@@ -1543,7 +1543,7 @@ MEMORY_TIMELINE_INTERVAL_SECONDS = max(
     30.0,
     float(getattr(config, 'memory_timeline_interval_seconds', 60.0)),
 )
-MEMORY_TIMELINE_MAX_EVENTS = max(30, int(getattr(config, 'memory_timeline_max_events', 240)))
+MEMORY_TIMELINE_MAX_EVENTS = max(30, int(getattr(config, 'memory_timeline_max_events', 720)))
 MEMORY_MALLOC_TRIM_ENABLED = bool(getattr(config, 'memory_malloc_trim_enabled', True))
 MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS = max(
     5.0,

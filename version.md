@@ -1,3 +1,7 @@
+*v1.794 (24 Jun 2026) -* main
+
+*Extends the built-in router memory timeline to about 12 hours, avoids scheduler refresh collisions while ipset is already running, and reloads ipsets through a safer flush/restore fallback when atomic swap fails.*
+
 *v1.793 (24 Jun 2026) -* main
 
 *Keeps Chrome Remote Desktop out of automatic bypass profiles and retries the external YouTube edge prefetch sooner after low-memory skips, so post-update YouTube warms without adding long-running bot memory.*

@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.793
+# ВЕРСИЯ СКРИПТА v1.794
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -55,7 +55,7 @@ memory_post_pool_restart_max_wait_seconds = 300.0
 memory_timeline_enabled = True
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0
-memory_timeline_max_events = 240
+memory_timeline_max_events = 720
 memory_malloc_trim_enabled = True  # после тяжёлой очистки просит libc вернуть свободные арены памяти системе
 memory_malloc_trim_min_rss_kb = 61440
 memory_malloc_trim_cooldown_seconds = 20.0

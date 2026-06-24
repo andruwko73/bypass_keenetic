@@ -14,6 +14,8 @@ LOG_FILE="${BYPASS_UNBLOCK_REFRESH_LOG:-/opt/var/log/bypass-unblock-scheduler.lo
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 RUNTIME_DEDUPE_LOCK_DIR="${BYPASS_RUNTIME_DEDUPE_LOCK_DIR:-/tmp/bypass-runtime-dedupe.lock}"
+UNBLOCK_IPSET_LOCK_DIR="${UNBLOCK_IPSET_LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
+UNBLOCK_IPSET_LOCK_STALE_SECONDS="${UNBLOCK_IPSET_LOCK_STALE_SECONDS:-600}"
 YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtube_edge_prefetch_runner.py}"
 YOUTUBE_EDGE_PREFETCH_STATUS_FILE="${YOUTUBE_EDGE_PREFETCH_STATUS_FILE:-/opt/etc/bot/youtube_edge_prefetch_status.json}"
 YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-900}"
@@ -63,9 +65,36 @@ cleanup_orphan_schedulers() {
 
 run_refresh() {
     [ -x /opt/bin/unblock_ipset.sh ] || return 0
+    unblock_ipset_running && return 0
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
     /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true
     run_youtube_edge_prefetch "ipset-refresh"
+}
+
+unblock_ipset_lock_age_seconds() {
+    started_at_file="$UNBLOCK_IPSET_LOCK_DIR/started_at"
+    [ -s "$started_at_file" ] || {
+        printf '%s\n' 0
+        return
+    }
+    started_at="$(sed -n '1p' "$started_at_file" 2>/dev/null | tr -cd '0-9')"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    case "$now:$started_at" in
+        *[!0-9:]*|0:*|*:0) printf '%s\n' 0 ;;
+        *) printf '%s\n' $((now - started_at)) ;;
+    esac
+}
+
+unblock_ipset_running() {
+    [ -d "$UNBLOCK_IPSET_LOCK_DIR" ] || return 1
+    pid="$(sed -n '1p' "$UNBLOCK_IPSET_LOCK_DIR/pid" 2>/dev/null | tr -cd '0-9')"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    lock_age="$(unblock_ipset_lock_age_seconds)"
+    case "$lock_age:$UNBLOCK_IPSET_LOCK_STALE_SECONDS" in
+        *[!0-9:]*|0:*) return 0 ;;
+    esac
+    [ "$lock_age" -lt "$UNBLOCK_IPSET_LOCK_STALE_SECONDS" ] 2>/dev/null
 }
 
 youtube_edge_prefetch_last_run_at() {

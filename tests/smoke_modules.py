@@ -1492,6 +1492,9 @@ def test_codex_version_matches_commit_count():
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in example
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in installer
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in bootstrap
+    assert 'memory_timeline_max_events = 720' in example
+    assert 'memory_timeline_max_events = 720' in installer
+    assert 'memory_timeline_max_events = 720' in bootstrap
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in example
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in installer
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in bootstrap
@@ -1722,6 +1725,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'run_youtube_edge_prefetch_if_due()' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtube_edge_prefetch_runner.py}"' in s99unblock
     assert 'PYTHONPATH="/opt/etc/bot" "$python_bin" "$YOUTUBE_EDGE_PREFETCH_RUNNER" --trigger "$trigger"' in s99unblock
+    assert 'UNBLOCK_IPSET_LOCK_DIR="${UNBLOCK_IPSET_LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in s99unblock
+    assert 'UNBLOCK_IPSET_LOCK_STALE_SECONDS="${UNBLOCK_IPSET_LOCK_STALE_SECONDS:-600}"' in s99unblock
+    assert 'unblock_ipset_running()' in s99unblock
+    assert 'unblock_ipset_running && return 0' in s99unblock
     assert 'last_refresh_check=0' in s99unblock
     assert 'refresh)' in s99unblock
     assert 'while :' in s99unblock
@@ -1875,6 +1882,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"' in ipset_script
     assert 'for set_name in $SET_NAMES $EXTRA_SET_NAMES; do' in ipset_script
     assert 'ipset swap "$swap_tmp_set" "$set_name"' in ipset_script
+    assert 'ipset save "$set_name" > "$tmp_dir/${set_name}.backup"' in ipset_script
+    assert 'ipset flush "$set_name"' in ipset_script
+    assert 'reloaded via flush/restore fallback' in ipset_script
     assert 'unblockshudp "tmp_unblockshudp_$$"' in ipset_script
     assert 'unblockvmessudp "tmp_unblockvmessudp_$$"' in ipset_script
     assert 'unblockvlessudp "tmp_unblockvlessudp_$$"' in ipset_script
@@ -2141,6 +2151,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
+    assert 'memory_timeline_max_events = 720' in script_source
+    assert "memory_timeline_max_events[[:space:]]*=[[:space:]]*240" in script_source
     assert 'memory_malloc_trim_enabled = True' in script_source
     assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
