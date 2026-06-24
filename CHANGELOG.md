@@ -1,3 +1,10 @@
+<a name="1.800"></a>
+# [1.800] - 24 Jun 2026
+
+- Stops cron-triggered `S99unblock refresh` calls from starting a second ipset refresh while the persistent unblock scheduler is already running.
+- Runs scheduler-owned ipset refreshes with quiet lock-busy handling, reducing repeated `unblock_ipset is already running` log noise while preserving bot-side already-running detection for direct UDP/QUIC drift refreshes.
+- Keeps the YouTube/CRD route lists unchanged; this release only tightens refresh coordination and does not add persistent bot memory load.
+
 <a name="1.799"></a>
 # [1.799] - 24 Jun 2026
 

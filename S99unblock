@@ -67,7 +67,7 @@ run_refresh() {
     [ -x /opt/bin/unblock_ipset.sh ] || return 0
     unblock_ipset_running && return 0
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
-    /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true
+    UNBLOCK_IPSET_LOCK_BUSY_QUIET=1 /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true
     run_youtube_edge_prefetch "ipset-refresh"
 }
 
@@ -354,6 +354,9 @@ case "$1" in
         start_scheduler
         ;;
     refresh)
+        if is_running; then
+            exit 0
+        fi
         run_refresh_if_due
         run_youtube_edge_prefetch_if_due
         run_runtime_dedupe

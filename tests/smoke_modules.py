@@ -1763,18 +1763,21 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'UNBLOCK_IPSET_LOCK_STALE_SECONDS="${UNBLOCK_IPSET_LOCK_STALE_SECONDS:-600}"' in s99unblock
     assert 'unblock_ipset_running()' in s99unblock
     assert 'unblock_ipset_running && return 0' in s99unblock
+    assert 'UNBLOCK_IPSET_LOCK_BUSY_QUIET=1 /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock
     assert 'last_refresh_check=0' in s99unblock
     assert 'refresh)' in s99unblock
+    assert 'refresh)\n        if is_running; then\n            exit 0\n        fi' in s99unblock
     assert 'while :' in s99unblock
     assert 'scheduler_pids()' in s99unblock
     assert 'cleanup_orphan_schedulers' in s99unblock
     assert 'stop_scheduler_pid "$pid"' in s99unblock
-    assert '/opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
     assert 'ipset test "$winner_set" "$entry"' in s99unblock
     assert 'acquire_runtime_dedupe_lock || return 0' in s99unblock
     assert '*unblock_ipset.sh*) continue ;;' in s99unblock
     assert 'dedupe_vless_final_ipsets()' in ipset_script
+    assert 'LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"' in ipset_script
+    assert 'lock_busy_exit()' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless" "unblockvless2"' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless2" "unblockvless"' in ipset_script
     last_swap_idx = ipset_script.index('swap_or_preserve_set unblocktroj6')

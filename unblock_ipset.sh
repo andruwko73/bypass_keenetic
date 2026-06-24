@@ -11,6 +11,7 @@ UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"
+LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
@@ -28,6 +29,11 @@ lock_pid_is_active() {
 	pid="$(lock_pid)"
 	[ -n "$pid" ] || return 1
 	kill -0 "$pid" 2>/dev/null
+}
+
+lock_busy_exit() {
+	[ "$LOCK_BUSY_QUIET" = "1" ] || echo "unblock_ipset is already running."
+	exit 0
 }
 
 lock_pid() {
@@ -111,12 +117,10 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
 			lock_age="$(lock_age_seconds)"
 			echo "Removed stale unblock_ipset lock (${lock_age}s old)."
 		else
-			echo "unblock_ipset is already running."
-			exit 0
+			lock_busy_exit
 		fi
 	else
-		echo "unblock_ipset is already running."
-		exit 0
+		lock_busy_exit
 	fi
 fi
 printf '%s\n' "$$" > "$LOCK_DIR/pid" 2>/dev/null || true

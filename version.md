@@ -1,3 +1,7 @@
+*v1.800 (24 Jun 2026) -* main
+
+*Stops cron refresh calls from competing with the persistent unblock scheduler, keeps scheduler lock-busy skips quiet, and preserves bot-side already-running detection for UDP/QUIC drift refreshes.*
+
 *v1.799 (24 Jun 2026) -* main
 
 *Closes raw-key output from the pool JSON API, softens one-off transient YouTube quick-probe misses on homepage/googlevideo endpoints, and disables the persistent memory timeline by default while keeping watchdog protection.*
