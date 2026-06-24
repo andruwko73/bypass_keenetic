@@ -1,3 +1,9 @@
+<a name="1.805"></a>
+# [1.805] - 24 Jun 2026
+
+- Adds a bounded cache-restore phase before YouTube fast/full warmup: recently quality-approved YouTube edge IPs are put back into the active route ipset immediately after install/update/startup.
+- Keeps the restore external and short-lived, requiring prior successful quality checks and preserving shared Google/Chrome Remote Desktop protection.
+
 <a name="1.804"></a>
 # [1.804] - 24 Jun 2026
 

@@ -1,3 +1,7 @@
+*v1.805 (24 Jun 2026) -* main
+
+*Restores recently quality-approved YouTube edge IPs from cache into the active ipset before the heavier warmup, reducing cold-start waits without persistent bot memory growth.*
+
 *v1.804 (24 Jun 2026) -* main
 
 *Expands the external YouTube fast-warm set for homepage/static bottlenecks and adds a live watch warmup URL so live googlevideo edges are discovered without adding persistent bot load.*

@@ -846,6 +846,9 @@ migrate_runtime_config_defaults() {
   grep -Eq '^youtube_edge_prefetch_max_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_exclusive_ipsets[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_exclusive_ipsets = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_protect_shared_google[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_protect_shared_google = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_cache_restore_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cache_restore_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_cache_restore_max_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cache_restore_max_addresses = 16\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_cache_restore_require_quality_ok[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cache_restore_require_quality_ok = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_fast_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"
   if ! grep -Eq '^youtube_edge_prefetch_fast_hosts[[:space:]]*=' "$BOT_CONFIG_PATH"; then
     cat >> "$BOT_CONFIG_PATH" <<'PYCFG'

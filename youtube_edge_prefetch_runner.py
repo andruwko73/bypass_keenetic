@@ -50,6 +50,9 @@ FAST_PREFETCH_TRIGGERS = (
     'startup',
     'manual-fast',
 )
+CACHE_RESTORE_TRIGGERS = FAST_PREFETCH_TRIGGERS + (
+    'manual-restore',
+)
 
 PROTOCOL_ROUTE_FILES = (
     ('shadowsocks', 'shadowsocks.txt'),
@@ -595,6 +598,17 @@ def _fast_warm_enabled_for_trigger(trigger):
     return any(text.startswith(prefix) for prefix in FAST_PREFETCH_TRIGGERS)
 
 
+def _cache_restore_enabled_for_trigger(trigger):
+    if not _config_bool('youtube_edge_prefetch_cache_restore_enabled', True):
+        return False
+    text = str(trigger or '').strip().lower()
+    return any(text.startswith(prefix) for prefix in CACHE_RESTORE_TRIGGERS)
+
+
+def _cache_restore_only_for_trigger(trigger):
+    return str(trigger or '').strip().lower().startswith('manual-restore')
+
+
 def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock_dir=None):
     started_at = time.time()
     status_path = status_path or _config_str('youtube_edge_prefetch_status_path', STATUS_PATH)
@@ -635,6 +649,53 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
             _write_json_file(status_path, status)
             return status
+
+        cache_restore_status = None
+        if _cache_restore_enabled_for_trigger(trigger):
+            restore_started = time.time()
+            cache_restore_status = youtube_edge_prefetch.restore_cached_ipsets(
+                route_protocol=route_protocol,
+                cache_path=cache_path,
+                ipset_contains=ipset_contains,
+                ipset_add=ipset_add,
+                ipset_delete=ipset_delete,
+                delete_conntrack=delete_conntrack_for_address,
+                cache_ttl_seconds=_config_int(
+                    'youtube_edge_prefetch_cache_ttl_seconds',
+                    youtube_edge_prefetch.DEFAULT_CACHE_TTL_SECONDS,
+                    minimum=3600,
+                ),
+                max_cache_entries=_config_int(
+                    'youtube_edge_prefetch_max_cache_entries',
+                    youtube_edge_prefetch.DEFAULT_MAX_CACHE_ENTRIES,
+                    minimum=16,
+                ),
+                max_addresses=_config_int(
+                    'youtube_edge_prefetch_cache_restore_max_addresses',
+                    youtube_edge_prefetch.DEFAULT_CACHE_RESTORE_MAX_ADDRESSES,
+                    minimum=0,
+                ),
+                remove_from_other_sets=_config_bool('youtube_edge_prefetch_exclusive_ipsets', True),
+                protect_shared_google=_config_bool('youtube_edge_prefetch_protect_shared_google', True),
+                require_quality_ok=_config_bool('youtube_edge_prefetch_cache_restore_require_quality_ok', True),
+                quality_bad_cooldown_seconds=_config_int(
+                    'youtube_edge_prefetch_quality_bad_cooldown_seconds',
+                    youtube_edge_prefetch.DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS,
+                    minimum=0,
+                ),
+            )
+            cache_restore_status['duration_ms'] = int(max(0.0, time.time() - restore_started) * 1000)
+            if _cache_restore_only_for_trigger(trigger):
+                cache_restore_status['available_memory_kb'] = available_kb
+                cache_restore_status['warm_mode'] = 'cache_restore'
+                status = _normalize_status(
+                    cache_restore_status,
+                    trigger=trigger,
+                    started_at=started_at,
+                    next_host_index=next_host_index,
+                )
+                _write_json_file(status_path, status)
+                return status
 
         fast_warm = _fast_warm_enabled_for_trigger(trigger)
         if fast_warm:
@@ -732,6 +793,25 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
         status['watch_edge_hosts'] = len(watch_edge_hosts)
         status['watch_edge'] = watch_edge_status
         status['warm_mode'] = 'fast' if fast_warm else 'full'
+        if cache_restore_status is not None:
+            status['cache_restore'] = {
+                'ok': bool(cache_restore_status.get('ok')),
+                'skipped_reason': str(cache_restore_status.get('skipped_reason') or ''),
+                'candidates': int(cache_restore_status.get('candidates') or 0),
+                'cache_entries': int(cache_restore_status.get('cache_entries') or 0),
+                'added_addresses': int(cache_restore_status.get('added_addresses') or 0),
+                'added_sets': int(cache_restore_status.get('added_sets') or 0),
+                'deleted_sets': int(cache_restore_status.get('deleted_sets') or 0),
+                'duration_ms': int(cache_restore_status.get('duration_ms') or 0),
+                'skipped_no_quality': int(cache_restore_status.get('cache_restore_skipped_no_quality') or 0),
+                'skipped_failed_quality': int(
+                    cache_restore_status.get('cache_restore_skipped_failed_quality') or 0
+                ),
+                'skipped_recent_bad_quality': int(
+                    cache_restore_status.get('cache_restore_skipped_recent_bad_quality') or 0
+                ),
+            }
+            status['cache_restored_addresses'] = int(cache_restore_status.get('added_addresses') or 0)
         status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
         _write_json_file(status_path, status)
         return status

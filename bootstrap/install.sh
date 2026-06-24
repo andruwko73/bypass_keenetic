@@ -700,6 +700,9 @@ youtube_edge_prefetch_min_available_kb = 125000
 youtube_edge_prefetch_max_rss_kb = 66560
 youtube_edge_prefetch_exclusive_ipsets = True
 youtube_edge_prefetch_protect_shared_google = True
+youtube_edge_prefetch_cache_restore_enabled = True
+youtube_edge_prefetch_cache_restore_max_addresses = 16
+youtube_edge_prefetch_cache_restore_require_quality_ok = True
 youtube_edge_prefetch_fast_warm_enabled = True
 youtube_edge_prefetch_fast_hosts = (
     'www.youtube.com',

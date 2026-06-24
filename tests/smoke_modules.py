@@ -1573,6 +1573,9 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_max_rss_kb = 66560',
         'youtube_edge_prefetch_exclusive_ipsets = True',
         'youtube_edge_prefetch_protect_shared_google = True',
+        'youtube_edge_prefetch_cache_restore_enabled = True',
+        'youtube_edge_prefetch_cache_restore_max_addresses = 16',
+        'youtube_edge_prefetch_cache_restore_require_quality_ok = True',
         'youtube_edge_prefetch_fast_warm_enabled = True',
         'youtube_edge_prefetch_fast_hosts = (',
         'youtube_edge_prefetch_fast_max_hosts_per_run = 8',
@@ -1601,6 +1604,9 @@ def test_codex_version_matches_commit_count():
     assert "youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*4" in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_max_hosts_per_run = 12' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_quality_target_ms = 1000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_cache_restore_enabled = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_cache_restore_max_addresses = 16' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_cache_restore_require_quality_ok = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_pages = 2' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -2751,6 +2757,78 @@ def test_youtube_edge_prefetch_protects_shared_google_candidates():
     assert status['added_addresses'] == 0
 
 
+def test_youtube_edge_prefetch_restores_only_quality_approved_cache():
+    now = 1_800_000
+    good_address = '142.250.150.119'
+    shared_address = '142.250.150.120'
+    failed_address = '142.250.150.121'
+    untested_address = '142.250.150.122'
+    cache = {
+        'version': 1,
+        'updated_at': now,
+        'entries': {
+            good_address: {
+                'host': 'rr3---sn-4g5ednsl.googlevideo.com',
+                'source': 'watch',
+                'last_seen': now - 10,
+                'hits': 4,
+                'quality_last_ok': now - 10,
+                'quality_latency_ms': 420,
+            },
+            shared_address: {
+                'host': 'www.gstatic.com',
+                'source': 'dns',
+                'last_seen': now - 8,
+                'hits': 3,
+                'quality_last_ok': now - 8,
+                'quality_latency_ms': 200,
+            },
+            failed_address: {
+                'host': 'rr4---sn-4g5ednsl.googlevideo.com',
+                'source': 'watch',
+                'last_seen': now - 6,
+                'hits': 2,
+                'quality_last_ok': now - 120,
+                'quality_last_fail': now - 20,
+                'quality_fail_reason': 'slow',
+            },
+            untested_address: {
+                'host': 'rr5---sn-4g5ednsl.googlevideo.com',
+                'source': 'watch',
+                'last_seen': now - 4,
+                'hits': 1,
+            },
+        },
+    }
+    added = []
+    deleted = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_path = Path(tmp) / 'youtube_edge_cache.json'
+        cache_path.write_text(json.dumps(cache), encoding='utf-8')
+        status = youtube_edge_prefetch.restore_cached_ipsets(
+            route_protocol='vless2',
+            cache_path=str(cache_path),
+            ipset_contains=lambda set_name, ip: False,
+            ipset_add=lambda set_name, ip: added.append((set_name, ip)) or True,
+            ipset_delete=lambda set_name, ip: deleted.append((set_name, ip)) or False,
+            now_provider=lambda: now,
+            max_addresses=16,
+            require_quality_ok=True,
+        )
+
+    assert status['ok'] is True
+    assert status['candidates'] == 1
+    assert status['added_addresses'] == 1
+    assert ('unblockvless2', good_address) in added
+    assert ('unblockvless2udp', good_address) in added
+    assert all(ip == good_address for _set_name, ip in added)
+    assert all(ip == good_address for _set_name, ip in deleted)
+    assert status['shared_candidates_skipped'] == 1
+    assert status['cache_restore_skipped_recent_bad_quality'] == 1
+    assert status['cache_restore_skipped_no_quality'] == 1
+
+
 def test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks():
     original_config = youtube_edge_prefetch_runner.config
     original_fetch = youtube_edge_prefetch_runner._fetch_watch_page
@@ -2838,6 +2916,23 @@ def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
     assert 'i.ytimg.com' in hosts
     assert 's.ytimg.com' in hosts
     assert 'yt3.ggpht.com' in hosts
+
+
+def test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers():
+    original_config = youtube_edge_prefetch_runner.config
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_cache_restore_enabled=True,
+        )
+
+        assert youtube_edge_prefetch_runner._cache_restore_enabled_for_trigger('Post-update')
+        assert youtube_edge_prefetch_runner._cache_restore_enabled_for_trigger('Post-update-late')
+        assert youtube_edge_prefetch_runner._cache_restore_enabled_for_trigger('startup')
+        assert youtube_edge_prefetch_runner._cache_restore_enabled_for_trigger('manual-restore')
+        assert youtube_edge_prefetch_runner._cache_restore_only_for_trigger('manual-restore')
+        assert not youtube_edge_prefetch_runner._cache_restore_enabled_for_trigger('scheduler')
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
 
 
 def test_entware_dns_runtime_helpers():
@@ -7557,10 +7652,12 @@ def main():
     test_youtube_edge_prefetch_skips_recent_bad_quality_cache()
     test_youtube_edge_prefetch_quality_probe_can_score_existing_ipset_entries()
     test_youtube_edge_prefetch_protects_shared_google_candidates()
+    test_youtube_edge_prefetch_restores_only_quality_approved_cache()
     test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks()
     test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts()
     test_youtube_edge_prefetch_runner_extends_existing_watch_urls()
     test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers()
+    test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_cached_protocol_status_description_has_no_static_trailing_period()

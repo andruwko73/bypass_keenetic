@@ -29,6 +29,7 @@ DEFAULT_MAX_HOSTS_PER_RUN = 12
 DEFAULT_MAX_RESOLVED_ADDRESSES = 32
 DEFAULT_MAX_CANDIDATES = 64
 DEFAULT_MAX_ADDRESSES_PER_RUN = 16
+DEFAULT_CACHE_RESTORE_MAX_ADDRESSES = 16
 DEFAULT_WATCH_EDGE_MAX_HOSTS = 6
 DEFAULT_QUALITY_TARGET_MS = 1000
 DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS = 3600
@@ -469,6 +470,223 @@ def _recent_quality_failure(entry, now, cooldown_seconds):
     except Exception:
         return False
     return last_fail > last_ok and (float(now) - last_fail) < cooldown_seconds
+
+
+def _quality_last_ok(entry):
+    try:
+        return int(float((entry or {}).get('quality_last_ok') or 0))
+    except Exception:
+        return 0
+
+
+def _quality_last_fail(entry):
+    try:
+        return int(float((entry or {}).get('quality_last_fail') or 0))
+    except Exception:
+        return 0
+
+
+def _quality_latency(entry):
+    return _bounded_int((entry or {}).get('quality_latency_ms'), 0, minimum=0)
+
+
+def cached_restore_candidates(
+    cache,
+    *,
+    now=None,
+    max_addresses=DEFAULT_CACHE_RESTORE_MAX_ADDRESSES,
+    protect_shared_google=True,
+    require_quality_ok=True,
+    quality_bad_cooldown_seconds=DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS,
+):
+    now = float(now or time.time())
+    max_addresses = max(0, int(max_addresses or 0))
+    if max_addresses <= 0:
+        return (), {'cache_entries': len((cache or {}).get('entries') or {}), 'skipped_limit': 0}
+
+    stats = {
+        'cache_entries': 0,
+        'skipped_invalid': 0,
+        'skipped_shared': 0,
+        'skipped_no_quality': 0,
+        'skipped_recent_bad_quality': 0,
+        'skipped_failed_quality': 0,
+        'skipped_limit': 0,
+    }
+    candidates = []
+    entries = (cache or {}).get('entries') or {}
+    stats['cache_entries'] = len(entries)
+    for address, entry in entries.items():
+        address = str(address or '').strip()
+        entry = entry or {}
+        host = str(entry.get('host') or '').strip().lower().strip('.')
+        if not is_public_ipv4(address):
+            stats['skipped_invalid'] += 1
+            continue
+        if protect_shared_google and not youtube_owned_host(host):
+            stats['skipped_shared'] += 1
+            continue
+        last_ok = _quality_last_ok(entry)
+        last_fail = _quality_last_fail(entry)
+        if require_quality_ok and last_ok <= 0:
+            stats['skipped_no_quality'] += 1
+            continue
+        if _recent_quality_failure(entry, now, quality_bad_cooldown_seconds):
+            stats['skipped_recent_bad_quality'] += 1
+            continue
+        if last_fail > last_ok:
+            stats['skipped_failed_quality'] += 1
+            continue
+        candidates.append({
+            'address': address,
+            'host': host,
+            'source': str(entry.get('source') or 'cache')[:40],
+            'from_cache': True,
+            'quality_last_ok': last_ok,
+            'quality_latency_ms': _quality_latency(entry),
+            'last_seen': _entry_last_seen(entry),
+            'hits': max(0, _bounded_int(entry.get('hits'), 0)),
+        })
+
+    candidates.sort(
+        key=lambda item: (
+            int(item.get('quality_last_ok') or 0),
+            int(item.get('last_seen') or 0),
+            int(item.get('hits') or 0),
+            -int(item.get('quality_latency_ms') or 0),
+        ),
+        reverse=True,
+    )
+    if len(candidates) > max_addresses:
+        stats['skipped_limit'] = len(candidates) - max_addresses
+        candidates = candidates[:max_addresses]
+    return tuple(candidates), stats
+
+
+def restore_cached_ipsets(
+    *,
+    route_protocol,
+    cache_path='',
+    ipset_contains=None,
+    ipset_add=None,
+    ipset_delete=None,
+    delete_conntrack=None,
+    now_provider=None,
+    max_cache_entries=DEFAULT_MAX_CACHE_ENTRIES,
+    cache_ttl_seconds=DEFAULT_CACHE_TTL_SECONDS,
+    max_addresses=DEFAULT_CACHE_RESTORE_MAX_ADDRESSES,
+    remove_from_other_sets=True,
+    protect_shared_google=True,
+    require_quality_ok=True,
+    quality_bad_cooldown_seconds=DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS,
+):
+    now_provider = now_provider or time.time
+    now = float(now_provider())
+    protocol = str(route_protocol or '').strip().lower()
+    target_sets = _target_sets(protocol)
+    status = {
+        'ok': False,
+        'route_protocol': protocol,
+        'last_run_at': now,
+        'skipped_reason': '',
+        'mode': 'cache_restore',
+        'candidates': 0,
+        'cache_entries': 0,
+        'added_addresses': 0,
+        'added_sets': 0,
+        'deleted_sets': 0,
+        'failed_sets': 0,
+        'shared_candidates_skipped': 0,
+        'cache_restore_skipped_no_quality': 0,
+        'cache_restore_skipped_recent_bad_quality': 0,
+        'cache_restore_skipped_failed_quality': 0,
+        'cache_restore_skipped_limit': 0,
+    }
+    if not target_sets:
+        status['skipped_reason'] = 'unsupported_route_protocol'
+        return status
+    if ipset_contains is None or ipset_add is None:
+        status['skipped_reason'] = 'missing_ipset_callbacks'
+        return status
+
+    cache = load_cache(
+        cache_path,
+        now=now,
+        ttl_seconds=cache_ttl_seconds,
+        max_entries=max_cache_entries,
+    )
+    candidates, restore_stats = cached_restore_candidates(
+        cache,
+        now=now,
+        max_addresses=max_addresses,
+        protect_shared_google=protect_shared_google,
+        require_quality_ok=require_quality_ok,
+        quality_bad_cooldown_seconds=quality_bad_cooldown_seconds,
+    )
+    status['cache_entries'] = int(restore_stats.get('cache_entries') or 0)
+    status['candidates'] = len(candidates)
+    status['shared_candidates_skipped'] = int(restore_stats.get('skipped_shared') or 0)
+    status['cache_restore_skipped_no_quality'] = int(restore_stats.get('skipped_no_quality') or 0)
+    status['cache_restore_skipped_recent_bad_quality'] = int(
+        restore_stats.get('skipped_recent_bad_quality') or 0
+    )
+    status['cache_restore_skipped_failed_quality'] = int(restore_stats.get('skipped_failed_quality') or 0)
+    status['cache_restore_skipped_limit'] = int(restore_stats.get('skipped_limit') or 0)
+
+    touched_addresses = set()
+    for candidate in candidates:
+        address = str(candidate.get('address') or '').strip()
+        if not is_public_ipv4(address):
+            continue
+        missing_sets = []
+        for set_name in target_sets:
+            try:
+                present = bool(ipset_contains(set_name, address))
+            except Exception:
+                present = False
+            if not present:
+                missing_sets.append(set_name)
+        if not missing_sets:
+            continue
+
+        if remove_from_other_sets and ipset_delete is not None:
+            for set_name in _other_sets(protocol):
+                try:
+                    if ipset_delete(set_name, address):
+                        status['deleted_sets'] += 1
+                except Exception:
+                    continue
+
+        added_any = False
+        for set_name in missing_sets:
+            try:
+                result = ipset_add(set_name, address)
+                ok = bool(result[0] if isinstance(result, tuple) else result)
+            except Exception:
+                ok = False
+            if ok:
+                status['added_sets'] += 1
+                added_any = True
+            else:
+                status['failed_sets'] += 1
+        if added_any:
+            touched_addresses.add(address)
+            if delete_conntrack is not None:
+                try:
+                    delete_conntrack(address)
+                except Exception:
+                    pass
+
+    status['added_addresses'] = len(touched_addresses)
+    save_cache(
+        cache_path,
+        cache,
+        now=now,
+        ttl_seconds=cache_ttl_seconds,
+        max_entries=max_cache_entries,
+    )
+    status['ok'] = True
+    return status
 
 
 def _normalize_quality_result(result):
