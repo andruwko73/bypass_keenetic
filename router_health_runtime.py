@@ -106,6 +106,69 @@ def read_proc_meminfo(meminfo_path='/proc/meminfo'):
     return values
 
 
+def parse_cpu_stat(stat_text):
+    for line in str(stat_text or '').splitlines():
+        parts = line.split()
+        if not parts or parts[0] != 'cpu':
+            continue
+        values = []
+        for item in parts[1:]:
+            try:
+                values.append(int(item))
+            except Exception:
+                break
+        return tuple(values) if len(values) >= 4 else None
+    return None
+
+
+def read_cpu_stat(stat_path='/proc/stat', read_text=read_proc_text):
+    return parse_cpu_stat(read_text(stat_path))
+
+
+def _cpu_total_idle(cpu_stat):
+    if not cpu_stat or len(cpu_stat) < 4:
+        return None
+    total = sum(int(value) for value in cpu_stat)
+    idle = int(cpu_stat[3]) + (int(cpu_stat[4]) if len(cpu_stat) > 4 else 0)
+    return total, idle
+
+
+def cpu_percent_between(previous_stat, current_stat):
+    previous = _cpu_total_idle(previous_stat)
+    current = _cpu_total_idle(current_stat)
+    if previous is None or current is None:
+        return None
+    previous_total, previous_idle = previous
+    current_total, current_idle = current
+    total_delta = current_total - previous_total
+    idle_delta = current_idle - previous_idle
+    if total_delta <= 0 or idle_delta < 0:
+        return None
+    busy_delta = max(0, total_delta - idle_delta)
+    value = (busy_delta * 100.0) / float(total_delta)
+    return min(100.0, max(0.0, value))
+
+
+def read_cpu_percent(
+    *,
+    interval=0.05,
+    stat_path='/proc/stat',
+    read_text=read_proc_text,
+    sleep_func=time.sleep,
+):
+    previous_stat = read_cpu_stat(stat_path=stat_path, read_text=read_text)
+    if previous_stat is None:
+        return None
+    try:
+        delay = float(interval or 0)
+    except Exception:
+        delay = 0.0
+    if delay > 0:
+        sleep_func(delay)
+    current_stat = read_cpu_stat(stat_path=stat_path, read_text=read_text)
+    return cpu_percent_between(previous_stat, current_stat)
+
+
 def read_ndmc_system_snapshot():
     try:
         result = subprocess.run(
@@ -508,6 +571,26 @@ def _current_load_text(load_text):
     return value.split('/', 1)[0].strip()
 
 
+def _normalize_cpu_percent(cpu_percent):
+    if cpu_percent is None:
+        return None
+    try:
+        value = float(cpu_percent)
+    except Exception:
+        return None
+    if value != value:
+        return None
+    return min(100.0, max(0.0, value))
+
+
+def _format_cpu_percent(cpu_percent):
+    value = _normalize_cpu_percent(cpu_percent)
+    if value is None:
+        return ''
+    text = f'{value:.2f}'.rstrip('0').rstrip('.')
+    return f'{text}%'
+
+
 def build_router_health_payload(
     *,
     meminfo,
@@ -518,6 +601,7 @@ def build_router_health_payload(
     temp_xray_count,
     dns_health=None,
     core_proxy_health=None,
+    cpu_percent=None,
 ):
     meminfo = meminfo or {}
     ndmc_system = ndmc_system or {}
@@ -578,8 +662,12 @@ def build_router_health_payload(
         details.append(f'Доступно для приложений: {available_mb} MB ({available_percent}%)')
     if cache_mb:
         details.append(f'Кэш и буферы: {cache_mb} MB')
-    if load_text:
-        details.append(f'Нагрузка CPU: {_current_load_text(load_text)}')
+    normalized_cpu_percent = _normalize_cpu_percent(cpu_percent)
+    cpu_percent_text = _format_cpu_percent(normalized_cpu_percent)
+    if cpu_percent_text:
+        details.append(f'Нагрузка CPU: {cpu_percent_text}')
+    elif load_text:
+        details.append(f'Средняя нагрузка: {_current_load_text(load_text)}')
     if bot_rss_mb:
         details.append(f'Бот использует {bot_rss_mb} MB RAM')
     if swap_total_kb:
@@ -612,6 +700,7 @@ def build_router_health_payload(
         'linux_cache_kb': display_cache_kb,
         'memory_source': memory_source,
         'load_text': load_text,
+        'cpu_percent': normalized_cpu_percent,
         'bot_rss_kb': bot_rss_kb or 0,
         'pool_probe_running': probe_running,
         'pool_probe_text': (
@@ -715,6 +804,7 @@ class RouterHealthRuntime:
             meminfo=read_proc_meminfo(),
             ndmc_system=self._ndmc_snapshot(now),
             load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
+            cpu_percent=read_cpu_percent(),
             bot_rss_kb=process_rss_kb('self'),
             probe_progress=probe_progress,
             temp_xray_count=count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0,

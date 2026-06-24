@@ -1,3 +1,10 @@
+<a name="1.807"></a>
+# [1.807] - 24 Jun 2026
+
+- Shows real router CPU usage as a percentage in the web router block instead of displaying load average as `Нагрузка CPU`.
+- Makes YouTube route detection count active route-list markers across Shadowsocks, Vmess, Vless 1, Vless 2, and Trojan in the bot watchdog, redirect priority script, scheduler, and ipset refresh.
+- Keeps Vless/Vless 2 runtime overlap cleanup scoped to the actual YouTube list so moving YouTube to another protocol no longer makes Vless 1 the implicit fallback winner.
+
 <a name="1.806"></a>
 # [1.806] - 24 Jun 2026
 

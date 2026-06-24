@@ -257,6 +257,7 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
             'memcache': 130 * 1024,
         },
         load_text='0.10 / 0.14 / 0.10',
+        cpu_percent=0.84,
         bot_rss_kb=52 * 1024,
         probe_progress={'running': False, 'total': 0},
         temp_xray_count=0,
@@ -264,7 +265,9 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['memory_source'] == 'keenetic'
     assert payload['memory_text'] == 'Память: доступно 201 MB, занято 281 из 512 MB'
     assert payload['used_percent'] == 55
+    assert payload['cpu_percent'] == 0.84
     assert payload['pool_probe_text'] == 'Не запущена'
+    assert 'Нагрузка CPU: 0.84%' in payload['note']
     assert 'Бот использует 52 MB RAM' in payload['note']
     assert not payload['note'].endswith('.')
     assert 'Проверка пула' not in payload['note']
@@ -441,11 +444,20 @@ def test_router_health_runtime_process_rss_parser():
     assert router_health_runtime.process_rss_kb('self', read_text=fake_read) == 54321
 
 
+def test_router_health_runtime_cpu_percent_parser():
+    stat_text = 'cpu  100 0 0 900 0 0 0 0 0 0\ncpu0 50 0 0 450 0 0 0 0 0 0\n'
+    assert router_health_runtime.parse_cpu_stat(stat_text) == (100, 0, 0, 900, 0, 0, 0, 0, 0, 0)
+    assert router_health_runtime.cpu_percent_between((100, 0, 0, 900, 0), (110, 0, 10, 980, 0)) == 20.0
+    assert router_health_runtime._format_cpu_percent(0.84) == '0.84%'
+    assert router_health_runtime._format_cpu_percent(2.0) == '2%'
+
+
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
-    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0}
+    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0, 'cpu': 0}
     original = {
         'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
         'read_proc_text': router_health_runtime.read_proc_text,
+        'read_cpu_percent': router_health_runtime.read_cpu_percent,
         'process_rss_kb': router_health_runtime.process_rss_kb,
         'count_proc_cmdline': router_health_runtime.count_proc_cmdline,
         'read_ndmc_system_snapshot': router_health_runtime.read_ndmc_system_snapshot,
@@ -470,10 +482,15 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
         calls['call'] += 1
         return {'ok': True, 'enabled': True, 'tproxy_enabled': True, 'protocols': ['vless'], 'ports': {'vless': 11812}, 'port_states': {'11812': True}}
 
+    def fake_cpu_percent():
+        calls['cpu'] += 1
+        return 12.34
+
     now = [100.0]
     try:
         router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
         router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
+        router_health_runtime.read_cpu_percent = fake_cpu_percent
         router_health_runtime.process_rss_kb = lambda pid='self': 64000
         router_health_runtime.count_proc_cmdline = lambda marker: 0
         router_health_runtime.read_ndmc_system_snapshot = fake_ndmc
@@ -499,7 +516,9 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
 
     assert first['dns_backend'] == 'dnsmasq'
     assert second['dns_backend'] == 'dnsmasq'
-    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1}
+    assert first['cpu_percent'] == 12.34
+    assert second['cpu_percent'] == 12.34
+    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu': 2}
 
 
 def test_web_commands_runtime_dispatch():
@@ -1803,10 +1822,14 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'cleanup_orphan_schedulers' in s99unblock
     assert 'stop_scheduler_pid "$pid"' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
+    assert 'route_file_marker_count()' in s99unblock
+    assert '"vmess:$UNBLOCK_DIR/vmess.txt"' in s99unblock
     assert 'ipset test "$winner_set" "$entry"' in s99unblock
     assert 'acquire_runtime_dedupe_lock || return 0' in s99unblock
     assert '*unblock_ipset.sh*) continue ;;' in s99unblock
     assert 'dedupe_vless_final_ipsets()' in ipset_script
+    assert 'route_file_marker_count()' in ipset_script
+    assert '"trojan:$UNBLOCK_DIR/trojan.txt"' in ipset_script
     assert 'LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"' in ipset_script
     assert 'lock_busy_exit()' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless" "unblockvless2"' in ipset_script
@@ -2107,7 +2130,9 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     # effective priority in the final chain.
     assert priority_block.index(vless1_insert) < priority_block.index(vless2_insert)
     assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in redirect_script
-    assert 'grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt"' in redirect_script
+    assert 'route_file_marker_count()' in redirect_script
+    assert '"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt"' in redirect_script
+    assert '"trojan:$UNBLOCK_DIR/trojan.txt"' in redirect_script
     push_block = redirect_script.split('refresh_mobile_push_priority() {', 1)[1].split('\n}', 1)[0]
     assert 'for push_port in 5222 5223 5228 5229 5230' in push_block
     assert 'telegram_route="$(telegram_route_protocol)"' in push_block
@@ -2317,6 +2342,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'stream_guard_defer'" in source
     assert "youtube_vless2_failover_recent_success_ttl', 300" in source
     assert 'def _youtube_route_protocol' in source
+    assert 'def _youtube_route_marker_count' in source
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
     assert "YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')" in source
     assert "proxy_mode == route_proto" in source

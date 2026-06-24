@@ -1,6 +1,6 @@
-*v1.806 (24 Jun 2026) -* main
+*v1.807 (24 Jun 2026) -* main
 
-*Polishes web status wording, counts pool-summary services per visible pool row, moves RuTracker to Vless 1, and adds ZazaZa image CDN domains to Vless 1.*
+*Shows true router CPU percentage in web status and makes YouTube route detection follow the active route list across web redirect, scheduler, ipset refresh, and bot watchdog logic.*
 
 *v1.805 (24 Jun 2026) -* main
 

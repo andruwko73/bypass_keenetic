@@ -941,6 +941,44 @@ refresh_vless_tcp_priority() {
 	fi
 }
 
+route_file_marker_count() {
+	route_file="$1"
+	shift
+	[ -s "$route_file" ] || {
+		printf '%s\n' 0
+		return
+	}
+	awk '
+		BEGIN {
+			file_arg = ARGC - 1
+			for (idx = 1; idx < file_arg; idx++) {
+				markers[ARGV[idx]] = 1
+				ARGV[idx] = ""
+			}
+		}
+		{
+			value = $0
+			sub(/#.*/, "", value)
+			gsub(/\r/, "", value)
+			gsub(/^[ \t]+|[ \t]+$/, "", value)
+			if (value == "") next
+			sub(/^full:/, "", value)
+			sub(/^domain:/, "", value)
+			sub(/^\+\./, "", value)
+			sub(/^\*\./, "", value)
+			sub(/^\./, "", value)
+			for (marker in markers) {
+				suffix = "." marker
+				if (value == marker || (length(value) > length(suffix) && substr(value, length(value) - length(suffix) + 1) == suffix)) {
+					count++
+					break
+				}
+			}
+		}
+		END { print count + 0 }
+	' "$@" "$route_file"
+}
+
 telegram_route_protocol() {
 	telegram_markers="api.telegram.org 149.154.160.0/20 mtalk.google.com 17.249.0.0/16"
 	for marker in $telegram_markers; do
@@ -953,20 +991,25 @@ telegram_route_protocol() {
 }
 
 youtube_route_protocol() {
-	youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com"
-	for marker in $youtube_markers; do
-		if grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt" >/dev/null 2>&1; then
-			printf '%s\n' "vless2"
-			return
+	youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com yt3.ggpht.com"
+	best_protocol=""
+	best_count=0
+	for route_spec in \
+		"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt" \
+		"vmess:$UNBLOCK_DIR/vmess.txt" \
+		"vless:$UNBLOCK_DIR/vless.txt" \
+		"vless2:$UNBLOCK_DIR/vless-2.txt" \
+		"trojan:$UNBLOCK_DIR/trojan.txt"; do
+		protocol="${route_spec%%:*}"
+		route_file="${route_spec#*:}"
+		count="$(route_file_marker_count "$route_file" $youtube_markers)"
+		case "$count" in ''|*[!0-9]*) count=0 ;; esac
+		if [ "$count" -gt "$best_count" ] 2>/dev/null; then
+			best_count="$count"
+			best_protocol="$protocol"
 		fi
 	done
-	for marker in $youtube_markers; do
-		if grep -Fxs "$marker" "$UNBLOCK_DIR/vless.txt" >/dev/null 2>&1; then
-			printf '%s\n' "vless"
-			return
-		fi
-	done
-	printf '%s\n' "vless"
+	printf '%s\n' "${best_protocol:-vless}"
 }
 
 refresh_vless_tcp_priority

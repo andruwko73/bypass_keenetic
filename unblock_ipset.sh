@@ -423,17 +423,64 @@ route_file_has_markers() {
 	return 1
 }
 
+route_file_marker_count() {
+	route_file="$1"
+	shift
+	[ -s "$route_file" ] || {
+		printf '%s\n' 0
+		return
+	}
+	awk '
+		BEGIN {
+			file_arg = ARGC - 1
+			for (idx = 1; idx < file_arg; idx++) {
+				markers[ARGV[idx]] = 1
+				ARGV[idx] = ""
+			}
+		}
+		{
+			value = $0
+			sub(/#.*/, "", value)
+			gsub(/\r/, "", value)
+			gsub(/^[ \t]+|[ \t]+$/, "", value)
+			if (value == "") next
+			sub(/^full:/, "", value)
+			sub(/^domain:/, "", value)
+			sub(/^\+\./, "", value)
+			sub(/^\*\./, "", value)
+			sub(/^\./, "", value)
+			for (marker in markers) {
+				suffix = "." marker
+				if (value == marker || (length(value) > length(suffix) && substr(value, length(value) - length(suffix) + 1) == suffix)) {
+					count++
+					break
+				}
+			}
+		}
+		END { print count + 0 }
+	' "$@" "$route_file"
+}
+
 youtube_route_protocol() {
-	youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com"
-	if route_file_has_markers "$UNBLOCK_DIR/vless-2.txt" $youtube_markers && [ -s "$VLESS2_KEY_PATH" ]; then
-		printf '%s\n' "vless2"
-		return 0
-	fi
-	if route_file_has_markers "$UNBLOCK_DIR/vless.txt" $youtube_markers; then
-		printf '%s\n' "vless"
-		return 0
-	fi
-	printf '%s\n' "vless"
+	youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com yt3.ggpht.com"
+	best_protocol=""
+	best_count=0
+	for route_spec in \
+		"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt" \
+		"vmess:$UNBLOCK_DIR/vmess.txt" \
+		"vless:$UNBLOCK_DIR/vless.txt" \
+		"vless2:$UNBLOCK_DIR/vless-2.txt" \
+		"trojan:$UNBLOCK_DIR/trojan.txt"; do
+		protocol="${route_spec%%:*}"
+		route_file="${route_spec#*:}"
+		count="$(route_file_marker_count "$route_file" $youtube_markers)"
+		case "$count" in ''|*[!0-9]*) count=0 ;; esac
+		if [ "$count" -gt "$best_count" ] 2>/dev/null; then
+			best_count="$count"
+			best_protocol="$protocol"
+		fi
+	done
+	printf '%s\n' "${best_protocol:-vless}"
 }
 
 xargs_parallel_flag() {
@@ -678,8 +725,13 @@ remove_runtime_overlap_from_set() {
 dedupe_vless_runtime_restore() {
 	[ "$RUNTIME_IPSET_DEDUPE_ENABLED" = "0" ] && return 0
 	[ -s "$sorted_restore_file" ] || return 0
+	youtube_route="$(youtube_route_protocol)"
+	case "$youtube_route" in
+		vless|vless2) ;;
+		*) return 0 ;;
+	esac
 	filtered_restore_file="$tmp_dir/restore.sorted.runtime-deduped"
-	case "$(youtube_route_protocol)" in
+	case "$youtube_route" in
 		vless2)
 			filter_restore_exact_overlap "tmp_unblockvless_$$" "tmp_unblockvless2_$$" "$sorted_restore_file" "$filtered_restore_file"
 			filter_restore_exact_overlap "tmp_unblockvlessudp_$$" "tmp_unblockvless2udp_$$" "$filtered_restore_file" "$filtered_restore_file.next"
@@ -687,12 +739,15 @@ dedupe_vless_runtime_restore() {
 			filter_restore_exact_overlap "tmp_unblockvless6_$$" "tmp_unblockvless2v6_$$" "$filtered_restore_file" "$filtered_restore_file.next"
 			mv "$filtered_restore_file.next" "$filtered_restore_file"
 			;;
-		*)
+		vless)
 			filter_restore_exact_overlap "tmp_unblockvless2_$$" "tmp_unblockvless_$$" "$sorted_restore_file" "$filtered_restore_file"
 			filter_restore_exact_overlap "tmp_unblockvless2udp_$$" "tmp_unblockvlessudp_$$" "$filtered_restore_file" "$filtered_restore_file.next"
 			mv "$filtered_restore_file.next" "$filtered_restore_file"
 			filter_restore_exact_overlap "tmp_unblockvless2v6_$$" "tmp_unblockvless6_$$" "$filtered_restore_file" "$filtered_restore_file.next"
 			mv "$filtered_restore_file.next" "$filtered_restore_file"
+			;;
+		*)
+			return 0
 			;;
 	esac
 	mv "$filtered_restore_file" "$sorted_restore_file"
@@ -706,10 +761,12 @@ dedupe_vless_runtime_ipsets() {
 			remove_runtime_overlap_from_set "tmp_unblockvlessudp_$$" "tmp_unblockvless2udp_$$"
 			remove_runtime_overlap_from_set "tmp_unblockvless6_$$" "tmp_unblockvless2v6_$$"
 			;;
-		*)
+		vless)
 			remove_runtime_overlap_from_set "tmp_unblockvless2_$$" "tmp_unblockvless_$$"
 			remove_runtime_overlap_from_set "tmp_unblockvless2udp_$$" "tmp_unblockvlessudp_$$"
 			remove_runtime_overlap_from_set "tmp_unblockvless2v6_$$" "tmp_unblockvless6_$$"
+			;;
+		*)
 			;;
 	esac
 }
@@ -722,10 +779,12 @@ dedupe_vless_final_ipsets() {
 			remove_runtime_overlap_from_set "unblockvlessudp" "unblockvless2udp"
 			remove_runtime_overlap_from_set "unblockvless6" "unblockvless2v6"
 			;;
-		*)
+		vless)
 			remove_runtime_overlap_from_set "unblockvless2" "unblockvless"
 			remove_runtime_overlap_from_set "unblockvless2udp" "unblockvlessudp"
 			remove_runtime_overlap_from_set "unblockvless2v6" "unblockvless6"
+			;;
+		*)
 			;;
 	esac
 }

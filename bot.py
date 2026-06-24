@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.806, последнее изменение: 24.06.2026
+#  Файл: bot.py, Версия v1.807, последнее изменение: 24.06.2026
 
 import subprocess
 import os
@@ -851,16 +851,24 @@ def _youtube_route_entry_matches(entry):
     return any(value == marker or value.endswith('.' + marker) for marker in YOUTUBE_ROUTE_MARKERS)
 
 
+def _youtube_route_marker_count(proto):
+    try:
+        route_name = _unblock_route_for_key_type(proto)
+        entries = _read_unblock_list_entries(route_name)
+    except Exception:
+        entries = []
+    return sum(1 for entry in entries if _youtube_route_entry_matches(entry))
+
+
 def _youtube_route_protocol():
+    best_proto = ''
+    best_count = 0
     for proto in YOUTUBE_ROUTE_PROTOCOLS:
-        try:
-            route_name = _unblock_route_for_key_type(proto)
-            entries = _read_unblock_list_entries(route_name)
-        except Exception:
-            entries = []
-        if any(_youtube_route_entry_matches(entry) for entry in entries):
-            return proto
-    return 'vless2'
+        count = _youtube_route_marker_count(proto)
+        if count > best_count:
+            best_count = count
+            best_proto = proto
+    return best_proto or 'vless2'
 
 
 def _youtube_failover_state(proto):
