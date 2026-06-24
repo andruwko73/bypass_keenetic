@@ -1,3 +1,9 @@
+<a name="1.798"></a>
+# [1.798] - 24 Jun 2026
+
+- Adds a delayed external YouTube edge prefetch retry after bot restart when the immediate post-update run skipped because memory was temporarily low or the runner lock was busy.
+- Keeps the memory guard unchanged; the retry runs as a short background process and does not add persistent Telegram-bot RSS.
+
 <a name="1.797"></a>
 # [1.797] - 24 Jun 2026
 

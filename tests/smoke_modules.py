@@ -1762,6 +1762,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'run_update_ipset_refresh "Post-update"' in script
     assert 'run_youtube_edge_prefetch_once "Post-install"' in script
     assert 'run_youtube_edge_prefetch_once "Post-update"' in script
+    assert 'youtube_edge_prefetch_skipped_reason()' in script
+    assert 'run_youtube_edge_prefetch_retry_if_skipped()' in script
+    assert 'low_available_memory|lock_busy)' in script
+    assert 'run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90' in script
     assert 'def youtube_edge_prefetch_shell(trigger):' in installer_source
     assert 'switch_to_main_bot(run_youtube_prefetch=True)' in installer_source
     assert 'YOUTUBE_EDGE_PREFETCH_RUNNER} --trigger "{safe_trigger}"' in installer_source
@@ -2165,6 +2169,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'youtube_edge_prefetch_runner.py' in readme_source
     assert 'Post-install' in readme_source
     assert 'Post-update' in readme_source
+    assert 'Post-update-late' in readme_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source

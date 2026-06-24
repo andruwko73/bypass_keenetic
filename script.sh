@@ -257,6 +257,26 @@ run_youtube_edge_prefetch_once() {
   PYTHONPATH="$BOT_RUNTIME_DIR" "$python_bin" "$runner" --trigger "$trigger" >/tmp/bypass-youtube-edge-prefetch.log 2>&1 || true
 }
 
+youtube_edge_prefetch_skipped_reason() {
+  status_file="${BOT_RUNTIME_DIR}/youtube_edge_prefetch_status.json"
+  [ -r "$status_file" ] || return 0
+  sed -n 's/.*"skipped_reason"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$status_file" 2>/dev/null | head -n 1
+}
+
+run_youtube_edge_prefetch_retry_if_skipped() {
+  trigger="${1:-Post-update-late}"
+  delay_seconds="${2:-90}"
+  (
+    sleep "$delay_seconds"
+    reason="$(youtube_edge_prefetch_skipped_reason)"
+    case "$reason" in
+      low_available_memory|lock_busy)
+        run_youtube_edge_prefetch_once "$trigger"
+        ;;
+    esac
+  ) >/tmp/bypass-youtube-edge-prefetch-late.log 2>&1 &
+}
+
 install_unblock_ipset_cron_job() {
   cron_tmp="/tmp/bypass-unblock-crontab.$$"
   {
@@ -1538,6 +1558,7 @@ if [ "$1" = "-update" ]; then
       fi
     fi
 
+    run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
     write_cli_update_status update false 100 Done "CLI update complete"
     cli_update_status_active=0
     trap - EXIT

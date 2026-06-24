@@ -1,3 +1,7 @@
+*v1.798 (24 Jun 2026) -* main
+
+*Retries the external YouTube edge prefetch in the background after the bot restart when the immediate post-update run skipped because memory was temporarily low or the runner lock was busy.*
+
 *v1.797 (24 Jun 2026) -* main
 
 *Runs the external YouTube edge prefetch during clean install, first main-bot start, and update, and documents the current GitHub bootstrap command plus the fresh-install YouTube warmup behavior in README.*

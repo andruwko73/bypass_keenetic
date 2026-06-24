@@ -48,7 +48,7 @@ sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /op
 
 Команда выше является актуальной командой чистой установки из GitHub `main`. Она ставит минимальный `curl`, скачивает `bootstrap/install.sh`, затем bootstrap скачивает основной `script.sh`, веб-установщик, Telegram-бота и все runtime-модули.
 
-Прогрев YouTube ставится сразу при чистой установке: в `/opt/etc/bot` попадают `youtube_edge_prefetch.py` и `youtube_edge_prefetch_runner.py`, а в `bot_config.py` добавляются параметры `youtube_edge_prefetch_*` и `youtube_edge_watch_warm_*`. После первичной установки `script.sh -install` запускает короткий внешний prefetch с меткой `Post-install`; после сохранения первичной формы и запуска основного бота запускается такой же короткий `first-run`; после обновления из веб-интерфейса запускается `Post-update`. Эта работа выполняется отдельным коротким процессом и не увеличивает постоянный RSS Telegram-бота.
+Прогрев YouTube ставится сразу при чистой установке: в `/opt/etc/bot` попадают `youtube_edge_prefetch.py` и `youtube_edge_prefetch_runner.py`, а в `bot_config.py` добавляются параметры `youtube_edge_prefetch_*` и `youtube_edge_watch_warm_*`. После первичной установки `script.sh -install` запускает короткий внешний prefetch с меткой `Post-install`; после сохранения первичной формы и запуска основного бота запускается такой же короткий `first-run`; после обновления из веб-интерфейса запускается `Post-update`, а если он пропущен из-за временно низкой памяти или занятого lock, после рестарта бота запускается фоновый `Post-update-late`. Эта работа выполняется отдельным коротким процессом и не увеличивает постоянный RSS Telegram-бота.
 
 При первой чистой установке откроется первичная настройка на `http://192.168.1.1:8080/`.
 
