@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.795
+# ВЕРСИЯ СКРИПТА v1.796
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -75,10 +75,10 @@ youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.j
 youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'
 youtube_edge_prefetch_cache_ttl_seconds = 259200
 youtube_edge_prefetch_max_cache_entries = 128
-youtube_edge_prefetch_max_hosts_per_run = 4
-youtube_edge_prefetch_max_resolved_addresses = 12
-youtube_edge_prefetch_max_candidates = 32
-youtube_edge_prefetch_max_addresses_per_run = 8
+youtube_edge_prefetch_max_hosts_per_run = 12
+youtube_edge_prefetch_max_resolved_addresses = 32
+youtube_edge_prefetch_max_candidates = 64
+youtube_edge_prefetch_max_addresses_per_run = 16
 youtube_edge_prefetch_min_available_kb = 125000
 youtube_edge_prefetch_max_rss_kb = 66560
 youtube_edge_prefetch_exclusive_ipsets = True

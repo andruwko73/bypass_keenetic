@@ -1,3 +1,10 @@
+<a name="1.796"></a>
+# [1.796] - 24 Jun 2026
+
+- Widens the short external YouTube prefetch pass from 4 to 12 bootstrap hosts, so homepage, player API, image/static, manifest, and video/live startup hosts warm in one run.
+- Raises the bounded prefetch resolver/candidate/address caps from 12/32/8 to 32/64/16 for that external runner only.
+- Migrates old default prefetch limits during update while leaving custom non-default values alone, keeping the work out of the long-running bot process.
+
 <a name="1.795"></a>
 # [1.795] - 24 Jun 2026
 

@@ -1541,10 +1541,10 @@ def test_codex_version_matches_commit_count():
         "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'",
         'youtube_edge_prefetch_cache_ttl_seconds = 259200',
         'youtube_edge_prefetch_max_cache_entries = 128',
-        'youtube_edge_prefetch_max_hosts_per_run = 4',
-        'youtube_edge_prefetch_max_resolved_addresses = 12',
-        'youtube_edge_prefetch_max_candidates = 32',
-        'youtube_edge_prefetch_max_addresses_per_run = 8',
+        'youtube_edge_prefetch_max_hosts_per_run = 12',
+        'youtube_edge_prefetch_max_resolved_addresses = 32',
+        'youtube_edge_prefetch_max_candidates = 64',
+        'youtube_edge_prefetch_max_addresses_per_run = 16',
         'youtube_edge_prefetch_min_available_kb = 125000',
         'youtube_edge_prefetch_max_rss_kb = 66560',
         'youtube_edge_prefetch_exclusive_ipsets = True',
@@ -1563,6 +1563,8 @@ def test_codex_version_matches_commit_count():
         assert config_line in bootstrap
     assert "youtube_edge_prefetch_min_available_kb[[:space:]]*=[[:space:]]*160000" in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_min_available_kb = 125000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert "youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*4" in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_max_hosts_per_run = 12' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
         'telegram_call_learning_enabled = True',
         "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",

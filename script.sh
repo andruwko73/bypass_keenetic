@@ -800,10 +800,22 @@ migrate_runtime_config_defaults() {
   grep -Eq '^youtube_edge_prefetch_lock_dir[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cache_ttl_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cache_ttl_seconds = 259200\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_max_cache_entries[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_cache_entries = 128\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_hosts_per_run = 4\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_resolved_addresses = 12\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_candidates = 32\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_addresses_per_run = 8\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*4([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=.*/youtube_edge_prefetch_max_hosts_per_run = 12/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_hosts_per_run = 12\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=[[:space:]]*12([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=.*/youtube_edge_prefetch_max_resolved_addresses = 32/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_resolved_addresses = 32\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=[[:space:]]*32([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_candidates[[:space:]]*=.*/youtube_edge_prefetch_max_candidates = 64/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_candidates = 64\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=[[:space:]]*8([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=.*/youtube_edge_prefetch_max_addresses_per_run = 16/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_addresses_per_run = 16\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^youtube_edge_prefetch_min_available_kb[[:space:]]*=[[:space:]]*160000([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^youtube_edge_prefetch_min_available_kb[[:space:]]*=.*/youtube_edge_prefetch_min_available_kb = 125000/' "$BOT_CONFIG_PATH" || true
   fi

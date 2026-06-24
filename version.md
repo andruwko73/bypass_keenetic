@@ -1,3 +1,7 @@
+*v1.796 (24 Jun 2026) -* main
+
+*Runs the external YouTube prefetch wider in one short pass, migrating old default limits so homepage, watch, and live bootstrap hosts warm immediately after update instead of waiting for several scheduler cycles.*
+
 *v1.795 (24 Jun 2026) -* main
 
 *Warms real YouTube watch-page CDN edges through the active route SOCKS port, adds manifest/player bootstrap hosts to the external prefetch runner, and keeps the work outside the long-running bot process so video/live startup can improve without raising bot RSS.*
