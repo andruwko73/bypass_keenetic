@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.803
+# ВЕРСИЯ СКРИПТА v1.804
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -86,11 +86,15 @@ youtube_edge_prefetch_protect_shared_google = True
 youtube_edge_prefetch_fast_warm_enabled = True
 youtube_edge_prefetch_fast_hosts = (
     'www.youtube.com',
+    'youtube.com',
     'youtubei.googleapis.com',
     'manifest.googlevideo.com',
     'redirector.googlevideo.com',
+    'i.ytimg.com',
+    's.ytimg.com',
+    'yt3.ggpht.com',
 )
-youtube_edge_prefetch_fast_max_hosts_per_run = 4
+youtube_edge_prefetch_fast_max_hosts_per_run = 8
 youtube_edge_prefetch_fast_max_candidates = 32
 youtube_edge_prefetch_quality_probe_enabled = True
 youtube_edge_prefetch_quality_target_ms = 1000
@@ -98,15 +102,19 @@ youtube_edge_prefetch_quality_timeout_seconds = 5
 youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600
 youtube_edge_prefetch_quality_max_candidates = 24
 youtube_edge_watch_warm_enabled = True
-youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)
-youtube_edge_watch_warm_max_pages = 1
-youtube_edge_watch_warm_max_hosts = 6
+youtube_edge_watch_warm_urls = (
+    'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+    'https://www.youtube.com/watch?v=jfKfPfyJRdk',
+)
+youtube_edge_watch_warm_max_pages = 2
+youtube_edge_watch_warm_max_hosts = 8
 youtube_edge_watch_warm_max_bytes = 1800000
 youtube_edge_watch_warm_connect_timeout = 6
 youtube_edge_watch_warm_max_time = 20
 youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')
 youtube_edge_prefetch_hosts = (
     'www.youtube.com',
+    'youtube.com',
     'm.youtube.com',
     'youtubei.googleapis.com',
     'youtubei-att.googleapis.com',

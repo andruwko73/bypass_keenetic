@@ -1,3 +1,9 @@
+<a name="1.804"></a>
+# [1.804] - 24 Jun 2026
+
+- Expands the short external YouTube fast-warm set with `youtube.com`, `i.ytimg.com`, `s.ytimg.com`, and `yt3.ggpht.com`, matching the browser timing bottlenecks seen on the homepage.
+- Adds a live YouTube watch URL to the external watch-edge warmup and raises the bounded watch page/edge-host defaults from 1/6 to 2/8 without adding persistent bot work.
+
 <a name="1.803"></a>
 # [1.803] - 24 Jun 2026
 

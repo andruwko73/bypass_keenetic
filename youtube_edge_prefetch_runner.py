@@ -24,17 +24,24 @@ UNBLOCK_DIR = '/opt/etc/unblock'
 MIN_AVAILABLE_KB = 125000
 LOCK_STALE_SECONDS = 300
 STATUS_MAX_BYTES = 65536
-WATCH_WARM_URLS = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)
-WATCH_WARM_MAX_PAGES = 1
-WATCH_WARM_MAX_HOSTS = 6
+WATCH_WARM_URLS = (
+    'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+    'https://www.youtube.com/watch?v=jfKfPfyJRdk',
+)
+WATCH_WARM_MAX_PAGES = 2
+WATCH_WARM_MAX_HOSTS = 8
 WATCH_WARM_MAX_BYTES = 1800000
 WATCH_WARM_CONNECT_TIMEOUT = 6
 WATCH_WARM_MAX_TIME = 20
 FAST_PREFETCH_HOSTS = (
     'www.youtube.com',
+    'youtube.com',
     'youtubei.googleapis.com',
     'manifest.googlevideo.com',
     'redirector.googlevideo.com',
+    'i.ytimg.com',
+    's.ytimg.com',
+    'yt3.ggpht.com',
 )
 FAST_PREFETCH_TRIGGERS = (
     'post-install',
@@ -139,6 +146,17 @@ def _normalize_watch_urls(urls):
         seen.add(url)
         normalized.append(url)
     return tuple(normalized)
+
+
+def watch_urls_for_run():
+    urls = list(_normalize_watch_urls(_config_value('youtube_edge_watch_warm_urls', WATCH_WARM_URLS)))
+    seen = set(urls)
+    for url in _normalize_watch_urls(WATCH_WARM_URLS):
+        if url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return tuple(urls)
 
 
 def _fetch_watch_page(url, socks_port, *, max_bytes, connect_timeout, max_time):
@@ -275,12 +293,18 @@ def collect_watch_edge_hosts(route_protocol):
     if socks_port <= 0:
         return (), {'enabled': True, 'skipped_reason': 'no_socks_port'}
 
-    max_hosts = _config_int('youtube_edge_watch_warm_max_hosts', WATCH_WARM_MAX_HOSTS, minimum=0)
+    max_hosts = max(
+        _config_int('youtube_edge_watch_warm_max_hosts', WATCH_WARM_MAX_HOSTS, minimum=0),
+        WATCH_WARM_MAX_HOSTS,
+    )
     if max_hosts <= 0:
         return (), {'enabled': True, 'socks_port': socks_port, 'skipped_reason': 'max_hosts_zero'}
 
-    urls = _normalize_watch_urls(_config_value('youtube_edge_watch_warm_urls', WATCH_WARM_URLS))
-    max_pages = min(len(urls), _config_int('youtube_edge_watch_warm_max_pages', WATCH_WARM_MAX_PAGES, minimum=1))
+    urls = watch_urls_for_run()
+    max_pages = min(
+        len(urls),
+        max(_config_int('youtube_edge_watch_warm_max_pages', WATCH_WARM_MAX_PAGES, minimum=1), WATCH_WARM_MAX_PAGES),
+    )
     hosts = []
     seen = set()
     fetched = 0

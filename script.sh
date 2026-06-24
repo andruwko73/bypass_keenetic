@@ -851,13 +851,20 @@ migrate_runtime_config_defaults() {
     cat >> "$BOT_CONFIG_PATH" <<'PYCFG'
 youtube_edge_prefetch_fast_hosts = (
     'www.youtube.com',
+    'youtube.com',
     'youtubei.googleapis.com',
     'manifest.googlevideo.com',
     'redirector.googlevideo.com',
+    'i.ytimg.com',
+    's.ytimg.com',
+    'yt3.ggpht.com',
 )
 PYCFG
   fi
-  grep -Eq '^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_max_hosts_per_run = 4\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=[[:space:]]*4([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=.*/youtube_edge_prefetch_fast_max_hosts_per_run = 8/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_max_hosts_per_run = 8\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_fast_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_max_candidates = 32\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_quality_probe_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_probe_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_quality_target_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_target_ms = 1000\n' >> "$BOT_CONFIG_PATH"
@@ -865,9 +872,15 @@ PYCFG
   grep -Eq '^youtube_edge_prefetch_quality_bad_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_quality_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_max_candidates = 24\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_watch_warm_urls[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)\n" >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 1\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 6\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_watch_warm_urls[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ', 'https://www.youtube.com/watch?v=jfKfPfyJRdk')\n" >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*1([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_pages[[:space:]]*=.*/youtube_edge_watch_warm_max_pages = 2/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 2\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=[[:space:]]*6([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_hosts[[:space:]]*=.*/youtube_edge_watch_warm_max_hosts = 8/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 8\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_bytes = 1800000\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_connect_timeout[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_connect_timeout = 6\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_max_time[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_time = 20\n' >> "$BOT_CONFIG_PATH"
@@ -876,6 +889,7 @@ PYCFG
     cat >> "$BOT_CONFIG_PATH" <<'PYCFG'
 youtube_edge_prefetch_hosts = (
     'www.youtube.com',
+    'youtube.com',
     'm.youtube.com',
     'youtubei.googleapis.com',
     'youtubei-att.googleapis.com',

@@ -1,3 +1,7 @@
+*v1.804 (24 Jun 2026) -* main
+
+*Expands the external YouTube fast-warm set for homepage/static bottlenecks and adds a live watch warmup URL so live googlevideo edges are discovered without adding persistent bot load.*
+
 *v1.803 (24 Jun 2026) -* main
 
 *Keeps the web header status banner updating automatically on open pages with low-frequency visible-tab polling, while preserving faster polling for pending checks and commands.*

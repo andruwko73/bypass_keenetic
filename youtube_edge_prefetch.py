@@ -9,6 +9,7 @@ import time
 
 DEFAULT_PREFETCH_HOSTS = (
     'www.youtube.com',
+    'youtube.com',
     'm.youtube.com',
     'youtubei.googleapis.com',
     'youtubei-att.googleapis.com',

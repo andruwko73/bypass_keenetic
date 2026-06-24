@@ -1575,7 +1575,7 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_protect_shared_google = True',
         'youtube_edge_prefetch_fast_warm_enabled = True',
         'youtube_edge_prefetch_fast_hosts = (',
-        'youtube_edge_prefetch_fast_max_hosts_per_run = 4',
+        'youtube_edge_prefetch_fast_max_hosts_per_run = 8',
         'youtube_edge_prefetch_fast_max_candidates = 32',
         'youtube_edge_prefetch_quality_probe_enabled = True',
         'youtube_edge_prefetch_quality_target_ms = 1000',
@@ -1583,9 +1583,10 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600',
         'youtube_edge_prefetch_quality_max_candidates = 24',
         'youtube_edge_watch_warm_enabled = True',
-        "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)",
-        'youtube_edge_watch_warm_max_pages = 1',
-        'youtube_edge_watch_warm_max_hosts = 6',
+        'youtube_edge_watch_warm_urls = (',
+        "'https://www.youtube.com/watch?v=jfKfPfyJRdk'",
+        'youtube_edge_watch_warm_max_pages = 2',
+        'youtube_edge_watch_warm_max_hosts = 8',
         'youtube_edge_watch_warm_max_bytes = 1800000',
         'youtube_edge_watch_warm_connect_timeout = 6',
         'youtube_edge_watch_warm_max_time = 20',
@@ -1600,6 +1601,10 @@ def test_codex_version_matches_commit_count():
     assert "youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*4" in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_max_hosts_per_run = 12' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_quality_target_ms = 1000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_pages = 2' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'jfKfPfyJRdk' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
         'telegram_call_learning_enabled = True',
         "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",
@@ -2792,9 +2797,25 @@ def test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts():
         youtube_edge_prefetch_runner.config = original_config
 
     assert hosts[:2] == ('www.youtube.com', 'i.ytimg.com')
+    assert 'youtube.com' in hosts
     assert 'manifest.googlevideo.com' in hosts
     assert 'jnn-pa.googleapis.com' in hosts
     assert 'play-fe.googleapis.com' in hosts
+
+
+def test_youtube_edge_prefetch_runner_extends_existing_watch_urls():
+    original_config = youtube_edge_prefetch_runner.config
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_watch_warm_urls=('https://www.youtube.com/watch?v=aqz-KE-bpKQ',),
+        )
+
+        urls = youtube_edge_prefetch_runner.watch_urls_for_run()
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+
+    assert urls[0] == 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
+    assert 'https://www.youtube.com/watch?v=jfKfPfyJRdk' in urls
 
 
 def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
@@ -2812,7 +2833,11 @@ def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
     assert youtube_edge_prefetch_runner._fast_warm_enabled_for_trigger('Post-update-late')
     assert not youtube_edge_prefetch_runner._fast_warm_enabled_for_trigger('scheduler')
     assert hosts[:2] == ('youtubei.googleapis.com', 'www.youtube.com')
+    assert 'youtube.com' in hosts
     assert 'manifest.googlevideo.com' in hosts
+    assert 'i.ytimg.com' in hosts
+    assert 's.ytimg.com' in hosts
+    assert 'yt3.ggpht.com' in hosts
 
 
 def test_entware_dns_runtime_helpers():
@@ -7534,6 +7559,7 @@ def main():
     test_youtube_edge_prefetch_protects_shared_google_candidates()
     test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks()
     test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts()
+    test_youtube_edge_prefetch_runner_extends_existing_watch_urls()
     test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
