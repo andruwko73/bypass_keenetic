@@ -1548,6 +1548,13 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_min_available_kb = 125000',
         'youtube_edge_prefetch_max_rss_kb = 66560',
         'youtube_edge_prefetch_exclusive_ipsets = True',
+        'youtube_edge_watch_warm_enabled = True',
+        "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)",
+        'youtube_edge_watch_warm_max_pages = 1',
+        'youtube_edge_watch_warm_max_hosts = 6',
+        'youtube_edge_watch_warm_max_bytes = 1800000',
+        'youtube_edge_watch_warm_connect_timeout = 6',
+        'youtube_edge_watch_warm_max_time = 20',
         "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')",
         'youtube_edge_prefetch_hosts = (',
     ):
@@ -2401,6 +2408,55 @@ def test_youtube_edge_prefetch_collects_limited_dns_candidates():
     assert set(cache['entries']) == set(addresses)
 
 
+def test_youtube_edge_prefetch_extracts_watch_edge_hosts():
+    html = (
+        r'https:\/\/rr3---sn-4g5ednsl.googlevideo.com\/videoplayback?expire=1\u0026id=o'
+        ' https://rr2---sn-4g5ednse.c.youtube.com/videoplayback'
+        ' https://googlevideo.com/not-an-edge'
+    )
+
+    hosts = youtube_edge_prefetch.extract_watch_edge_hosts(html, max_hosts=3)
+
+    assert hosts == (
+        'rr3---sn-4g5ednsl.googlevideo.com',
+        'rr2---sn-4g5ednse.c.youtube.com',
+    )
+
+
+def test_youtube_edge_prefetch_priority_hosts_are_tried_before_cache():
+    now = 1_800_000
+    cache = {
+        'version': 1,
+        'updated_at': now,
+        'entries': {
+            '142.250.150.119': {'host': 'www.youtube.com', 'source': 'dns', 'last_seen': now - 10, 'hits': 2},
+        },
+    }
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        addresses = {
+            'rr3---sn-4g5ednsl.googlevideo.com': '173.194.188.72',
+            'www.youtube.com': '64.233.162.198',
+        }
+        return [(family, socktype, 0, '', (addresses[host], port))]
+
+    candidates, cache = youtube_edge_prefetch.collect_prefetch_candidates(
+        hosts=('www.youtube.com',),
+        priority_hosts=('rr3---sn-4g5ednsl.googlevideo.com',),
+        dns_servers=('local',),
+        cache=cache,
+        now=now,
+        max_hosts_per_run=1,
+        max_resolved_addresses=4,
+        getaddrinfo=fake_getaddrinfo,
+        run_command=lambda args, timeout: '',
+    )
+
+    assert candidates[0]['address'] == '173.194.188.72'
+    assert candidates[0]['source'] == 'watch'
+    assert cache['entries']['173.194.188.72']['source'] == 'watch'
+
+
 def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
     address = '142.250.150.119'
     present = {
@@ -2452,6 +2508,57 @@ def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
     assert ('unblockvlessudp', address) in deleted
     assert ('unblockvless', address) not in present
     assert ('unblockvless2', address) in present
+
+
+def test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks():
+    original_config = youtube_edge_prefetch_runner.config
+    original_fetch = youtube_edge_prefetch_runner._fetch_watch_page
+    calls = []
+
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_watch_warm_enabled=True,
+            youtube_edge_watch_warm_urls=('https://www.youtube.com/watch?v=aqz-KE-bpKQ',),
+            youtube_edge_watch_warm_max_pages=1,
+            youtube_edge_watch_warm_max_hosts=2,
+            youtube_edge_watch_warm_max_bytes=200000,
+            youtube_edge_watch_warm_connect_timeout=1,
+            youtube_edge_watch_warm_max_time=2,
+            localportvless='12000',
+        )
+
+        def fake_fetch(url, socks_port, **kwargs):
+            calls.append((url, socks_port, kwargs))
+            return 'https://rr3---sn-4g5ednsl.googlevideo.com/videoplayback'
+
+        youtube_edge_prefetch_runner._fetch_watch_page = fake_fetch
+
+        hosts, status = youtube_edge_prefetch_runner.collect_watch_edge_hosts('vless2')
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner._fetch_watch_page = original_fetch
+
+    assert hosts == ('rr3---sn-4g5ednsl.googlevideo.com',)
+    assert calls[0][1] == 12002
+    assert status['socks_port'] == 12002
+    assert status['hosts'] == 1
+
+
+def test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts():
+    original_config = youtube_edge_prefetch_runner.config
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_hosts=('www.youtube.com', 'i.ytimg.com'),
+        )
+
+        hosts = youtube_edge_prefetch_runner.prefetch_hosts_for_run()
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+
+    assert hosts[:2] == ('www.youtube.com', 'i.ytimg.com')
+    assert 'manifest.googlevideo.com' in hosts
+    assert 'jnn-pa.googleapis.com' in hosts
+    assert 'play-fe.googleapis.com' in hosts
 
 
 def test_entware_dns_runtime_helpers():
@@ -7154,7 +7261,11 @@ def main():
     test_web_response_body_ignores_client_disconnect()
     test_youtube_edge_prefetch_cache_is_bounded_and_public_only()
     test_youtube_edge_prefetch_collects_limited_dns_candidates()
+    test_youtube_edge_prefetch_extracts_watch_edge_hosts()
+    test_youtube_edge_prefetch_priority_hosts_are_tried_before_cache()
     test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps()
+    test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks()
+    test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_cached_protocol_status_description_has_no_static_trailing_period()

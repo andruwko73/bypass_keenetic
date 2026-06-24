@@ -1,3 +1,7 @@
+*v1.795 (24 Jun 2026) -* main
+
+*Warms real YouTube watch-page CDN edges through the active route SOCKS port, adds manifest/player bootstrap hosts to the external prefetch runner, and keeps the work outside the long-running bot process so video/live startup can improve without raising bot RSS.*
+
 *v1.794 (24 Jun 2026) -* main
 
 *Extends the built-in router memory timeline to about 12 hours, avoids scheduler refresh collisions while ipset is already running, and reloads ipsets through a safer flush/restore fallback when atomic swap fails.*

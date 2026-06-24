@@ -1,3 +1,10 @@
+<a name="1.795"></a>
+# [1.795] - 24 Jun 2026
+
+- Adds a bounded external YouTube watch-page warmup that fetches one public watch page through the active route SOCKS port, extracts real `*.googlevideo.com` / `*.c.youtube.com` edge hosts, and preloads their IPs into the active YouTube ipsets.
+- Extends the external YouTube prefetch bootstrap set with mobile, player API, manifest, image, and static hosts used during homepage, video, and live startup.
+- Merges the new bootstrap hosts at runner time even when an existing router config still has the older host tuple, without rewriting user route lists or keeping extra work in the bot RSS.
+
 <a name="1.794"></a>
 # [1.794] - 24 Jun 2026
 

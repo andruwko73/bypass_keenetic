@@ -699,13 +699,26 @@ youtube_edge_prefetch_max_addresses_per_run = 8
 youtube_edge_prefetch_min_available_kb = 125000
 youtube_edge_prefetch_max_rss_kb = 66560
 youtube_edge_prefetch_exclusive_ipsets = True
+youtube_edge_watch_warm_enabled = True
+youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)
+youtube_edge_watch_warm_max_pages = 1
+youtube_edge_watch_warm_max_hosts = 6
+youtube_edge_watch_warm_max_bytes = 1800000
+youtube_edge_watch_warm_connect_timeout = 6
+youtube_edge_watch_warm_max_time = 20
 youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')
 youtube_edge_prefetch_hosts = (
     'www.youtube.com',
+    'm.youtube.com',
     'youtubei.googleapis.com',
     'youtubei-att.googleapis.com',
+    'jnn-pa.googleapis.com',
+    'play-fe.googleapis.com',
     'i.ytimg.com',
+    's.ytimg.com',
     'yt3.ggpht.com',
+    'www.gstatic.com',
+    'manifest.googlevideo.com',
     'redirector.googlevideo.com',
 )
 telegram_call_learning_enabled = True

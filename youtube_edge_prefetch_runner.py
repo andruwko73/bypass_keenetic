@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import time
+from urllib.parse import urlparse
 
 import youtube_edge_prefetch
 
@@ -23,6 +24,12 @@ UNBLOCK_DIR = '/opt/etc/unblock'
 MIN_AVAILABLE_KB = 125000
 LOCK_STALE_SECONDS = 300
 STATUS_MAX_BYTES = 65536
+WATCH_WARM_URLS = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)
+WATCH_WARM_MAX_PAGES = 1
+WATCH_WARM_MAX_HOSTS = 6
+WATCH_WARM_MAX_BYTES = 1800000
+WATCH_WARM_CONNECT_TIMEOUT = 6
+WATCH_WARM_MAX_TIME = 20
 
 PROTOCOL_ROUTE_FILES = (
     ('shadowsocks', 'shadowsocks.txt'),
@@ -67,6 +74,158 @@ def _config_int(name, default, minimum=0):
 
 def _config_str(name, default):
     return str(_config_value(name, default) or default).strip()
+
+
+def _as_tuple(value, default=()):
+    if value is None:
+        return tuple(default)
+    if isinstance(value, str):
+        return (value,)
+    try:
+        return tuple(value)
+    except Exception:
+        return tuple(default)
+
+
+def _route_socks_port(protocol):
+    protocol = str(protocol or '').strip().lower()
+    if protocol == 'shadowsocks':
+        return _config_int('localportsh_bot', 10820, minimum=1)
+    if protocol == 'vmess':
+        return _config_int('localportvmess', 10810, minimum=1)
+    if protocol == 'vless':
+        return _config_int('localportvless', 10811, minimum=1)
+    if protocol == 'vless2':
+        default_vless = _config_int('localportvless', 10811, minimum=1)
+        return _config_int('localportvless2', default_vless + 2, minimum=1)
+    if protocol == 'trojan':
+        return _config_int('localporttrojan_bot', 10830, minimum=1)
+    return 0
+
+
+def _normalize_watch_urls(urls):
+    normalized = []
+    seen = set()
+    for item in _as_tuple(urls, WATCH_WARM_URLS):
+        url = str(item or '').strip()
+        if not url:
+            continue
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            continue
+        host = (parsed.hostname or '').lower().strip('.')
+        if parsed.scheme != 'https':
+            continue
+        if host not in ('www.youtube.com', 'm.youtube.com', 'youtube.com', 'youtu.be'):
+            continue
+        if host != 'youtu.be' and not parsed.path.startswith('/watch'):
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        normalized.append(url)
+    return tuple(normalized)
+
+
+def _fetch_watch_page(url, socks_port, *, max_bytes, connect_timeout, max_time):
+    if socks_port <= 0:
+        return ''
+    max_bytes = max(4096, int(max_bytes or WATCH_WARM_MAX_BYTES))
+    command = [
+        'curl',
+        '-L',
+        '-sS',
+        '--compressed',
+        '--max-filesize',
+        str(max_bytes),
+        '--socks5-hostname',
+        f'127.0.0.1:{int(socks_port)}',
+        '--connect-timeout',
+        str(max(1, int(connect_timeout or WATCH_WARM_CONNECT_TIMEOUT))),
+        '--max-time',
+        str(max(2, int(max_time or WATCH_WARM_MAX_TIME))),
+        '-A',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        str(url),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=max(3, int(max_time or WATCH_WARM_MAX_TIME) + 3),
+            check=False,
+        )
+    except Exception:
+        return ''
+    if result.returncode != 0:
+        return ''
+    data = bytes(result.stdout or b'')[:max_bytes]
+    return data.decode('utf-8', errors='ignore')
+
+
+def collect_watch_edge_hosts(route_protocol):
+    if not _config_bool('youtube_edge_watch_warm_enabled', True):
+        return (), {'enabled': False, 'skipped_reason': 'disabled'}
+    socks_port = _route_socks_port(route_protocol)
+    if socks_port <= 0:
+        return (), {'enabled': True, 'skipped_reason': 'no_socks_port'}
+
+    max_hosts = _config_int('youtube_edge_watch_warm_max_hosts', WATCH_WARM_MAX_HOSTS, minimum=0)
+    if max_hosts <= 0:
+        return (), {'enabled': True, 'socks_port': socks_port, 'skipped_reason': 'max_hosts_zero'}
+
+    urls = _normalize_watch_urls(_config_value('youtube_edge_watch_warm_urls', WATCH_WARM_URLS))
+    max_pages = min(len(urls), _config_int('youtube_edge_watch_warm_max_pages', WATCH_WARM_MAX_PAGES, minimum=1))
+    hosts = []
+    seen = set()
+    fetched = 0
+    for url in urls[:max_pages]:
+        text = _fetch_watch_page(
+            url,
+            socks_port,
+            max_bytes=_config_int('youtube_edge_watch_warm_max_bytes', WATCH_WARM_MAX_BYTES, minimum=4096),
+            connect_timeout=_config_int(
+                'youtube_edge_watch_warm_connect_timeout',
+                WATCH_WARM_CONNECT_TIMEOUT,
+                minimum=1,
+            ),
+            max_time=_config_int('youtube_edge_watch_warm_max_time', WATCH_WARM_MAX_TIME, minimum=2),
+        )
+        if not text:
+            continue
+        fetched += 1
+        for host in youtube_edge_prefetch.extract_watch_edge_hosts(text, max_hosts=max_hosts - len(hosts)):
+            if host in seen:
+                continue
+            seen.add(host)
+            hosts.append(host)
+            if len(hosts) >= max_hosts:
+                break
+        if len(hosts) >= max_hosts:
+            break
+
+    return tuple(hosts), {
+        'enabled': True,
+        'socks_port': socks_port,
+        'fetched_pages': fetched,
+        'hosts': len(hosts),
+        'skipped_reason': '' if hosts else 'no_watch_edge_hosts',
+    }
+
+
+def prefetch_hosts_for_run():
+    hosts = list(youtube_edge_prefetch.normalize_hosts(
+        _config_value('youtube_edge_prefetch_hosts', youtube_edge_prefetch.DEFAULT_PREFETCH_HOSTS)
+    ))
+    seen = set(hosts)
+    for host in youtube_edge_prefetch.normalize_hosts(youtube_edge_prefetch.DEFAULT_PREFETCH_HOSTS):
+        if host in seen:
+            continue
+        seen.add(host)
+        hosts.append(host)
+    return tuple(hosts)
 
 
 def _read_json_file(path, default=None):
@@ -253,10 +412,13 @@ def _status_message(status):
     if skipped:
         return f'skipped: {skipped}'
     protocol = str((status or {}).get('route_protocol') or '').strip() or 'unknown'
+    edge_hosts = int((status or {}).get('watch_edge_hosts') or 0)
+    edge_part = f', edge {edge_hosts}' if edge_hosts else ''
     return (
         f'{protocol}: added {int((status or {}).get("added_addresses") or 0)} addresses, '
         f'candidates {int((status or {}).get("candidates") or 0)}, '
         f'cache {int((status or {}).get("cache_entries") or 0)}'
+        f'{edge_part}'
     )
 
 
@@ -330,7 +492,7 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             return status
 
         hosts, next_host_index = _selected_hosts(
-            _config_value('youtube_edge_prefetch_hosts', youtube_edge_prefetch.DEFAULT_PREFETCH_HOSTS),
+            prefetch_hosts_for_run(),
             _config_int(
                 'youtube_edge_prefetch_max_hosts_per_run',
                 youtube_edge_prefetch.DEFAULT_MAX_HOSTS_PER_RUN,
@@ -338,10 +500,19 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             ),
             previous_status,
         )
+        watch_edge_hosts, watch_edge_status = collect_watch_edge_hosts(route_protocol)
+        resolved_address_limit = _config_int(
+            'youtube_edge_prefetch_max_resolved_addresses',
+            youtube_edge_prefetch.DEFAULT_MAX_RESOLVED_ADDRESSES,
+            minimum=1,
+        )
+        if watch_edge_hosts:
+            resolved_address_limit = max(resolved_address_limit, len(watch_edge_hosts) + len(hosts))
         status = youtube_edge_prefetch.prefetch_once(
             route_protocol=route_protocol,
             cache_path=cache_path,
             hosts=hosts,
+            priority_hosts=watch_edge_hosts,
             dns_servers=_config_value('youtube_edge_prefetch_dns_servers', youtube_edge_prefetch.DEFAULT_DNS_SERVERS),
             ipset_contains=ipset_contains,
             ipset_add=ipset_add,
@@ -358,11 +529,7 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 minimum=16,
             ),
             max_hosts_per_run=len(hosts) or 1,
-            max_resolved_addresses=_config_int(
-                'youtube_edge_prefetch_max_resolved_addresses',
-                youtube_edge_prefetch.DEFAULT_MAX_RESOLVED_ADDRESSES,
-                minimum=1,
-            ),
+            max_resolved_addresses=resolved_address_limit,
             max_candidates=_config_int(
                 'youtube_edge_prefetch_max_candidates',
                 youtube_edge_prefetch.DEFAULT_MAX_CANDIDATES,
@@ -376,6 +543,8 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             remove_from_other_sets=_config_bool('youtube_edge_prefetch_exclusive_ipsets', True),
         )
         status['available_memory_kb'] = available_kb
+        status['watch_edge_hosts'] = len(watch_edge_hosts)
+        status['watch_edge'] = watch_edge_status
         status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
         _write_json_file(status_path, status)
         return status

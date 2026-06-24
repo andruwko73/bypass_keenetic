@@ -9,10 +9,16 @@ import time
 
 DEFAULT_PREFETCH_HOSTS = (
     'www.youtube.com',
+    'm.youtube.com',
     'youtubei.googleapis.com',
     'youtubei-att.googleapis.com',
+    'jnn-pa.googleapis.com',
+    'play-fe.googleapis.com',
     'i.ytimg.com',
+    's.ytimg.com',
     'yt3.ggpht.com',
+    'www.gstatic.com',
+    'manifest.googlevideo.com',
     'redirector.googlevideo.com',
 )
 DEFAULT_DNS_SERVERS = ('local', '1.1.1.1', '8.8.8.8')
@@ -22,6 +28,11 @@ DEFAULT_MAX_HOSTS_PER_RUN = 4
 DEFAULT_MAX_RESOLVED_ADDRESSES = 12
 DEFAULT_MAX_CANDIDATES = 32
 DEFAULT_MAX_ADDRESSES_PER_RUN = 8
+DEFAULT_WATCH_EDGE_MAX_HOSTS = 6
+WATCH_EDGE_HOST_RE = re.compile(
+    r'(?<![a-z0-9.-])((?:[a-z0-9-]+\.)*(?:googlevideo\.com|c\.youtube\.com))(?![a-z0-9.-])',
+    re.IGNORECASE,
+)
 
 ROUTE_IPSETS = {
     'shadowsocks': ('unblocksh', 'unblockshudp'),
@@ -55,6 +66,29 @@ def normalize_hosts(hosts):
         if host not in seen:
             seen.add(host)
             normalized.append(host)
+    return tuple(normalized)
+
+
+def extract_watch_edge_hosts(text, *, max_hosts=DEFAULT_WATCH_EDGE_MAX_HOSTS):
+    max_hosts = max(0, int(max_hosts or 0))
+    if max_hosts <= 0:
+        return ()
+    normalized = []
+    seen = set()
+    for match in WATCH_EDGE_HOST_RE.finditer(str(text or '')):
+        host = match.group(1).strip().lower().strip('.')
+        if host in ('googlevideo.com', 'c.youtube.com'):
+            continue
+        valid_hosts = normalize_hosts((host,))
+        if not valid_hosts:
+            continue
+        host = valid_hosts[0]
+        if host in seen:
+            continue
+        seen.add(host)
+        normalized.append(host)
+        if len(normalized) >= max_hosts:
+            break
     return tuple(normalized)
 
 
@@ -273,6 +307,7 @@ def _add_candidate(candidates, seen, address, host, source, from_cache=False, ma
 def collect_prefetch_candidates(
     *,
     hosts=DEFAULT_PREFETCH_HOSTS,
+    priority_hosts=(),
     dns_servers=DEFAULT_DNS_SERVERS,
     cache=None,
     now=None,
@@ -289,6 +324,29 @@ def collect_prefetch_candidates(
     max_candidates = max(1, int(max_candidates or DEFAULT_MAX_CANDIDATES))
     max_hosts_per_run = max(1, int(max_hosts_per_run or DEFAULT_MAX_HOSTS_PER_RUN))
     max_resolved_addresses = max(1, int(max_resolved_addresses or DEFAULT_MAX_RESOLVED_ADDRESSES))
+    resolved_count = 0
+
+    def resolve_hosts(candidate_hosts, source, *, limit=None):
+        nonlocal resolved_count
+        host_list = normalize_hosts(candidate_hosts)
+        if limit is not None:
+            host_list = host_list[:max(0, int(limit or 0))]
+        for host in host_list:
+            if resolved_count >= max_resolved_addresses:
+                break
+            for address in resolve_host_addresses(
+                host,
+                dns_servers,
+                getaddrinfo=getaddrinfo,
+                run_command=run_command,
+            ):
+                _cache_candidate(cache, address, host, source, now)
+                _add_candidate(candidates, seen, address, host, source, max_candidates=max_candidates)
+                resolved_count += 1
+                if resolved_count >= max_resolved_addresses:
+                    break
+
+    resolve_hosts(priority_hosts, 'watch')
 
     cached_entries = sorted(
         cache.get('entries', {}).items(),
@@ -306,21 +364,7 @@ def collect_prefetch_candidates(
             max_candidates=max_candidates,
         )
 
-    resolved_count = 0
-    for host in normalize_hosts(hosts)[:max_hosts_per_run]:
-        if resolved_count >= max_resolved_addresses:
-            break
-        for address in resolve_host_addresses(
-            host,
-            dns_servers,
-            getaddrinfo=getaddrinfo,
-            run_command=run_command,
-        ):
-            _cache_candidate(cache, address, host, 'dns', now)
-            _add_candidate(candidates, seen, address, host, 'dns', max_candidates=max_candidates)
-            resolved_count += 1
-            if resolved_count >= max_resolved_addresses:
-                break
+    resolve_hosts(hosts, 'dns', limit=max_hosts_per_run)
 
     return candidates, prune_cache(cache, now=now)
 
@@ -344,6 +388,7 @@ def prefetch_once(
     route_protocol,
     cache_path='',
     hosts=DEFAULT_PREFETCH_HOSTS,
+    priority_hosts=(),
     dns_servers=DEFAULT_DNS_SERVERS,
     ipset_contains=None,
     ipset_add=None,
@@ -375,6 +420,7 @@ def prefetch_once(
         'added_sets': 0,
         'deleted_sets': 0,
         'failed_sets': 0,
+        'priority_hosts': len(normalize_hosts(priority_hosts)),
     }
     if not target_sets:
         status['skipped_reason'] = 'unsupported_route_protocol'
@@ -391,6 +437,7 @@ def prefetch_once(
     )
     candidates, cache = collect_prefetch_candidates(
         hosts=hosts,
+        priority_hosts=priority_hosts,
         dns_servers=dns_servers,
         cache=cache,
         now=now,
