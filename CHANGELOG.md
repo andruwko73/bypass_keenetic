@@ -1,3 +1,10 @@
+<a name="1.793"></a>
+# [1.793] - 24 Jun 2026
+
+- Keeps Chrome Remote Desktop out of automatic route profiles and catalog drift repair, so YouTube profile actions do not re-add CRD signaling/auth routes to Vless.
+- Removes Chrome Remote Desktop-specific entries from the default Vless route list while keeping the manual service preset available.
+- Retries the external YouTube edge prefetch after low-memory skips in 180 seconds instead of waiting for the normal 15-minute interval.
+
 <a name="1.792"></a>
 # [1.792] - 24 Jun 2026
 

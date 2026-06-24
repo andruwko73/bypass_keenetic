@@ -111,6 +111,11 @@ def _service_entries(service_key):
     return entries
 
 
+def _service_profile_enabled(service_key):
+    source = SERVICE_LIST_SOURCES.get(service_key) or {}
+    return bool(source.get('route_profile_enabled', True))
+
+
 def _service_state_entries(service_key):
     return set(_service_entries(service_key))
 
@@ -269,6 +274,8 @@ def repair_service_route_catalog_drift(
         service_key = item.get('id') if isinstance(item, dict) else str(item or '')
         if not service_key:
             continue
+        if not _service_profile_enabled(service_key):
+            continue
         try:
             entries = set(_service_entries(service_key))
         except ValueError:
@@ -364,6 +371,8 @@ def apply_service_profile(
     service_items = service_items or route_service_items()
     results = []
     for item in service_items:
+        if not _service_profile_enabled(item['id']):
+            continue
         target_protocol = _profile_target(profile, item['id'])
         results.append(
             apply_service_route(

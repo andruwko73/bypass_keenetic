@@ -475,21 +475,11 @@ CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES = [
     '216.239.38.223',
 ]
 
-CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES = [
+CHROME_REMOTE_DESKTOP_CORE_ROUTE_ENTRIES = [
     'remotedesktop.google.com',
     'remotedesktop-pa.googleapis.com',
     'instantmessaging-pa.googleapis.com',
     'instantmessaging-pa.clients6.google.com',
-    'www.gstatic.com',
-    'ssl.gstatic.com',
-    'oauth2.googleapis.com',
-    'www.googleapis.com',
-    'accounts.google.com',
-    'apis.google.com',
-    'clients2.google.com',
-    'clients3.google.com',
-    'clients4.google.com',
-    'clients6.google.com',
     'mtalk.google.com',
     'alt1-mtalk.google.com',
     'alt2-mtalk.google.com',
@@ -502,13 +492,38 @@ CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES = [
     'chromoting-client.talkgadget.google.com',
     'talkgadget.google.com',
     '74.125.247.128',
+]
+
+CHROME_REMOTE_DESKTOP_SHARED_ROUTE_ENTRIES = [
+    'www.gstatic.com',
+    'ssl.gstatic.com',
+    'oauth2.googleapis.com',
+    'www.googleapis.com',
+    'accounts.google.com',
+    'apis.google.com',
+    'clients2.google.com',
+    'clients3.google.com',
+    'clients4.google.com',
+    'clients6.google.com',
     *CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES,
 ]
 
+CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES = [
+    *CHROME_REMOTE_DESKTOP_CORE_ROUTE_ENTRIES,
+    *CHROME_REMOTE_DESKTOP_SHARED_ROUTE_ENTRIES,
+]
+
 GOOGLE_SHARED_ROUTE_STATE_ENTRIES = [
+    'accounts.google.com',
     'apis.google.com',
+    'clients2.google.com',
+    'clients3.google.com',
     'clients4.google.com',
+    'clients6.google.com',
     'fonts.googleapis.com',
+    'oauth2.googleapis.com',
+    'ssl.gstatic.com',
+    'www.googleapis.com',
     'www.gstatic.com',
 ]
 
@@ -927,9 +942,9 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['chrome remote desktop', 'crd', 'chromoting', 'remote desktop', 'удаленный рабочий стол chrome'],
         'url': '',
         'entries': CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
+        'route_profile_enabled': False,
         'route_state_exclude': [
-            *GOOGLE_SHARED_ROUTE_STATE_ENTRIES,
-            *CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES,
+            *CHROME_REMOTE_DESKTOP_SHARED_ROUTE_ENTRIES,
         ],
     },
     'tiktok': {

@@ -1712,8 +1712,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'BYPASS_UNBLOCK_REFRESH_CHECK_INTERVAL_SECONDS:-60' in s99unblock
     assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-10' in s99unblock
     assert 'BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120' in s99unblock
+    assert 'YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"' in s99unblock
     assert 'dedupe_lock_pid_is_active()' in s99unblock
     assert 'dedupe_lock_age_seconds()' in s99unblock
+    assert 'youtube_edge_prefetch_skipped_reason()' in s99unblock
+    assert '[ "$skipped_reason" = "low_available_memory" ]' in s99unblock
     assert 'run_refresh_if_due()' in s99unblock
     assert 'run_refresh_if_check_due()' in s99unblock
     assert 'run_youtube_edge_prefetch_if_due()' in s99unblock
@@ -4578,7 +4581,9 @@ def test_vless2_youtube_routes_are_scoped():
     assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert service_routes.service_route_state('youtube', unblock_dir=str(ROOT))['label'] == 'Vless 2'
     assert service_routes.service_route_state('gemini', unblock_dir=str(ROOT))['label'] == 'Vless 1'
-    assert service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))['label'] == 'Vless 1'
+    chrome_remote_desktop_state = service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))
+    assert chrome_remote_desktop_state['complete_protocols'] == []
+    assert chrome_remote_desktop_state['partial_protocols'] == []
     assert 'static.rutracker.cc' in entries
     assert 'feed.rutracker.cc' in entries
     assert 'rutracker.org' not in vless_entries
@@ -4642,14 +4647,18 @@ def test_vless2_youtube_routes_are_scoped():
     } & entries
 
 
-def test_chrome_remote_desktop_routes_stay_on_vless():
+def test_chrome_remote_desktop_routes_stay_manual_only():
     entries = {
         line.split('#', 1)[0].strip()
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
+    source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
     state_entries = set(service_catalog.service_route_entries('chrome_remote_desktop'))
-    assert state_entries <= entries
+    assert source.get('route_profile_enabled') is False
+    assert state_entries == set(service_catalog.CHROME_REMOTE_DESKTOP_CORE_ROUTE_ENTRIES)
+    assert not (state_entries & entries)
+    assert not (set(service_catalog.CHROME_REMOTE_DESKTOP_SHARED_ROUTE_ENTRIES) & state_entries)
     assert 'full:instantmessaging-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
     assert 'full:remotedesktop-pa.googleapis.com' not in service_catalog.CONNECTIVITY_CHECK_DOMAINS
 
@@ -4783,6 +4792,9 @@ def test_custom_check_service_sources_are_synced():
         assert source_entries
         assert preset_routes <= source_entries
         assert applied_routes <= source_entries
+        if source.get('route_profile_enabled') is False:
+            assert not (applied_routes & entries)
+            continue
         assert applied_routes <= entries
 
     assert service_catalog.SERVICE_LIST_SOURCES['discord']['entries'] == service_catalog.DISCORD_ROUTE_ENTRIES
@@ -4883,7 +4895,7 @@ def test_meta_custom_check_migration():
     assert checks[0]['routes'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
 
 
-def test_chrome_remote_desktop_routes_are_in_vless():
+def test_chrome_remote_desktop_routes_are_manual_only():
     entries = {
         line.split('#', 1)[0].strip()
         for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
@@ -4891,7 +4903,9 @@ def test_chrome_remote_desktop_routes_are_in_vless():
     }
     source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
     state_entries = set(service_catalog.service_route_entries('chrome_remote_desktop'))
-    assert state_entries <= entries
+    assert source.get('route_profile_enabled') is False
+    assert state_entries == set(service_catalog.CHROME_REMOTE_DESKTOP_CORE_ROUTE_ENTRIES)
+    assert not (state_entries & entries)
     assert service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']['entries'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
     assert presets['chrome_remote_desktop']['routes'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
@@ -6839,7 +6853,7 @@ def test_service_routes_apply_and_profile():
         assert not (set(discord_entries) & set(vless2_entries))
         profile = service_routes.apply_service_profile(
             'youtube_vless2_rest_vless',
-            service_items=[{'id': 'youtube'}, {'id': 'telegram'}],
+            service_items=[{'id': 'youtube'}, {'id': 'telegram'}, {'id': 'chrome_remote_desktop'}],
             unblock_dir=tmp,
             update_script='',
             before_update=lambda: callbacks.append('profile'),
@@ -6851,6 +6865,7 @@ def test_service_routes_apply_and_profile():
         vless_after_profile = set((Path(tmp) / 'vless.txt').read_text(encoding='utf-8').splitlines())
         assert set(service_catalog.service_route_entries('telegram')) <= vless_after_profile
         assert not (set(service_catalog.SERVICE_LIST_SOURCES['telegram'].get('route_state_exclude') or []) & vless_after_profile)
+        assert not (set(service_catalog.CHROME_REMOTE_DESKTOP_CORE_ROUTE_ENTRIES) & vless_after_profile)
         same_route_dir = Path(tmp) / 'same-route'
         same_route_dir.mkdir()
         for route_file in ('vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
@@ -7076,6 +7091,7 @@ def main():
     test_unblock_list_helpers()
     test_unblock_lists_hide_legacy_txt_files()
     test_vless2_youtube_routes_are_scoped()
+    test_chrome_remote_desktop_routes_stay_manual_only()
     test_chatgpt_codex_routes_are_synced()
     test_ai_assistant_custom_routes_are_synced()
     test_primary_vless_does_not_capture_gmail_domains()
@@ -7084,7 +7100,7 @@ def main():
     test_chatgpt_codex_custom_check_migration()
     test_preset_custom_checks_are_hydrated_from_catalog()
     test_meta_custom_check_migration()
-    test_chrome_remote_desktop_routes_are_in_vless()
+    test_chrome_remote_desktop_routes_are_manual_only()
     test_web_command_state_helpers()
     test_web_http_common_helpers()
     test_web_http_basic_auth_accepts_and_rejects_credentials()

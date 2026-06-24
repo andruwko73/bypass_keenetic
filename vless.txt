@@ -123,7 +123,6 @@
 74.114.0.0/16
 74.119.0.0/16
 74.119.76.0/22
-74.125.247.128
 8.47.69.6
 8.6.112.6
 80.239.150.25
@@ -160,14 +159,6 @@ ai.meta.com
 ai.studio
 aistudio.google.com
 alkalimakersuite-pa.clients6.google.com
-alt1-mtalk.google.com
-alt2-mtalk.google.com
-alt3-mtalk.google.com
-alt4-mtalk.google.com
-alt5-mtalk.google.com
-alt6-mtalk.google.com
-alt7-mtalk.google.com
-alt8-mtalk.google.com
 android.chat.openai.com
 anistar.me
 anistar.org
@@ -222,7 +213,6 @@ chat.deepseek.com
 chat.openai.com
 chatgpt.com
 checkout.stripe.com
-chromoting-client.talkgadget.google.com
 circlecrewpinkcrowd.com
 claude.ai
 claude.com
@@ -316,8 +306,6 @@ images-ext-1.discordapp.net
 images.ctfassets.net
 images.workoscdn.com
 instagram.com
-instantmessaging-pa.clients6.google.com
-instantmessaging-pa.googleapis.com
 intercom.io
 intercomcdn.com
 internal.api.vk.ru
@@ -342,7 +330,6 @@ media.discordapp.net
 meta.ai
 meta.com
 mobile.twitter.com
-mtalk.google.com
 muscdn.com
 musical.ly
 my.telegram.org
@@ -381,8 +368,6 @@ queuev4.vk.ru
 quiz.directory
 r.stripe.com
 raw.githubusercontent.com
-remotedesktop-pa.googleapis.com
-remotedesktop.google.com
 rum.browser-intake-datadoghq.com
 rutor.info
 rutor.is
@@ -405,7 +390,6 @@ sydney.bing.com
 t-bank-app.ru
 t.co
 t.me
-talkgadget.google.com
 tbank.ru
 tcr9i.chat.openai.com
 td.doubleclick.net

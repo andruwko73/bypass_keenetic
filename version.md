@@ -1,3 +1,7 @@
+*v1.793 (24 Jun 2026) -* main
+
+*Keeps Chrome Remote Desktop out of automatic bypass profiles and retries the external YouTube edge prefetch sooner after low-memory skips, so post-update YouTube warms without adding long-running bot memory.*
+
 *v1.792 (24 Jun 2026) -* main
 
 *Adds gzip compression for large web UI HTML/JSON responses and supports HEAD requests so the external Netcraze HTTPS endpoint has a smaller, more compatible first response on mobile browsers.*
