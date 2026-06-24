@@ -1,3 +1,10 @@
+<a name="1.797"></a>
+# [1.797] - 24 Jun 2026
+
+- Runs the external YouTube edge prefetch once at the end of clean `script.sh -install`, then once after the first installer form starts the main bot, so fresh installs get the same immediate warmup path as GitHub updates.
+- Keeps the existing `Post-update` prefetch path unchanged and covered by smoke tests.
+- Updates README with the current GitHub bootstrap command and explains that YouTube warmup modules/config are installed from the first setup without adding persistent bot RSS.
+
 <a name="1.796"></a>
 # [1.796] - 24 Jun 2026
 

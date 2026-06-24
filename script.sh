@@ -1280,6 +1280,7 @@ if [ "$1" = "-install" ]; then
     generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
     /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || /opt/etc/init.d/S99unblock start >/dev/null 2>&1 || true
+    run_youtube_edge_prefetch_once "Post-install"
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
 
     #ndmc -c 'opkg dns-override'

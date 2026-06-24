@@ -1,3 +1,7 @@
+*v1.797 (24 Jun 2026) -* main
+
+*Runs the external YouTube edge prefetch during clean install, first main-bot start, and update, and documents the current GitHub bootstrap command plus the fresh-install YouTube warmup behavior in README.*
+
 *v1.796 (24 Jun 2026) -* main
 
 *Runs the external YouTube prefetch wider in one short pass, migrating old default limits so homepage, watch, and live bootstrap hosts warm immediately after update instead of waiting for several scheduler cycles.*

@@ -1688,6 +1688,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    installer_source = (ROOT / 'installer.py').read_text(encoding='utf-8')
     update_script = (ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
     unblock_dnsmasq = (ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
     ipset_script = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
@@ -1759,7 +1760,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
     assert 'continuing update while refresh finishes in background' in script
     assert 'run_update_ipset_refresh "Post-update"' in script
+    assert 'run_youtube_edge_prefetch_once "Post-install"' in script
     assert 'run_youtube_edge_prefetch_once "Post-update"' in script
+    assert 'def youtube_edge_prefetch_shell(trigger):' in installer_source
+    assert 'switch_to_main_bot(run_youtube_prefetch=True)' in installer_source
+    assert 'YOUTUBE_EDGE_PREFETCH_RUNNER} --trigger "{safe_trigger}"' in installer_source
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source
     assert 'def _refresh_dns_override_runtime(restart_dnsmasq=False)' in bot_source
@@ -2155,6 +2160,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_cleanup_pool_probe_runtime_light(kill_processes=True)" in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
     assert "update_proxy('none', persist=False)" not in startup_restore
+    readme_source = (ROOT / 'README.md').read_text(encoding='utf-8')
+    assert 'https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh' in readme_source
+    assert 'youtube_edge_prefetch_runner.py' in readme_source
+    assert 'Post-install' in readme_source
+    assert 'Post-update' in readme_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source

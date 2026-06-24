@@ -31,6 +31,8 @@ LEGACY_MAIN_PATH = '/opt/etc/bot.py'
 BOT_SERVICE_PATH = '/opt/etc/init.d/S99telegram_bot'
 INSTALLER_SERVICE_PATH = '/opt/etc/init.d/S98telegram_bot_installer'
 APP_RUNTIME_MODE_FILE = '/opt/etc/bot_app_mode'
+YOUTUBE_EDGE_PREFETCH_RUNNER = '/opt/etc/bot/youtube_edge_prefetch_runner.py'
+YOUTUBE_EDGE_PREFETCH_LOG = '/opt/var/log/bypass-youtube-edge-prefetch.log'
 DEFAULT_BROWSER_PORT = int(os.environ.get('BYPASS_INSTALLER_PORT', '8080'))
 DEFAULT_FORK_REPO_OWNER = 'andruwko73'
 DEFAULT_FORK_REPO_NAME = 'bypass_keenetic'
@@ -218,12 +220,25 @@ def write_config(form):
         f.write(mode + '\n')
 
 
-def switch_to_main_bot():
+def youtube_edge_prefetch_shell(trigger):
+    safe_trigger = ''.join(ch for ch in trigger if ch.isalnum() or ch in '-_') or 'first-run'
+    return (
+        f'if [ -f {YOUTUBE_EDGE_PREFETCH_RUNNER} ]; then '
+        'python_bin="$(command -v python3 2>/dev/null || echo /opt/bin/python3)"; '
+        f'mkdir -p "$(dirname {YOUTUBE_EDGE_PREFETCH_LOG})" >/dev/null 2>&1 || true; '
+        f'PYTHONPATH=/opt/etc/bot "$python_bin" {YOUTUBE_EDGE_PREFETCH_RUNNER} --trigger "{safe_trigger}" >> {YOUTUBE_EDGE_PREFETCH_LOG} 2>&1 || true; '
+        'fi'
+    )
+
+
+def switch_to_main_bot(run_youtube_prefetch=False):
     command = (
         f'sleep 2; {INSTALLER_SERVICE_PATH} stop >/dev/null 2>&1 || true; '
         'sleep 1; '
         f'if [ -x {BOT_SERVICE_PATH} ]; then {BOT_SERVICE_PATH} restart >/dev/null 2>&1 || {BOT_SERVICE_PATH} start >/dev/null 2>&1 || true; fi'
     )
+    if run_youtube_prefetch:
+        command = f'{command}; sleep 8; {youtube_edge_prefetch_shell("first-run")}'
     start_detached_shell(command)
 
 
@@ -461,7 +476,7 @@ class InstallerHandler(BaseHTTPRequestHandler):
 
         try:
             write_config(parsed)
-            switch_to_main_bot()
+            switch_to_main_bot(run_youtube_prefetch=True)
         except Exception as exc:
             self._send_html(page_html(f'Не удалось сохранить конфиг: {exc}', csrf_token=self._get_or_create_csrf_token()), status=500)
             return
