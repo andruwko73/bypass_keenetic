@@ -6752,6 +6752,11 @@ def test_web_template_scripts_helpers():
     )
     assert 'const APP_CONFIG = window.BK_APP_CONFIG || {};' in scripts
     assert 'const INITIAL_STATUS_PENDING = !!APP_CONFIG.initialStatusPending;' in scripts
+    assert 'const STATUS_ACTIVE_POLL_MS = 8000;' in scripts
+    assert "const STATUS_IDLE_POLL_MS = Math.max(15000, Number(APP_CONFIG.statusIdlePollMs || 30000));" in scripts
+    assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
+    assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
+    assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS);" in scripts
     assert 'const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;' in scripts
     assert "const CSRF_TOKEN = String(APP_CONFIG.csrfToken || '');" in scripts
     assert '"token"' not in scripts

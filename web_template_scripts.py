@@ -20,6 +20,8 @@ def render_web_scripts(
         const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;
         const ENABLE_LIVE_STATUS = APP_CONFIG.enableLiveStatus !== false;
         const ENABLE_TELEGRAM = APP_CONFIG.enableTelegram !== false;
+        const STATUS_ACTIVE_POLL_MS = 8000;
+        const STATUS_IDLE_POLL_MS = Math.max(15000, Number(APP_CONFIG.statusIdlePollMs || 30000));
         let botReady = APP_CONFIG.botReady === true;
         const POOL_PROBE_POLL_EXTENSION_MS = Number(APP_CONFIG.poolProbePollExtensionMs || {POOL_PROBE_UI_POLL_EXTENSION_MS});
         const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
@@ -1906,6 +1908,10 @@ def render_web_scripts(
         }}
 
         function pollStatus() {{
+            if (!ENABLE_LIVE_STATUS || document.hidden) {{
+                statusPollTimer = null;
+                return;
+            }}
             statusPollTimer = null;
             fetch('/api/status', {{
                 headers: {{'Accept': 'application/json'}},
@@ -1922,8 +1928,9 @@ def render_web_scripts(
                 }})
                 .catch(function() {{}})
                 .finally(function() {{
-                    if (Date.now() < statusPollUntil && !document.hidden) {{
-                        statusPollTimer = window.setTimeout(pollStatus, 8000);
+                    if (!document.hidden) {{
+                        const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;
+                        statusPollTimer = window.setTimeout(pollStatus, delay);
                     }}
                 }});
         }}
@@ -2586,6 +2593,8 @@ def render_web_scripts(
             }}
             if (INITIAL_STATUS_PENDING) {{
                 scheduleStatusPolling(POOL_PROBE_POLL_EXTENSION_MS);
+            }} else if (ENABLE_LIVE_STATUS) {{
+                scheduleStatusPolling(STATUS_IDLE_POLL_MS);
             }}
             if (INITIAL_COMMAND_RUNNING) {{
                 setCommandRunningLayout(true);

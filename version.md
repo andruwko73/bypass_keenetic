@@ -1,3 +1,7 @@
+*v1.803 (24 Jun 2026) -* main
+
+*Keeps the web header status banner updating automatically on open pages with low-frequency visible-tab polling, while preserving faster polling for pending checks and commands.*
+
 *v1.802 (24 Jun 2026) -* main
 
 *Makes YouTube install/update fast-warm prefer fresh bootstrap DNS candidates over stale cache entries and score already-present runtime ipset entries without adding web UI output or scheduler load.*

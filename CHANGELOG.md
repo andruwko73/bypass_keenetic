@@ -1,3 +1,8 @@
+<a name="1.803"></a>
+# [1.803] - 24 Jun 2026
+
+- Keeps the web header/top status banner refreshing automatically while the page is visible, using a low-frequency idle `/api/status` poll and the existing faster poll for pending checks, commands, and pool probes.
+
 <a name="1.802"></a>
 # [1.802] - 24 Jun 2026
 
