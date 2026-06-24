@@ -1,6 +1,6 @@
-*v1.807 (24 Jun 2026) -* main
+*v1.808 (24 Jun 2026) -* main
 
-*Shows true router CPU percentage in web status and makes YouTube route detection follow the active route list across web redirect, scheduler, ipset refresh, and bot watchdog logic.*
+*Stabilizes router CPU percentage sampling in web status while keeping YouTube route detection tied to the active service route list across redirect, scheduler, ipset refresh, and bot watchdog logic.*
 
 *v1.805 (24 Jun 2026) -* main
 

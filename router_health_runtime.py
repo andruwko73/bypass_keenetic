@@ -151,7 +151,7 @@ def cpu_percent_between(previous_stat, current_stat):
 
 def read_cpu_percent(
     *,
-    interval=0.05,
+    interval=0.35,
     stat_path='/proc/stat',
     read_text=read_proc_text,
     sleep_func=time.sleep,

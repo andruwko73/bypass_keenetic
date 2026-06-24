@@ -1,3 +1,9 @@
+<a name="1.808"></a>
+# [1.808] - 24 Jun 2026
+
+- Increases the router CPU percentage sampling window to avoid false `0/50/100%` jumps on low-tick routers while keeping the metric cached and lightweight.
+- Keeps the 1.807 YouTube route-detection fix: active YouTube list detection now follows all supported route files instead of assuming Vless 2.
+
 <a name="1.807"></a>
 # [1.807] - 24 Jun 2026
 
