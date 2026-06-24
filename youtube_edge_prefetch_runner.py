@@ -30,6 +30,19 @@ WATCH_WARM_MAX_HOSTS = 6
 WATCH_WARM_MAX_BYTES = 1800000
 WATCH_WARM_CONNECT_TIMEOUT = 6
 WATCH_WARM_MAX_TIME = 20
+FAST_PREFETCH_HOSTS = (
+    'www.youtube.com',
+    'youtubei.googleapis.com',
+    'manifest.googlevideo.com',
+    'redirector.googlevideo.com',
+)
+FAST_PREFETCH_TRIGGERS = (
+    'post-install',
+    'post-update',
+    'first-run',
+    'startup',
+    'manual-fast',
+)
 
 PROTOCOL_ROUTE_FILES = (
     ('shadowsocks', 'shadowsocks.txt'),
@@ -165,6 +178,96 @@ def _fetch_watch_page(url, socks_port, *, max_bytes, connect_timeout, max_time):
     return data.decode('utf-8', errors='ignore')
 
 
+def _quality_probe_url(host):
+    host = youtube_edge_prefetch.normalize_hosts((host,))
+    if not host:
+        return ''
+    host = host[0]
+    return f'https://{host}/generate_204'
+
+
+def _quality_probe_reason(returncode, stderr):
+    text = str(stderr or '').strip().lower()
+    if returncode == 28 or 'timeout' in text or 'timed out' in text:
+        return 'timeout'
+    if 'eof' in text or 'ssl' in text or 'tls' in text or 'handshake' in text:
+        return 'eof'
+    return 'failed'
+
+
+def probe_candidate_quality(candidate, route_protocol, *, target_ms=1000, timeout_seconds=5):
+    host = str((candidate or {}).get('host') or '').strip().lower().strip('.')
+    address = str((candidate or {}).get('address') or '').strip()
+    if not youtube_edge_prefetch.youtube_owned_host(host):
+        return {'ok': False, 'reason': 'shared', 'latency_ms': 0}
+    if not youtube_edge_prefetch.is_public_ipv4(address):
+        return {'ok': False, 'reason': 'invalid_ip', 'latency_ms': 0}
+    socks_port = _route_socks_port(route_protocol)
+    if socks_port <= 0:
+        return {'ok': False, 'reason': 'no_socks_port', 'latency_ms': 0}
+    url = _quality_probe_url(host)
+    if not url:
+        return {'ok': False, 'reason': 'invalid_host', 'latency_ms': 0}
+
+    timeout_seconds = max(2, int(timeout_seconds or 5))
+    command = [
+        'curl',
+        '-L',
+        '-sS',
+        '--socks5-hostname',
+        f'127.0.0.1:{int(socks_port)}',
+        '--resolve',
+        f'{host}:443:{address}',
+        '--connect-timeout',
+        str(min(3, timeout_seconds)),
+        '--max-time',
+        str(timeout_seconds),
+        '-o',
+        '/dev/null',
+        '-w',
+        '%{http_code} %{time_total}',
+        '-A',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+        url,
+    ]
+    started = time.time()
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout_seconds + 2,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'reason': 'timeout', 'latency_ms': int((time.time() - started) * 1000)}
+    except Exception:
+        return {'ok': False, 'reason': 'failed', 'latency_ms': 0}
+
+    latency_ms = int((time.time() - started) * 1000)
+    parts = str(result.stdout or '').strip().split()
+    http_code = parts[0] if parts else '000'
+    if len(parts) > 1:
+        try:
+            latency_ms = int(float(parts[1]) * 1000)
+        except Exception:
+            pass
+    if result.returncode != 0:
+        return {
+            'ok': False,
+            'reason': _quality_probe_reason(result.returncode, result.stderr),
+            'latency_ms': latency_ms,
+        }
+    if not http_code.isdigit() or http_code == '000':
+        return {'ok': False, 'reason': 'failed', 'latency_ms': latency_ms}
+    return {
+        'ok': latency_ms <= int(target_ms or youtube_edge_prefetch.DEFAULT_QUALITY_TARGET_MS),
+        'reason': 'ok' if latency_ms <= int(target_ms or youtube_edge_prefetch.DEFAULT_QUALITY_TARGET_MS) else 'slow',
+        'latency_ms': latency_ms,
+    }
+
+
 def collect_watch_edge_hosts(route_protocol):
     if not _config_bool('youtube_edge_watch_warm_enabled', True):
         return (), {'enabled': False, 'skipped_reason': 'disabled'}
@@ -215,7 +318,18 @@ def collect_watch_edge_hosts(route_protocol):
     }
 
 
-def prefetch_hosts_for_run():
+def prefetch_hosts_for_run(*, fast=False):
+    if fast:
+        hosts = list(youtube_edge_prefetch.normalize_hosts(
+            _config_value('youtube_edge_prefetch_fast_hosts', FAST_PREFETCH_HOSTS)
+        ))
+        seen = set(hosts)
+        for host in youtube_edge_prefetch.normalize_hosts(FAST_PREFETCH_HOSTS):
+            if host in seen:
+                continue
+            seen.add(host)
+            hosts.append(host)
+        return tuple(hosts)
     hosts = list(youtube_edge_prefetch.normalize_hosts(
         _config_value('youtube_edge_prefetch_hosts', youtube_edge_prefetch.DEFAULT_PREFETCH_HOSTS)
     ))
@@ -450,6 +564,13 @@ def _selected_hosts(hosts, max_hosts, status):
     return selected, (start_index + max_hosts) % len(hosts)
 
 
+def _fast_warm_enabled_for_trigger(trigger):
+    if not _config_bool('youtube_edge_prefetch_fast_warm_enabled', True):
+        return False
+    text = str(trigger or '').strip().lower()
+    return any(text.startswith(prefix) for prefix in FAST_PREFETCH_TRIGGERS)
+
+
 def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock_dir=None):
     started_at = time.time()
     status_path = status_path or _config_str('youtube_edge_prefetch_status_path', STATUS_PATH)
@@ -491,15 +612,25 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             _write_json_file(status_path, status)
             return status
 
-        hosts, next_host_index = _selected_hosts(
-            prefetch_hosts_for_run(),
-            _config_int(
-                'youtube_edge_prefetch_max_hosts_per_run',
-                youtube_edge_prefetch.DEFAULT_MAX_HOSTS_PER_RUN,
+        fast_warm = _fast_warm_enabled_for_trigger(trigger)
+        if fast_warm:
+            hosts = prefetch_hosts_for_run(fast=True)
+            fast_max_hosts = _config_int(
+                'youtube_edge_prefetch_fast_max_hosts_per_run',
+                len(FAST_PREFETCH_HOSTS),
                 minimum=1,
-            ),
-            previous_status,
-        )
+            )
+            hosts = hosts[:min(len(hosts), fast_max_hosts)]
+        else:
+            hosts, next_host_index = _selected_hosts(
+                prefetch_hosts_for_run(),
+                _config_int(
+                    'youtube_edge_prefetch_max_hosts_per_run',
+                    youtube_edge_prefetch.DEFAULT_MAX_HOSTS_PER_RUN,
+                    minimum=1,
+                ),
+                previous_status,
+            )
         watch_edge_hosts, watch_edge_status = collect_watch_edge_hosts(route_protocol)
         resolved_address_limit = _config_int(
             'youtube_edge_prefetch_max_resolved_addresses',
@@ -508,6 +639,21 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
         )
         if watch_edge_hosts:
             resolved_address_limit = max(resolved_address_limit, len(watch_edge_hosts) + len(hosts))
+        quality_enabled = _config_bool('youtube_edge_prefetch_quality_probe_enabled', True)
+        quality_target_ms = _config_int(
+            'youtube_edge_prefetch_quality_target_ms',
+            youtube_edge_prefetch.DEFAULT_QUALITY_TARGET_MS,
+            minimum=100,
+        )
+        quality_timeout_seconds = _config_int('youtube_edge_prefetch_quality_timeout_seconds', 5, minimum=2)
+        quality_probe = None
+        if quality_enabled:
+            quality_probe = lambda candidate: probe_candidate_quality(
+                candidate,
+                route_protocol,
+                target_ms=quality_target_ms,
+                timeout_seconds=quality_timeout_seconds,
+            )
         status = youtube_edge_prefetch.prefetch_once(
             route_protocol=route_protocol,
             cache_path=cache_path,
@@ -531,8 +677,8 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             max_hosts_per_run=len(hosts) or 1,
             max_resolved_addresses=resolved_address_limit,
             max_candidates=_config_int(
-                'youtube_edge_prefetch_max_candidates',
-                youtube_edge_prefetch.DEFAULT_MAX_CANDIDATES,
+                'youtube_edge_prefetch_fast_max_candidates' if fast_warm else 'youtube_edge_prefetch_max_candidates',
+                32 if fast_warm else youtube_edge_prefetch.DEFAULT_MAX_CANDIDATES,
                 minimum=1,
             ),
             max_addresses_per_run=_config_int(
@@ -541,10 +687,25 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 minimum=1,
             ),
             remove_from_other_sets=_config_bool('youtube_edge_prefetch_exclusive_ipsets', True),
+            protect_shared_google=_config_bool('youtube_edge_prefetch_protect_shared_google', True),
+            quality_probe=quality_probe,
+            quality_probe_enabled=quality_enabled,
+            quality_probe_target_ms=quality_target_ms,
+            quality_probe_bad_cooldown_seconds=_config_int(
+                'youtube_edge_prefetch_quality_bad_cooldown_seconds',
+                youtube_edge_prefetch.DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS,
+                minimum=0,
+            ),
+            quality_probe_max_candidates=_config_int(
+                'youtube_edge_prefetch_quality_max_candidates',
+                youtube_edge_prefetch.DEFAULT_QUALITY_MAX_CANDIDATES,
+                minimum=1,
+            ),
         )
         status['available_memory_kb'] = available_kb
         status['watch_edge_hosts'] = len(watch_edge_hosts)
         status['watch_edge'] = watch_edge_status
+        status['warm_mode'] = 'fast' if fast_warm else 'full'
         status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
         _write_json_file(status_path, status)
         return status

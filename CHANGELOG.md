@@ -1,3 +1,10 @@
+<a name="1.801"></a>
+# [1.801] - 24 Jun 2026
+
+- Scores YouTube edge prefetch candidates through the active route before adding them to runtime ipsets, rejecting slow, TLS EOF, and timeout-prone addresses against the 1000 ms target.
+- Uses a short fast-warm host set for install/update/first-run triggers while leaving scheduler runs on the full rotating host list.
+- Skips shared Google/Chrome Remote Desktop hosts in YouTube edge prefetch so CRD/auth traffic is not pulled into YouTube route ipsets.
+
 <a name="1.800"></a>
 # [1.800] - 24 Jun 2026
 

@@ -127,6 +127,21 @@ youtube_edge_prefetch_max_addresses_per_run = 16
 youtube_edge_prefetch_min_available_kb = 125000
 youtube_edge_prefetch_max_rss_kb = 66560
 youtube_edge_prefetch_exclusive_ipsets = True
+youtube_edge_prefetch_protect_shared_google = True
+youtube_edge_prefetch_fast_warm_enabled = True
+youtube_edge_prefetch_fast_hosts = (
+    'www.youtube.com',
+    'youtubei.googleapis.com',
+    'manifest.googlevideo.com',
+    'redirector.googlevideo.com',
+)
+youtube_edge_prefetch_fast_max_hosts_per_run = 4
+youtube_edge_prefetch_fast_max_candidates = 32
+youtube_edge_prefetch_quality_probe_enabled = True
+youtube_edge_prefetch_quality_target_ms = 1000
+youtube_edge_prefetch_quality_timeout_seconds = 5
+youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600
+youtube_edge_prefetch_quality_max_candidates = 24
 youtube_edge_watch_warm_enabled = True
 youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)
 youtube_edge_watch_warm_max_pages = 1

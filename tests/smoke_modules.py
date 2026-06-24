@@ -1572,6 +1572,16 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_min_available_kb = 125000',
         'youtube_edge_prefetch_max_rss_kb = 66560',
         'youtube_edge_prefetch_exclusive_ipsets = True',
+        'youtube_edge_prefetch_protect_shared_google = True',
+        'youtube_edge_prefetch_fast_warm_enabled = True',
+        'youtube_edge_prefetch_fast_hosts = (',
+        'youtube_edge_prefetch_fast_max_hosts_per_run = 4',
+        'youtube_edge_prefetch_fast_max_candidates = 32',
+        'youtube_edge_prefetch_quality_probe_enabled = True',
+        'youtube_edge_prefetch_quality_target_ms = 1000',
+        'youtube_edge_prefetch_quality_timeout_seconds = 5',
+        'youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600',
+        'youtube_edge_prefetch_quality_max_candidates = 24',
         'youtube_edge_watch_warm_enabled = True',
         "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ',)",
         'youtube_edge_watch_warm_max_pages = 1',
@@ -1589,6 +1599,7 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_prefetch_min_available_kb = 125000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert "youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*4" in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_max_hosts_per_run = 12' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_quality_target_ms = 1000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
         'telegram_call_learning_enabled = True',
         "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",
@@ -2554,6 +2565,127 @@ def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
     assert ('unblockvless2', address) in present
 
 
+def test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof():
+    addresses = {
+        'www.youtube.com': '142.250.150.119',
+        'youtubei.googleapis.com': '142.251.38.106',
+        'manifest.googlevideo.com': '172.217.20.170',
+    }
+    added = []
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        return [(family, socktype, 0, '', (addresses[host], port))]
+
+    def quality_probe(candidate):
+        address = candidate['address']
+        if address == '142.250.150.119':
+            return {'ok': True, 'latency_ms': 850, 'reason': 'ok'}
+        if address == '142.251.38.106':
+            return {'ok': True, 'latency_ms': 1500, 'reason': 'ok'}
+        return {'ok': False, 'latency_ms': 300, 'reason': 'eof'}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        status = youtube_edge_prefetch.prefetch_once(
+            route_protocol='vless2',
+            cache_path=str(Path(tmp) / 'youtube_edge_cache.json'),
+            hosts=tuple(addresses),
+            dns_servers=('local',),
+            ipset_contains=lambda set_name, ip: False,
+            ipset_add=lambda set_name, ip: added.append((set_name, ip)) or True,
+            now_provider=lambda: 1_800_000,
+            max_hosts_per_run=3,
+            max_resolved_addresses=3,
+            max_addresses_per_run=3,
+            quality_probe=quality_probe,
+            quality_probe_enabled=True,
+            quality_probe_target_ms=1000,
+            getaddrinfo=fake_getaddrinfo,
+            run_command=lambda args, timeout: '',
+        )
+
+    assert status['ok'] is True
+    assert status['quality_tested'] == 3
+    assert status['quality_accepted'] == 1
+    assert status['quality_rejected_slow'] == 1
+    assert status['quality_rejected_eof'] == 1
+    assert status['added_addresses'] == 1
+    assert added == [
+        ('unblockvless2', '142.250.150.119'),
+        ('unblockvless2udp', '142.250.150.119'),
+    ]
+
+
+def test_youtube_edge_prefetch_skips_recent_bad_quality_cache():
+    now = 1_800_000
+    cache = {
+        'version': 1,
+        'updated_at': now,
+        'entries': {
+            '142.250.150.119': {
+                'host': 'www.youtube.com',
+                'source': 'dns',
+                'last_seen': now - 10,
+                'hits': 2,
+                'quality_last_fail': now - 60,
+                'quality_fail_reason': 'eof',
+            },
+        },
+    }
+    probe_calls = []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_path = Path(tmp) / 'youtube_edge_cache.json'
+        cache_path.write_text(json.dumps(cache), encoding='utf-8')
+        status = youtube_edge_prefetch.prefetch_once(
+            route_protocol='vless2',
+            cache_path=str(cache_path),
+            hosts=(),
+            dns_servers=('local',),
+            ipset_contains=lambda set_name, ip: False,
+            ipset_add=lambda set_name, ip: True,
+            now_provider=lambda: now,
+            quality_probe=lambda candidate: probe_calls.append(candidate) or {'ok': True, 'latency_ms': 700},
+            quality_probe_enabled=True,
+            quality_probe_bad_cooldown_seconds=3600,
+            getaddrinfo=lambda host, port, family, socktype: [],
+            run_command=lambda args, timeout: '',
+        )
+
+    assert status['quality_rejected_cached'] == 1
+    assert status['added_addresses'] == 0
+    assert probe_calls == []
+
+
+def test_youtube_edge_prefetch_protects_shared_google_candidates():
+    assert youtube_edge_prefetch.youtube_owned_host('rr3---sn-4g5ednsl.googlevideo.com')
+    assert not youtube_edge_prefetch.youtube_owned_host('remotedesktop-pa.googleapis.com')
+    assert not youtube_edge_prefetch.youtube_owned_host('www.gstatic.com')
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        return [(family, socktype, 0, '', ('142.250.150.120', port))]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        status = youtube_edge_prefetch.prefetch_once(
+            route_protocol='vless2',
+            cache_path=str(Path(tmp) / 'youtube_edge_cache.json'),
+            hosts=('www.gstatic.com',),
+            dns_servers=('local',),
+            ipset_contains=lambda set_name, ip: False,
+            ipset_add=lambda set_name, ip: True,
+            now_provider=lambda: 1_800_000,
+            max_hosts_per_run=1,
+            max_resolved_addresses=1,
+            quality_probe=lambda candidate: {'ok': True, 'latency_ms': 100},
+            quality_probe_enabled=True,
+            getaddrinfo=fake_getaddrinfo,
+            run_command=lambda args, timeout: '',
+        )
+
+    assert status['shared_candidates_skipped'] == 1
+    assert status['quality_tested'] == 0
+    assert status['added_addresses'] == 0
+
+
 def test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks():
     original_config = youtube_edge_prefetch_runner.config
     original_fetch = youtube_edge_prefetch_runner._fetch_watch_page
@@ -2603,6 +2735,24 @@ def test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts():
     assert 'manifest.googlevideo.com' in hosts
     assert 'jnn-pa.googleapis.com' in hosts
     assert 'play-fe.googleapis.com' in hosts
+
+
+def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
+    original_config = youtube_edge_prefetch_runner.config
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_fast_warm_enabled=True,
+            youtube_edge_prefetch_fast_hosts=('youtubei.googleapis.com', 'www.youtube.com'),
+        )
+
+        hosts = youtube_edge_prefetch_runner.prefetch_hosts_for_run(fast=True)
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+
+    assert youtube_edge_prefetch_runner._fast_warm_enabled_for_trigger('Post-update-late')
+    assert not youtube_edge_prefetch_runner._fast_warm_enabled_for_trigger('scheduler')
+    assert hosts[:2] == ('youtubei.googleapis.com', 'www.youtube.com')
+    assert 'manifest.googlevideo.com' in hosts
 
 
 def test_entware_dns_runtime_helpers():
@@ -7312,8 +7462,12 @@ def main():
     test_youtube_edge_prefetch_extracts_watch_edge_hosts()
     test_youtube_edge_prefetch_priority_hosts_are_tried_before_cache()
     test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps()
+    test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof()
+    test_youtube_edge_prefetch_skips_recent_bad_quality_cache()
+    test_youtube_edge_prefetch_protects_shared_google_candidates()
     test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks()
     test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts()
+    test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_cached_protocol_status_description_has_no_static_trailing_period()

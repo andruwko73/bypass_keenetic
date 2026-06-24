@@ -1,3 +1,7 @@
+*v1.801 (24 Jun 2026) -* main
+
+*Scores YouTube edge prefetch IPs through the active route before adding them, uses a short fast-warm path for install/update triggers, and keeps shared Google/CRD hosts out of YouTube runtime ipsets.*
+
 *v1.800 (24 Jun 2026) -* main
 
 *Stops cron refresh calls from competing with the persistent unblock scheduler, keeps scheduler lock-busy skips quiet, and preserves bot-side already-running detection for UDP/QUIC drift refreshes.*
