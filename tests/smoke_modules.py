@@ -1072,7 +1072,7 @@ def test_youtube_healthcheck_rejects_http_client_error_status():
     assert metrics['yt_stability'] == 'fail'
 
 
-def test_youtube_healthcheck_rejects_single_home_timeout():
+def test_youtube_healthcheck_tolerates_single_quick_home_timeout():
     def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
         if url == youtube_healthcheck.YOUTUBE_HOME_URL:
             return False, 'Удалённый сервер не ответил вовремя через этот ключ.'
@@ -1087,11 +1087,35 @@ def test_youtube_healthcheck_rejects_single_home_timeout():
         metrics=metrics,
     )
 
-    assert ok is False
-    assert 'Required YouTube endpoint' in message
+    assert ok is True
+    assert 'soft diagnostic issue' in message
     assert metrics['yt_home_ok'] is False
     assert metrics['googlevideo_ok'] is True
-    assert metrics['yt_stability'] == 'fail'
+    assert metrics['yt_stability'] == 'stable'
+    assert metrics['yt_error_rate'] > 0
+
+
+def test_youtube_healthcheck_tolerates_single_quick_googlevideo_timeout():
+    def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
+        if url == youtube_healthcheck.YOUTUBE_GOOGLEVIDEO_URL:
+            return False, 'TLS connect error: unexpected EOF while reading'
+        return True, 'ok'
+
+    metrics = {}
+    ok, message = youtube_healthcheck.check_youtube_through_proxy(
+        check_http,
+        'socks5h://127.0.0.1:10811',
+        http_timeouts=(1, 2),
+        profile='quick',
+        metrics=metrics,
+    )
+
+    assert ok is True
+    assert 'soft diagnostic issue' in message
+    assert metrics['yt_home_ok'] is True
+    assert metrics['googlevideo_ok'] is False
+    assert metrics['yt_stability'] == 'stable'
+    assert metrics['yt_error_rate'] > 0
 
 
 def test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure():
@@ -1483,9 +1507,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
-    assert 'memory_timeline_enabled = True' in example
-    assert 'memory_timeline_enabled = True' in installer
-    assert 'memory_timeline_enabled = True' in bootstrap
+    assert 'memory_timeline_enabled = False' in example
+    assert 'memory_timeline_enabled = False' in installer
+    assert 'memory_timeline_enabled = False' in bootstrap
     assert 'status_refresh_min_interval_seconds = 180.0' in example
     assert 'status_refresh_min_interval_seconds = 180.0' in installer
     assert 'status_refresh_min_interval_seconds = 180.0' in bootstrap
@@ -5471,6 +5495,9 @@ def test_web_get_actions_helpers():
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
     assert pools['payload']['pool_probe_running'] is True
     assert pools['payload']['pool_probe_progress'] == {'running': True, 'total': 2}
+    sensitive_pools = web_get_actions.dispatch(ctx, '/api/pools', 'include_keys=1&protocols=vless')
+    assert sensitive_pools['payload']['pools'] == {'vless': {'rows': []}}
+    assert pool_snapshot_calls[-1] == (current_keys, False, ['vless'])
     service_routes_payload = web_get_actions.dispatch(ctx, '/api/service_routes')
     assert service_routes_payload['payload'] == {'route_tools_html': '<div>routes</div>'}
     scoped_pools = web_get_actions.dispatch(ctx, '/api/pools', 'protocols=vless,vmess')
@@ -7249,7 +7276,8 @@ def main():
     test_youtube_healthcheck_retries_transient_watch_page()
     test_youtube_healthcheck_tolerates_transient_primary_generate_204()
     test_youtube_healthcheck_rejects_http_client_error_status()
-    test_youtube_healthcheck_rejects_single_home_timeout()
+    test_youtube_healthcheck_tolerates_single_quick_home_timeout()
+    test_youtube_healthcheck_tolerates_single_quick_googlevideo_timeout()
     test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure()
     test_youtube_healthcheck_tolerates_multiple_transient_bootstrap_failures()
     test_youtube_healthcheck_warns_on_partial_googlevideo_success()

@@ -799,7 +799,10 @@ migrate_runtime_config_defaults() {
   if grep -Eq '^memory_post_pool_restart_rss_kb[[:space:]]*=[[:space:]]*(61440|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^memory_post_pool_restart_rss_kb[[:space:]]*=.*/memory_post_pool_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^memory_timeline_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf '\nmemory_timeline_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^memory_timeline_enabled[[:space:]]*=[[:space:]]*True([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^memory_timeline_enabled[[:space:]]*=.*/memory_timeline_enabled = False/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^memory_timeline_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf '\nmemory_timeline_enabled = False\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_timeline_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_timeline_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_timeline_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^memory_timeline_max_events[[:space:]]*=[[:space:]]*240([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then

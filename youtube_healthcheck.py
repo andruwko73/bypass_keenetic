@@ -134,6 +134,7 @@ def check_youtube_through_proxy(
     sleep=time.sleep,
     max_failures=None,
 ):
+    profile_name = str(profile or 'full').strip().lower()
     profile_urls, profile_min_ok, profile_max_failures = youtube_healthcheck_profile(profile)
     retry_http_connect, retry_http_read = http_retry_timeouts or http_timeouts
     urls = tuple(urls or profile_urls)
@@ -221,13 +222,21 @@ def check_youtube_through_proxy(
     soft_success_required = max(1, success_required - transient_failure_allowance)
     only_transient_failures = failure_count == 0 or unstable_failures == failure_count
     success_threshold = ok_count >= success_required
-    critical_missing = required_missing - {YOUTUBE_PRIMARY_URL}
+    soft_required_missing = set()
+    if profile_name == 'quick' and only_transient_failures and ok_count >= soft_success_required:
+        if YOUTUBE_HOME_URL in required_missing and short_ok and googlevideo_ok:
+            soft_required_missing.add(YOUTUBE_HOME_URL)
+        if YOUTUBE_GOOGLEVIDEO_URL in required_missing and home_ok and short_ok:
+            soft_required_missing.add(YOUTUBE_GOOGLEVIDEO_URL)
+    home_ok_for_service = home_ok or YOUTUBE_HOME_URL in soft_required_missing
+    googlevideo_ok_for_service = googlevideo_ok or YOUTUBE_GOOGLEVIDEO_URL in soft_required_missing
+    critical_missing = (required_missing - soft_required_missing) - {YOUTUBE_PRIMARY_URL}
     service_usable = (
         not critical_missing and
-        home_ok and
+        home_ok_for_service and
         watch_ok and
         short_ok and
-        googlevideo_ok and
+        googlevideo_ok_for_service and
         ok_count >= (soft_success_required if only_transient_failures else max(1, success_required - 1))
     )
     soft_diagnostic_issue = service_usable and (
@@ -243,10 +252,10 @@ def check_youtube_through_proxy(
         not stable and
         success_threshold and
         not required_missing and
-        home_ok and
+        home_ok_for_service and
         watch_ok and
         short_ok and
-        googlevideo_ok_count > 0
+        googlevideo_ok_for_service
     )
     stability = 'stable' if stable else ('unstable' if partially_ok else 'fail')
 

@@ -1,3 +1,7 @@
+*v1.799 (24 Jun 2026) -* main
+
+*Closes raw-key output from the pool JSON API, softens one-off transient YouTube quick-probe misses on homepage/googlevideo endpoints, and disables the persistent memory timeline by default while keeping watchdog protection.*
+
 *v1.798 (24 Jun 2026) -* main
 
 *Retries the external YouTube edge prefetch in the background after the bot restart when the immediate post-update run skipped because memory was temporarily low or the runner lock was busy.*

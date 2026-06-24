@@ -1,3 +1,10 @@
+<a name="1.799"></a>
+# [1.799] - 24 Jun 2026
+
+- Stops `/api/pools?include_keys=1` from returning raw pool keys while keeping full keys visible in the server-rendered web form for copying.
+- Treats a single transient quick-probe miss on the YouTube homepage or googlevideo endpoint as a soft diagnostic issue instead of failing otherwise working pool keys.
+- Disables the persistent memory timeline by default and migrates existing default-enabled configs back to off while keeping the memory watchdog active.
+
 <a name="1.798"></a>
 # [1.798] - 24 Jun 2026
 

@@ -149,14 +149,13 @@ def _pools_payload(ctx, query=''):
             'timestamp': _ctx(ctx, 'time_provider', time.time)(),
         }
     params = parse_qs(query or '', keep_blank_values=True)
-    include_keys = str((params.get('include_keys') or [''])[0]).lower() in ('1', 'true', 'yes')
     protocols = _requested_protocols(params)
     current_keys = _ctx(ctx, 'load_current_keys')()
     progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})()
     pool_probe_running = _pool_probe_running(progress)
     pool_probe_paused = _pool_probe_paused(ctx, progress)
     return {
-        'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=include_keys, protocols=protocols),
+        'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=False, protocols=protocols),
         'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
         'pool_probe_running': pool_probe_running,
         'pool_probe_paused': pool_probe_paused,

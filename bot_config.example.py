@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.798
+# ВЕРСИЯ СКРИПТА v1.799
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -52,7 +52,7 @@ memory_post_pool_restart_rss_kb = 71680
 memory_post_pool_restart_delay_seconds = 20.0
 memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
-memory_timeline_enabled = True
+memory_timeline_enabled = False
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0
 memory_timeline_max_events = 720
