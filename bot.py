@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.791, последнее изменение: 24.06.2026
+#  Файл: bot.py, Версия v1.792, последнее изменение: 24.06.2026
 
 import subprocess
 import os
@@ -9291,6 +9291,9 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             self._send_png(action.get('path', ''))
         else:
             self._send_html('<h1>404 Not Found</h1>', status=404)
+
+    def do_HEAD(self):
+        self.do_GET()
 
     def do_POST(self):
         if not self._ensure_request_allowed():

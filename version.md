@@ -1,3 +1,7 @@
+*v1.792 (24 Jun 2026) -* main
+
+*Adds gzip compression for large web UI HTML/JSON responses and supports HEAD requests so the external Netcraze HTTPS endpoint has a smaller, more compatible first response on mobile browsers.*
+
 *v1.791 (24 Jun 2026) -* main
 
 *Lowers the external YouTube edge prefetch memory guard to 125 MB available so the short runner can still warm YouTube on routers where post-update available memory sits around 135 MB, without moving that work back into the bot RSS.*

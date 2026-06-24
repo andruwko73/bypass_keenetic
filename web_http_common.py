@@ -1,4 +1,5 @@
 import base64
+import gzip
 import ipaddress
 import json
 import re
@@ -49,6 +50,12 @@ class WebRequestMixin:
     web_auth_user_getter = staticmethod(lambda: 'admin')
     flash_message_setter = staticmethod(lambda message: None)
     quiet_log_prefixes = ()
+    gzip_min_bytes = 1024
+    gzip_compressible_types = (
+        'application/json',
+        'application/javascript',
+        'text/',
+    )
 
     def log_message(self, format, *args):
         path = getattr(self, 'path', '') or ''
@@ -82,12 +89,51 @@ class WebRequestMixin:
         self.close_connection = True
 
     def _write_response_body(self, body):
+        if str(getattr(self, 'command', '') or '').upper() == 'HEAD':
+            return True
         try:
             self.wfile.write(body)
             return True
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
             self.close_connection = True
             return False
+
+    def _client_accepts_gzip(self):
+        accept_encoding = str(self.headers.get('Accept-Encoding', '') or '').lower()
+        for raw_part in accept_encoding.split(','):
+            part = raw_part.strip()
+            if not part:
+                continue
+            token, _, options = part.partition(';')
+            token = token.strip()
+            if token not in ('gzip', '*'):
+                continue
+            if re.search(r'(?:^|;)\s*q=0(?:\.0+)?(?:\s*;|$)', ';' + options):
+                continue
+            return True
+        return False
+
+    def _content_type_allows_gzip(self, content_type):
+        normalized = str(content_type or '').lower()
+        return any(normalized.startswith(prefix) for prefix in self.gzip_compressible_types)
+
+    def _prepare_response_body(self, body, content_type):
+        if (
+            len(body) < self.gzip_min_bytes
+            or not self._content_type_allows_gzip(content_type)
+            or not self._client_accepts_gzip()
+        ):
+            return body, []
+        try:
+            compressed = gzip.compress(body, compresslevel=5)
+        except Exception:
+            return body, []
+        if len(compressed) >= len(body):
+            return body, []
+        return compressed, [
+            ('Content-Encoding', 'gzip'),
+            ('Vary', 'Accept-Encoding'),
+        ]
 
     def _ensure_web_auth(self):
         expected_token = str(self.web_auth_token_getter() or '')
@@ -155,9 +201,12 @@ class WebRequestMixin:
         return parse_qs(body)
 
     def _send_html(self, html, status=200):
-        body = html.encode('utf-8')
+        content_type = 'text/html; charset=utf-8'
+        body, extra_headers = self._prepare_response_body(html.encode('utf-8'), content_type)
         self.send_response(status)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.send_header('Content-type', content_type)
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
@@ -174,9 +223,15 @@ class WebRequestMixin:
         self.close_connection = True
 
     def _send_json(self, payload, status=200):
-        body = json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        content_type = 'application/json; charset=utf-8'
+        body, extra_headers = self._prepare_response_body(
+            json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8'),
+            content_type,
+        )
         self.send_response(status)
-        self.send_header('Content-type', 'application/json; charset=utf-8')
+        self.send_header('Content-type', content_type)
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
         self.send_header('Pragma', 'no-cache')
@@ -187,9 +242,11 @@ class WebRequestMixin:
         self.close_connection = True
 
     def _send_text_asset(self, text, content_type='text/plain; charset=utf-8', cache_seconds=0):
-        body = (text or '').encode('utf-8')
+        body, extra_headers = self._prepare_response_body((text or '').encode('utf-8'), content_type)
         self.send_response(200)
         self.send_header('Content-type', content_type)
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.send_header('Content-Length', str(len(body)))
         if cache_seconds:
             self.send_header('Cache-Control', f'public, max-age={int(cache_seconds)}')

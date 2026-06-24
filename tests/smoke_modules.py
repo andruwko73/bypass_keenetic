@@ -1,6 +1,7 @@
 from pathlib import Path
 from io import BytesIO
 import base64
+import gzip
 import importlib
 import json
 import os
@@ -5056,6 +5057,54 @@ def test_web_http_basic_auth_accepts_and_rejects_credentials():
         web_auth_token_getter = staticmethod(lambda: '')
 
     assert _NoAuthRequest()._ensure_web_auth() is True
+
+
+def test_web_http_gzip_and_head_responses():
+    class _Request(web_http_common.WebRequestMixin):
+        def __init__(self, headers=None, command='GET'):
+            self.headers = headers or {}
+            self.command = command
+            self.wfile = BytesIO()
+            self.status_code = None
+            self.sent_headers = []
+            self.close_connection = False
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.sent_headers.append((name, value))
+
+        def end_headers(self):
+            pass
+
+    request = _Request({'Accept-Encoding': 'br, gzip'})
+    html = '<main>' + ('external web ui ' * 512) + '</main>'
+    request._send_html(html)
+    headers = dict(request.sent_headers)
+
+    assert request.status_code == 200
+    assert headers['Content-Encoding'] == 'gzip'
+    assert headers['Vary'] == 'Accept-Encoding'
+    assert int(headers['Content-Length']) == len(request.wfile.getvalue())
+    assert gzip.decompress(request.wfile.getvalue()).decode('utf-8') == html
+    assert request.close_connection is True
+
+    no_gzip = _Request({'Accept-Encoding': 'gzip;q=0'})
+    no_gzip._send_html(html)
+    no_gzip_headers = dict(no_gzip.sent_headers)
+    assert 'Content-Encoding' not in no_gzip_headers
+    assert no_gzip.wfile.getvalue().decode('utf-8') == html
+
+    head_request = _Request({'Accept-Encoding': 'gzip'}, command='HEAD')
+    head_request._send_json({'payload': 'external web ui ' * 512})
+    head_headers = dict(head_request.sent_headers)
+
+    assert head_request.status_code == 200
+    assert head_headers['Content-Encoding'] == 'gzip'
+    assert int(head_headers['Content-Length']) > 0
+    assert head_request.wfile.getvalue() == b''
+    assert head_request.close_connection is True
 
 
 def test_installer_common_helpers():

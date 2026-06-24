@@ -1,3 +1,10 @@
+<a name="1.792"></a>
+# [1.792] - 24 Jun 2026
+
+- Adds gzip compression for large HTML, JSON, and text web responses when the browser advertises `Accept-Encoding: gzip`.
+- Supports `HEAD` requests through the existing web handler, returning headers without a response body instead of `501 Unsupported method`.
+- Keeps web responses on `Connection: close` while reducing the payload sent through the external Netcraze HTTPS endpoint.
+
 <a name="1.791"></a>
 # [1.791] - 24 Jun 2026
 
