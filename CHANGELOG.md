@@ -1,3 +1,9 @@
+<a name="1.818"></a>
+# [1.818] - 25 Jun 2026
+
+- Adds optional router HWID forwarding for subscription imports and stores HWID-enabled subscriptions for daily sync.
+- Scopes YouTube failover stream guard to the route being repaired, so Vless 1 traffic no longer blocks Vless 2 YouTube key switching.
+
 <a name="1.817"></a>
 # [1.817] - 25 Jun 2026
 

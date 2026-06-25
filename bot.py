@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.817, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.818, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -98,6 +98,7 @@ from custom_checks_store import (
 )
 import key_pool_store
 import key_pool_web
+import subscription_runtime
 import telegram_pool_ui
 import web_pool_form_blocks
 import telegram_key_ui
@@ -408,8 +409,33 @@ else:
 
 # --- Пул ключей и авто-фейловер Telegram API ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
+SUBSCRIPTION_STATE_PATH = str(getattr(config, 'subscription_state_path', '/opt/etc/bot/subscriptions.json') or '').strip()
 SUBSCRIPTION_MAX_BYTES = int(getattr(config, 'subscription_max_bytes', 2 * 1024 * 1024))
 SUBSCRIPTION_ALLOW_PRIVATE_URLS = bool(getattr(config, 'subscription_allow_private_urls', False))
+SUBSCRIPTION_HWID_VALUE = str(getattr(config, 'subscription_router_hwid', '') or '').strip()
+SUBSCRIPTION_HWID_QUERY_PARAM = str(getattr(config, 'subscription_hwid_query_param', 'hwid') or 'hwid').strip()
+SUBSCRIPTION_HWID_HEADER_NAMES = tuple(
+    str(item).strip()
+    for item in getattr(config, 'subscription_hwid_header_names', subscription_runtime.DEFAULT_HWID_HEADER_NAMES)
+    if str(item or '').strip()
+)
+SUBSCRIPTION_AUTO_REFRESH_ENABLED = bool(getattr(config, 'subscription_auto_refresh_enabled', True))
+SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS = max(
+    3600,
+    int(getattr(config, 'subscription_auto_refresh_interval_seconds', 24 * 3600)),
+)
+SUBSCRIPTION_AUTO_REFRESH_RETRY_SECONDS = max(
+    600,
+    int(getattr(config, 'subscription_auto_refresh_retry_seconds', 3600)),
+)
+SUBSCRIPTION_AUTO_REFRESH_START_DELAY_SECONDS = max(
+    60,
+    int(getattr(config, 'subscription_auto_refresh_start_delay_seconds', 300)),
+)
+SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS = max(
+    300,
+    int(getattr(config, 'subscription_auto_refresh_check_seconds', 3600)),
+)
 AUTO_FAILOVER_GRACE_SECONDS = int(getattr(config, 'auto_failover_grace_seconds', 180))
 AUTO_FAILOVER_POLL_SECONDS = int(getattr(config, 'auto_failover_poll_seconds', 60))
 AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switch_cooldown_seconds', 180))
@@ -701,7 +727,65 @@ def _read_limited_response(response, max_bytes):
     return b''.join(chunks).decode(encoding, errors='replace').strip()
 
 
-def _fetch_keys_from_subscription(url):
+def _read_router_hwid_command(command):
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout or ''
+    except Exception:
+        pass
+    return ''
+
+
+def _detect_router_hwid():
+    texts = []
+    for command in (
+        ['ndmc', '-c', 'show system'],
+        ['ndmc', '-c', 'show version'],
+    ):
+        text = _read_router_hwid_command(command)
+        if text:
+            texts.append(text)
+    return subscription_runtime.extract_router_hwid('\n'.join(texts))
+
+
+def _router_hwid():
+    if SUBSCRIPTION_HWID_VALUE:
+        return SUBSCRIPTION_HWID_VALUE
+    now = time.time()
+    with subscription_hwid_lock:
+        cached = subscription_hwid_cache.get('value')
+        checked_at = float(subscription_hwid_cache.get('checked_at') or 0)
+        if cached is not None and now - checked_at < 3600:
+            return cached
+        value = _detect_router_hwid()
+        subscription_hwid_cache['value'] = value
+        subscription_hwid_cache['checked_at'] = now
+        return value
+
+
+def _subscription_request_url_headers(url, use_router_hwid=False):
+    if not use_router_hwid:
+        return str(url or '').strip(), {}
+    hwid = _router_hwid()
+    if not hwid:
+        raise ValueError('HWID роутера не определён')
+    return subscription_runtime.apply_hwid_to_subscription_request(
+        url,
+        hwid,
+        query_param=SUBSCRIPTION_HWID_QUERY_PARAM,
+        header_names=SUBSCRIPTION_HWID_HEADER_NAMES,
+    )
+
+
+def _fetch_keys_from_subscription(url, use_router_hwid=False):
     """Загружает ключи из subscription-ссылки (base64-encoded список)."""
     try:
         parsed = urlparse(str(url or '').strip())
@@ -709,10 +793,11 @@ def _fetch_keys_from_subscription(url):
             raise ValueError('subscription URL must be http:// or https://')
         if not SUBSCRIPTION_ALLOW_PRIVATE_URLS and _private_subscription_address(parsed.hostname):
             raise ValueError('private, local and reserved subscription hosts are not allowed')
+        request_url, headers = _subscription_request_url_headers(url, use_router_hwid=use_router_hwid)
         session = requests.Session()
         try:
             session.trust_env = False
-            resp = session.get(url, stream=True, timeout=(5, 15))
+            resp = session.get(request_url, headers=headers, stream=True, timeout=(5, 15))
             try:
                 resp.raise_for_status()
                 raw = _read_limited_response(resp, SUBSCRIPTION_MAX_BYTES)
@@ -804,7 +889,8 @@ def _auto_failover_log(message):
 
 
 def _attempt_auto_failover():
-    if proxy_mode in YOUTUBE_ROUTE_PROTOCOLS and _vless_traffic_guard_active(
+    if proxy_mode in YOUTUBE_STREAM_GUARD_PROTOCOLS and _youtube_stream_guard_active(
+        proxy_mode,
         'Telegram auto-failover',
         log=False,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
@@ -978,7 +1064,8 @@ def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_me
     last_restart = float(youtube_core_restart_state.get('last_restart') or 0.0)
     if last_restart and now - last_restart < YOUTUBE_VLESS2_RESTART_RECHECK_COOLDOWN_SECONDS:
         return False
-    if _vless_traffic_guard_active(
+    if _youtube_stream_guard_active(
+        route_proto,
         f'{_pool_proto_label(route_proto)} core restart recheck',
         log=True,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
@@ -1170,7 +1257,8 @@ def _attempt_youtube_failover():
         return False
     if (
         route_proto in ('vless', 'vless2') and
-        not _vless_traffic_guard_active(
+        not _youtube_stream_guard_active(
+            route_proto,
             f'{_pool_proto_label(route_proto)} endpoint repair',
             log=True,
             hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
@@ -1258,7 +1346,8 @@ def _attempt_youtube_failover():
                 continue
 
             key_hash = _hash_key(key_value)[:12]
-            if _vless_traffic_guard_active(
+            if _youtube_stream_guard_active(
+                route_proto,
                 f'{_pool_proto_label(route_proto)} key switch',
                 log=True,
                 hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
@@ -1789,6 +1878,9 @@ status_refresh_in_progress = set()
 status_refresh_last_started_at = {}
 status_refresh_last_finished_at = {}
 key_pool_lock = threading.RLock()
+subscription_state_lock = threading.RLock()
+subscription_hwid_lock = threading.Lock()
+subscription_hwid_cache = {'value': None, 'checked_at': 0.0}
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_cancel_event = threading.Event()
@@ -2176,6 +2268,41 @@ def _write_json_file(path, payload):
                 os.remove(temp_path)
             except Exception:
                 pass
+
+
+def _load_subscription_state():
+    if not SUBSCRIPTION_STATE_PATH:
+        return subscription_runtime.normalize_subscription_state({})
+    with subscription_state_lock:
+        return subscription_runtime.normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
+
+
+def _save_subscription_state(state):
+    if not SUBSCRIPTION_STATE_PATH:
+        return
+    payload = subscription_runtime.serialize_subscription_state(state)
+    with subscription_state_lock:
+        _write_json_file(SUBSCRIPTION_STATE_PATH, payload)
+
+
+def _subscription_public_settings():
+    return subscription_runtime.subscription_public_settings(_load_subscription_state())
+
+
+def _subscription_record(proto):
+    return _load_subscription_state().get(proto, {})
+
+
+def _update_subscription_record(proto, **updates):
+    if not SUBSCRIPTION_STATE_PATH:
+        return dict(updates)
+    with subscription_state_lock:
+        state = subscription_runtime.normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
+        record = dict(state.get(proto, {}) or {})
+        record.update(updates)
+        state[proto] = record
+        _write_json_file(SUBSCRIPTION_STATE_PATH, subscription_runtime.serialize_subscription_state(state))
+        return record
 
 
 def _write_text_file_atomic(path, text, mode=0o644):
@@ -8146,19 +8273,107 @@ def _add_keys_to_pool(proto, keys_text):
     return len(added_keys)
 
 
-def _add_subscription_keys_to_pool(proto, fetched_keys):
+def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None):
     with key_pool_lock:
-        pools, added_keys = key_pool_store.add_subscription_keys_to_pool(
-            key_pool_store.load_key_pools(KEY_POOLS_PATH),
-            proto,
-            fetched_keys,
-        )
+        if sync_subscription:
+            pools, added_keys, removed_keys, managed_keys = subscription_runtime.sync_subscription_keys_to_pool(
+                key_pool_store.load_key_pools(KEY_POOLS_PATH),
+                proto,
+                fetched_keys,
+                previous_managed_keys=previous_managed_keys,
+            )
+        else:
+            pools, added_keys = key_pool_store.add_subscription_keys_to_pool(
+                key_pool_store.load_key_pools(KEY_POOLS_PATH),
+                proto,
+                fetched_keys,
+            )
+            removed_keys = []
+            managed_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys)
         key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
     if added_keys:
         _probe_pool_keys_background(proto, added_keys)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
-    return pools, added_keys
+    return pools, added_keys, removed_keys, managed_keys
+
+
+def _refresh_subscription_once(proto, record, *, source='auto'):
+    url = str((record or {}).get('url') or '').strip()
+    if not url or not bool((record or {}).get('hwid_enabled')):
+        return False
+    attempt_at = time.time()
+    try:
+        fetched, error = _fetch_keys_from_subscription(url, use_router_hwid=True)
+        if error:
+            raise ValueError(error)
+        selected_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched)
+        if not selected_keys:
+            raise ValueError('subscription did not return keys for the selected protocol')
+        pools, added_keys, removed_keys, _managed_keys = _add_subscription_keys_to_pool(
+            proto,
+            fetched,
+            sync_subscription=True,
+            previous_managed_keys=(record or {}).get('managed_keys', []),
+        )
+        _update_subscription_record(
+            proto,
+            url=url,
+            hwid_enabled=True,
+            last_attempt_at=attempt_at,
+            last_success_at=time.time(),
+            last_error='',
+            managed_keys=_managed_keys,
+        )
+        _write_runtime_log(
+            f'Subscription {source} refresh for {proto}: added={len(added_keys)}, '
+            f'removed={len(removed_keys)}, total={len(_managed_keys)}'
+        )
+        return True
+    except Exception as exc:
+        _update_subscription_record(
+            proto,
+            url=url,
+            hwid_enabled=True,
+            last_attempt_at=attempt_at,
+            last_error=str(exc),
+        )
+        _write_runtime_log(f'Subscription {source} refresh for {proto} failed: {exc}')
+        return False
+
+
+def _subscription_refresh_due(record, now):
+    if not record or not record.get('url') or not record.get('hwid_enabled'):
+        return False
+    last_success = float(record.get('last_success_at') or 0)
+    last_attempt = float(record.get('last_attempt_at') or 0)
+    if last_success:
+        return now - last_success >= SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS
+    if last_attempt:
+        return now - last_attempt >= SUBSCRIPTION_AUTO_REFRESH_RETRY_SECONDS
+    return True
+
+
+def _start_subscription_auto_refresh_thread():
+    if not SUBSCRIPTION_AUTO_REFRESH_ENABLED or not SUBSCRIPTION_STATE_PATH:
+        return
+
+    def worker():
+        shutdown_requested.wait(SUBSCRIPTION_AUTO_REFRESH_START_DELAY_SECONDS)
+        while not shutdown_requested.is_set():
+            try:
+                state = _load_subscription_state()
+                now = time.time()
+                for proto, record in state.items():
+                    if shutdown_requested.is_set():
+                        break
+                    if _subscription_refresh_due(record, now):
+                        _refresh_subscription_once(proto, record, source='auto')
+            except Exception as exc:
+                _write_runtime_log(f'Subscription auto refresh error: {exc}')
+            shutdown_requested.wait(SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS)
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def _web_custom_checks():
@@ -8828,6 +9043,9 @@ def _web_action_context():
         fetch_keys_from_subscription=_fetch_keys_from_subscription,
         add_subscription_keys_to_pool=key_pool_store.add_subscription_keys_to_pool,
         add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
+        subscription_keys_for_protocol=subscription_runtime.subscription_keys_for_protocol,
+        subscription_record=_subscription_record,
+        save_subscription_record=_update_subscription_record,
         save_key_pools=_save_key_pools,
         pool_apply_lock=pool_apply_lock,
         custom_checks_enabled=pool_enabled,
@@ -8887,6 +9105,7 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
     if not protocol_sections:
         raise ValueError('Неизвестный протокол')
     key_pools = _ensure_current_keys_in_pools(current_keys)
+    subscription_settings = _subscription_public_settings()
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     custom_checks_html = ''
@@ -8929,6 +9148,7 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         pool_custom_col_width=pool_custom_col_width,
         pool_mobile_custom_col_width=pool_mobile_custom_col_width,
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        subscription_settings=subscription_settings,
         custom_checks_for_protocol=custom_checks_for_protocol,
         custom_header_icons_for_protocol=custom_header_icons_for_protocol,
         core_service_applicability_for_protocol=core_service_applicability_for_protocol,
@@ -8980,6 +9200,7 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
 
 def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
     key_pools = _ensure_current_keys_in_pools(current_keys)
+    subscription_settings = _subscription_public_settings()
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     custom_checks_html = ''
@@ -9022,6 +9243,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         pool_custom_col_width=pool_custom_col_width,
         pool_mobile_custom_col_width=pool_mobile_custom_col_width,
         custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        subscription_settings=subscription_settings,
         custom_checks_for_protocol=custom_checks_for_protocol,
         custom_header_icons_for_protocol=custom_header_icons_for_protocol,
         core_service_applicability_for_protocol=core_service_applicability_for_protocol,
@@ -9821,6 +10043,7 @@ def main():
     _mark_bot_ready_from_autostart()
     _restore_startup_proxy_mode()
     if _app_mode_pool_enabled(runtime_mode):
+        _start_subscription_auto_refresh_thread()
         _start_auto_failover_thread()
         _start_youtube_vless2_failover_thread()
         _ensure_current_keys_in_pools()

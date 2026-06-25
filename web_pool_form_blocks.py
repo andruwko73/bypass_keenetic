@@ -353,6 +353,7 @@ def render_protocol_panel(
     telegram_icon_html,
     youtube_icon_html,
     route_tools_html='',
+    subscription_settings=None,
     active=False,
     csrf_input_html='',
     enable_key_pool=True,
@@ -389,6 +390,8 @@ def render_protocol_panel(
     pool_subview_html = ''
     subscription_subview_html = ''
     if enable_key_pool:
+        subscription_settings = subscription_settings or {}
+        hwid_checked = ' checked' if subscription_settings.get('hwid_enabled') else ''
         deferred_attr = ' data-pool-deferred="1"' if defer_pool_rows else ''
         pool_subview_html = f'''
         <div class="protocol-subview" data-subview="pool">
@@ -455,7 +458,13 @@ def render_protocol_panel(
                 <input type="hidden" name="type" value="{safe_key_name}">
                 <label class="field-label">Загрузить subscription</label>
                 <input type="url" name="url" placeholder="https://sub.example.com/...">
-                <button type="submit" class="secondary-button">Загрузить subscription</button>
+                <div class="pool-subscribe-actions">
+                    <label class="subscription-hwid-toggle">
+                        <input type="checkbox" name="send_router_hwid" value="1"{hwid_checked}>
+                        <span>Передавать HWID роутера</span>
+                    </label>
+                    <button type="submit" class="secondary-button">Загрузить subscription</button>
+                </div>
             </form>
         </div>'''
     custom_check_card_html = ''
@@ -577,12 +586,14 @@ def render_protocol_tabs_and_panels(
     lazy_protocol_panels=False,
     pool_probe_pending=False,
     core_service_applicability_for_protocol=None,
+    subscription_settings=None,
     defer_pool_rows=False,
     defer_check_content=False,
 ):
     current_keys = current_keys or {}
     protocol_statuses = protocol_statuses or {}
     key_pools = key_pools or {}
+    subscription_settings = subscription_settings or {}
     key_probe_cache = key_probe_cache or {}
     custom_checks = custom_checks or []
     telegram_icon_html = telegram_icon_html or (lambda opacity=1.0: '')
@@ -697,6 +708,7 @@ def render_protocol_tabs_and_panels(
                 custom_presets_html=custom_presets_html,
                 custom_checks_html=custom_checks_html,
                 route_tools_html=route_tools_html,
+                subscription_settings=subscription_settings.get(key_name, {}),
                 telegram_icon_html=telegram_icon_html,
                 youtube_icon_html=youtube_icon_html,
                 active=tab_active,

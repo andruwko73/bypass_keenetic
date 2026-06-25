@@ -14,6 +14,7 @@ bot_config.py
 node_modules/
 router_combined.txt
 router_data.txt
+router-keys-backup-*.txt
 router_output.html
 web_state.html
 web_state_utf8.html

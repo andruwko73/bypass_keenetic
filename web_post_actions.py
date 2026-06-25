@@ -1,4 +1,5 @@
 import os
+import time
 
 
 PROXY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
@@ -487,18 +488,52 @@ def _pool_subscribe(ctx, data):
     try:
         if proto not in PROXY_PROTOCOLS:
             raise ValueError('Неизвестный протокол')
-        fetched, error = _ctx(ctx, 'fetch_keys_from_subscription')(form_value(data, 'url'))
+        subscription_url = form_value(data, 'url')
+        send_router_hwid = form_value(data, 'send_router_hwid').lower() in ('1', 'on', 'true', 'yes')
+        fetched, error = _ctx(ctx, 'fetch_keys_from_subscription')(
+            subscription_url,
+            use_router_hwid=send_router_hwid,
+        )
         if error:
             raise ValueError(error)
+        subscription_keys_for_protocol = _ctx(ctx, 'subscription_keys_for_protocol')
+        if send_router_hwid and subscription_keys_for_protocol:
+            selected_keys = subscription_keys_for_protocol(proto, fetched)
+            if not selected_keys:
+                raise ValueError('subscription не вернула ключи для выбранного протокола')
         add_saved = _ctx(ctx, 'add_subscription_keys_to_pool_saved')
+        previous_record = {}
+        subscription_record = _ctx(ctx, 'subscription_record')
+        if subscription_record:
+            previous_record = subscription_record(proto) or {}
         if add_saved:
-            pools, added_keys = add_saved(proto, fetched)
+            pools, added_keys, removed_keys, managed_keys = add_saved(
+                proto,
+                fetched,
+                sync_subscription=send_router_hwid,
+                previous_managed_keys=previous_record.get('managed_keys', []),
+            )
         else:
             pools, added_keys = _ctx(ctx, 'add_subscription_keys_to_pool')(_ctx(ctx, 'load_key_pools')(), proto, fetched)
+            removed_keys = []
+            managed_keys = added_keys
             _ctx(ctx, 'save_key_pools')(pools)
             if added_keys:
                 _ctx(ctx, 'probe_pool_keys_background')(proto, added_keys)
+        save_subscription_record = _ctx(ctx, 'save_subscription_record')
+        if save_subscription_record:
+            save_subscription_record(
+                proto,
+                url=subscription_url.strip(),
+                hwid_enabled=send_router_hwid,
+                last_attempt_at=time.time(),
+                last_success_at=time.time(),
+                last_error='',
+                managed_keys=managed_keys if send_router_hwid else [],
+            )
         result = f'Загружено из subscription и добавлено в пул {proto}: {len(added_keys)} ключей'
+        if removed_keys:
+            result += f'; удалено устаревших: {len(removed_keys)}'
         _invalidate_status(ctx)
     except Exception as exc:
         success = False

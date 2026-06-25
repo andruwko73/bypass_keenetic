@@ -1,3 +1,7 @@
+*v1.818 (25 Jun 2026) -* main
+
+*Adds optional router HWID forwarding for subscription imports with daily subscription sync, and scopes YouTube failover stream guard to the route being switched so Vless 1 traffic no longer blocks Vless 2 YouTube key recovery.*
+
 *v1.817 (25 Jun 2026) -* main
 
 *Stops automatic Telegram call-learning from applying broad active-media UDP flows; only Telegram-correlated UDP clusters may be learned, so unrelated heavy UDP traffic cannot be added as call destinations.*

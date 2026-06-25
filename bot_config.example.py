@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.817
+# ВЕРСИЯ СКРИПТА v1.818
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -12,6 +12,13 @@ fork_repo_owner = 'andruwko73'  # GitHub username вашего форка bypass
 fork_repo_name = 'bypass_keenetic'  # имя репозитория форка
 fork_button_label = 'Fork by andruwko73'  # подпись кнопки установки из вашего форка
 app_runtime_mode = 'advanced'  # simple, advanced или web_only
+subscription_state_path = '/opt/etc/bot/subscriptions.json'  # сохраненные subscription URL и режим HWID
+subscription_router_hwid = ''  # если пусто, HWID читается read-only через ndmc show system/version
+subscription_hwid_query_param = 'hwid'
+subscription_hwid_header_names = ('X-HWID', 'X-Router-HWID', 'X-Device-ID')
+subscription_auto_refresh_enabled = True
+subscription_auto_refresh_interval_seconds = 86400  # раз в день для подписок с включенным HWID
+subscription_auto_refresh_retry_seconds = 3600
 pool_probe_min_available_kb = 190000  # проверка пула не запускает временный xray, если доступной памяти меньше этого порога
 pool_probe_pause_available_kb = 125000  # ниже этого порога проверка ставит очередь на паузу до освобождения памяти
 pool_probe_slow_available_kb = 190000  # ниже этого порога проверка идёт медленнее, но не останавливается полностью

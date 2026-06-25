@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 import key_pool_web
 import key_pool_store
+import subscription_runtime
 import app_version
 import app_runtime_mode
 import router_health_runtime
@@ -995,6 +996,37 @@ def test_key_pool_subscription_helpers():
     assert 'finally:\n            session.close()' in bot_source
 
 
+def test_subscription_hwid_request_helpers():
+    url, headers = subscription_runtime.apply_hwid_to_subscription_request(
+        'https://sub.example.test/list?token=abc&hwid=old',
+        'KN-12345',
+    )
+    assert url == 'https://sub.example.test/list?token=abc&hwid=KN-12345'
+    assert headers == {
+        'X-HWID': 'KN-12345',
+        'X-Router-HWID': 'KN-12345',
+        'X-Device-ID': 'KN-12345',
+    }
+    text = 'model: Keenetic\nserial number: ABCD123456\n'
+    assert subscription_runtime.extract_router_hwid(text) == 'ABCD123456'
+
+
+def test_subscription_pool_sync_preserves_manual_keys():
+    old_key = 'vless://old@example.com:443#old'
+    new_key = 'vless://new@example.com:443#new'
+    manual_key = 'vless://manual@example.com:443#manual'
+    pools, added, removed, managed = subscription_runtime.sync_subscription_keys_to_pool(
+        {'vless2': [manual_key, old_key]},
+        'vless2',
+        {'vless': [new_key]},
+        previous_managed_keys=[old_key],
+    )
+    assert added == [new_key]
+    assert removed == [old_key]
+    assert managed == [new_key]
+    assert pools['vless2'] == [manual_key, new_key]
+
+
 def test_youtube_healthcheck_detects_first_load_instability():
     calls = []
 
@@ -1445,7 +1477,7 @@ def test_web_post_actions_helpers():
         load_key_pools=lambda: {},
         set_active_key=lambda proto, key: None,
         clear_pool=lambda proto: 0,
-        fetch_keys_from_subscription=lambda url: ({}, ''),
+        fetch_keys_from_subscription=lambda url, **kwargs: ({}, ''),
         add_subscription_keys_to_pool=lambda pools, proto, fetched: (pools, []),
         save_key_pools=lambda pools: None,
         pool_apply_lock=None,
@@ -2431,6 +2463,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _youtube_route_marker_count' in source
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
     assert "YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')" in source
+    assert "proxy_mode in YOUTUBE_STREAM_GUARD_PROTOCOLS" in source
+    assert "_youtube_stream_guard_active(\n        route_proto,\n        f'{_pool_proto_label(route_proto)} core restart recheck'" in source
+    assert "_youtube_stream_guard_active(\n                route_proto,\n                f'{_pool_proto_label(route_proto)} key switch'" in source
     assert "proxy_mode == route_proto" in source
     assert 'Telegram is required because bot mode is' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
@@ -6224,6 +6259,7 @@ def test_web_pool_form_blocks_helpers():
         youtube_icon_html=lambda opacity=1.0: 'YT',
         active=True,
         csrf_input_html='<input name="csrf_token" value="token">',
+        subscription_settings={'hwid_enabled': True},
     )
     assert 'protocol-workspace active' in panel
     assert 'vless://sample' in panel
@@ -6235,6 +6271,8 @@ def test_web_pool_form_blocks_helpers():
     assert 'custom-check-form' in panel
     assert 'data-pool-probe-start-button aria-disabled="false"' in panel
     assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in panel
+    assert 'name="send_router_hwid" value="1" checked' in panel
+    assert 'Передавать HWID роутера' in panel
     check_content = web_pool_form_blocks.render_protocol_check_content(
         key_name='vless',
         title='Vless 1',
@@ -7760,6 +7798,8 @@ def main():
     test_youtube_healthcheck_tolerates_multiple_transient_bootstrap_failures()
     test_youtube_healthcheck_warns_on_partial_googlevideo_success()
     test_key_pool_subscription_helpers()
+    test_subscription_hwid_request_helpers()
+    test_subscription_pool_sync_preserves_manual_keys()
     test_telegram_pool_ui()
     test_web_get_actions_helpers()
     test_web_form_blocks_helpers()
