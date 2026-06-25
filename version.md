@@ -1,3 +1,7 @@
+*v1.812 (25 Jun 2026) -* main
+
+*Extends protected route priority to RuTracker domains so Vless 2 wins over shared Cloudflare ranges that may also exist in Vless 1.*
+
 *v1.811 (25 Jun 2026) -* main
 
 *Adds small priority ipsets and top NAT redirects so protected Vless service IPs win over broad YouTube/Google CIDRs, then keeps RuTracker in Vless 2 only.*

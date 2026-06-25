@@ -1,3 +1,9 @@
+<a name="1.812"></a>
+# [1.812] - 25 Jun 2026
+
+- Adds RuTracker domains to the protected Vless priority resolver so their exact IPs are placed into the priority set for whichever Vless list owns them.
+- Keeps RuTracker on Vless 2 even when broad Cloudflare ranges remain in Vless 1 for other saved user routes.
+
 <a name="1.811"></a>
 # [1.811] - 25 Jun 2026
 
