@@ -532,8 +532,20 @@ apply_vless_priority_domain_ips() {
 	vless2_set="$2"
 	vless6_set="$3"
 	vless2v6_set="$4"
+	vless_priority_set="${5:-unblockvlesspriority}"
+	vless2_priority_set="${6:-unblockvless2priority}"
+	vless_priority6_set="${7:-unblockvlesspriority6}"
+	vless2_priority6_set="${8:-unblockvless2priority6}"
 	ipset list "$vless_set" >/dev/null 2>&1 || return 0
 	ipset list "$vless2_set" >/dev/null 2>&1 || return 0
+	ipset create "$vless_priority_set" hash:net -exist >/dev/null 2>&1 || true
+	ipset create "$vless2_priority_set" hash:net -exist >/dev/null 2>&1 || true
+	ipset flush "$vless_priority_set" >/dev/null 2>&1 || true
+	ipset flush "$vless2_priority_set" >/dev/null 2>&1 || true
+	ipset create "$vless_priority6_set" hash:net family inet6 -exist >/dev/null 2>&1 || true
+	ipset create "$vless2_priority6_set" hash:net family inet6 -exist >/dev/null 2>&1 || true
+	ipset flush "$vless_priority6_set" >/dev/null 2>&1 || true
+	ipset flush "$vless2_priority6_set" >/dev/null 2>&1 || true
 
 	for priority_domain in $VLESS_PRIORITY_DOMAINS; do
 		route_file_has_domain "$UNBLOCK_DIR/vless.txt" "$priority_domain"
@@ -543,13 +555,21 @@ apply_vless_priority_domain_ips() {
 		if [ "$in_vless" -eq 0 ] && [ "$in_vless2" -ne 0 ]; then
 			winner_set="$vless_set"
 			loser_set="$vless2_set"
+			winner_priority_set="$vless_priority_set"
+			loser_priority_set="$vless2_priority_set"
 			winner6_set="$vless6_set"
 			loser6_set="$vless2v6_set"
+			winner_priority6_set="$vless_priority6_set"
+			loser_priority6_set="$vless2_priority6_set"
 		elif [ "$in_vless2" -eq 0 ] && [ "$in_vless" -ne 0 ]; then
 			winner_set="$vless2_set"
 			loser_set="$vless_set"
+			winner_priority_set="$vless2_priority_set"
+			loser_priority_set="$vless_priority_set"
 			winner6_set="$vless2v6_set"
 			loser6_set="$vless6_set"
+			winner_priority6_set="$vless2_priority6_set"
+			loser_priority6_set="$vless_priority6_set"
 		else
 			continue
 		fi
@@ -557,13 +577,17 @@ apply_vless_priority_domain_ips() {
 		resolve_priority_ipv4 "$priority_domain" | while IFS= read -r priority_ip; do
 			[ -n "$priority_ip" ] || continue
 			ipset add "$winner_set" "$priority_ip" -exist >/dev/null 2>&1 || true
+			ipset add "$winner_priority_set" "$priority_ip" -exist >/dev/null 2>&1 || true
 			ipset del "$loser_set" "$priority_ip" >/dev/null 2>&1 || true
+			ipset del "$loser_priority_set" "$priority_ip" >/dev/null 2>&1 || true
 		done
 		if ipset list "$winner6_set" >/dev/null 2>&1 && ipset list "$loser6_set" >/dev/null 2>&1; then
 			resolve_priority_ipv6 "$priority_domain" | while IFS= read -r priority_ip6; do
 				[ -n "$priority_ip6" ] || continue
 				ipset add "$winner6_set" "$priority_ip6" -exist >/dev/null 2>&1 || true
+				ipset add "$winner_priority6_set" "$priority_ip6" -exist >/dev/null 2>&1 || true
 				ipset del "$loser6_set" "$priority_ip6" >/dev/null 2>&1 || true
+				ipset del "$loser_priority6_set" "$priority_ip6" >/dev/null 2>&1 || true
 			done
 		fi
 	done

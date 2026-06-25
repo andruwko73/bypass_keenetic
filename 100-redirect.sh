@@ -920,6 +920,31 @@ if [ -n "$vless2_key_path" ]; then
 	refresh_transparent_udp_quic_reject 10814 "$BYPASS_UDP_QUIC_BLOCK_VLESS2"
 fi
 
+remove_vless_priority_redirect_rules() {
+	for priority_set in unblockvlesspriority unblockvless2priority; do
+		for priority_port in 10812 10814; do
+			while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set "$priority_set" dst -j REDIRECT --to-ports "$priority_port" 2>/dev/null; do
+				iptables -t nat -D PREROUTING -w -p tcp -m set --match-set "$priority_set" dst -j REDIRECT --to-ports "$priority_port"
+			done
+			while iptables -t nat -C PREROUTING -w -p udp -m set --match-set "$priority_set" dst -j REDIRECT --to-ports "$priority_port" 2>/dev/null; do
+				iptables -t nat -D PREROUTING -w -p udp -m set --match-set "$priority_set" dst -j REDIRECT --to-ports "$priority_port"
+			done
+		done
+	done
+}
+
+refresh_vless_priority_redirects() {
+	ipset create unblockvlesspriority hash:net -exist 2>/dev/null
+	ipset create unblockvless2priority hash:net -exist 2>/dev/null
+	remove_vless_priority_redirect_rules
+	if [ -n "$vless2_key_path" ]; then
+		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvless2priority dst -j REDIRECT --to-ports 10814
+		iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvless2priority dst -j REDIRECT --to-ports 10814
+	fi
+	iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockvlesspriority dst -j REDIRECT --to-ports 10812
+	iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvlesspriority dst -j REDIRECT --to-ports 10812
+}
+
 refresh_vless_tcp_priority() {
 	youtube_route="$(youtube_route_protocol)"
 	while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812 2>/dev/null; do
@@ -1013,6 +1038,7 @@ youtube_route_protocol() {
 }
 
 refresh_vless_tcp_priority
+refresh_vless_priority_redirects
 
 refresh_mobile_push_priority() {
 	# Telegram mobile can use MTProto TCP 5222; Android FCM/mtalk uses TCP

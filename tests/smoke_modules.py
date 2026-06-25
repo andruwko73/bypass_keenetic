@@ -2044,11 +2044,15 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'swap_or_preserve_set unblocktrojudp "tmp_unblocktrojudp_$$"' in ipset_script
     assert 'ipset create unblockshudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvmessudp hash:net -exist' in ipset_boot_script
+    assert 'ipset create unblockvlesspriority hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvlessudp hash:net -exist' in ipset_boot_script
+    assert 'ipset create unblockvless2priority hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless2udp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblocktrojudp hash:net -exist' in ipset_boot_script
     assert 'ipset create unblockvless6 hash:net family inet6 -exist' in ipset_boot_script
+    assert 'ipset create unblockvlesspriority6 hash:net family inet6 -exist' in ipset_boot_script
     assert 'ipset create unblockvless2v6 hash:net family inet6 -exist' in ipset_boot_script
+    assert 'ipset create unblockvless2priority6 hash:net family inet6 -exist' in ipset_boot_script
     assert 'UDP_QUIC_REJECT_PORT="${UDP_QUIC_REJECT_PORT:-10944}"' in redirect_script
     assert 'install_udp_quic_block_rule unblockshudp "$BYPASS_UDP_QUIC_BLOCK_SHADOWSOCKS"' in redirect_script
     assert 'install_udp_quic_block_rule unblockvmessudp "$BYPASS_UDP_QUIC_BLOCK_VMESS"' in redirect_script
@@ -2125,6 +2129,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'iptables -I FORWARD -w -p udp -m set --match-set unblockvless2 dst --dport 443 -j REJECT' not in redirect_script
     assert '-p udp -m set --match-set unblockvless dst -j REDIRECT --to-ports 10812' in redirect_script
     assert '-p udp -m set --match-set unblockvless2 dst -j REDIRECT --to-ports 10814' in redirect_script
+    assert 'refresh_vless_priority_redirects()' in redirect_script
+    assert '-p tcp -m set --match-set unblockvlesspriority dst -j REDIRECT --to-ports 10812' in redirect_script
+    assert '-p tcp -m set --match-set unblockvless2priority dst -j REDIRECT --to-ports 10814' in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
     assert '*/15 * * * * root /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1' in crontab
 
@@ -2135,6 +2142,7 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     assert 'telegram_route_protocol()' in redirect_script
     assert 'refresh_mobile_push_priority()' in redirect_script
     assert 'remove_vless_tcp_forward_guard()' in redirect_script
+    assert 'refresh_vless_priority_redirects()' in redirect_script
     assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' not in redirect_script
     assert 'Shared Google IPs must follow the YouTube route for video streams.' in redirect_script
     assert 'ports to whichever Vless list currently carries Telegram routes.' in redirect_script
@@ -2150,6 +2158,14 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     # iptables -I inserts each rule at the top, so the command emitted last has
     # effective priority in the final chain.
     assert priority_block.index(vless1_insert) < priority_block.index(vless2_insert)
+    priority_redirect_block = redirect_script.split('refresh_vless_priority_redirects() {', 1)[1].split('\n}', 1)[0]
+    assert 'ipset create unblockvlesspriority hash:net -exist' in priority_redirect_block
+    assert 'ipset create unblockvless2priority hash:net -exist' in priority_redirect_block
+    assert 'unblockvlesspriority dst -j REDIRECT --to-ports 10812' in priority_redirect_block
+    assert 'unblockvless2priority dst -j REDIRECT --to-ports 10814' in priority_redirect_block
+    tcp_priority_call = redirect_script.index('\nrefresh_vless_tcp_priority\n')
+    service_priority_call = redirect_script.index('\nrefresh_vless_priority_redirects\n')
+    assert tcp_priority_call < service_priority_call
     assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in redirect_script
     assert 'route_file_marker_count()' in redirect_script
     assert '"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt"' in redirect_script

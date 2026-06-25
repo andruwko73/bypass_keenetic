@@ -1,3 +1,7 @@
+*v1.811 (25 Jun 2026) -* main
+
+*Adds small priority ipsets and top NAT redirects so protected Vless service IPs win over broad YouTube/Google CIDRs, then keeps RuTracker in Vless 2 only.*
+
 *v1.810 (25 Jun 2026) -* main
 
 *Keeps Chrome Remote Desktop and other protected service domains on their configured Vless route after YouTube/Vless overlap dedupe, and moves RuTracker back to Vless 2 only.*

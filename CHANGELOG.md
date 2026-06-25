@@ -1,3 +1,10 @@
+<a name="1.811"></a>
+# [1.811] - 25 Jun 2026
+
+- Adds `unblockvlesspriority` and `unblockvless2priority` ipsets for protected service domains so exact route selections win over broad shared Google/YouTube CIDRs.
+- Installs top NAT redirects for those priority sets before the normal Vless/Vless 2 redirects, keeping Chrome Remote Desktop on its configured route even when YouTube uses Vless 2.
+- Keeps the priority sets out of the normal UI ipset counters while refreshing them from the existing ipset refresh/runtime-dedupe path.
+
 <a name="1.810"></a>
 # [1.810] - 25 Jun 2026
 
