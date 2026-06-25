@@ -1,3 +1,7 @@
+*v1.821 (25 Jun 2026) -* main
+
+*Refreshes pending active status checks with a short backoff so transient Telegram/YouTube probe states clear automatically without waiting for the full normal status interval.*
+
 *v1.820 (25 Jun 2026) -* main
 
 *Makes the S99unblock fallback scheduler cleanup robust after consecutive updates, preventing stale duplicate refresh schedulers from staying alive.*

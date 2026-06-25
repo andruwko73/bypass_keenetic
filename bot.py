@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.820, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.821, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -1495,6 +1495,10 @@ STATUS_CACHE_TTL = min(WEB_STATUS_CACHE_TTL, KEY_STATUS_CACHE_TTL)
 STATUS_REFRESH_MIN_INTERVAL_SECONDS = max(
     60.0,
     float(getattr(config, 'status_refresh_min_interval_seconds', 180.0)),
+)
+STATUS_REFRESH_PENDING_MIN_INTERVAL_SECONDS = max(
+    15.0,
+    min(30.0, STATUS_REFRESH_MIN_INTERVAL_SECONDS),
 )
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
@@ -8618,6 +8622,19 @@ def _stale_status_snapshot(current_keys):
     return snapshot if isinstance(snapshot, dict) else None
 
 
+def _status_snapshot_has_pending_check(snapshot):
+    if not isinstance(snapshot, dict):
+        return False
+    try:
+        return web_form_blocks.status_refresh_pending(
+            snapshot.get('web') or {},
+            snapshot.get('protocols') or {},
+            False,
+        )
+    except Exception:
+        return False
+
+
 def _active_mode_status_signature(current_keys):
     return _status_active_mode_signature(proxy_mode, current_keys, _load_custom_checks())
 
@@ -8705,11 +8722,17 @@ def _refresh_status_caches_async(current_keys):
             float(status_refresh_last_started_at.get(signature) or 0.0),
             float(status_refresh_last_finished_at.get(signature) or 0.0),
         )
+        cached_snapshot = status_snapshot_cache.get('data')
+        refresh_interval = (
+            STATUS_REFRESH_PENDING_MIN_INTERVAL_SECONDS
+            if _status_snapshot_has_pending_check(cached_snapshot)
+            else STATUS_REFRESH_MIN_INTERVAL_SECONDS
+        )
         if (
             last_refresh and
-            now - last_refresh < STATUS_REFRESH_MIN_INTERVAL_SECONDS and
+            now - last_refresh < refresh_interval and
             status_snapshot_cache.get('signature') == signature and
-            isinstance(status_snapshot_cache.get('data'), dict)
+            isinstance(cached_snapshot, dict)
         ):
             return
         status_refresh_in_progress.add(signature)

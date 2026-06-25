@@ -1,3 +1,8 @@
+<a name="1.821"></a>
+# [1.821] - 25 Jun 2026
+
+- Refreshes pending active protocol statuses with a short backoff, so transient Telegram/YouTube probe warnings clear automatically instead of waiting for the full normal status interval.
+
 <a name="1.820"></a>
 # [1.820] - 25 Jun 2026
 
