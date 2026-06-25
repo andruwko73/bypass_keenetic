@@ -1,3 +1,9 @@
+<a name="1.819"></a>
+# [1.819] - 25 Jun 2026
+
+- Streams conntrack scans in Telegram call-learning and YouTube stream guards instead of loading the whole table into memory.
+- Filters Telegram call-learning UDP candidates earlier and avoids rebuilding temporary client sets for every flow, reducing idle RSS churn when call-learning clients are present.
+
 <a name="1.818"></a>
 # [1.818] - 25 Jun 2026
 

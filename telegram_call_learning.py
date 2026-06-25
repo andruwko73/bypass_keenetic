@@ -237,24 +237,41 @@ def telegram_signal_clients_from_lines(lines, router_ip='', allowed_sources=None
         text = str(line or '')
         if allowed_source_tokens and not any(token in text for token in allowed_source_tokens):
             continue
-        if ' tcp ' not in text and ' udp ' not in text and not text.startswith(('tcp ', 'udp ')):
-            continue
-        fields = re.findall(r'\b(src|dst|sport|dport)=([^ ]+)', text)
-        for item in _conntrack_tuples(fields):
-            src = item.get('src') or ''
-            dst = item.get('dst') or ''
-            dport = item.get('dport') or ''
-            if not is_lan_ipv4(src):
-                continue
-            if src in excluded_sources:
-                continue
-            if allowed_sources and src not in allowed_sources:
-                continue
-            if dport not in TELEGRAM_SIGNAL_PORTS:
-                continue
-            if address_in_networks(dst):
-                clients.add(src)
+        clients.update(_telegram_signal_clients_from_line(text, allowed_sources, excluded_sources))
     return clients
+
+
+def _telegram_signal_clients_from_line(text, allowed_sources=None, excluded_sources=None):
+    allowed_sources = allowed_sources or set()
+    excluded_sources = excluded_sources or set()
+    clients = set()
+    if ' tcp ' not in text and ' udp ' not in text and not text.startswith(('tcp ', 'udp ')):
+        return clients
+    fields = re.findall(r'\b(src|dst|sport|dport)=([^ ]+)', text)
+    for item in _conntrack_tuples(fields):
+        src = item.get('src') or ''
+        dst = item.get('dst') or ''
+        dport = item.get('dport') or ''
+        if not is_lan_ipv4(src):
+            continue
+        if src in excluded_sources:
+            continue
+        if allowed_sources and src not in allowed_sources:
+            continue
+        if dport not in TELEGRAM_SIGNAL_PORTS:
+            continue
+        if address_in_networks(dst):
+            clients.add(src)
+    return clients
+
+
+def _iter_conntrack_lines(conntrack_path):
+    try:
+        with open(conntrack_path, 'r', encoding='utf-8', errors='ignore') as file:
+            for line in file:
+                yield line
+    except Exception:
+        return
 
 
 def _udp_cluster_key(flow):
@@ -308,7 +325,7 @@ def flow_matches_udp_call_cluster(flow, cluster_stats, telegram_clients):
     if not _udp_cluster_member(flow):
         return False
     src = str(flow.get('src') or '')
-    if src not in set(telegram_clients or ()):
+    if src not in (telegram_clients or ()):
         return False
     stats = cluster_stats.get(_udp_cluster_key(flow), {}) if cluster_stats else {}
     flow_count = int(stats.get('flow_count') or 0)
@@ -329,7 +346,7 @@ def flow_matches_active_udp_media(flow, telegram_clients):
     if not _udp_cluster_member(flow):
         return False
     src = str(flow.get('src') or '')
-    if src not in set(telegram_clients or ()):
+    if src not in (telegram_clients or ()):
         return False
     try:
         packets = int(flow.get('packets') or 0)
@@ -342,12 +359,7 @@ def flow_matches_active_udp_media(flow, telegram_clients):
 def read_conntrack_flows(device_ip, conntrack_path='/proc/net/nf_conntrack', now=None):
     timestamp = time.time() if now is None else float(now)
     flows = {}
-    try:
-        with open(conntrack_path, 'r', encoding='utf-8', errors='ignore') as file:
-            lines = file.readlines()
-    except Exception:
-        return flows
-    for line in lines:
+    for line in _iter_conntrack_lines(conntrack_path):
         flow = parse_udp_flow(line, device_ip=device_ip)
         if not flow:
             continue
@@ -366,17 +378,15 @@ def read_lan_conntrack_flows(
     allowed_sources = {str(item or '').strip() for item in (allowed_sources or []) if str(item or '').strip()}
     excluded_sources = {str(router_ip or '').strip()} if str(router_ip or '').strip() else set()
     flows = {}
-    try:
-        with open(conntrack_path, 'r', encoding='utf-8', errors='ignore') as file:
-            lines = file.readlines()
-    except Exception:
-        return flows
     all_flows = []
     allowed_source_tokens = tuple(f'src={item}' for item in allowed_sources)
-    for line in lines:
-        if allowed_source_tokens and not any(token in line for token in allowed_source_tokens):
+    telegram_clients = set()
+    for line in _iter_conntrack_lines(conntrack_path):
+        text = str(line or '')
+        if allowed_source_tokens and not any(token in text for token in allowed_source_tokens):
             continue
-        flow = parse_udp_flow(line)
+        telegram_clients.update(_telegram_signal_clients_from_line(text, allowed_sources, excluded_sources))
+        flow = parse_udp_flow(text)
         if not flow:
             continue
         src = str(flow.get('src') or '')
@@ -386,13 +396,10 @@ def read_lan_conntrack_flows(
             continue
         if allowed_sources and src not in allowed_sources:
             continue
+        if not flow_matches_telegram_call(flow) and not _udp_cluster_member(flow):
+            continue
         all_flows.append(flow)
 
-    telegram_clients = telegram_signal_clients_from_lines(
-        lines,
-        router_ip=router_ip,
-        allowed_sources=allowed_sources,
-    )
     telegram_clients.update(allowed_sources)
     cluster_stats = _udp_call_cluster_stats(all_flows)
     for flow in all_flows:

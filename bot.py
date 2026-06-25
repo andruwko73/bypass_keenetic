@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.818, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.819, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -21,6 +21,7 @@ import socket
 import tempfile
 import gc
 import ctypes
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
 
@@ -3819,27 +3820,26 @@ def _conntrack_route_diagnostic(proto, sample_limit=6):
     fastnat = []
     try:
         with open('/proc/net/nf_conntrack', 'r', encoding='utf-8', errors='ignore') as file:
-            lines = file.readlines()
+            for line in file:
+                if len(fastnat) >= sample_limit:
+                    break
+                if '[FASTNAT]' not in line or ' dport=443 ' not in line or 'TIME_WAIT' in line or 'CLOSE' in line:
+                    continue
+                info = _conntrack_tuple_summary(line)
+                src = info.get('orig_src', '')
+                dst = info.get('orig_dst', '')
+                if not src.startswith('192.168.'):
+                    continue
+                packets, bytes_count = _conntrack_packets_bytes(line)
+                fastnat.append({
+                    'src': src,
+                    'dst': dst,
+                    'sport': info.get('orig_sport', ''),
+                    'packets': packets,
+                    'bytes': bytes_count,
+                })
     except Exception:
-        lines = []
-    for line in lines:
-        if len(fastnat) >= sample_limit:
-            break
-        if '[FASTNAT]' not in line or ' dport=443 ' not in line or 'TIME_WAIT' in line or 'CLOSE' in line:
-            continue
-        info = _conntrack_tuple_summary(line)
-        src = info.get('orig_src', '')
-        dst = info.get('orig_dst', '')
-        if not src.startswith('192.168.'):
-            continue
-        packets, bytes_count = _conntrack_packets_bytes(line)
-        fastnat.append({
-            'src': src,
-            'dst': dst,
-            'sport': info.get('orig_sport', ''),
-            'packets': packets,
-            'bytes': bytes_count,
-        })
+        pass
     return {
         'proxy_ports': sorted(_youtube_protocol_conntrack_ports(proto)),
         'proxy_samples': samples,
@@ -3861,60 +3861,59 @@ def _youtube_active_connection_count(proto):
             return max(0, int(state.get('last_scan_count') or 0))
         except Exception:
             return 0
-    try:
-        with open('/proc/net/nf_conntrack', 'r', encoding='utf-8', errors='ignore') as file:
-            lines = file.readlines()
-    except Exception:
-        return 0
     active = 0
     previous = state.get('conntrack')
     if not isinstance(previous, dict):
         previous = {}
     current = {}
     samples = []
-    for line in lines:
-        if ' dport=443 ' not in line and ' dport=443\n' not in line:
-            continue
-        if 'TIME_WAIT' in line or 'CLOSE' in line:
-            continue
-        if not any(f' sport={port} ' in line or line.rstrip().endswith(f' sport={port}') for port in ports):
-            continue
-        packets, bytes_count = _conntrack_packets_bytes(line)
-        identity = _conntrack_identity(line)
-        if not identity:
-            continue
-        current[identity] = {
-            'packets': packets,
-            'bytes': bytes_count,
-            'seen': now,
-        }
-        old = previous.get(identity, {})
-        try:
-            packet_delta = packets - int(old.get('packets') or 0)
-            byte_delta = bytes_count - int(old.get('bytes') or 0)
-        except Exception:
-            packet_delta = packets
-            byte_delta = bytes_count
-        # On first observation protect already established streams; after that require fresh traffic.
-        first_seen = identity not in previous
-        if (
-            (first_seen and (packets >= YOUTUBE_STREAM_GUARD_MIN_PACKETS or bytes_count >= YOUTUBE_STREAM_GUARD_MIN_BYTES)) or
-            packet_delta >= YOUTUBE_STREAM_GUARD_MIN_PACKETS or
-            byte_delta >= YOUTUBE_STREAM_GUARD_MIN_BYTES
-        ):
-            active += 1
-            if len(samples) < 8:
-                info = _conntrack_tuple_summary(line)
-                samples.append({
-                    'src': info.get('orig_src', ''),
-                    'dst': info.get('orig_dst', ''),
-                    'sport': info.get('orig_sport', ''),
-                    'reply_sport': info.get('reply_sport', ''),
+    try:
+        with open('/proc/net/nf_conntrack', 'r', encoding='utf-8', errors='ignore') as file:
+            for line in file:
+                if ' dport=443 ' not in line and ' dport=443\n' not in line:
+                    continue
+                if 'TIME_WAIT' in line or 'CLOSE' in line:
+                    continue
+                if not any(f' sport={port} ' in line or line.rstrip().endswith(f' sport={port}') for port in ports):
+                    continue
+                packets, bytes_count = _conntrack_packets_bytes(line)
+                identity = _conntrack_identity(line)
+                if not identity:
+                    continue
+                current[identity] = {
                     'packets': packets,
                     'bytes': bytes_count,
-                    'delta_packets': packet_delta,
-                    'delta_bytes': byte_delta,
-                })
+                    'seen': now,
+                }
+                old = previous.get(identity, {})
+                try:
+                    packet_delta = packets - int(old.get('packets') or 0)
+                    byte_delta = bytes_count - int(old.get('bytes') or 0)
+                except Exception:
+                    packet_delta = packets
+                    byte_delta = bytes_count
+                # On first observation protect already established streams; after that require fresh traffic.
+                first_seen = identity not in previous
+                if (
+                    (first_seen and (packets >= YOUTUBE_STREAM_GUARD_MIN_PACKETS or bytes_count >= YOUTUBE_STREAM_GUARD_MIN_BYTES)) or
+                    packet_delta >= YOUTUBE_STREAM_GUARD_MIN_PACKETS or
+                    byte_delta >= YOUTUBE_STREAM_GUARD_MIN_BYTES
+                ):
+                    active += 1
+                    if len(samples) < 8:
+                        info = _conntrack_tuple_summary(line)
+                        samples.append({
+                            'src': info.get('orig_src', ''),
+                            'dst': info.get('orig_dst', ''),
+                            'sport': info.get('orig_sport', ''),
+                            'reply_sport': info.get('reply_sport', ''),
+                            'packets': packets,
+                            'bytes': bytes_count,
+                            'delta_packets': packet_delta,
+                            'delta_bytes': byte_delta,
+                        })
+    except Exception:
+        return 0
     state['conntrack'] = current
     state['last_samples'] = samples
     state['last_scan_at'] = now
@@ -4091,8 +4090,8 @@ def _trim_jsonl_file(path, max_events):
         if not os.path.exists(path):
             return
         with open(path, 'r', encoding='utf-8', errors='ignore') as file:
-            lines = file.readlines()
-        if len(lines) <= max_events:
+            tail = deque(file, maxlen=max_events + 1)
+        if len(tail) <= max_events:
             return
         directory = os.path.dirname(path)
         if directory:
@@ -4100,7 +4099,7 @@ def _trim_jsonl_file(path, max_events):
         fd, temp_path = tempfile.mkstemp(prefix='.' + os.path.basename(path) + '.', suffix='.tmp', dir=directory or None)
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as file:
-                file.writelines(lines[-max_events:])
+                file.writelines(list(tail)[-max_events:])
                 file.flush()
                 os.fsync(file.fileno())
             os.replace(temp_path, path)

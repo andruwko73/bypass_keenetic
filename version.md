@@ -1,3 +1,7 @@
+*v1.819 (25 Jun 2026) -* main
+
+*Reduces idle RSS growth by streaming conntrack reads in Telegram call learning and YouTube stream guards, and by filtering call-learning UDP candidates earlier.*
+
 *v1.818 (25 Jun 2026) -* main
 
 *Adds optional router HWID forwarding for subscription imports with daily subscription sync, and scopes YouTube failover stream guard to the route being switched so Vless 1 traffic no longer blocks Vless 2 YouTube key recovery.*
