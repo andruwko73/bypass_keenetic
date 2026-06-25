@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.813, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.814, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -1671,7 +1671,7 @@ YOUTUBE_ROUTE_MARKERS = (
     'ggpht.com',
 )
 UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
-TELEGRAM_CALL_LEARNING_ENABLED = bool(getattr(config, 'telegram_call_learning_enabled', True))
+TELEGRAM_CALL_LEARNING_ENABLED = bool(getattr(config, 'telegram_call_learning_enabled', False))
 TELEGRAM_CALL_LEARNING_DEFAULT_STATE_PATH = '/tmp/bypass_telegram_call_learning.json'
 TELEGRAM_CALL_LEARNING_LEGACY_STATE_PATH = '/opt/tmp/bypass_telegram_call_learning.json'
 TELEGRAM_CALL_LEARNING_STATE_PATH = str(
@@ -1721,7 +1721,7 @@ TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS = max(
     120,
     int(getattr(config, 'telegram_call_learning_address_timeout_seconds', 14400)),
 )
-TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enabled', True))
+TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enabled', False))
 TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
 TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(telegram_call_learning.CALL_CLIENT_IPSETS)
 TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')

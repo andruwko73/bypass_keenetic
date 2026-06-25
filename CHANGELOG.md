@@ -1,3 +1,9 @@
+<a name="1.814"></a>
+# [1.814] - 25 Jun 2026
+
+- Makes Telegram call-learning and Telegram-call TPROXY opt-in instead of enabled by default, protecting normal Vless/Vless 2 site routing from learned call traffic.
+- Updates install, bootstrap, update-generated UDP policy, and example config defaults to keep call-learning disabled unless explicitly enabled later.
+
 <a name="1.813"></a>
 # [1.813] - 25 Jun 2026
 

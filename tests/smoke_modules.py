@@ -1653,7 +1653,7 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'jfKfPfyJRdk' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
-        'telegram_call_learning_enabled = True',
+        'telegram_call_learning_enabled = False',
         "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",
         'telegram_call_learning_default_duration_seconds = 90',
         'telegram_call_learning_max_duration_seconds = 180',
@@ -1668,7 +1668,7 @@ def test_codex_version_matches_commit_count():
         'telegram_call_learning_apply_by_default = True',
         'telegram_call_learning_client_timeout_seconds = 900',
         'telegram_call_learning_address_timeout_seconds = 14400',
-        'telegram_call_tproxy_enabled = True',
+        'telegram_call_tproxy_enabled = False',
         "localportsh_tproxy = '11802'",
         "localportvmess_tproxy = '11815'",
         "localportvless_tproxy = '11812'",
@@ -1965,10 +1965,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         assert telegram_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert combined_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert combined_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
-        assert auto_policy['BYPASS_TELEGRAM_CALL_LEARNING_ENABLED'] == '1'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_LEARNING_ENABLED'] == '0'
         assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT'] == '900'
         assert auto_policy['BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT'] == '14400'
-        assert auto_policy['BYPASS_TELEGRAM_CALL_TPROXY_ENABLED'] == '1'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_TPROXY_ENABLED'] == '0'
         assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED'] == '0'
         assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS'] == '11812'
         assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS2'] == '11814'
@@ -2063,14 +2063,14 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'install_udp_quic_block_rule unblockvless2udp "$BYPASS_UDP_QUIC_BLOCK_VLESS2"' in redirect_script
     assert 'install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"' in redirect_script
     assert '--match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-ports "$UDP_QUIC_REJECT_PORT"' in redirect_script
-    assert 'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED="${BYPASS_TELEGRAM_CALL_LEARNING_ENABLED:-1}"' in redirect_script
+    assert 'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED="${BYPASS_TELEGRAM_CALL_LEARNING_ENABLED:-0}"' in redirect_script
     assert 'BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED:-0}"' in redirect_script
     assert 'TELEGRAM_CALL_CLIENT_SET="${TELEGRAM_CALL_CLIENT_SET:-bypass_tg_call_clients}"' in redirect_script
     assert 'TELEGRAM_CALL_SIGNAL_SET="${TELEGRAM_CALL_SIGNAL_SET:-bypass_tg_call_signal}"' in redirect_script
     assert 'CALL_CLIENT_SET_VLESS="${CALL_CLIENT_SET_VLESS:-bypass_call_clients_vless}"' in redirect_script
     assert 'CALL_SIGNAL_SET_VLESS2="${CALL_SIGNAL_SET_VLESS2:-bypass_call_signal_vless2}"' in redirect_script
     assert 'TELEGRAM_CALL_TPROXY_CHAIN="${TELEGRAM_CALL_TPROXY_CHAIN:-BYPASS_TG_CALL_TPROXY}"' in redirect_script
-    assert 'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED="${BYPASS_TELEGRAM_CALL_TPROXY_ENABLED:-1}"' in redirect_script
+    assert 'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED="${BYPASS_TELEGRAM_CALL_TPROXY_ENABLED:-0}"' in redirect_script
     assert 'load_tproxy_module xt_TPROXY' in redirect_script
     assert 'load_tproxy_module xt_socket' in redirect_script
     assert 'ip rule add fwmark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK"' in redirect_script
@@ -2315,7 +2315,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "getattr(config, 'telegram_call_learning_scan_interval_seconds', 5.0)" in source
     assert "getattr(config, 'telegram_call_learning_client_timeout_seconds', 900)" in source
     assert "getattr(config, 'telegram_call_learning_address_timeout_seconds', 14400)" in source
-    assert "getattr(config, 'telegram_call_tproxy_enabled', True)" in source
+    assert "getattr(config, 'telegram_call_tproxy_enabled', False)" in source
     assert "getattr(config, 'localportvless_tproxy', 11812)" in source
     assert 'TELEGRAM_CALL_TPROXY_PORT_VLESS={localportvless_tproxy}' in source
     assert 'def _start_telegram_call_learning_auto_thread' in source
@@ -2330,7 +2330,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'telegram_call_learning_apply_by_default = True' in script_source
     assert 'telegram_call_learning_client_timeout_seconds = 900' in script_source
     assert 'telegram_call_learning_address_timeout_seconds = 14400' in script_source
-    assert 'telegram_call_tproxy_enabled = True' in script_source
+    assert 'telegram_call_tproxy_enabled = False' in script_source
     assert "localportvless_tproxy = '11812'" in script_source
     assert 'Refreshing ipset after proxy core startup.' in script_source
     assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')

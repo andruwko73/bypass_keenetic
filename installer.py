@@ -175,7 +175,7 @@ youtube_edge_prefetch_hosts = (
     'manifest.googlevideo.com',
     'redirector.googlevideo.com',
 )
-telegram_call_learning_enabled = True
+telegram_call_learning_enabled = False
 telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'
 telegram_call_learning_default_duration_seconds = 90
 telegram_call_learning_max_duration_seconds = 180
@@ -190,7 +190,7 @@ telegram_call_learning_max_seen_addresses = 512
 telegram_call_learning_apply_by_default = True
 telegram_call_learning_client_timeout_seconds = 900
 telegram_call_learning_address_timeout_seconds = 14400
-telegram_call_tproxy_enabled = True
+telegram_call_tproxy_enabled = False
 ipset_refresh_command_timeout_seconds = 420
 ipv6_bypass_fallback_enabled = True
 reality_endpoint_overrides = {{}}

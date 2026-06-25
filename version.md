@@ -1,3 +1,7 @@
+*v1.814 (25 Jun 2026) -* main
+
+*Keeps Telegram call-learning and its TPROXY layer disabled by default so experimental call detection cannot break the primary Vless/Vless 2 website routing.*
+
 *v1.813 (25 Jun 2026) -* main
 
 *Disables client-wide Telegram call UDP TPROXY routing so one learned LAN client can no longer pull all high UDP traffic through Vless 1 for the call-learning timeout window.*
