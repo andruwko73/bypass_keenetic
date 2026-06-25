@@ -457,14 +457,13 @@ def render_protocol_panel(
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
                 <label class="field-label">Загрузить subscription</label>
+                <label class="subscription-hwid-toggle">
+                    <input type="checkbox" class="subscription-switch-input" name="send_router_hwid" value="1"{hwid_checked}>
+                    <span class="subscription-switch-ui" aria-hidden="true"></span>
+                    <span class="subscription-hwid-label">Передавать HWID роутера</span>
+                </label>
                 <input type="url" name="url" placeholder="https://sub.example.com/...">
-                <div class="pool-subscribe-actions">
-                    <label class="subscription-hwid-toggle">
-                        <input type="checkbox" name="send_router_hwid" value="1"{hwid_checked}>
-                        <span>Передавать HWID роутера</span>
-                    </label>
-                    <button type="submit" class="secondary-button">Загрузить subscription</button>
-                </div>
+                <button type="submit" class="secondary-button">Загрузить subscription</button>
             </form>
         </div>'''
     custom_check_card_html = ''

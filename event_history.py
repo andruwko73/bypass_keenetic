@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+from collections import deque
 
 
 EVENT_HISTORY_PATH = '/opt/etc/bot/event_history.jsonl'
@@ -203,8 +204,12 @@ def _redact_loaded_event(event):
 def load_events(limit=50, *, event_path=None):
     path = _event_path(event_path)
     try:
+        limit_value = max(1, int(limit or 50))
+    except Exception:
+        limit_value = 50
+    try:
         with open(path, 'r', encoding='utf-8', errors='ignore') as file:
-            lines = [line.strip() for line in file if line.strip()]
+            lines = deque((line.strip() for line in file if line.strip()), maxlen=max(limit_value * 2, limit_value + 20))
     except Exception:
         return []
     events = []
@@ -217,7 +222,7 @@ def load_events(limit=50, *, event_path=None):
             event = _redact_loaded_event(event)
             event['protocol_label'] = PROTOCOL_LABELS.get(event.get('protocol'), event.get('protocol') or 'Система')
             events.append(event)
-        if len(events) >= int(limit or 50):
+        if len(events) >= limit_value:
             break
     return events
 

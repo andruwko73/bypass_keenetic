@@ -1,3 +1,7 @@
+*v1.822 (25 Jun 2026) -* main
+
+*Protects the active Vless routes while pool checks and auto-failover are running: pool-probe batches now stop promptly before applying a key, Reality endpoint repair waits until failures are confirmed, and router memory cleanup is more aggressive after heavy web/status work.*
+
 *v1.821 (25 Jun 2026) -* main
 
 *Refreshes pending active status checks with a short backoff so transient Telegram/YouTube probe states clear automatically without waiting for the full normal status interval.*

@@ -51,26 +51,6 @@ def attempt_auto_failover(
         state['consecutive_failures'] = 0
         return False
 
-    if callable(repair_active_proxy):
-        try:
-            repaired = bool(repair_active_proxy(proxy_mode, failure_message))
-        except Exception as exc:
-            repaired = False
-            log(f'Auto-failover: active proxy repair failed: {exc}')
-        if repaired:
-            repair_ok, repair_message = check_telegram_api(
-                proxy_url,
-                connect_timeout=max(float(connect_timeout or 0), 5.0),
-                read_timeout=max(float(read_timeout or 0), 8.0),
-            )
-            if repair_ok:
-                state['last_ok'] = time_provider()
-                state['last_fail'] = 0.0
-                state['consecutive_failures'] = 0
-                log('Auto-failover: active proxy endpoint repair restored Telegram API; key switch skipped.')
-                return False
-            failure_message = repair_message or failure_message
-
     startup_hold = float(startup_hold_seconds or 0)
     if startup_hold > 0:
         try:
@@ -176,6 +156,26 @@ def attempt_auto_failover(
     state['in_progress'] = True
     state['last_attempt'] = now
     try:
+        if callable(repair_active_proxy):
+            try:
+                repaired = bool(repair_active_proxy(proxy_mode, failure_message))
+            except Exception as exc:
+                repaired = False
+                log(f'Auto-failover: active proxy repair failed: {exc}')
+            if repaired:
+                repair_ok, repair_message = check_telegram_api(
+                    proxy_url,
+                    connect_timeout=max(float(connect_timeout or 0), 5.0),
+                    read_timeout=max(float(read_timeout or 0), 8.0),
+                )
+                if repair_ok:
+                    state['last_ok'] = time_provider()
+                    state['last_fail'] = 0.0
+                    state['consecutive_failures'] = 0
+                    log('Auto-failover: active proxy endpoint repair restored Telegram API; key switch skipped.')
+                    return False
+                failure_message = repair_message or failure_message
+
         current_keys = current_keys if current_keys is not None else load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
         probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache

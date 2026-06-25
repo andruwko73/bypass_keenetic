@@ -1,3 +1,10 @@
+<a name="1.822"></a>
+# [1.822] - 25 Jun 2026
+
+- Stops the current pool-probe batch promptly when a key is applied, and refuses to restart the main Xray while a temporary pool probe is still active.
+- Moves Reality endpoint repair behind startup/recent-success/repeated-failure guards so one transient Telegram timeout cannot rewrite the active Vless endpoint and break Chrome Remote Desktop/Codex traffic.
+- Adds quieter cleanup paths for web rendering, event history, and the memory watchdog to reduce idle RSS growth after heavy UI/status work.
+
 <a name="1.821"></a>
 # [1.821] - 25 Jun 2026
 

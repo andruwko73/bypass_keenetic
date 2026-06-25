@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.821, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.822, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -239,6 +239,7 @@ def _config_sequence(name, default=()):
 _pool_probe_runner_module = None
 _repo_update_module = None
 _web_form_template_module = None
+_web_form_template_lock = threading.Lock()
 _web_route_tools_runtime = None
 
 
@@ -310,11 +311,20 @@ def _repo_write_script(*args, **kwargs):
 
 def _web_form_template():
     global _web_form_template_module
-    if _web_form_template_module is None:
-        import web_form_template as module
+    with _web_form_template_lock:
+        if _web_form_template_module is None:
+            import web_form_template as module
 
-        _web_form_template_module = module
-    return _web_form_template_module
+            _web_form_template_module = module
+        return _web_form_template_module
+
+
+def _release_web_form_template_cache():
+    global _web_form_template_module
+    with _web_form_template_lock:
+        _web_form_template_module = None
+        for module_name in ('web_form_template', 'web_template_styles', 'web_template_scripts'):
+            sys.modules.pop(module_name, None)
 
 
 def render_web_form(*args, **kwargs):
@@ -890,10 +900,9 @@ def _auto_failover_log(message):
 
 
 def _attempt_auto_failover():
-    if proxy_mode in YOUTUBE_STREAM_GUARD_PROTOCOLS and _youtube_stream_guard_active(
-        proxy_mode,
+    if proxy_mode in YOUTUBE_STREAM_GUARD_PROTOCOLS and _vless_traffic_guard_active(
         'Telegram auto-failover',
-        log=False,
+        log=True,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
     ):
         auto_failover_state['last_fail'] = 0.0
@@ -1065,8 +1074,7 @@ def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_me
     last_restart = float(youtube_core_restart_state.get('last_restart') or 0.0)
     if last_restart and now - last_restart < YOUTUBE_VLESS2_RESTART_RECHECK_COOLDOWN_SECONDS:
         return False
-    if _youtube_stream_guard_active(
-        route_proto,
+    if _vless_traffic_guard_active(
         f'{_pool_proto_label(route_proto)} core restart recheck',
         log=True,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
@@ -1258,8 +1266,7 @@ def _attempt_youtube_failover():
         return False
     if (
         route_proto in ('vless', 'vless2') and
-        not _youtube_stream_guard_active(
-            route_proto,
+        not _vless_traffic_guard_active(
             f'{_pool_proto_label(route_proto)} endpoint repair',
             log=True,
             hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
@@ -1347,18 +1354,41 @@ def _attempt_youtube_failover():
                 continue
 
             key_hash = _hash_key(key_value)[:12]
-            if _youtube_stream_guard_active(
-                route_proto,
+            allow_guard_bypass = bool(
+                cached_youtube_state == 'fail' and
+                int(state.get('consecutive_failures') or 0) >= YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES
+            )
+            other_traffic_guarded = _vless_traffic_guard_active(
                 f'{_pool_proto_label(route_proto)} key switch',
                 log=True,
                 hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-            ):
+                exclude_proto=route_proto,
+            )
+            if other_traffic_guarded:
                 state['last_attempt'] = 0.0
                 _write_runtime_log(
                     f'YouTube failover: candidate {key_hash} is ready, '
-                    f'but switching is deferred because {_pool_proto_label(route_proto)} traffic is active.'
+                    'but switching is deferred because another Vless route has active traffic.'
                 )
                 return False
+            if _youtube_stream_guard_active(
+                route_proto,
+                f'{_pool_proto_label(route_proto)} key switch',
+                log=not allow_guard_bypass,
+                hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+            ):
+                if allow_guard_bypass:
+                    _write_runtime_log(
+                        f'YouTube failover: bypassing stream guard for candidate {key_hash} '
+                        f'because active {_pool_proto_label(route_proto)} key has confirmed hard failure.'
+                    )
+                else:
+                    state['last_attempt'] = 0.0
+                    _write_runtime_log(
+                        f'YouTube failover: candidate {key_hash} is ready, '
+                        f'but switching is deferred because {_pool_proto_label(route_proto)} traffic is active.'
+                    )
+                    return False
             try:
                 result = _install_key_for_protocol(route_proto, key_value, verify=False)
             except Exception as exc:
@@ -1654,6 +1684,13 @@ MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS = max(
 MEMORY_MALLOC_TRIM_MIN_RSS_KB = max(
     0,
     int(getattr(config, 'memory_malloc_trim_min_rss_kb', 60 * 1024)),
+)
+_DEFAULT_MEMORY_CLEANUP_RSS_KB = MEMORY_MALLOC_TRIM_MIN_RSS_KB or (60 * 1024)
+if MEMORY_WATCHDOG_RSS_SOFT_KB > 0:
+    _DEFAULT_MEMORY_CLEANUP_RSS_KB = min(_DEFAULT_MEMORY_CLEANUP_RSS_KB, MEMORY_WATCHDOG_RSS_SOFT_KB)
+MEMORY_CLEANUP_RSS_KB = max(
+    0,
+    int(getattr(config, 'memory_cleanup_rss_kb', _DEFAULT_MEMORY_CLEANUP_RSS_KB)),
 )
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
@@ -3986,8 +4023,11 @@ def _youtube_vless2_stream_guard_active(reason='', log=False, hold_seconds=None)
     return _youtube_stream_guard_active('vless2', reason=reason, log=log, hold_seconds=hold_seconds)
 
 
-def _vless_traffic_guard_active(reason='', log=False, hold_seconds=None):
+def _vless_traffic_guard_active(reason='', log=False, hold_seconds=None, exclude_proto=None):
+    exclude_proto = str(exclude_proto or '').strip().lower()
     for proto in YOUTUBE_STREAM_GUARD_PROTOCOLS:
+        if exclude_proto and proto == exclude_proto:
+            continue
         if _youtube_stream_guard_active(proto, reason=reason, log=log, hold_seconds=hold_seconds):
             return True
     return False
@@ -4229,6 +4269,8 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
     _clear_runtime_memory_caches(clear_status=clear_status)
     rss_before = _process_rss_kb()
     should_collect = bool(force or clear_status)
+    if not should_collect and MEMORY_CLEANUP_RSS_KB > 0 and rss_before >= MEMORY_CLEANUP_RSS_KB:
+        should_collect = True
     if not should_collect and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB:
         should_collect = True
     collected = gc.collect() if should_collect else 0
@@ -4509,6 +4551,9 @@ def _start_memory_watchdog_thread():
         while not shutdown_requested.is_set():
             try:
                 rss_kb = _process_rss_kb()
+                if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
+                    _memory_cleanup('watchdog-cleanup', clear_status=False)
+                    rss_kb = _process_rss_kb() or rss_kb
                 if rss_kb and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_kb >= MEMORY_WATCHDOG_RSS_SOFT_KB:
                     _memory_cleanup('watchdog-soft', clear_status=True)
                     rss_kb = _process_rss_kb() or rss_kb
@@ -8122,11 +8167,18 @@ def _pause_pool_probe_for_apply(timeout=12.0):
         return False, ''
     pool_probe_resume_after_cancel = True
     pool_probe_cancel_event.set()
+    _set_pool_probe_progress(note='Проверка пула приостанавливается для применения выбранного ключа.')
     deadline = time.time() + max(0.5, float(timeout or 0))
     while pool_probe_lock.locked() and time.time() < deadline:
         time.sleep(0.2)
     if pool_probe_lock.locked():
-        return True, 'Проверка пула завершает текущий ключ; применение продолжено без ожидания всей очереди.'
+        _cleanup_pool_probe_runtime_light(kill_processes=True)
+        force_deadline = time.time() + 5.0
+        while pool_probe_lock.locked() and time.time() < force_deadline:
+            time.sleep(0.2)
+    if pool_probe_lock.locked():
+        _resume_cancelled_pool_probe('неудачной паузы проверки пула')
+        raise RuntimeError('Проверка пула ещё останавливается. Ключ не применён, чтобы не перезапускать основной Xray поверх активной проверки. Повторите применение через несколько секунд.')
     return True, 'Проверка пула приостановлена; после применения ключа она продолжится.'
 
 
@@ -9533,6 +9585,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             self._send_json(action.get('payload', {}), status=action.get('status', 200))
         elif kind == 'html':
             self._send_html(action.get('html', ''))
+            _release_web_form_template_cache()
             _memory_cleanup('web html render')
         elif kind == 'text':
             self._send_text_asset(
@@ -9857,6 +9910,27 @@ def _repair_active_reality_endpoint(proto, failure_message='', service='telegram
     if not candidates:
         return False
     service_name = 'YouTube' if str(service or '').strip().lower() == 'youtube' else 'Telegram'
+    probe_field = 'yt_ok' if service_name == 'YouTube' else 'tg_ok'
+    recent_ttl = (
+        YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL
+        if service_name == 'YouTube'
+        else AUTO_FAILOVER_RECENT_SUCCESS_TTL
+    )
+    try:
+        active_probe = _load_key_probe_cache().get(_hash_key(key), {})
+    except Exception:
+        active_probe = {}
+    if _recent_probe_ok(active_probe, probe_field, recent_ttl):
+        _write_runtime_log(
+            f'Reality endpoint repair skipped for {_pool_proto_label(proto)}: recent {service_name} success is still fresh.'
+        )
+        return False
+    if _vless_traffic_guard_active(
+        f'{_pool_proto_label(proto)} endpoint repair',
+        log=True,
+        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+    ):
+        return False
     _write_runtime_log(
         f'Reality endpoint repair: probing {len(candidates)} endpoints for {_pool_proto_label(proto)} after {service_name} failure.'
     )

@@ -41,9 +41,23 @@ def _read_all(unblock_dir):
     return result
 
 
+def _entry_value(entry):
+    value = str(entry or '').strip()
+    if not value or value.startswith('#'):
+        return ''
+    return value.split('#', 1)[0].strip()
+
+
+def _entry_key(entry):
+    value = _entry_value(entry)
+    if not value:
+        return ''
+    return normalize_route_entry(value)
+
+
 def _domain_key(entry):
-    value = str(entry or '').strip().lower()
-    if not value or '/' in value or ':' in value or value.startswith('#'):
+    value = _entry_value(entry).lower()
+    if not value or '/' in value or ':' in value:
         return ''
     value = value.lstrip('*.')
     allowed = set('abcdefghijklmnopqrstuvwxyz0123456789.-_')
@@ -51,11 +65,13 @@ def _domain_key(entry):
         return ''
     if '.' not in value:
         return ''
+    if _ip_network(value):
+        return ''
     return value.rstrip('.')
 
 
 def _ip_network(entry):
-    value = str(entry or '').strip()
+    value = _entry_value(entry)
     try:
         return ipaddress.ip_network(value, strict=False)
     except Exception:
@@ -200,15 +216,22 @@ def analyze_route_intersections(
     exact_seen = {}
     for route, entries in entries_by_route.items():
         for entry in entries:
-            exact_seen.setdefault(entry, []).append(route)
-    for entry, routes in exact_seen.items():
-        if len(routes) > 1 and normalize_route_entry(entry) not in shared_entries:
+            key = _entry_key(entry)
+            if not key:
+                continue
+            bucket = exact_seen.setdefault(key, {'routes': set(), 'entries': set(), 'display': _entry_value(entry)})
+            bucket['routes'].add(route)
+            bucket['entries'].add(entry)
+    for key, bucket in exact_seen.items():
+        routes = sorted(bucket['routes'])
+        if len(routes) > 1 and key not in shared_entries:
+            display = bucket.get('display') or key
             issues.append({
                 'kind': 'exact',
-                'entry': entry,
-                'entries': [entry],
-                'routes': sorted(routes),
-                'message': f'{entry}: точное совпадение в {", ".join(sorted(routes))}',
+                'entry': display,
+                'entries': sorted(bucket['entries']),
+                'routes': routes,
+                'message': f'{display}: точное совпадение в {", ".join(routes)}',
             })
 
     domains = []
@@ -224,13 +247,12 @@ def analyze_route_intersections(
             if route == other_route:
                 continue
             if (
-                other_domain == domain
-                or other_domain.endswith('.' + domain)
+                other_domain.endswith('.' + domain)
                 or domain.endswith('.' + other_domain)
             ):
                 if (
-                    normalize_route_entry(entry) in shared_entries
-                    and normalize_route_entry(other_entry) in shared_entries
+                    _entry_key(entry) in shared_entries
+                    and _entry_key(other_entry) in shared_entries
                 ):
                     continue
                 pair = tuple(sorted((entry, other_entry))) + tuple(sorted((route, other_route)))
@@ -257,6 +279,8 @@ def analyze_route_intersections(
     for index, (network, entry, route) in enumerate(networks):
         for other_network, other_entry, other_route in networks[index + 1:]:
             if route == other_route:
+                continue
+            if network == other_network:
                 continue
             if network.version == other_network.version and network.overlaps(other_network):
                 issues.append({

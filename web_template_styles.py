@@ -161,9 +161,14 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .pool-subscribe-row{margin-top:8px;display:flex;align-items:stretch;gap:8px;}
         .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;flex:1;}
         .pool-subscribe-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;}
-        .subscription-hwid-toggle{display:inline-flex;align-items:center;gap:6px;min-width:0;color:var(--muted);font-size:12px;font-weight:700;line-height:1.15;white-space:nowrap;}
-        .subscription-hwid-toggle input{width:16px;height:16px;min-width:16px;accent-color:#4ed8cd;}
-        .subscription-hwid-toggle span{min-width:0;overflow:hidden;text-overflow:ellipsis;}
+        .subscription-hwid-toggle{grid-column:1 / -1;display:inline-flex;align-items:center;justify-self:start;gap:8px;min-width:0;max-width:100%;color:var(--muted);font-size:12px;font-weight:700;line-height:1.15;white-space:normal;cursor:pointer;}
+        .subscription-switch-input{position:absolute;width:1px!important;height:1px!important;min-width:0!important;margin:0;padding:0;border:0;opacity:0;overflow:hidden;clip:rect(0 0 0 0);}
+        .subscription-switch-ui{position:relative;display:inline-flex;flex:none;width:34px;height:20px;border-radius:999px;border:1px solid rgba(159,176,200,.42);background:rgba(159,176,200,.18);transition:background-color .15s ease,border-color .15s ease;}
+        .subscription-switch-ui::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#d7e0ec;box-shadow:0 1px 4px rgba(0,0,0,.25);transition:transform .15s ease,background-color .15s ease;}
+        .subscription-switch-input:checked + .subscription-switch-ui{border-color:rgba(78,216,205,.66);background:rgba(48,191,181,.34);}
+        .subscription-switch-input:checked + .subscription-switch-ui::after{transform:translateX(14px);background:#96f1eb;}
+        .subscription-switch-input:focus-visible + .subscription-switch-ui{box-shadow:0 0 0 3px rgba(78,216,205,.18);}
+        .subscription-hwid-label{min-width:0;overflow-wrap:anywhere;}
         .pool-subscribe-form button,.pool-clear-btn{height:var(--control-height);min-height:var(--control-height);padding:0 12px;font-size:13px;line-height:1.15;white-space:nowrap;}
         .pool-clear-form{margin:0;display:flex;}
         .pool-clear-btn{height:100%;}
@@ -418,8 +423,9 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .protocol-subview-import .pool-add-form .field-label{grid-column:1 / -1;}
         .protocol-subview-import .pool-add-form textarea{min-height:68px;}
         .protocol-subview-import .pool-add-form button{justify-self:start;min-width:150px;}
-        .protocol-subview-import .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,auto);gap:7px;align-items:end;}
+        .protocol-subview-import .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,auto);grid-template-rows:auto auto auto;gap:7px;align-items:end;}
         .protocol-subview-import .pool-subscribe-form .field-label{grid-column:1 / -1;}
+        .protocol-subview-import .pool-subscribe-form .subscription-hwid-toggle{grid-column:1 / -1;}
         .protocol-subview-import .pool-subscribe-form > input[type="url"]{min-width:0;}
         .protocol-subview-import .pool-subscribe-form button{white-space:nowrap;}
         .protocol-subview-check > form{justify-self:start;}
@@ -595,13 +601,14 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .pool-delete-label{display:inline;}
         .pool-checked-cell,.pool-checked-head{white-space:nowrap;}
         .protocol-subview-import.active{grid-template-columns:minmax(0,1fr) minmax(420px,.72fr);gap:8px;align-items:stretch;}
-        .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:116px;min-height:0;padding:8px;align-self:stretch;}
+        .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:132px;min-height:0;padding:8px;align-self:stretch;}
         .protocol-subview-import .pool-add-form{display:grid;grid-template-columns:minmax(0,1fr) 150px;grid-template-rows:auto 66px;gap:7px;align-items:stretch;align-content:start;}
         .protocol-subview-import .pool-add-form .field-label{grid-column:1 / -1;margin:0;}
         .protocol-subview-import .pool-add-form textarea{grid-column:1;min-height:66px;height:66px;resize:vertical;}
         .protocol-subview-import .pool-add-form button{grid-column:2;align-self:end;justify-self:stretch;width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);margin-top:0;}
-        .protocol-subview-import .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.9fr);grid-template-rows:auto 66px;gap:7px;align-content:start;align-items:end;}
+        .protocol-subview-import .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.9fr);grid-template-rows:auto auto 44px;gap:7px;align-content:start;align-items:end;}
         .protocol-subview-import .pool-subscribe-form .field-label{grid-column:1 / -1;margin:0;}
+        .protocol-subview-import .pool-subscribe-form .subscription-hwid-toggle{grid-column:1 / -1;margin:0;}
         .protocol-subview-import .pool-subscribe-form > input[type="url"]{height:var(--control-height);min-height:var(--control-height);align-self:end;}
         .protocol-subview-import .pool-subscribe-form button{height:var(--control-height);min-height:var(--control-height);width:100%;padding:0 10px;white-space:nowrap;align-self:end;}
         @media (min-width: 1024px){
@@ -918,7 +925,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-subview-import .pool-add-form{grid-template-columns:1fr;}
             .protocol-subview-import .pool-add-form .field-label{grid-column:auto;}
             .protocol-subview-import .pool-subscribe-form{grid-template-columns:1fr;}
-            .protocol-subview-import .pool-subscribe-form .pool-subscribe-actions{grid-column:1 / -1;justify-content:space-between;flex-wrap:wrap;}
+            .protocol-subview-import .pool-subscribe-form .subscription-hwid-toggle{grid-column:1 / -1;}
             .pool-toolbar{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px;}
             .pool-toolbar form:last-child{grid-column:1 / -1;}
             .pool-toolbar button{width:100%;}

@@ -636,7 +636,21 @@ def run_pool_probe_worker(
                         future = executor.submit(run_check_pool_key, proto, key_value, checks, proxy_url)
                         future_map[future] = (proto, key_value)
 
-                    done, pending = concurrent.futures.wait(future_map, timeout=batch_timeout)
+                    pending = set(future_map)
+                    while pending:
+                        if cancel_requested():
+                            paused_remaining = True
+                            log('Проверка пула прервала текущую пачку для применения выбранного ключа.')
+                            break
+                        remaining_timeout = batch_deadline - time.monotonic()
+                        if remaining_timeout <= 0:
+                            break
+                        just_done, pending = concurrent.futures.wait(
+                            pending,
+                            timeout=min(0.5, remaining_timeout),
+                            return_when=concurrent.futures.FIRST_COMPLETED,
+                        )
+                        done.update(just_done)
 
                     for future in done:
                         proto, key_value = future_map[future]
@@ -653,7 +667,18 @@ def run_pool_probe_worker(
                             clear_result_deadline(proto, key_value)
                             mark_checked(proto, key_value)
 
-                    for future in pending:
+                    if cancel_requested() and pending:
+                        remaining_current_batch = []
+                        for future in pending:
+                            proto, key_value = future_map[future]
+                            future.cancel()
+                            ignore_late_result(proto, key_value)
+                            remaining_current_batch.append((proto, key_value))
+                        pending_tasks.extendleft(reversed(remaining_current_batch))
+                        update_note('Проверка пула приостановлена для применения выбранного ключа.')
+                    for future in list(pending):
+                        if cancel_requested():
+                            continue
                         proto, key_value = future_map[future]
                         future.cancel()
                         record_key_probe(

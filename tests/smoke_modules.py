@@ -2464,14 +2464,25 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
     assert "YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')" in source
     assert "proxy_mode in YOUTUBE_STREAM_GUARD_PROTOCOLS" in source
-    assert "_youtube_stream_guard_active(\n        route_proto,\n        f'{_pool_proto_label(route_proto)} core restart recheck'" in source
+    assert "_vless_traffic_guard_active(\n        'Telegram auto-failover'" in source
+    assert "_vless_traffic_guard_active(\n        f'{_pool_proto_label(route_proto)} core restart recheck'" in source
+    assert "_vless_traffic_guard_active(\n            f'{_pool_proto_label(route_proto)} endpoint repair'" in source
+    assert "exclude_proto=route_proto" in source
+    assert 'another Vless route has active traffic' in source
     assert "_youtube_stream_guard_active(\n                route_proto,\n                f'{_pool_proto_label(route_proto)} key switch'" in source
+    assert 'allow_guard_bypass = bool(' in source
+    assert 'bypassing stream guard for candidate' in source
     assert "proxy_mode == route_proto" in source
     assert 'Telegram is required because bot mode is' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
     assert "youtube_stream_guard_failover_hold_seconds" in source
     assert "youtube_stream_guard_scan_cache_seconds" in source
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
+    assert 'def _release_web_form_template_cache()' in source
+    assert "sys.modules.pop(module_name, None)" in source
+    assert "_release_web_form_template_cache()\n            _memory_cleanup('web html render')" in source
+    assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "MEMORY_CLEANUP_RSS_KB" in source
     assert "last_scan_count" in source
     assert "cached_fail_since or now" in source
     assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
@@ -3743,6 +3754,32 @@ def test_auto_failover_runtime_helpers():
     assert recent_probe_state['last_fail'] == 0.0
     assert not any(call[0] == 'install' for call in recent_probe_calls)
     assert any(call[0] == 'log' and 'recently marked working' in call[1] for call in recent_probe_calls)
+    recent_repair_calls = []
+    recent_repair_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=recent_repair_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'TLS EOF'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: recent_repair_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: recent_repair_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: recent_repair_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: recent_repair_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: recent_repair_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        key_probe_cache={'active-hash': {'tg_ok': True, 'ts': 19.0}},
+        hash_key=lambda key: f'{key}-hash',
+        recent_success_ttl=60,
+        repair_active_proxy=lambda proto, message: recent_repair_calls.append(('repair', proto, message)) or True,
+        time_provider=lambda: 20.0,
+    ) is False
+    assert not any(call[0] == 'repair' for call in recent_repair_calls)
     confirm_calls = []
     confirm_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
     confirm_results = iter([(False, 'first fail'), (True, 'confirm ok')])
@@ -3826,7 +3863,7 @@ def test_auto_failover_runtime_helpers():
     assert not any(isinstance(call, tuple) and call[0] == 'install' for call in startup_hold_calls)
     repair_calls = []
     repair_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
-    repair_checks = iter([(False, 'first fail'), (True, 'after repair')])
+    repair_checks = iter([(False, 'first fail'), (False, 'confirm fail'), (True, 'after repair')])
     assert auto_failover_runtime.attempt_auto_failover(
         state=repair_state,
         pool_probe_locked=lambda: False,
@@ -4638,6 +4675,54 @@ def test_pool_probe_runner_failover_candidate():
     )
     assert (checked, total) == (0, 1)
     assert remaining == [('vless', 'left')]
+
+    cancel_event = threading.Event()
+    cancel_started = threading.Event()
+    cancel_release = threading.Event()
+    cancel_remaining = []
+    cancel_records = []
+    cancel_logs = []
+
+    def slow_cancelled_check(proto, key, checks, proxy_url, record_key_probe=None):
+        cancel_started.set()
+        cancel_event.set()
+        cancel_release.wait(timeout=1)
+        if record_key_probe:
+            record_key_probe(proto, key, tg_ok=False, yt_ok=False)
+
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'cancel-current-batch')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=cancel_logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: cancel_records.append((proto, key, kwargs)),
+        start_xray_for_batch=lambda batch: ('process', 'config.json'),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=slow_cancelled_check,
+        timeout_budget=lambda checks, task_count, workers: 5,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+        cancel_event=cancel_event,
+        on_cancelled_remaining=cancel_remaining.extend,
+    )
+    assert cancel_started.wait(timeout=1)
+    assert (checked, total) == (0, 1)
+    assert cancel_remaining == [('vless', 'cancel-current-batch')]
+    cancel_release.set()
+    time.sleep(0.05)
+    assert cancel_records == []
+    assert any('текущую пачку' in message for message in cancel_logs)
 
     memory_values = iter([999999, 1000, 1000])
     time_values = iter([0.0, 2.0])
@@ -7615,6 +7700,32 @@ def test_route_intersections_helpers():
         assert 'example.com' not in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
 
 
+def test_route_intersections_filters_comments_and_ip_domain_noise():
+    with tempfile.TemporaryDirectory() as tmp:
+        for route_file in ('vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        shared_comment = '# synced from router'
+        (Path(tmp) / 'vless.txt').write_text(
+            f'{shared_comment}\n198.51.100.10\nexample.com\n203.0.113.5\n',
+            encoding='utf-8',
+        )
+        (Path(tmp) / 'vless-2.txt').write_text(
+            f'{shared_comment}\n198.51.100.10\napi.example.com\n203.0.113.0/24\n',
+            encoding='utf-8',
+        )
+
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=tmp,
+            include_runtime=False,
+        )
+        kinds = [issue['kind'] for issue in report['issues']]
+        assert kinds.count('exact') == 1
+        assert kinds.count('domain_suffix') == 1
+        assert kinds.count('ip_overlap') == 1
+        assert all(not str(issue.get('entry', '')).startswith('#') for issue in report['issues'])
+        assert all('198.51.100.10 / 198.51.100.10' not in str(issue.get('message', '')) for issue in report['issues'])
+
+
 def test_service_route_repair_preserves_shared_entries():
     shared_entry = 'accounts.google.com'
     assert shared_entry in service_catalog.shared_service_route_entries()
@@ -7860,6 +7971,7 @@ def main():
     test_update_status_helpers()
     test_service_routes_apply_and_profile()
     test_route_intersections_helpers()
+    test_route_intersections_filters_comments_and_ip_domain_noise()
     test_route_intersections_detect_runtime_ipset_overlap()
     test_service_route_ui_helpers()
     test_service_route_runtime_helpers()
