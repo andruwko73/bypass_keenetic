@@ -5642,6 +5642,14 @@ def test_web_http_basic_auth_accepts_and_rejects_credentials():
         web_auth_token_getter = staticmethod(lambda: '')
 
     assert _NoAuthRequest()._ensure_web_auth() is True
+    local_no_auth = _NoAuthRequest()
+    local_no_auth.headers = {'Host': '192.168.1.1:8080'}
+    assert local_no_auth._ensure_web_auth() is True
+    external_no_auth = _NoAuthRequest()
+    external_no_auth.headers = {'Host': 'bypass.keenetic-2969.netcraze.pro'}
+    assert external_no_auth._ensure_web_auth() is False
+    assert external_no_auth.status_code == 401
+    assert b'external web access' in external_no_auth.wfile.getvalue()
 
 
 def test_web_http_gzip_and_head_responses():
@@ -5706,6 +5714,10 @@ def test_installer_common_helpers():
     assert user == 'admin'
     assert 'secret' not in note
     assert 'задан' in note
+    user, note = installer_common.web_auth_summary({'web_auth_user': 'admin', 'web_auth_token': ''})
+    assert user == 'admin'
+    assert 'только локальный адрес' in note
+    assert 'вход будет без пароля' not in note
     assert installer_common.validate_installer_form(
         {'token': 'x', 'username': 'u', 'browser_port': '8080'},
         ['token', 'username'],

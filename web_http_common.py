@@ -73,10 +73,10 @@ class WebRequestMixin:
             return False
         return self._ensure_web_auth()
 
-    def _send_unauthorized(self):
+    def _send_unauthorized(self, message=None):
         body = (
-            'Authentication required. Use user "admin" and web_auth_token from '
-            'bot_config.py, or leave web_auth_token empty to disable the password.'
+            message or
+            'Authentication required. Use web_auth_user and web_auth_token from bot_config.py.'
         ).encode('utf-8')
         self.send_response(401)
         self.send_header('WWW-Authenticate', f'Basic realm="{self.auth_realm}"')
@@ -87,6 +87,30 @@ class WebRequestMixin:
         self.end_headers()
         self._write_response_body(body)
         self.close_connection = True
+
+    def _request_host_is_local(self):
+        try:
+            host_header = str(self.headers.get('Host', '') or '').split(',', 1)[0].strip()
+        except Exception:
+            host_header = ''
+        if not host_header:
+            return True
+        host = host_header.lower().rstrip('.')
+        if host.startswith('['):
+            host = host[1:].split(']', 1)[0]
+        elif host.count(':') == 1:
+            name, _, port = host.rpartition(':')
+            if port.isdigit():
+                host = name
+        if host in ('localhost', 'localhost.localdomain', 'keenetic', 'keenetic.local'):
+            return True
+        if host.endswith('.local'):
+            return True
+        try:
+            ip_obj = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        return ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
 
     def _write_response_body(self, body):
         if str(getattr(self, 'command', '') or '').upper() == 'HEAD':
@@ -138,6 +162,11 @@ class WebRequestMixin:
     def _ensure_web_auth(self):
         expected_token = str(self.web_auth_token_getter() or '')
         if not expected_token:
+            if not self._request_host_is_local():
+                self._send_unauthorized(
+                    'Authentication is required for external web access. Set web_auth_token in bot_config.py.'
+                )
+                return False
             return True
         expected_user = str(self.web_auth_user_getter() or 'admin')
         header = self.headers.get('Authorization', '')

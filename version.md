@@ -1,3 +1,7 @@
+*v1.815 (25 Jun 2026) -* main
+
+*Blocks external web-interface access when web_auth_token is empty or missing, so only local private-host access can run without Basic auth.*
+
 *v1.814 (25 Jun 2026) -* main
 
 *Keeps Telegram call-learning and its TPROXY layer disabled by default so experimental call detection cannot break the primary Vless/Vless 2 website routing.*

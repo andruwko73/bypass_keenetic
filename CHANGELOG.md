@@ -1,3 +1,9 @@
+<a name="1.815"></a>
+# [1.815] - 25 Jun 2026
+
+- Requires Basic auth for non-local web hosts when `web_auth_token` is empty or missing, preventing public tunnel access from opening the interface without a password.
+- Updates the installer and example config wording so the web password is treated as the known router web password, not a separate generated secret.
+
 <a name="1.814"></a>
 # [1.814] - 25 Jun 2026
 

@@ -85,7 +85,7 @@ def web_auth_summary(form, default_user='admin'):
     note = (
         ' Пароль веб-интерфейса задан.'
         if web_auth_token else
-        ' Пароль веб-интерфейса не задан; вход будет без пароля.'
+        ' Пароль веб-интерфейса не задан; без пароля доступен только локальный адрес.'
     )
     return web_auth_user, note
 

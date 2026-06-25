@@ -347,7 +347,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3, csrf_toke
                     </div>
                     <div class="full">
                         <label for="web_auth_token">Пароль веб-интерфейса</label>
-                        <input id="web_auth_token" name="web_auth_token" placeholder="Необязательно: пусто = вход без пароля">
+                        <input id="web_auth_token" name="web_auth_token" placeholder="Обычно пароль основного интерфейса роутера">
                     </div>
                     <div>
                         <label for="routerip">IP роутера</label>
