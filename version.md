@@ -1,3 +1,7 @@
+*v1.825 (25 Jun 2026) -* main
+
+*Removes the hardcoded api.telegram.org DNS override from generated Xray configs, letting Telegram API resolve normally like pool-probe checks. This prevents keys from passing temporary probes but timing out in the active bot/Xray config.*
+
 *v1.824 (25 Jun 2026) -* main
 
 *Clears stale GitHub update environment before downloads and before restarting the bot, preventing a later web update from reusing an older archive cache while reporting a newer commit.*

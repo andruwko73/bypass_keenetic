@@ -117,9 +117,6 @@ def build_proxy_core_config(
             'loglevel': loglevel,
         },
         'dns': {
-            'hosts': {
-                'api.telegram.org': '149.154.167.220',
-            },
             'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
             'queryStrategy': 'UseIPv4',
         },

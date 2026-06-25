@@ -1,3 +1,8 @@
+<a name="1.825"></a>
+# [1.825] - 25 Jun 2026
+
+- Removes the hardcoded api.telegram.org DNS override from generated Xray configs, letting Telegram API resolve normally like pool-probe checks. This prevents keys from passing temporary probes but timing out in the active bot/Xray config.
+
 <a name="1.824"></a>
 # [1.824] - 25 Jun 2026
 
