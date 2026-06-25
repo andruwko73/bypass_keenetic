@@ -1,3 +1,7 @@
+*v1.823 (25 Jun 2026) -* main
+
+*Uses the GitHub archive/API fallback first after raw GitHub downloads have failed once, so web updates do not wait on every runtime file through a slow or broken local SOCKS route.*
+
 *v1.822 (25 Jun 2026) -* main
 
 *Protects the active Vless routes while pool checks and auto-failover are running: pool-probe batches now stop promptly before applying a key, Reality endpoint repair waits until failures are confirmed, and router memory cleanup is more aggressive after heavy web/status work.*

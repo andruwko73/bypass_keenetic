@@ -1,3 +1,8 @@
+<a name="1.823"></a>
+# [1.823] - 25 Jun 2026
+
+- Uses the GitHub archive/API fallback first after raw GitHub downloads have failed once, so web updates do not wait on every runtime file through a slow or broken local SOCKS route.
+
 <a name="1.822"></a>
 # [1.822] - 25 Jun 2026
 

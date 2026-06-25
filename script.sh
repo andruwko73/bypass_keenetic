@@ -514,6 +514,16 @@ download_update_file() {
   description="$4"
 
   rm -f "$target" "$target".tmp.*
+  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
+    echo "Using GitHub archive/API fallback for ${description}."
+    if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
+      validate_update_file "$target" "$marker" "$description" || return 1
+      return 0
+    fi
+    echo "Error: failed to download ${description}"
+    return 1
+  fi
+
   if [ "${RAW_GITHUB_USE_SOCKS:-0}" = "1" ]; then
     if download_raw_file_via_socks "$url" "$target"; then
       validate_update_file "$target" "$marker" "$description" || return 1
@@ -522,10 +532,7 @@ download_update_file() {
     rm -f "$target"
     RAW_GITHUB_BYPASS=1
     export RAW_GITHUB_BYPASS
-  fi
-
-  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
-    echo "Using GitHub archive/API fallback for ${description}."
+    echo "raw.githubusercontent.com unavailable; using GitHub archive fallback."
     if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
       validate_update_file "$target" "$marker" "$description" || return 1
       return 0
