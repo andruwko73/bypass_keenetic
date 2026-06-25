@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.816, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.817, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -2575,7 +2575,7 @@ def _telegram_call_learning_auto_scan(
             continue
         if telegram_call_learning.address_in_networks(address):
             continue
-        if not candidate.get('udp_call_cluster') and not candidate.get('udp_call_active_media'):
+        if not candidate.get('udp_call_cluster'):
             continue
         seen_addresses.add(address)
         payload = _apply_telegram_call_learning_call_candidate(

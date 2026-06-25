@@ -3176,11 +3176,14 @@ def test_telegram_call_learning_idle_backoff_source():
     source = (ROOT / 'bot.py').read_text(encoding='utf-8')
     config_source = (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     installer_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    auto_scan = source.split('def _telegram_call_learning_auto_scan', 1)[1].split('def _telegram_call_learning_auto_worker', 1)[0]
     assert 'TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS' in source
     assert 'TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
     assert '_telegram_call_learning_ipset_members(set_name, include_timeouts=True)' in source
     assert 'active_clients_changed = active_clients_key != previous_active_clients_key' in source
     assert 'idle_active_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
+    assert "if not candidate.get('udp_call_cluster'):" in auto_scan
+    assert "not candidate.get('udp_call_active_media')" not in auto_scan
     assert 'telegram_call_learning_idle_backoff_seconds = 60.0' in config_source
     assert 'telegram_call_learning_idle_backoff_seconds = 60.0' in installer_source
 

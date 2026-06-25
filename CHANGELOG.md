@@ -1,3 +1,9 @@
+<a name="1.817"></a>
+# [1.817] - 25 Jun 2026
+
+- Stops auto Telegram call-learning from applying active-media-only UDP candidates, which can include unrelated heavy UDP traffic from a Telegram-signaled client.
+- Keeps automatic call learning limited to UDP clusters correlated with Telegram signaling.
+
 <a name="1.816"></a>
 # [1.816] - 25 Jun 2026
 

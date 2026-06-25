@@ -1,3 +1,7 @@
+*v1.817 (25 Jun 2026) -* main
+
+*Stops automatic Telegram call-learning from applying broad active-media UDP flows; only Telegram-correlated UDP clusters may be learned, so unrelated heavy UDP traffic cannot be added as call destinations.*
+
 *v1.816 (25 Jun 2026) -* main
 
 *Guards Telegram call-learning so learned call UDP cannot override destinations that already belong to regular bypass route ipsets, protecting YouTube, Chrome Remote Desktop, and other primary routes from call TPROXY hijacks.*
