@@ -1,3 +1,7 @@
+*v1.810 (25 Jun 2026) -* main
+
+*Keeps Chrome Remote Desktop and other protected service domains on their configured Vless route after YouTube/Vless overlap dedupe, and moves RuTracker back to Vless 2 only.*
+
 *v1.809 (25 Jun 2026) -* main
 
 *Shows Flash/Entware storage usage instead of swap in the router web card, fixes empty custom-check icon fallbacks, and trims README guidance around YouTube warmup, DNS Override, UDP/443, and realtime-call behavior.*

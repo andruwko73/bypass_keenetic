@@ -15,6 +15,7 @@ LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
+VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com clients3.google.com}"
 VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
@@ -483,6 +484,91 @@ youtube_route_protocol() {
 	printf '%s\n' "${best_protocol:-vless}"
 }
 
+route_file_has_domain() {
+	route_file="$1"
+	target_domain="$2"
+	[ -f "$route_file" ] || return 1
+	awk -v target="$target_domain" '
+		BEGIN { found = 0 }
+		{
+			value = $0
+			sub(/#.*/, "", value)
+			gsub(/\r/, "", value)
+			gsub(/^[ \t]+|[ \t]+$/, "", value)
+			if (value == "") next
+			sub(/^full:/, "", value)
+			sub(/^domain:/, "", value)
+			sub(/^\+\./, "", value)
+			sub(/^\*\./, "", value)
+			sub(/^\./, "", value)
+			if (value == target) {
+				found = 1
+				exit
+			}
+		}
+		END { exit found ? 0 : 1 }
+	' "$route_file"
+}
+
+resolve_priority_ipv4() {
+	priority_domain="$1"
+	dig +time=2 +tries=1 +short "$priority_domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
+		| grep -Eo "$IPV4_RE" \
+		| grep -vE "$LOCAL_RE" \
+		| sort -u
+}
+
+resolve_priority_ipv6() {
+	priority_domain="$1"
+	dig +time=2 +tries=1 +short AAAA "$priority_domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
+		| grep -E "^[0-9A-Fa-f:]+$" \
+		| grep ":" \
+		| grep -vE "$LOCAL_RE" \
+		| sort -u
+}
+
+apply_vless_priority_domain_ips() {
+	vless_set="$1"
+	vless2_set="$2"
+	vless6_set="$3"
+	vless2v6_set="$4"
+	ipset list "$vless_set" >/dev/null 2>&1 || return 0
+	ipset list "$vless2_set" >/dev/null 2>&1 || return 0
+
+	for priority_domain in $VLESS_PRIORITY_DOMAINS; do
+		route_file_has_domain "$UNBLOCK_DIR/vless.txt" "$priority_domain"
+		in_vless=$?
+		route_file_has_domain "$UNBLOCK_DIR/vless-2.txt" "$priority_domain"
+		in_vless2=$?
+		if [ "$in_vless" -eq 0 ] && [ "$in_vless2" -ne 0 ]; then
+			winner_set="$vless_set"
+			loser_set="$vless2_set"
+			winner6_set="$vless6_set"
+			loser6_set="$vless2v6_set"
+		elif [ "$in_vless2" -eq 0 ] && [ "$in_vless" -ne 0 ]; then
+			winner_set="$vless2_set"
+			loser_set="$vless_set"
+			winner6_set="$vless2v6_set"
+			loser6_set="$vless6_set"
+		else
+			continue
+		fi
+
+		resolve_priority_ipv4 "$priority_domain" | while IFS= read -r priority_ip; do
+			[ -n "$priority_ip" ] || continue
+			ipset add "$winner_set" "$priority_ip" -exist >/dev/null 2>&1 || true
+			ipset del "$loser_set" "$priority_ip" >/dev/null 2>&1 || true
+		done
+		if ipset list "$winner6_set" >/dev/null 2>&1 && ipset list "$loser6_set" >/dev/null 2>&1; then
+			resolve_priority_ipv6 "$priority_domain" | while IFS= read -r priority_ip6; do
+				[ -n "$priority_ip6" ] || continue
+				ipset add "$winner6_set" "$priority_ip6" -exist >/dev/null 2>&1 || true
+				ipset del "$loser6_set" "$priority_ip6" >/dev/null 2>&1 || true
+			done
+		fi
+	done
+}
+
 xargs_parallel_flag() {
 	if printf 'test\n' | xargs -n 1 -P 1 echo >/dev/null 2>&1; then
 		printf '%s\n' "-P $PARALLEL_JOBS"
@@ -870,6 +956,8 @@ swap_or_preserve_set unblockvless2v6 "tmp_unblockvless2v6_$$"
 swap_or_preserve_set unblocktroj6 "tmp_unblocktroj6_$$"
 
 dedupe_vless_final_ipsets
+
+apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6
 
 if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
 	message="ipset refresh completed with preserved/fallback sets."

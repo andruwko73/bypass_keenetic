@@ -1,3 +1,10 @@
+<a name="1.810"></a>
+# [1.810] - 25 Jun 2026
+
+- Adds a protected-domain pass after Vless/Vless 2 ipset dedupe so Chrome Remote Desktop/Chromoting domains keep the route selected by the actual route list instead of being pulled into the YouTube route by shared Google IPs.
+- Applies the same protected-domain pass in the lightweight scheduler dedupe, preventing runtime refresh from undoing the route a few seconds later.
+- Moves RuTracker entries out of Vless 1 and into Vless 2 so GitHub updates preserve the intended split.
+
 <a name="1.809"></a>
 # [1.809] - 25 Jun 2026
 

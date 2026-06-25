@@ -1835,6 +1835,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'cleanup_orphan_schedulers' in s99unblock
     assert 'stop_scheduler_pid "$pid"' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
+    assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in s99unblock
+    assert 'apply_vless_priority_domain_ips' in s99unblock
     assert 'route_file_marker_count()' in s99unblock
     assert '"vmess:$UNBLOCK_DIR/vmess.txt"' in s99unblock
     assert 'ipset test "$winner_set" "$entry"' in s99unblock
@@ -1847,9 +1849,15 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'lock_busy_exit()' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless" "unblockvless2"' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless2" "unblockvless"' in ipset_script
+    assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in ipset_script
+    assert 'apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6' in ipset_script
     last_swap_idx = ipset_script.index('swap_or_preserve_set unblocktroj6')
     final_dedupe_call_idx = ipset_script.index('dedupe_vless_final_ipsets', last_swap_idx)
-    assert last_swap_idx < final_dedupe_call_idx
+    priority_call_idx = ipset_script.index(
+        'apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6',
+        final_dedupe_call_idx,
+    )
+    assert last_swap_idx < final_dedupe_call_idx < priority_call_idx
     assert 'run_update_ipset_refresh()' in script
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
     assert 'continuing update while refresh finishes in background' in script
@@ -5115,20 +5123,20 @@ def test_vless2_youtube_routes_are_scoped():
     assert 'accounts.google.com' in vless_entries
     router_preserved_global = {'clients3.google.com'}
     assert set(service_catalog.global_route_exclude_entries()) & vless_entries <= router_preserved_global
-    assert 'rutracker.org' not in entries
-    assert 'rutracker.wiki' not in entries
+    assert 'rutracker.org' in entries
+    assert 'rutracker.wiki' in entries
     assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     assert service_routes.service_route_state('youtube', unblock_dir=str(ROOT))['label'] == 'Vless 2'
     assert service_routes.service_route_state('gemini', unblock_dir=str(ROOT))['label'] == 'Vless 1'
     chrome_remote_desktop_state = service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))
     assert chrome_remote_desktop_state['complete_protocols'] == []
     assert chrome_remote_desktop_state['partial_protocols'] == []
-    assert 'static.rutracker.cc' not in entries
-    assert 'feed.rutracker.cc' not in entries
-    assert 'rutracker.org' in vless_entries
-    assert 'rutracker.wiki' in vless_entries
-    assert 'static.rutracker.cc' in vless_entries
-    assert 'feed.rutracker.cc' in vless_entries
+    assert 'static.rutracker.cc' in entries
+    assert 'feed.rutracker.cc' in entries
+    assert 'rutracker.org' not in vless_entries
+    assert 'rutracker.wiki' not in vless_entries
+    assert 'static.rutracker.cc' not in vless_entries
+    assert 'feed.rutracker.cc' not in vless_entries
     assert {'one-way.work', 'rmr.rocks', 'aaa200.one', 'static.librebook.me'} <= vless_entries
     assert 'thepiratebay.org' not in entries
     assert 'discord-attachments-uploads-prd.storage.googleapis.com' not in entries
