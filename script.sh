@@ -12,6 +12,7 @@
 
 repo="andruwko73"
 REPO_REF="${REPO_REF:-main}"
+unset UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN
 
 config_get() {
   key="$1"
@@ -97,6 +98,10 @@ if [ -d "/opt/etc/bot" ] || grep -q '/opt/etc/bot/main.py' /opt/etc/init.d/S99te
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 
+clear_runtime_update_env() {
+  unset REPO_REF UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN
+}
+
 sanitize_xray26_compat() {
   for config_path in /opt/etc/xray/config.json /opt/etc/v2ray/config.json; do
     [ -f "$config_path" ] && sed -i '/allowInsecure/d' "$config_path" >/dev/null 2>&1 || true
@@ -150,6 +155,7 @@ telegram_config_complete() {
 }
 
 start_telegram_installer() {
+  clear_runtime_update_env
   [ -x "$BOT_SERVICE_PATH" ] && "$BOT_SERVICE_PATH" stop >/dev/null 2>&1 || true
   if [ -x "$INSTALLER_SERVICE_PATH" ]; then
     "$INSTALLER_SERVICE_PATH" restart >/dev/null 2>&1 || "$INSTALLER_SERVICE_PATH" start >/dev/null 2>&1 || true
@@ -1576,6 +1582,7 @@ if [ "$1" = "-update" ]; then
     cleanup_pool_probe_runtime
     cleanup_web_only_runtime
     cleanup_pool_probe_runtime
+    clear_runtime_update_env
     if ! telegram_config_complete; then
       write_cli_update_status update false 100 Done "CLI update complete; installer started"
       cli_update_status_active=0

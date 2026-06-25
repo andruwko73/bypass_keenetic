@@ -1,3 +1,8 @@
+<a name="1.824"></a>
+# [1.824] - 25 Jun 2026
+
+- Clears stale GitHub update environment before downloads and before restarting the bot, preventing a later web update from reusing an older archive cache while reporting a newer commit.
+
 <a name="1.823"></a>
 # [1.823] - 25 Jun 2026
 

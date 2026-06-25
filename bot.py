@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.823, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.824, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -2012,6 +2012,11 @@ DIRECT_FETCH_ENV_KEYS = [
     'http_proxy',
     'ALL_PROXY',
     'all_proxy',
+    'REPO_REF',
+    'UPDATE_ARCHIVE_ROOT',
+    'RAW_GITHUB_USE_SOCKS',
+    'RAW_GITHUB_BYPASS',
+    'RAW_GITHUB_SOCKS_NOTICE_SHOWN',
 ]
 RUNTIME_ERROR_LOG_PATHS = [
     '/opt/etc/error.log',

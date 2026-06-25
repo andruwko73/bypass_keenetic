@@ -1,3 +1,7 @@
+*v1.824 (25 Jun 2026) -* main
+
+*Clears stale GitHub update environment before downloads and before restarting the bot, preventing a later web update from reusing an older archive cache while reporting a newer commit.*
+
 *v1.823 (25 Jun 2026) -* main
 
 *Uses the GitHub archive/API fallback first after raw GitHub downloads have failed once, so web updates do not wait on every runtime file through a slow or broken local SOCKS route.*
