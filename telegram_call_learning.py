@@ -59,6 +59,11 @@ CALL_CLIENT_IPSETS = {
     'vless2': 'bypass_call_clients_vless2',
     'trojan': 'bypass_call_clients_troj',
 }
+KNOWN_ROUTE_IPSETS = tuple(dict.fromkeys(
+    set_name
+    for pair in PROTOCOL_IPSETS.values()
+    for set_name in pair
+))
 
 NOISE_UDP_PORTS = {
     '53',
@@ -494,6 +499,23 @@ def _run_quiet(args, timeout=3):
     return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False)
 
 
+def address_in_ipsets(address, set_names=None, run_command=None):
+    address = str(address or '').strip()
+    if not is_public_ipv4(address):
+        return False
+    runner = run_command or _run_quiet
+    for set_name in tuple(set_names or KNOWN_ROUTE_IPSETS):
+        if not str(set_name or '').strip():
+            continue
+        try:
+            completed = runner(['ipset', 'test', str(set_name), address], timeout=2)
+        except Exception:
+            continue
+        if getattr(completed, 'returncode', 1) == 0:
+            return True
+    return False
+
+
 def add_candidate_to_ipsets(candidate, protocol, apply=False, run_command=None):
     address = str((candidate or {}).get('address') or (candidate or {}).get('dst') or '').strip()
     sets = protocol_ipsets(protocol)
@@ -554,6 +576,9 @@ def add_candidate_to_call_ipset(candidate, protocol, timeout=14400, apply=False,
     except Exception:
         timeout_value = 14400
     runner = run_command or _run_quiet
+    if not address_in_networks(address) and address_in_ipsets(address, run_command=runner):
+        result['errors'].append('known_route_ipset')
+        return result
     try:
         completed = runner(
             ['ipset', 'add', set_name, address, 'timeout', str(timeout_value), '-exist'],

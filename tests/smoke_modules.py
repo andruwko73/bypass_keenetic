@@ -1352,6 +1352,43 @@ def test_telegram_call_learning_helpers():
     call_dry_run = telegram_call_learning.add_candidate_to_call_ipset(cluster_candidates[0], 'vless', apply=False)
     assert call_dry_run['sets'] == ['bypass_tg_call_vless']
     assert call_dry_run['applied_sets'] == []
+    blocked_calls = []
+
+    def known_route_runner(args, timeout=3):
+        blocked_calls.append((args, timeout))
+        if args[:2] == ['ipset', 'test'] and args[2] == 'unblockvless':
+            return py_types.SimpleNamespace(returncode=0, stderr=b'')
+        return py_types.SimpleNamespace(returncode=1, stderr=b'')
+
+    non_telegram_call_candidate = next(
+        item for item in cluster_candidates
+        if not telegram_call_learning.address_in_networks(item['address'])
+    )
+    blocked_call = telegram_call_learning.add_candidate_to_call_ipset(
+        non_telegram_call_candidate,
+        'vless',
+        apply=True,
+        run_command=known_route_runner,
+    )
+    assert blocked_call['applied_sets'] == []
+    assert blocked_call['errors'] == ['known_route_ipset']
+    assert ['ipset', 'add', 'bypass_tg_call_vless', non_telegram_call_candidate['address'], 'timeout'] not in [
+        item[0][:5] for item in blocked_calls
+    ]
+    telegram_call_adds = []
+
+    def telegram_route_runner(args, timeout=3):
+        telegram_call_adds.append((args, timeout))
+        return py_types.SimpleNamespace(returncode=0, stderr=b'')
+
+    telegram_call = telegram_call_learning.add_candidate_to_call_ipset(
+        candidates[0],
+        'vless',
+        apply=True,
+        run_command=telegram_route_runner,
+    )
+    assert telegram_call['applied_sets'] == ['bypass_tg_call_vless']
+    assert telegram_call_adds[0][0][:3] == ['ipset', 'add', 'bypass_tg_call_vless']
 
     calls = []
 
@@ -2118,9 +2155,16 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '-j SET --add-set "$client_set" src --exist --timeout "$BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT"' in redirect_script
     assert '-j SET --add-set "$learned_set" dst --exist --timeout "$BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT"' in redirect_script
     assert 'iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN' in redirect_script
+    assert 'iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN' in redirect_script
+    assert 'iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN' in redirect_script
     assert '-m set --match-set "$learned_set" dst \\' in redirect_script
     assert '-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"' in redirect_script
     assert 'iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m set --match-set "$learned_set" dst -j REDIRECT --to-ports "$target_port"' in redirect_script
+    signal_tproxy = 'iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$signal_set" dst'
+    known_tproxy_return = 'iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN'
+    learned_tproxy = 'iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$learned_set" dst'
+    assert redirect_script.index(signal_tproxy) < redirect_script.index(known_tproxy_return)
+    assert redirect_script.index(known_tproxy_return) < redirect_script.index(learned_tproxy)
     assert 'telegram_call_route_enabled "$proto"' in redirect_script
     assert 'vless2) [ -n "$vless2_key_path" ] && printf' in redirect_script
     assert 'iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockvlessudp dst --dport 443 -j REDIRECT --to-ports 10812' not in redirect_script

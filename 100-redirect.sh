@@ -734,8 +734,6 @@ refresh_telegram_call_learning_rules() {
 		iptables -t mangle -A "$TELEGRAM_CALL_LEARN_CHAIN" -p udp -m set --match-set "$learned_set" dst \
 			-j SET --add-set "$learned_set" dst --exist --timeout "$BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT"
 		if [ "$telegram_call_tproxy_ready" = "1" ] && [ -n "$tproxy_port" ]; then
-			iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$learned_set" dst \
-				-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
 			iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$signal_set" dst \
 				-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
 		fi
@@ -749,7 +747,23 @@ refresh_telegram_call_learning_rules() {
 					-j REDIRECT --to-ports "$target_port"
 			fi
 		fi
-		if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
+	done
+	for known_set in $(telegram_call_known_route_sets); do
+		ipset list "$known_set" >/dev/null 2>&1 || continue
+		iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN
+		iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m set --match-set "$known_set" dst -j RETURN
+	done
+	for proto in $active_protocols; do
+		learned_set="$(telegram_call_learned_set "$proto")"
+		target_port="$(telegram_call_target_port "$proto")"
+		tproxy_port="$(telegram_call_tproxy_port "$proto")"
+		[ -n "$learned_set" ] || continue
+		ipset list "$learned_set" >/dev/null 2>&1 || continue
+		if [ "$telegram_call_tproxy_ready" = "1" ] && [ -n "$tproxy_port" ]; then
+			iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$learned_set" dst \
+				-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
+		fi
+		if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ] && [ -n "$target_port" ]; then
 			iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m set --match-set "$learned_set" dst -j REDIRECT --to-ports "$target_port"
 		fi
 	done

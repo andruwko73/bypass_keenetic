@@ -1,3 +1,9 @@
+<a name="1.816"></a>
+# [1.816] - 25 Jun 2026
+
+- Blocks Telegram call-learning from adding non-Telegram destinations that are already present in regular route ipsets.
+- Orders Telegram call TPROXY rules so signal routes are handled first, regular bypass routes return next, and learned call destinations are applied last.
+
 <a name="1.815"></a>
 # [1.815] - 25 Jun 2026
 

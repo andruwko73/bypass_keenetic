@@ -1,3 +1,7 @@
+*v1.816 (25 Jun 2026) -* main
+
+*Guards Telegram call-learning so learned call UDP cannot override destinations that already belong to regular bypass route ipsets, protecting YouTube, Chrome Remote Desktop, and other primary routes from call TPROXY hijacks.*
+
 *v1.815 (25 Jun 2026) -* main
 
 *Blocks external web-interface access when web_auth_token is empty or missing, so only local private-host access can run without Basic auth.*
