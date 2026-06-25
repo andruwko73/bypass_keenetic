@@ -255,6 +255,7 @@ print(f'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED={1 if config_bool("telegram_call_l
 print(f'BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT={config_int("telegram_call_learning_client_timeout_seconds", 900, 30, 86400)}')
 print(f'BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT={config_int("telegram_call_learning_address_timeout_seconds", 14400, 120, 86400)}')
 print(f'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED={1 if config_bool("telegram_call_tproxy_enabled", True) else 0}')
+print('BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED=0')
 print(f'TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS={config_int("localportsh_tproxy", 11802, 1, 65535)}')
 print(f'TELEGRAM_CALL_TPROXY_PORT_VMESS={config_int("localportvmess_tproxy", 11815, 1, 65535)}')
 print(f'TELEGRAM_CALL_TPROXY_PORT_VLESS={config_int("localportvless_tproxy", 11812, 1, 65535)}')

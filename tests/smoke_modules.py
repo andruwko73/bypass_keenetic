@@ -1969,6 +1969,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT'] == '900'
         assert auto_policy['BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT'] == '14400'
         assert auto_policy['BYPASS_TELEGRAM_CALL_TPROXY_ENABLED'] == '1'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED'] == '0'
         assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS'] == '11812'
         assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS2'] == '11814'
         assert auto_policy['BYPASS_TELEGRAM_CALL_ROUTE_VLESS2'] == '0'
@@ -2063,6 +2064,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"' in redirect_script
     assert '--match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-ports "$UDP_QUIC_REJECT_PORT"' in redirect_script
     assert 'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED="${BYPASS_TELEGRAM_CALL_LEARNING_ENABLED:-1}"' in redirect_script
+    assert 'BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED:-0}"' in redirect_script
     assert 'TELEGRAM_CALL_CLIENT_SET="${TELEGRAM_CALL_CLIENT_SET:-bypass_tg_call_clients}"' in redirect_script
     assert 'TELEGRAM_CALL_SIGNAL_SET="${TELEGRAM_CALL_SIGNAL_SET:-bypass_tg_call_signal}"' in redirect_script
     assert 'CALL_CLIENT_SET_VLESS="${CALL_CLIENT_SET_VLESS:-bypass_call_clients_vless}"' in redirect_script
@@ -2088,7 +2090,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'iptables -t mangle -I PREROUTING -p udp -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
     assert '-p tcp -m tcp --dport "$signal_port" -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
     assert 'telegram_call_client_udp_ports()' in redirect_script
-    assert "printf '%s\\n' 1024:65535" in redirect_script
+    assert 'Client-wide UDP routing is intentionally disabled' in redirect_script
     assert 'telegram_call_client_udp_cleanup_ports()' in redirect_script
     assert "printf '%s\\n' 443 1024:65535" in redirect_script
     assert 'telegram_call_known_route_sets()' in redirect_script
@@ -2102,11 +2104,14 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'install_telegram_call_tproxy_prerouting_rule()' in redirect_script
     assert 'iptables -t mangle -I PREROUTING "$insert_index" "$@"' in redirect_script
     assert 'iptables -t mangle -A PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"' not in redirect_script
-    assert 'for client_udp_port in $(telegram_call_client_udp_ports); do' in redirect_script
+    assert 'for client_udp_port in $(telegram_call_client_udp_cleanup_ports); do' in redirect_script
     assert '-p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"' in redirect_script
     active_call_prerouting = redirect_script.split('install_telegram_call_prerouting_jumps() {', 1)[1].split('\n}', 1)[0]
     assert '-p udp -m udp --dport "$client_udp_port" -m set --match-set "$TELEGRAM_CALL_CLIENT_SET" src -j "$TELEGRAM_CALL_LEARN_CHAIN"' not in active_call_prerouting
-    assert '-p udp -m udp --dport "$client_udp_port" -m set --match-set "$client_set" src -j "$TELEGRAM_CALL_TPROXY_CHAIN"' in redirect_script
+    assert 'install_telegram_call_tproxy_prerouting_rule -p udp -m udp --dport "$client_udp_port" -m set --match-set "$client_set" src' not in redirect_script
+    assert 'iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m udp -m set --match-set "$client_set" src --dport "$client_udp_port"' not in redirect_script
+    assert 'iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m udp -m set --match-set "$client_set" src --dport "$client_udp_port"' not in redirect_script
+    assert 'iptables -t nat -I PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$client_set" src' not in redirect_script
     assert 'iptables -t "$table_name" -I PREROUTING -j "$chain_name"' not in redirect_script
     assert 'iptables -t mangle -I PREROUTING -j "$TELEGRAM_CALL_LEARN_CHAIN"' not in redirect_script
     assert 'iptables -t nat -I PREROUTING -j "$TELEGRAM_CALL_ROUTE_CHAIN"' not in redirect_script

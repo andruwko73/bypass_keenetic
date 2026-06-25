@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.812, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.813, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -2961,6 +2961,7 @@ def _sync_udp_policy_config():
         f'BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT={TELEGRAM_CALL_LEARNING_CLIENT_TIMEOUT_SECONDS}\n'
         f'BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT={TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS}\n'
         f'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED={1 if TELEGRAM_CALL_TPROXY_ENABLED else 0}\n'
+        'BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED=0\n'
         f'TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS={localportsh_tproxy}\n'
         f'TELEGRAM_CALL_TPROXY_PORT_VMESS={localportvmess_tproxy}\n'
         f'TELEGRAM_CALL_TPROXY_PORT_VLESS={localportvless_tproxy}\n'

@@ -1,3 +1,7 @@
+*v1.813 (25 Jun 2026) -* main
+
+*Disables client-wide Telegram call UDP TPROXY routing so one learned LAN client can no longer pull all high UDP traffic through Vless 1 for the call-learning timeout window.*
+
 *v1.812 (25 Jun 2026) -* main
 
 *Extends protected route priority to RuTracker domains so Vless 2 wins over shared Cloudflare ranges that may also exist in Vless 1.*

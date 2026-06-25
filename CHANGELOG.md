@@ -1,3 +1,9 @@
+<a name="1.813"></a>
+# [1.813] - 25 Jun 2026
+
+- Disables client-wide Telegram call UDP TPROXY routing while keeping destination-based learned Telegram call routing active.
+- Writes `BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED=0` into generated UDP policy files so old runtime config cannot re-enable broad client UDP capture after restart.
+
 <a name="1.812"></a>
 # [1.812] - 25 Jun 2026
 

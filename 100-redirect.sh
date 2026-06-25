@@ -61,7 +61,7 @@ BYPASS_TELEGRAM_CALL_TPROXY_MARK="${BYPASS_TELEGRAM_CALL_TPROXY_MARK:-0x71}"
 BYPASS_TELEGRAM_CALL_TPROXY_TABLE="${BYPASS_TELEGRAM_CALL_TPROXY_TABLE:-100}"
 BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY="${BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY:-100}"
 BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED="${BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED:-0}"
-BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED:-1}"
+BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED:-0}"
 BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED:-1}"
 BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS="${BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS:-0}"
 BYPASS_TELEGRAM_CALL_ROUTE_VMESS="${BYPASS_TELEGRAM_CALL_ROUTE_VMESS:-0}"
@@ -329,7 +329,9 @@ telegram_call_signal_tcp_ports() {
 }
 
 telegram_call_client_udp_ports() {
-	printf '%s\n' 1024:65535
+	# Client-wide UDP routing is intentionally disabled: learned clients are too broad
+	# and can hijack unrelated Vless traffic for the whole timeout window.
+	return 0
 }
 
 telegram_call_client_udp_cleanup_ports() {
@@ -582,13 +584,8 @@ install_telegram_call_prerouting_jumps() {
 		for proto in shadowsocks vmess vless vless2 trojan; do
 			telegram_call_route_enabled "$proto" || continue
 			signal_set="$(telegram_call_signal_set "$proto")"
-			client_set="$(telegram_call_client_set "$proto")"
 			[ -n "$signal_set" ] && ipset list "$signal_set" >/dev/null 2>&1 \
 				&& iptables -t nat -I PREROUTING -p udp -m set --match-set "$signal_set" dst -j RETURN
-			[ -n "$client_set" ] && ipset list "$client_set" >/dev/null 2>&1 || continue
-			for client_udp_port in $(telegram_call_client_udp_ports); do
-				iptables -t nat -I PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$client_set" src -j RETURN
-			done
 		done
 	fi
 	if [ "$BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED" != "0" ]; then
@@ -603,17 +600,6 @@ install_telegram_call_prerouting_jumps() {
 			if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
 				iptables -t nat -I PREROUTING -p udp -m udp --dport 1024:65535 -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
 			fi
-		done
-	fi
-	if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ] && [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ]; then
-		for proto in shadowsocks vmess vless vless2 trojan; do
-			telegram_call_route_enabled "$proto" || continue
-			client_set="$(telegram_call_client_set "$proto")"
-			[ -n "$client_set" ] || continue
-			ipset list "$client_set" >/dev/null 2>&1 || continue
-			for client_udp_port in $(telegram_call_client_udp_ports); do
-				iptables -t nat -I PREROUTING -p udp -m udp --dport "$client_udp_port" -m set --match-set "$client_set" src -j "$TELEGRAM_CALL_ROUTE_CHAIN"
-			done
 		done
 	fi
 }
@@ -636,14 +622,8 @@ install_telegram_call_tproxy_prerouting_jumps() {
 	for proto in shadowsocks vmess vless vless2 trojan; do
 		telegram_call_route_enabled "$proto" || continue
 		signal_set="$(telegram_call_signal_set "$proto")"
-		client_set="$(telegram_call_client_set "$proto")"
 		[ -n "$signal_set" ] && ipset list "$signal_set" >/dev/null 2>&1 \
 			&& install_telegram_call_tproxy_prerouting_rule -p udp -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
-		if [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ] && [ -n "$client_set" ] && ipset list "$client_set" >/dev/null 2>&1; then
-			for client_udp_port in $(telegram_call_client_udp_ports); do
-				install_telegram_call_tproxy_prerouting_rule -p udp -m udp --dport "$client_udp_port" -m set --match-set "$client_set" src -j "$TELEGRAM_CALL_TPROXY_CHAIN"
-			done
-		fi
 	done
 	for proto in shadowsocks vmess vless vless2 trojan; do
 		telegram_call_route_enabled "$proto" || continue
@@ -758,12 +738,6 @@ refresh_telegram_call_learning_rules() {
 				-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
 			iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m set --match-set "$signal_set" dst \
 				-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
-			if [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ]; then
-				for client_udp_port in $(telegram_call_client_udp_ports); do
-					iptables -t mangle -A "$TELEGRAM_CALL_TPROXY_CHAIN" -p udp -m udp -m set --match-set "$client_set" src --dport "$client_udp_port" \
-						-j TPROXY --on-port "$tproxy_port" --tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
-				done
-			fi
 		fi
 		if [ "$BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED" != "0" ]; then
 			for signal_port in $(telegram_call_signal_tcp_ports); do
@@ -774,12 +748,6 @@ refresh_telegram_call_learning_rules() {
 				iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m udp -m set --match-set "$signal_set" dst --dport 1024:65535 \
 					-j REDIRECT --to-ports "$target_port"
 			fi
-		fi
-		if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ] && [ "$BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED" != "0" ]; then
-			for client_udp_port in $(telegram_call_client_udp_ports); do
-				iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m udp -m set --match-set "$client_set" src --dport "$client_udp_port" \
-					-j REDIRECT --to-ports "$target_port"
-			done
 		fi
 		if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
 			iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m set --match-set "$learned_set" dst -j REDIRECT --to-ports "$target_port"
