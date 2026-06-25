@@ -1,3 +1,8 @@
+<a name="1.820"></a>
+# [1.820] - 25 Jun 2026
+
+- Makes `S99unblock` stop stale fallback scheduler processes more robustly after consecutive updates, preventing duplicate refresh loops from staying alive.
+
 <a name="1.819"></a>
 # [1.819] - 25 Jun 2026
 

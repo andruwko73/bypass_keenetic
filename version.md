@@ -1,3 +1,7 @@
+*v1.820 (25 Jun 2026) -* main
+
+*Makes the S99unblock fallback scheduler cleanup robust after consecutive updates, preventing stale duplicate refresh schedulers from staying alive.*
+
 *v1.819 (25 Jun 2026) -* main
 
 *Reduces idle RSS growth by streaming conntrack reads in Telegram call learning and YouTube stream guards, and by filtering call-learning UDP candidates earlier.*
