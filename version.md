@@ -1,3 +1,7 @@
+*v1.826 (25 Jun 2026) -* main
+
+*Lets Telegram auto-failover keep counting confirmed failures while the Vless traffic guard is active, then bypasses the guard after repeated failures so stuck CRD/Codex/Telegram outages do not block recovery indefinitely.*
+
 *v1.825 (25 Jun 2026) -* main
 
 *Removes the hardcoded api.telegram.org DNS override from generated Xray configs, letting Telegram API resolve normally like pool-probe checks. This prevents keys from passing temporary probes but timing out in the active bot/Xray config.*

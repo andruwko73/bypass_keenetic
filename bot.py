@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.825, последнее изменение: 25.06.2026
+#  Файл: bot.py, Версия v1.826, последнее изменение: 25.06.2026
 
 import subprocess
 import os
@@ -454,6 +454,10 @@ AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT = float(getattr(config, 'auto_failover_check
 AUTO_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'auto_failover_check_read_timeout', 3))
 AUTO_FAILOVER_RECENT_SUCCESS_TTL = max(0, int(getattr(config, 'auto_failover_recent_success_ttl', 300)))
 AUTO_FAILOVER_CONSECUTIVE_FAILURES = max(1, int(getattr(config, 'auto_failover_consecutive_failures', 3)))
+AUTO_FAILOVER_TRAFFIC_GUARD_BYPASS_FAILURES = max(
+    AUTO_FAILOVER_CONSECUTIVE_FAILURES,
+    int(getattr(config, 'auto_failover_traffic_guard_bypass_failures', AUTO_FAILOVER_CONSECUTIVE_FAILURES)),
+)
 AUTO_FAILOVER_STARTUP_HOLD_SECONDS = max(
     180,
     int(getattr(config, 'auto_failover_startup_hold_seconds', 180)),
@@ -899,15 +903,50 @@ def _auto_failover_log(message):
     )
 
 
-def _attempt_auto_failover():
-    if proxy_mode in YOUTUBE_STREAM_GUARD_PROTOCOLS and _vless_traffic_guard_active(
-        'Telegram auto-failover',
-        log=True,
-        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-    ):
-        auto_failover_state['last_fail'] = 0.0
-        auto_failover_state['consecutive_failures'] = 0
+def _auto_failover_defer_switch_for_traffic_guard(**kwargs):
+    if proxy_mode not in YOUTUBE_STREAM_GUARD_PROTOCOLS:
         return False
+    try:
+        failures = int(auto_failover_state.get('consecutive_failures') or 0)
+    except Exception:
+        failures = 0
+    bypass_after = max(
+        int(kwargs.get('min_consecutive_failures') or AUTO_FAILOVER_CONSECUTIVE_FAILURES),
+        AUTO_FAILOVER_TRAFFIC_GUARD_BYPASS_FAILURES,
+    )
+    guarded = _vless_traffic_guard_active(
+        'Telegram auto-failover',
+        log=failures < bypass_after,
+        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+    )
+    if not guarded:
+        return False
+    if failures >= bypass_after:
+        message = (
+            f'Auto-failover: bypassing traffic guard after {failures} confirmed '
+            'Telegram API failures.'
+        )
+        _write_runtime_log(message)
+        _record_event(
+            'auto_failover_guard_bypass',
+            message,
+            level='warn',
+            source='watchdog',
+            protocol=proxy_mode,
+            service='telegram',
+            details=_auto_failover_event_details({
+                'guard_bypass_after_failures': bypass_after,
+            }),
+        )
+        return False
+    _auto_failover_log(
+        f'Auto-failover: traffic guard deferred Telegram key switch after confirmed '
+        f'failure {failures}/{bypass_after}.'
+    )
+    return True
+
+
+def _attempt_auto_failover():
     return auto_failover_runtime.attempt_auto_failover(
         state=auto_failover_state,
         pool_probe_locked=lambda: bool(globals().get('pool_probe_lock') and pool_probe_lock.locked()),
@@ -936,6 +975,7 @@ def _attempt_auto_failover():
         min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES,
         repair_active_proxy=_repair_active_reality_endpoint,
         protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER,
+        defer_switch=_auto_failover_defer_switch_for_traffic_guard,
     )
 
 

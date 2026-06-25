@@ -1765,6 +1765,9 @@ def test_codex_version_matches_commit_count():
     assert 'auto_failover_consecutive_failures = 3' in example
     assert 'auto_failover_consecutive_failures = 3' in installer
     assert 'auto_failover_consecutive_failures = 3' in bootstrap
+    assert 'auto_failover_traffic_guard_bypass_failures = 3' in example
+    assert 'auto_failover_traffic_guard_bypass_failures = 3' in installer
+    assert 'auto_failover_traffic_guard_bypass_failures = 3' in bootstrap
     assert 'youtube_vless2_failover_enabled = True' in example
     assert 'youtube_vless2_failover_enabled = True' in installer
     assert 'youtube_vless2_failover_enabled = True' in bootstrap
@@ -2452,9 +2455,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "auto_failover_recent_success_ttl', 300" in source
     assert "auto_failover_startup_hold_seconds', 180" in source
     assert "auto_failover_consecutive_failures', 3" in source
+    assert "auto_failover_traffic_guard_bypass_failures" in source
     assert 'def _event_history_snapshot(limit=50)' in source
     assert 'startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS' in source
     assert 'min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES' in source
+    assert 'def _auto_failover_defer_switch_for_traffic_guard' in source
+    assert 'defer_switch=_auto_failover_defer_switch_for_traffic_guard' in source
+    assert 'bypassing traffic guard after' in source
     assert 'def _auto_failover_log' in source
     assert "'auto_failover_confirm_fail'" in source
     assert "'stream_guard_defer'" in source
@@ -2463,7 +2470,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _youtube_route_marker_count' in source
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
     assert "YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')" in source
-    assert "proxy_mode in YOUTUBE_STREAM_GUARD_PROTOCOLS" in source
+    assert "if proxy_mode not in YOUTUBE_STREAM_GUARD_PROTOCOLS" in source
     assert "_vless_traffic_guard_active(\n        'Telegram auto-failover'" in source
     assert "_vless_traffic_guard_active(\n        f'{_pool_proto_label(route_proto)} core restart recheck'" in source
     assert "_vless_traffic_guard_active(\n            f'{_pool_proto_label(route_proto)} endpoint repair'" in source
@@ -3929,6 +3936,39 @@ def test_auto_failover_runtime_helpers():
     assert repeated_attempt(40.0) is True
     assert repeated_state['consecutive_failures'] == 0
     assert ('update', 'vless') in repeated_calls
+
+    deferred_calls = []
+    deferred_state = {
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_attempt': 0.0,
+        'consecutive_failures': 0,
+        'in_progress': False,
+    }
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=deferred_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'fail'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: deferred_calls.append(('install', proto, key, verify)) or 'ok',
+        update_proxy=lambda proto: deferred_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: deferred_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: deferred_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: deferred_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        min_consecutive_failures=1,
+        defer_switch=lambda **kwargs: deferred_calls.append(('defer', kwargs['state']['consecutive_failures'])) or True,
+        time_provider=iter([20.0, 21.0]).__next__,
+    ) is False
+    assert deferred_state['consecutive_failures'] == 1
+    assert ('defer', 1) in deferred_calls
+    assert not any(call[0] == 'install' for call in deferred_calls)
 
 
 def test_proxy_apply_runtime_helpers():

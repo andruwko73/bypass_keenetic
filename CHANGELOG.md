@@ -1,3 +1,8 @@
+<a name="1.826"></a>
+# [1.826] - 25 Jun 2026
+
+- Lets Telegram auto-failover keep counting confirmed failures while the Vless traffic guard is active, then bypasses the guard after repeated failures so stuck CRD/Codex/Telegram outages do not block recovery indefinitely.
+
 <a name="1.825"></a>
 # [1.825] - 25 Jun 2026
 

@@ -33,6 +33,7 @@ def attempt_auto_failover(
     min_consecutive_failures=1,
     repair_active_proxy=None,
     audit_key_switch=None,
+    defer_switch=None,
     time_provider=time.time,
 ):
     now = time_provider()
@@ -152,6 +153,19 @@ def attempt_auto_failover(
             'current key is kept until failures repeat.'
         )
         return False
+
+    if callable(defer_switch):
+        try:
+            if defer_switch(
+                state=state,
+                proxy_mode=proxy_mode,
+                failure_message=failure_message,
+                now=now,
+                min_consecutive_failures=min_failures,
+            ):
+                return False
+        except Exception as exc:
+            log(f'Auto-failover: traffic guard callback failed: {exc}')
 
     state['in_progress'] = True
     state['last_attempt'] = now
