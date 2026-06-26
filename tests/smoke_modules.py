@@ -2356,8 +2356,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'udp_quic_drift_fast_add'" in source
     assert 'last_fast_add_signature' in source
     assert "'conntrack_cleared': str(conntrack_deleted)" in source
-    assert "if _apply_priority_udp_quic_drift_findings(priority_findings):" in source
-    assert source.find('if _apply_priority_udp_quic_drift_findings(priority_findings):') < source.find('if _udp_quic_drift_refresh_deferred_for_stream(findings):')
+    assert "if priority_findings and _udp_quic_drift_refresh_deferred_for_stream(priority_findings):" in source
+    assert source.find('if priority_findings and _udp_quic_drift_refresh_deferred_for_stream(priority_findings):') < source.find('if _apply_priority_udp_quic_drift_findings(priority_findings):')
+    assert "_background_task_allowed('UDP/QUIC drift watchdog')" in source
     assert "'youtu.be'," in source
     assert "'i.ytimg.com'," in source
     assert "getattr(config, 'ipset_refresh_command_timeout_seconds', 420)" in source
@@ -3759,7 +3760,7 @@ def test_auto_failover_runtime_helpers():
         pool_probe_locked=lambda: False,
         proxy_mode='vless',
         proxy_url='proxy',
-        check_telegram_api=lambda proxy, **kwargs: (False, 'TLS EOF'),
+        check_telegram_api=lambda proxy, **kwargs: recent_probe_calls.append(('check', kwargs)) or (False, 'TLS EOF'),
         load_current_keys=lambda: {'vless': 'active'},
         load_key_pools=lambda: {'vless': ['active', 'next']},
         failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
@@ -3777,8 +3778,8 @@ def test_auto_failover_runtime_helpers():
         time_provider=lambda: 20.0,
     ) is False
     assert recent_probe_state['last_fail'] == 0.0
+    assert not any(call[0] == 'check' for call in recent_probe_calls)
     assert not any(call[0] == 'install' for call in recent_probe_calls)
-    assert any(call[0] == 'log' and 'recently marked working' in call[1] for call in recent_probe_calls)
     recent_repair_calls = []
     recent_repair_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
     assert auto_failover_runtime.attempt_auto_failover(

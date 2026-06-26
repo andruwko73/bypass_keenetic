@@ -4,6 +4,46 @@ import time
 POOL_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
 
 
+def _recent_active_success(
+    *,
+    state,
+    now,
+    proxy_mode,
+    load_current_keys,
+    key_probe_cache=None,
+    hash_key=None,
+    ttl=0,
+):
+    ttl = float(ttl or 0)
+    if ttl <= 0:
+        return False
+    try:
+        last_ok = float(state.get('last_ok') or 0)
+    except (TypeError, ValueError):
+        last_ok = 0.0
+    if last_ok and now - last_ok <= ttl:
+        return True
+    if not callable(load_current_keys) or not callable(hash_key):
+        return False
+    try:
+        current_keys = load_current_keys()
+    except Exception:
+        return False
+    active_key = (current_keys.get(proxy_mode) or '').strip()
+    if not active_key:
+        return False
+    try:
+        probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
+    except Exception:
+        probe_cache = None
+    active_probe = probe_cache.get(hash_key(active_key), {}) if probe_cache else {}
+    try:
+        checked_ts = float(active_probe.get('ts') or 0)
+    except (TypeError, ValueError):
+        checked_ts = 0.0
+    return bool(active_probe.get('tg_ok') is True and checked_ts and now - checked_ts <= ttl)
+
+
 def attempt_auto_failover(
     *,
     state,
@@ -42,6 +82,19 @@ def attempt_auto_failover(
     if pool_probe_locked and pool_probe_locked():
         return False
     if state['last_attempt'] and now - state['last_attempt'] < switch_cooldown_seconds:
+        return False
+
+    if _recent_active_success(
+        state=state,
+        now=now,
+        proxy_mode=proxy_mode,
+        load_current_keys=load_current_keys,
+        key_probe_cache=key_probe_cache,
+        hash_key=hash_key,
+        ttl=recent_success_ttl,
+    ):
+        state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
         return False
 
     connect_timeout, read_timeout = check_timeouts

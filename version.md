@@ -1,3 +1,7 @@
+*v1.832 (26 Jun 2026) -* main
+
+*Reduces router CPU spikes by skipping Telegram auto-failover checks while the active key has a recent successful Telegram probe, adding a CPU guard to background failover/drift watchdogs, and deferring YouTube UDP/QUIC drift fast-add while active streams are detected.*
+
 *v1.831 (26 Jun 2026) -* main
 
 *Releases heavy web JSON API payload references after responses and runs the existing RSS-threshold cleanup path, reducing idle memory left behind by status/pool/service API polling without adding cleanup work when RSS is already low.*

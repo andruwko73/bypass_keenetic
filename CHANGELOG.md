@@ -1,3 +1,8 @@
+<a name="1.832"></a>
+# [1.832] - 26 Jun 2026
+
+- Reduces router CPU spikes by skipping Telegram auto-failover checks while the active key has a recent successful Telegram probe, adding a CPU guard to background failover/drift watchdogs, and deferring YouTube UDP/QUIC drift fast-add while active streams are detected.
+
 <a name="1.831"></a>
 # [1.831] - 26 Jun 2026
 

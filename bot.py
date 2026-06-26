@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.831, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.832, последнее изменение: 26.06.2026
 
 import subprocess
 import os
@@ -620,6 +620,7 @@ udp_quic_drift_state = {
     'last_fast_add_signature': (),
     'last_fast_add_event': 0.0,
 }
+background_task_skip_log_at = {}
 youtube_edge_prefetch_state = {
     'enabled': YOUTUBE_EDGE_PREFETCH_ENABLED,
     'route_protocol': '',
@@ -1490,7 +1491,7 @@ def _start_auto_failover_thread():
     def worker():
         while not shutdown_requested.is_set():
             try:
-                if _app_mode_pool_enabled():
+                if _app_mode_pool_enabled() and _background_task_allowed('Telegram auto-failover'):
                     _attempt_auto_failover()
             except Exception as exc:
                 _write_runtime_log(f'Auto-failover error: {exc}')
@@ -1507,7 +1508,7 @@ def _start_youtube_vless2_failover_thread():
     def worker():
         while not shutdown_requested.is_set():
             try:
-                if _app_mode_pool_enabled():
+                if _app_mode_pool_enabled() and _background_task_allowed('YouTube failover'):
                     _attempt_youtube_vless2_failover()
             except Exception as exc:
                 _write_runtime_log(f'YouTube Vless2 failover error: {exc}')
@@ -1598,6 +1599,13 @@ POOL_PROBE_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'pool_probe_max_cpu_
 POOL_PROBE_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'pool_probe_cpu_sample_seconds', 0.35)))
 POOL_PROBE_HIGH_CPU_DELAY_SECONDS = max(1.0, float(getattr(config, 'pool_probe_high_cpu_delay_seconds', 5.0)))
 POOL_PROBE_HIGH_CPU_MAX_WAIT_SECONDS = max(0.0, float(getattr(config, 'pool_probe_high_cpu_max_wait_seconds', 45.0)))
+BACKGROUND_TASK_CPU_GUARD_ENABLED = bool(getattr(config, 'background_task_cpu_guard_enabled', True))
+BACKGROUND_TASK_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'background_task_max_cpu_percent', 65.0)))
+BACKGROUND_TASK_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'background_task_cpu_sample_seconds', 0.35)))
+BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS = max(
+    60.0,
+    float(getattr(config, 'background_task_skip_log_interval_seconds', 300.0)),
+)
 POOL_PROBE_LOW_MEMORY_DELAY_SECONDS = float(getattr(config, 'pool_probe_low_memory_delay_seconds', 12.0))
 POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS = float(getattr(config, 'pool_probe_low_memory_max_wait_seconds', 180.0))
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
@@ -3506,6 +3514,9 @@ def _udp_quic_drift_refresh_deferred_for_stream(findings):
 def _refresh_ipset_for_udp_quic_drift(findings):
     now = time.time()
     priority_findings = _udp_quic_drift_priority_findings(findings)
+    if priority_findings and _udp_quic_drift_refresh_deferred_for_stream(priority_findings):
+        udp_quic_drift_state['last_log'] = now
+        return
     if _apply_priority_udp_quic_drift_findings(priority_findings):
         udp_quic_drift_state['last_refresh'] = now
         udp_quic_drift_state['last_log'] = now
@@ -3559,9 +3570,10 @@ def _start_udp_quic_drift_watchdog_thread():
         shutdown_requested.wait(30)
         while not shutdown_requested.is_set():
             try:
-                findings = _udp_quic_route_drift_findings()
-                if findings:
-                    _refresh_ipset_for_udp_quic_drift(findings)
+                if _background_task_allowed('UDP/QUIC drift watchdog'):
+                    findings = _udp_quic_route_drift_findings()
+                    if findings:
+                        _refresh_ipset_for_udp_quic_drift(findings)
             except Exception as exc:
                 _write_runtime_log(f'UDP/QUIC drift check failed: {exc}')
             shutdown_requested.wait(UDP_QUIC_DRIFT_CHECK_INTERVAL_SECONDS)
@@ -3830,6 +3842,38 @@ def _pool_probe_cpu_busy_percent():
     if total_delta <= 0:
         return None
     return max(0.0, min(100.0, 100.0 * (total_delta - idle_delta) / float(total_delta)))
+
+
+def _background_cpu_busy_percent():
+    if not BACKGROUND_TASK_CPU_GUARD_ENABLED:
+        return None
+    before = _read_cpu_totals()
+    if not before:
+        return None
+    shutdown_requested.wait(BACKGROUND_TASK_CPU_SAMPLE_SECONDS)
+    after = _read_cpu_totals()
+    if not after:
+        return None
+    total_delta = after[0] - before[0]
+    idle_delta = after[1] - before[1]
+    if total_delta <= 0:
+        return None
+    return max(0.0, min(100.0, 100.0 * (total_delta - idle_delta) / float(total_delta)))
+
+
+def _background_task_allowed(task_name):
+    cpu_busy = _background_cpu_busy_percent()
+    if cpu_busy is None or cpu_busy <= BACKGROUND_TASK_MAX_CPU_PERCENT:
+        return True
+    now = time.time()
+    last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
+    if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+        background_task_skip_log_at[task_name] = now
+        _write_runtime_log(
+            f'{task_name}: skipped background check because router CPU is busy '
+            f'({cpu_busy:.1f}% > {BACKGROUND_TASK_MAX_CPU_PERCENT:.1f}%).'
+        )
+    return False
 
 
 def _youtube_stream_guard_state(proto):
