@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.830, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.831, последнее изменение: 26.06.2026
 
 import subprocess
 import os
@@ -9633,7 +9633,18 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
         kind = action.get('kind')
         if kind == 'json':
-            self._send_json(action.get('payload', {}), status=action.get('status', 200))
+            payload = action.get('payload', {})
+            self._send_json(payload, status=action.get('status', 200))
+            if path in (
+                '/api/status',
+                '/api/pools',
+                '/api/protocol_panel',
+                '/api/protocol_check_panel',
+                '/api/service_routes',
+            ):
+                action['payload'] = None
+                payload = None
+                _memory_cleanup('web json api render', log=False)
         elif kind == 'html':
             self._send_html(action.get('html', ''))
             _release_web_form_template_cache()

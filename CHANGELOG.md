@@ -1,3 +1,8 @@
+<a name="1.831"></a>
+# [1.831] - 26 Jun 2026
+
+- Releases heavy web JSON API payload references after responses and runs the existing RSS-threshold cleanup path, reducing idle memory left behind by status/pool/service API polling without adding cleanup work when RSS is already low.
+
 <a name="1.830"></a>
 # [1.830] - 26 Jun 2026
 

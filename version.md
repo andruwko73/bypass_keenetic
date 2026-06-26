@@ -1,3 +1,7 @@
+*v1.831 (26 Jun 2026) -* main
+
+*Releases heavy web JSON API payload references after responses and runs the existing RSS-threshold cleanup path, reducing idle memory left behind by status/pool/service API polling without adding cleanup work when RSS is already low.*
+
 *v1.830 (26 Jun 2026) -* main
 
 *Adds Chrome Remote Desktop and Google auth/API helper domains to protected Vless priority refreshes, reducing runtime overlap windows where broad YouTube ranges could temporarily capture exact CRD/auth destinations.*

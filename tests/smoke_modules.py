@@ -2503,6 +2503,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _release_web_form_template_cache()' in source
     assert "sys.modules.pop(module_name, None)" in source
     assert "_release_web_form_template_cache()\n            _memory_cleanup('web html render')" in source
+    assert "_memory_cleanup('web json api render', log=False)" in source
     assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "MEMORY_CLEANUP_RSS_KB" in source
     assert 'clear_pool_summary=bool(should_collect)' in source
