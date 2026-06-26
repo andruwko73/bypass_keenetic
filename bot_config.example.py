@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.827
+# ВЕРСИЯ СКРИПТА v1.828
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -138,7 +138,7 @@ youtube_edge_prefetch_hosts = (
     'manifest.googlevideo.com',
     'redirector.googlevideo.com',
 )
-telegram_call_learning_enabled = False
+telegram_call_learning_enabled = True
 telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'
 telegram_call_learning_default_duration_seconds = 90
 telegram_call_learning_max_duration_seconds = 180
@@ -156,7 +156,7 @@ telegram_call_learning_max_seen_addresses = 512
 telegram_call_learning_apply_by_default = True
 telegram_call_learning_client_timeout_seconds = 900  # idle kernel window after Telegram signaling from a LAN client
 telegram_call_learning_address_timeout_seconds = 14400  # learned call relay/P2P addresses expire automatically
-telegram_call_tproxy_enabled = False  # routes Telegram call UDP through TPROXY when KeenOS exposes xt_TPROXY/xt_socket
+telegram_call_tproxy_enabled = True  # routes Telegram call UDP through TPROXY when KeenOS exposes xt_TPROXY/xt_socket
 udp_quic_drift_priority_refresh_cooldown_seconds = 120  # refresh YouTube/Googlevideo ipset drift faster than low-priority service drift
 ipset_refresh_command_timeout_seconds = 420  # allow slower low-load ipset refreshes on busy routers
 ipv6_bypass_fallback_enabled = True  # для ndnproxy: сбрасывать IPv6 к доменам обхода, чтобы клиенты быстро переходили на IPv4 через прокси

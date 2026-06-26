@@ -1730,7 +1730,7 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'jfKfPfyJRdk' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
-        'telegram_call_learning_enabled = False',
+        'telegram_call_learning_enabled = True',
         "telegram_call_learning_state_path = '/tmp/bypass_telegram_call_learning.json'",
         'telegram_call_learning_default_duration_seconds = 90',
         'telegram_call_learning_max_duration_seconds = 180',
@@ -1745,7 +1745,7 @@ def test_codex_version_matches_commit_count():
         'telegram_call_learning_apply_by_default = True',
         'telegram_call_learning_client_timeout_seconds = 900',
         'telegram_call_learning_address_timeout_seconds = 14400',
-        'telegram_call_tproxy_enabled = False',
+        'telegram_call_tproxy_enabled = True',
         "localportsh_tproxy = '11802'",
         "localportvmess_tproxy = '11815'",
         "localportvless_tproxy = '11812'",
@@ -1912,6 +1912,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'refresh)\n        if is_running; then\n            exit 0\n        fi' in s99unblock
     assert 'while :' in s99unblock
     assert 'scheduler_pids()' in s99unblock
+    assert 'run_scheduler_loop()' in s99unblock
+    assert '"/opt/etc/init.d/S99unblock scheduler"' in s99unblock
+    assert '"$0" scheduler &' in s99unblock
     assert 'cleanup_orphan_schedulers' in s99unblock
     assert 'stop_scheduler_pid "$pid"' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
@@ -2045,10 +2048,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         assert telegram_block_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert combined_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
         assert combined_auto_policy['BYPASS_UDP_QUIC_BLOCK_VLESS'] == '1'
-        assert auto_policy['BYPASS_TELEGRAM_CALL_LEARNING_ENABLED'] == '0'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_LEARNING_ENABLED'] == '1'
         assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT'] == '900'
         assert auto_policy['BYPASS_TELEGRAM_CALL_ADDRESS_TIMEOUT'] == '14400'
-        assert auto_policy['BYPASS_TELEGRAM_CALL_TPROXY_ENABLED'] == '0'
+        assert auto_policy['BYPASS_TELEGRAM_CALL_TPROXY_ENABLED'] == '1'
         assert auto_policy['BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED'] == '0'
         assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS'] == '11812'
         assert auto_policy['TELEGRAM_CALL_TPROXY_PORT_VLESS2'] == '11814'
@@ -2417,7 +2420,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'telegram_call_learning_apply_by_default = True' in script_source
     assert 'telegram_call_learning_client_timeout_seconds = 900' in script_source
     assert 'telegram_call_learning_address_timeout_seconds = 14400' in script_source
-    assert 'telegram_call_tproxy_enabled = False' in script_source
+    assert 'telegram_call_tproxy_enabled = True' in script_source
     assert "localportvless_tproxy = '11812'" in script_source
     assert 'Refreshing ipset after proxy core startup.' in script_source
     assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')
@@ -2498,6 +2501,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_release_web_form_template_cache()\n            _memory_cleanup('web html render')" in source
     assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "MEMORY_CLEANUP_RSS_KB" in source
+    assert 'clear_pool_summary=bool(should_collect)' in source
+    assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source
     assert "last_scan_count" in source
     assert "cached_fail_since or now" in source
     assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source

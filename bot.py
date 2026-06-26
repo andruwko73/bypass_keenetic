@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.827, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.828, последнее изменение: 26.06.2026
 
 import subprocess
 import os
@@ -4078,8 +4078,8 @@ def _vless_traffic_guard_active(reason='', log=False, hold_seconds=None, exclude
     return False
 
 
-def _clear_runtime_memory_caches(clear_status=False):
-    if not clear_status:
+def _clear_runtime_memory_caches(clear_status=False, *, clear_pool_summary=False):
+    if not clear_status and not clear_pool_summary:
         return
     status_snapshot_cache.update({'timestamp': 0, 'data': None, 'signature': None})
     with status_refresh_lock:
@@ -4089,6 +4089,9 @@ def _clear_runtime_memory_caches(clear_status=False):
         web_status_api_cache.update({'timestamp': 0, 'payload': None})
     with active_mode_status_cache_lock:
         active_mode_status_cache.update({'timestamp': 0, 'signature': None, 'status': None})
+    if clear_pool_summary:
+        with pool_summary_cache_lock:
+            pool_summary_cache.update({'signature': None, 'summary': None})
     try:
         router_health.invalidate()
     except Exception:
@@ -4311,13 +4314,16 @@ def _malloc_trim(reason='', force=False, rss_kb=None):
 
 
 def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
-    _clear_runtime_memory_caches(clear_status=clear_status)
     rss_before = _process_rss_kb()
     should_collect = bool(force or clear_status)
     if not should_collect and MEMORY_CLEANUP_RSS_KB > 0 and rss_before >= MEMORY_CLEANUP_RSS_KB:
         should_collect = True
     if not should_collect and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB:
         should_collect = True
+    _clear_runtime_memory_caches(
+        clear_status=bool(clear_status or should_collect),
+        clear_pool_summary=bool(should_collect),
+    )
     collected = gc.collect() if should_collect else 0
     malloc_trim_info = {'attempted': False, 'ok': False, 'result': None, 'available': None}
     trim_requested = bool(force or clear_status or should_collect)

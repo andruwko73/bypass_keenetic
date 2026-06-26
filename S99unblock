@@ -42,7 +42,7 @@ scheduler_pids() {
             ''|PID|*[!0-9]*) continue ;;
         esac
         case "$line" in
-            *"/opt/etc/init.d/S99unblock start"*|*"/opt/etc/init.d/S99unblock restart"*) printf '%s\n' "$pid" ;;
+            *"/opt/etc/init.d/S99unblock scheduler"*|*"/opt/etc/init.d/S99unblock start"*|*"/opt/etc/init.d/S99unblock restart"*) printf '%s\n' "$pid" ;;
         esac
     done
 }
@@ -479,24 +479,26 @@ run_runtime_dedupe() {
     trap - EXIT INT TERM
 }
 
+run_scheduler_loop() {
+    last_refresh_check=0
+    while :; do
+        run_refresh_if_check_due
+        run_youtube_edge_prefetch_if_due
+        run_runtime_dedupe
+        sleep_seconds="$DEDUP_INTERVAL_SECONDS"
+        [ "$sleep_seconds" -gt 0 ] 2>/dev/null || sleep_seconds="$INTERVAL_SECONDS"
+        sleep "$sleep_seconds" &
+        wait "$!" || exit 0
+    done
+}
+
 start_scheduler() {
     cleanup_orphan_schedulers
     if is_running; then
         exit 0
     fi
     mkdir -p "$(dirname "$PID_FILE")" 2>/dev/null || true
-    (
-        last_refresh_check=0
-        while :; do
-            run_refresh_if_check_due
-            run_youtube_edge_prefetch_if_due
-            run_runtime_dedupe
-            sleep_seconds="$DEDUP_INTERVAL_SECONDS"
-            [ "$sleep_seconds" -gt 0 ] 2>/dev/null || sleep_seconds="$INTERVAL_SECONDS"
-            sleep "$sleep_seconds" &
-            wait "$!" || exit 0
-        done
-    ) &
+    "$0" scheduler &
     echo "$!" > "$PID_FILE"
 }
 
@@ -510,6 +512,9 @@ stop_scheduler() {
 }
 
 case "$1" in
+    scheduler)
+        run_scheduler_loop
+        ;;
     start)
         start_scheduler
         ;;

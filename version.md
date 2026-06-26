@@ -1,3 +1,7 @@
+*v1.828 (26 Jun 2026) -* main
+
+*Restores Telegram/WhatsApp/Discord call routing through the existing narrow TPROXY path while keeping client-wide UDP routing disabled, renames the S99unblock background loop to scheduler for clearer diagnostics, and clears status/pool summary caches during RSS cleanup to reduce idle memory pressure.*
+
 *v1.827 (26 Jun 2026) -* main
 
 *Prevents Telegram auto-failover from selecting a key that is already active in another protocol, so Vless 1 and Vless 2 do not collapse onto the same subscription key and break both routes under concurrent traffic.*
