@@ -1,3 +1,7 @@
+*v1.833 (26 Jun 2026) -* main
+
+*Reduces idle router CPU spikes by throttling Telegram auto-failover checks during the failure grace window, recording successful active Telegram probes, and caching the idle web pool API payload briefly.*
+
 *v1.832 (26 Jun 2026) -* main
 
 *Reduces router CPU spikes by skipping Telegram auto-failover checks while the active key has a recent successful Telegram probe, adding a CPU guard to background failover/drift watchdogs, and deferring YouTube UDP/QUIC drift fast-add while active streams are detected.*

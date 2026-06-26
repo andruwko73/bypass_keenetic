@@ -1,3 +1,8 @@
+<a name="1.833"></a>
+# [1.833] - 26 Jun 2026
+
+- Reduces idle router CPU spikes by throttling Telegram auto-failover checks during the failure grace window, recording successful active Telegram probes, and caching the idle web pool API payload briefly.
+
 <a name="1.832"></a>
 # [1.832] - 26 Jun 2026
 

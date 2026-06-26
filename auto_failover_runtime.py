@@ -44,6 +44,25 @@ def _recent_active_success(
     return bool(active_probe.get('tg_ok') is True and checked_ts and now - checked_ts <= ttl)
 
 
+def _active_key_for_mode(load_current_keys, proxy_mode):
+    if not callable(load_current_keys):
+        return ''
+    try:
+        current_keys = load_current_keys()
+    except Exception:
+        return ''
+    return (current_keys.get(proxy_mode) or '').strip()
+
+
+def _record_active_telegram_success(record_key_probe, proxy_mode, active_key):
+    if not callable(record_key_probe) or not active_key:
+        return
+    try:
+        record_key_probe(proxy_mode, active_key, tg_ok=True, yt_ok=None)
+    except Exception:
+        pass
+
+
 def attempt_auto_failover(
     *,
     state,
@@ -97,14 +116,6 @@ def attempt_auto_failover(
         state['consecutive_failures'] = 0
         return False
 
-    connect_timeout, read_timeout = check_timeouts
-    ok, failure_message = check_telegram_api(proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout)
-    if ok:
-        state['last_ok'] = now
-        state['last_fail'] = 0.0
-        state['consecutive_failures'] = 0
-        return False
-
     startup_hold = float(startup_hold_seconds or 0)
     if startup_hold > 0:
         try:
@@ -112,8 +123,46 @@ def attempt_auto_failover(
         except (TypeError, ValueError):
             started_at = 0.0
         if started_at and now - started_at < startup_hold:
+            if state.get('last_fail'):
+                state['last_fail'] = 0.0
+                state['consecutive_failures'] = 0
+                state['last_failure_message'] = ''
+                log('Auto-failover: startup hold is active; Telegram key switch skipped.')
+            return False
+
+    connect_timeout, read_timeout = check_timeouts
+    try:
+        last_fail = float(state.get('last_fail') or 0.0)
+    except (TypeError, ValueError):
+        last_fail = 0.0
+
+    if last_fail and now - last_fail < grace_seconds:
+        return False
+
+    if last_fail:
+        failure_message = str(state.get('last_failure_message') or 'Previous Telegram API check failed.')
+    else:
+        ok, failure_message = check_telegram_api(proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout)
+        if ok:
+            state['last_ok'] = now
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
+            _record_active_telegram_success(
+                record_key_probe,
+                proxy_mode,
+                _active_key_for_mode(load_current_keys, proxy_mode),
+            )
+            return False
+
+        try:
+            started_at = float(state.get('started_at') or 0)
+        except (TypeError, ValueError):
+            started_at = 0.0
+        if startup_hold > 0 and started_at and now - started_at < startup_hold:
+            state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
             log('Auto-failover: startup hold is active; key switch skipped after failed Telegram check.')
             return False
 
@@ -178,8 +227,8 @@ def attempt_auto_failover(
 
     if not state['last_fail']:
         state['last_fail'] = now
+        state['last_failure_message'] = failure_message
         state['consecutive_failures'] = 0
-    if now - state['last_fail'] < grace_seconds:
         return False
 
     confirm_connect_timeout = max(float(connect_timeout or 0), 5.0)
@@ -193,9 +242,17 @@ def attempt_auto_failover(
         state['last_ok'] = now
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
+        state['last_failure_message'] = ''
+        _record_active_telegram_success(
+            record_key_probe,
+            proxy_mode,
+            _active_key_for_mode(load_current_keys, proxy_mode),
+        )
         log('Auto-failover: repeated Telegram API check for the active key succeeded; switch skipped.')
         return False
     failure_message = confirm_message or failure_message
+    state['last_failure_message'] = failure_message
+    state['last_fail'] = now
 
     min_failures = max(1, int(min_consecutive_failures or 1))
     state['consecutive_failures'] = int(state.get('consecutive_failures') or 0) + 1

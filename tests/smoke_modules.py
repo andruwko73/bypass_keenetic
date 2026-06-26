@@ -3701,7 +3701,13 @@ def test_auto_failover_runtime_helpers():
     assert ('update', 'vless') in calls
     assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': None} for call in calls)
     transient_calls = []
-    transient_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    transient_state = {
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_failure_message': 'SSLEOFError: UNEXPECTED_EOF_WHILE_READING',
+        'last_attempt': 0.0,
+        'in_progress': False,
+    }
     assert auto_failover_runtime.attempt_auto_failover(
         state=transient_state,
         pool_probe_locked=lambda: False,
@@ -3729,7 +3735,13 @@ def test_auto_failover_runtime_helpers():
     assert not any(call[0] == 'install' for call in transient_calls)
     assert any(call[0] == 'log' and 'временный сбой' in call[1] for call in transient_calls)
     last_ok_calls = []
-    last_ok_state = {'last_ok': 19.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    last_ok_state = {
+        'last_ok': 19.0,
+        'last_fail': 1.0,
+        'last_failure_message': 'Read timed out',
+        'last_attempt': 0.0,
+        'in_progress': False,
+    }
     assert auto_failover_runtime.attempt_auto_failover(
         state=last_ok_state,
         pool_probe_locked=lambda: False,
@@ -3780,6 +3792,50 @@ def test_auto_failover_runtime_helpers():
     assert recent_probe_state['last_fail'] == 0.0
     assert not any(call[0] == 'check' for call in recent_probe_calls)
     assert not any(call[0] == 'install' for call in recent_probe_calls)
+    fresh_fail_calls = []
+    fresh_fail_state = {'last_ok': 0.0, 'last_fail': 95.0, 'last_attempt': 0.0, 'in_progress': False}
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=fresh_fail_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: fresh_fail_calls.append(('check', kwargs)) or (False, 'fail'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: fresh_fail_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: fresh_fail_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: fresh_fail_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: fresh_fail_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: fresh_fail_calls.append(('log', message)),
+        grace_seconds=60,
+        switch_cooldown_seconds=30,
+        time_provider=lambda: 120.0,
+    ) is False
+    assert fresh_fail_calls == []
+    first_success_calls = []
+    first_success_state = {'last_ok': 0.0, 'last_fail': 0.0, 'last_attempt': 0.0, 'in_progress': False}
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=first_success_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: first_success_calls.append(('check', kwargs)) or (True, 'ok'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['active', 'next']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: first_success_calls.append(('install', proto, key)),
+        update_proxy=lambda proto: first_success_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: first_success_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: first_success_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: first_success_calls.append(('log', message)),
+        grace_seconds=60,
+        switch_cooldown_seconds=30,
+        time_provider=lambda: 120.0,
+    ) is False
+    assert ('probe', 'vless', 'active', {'tg_ok': True, 'yt_ok': None}) in first_success_calls
     recent_repair_calls = []
     recent_repair_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
     assert auto_failover_runtime.attempt_auto_failover(
@@ -3808,14 +3864,14 @@ def test_auto_failover_runtime_helpers():
     assert not any(call[0] == 'repair' for call in recent_repair_calls)
     confirm_calls = []
     confirm_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
-    confirm_results = iter([(False, 'first fail'), (True, 'confirm ok')])
+    confirm_results = iter([(True, 'confirm ok')])
     assert auto_failover_runtime.attempt_auto_failover(
         state=confirm_state,
         pool_probe_locked=lambda: False,
         proxy_mode='vless',
         proxy_url='proxy',
         check_telegram_api=lambda proxy, **kwargs: confirm_calls.append(('check', kwargs)) or next(confirm_results),
-        load_current_keys=lambda: (_ for _ in ()).throw(AssertionError('confirmed active key should skip key lookup')),
+        load_current_keys=lambda: {'vless': 'active'},
         load_key_pools=lambda: {'vless': ['active', 'next']},
         failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'next')],
         find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
@@ -3831,8 +3887,8 @@ def test_auto_failover_runtime_helpers():
     ) is False
     assert confirm_state['last_fail'] == 0.0
     assert confirm_calls[:2] == [
-        ('check', {'connect_timeout': 2, 'read_timeout': 3}),
         ('check', {'connect_timeout': 5.0, 'read_timeout': 8.0}),
+        ('probe', 'vless', 'active', {'tg_ok': True, 'yt_ok': None}),
     ]
     assert not any(call[0] == 'install' for call in confirm_calls)
     locked_calls = []
@@ -3885,11 +3941,11 @@ def test_auto_failover_runtime_helpers():
         startup_hold_seconds=180,
         time_provider=lambda: 100.0,
     ) is False
-    assert 'check' in startup_hold_calls
+    assert 'check' not in startup_hold_calls
     assert not any(isinstance(call, tuple) and call[0] == 'install' for call in startup_hold_calls)
     repair_calls = []
     repair_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
-    repair_checks = iter([(False, 'first fail'), (False, 'confirm fail'), (True, 'after repair')])
+    repair_checks = iter([(False, 'confirm fail'), (True, 'after repair')])
     assert auto_failover_runtime.attempt_auto_failover(
         state=repair_state,
         pool_probe_locked=lambda: False,
@@ -6188,6 +6244,35 @@ def test_web_get_actions_helpers():
     scoped_pools = web_get_actions.dispatch(ctx, '/api/pools', 'protocols=vless,vmess')
     assert scoped_pools['payload']['pools'] == {'vless': {'rows': []}, 'vmess': {'rows': []}}
     assert pool_snapshot_calls[-1] == (current_keys, False, ['vless', 'vmess'])
+    cached_pool_ctx = dict(ctx)
+    cached_pool_payload = {
+        'pools': {'cached': {'rows': []}},
+        'pool_summary': {'active_text': 'cached'},
+        'pool_probe_running': False,
+        'pool_probe_paused': False,
+        'pool_probe_progress': {'running': False, 'total': 0},
+        'custom_checks': [],
+        'timestamp': 124.0,
+    }
+    cached_pool_ctx.update({
+        'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
+        'pools_api_cache_ttl': 10,
+        'get_pools_api_cache': lambda keys, protocols, now=None: cached_pool_payload,
+        'web_pool_snapshot': lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('cached pools should not rebuild snapshot')),
+    })
+    cached_pools = web_get_actions.dispatch(cached_pool_ctx, '/api/pools', 'protocols=vless')
+    assert cached_pools['payload'] == cached_pool_payload
+    stored_pool_payloads = []
+    stored_pool_ctx = dict(ctx)
+    stored_pool_ctx.update({
+        'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
+        'pools_api_cache_ttl': 10,
+        'get_pools_api_cache': lambda keys, protocols, now=None: None,
+        'store_pools_api_cache': lambda keys, protocols, payload, timestamp=None: stored_pool_payloads.append((protocols, payload, timestamp)),
+    })
+    stored_pools = web_get_actions.dispatch(stored_pool_ctx, '/api/pools', 'protocols=vless')
+    assert stored_pools['payload']['pool_probe_running'] is False
+    assert stored_pool_payloads and stored_pool_payloads[0][0] == ['vless']
     probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
     assert probe['payload']['status'] == 'running'
     learning = web_get_actions.dispatch(ctx, '/api/telegram_call_learning')

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.832, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.833, последнее изменение: 26.06.2026
 
 import subprocess
 import os
@@ -21,6 +21,7 @@ import socket
 import tempfile
 import gc
 import ctypes
+import copy
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
@@ -482,6 +483,7 @@ auto_failover_state = {
     'started_at': time.time(),
     'last_ok': 0.0,
     'last_fail': 0.0,
+    'last_failure_message': '',
     'last_attempt': 0.0,
     'consecutive_failures': 0,
     'in_progress': False,
@@ -1574,6 +1576,7 @@ STATUS_REFRESH_PENDING_MIN_INTERVAL_SECONDS = max(
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 10.0))
+WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 12.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
 ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
@@ -1946,6 +1949,11 @@ web_status_api_cache = {
     'timestamp': 0,
     'payload': None,
 }
+web_pools_api_cache = {
+    'timestamp': 0,
+    'signature': None,
+    'payload': None,
+}
 pool_summary_cache = {
     'signature': None,
     'summary': None,
@@ -1962,6 +1970,7 @@ active_mode_status_cache = {
 }
 active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
+web_pools_api_cache_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
@@ -4136,6 +4145,7 @@ def _clear_runtime_memory_caches(clear_status=False, *, clear_pool_summary=False
     if clear_pool_summary:
         with pool_summary_cache_lock:
             pool_summary_cache.update({'signature': None, 'summary': None})
+        _invalidate_web_pools_api_cache()
     try:
         router_health.invalidate()
     except Exception:
@@ -6299,6 +6309,14 @@ def _invalidate_pool_summary_cache():
     with pool_summary_cache_lock:
         pool_summary_cache['signature'] = None
         pool_summary_cache['summary'] = None
+    _invalidate_web_pools_api_cache()
+
+
+def _invalidate_web_pools_api_cache():
+    with web_pools_api_cache_lock:
+        web_pools_api_cache['timestamp'] = 0
+        web_pools_api_cache['signature'] = None
+        web_pools_api_cache['payload'] = None
 
 
 def _file_cache_signature(path):
@@ -6343,6 +6361,35 @@ def _store_web_status_api_cache(payload, timestamp=None):
     with web_status_api_cache_lock:
         web_status_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
         web_status_api_cache['payload'] = payload
+
+
+def _web_pools_api_cache_signature(current_keys, protocols):
+    return (
+        tuple(protocols or ()),
+        _pool_summary_cache_signature(current_keys),
+    )
+
+
+def _get_web_pools_api_cache(current_keys, protocols, now=None):
+    now = time.time() if now is None else now
+    signature = _web_pools_api_cache_signature(current_keys, protocols)
+    with web_pools_api_cache_lock:
+        payload = web_pools_api_cache.get('payload')
+        if (
+            payload is not None and
+            web_pools_api_cache.get('signature') == signature and
+            now - float(web_pools_api_cache.get('timestamp') or 0.0) <= WEB_POOLS_API_CACHE_TTL
+        ):
+            return copy.deepcopy(payload)
+    return None
+
+
+def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None):
+    signature = _web_pools_api_cache_signature(current_keys, protocols)
+    with web_pools_api_cache_lock:
+        web_pools_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
+        web_pools_api_cache['signature'] = signature
+        web_pools_api_cache['payload'] = copy.deepcopy(payload)
 
 
 def _append_status_note(note, extra):
@@ -9242,6 +9289,9 @@ def _web_get_context(handler):
         'get_status_api_cache': _get_web_status_api_cache,
         'store_status_api_cache': _store_web_status_api_cache,
         'status_api_cache_ttl': WEB_STATUS_API_CACHE_TTL,
+        'get_pools_api_cache': _get_web_pools_api_cache,
+        'store_pools_api_cache': _store_web_pools_api_cache,
+        'pools_api_cache_ttl': WEB_POOLS_API_CACHE_TTL,
         'get_web_command_state': _get_web_command_state,
         'update_status_snapshot': _update_status_snapshot,
         'event_history_snapshot': _event_history_snapshot,
