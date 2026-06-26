@@ -443,6 +443,59 @@ def read_available_memory_kb(meminfo_path='/proc/meminfo'):
     return int(values.get('MemFree', 0) + values.get('Cached', 0) + values.get('Buffers', 0))
 
 
+def read_cpu_stat(stat_path='/proc/stat'):
+    try:
+        with open(stat_path, 'r', encoding='utf-8', errors='ignore') as file:
+            parts = file.readline().split()
+    except Exception:
+        return None
+    if not parts or parts[0] != 'cpu':
+        return None
+    try:
+        values = tuple(int(value) for value in parts[1:])
+    except Exception:
+        return None
+    return values if len(values) >= 4 else None
+
+
+def cpu_percent_between(previous, current):
+    if not previous or not current:
+        return None
+    previous_total = sum(previous)
+    current_total = sum(current)
+    previous_idle = previous[3] + (previous[4] if len(previous) > 4 else 0)
+    current_idle = current[3] + (current[4] if len(current) > 4 else 0)
+    total_delta = current_total - previous_total
+    idle_delta = current_idle - previous_idle
+    if total_delta <= 0 or idle_delta < 0:
+        return None
+    return max(0.0, min(100.0, (total_delta - idle_delta) * 100.0 / float(total_delta)))
+
+
+def read_cpu_percent(sample_seconds=0.25):
+    previous = read_cpu_stat()
+    if previous is None:
+        return None
+    time.sleep(max(0.05, float(sample_seconds or 0.25)))
+    return cpu_percent_between(previous, read_cpu_stat())
+
+
+def _scheduler_full_run_cpu_busy(trigger, fast_warm):
+    if fast_warm:
+        return None
+    if str(trigger or '').strip().lower() != 'scheduler':
+        return None
+    max_cpu = _config_int('youtube_edge_prefetch_scheduler_max_cpu_percent', 60, minimum=0)
+    if max_cpu <= 0:
+        return None
+    cpu_percent = read_cpu_percent(
+        _config_int('youtube_edge_prefetch_cpu_sample_ms', 250, minimum=50) / 1000.0
+    )
+    if cpu_percent is None or cpu_percent <= float(max_cpu):
+        return None
+    return cpu_percent
+
+
 def _pid_is_active(pid):
     try:
         os.kill(int(pid), 0)
@@ -716,6 +769,19 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 ),
                 previous_status,
             )
+        busy_cpu = _scheduler_full_run_cpu_busy(trigger, fast_warm)
+        if busy_cpu is not None:
+            status = {
+                'ok': False,
+                'route_protocol': route_protocol,
+                'skipped_reason': 'high_cpu',
+                'cpu_percent': round(float(busy_cpu), 2),
+                'available_memory_kb': available_kb,
+                'warm_mode': 'full',
+            }
+            status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
+            _write_json_file(status_path, status)
+            return status
         watch_edge_hosts, watch_edge_status = collect_watch_edge_hosts(route_protocol)
         resolved_address_limit = _config_int(
             'youtube_edge_prefetch_max_resolved_addresses',

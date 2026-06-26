@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.834
+# ВЕРСИЯ СКРИПТА v1.835
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -45,8 +45,13 @@ pool_probe_quality_4k_min_mbps = 45.0
 router_health_cache_ttl = 15.0  # быстрый веб-статус памяти/CPU
 router_health_dns_cache_ttl = 45.0  # dnsmasq/ipset diagnostics не дергать на каждом обновлении страницы
 router_health_ndmc_cache_ttl = 30.0  # ndmc show system тяжелее /proc, держим отдельный TTL
+web_status_api_cache_ttl = 30.0
+web_pools_api_cache_ttl = 45.0
+service_route_intersections_cache_ttl = 60.0
 memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
 memory_cleanup_rss_kb = 61440  # тихая очистка gc/malloc_trim без перезапуска, когда RSS держится около 60 MB
+web_response_cleanup_rss_kb = 67584  # веб-ответы запускают тяжелую очистку только при заметно высоком RSS
+web_response_cleanup_min_interval_seconds = 300.0
 memory_watchdog_rss_soft_kb = 87040  # при достижении порога очищаются кэши статуса и запускается gc.collect()
 memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот перезапустится, если сейчас не идёт обновление или проверка пула
 memory_watchdog_idle_restart_rss_kb = 71680  # если бот долго держит RSS выше этого уровня в простое, сервис будет мягко перезапущен
@@ -77,7 +82,7 @@ telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so 
 youtube_edge_prefetch_enabled = True  # lightweight DNS/IP prefetch for the active YouTube route
 youtube_edge_prefetch_mode = 'external'  # external runner keeps this work out of the long-running bot process
 youtube_edge_prefetch_start_delay_seconds = 120
-youtube_edge_prefetch_interval_seconds = 900
+youtube_edge_prefetch_interval_seconds = 1800
 youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'
 youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'
 youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'
@@ -112,6 +117,8 @@ youtube_edge_prefetch_quality_target_ms = 1000
 youtube_edge_prefetch_quality_timeout_seconds = 5
 youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600
 youtube_edge_prefetch_quality_max_candidates = 24
+youtube_edge_prefetch_scheduler_max_cpu_percent = 60
+youtube_edge_prefetch_cpu_sample_ms = 250
 youtube_edge_watch_warm_enabled = True
 youtube_edge_watch_warm_urls = (
     'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
@@ -175,6 +182,8 @@ youtube_vless2_failover_check_connect_timeout = 6
 youtube_vless2_failover_check_read_timeout = 10
 youtube_vless2_failover_confirm_retries = 3
 youtube_vless2_failover_confirm_delay_seconds = 8.0
+active_status_recent_success_ttl = 900
+youtube_vless2_failover_recent_success_ttl = 900
 youtube_vless2_restart_recheck_enabled = True
 youtube_vless2_restart_recheck_cooldown_seconds = 300
 youtube_vless2_failover_consecutive_failures = 3

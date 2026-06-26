@@ -1,3 +1,8 @@
+<a name="1.835"></a>
+# [1.835] - 26 Jun 2026
+
+- Reduces idle router CPU/RSS pressure by making web response cleanup threshold-based, stretching web/pool status caches, throttling runtime route overlap refreshes, sampling router CPU without blocking, and skipping scheduled heavy YouTube prefetch when CPU is already busy.
+
 <a name="1.834"></a>
 # [1.834] - 26 Jun 2026
 

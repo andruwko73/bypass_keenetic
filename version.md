@@ -1,3 +1,7 @@
+*v1.835 (26 Jun 2026) -* main
+
+*Reduces idle router CPU/RSS pressure by making web response cleanup threshold-based, stretching web/pool status caches, throttling runtime route overlap refreshes, sampling router CPU without blocking, and skipping scheduled heavy YouTube prefetch when CPU is already busy.*
+
 *v1.834 (26 Jun 2026) -* main
 
 *Reduces web-status CPU load by reusing fresh successful active-key probe results instead of rechecking Telegram and YouTube on every status refresh while the cache is still current.*

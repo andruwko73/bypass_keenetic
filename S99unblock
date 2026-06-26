@@ -8,19 +8,21 @@ INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900}"
 DNSMASQ_INTERVAL_SECONDS="${BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600}"
 NDNPROXY_INTERVAL_SECONDS="${BYPASS_UNBLOCK_NDNPROXY_REFRESH_INTERVAL_SECONDS:-$INTERVAL_SECONDS}"
 REFRESH_CHECK_INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_CHECK_INTERVAL_SECONDS:-60}"
-DEDUP_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-10}"
+DEDUP_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-60}"
 DEDUP_LOCK_STALE_SECONDS="${BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120}"
+PRIORITY_REFRESH_INTERVAL_SECONDS="${BYPASS_VLESS_PRIORITY_REFRESH_INTERVAL_SECONDS:-900}"
 LOG_FILE="${BYPASS_UNBLOCK_REFRESH_LOG:-/opt/var/log/bypass-unblock-scheduler.log}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 RUNTIME_DEDUPE_LOCK_DIR="${BYPASS_RUNTIME_DEDUPE_LOCK_DIR:-/tmp/bypass-runtime-dedupe.lock}"
+PRIORITY_REFRESH_STATE_FILE="${BYPASS_VLESS_PRIORITY_REFRESH_STATE_FILE:-/tmp/bypass-vless-priority-refresh.state}"
 UNBLOCK_IPSET_LOCK_DIR="${UNBLOCK_IPSET_LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 UNBLOCK_IPSET_LOCK_STALE_SECONDS="${UNBLOCK_IPSET_LOCK_STALE_SECONDS:-600}"
 YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtube_edge_prefetch_runner.py}"
 YOUTUBE_EDGE_PREFETCH_STATUS_FILE="${YOUTUBE_EDGE_PREFETCH_STATUS_FILE:-/opt/etc/bot/youtube_edge_prefetch_status.json}"
-YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-900}"
+YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-1800}"
 YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"
 YOUTUBE_EDGE_PREFETCH_LOG="${YOUTUBE_EDGE_PREFETCH_LOG:-/opt/var/log/bypass-youtube-edge-prefetch.log}"
 VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
@@ -408,6 +410,53 @@ apply_vless_priority_domain_ips() {
     done
 }
 
+priority_refresh_signature() {
+    {
+        printf '%s\n' "$VLESS_PRIORITY_DOMAINS"
+        for route_file in "$UNBLOCK_DIR/vless.txt" "$UNBLOCK_DIR/vless-2.txt"; do
+            if [ -f "$route_file" ]; then
+                cksum "$route_file" 2>/dev/null || ls -ln "$route_file" 2>/dev/null
+            else
+                printf '%s missing\n' "$route_file"
+            fi
+        done
+    } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+}
+
+priority_refresh_due() {
+    now="$(date +%s 2>/dev/null || echo 0)"
+    signature="$(priority_refresh_signature)"
+    last_signature=""
+    last_run_at=0
+    if [ -r "$PRIORITY_REFRESH_STATE_FILE" ]; then
+        last_signature="$(sed -n '1p' "$PRIORITY_REFRESH_STATE_FILE" 2>/dev/null)"
+        last_run_at="$(sed -n '2p' "$PRIORITY_REFRESH_STATE_FILE" 2>/dev/null | tr -cd '0-9')"
+        [ -n "$last_run_at" ] || last_run_at=0
+    fi
+    [ -n "$signature" ] || return 0
+    [ "$signature" != "$last_signature" ] && return 0
+    case "$now:$last_run_at:$PRIORITY_REFRESH_INTERVAL_SECONDS" in
+        *[!0-9:]*|0:*|*:0) return 0 ;;
+    esac
+    [ $((now - last_run_at)) -ge "$PRIORITY_REFRESH_INTERVAL_SECONDS" ] 2>/dev/null
+}
+
+mark_priority_refresh_done() {
+    now="$(date +%s 2>/dev/null || echo 0)"
+    signature="$(priority_refresh_signature)"
+    mkdir -p "$(dirname "$PRIORITY_REFRESH_STATE_FILE")" 2>/dev/null || true
+    {
+        printf '%s\n' "$signature"
+        printf '%s\n' "$now"
+    } > "$PRIORITY_REFRESH_STATE_FILE" 2>/dev/null || true
+}
+
+apply_vless_priority_domain_ips_if_due() {
+    priority_refresh_due || return 0
+    apply_vless_priority_domain_ips
+    mark_priority_refresh_done
+}
+
 dedupe_lock_pid_is_active() {
     lock_dir="$1"
     pid_file="$lock_dir/pid"
@@ -474,7 +523,7 @@ run_runtime_dedupe() {
         *)
             ;;
     esac
-    apply_vless_priority_domain_ips
+    apply_vless_priority_domain_ips_if_due
     cleanup_runtime_dedupe_lock
     trap - EXIT INT TERM
 }

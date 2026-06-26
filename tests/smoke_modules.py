@@ -459,11 +459,11 @@ def test_router_health_runtime_cpu_percent_parser():
 
 
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
-    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0, 'cpu': 0, 'flash': 0}
+    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0, 'cpu_stat': 0, 'flash': 0}
     original = {
         'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
         'read_proc_text': router_health_runtime.read_proc_text,
-        'read_cpu_percent': router_health_runtime.read_cpu_percent,
+        'read_cpu_stat': router_health_runtime.read_cpu_stat,
         'read_flash_storage': router_health_runtime.read_flash_storage,
         'process_rss_kb': router_health_runtime.process_rss_kb,
         'count_proc_cmdline': router_health_runtime.count_proc_cmdline,
@@ -489,9 +489,14 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
         calls['call'] += 1
         return {'ok': True, 'enabled': True, 'tproxy_enabled': True, 'protocols': ['vless'], 'ports': {'vless': 11812}, 'port_states': {'11812': True}}
 
-    def fake_cpu_percent():
-        calls['cpu'] += 1
-        return 12.34
+    cpu_stats = iter((
+        (100, 0, 0, 900, 0),
+        (110, 0, 10, 980, 0),
+    ))
+
+    def fake_cpu_stat(stat_path='/proc/stat'):
+        calls['cpu_stat'] += 1
+        return next(cpu_stats)
 
     def fake_flash_storage():
         calls['flash'] += 1
@@ -501,7 +506,7 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     try:
         router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
         router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
-        router_health_runtime.read_cpu_percent = fake_cpu_percent
+        router_health_runtime.read_cpu_stat = fake_cpu_stat
         router_health_runtime.read_flash_storage = fake_flash_storage
         router_health_runtime.process_rss_kb = lambda pid='self': 64000
         router_health_runtime.count_proc_cmdline = lambda marker: 0
@@ -528,11 +533,11 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
 
     assert first['dns_backend'] == 'dnsmasq'
     assert second['dns_backend'] == 'dnsmasq'
-    assert first['cpu_percent'] == 12.34
-    assert second['cpu_percent'] == 12.34
+    assert first['cpu_percent'] is None
+    assert second['cpu_percent'] == 20.0
     assert first['flash_used_percent'] == 25
     assert 'Flash-носитель: занято 256 из 1024 MB (25%)' in first['note']
-    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu': 2, 'flash': 2}
+    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu_stat': 2, 'flash': 2}
 
 
 def test_web_commands_runtime_dispatch():
@@ -1631,6 +1636,18 @@ def test_codex_version_matches_commit_count():
     assert 'status_refresh_min_interval_seconds = 180.0' in example
     assert 'status_refresh_min_interval_seconds = 180.0' in installer
     assert 'status_refresh_min_interval_seconds = 180.0' in bootstrap
+    assert 'web_status_api_cache_ttl = 30.0' in example
+    assert 'web_status_api_cache_ttl = 30.0' in installer
+    assert 'web_status_api_cache_ttl = 30.0' in bootstrap
+    assert 'web_pools_api_cache_ttl = 45.0' in example
+    assert 'web_pools_api_cache_ttl = 45.0' in installer
+    assert 'web_pools_api_cache_ttl = 45.0' in bootstrap
+    assert 'service_route_intersections_cache_ttl = 60.0' in example
+    assert 'service_route_intersections_cache_ttl = 60.0' in installer
+    assert 'service_route_intersections_cache_ttl = 60.0' in bootstrap
+    assert 'web_response_cleanup_rss_kb = 67584' in example
+    assert 'web_response_cleanup_rss_kb = 67584' in installer
+    assert 'web_response_cleanup_rss_kb = 67584' in bootstrap
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in example
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in installer
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in bootstrap
@@ -1677,7 +1694,7 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_enabled = True',
         "youtube_edge_prefetch_mode = 'external'",
         'youtube_edge_prefetch_start_delay_seconds = 120',
-        'youtube_edge_prefetch_interval_seconds = 900',
+        'youtube_edge_prefetch_interval_seconds = 1800',
         "youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'",
         "youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'",
         "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'",
@@ -1703,6 +1720,8 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_quality_timeout_seconds = 5',
         'youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600',
         'youtube_edge_prefetch_quality_max_candidates = 24',
+        'youtube_edge_prefetch_scheduler_max_cpu_percent = 60',
+        'youtube_edge_prefetch_cpu_sample_ms = 250',
         'youtube_edge_watch_warm_enabled = True',
         'youtube_edge_watch_warm_urls = (',
         "'https://www.youtube.com/watch?v=jfKfPfyJRdk'",
@@ -1728,6 +1747,12 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_pages = 2' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_cleanup_rss_kb = 67584' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'service_route_intersections_cache_ttl = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_scheduler_max_cpu_percent = 60' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_cpu_sample_ms = 250' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'active_status_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_vless2_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'jfKfPfyJRdk' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
         'telegram_call_learning_enabled = True',
@@ -1890,8 +1915,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
     assert 'BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600' in s99unblock
     assert 'BYPASS_UNBLOCK_REFRESH_CHECK_INTERVAL_SECONDS:-60' in s99unblock
-    assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-10' in s99unblock
+    assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-60' in s99unblock
     assert 'BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120' in s99unblock
+    assert 'BYPASS_VLESS_PRIORITY_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
+    assert 'BYPASS_VLESS_PRIORITY_REFRESH_STATE_FILE' in s99unblock
+    assert 'apply_vless_priority_domain_ips_if_due()' in s99unblock
+    assert 'priority_refresh_due()' in s99unblock
+    assert 'YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-1800}"' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"' in s99unblock
     assert 'dedupe_lock_pid_is_active()' in s99unblock
     assert 'dedupe_lock_age_seconds()' in s99unblock
@@ -2448,7 +2478,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'for key_name, key_value in (current_keys or {}).items()' in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source
     assert 'allow_youtube_confirm=False' in source
-    assert "_memory_cleanup('status refresh', force=True, clear_status=False)" in source
+    assert "_memory_cleanup('status refresh', clear_status=False, log=False)" in source
     assert 'def _pool_probe_cpu_busy_percent' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source
     assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
@@ -2481,7 +2511,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _auto_failover_log' in source
     assert "'auto_failover_confirm_fail'" in source
     assert "'stream_guard_defer'" in source
-    assert "youtube_vless2_failover_recent_success_ttl', 300" in source
+    assert "youtube_vless2_failover_recent_success_ttl', 900" in source
     assert 'def _youtube_route_protocol' in source
     assert 'def _youtube_route_marker_count' in source
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
@@ -2503,9 +2533,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
     assert 'def _release_web_form_template_cache()' in source
     assert "sys.modules.pop(module_name, None)" in source
-    assert "_release_web_form_template_cache()\n            _memory_cleanup('web html render')" in source
-    assert "_memory_cleanup('web json api render', log=False)" in source
+    assert "service_route_intersections_cache_ttl', 60.0" in source
+    assert 'intersections_cache_ttl=SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL' in source
+    assert "_release_web_form_template_cache()\n            _web_response_cleanup('web html render')" in source
+    assert "_web_response_cleanup('web json api render')" in source
     assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "web_response_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "WEB_RESPONSE_CLEANUP_RSS_KB" in source
     assert "MEMORY_CLEANUP_RSS_KB" in source
     assert 'clear_pool_summary=bool(should_collect)' in source
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source
@@ -2558,7 +2592,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'redact_text=_redact_sensitive_text' in source
     assert "_memory_cleanup('pool probe finished'" in source
     assert "_memory_cleanup('web command finished'" in source
-    assert "_memory_cleanup('protocol panel render'" in source
+    assert "_web_response_cleanup('protocol panel render')" in source
+    assert "_web_response_cleanup('protocol check render')" in source
     assert 'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"' in source
     assert 'from pool_probe_runner import' not in source
     assert 'from repo_update import' not in source
@@ -3109,6 +3144,24 @@ def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
     assert 'i.ytimg.com' in hosts
     assert 's.ytimg.com' in hosts
     assert 'yt3.ggpht.com' in hosts
+
+
+def test_youtube_edge_prefetch_runner_skips_scheduler_full_run_on_high_cpu():
+    original_config = youtube_edge_prefetch_runner.config
+    original_read_cpu_percent = youtube_edge_prefetch_runner.read_cpu_percent
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_scheduler_max_cpu_percent=60,
+            youtube_edge_prefetch_cpu_sample_ms=50,
+        )
+        youtube_edge_prefetch_runner.read_cpu_percent = lambda sample_seconds=0.25: 88.5
+
+        assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('scheduler', False) == 88.5
+        assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('Post-update', False) is None
+        assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('scheduler', True) is None
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner.read_cpu_percent = original_read_cpu_percent
 
 
 def test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers():
@@ -8161,6 +8214,7 @@ def main():
     test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts()
     test_youtube_edge_prefetch_runner_extends_existing_watch_urls()
     test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers()
+    test_youtube_edge_prefetch_runner_skips_scheduler_full_run_on_high_cpu()
     test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()

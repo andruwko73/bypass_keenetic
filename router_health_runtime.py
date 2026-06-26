@@ -776,6 +776,8 @@ class RouterHealthRuntime:
         self._core_proxy_cache = {'timestamp': 0, 'payload': None}
         self._dns_cache = {'timestamp': 0, 'payload': None}
         self._ndmc_cache = {'timestamp': 0, 'payload': None}
+        self._last_cpu_stat = None
+        self._last_cpu_percent = None
 
     def _cached_payload(self, cache_name, ttl, now, loader):
         cache = getattr(self, cache_name)
@@ -829,6 +831,19 @@ class RouterHealthRuntime:
             read_ndmc_system_snapshot,
         )
 
+    def _cpu_snapshot(self):
+        current_stat = read_cpu_stat()
+        if current_stat is None:
+            return self._last_cpu_percent
+        previous_stat = self._last_cpu_stat
+        self._last_cpu_stat = current_stat
+        if previous_stat is None:
+            return self._last_cpu_percent
+        value = cpu_percent_between(previous_stat, current_stat)
+        if value is not None:
+            self._last_cpu_percent = value
+        return self._last_cpu_percent
+
     def snapshot(self, pool_probe_progress_getter):
         now = self.time_provider()
         with self._lock:
@@ -842,7 +857,7 @@ class RouterHealthRuntime:
             meminfo=read_proc_meminfo(),
             ndmc_system=self._ndmc_snapshot(now),
             load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
-            cpu_percent=read_cpu_percent(),
+            cpu_percent=self._cpu_snapshot(),
             bot_rss_kb=process_rss_kb('self'),
             probe_progress=probe_progress,
             temp_xray_count=count_proc_cmdline('/tmp/bypass_pool_probe_') if probe_running else 0,

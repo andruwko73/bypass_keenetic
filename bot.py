@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.834, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.835, последнее изменение: 26.06.2026
 
 import subprocess
 import os
@@ -507,7 +507,7 @@ YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
 )
 YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL = max(
     0,
-    int(getattr(config, 'youtube_vless2_failover_recent_success_ttl', 300)),
+    int(getattr(config, 'youtube_vless2_failover_recent_success_ttl', 900)),
 )
 YOUTUBE_VLESS2_HEALTHCHECK_URLS = tuple(getattr(config, 'youtube_vless2_healthcheck_urls', _POOL_YOUTUBE_HEALTHCHECK_URLS))
 YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK = max(1, int(getattr(config, 'youtube_vless2_healthcheck_min_ok', _POOL_YOUTUBE_HEALTHCHECK_MIN_OK)))
@@ -1575,9 +1575,10 @@ STATUS_REFRESH_PENDING_MIN_INTERVAL_SECONDS = max(
 )
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
-ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 300)))
-WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 10.0))
-WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 12.0))
+ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 900)))
+WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 30.0))
+WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 45.0))
+SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL = float(getattr(config, 'service_route_intersections_cache_ttl', 60.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
 ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
@@ -1743,6 +1744,14 @@ if MEMORY_WATCHDOG_RSS_SOFT_KB > 0:
 MEMORY_CLEANUP_RSS_KB = max(
     0,
     int(getattr(config, 'memory_cleanup_rss_kb', _DEFAULT_MEMORY_CLEANUP_RSS_KB)),
+)
+WEB_RESPONSE_CLEANUP_RSS_KB = max(
+    0,
+    int(getattr(config, 'web_response_cleanup_rss_kb', max(MEMORY_CLEANUP_RSS_KB, 66 * 1024))),
+)
+WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS = max(
+    30.0,
+    float(getattr(config, 'web_response_cleanup_min_interval_seconds', 300.0)),
 )
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
@@ -2005,6 +2014,7 @@ memory_malloc_trim_lock = threading.Lock()
 memory_malloc_trim_last_at = 0.0
 memory_malloc_trim_libc = None
 memory_malloc_trim_available = None
+web_response_cleanup_last_at = 0.0
 post_pool_memory_cleanup_lock = threading.Lock()
 post_pool_memory_cleanup_state = {
     'scheduled': False,
@@ -4418,6 +4428,25 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
     }
 
 
+def _web_response_cleanup(reason='web response'):
+    global web_response_cleanup_last_at
+    rss_before = _process_rss_kb()
+    now = time.time()
+    if (
+        WEB_RESPONSE_CLEANUP_RSS_KB > 0 and
+        rss_before >= WEB_RESPONSE_CLEANUP_RSS_KB and
+        now - web_response_cleanup_last_at >= WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS
+    ):
+        web_response_cleanup_last_at = now
+        return _memory_cleanup(reason, clear_status=False, log=False)
+    return {
+        'rss_before_kb': rss_before,
+        'rss_after_kb': rss_before,
+        'collected': 0,
+        'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
+    }
+
+
 def _pool_probe_memory_checkpoint(reason='', force=False, clear_status=False):
     cleanup = _memory_cleanup(
         reason or 'pool probe memory checkpoint',
@@ -6153,6 +6182,7 @@ def _route_tools_runtime():
             youtube_icon_html=_youtube_icon_html,
             sync_udp_policy_config=_sync_udp_policy_config,
             invalidate_web_status_cache=_invalidate_web_status_cache,
+            intersections_cache_ttl=SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL,
         )
     return _web_route_tools_runtime
 
@@ -8981,7 +9011,7 @@ def _refresh_status_caches_async(current_keys):
                     for old_signature in list(cache):
                         if old_signature != signature:
                             cache.pop(old_signature, None)
-            _memory_cleanup('status refresh', force=True, clear_status=False)
+            _memory_cleanup('status refresh', clear_status=False, log=False)
             _record_memory_timeline(
                 'status refresh finished',
                 marker='status_refresh_finish',
@@ -9720,7 +9750,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         try:
             return _web_protocol_panel_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
         finally:
-            _memory_cleanup('protocol panel render', force=True, log=False)
+            _web_response_cleanup('protocol panel render')
 
     def _build_protocol_check_panel(self, protocol):
         app_runtime_mode = _load_app_runtime_mode()
@@ -9737,7 +9767,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         try:
             return _web_protocol_check_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
         finally:
-            _memory_cleanup('protocol check render', force=True, log=False)
+            _web_response_cleanup('protocol check render')
 
     def do_GET(self):
         if not self._ensure_request_allowed():
@@ -9768,11 +9798,11 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             ):
                 action['payload'] = None
                 payload = None
-                _memory_cleanup('web json api render', log=False)
+                _web_response_cleanup('web json api render')
         elif kind == 'html':
             self._send_html(action.get('html', ''))
             _release_web_form_template_cache()
-            _memory_cleanup('web html render')
+            _web_response_cleanup('web html render')
         elif kind == 'text':
             self._send_text_asset(
                 action.get('text', ''),
