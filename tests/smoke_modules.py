@@ -954,6 +954,14 @@ def test_key_pool_subscription_helpers():
         protocols=('vless', 'vmess'),
     )
     assert candidates == [('vless', 'next'), ('vmess', 'vmess-key')]
+    duplicate_filtered_candidates = key_pool_store.failover_candidates(
+        {'vless': ['active', 'other-active', 'next'], 'vless2': ['other-active']},
+        'vless',
+        'active',
+        protocols=('vless',),
+        exclude_keys={'other-active'},
+    )
+    assert duplicate_filtered_candidates == [('vless', 'next')]
     scored_candidates = key_pool_store.failover_candidates(
         {'vless': ['active', 'bad', 'good', 'unknown'], 'vmess': ['vmess-key']},
         'vless',
@@ -3969,6 +3977,42 @@ def test_auto_failover_runtime_helpers():
     assert deferred_state['consecutive_failures'] == 1
     assert ('defer', 1) in deferred_calls
     assert not any(call[0] == 'install' for call in deferred_calls)
+
+    exclude_calls = []
+    exclude_state = {
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_attempt': 0.0,
+        'consecutive_failures': 0,
+        'in_progress': False,
+    }
+
+    def exclude_failover_candidates(pools, mode, active, protocols=(), **kwargs):
+        exclude_calls.append(('exclude', tuple(sorted(kwargs.get('exclude_keys') or ()))))
+        return [('vless', 'next')]
+
+    assert auto_failover_runtime.attempt_auto_failover(
+        state=exclude_state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'fail'),
+        load_current_keys=lambda: {'vless': 'active', 'vless2': 'other-active'},
+        load_key_pools=lambda: {'vless': ['active', 'other-active', 'next']},
+        failover_candidates=exclude_failover_candidates,
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'next', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: exclude_calls.append(('install', proto, key, verify)) or 'ok',
+        update_proxy=lambda proto: exclude_calls.append(('update', proto)),
+        set_active_key=lambda proto, key: exclude_calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: exclude_calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: exclude_calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        min_consecutive_failures=1,
+        time_provider=lambda: 20.0,
+    ) is True
+    assert ('exclude', ('other-active',)) in exclude_calls
+    assert ('install', 'vless', 'next', False) in exclude_calls
 
 
 def test_proxy_apply_runtime_helpers():

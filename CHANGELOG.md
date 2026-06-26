@@ -1,3 +1,8 @@
+<a name="1.827"></a>
+# [1.827] - 26 Jun 2026
+
+- Prevents Telegram auto-failover from selecting a key that is already active in another protocol, so Vless 1 and Vless 2 do not collapse onto the same subscription key and break both routes under concurrent traffic.
+
 <a name="1.826"></a>
 # [1.826] - 25 Jun 2026
 

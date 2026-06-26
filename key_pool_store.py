@@ -168,10 +168,12 @@ def failover_candidates(
     key_probe_cache=None,
     hash_key=None,
     service='telegram',
+    exclude_keys=None,
 ):
     pools = normalize_key_pools(pools)
     current_proto = str(current_proto or '').strip()
     current_key = str(current_key or '').strip()
+    exclude_keys = {str(key or '').strip() for key in (exclude_keys or ()) if str(key or '').strip()}
     key_probe_cache = key_probe_cache or {}
     service_field = 'yt_ok' if service == 'youtube' else 'tg_ok'
 
@@ -237,6 +239,8 @@ def failover_candidates(
             if not key_value:
                 continue
             if proto == current_proto and key_value == current_key:
+                continue
+            if key_value in exclude_keys:
                 continue
             score, checked_ts = probe_score(key_value)
             proto_candidates.append((proto, key_value, score, checked_ts, index))

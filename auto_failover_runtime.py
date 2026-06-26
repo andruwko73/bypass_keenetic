@@ -193,6 +193,11 @@ def attempt_auto_failover(
         current_keys = current_keys if current_keys is not None else load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
         probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
+        exclude_keys = {
+            str(key_value or '').strip()
+            for proto, key_value in (current_keys or {}).items()
+            if proto != proxy_mode and str(key_value or '').strip()
+        }
         candidates = failover_candidates(
             load_key_pools(),
             proxy_mode,
@@ -201,6 +206,7 @@ def attempt_auto_failover(
             key_probe_cache=probe_cache,
             hash_key=hash_key,
             service='telegram',
+            exclude_keys=exclude_keys,
         )
 
         if not candidates:

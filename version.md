@@ -1,3 +1,7 @@
+*v1.827 (26 Jun 2026) -* main
+
+*Prevents Telegram auto-failover from selecting a key that is already active in another protocol, so Vless 1 and Vless 2 do not collapse onto the same subscription key and break both routes under concurrent traffic.*
+
 *v1.826 (25 Jun 2026) -* main
 
 *Lets Telegram auto-failover keep counting confirmed failures while the Vless traffic guard is active, then bypasses the guard after repeated failures so stuck CRD/Codex/Telegram outages do not block recovery indefinitely.*
