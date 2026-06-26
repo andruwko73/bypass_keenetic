@@ -1,3 +1,8 @@
+<a name="1.829"></a>
+# [1.829] - 26 Jun 2026
+
+- Keeps route-intersection diagnostics aligned with protected Vless priority ipsets, so Chrome Remote Desktop/Telegram exact Google IP pins do not appear as unsafe overlaps with broad YouTube ranges while real unprotected route conflicts still surface.
+
 <a name="1.828"></a>
 # [1.828] - 26 Jun 2026
 

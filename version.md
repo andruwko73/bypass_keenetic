@@ -1,3 +1,7 @@
+*v1.829 (26 Jun 2026) -* main
+
+*Keeps route-intersection diagnostics aligned with protected Vless priority ipsets, so Chrome Remote Desktop/Telegram exact Google IP pins do not appear as unsafe overlaps with broad YouTube ranges while real unprotected route conflicts still surface.*
+
 *v1.828 (26 Jun 2026) -* main
 
 *Restores Telegram/WhatsApp/Discord call routing through the existing narrow TPROXY path while keeping client-wide UDP routing disabled, renames the S99unblock background loop to scheduler for clearer diagnostics, and clears status/pool summary caches during RSS cleanup to reduce idle memory pressure.*

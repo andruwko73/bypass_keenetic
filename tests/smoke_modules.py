@@ -7889,6 +7889,39 @@ def test_route_intersections_detect_runtime_ipset_overlap():
         assert result['moved'] == 0
 
 
+def test_route_intersections_ignores_priority_runtime_overlap():
+    with tempfile.TemporaryDirectory() as tmp:
+        for route_file, content in (
+            ('vless.txt', 'mtalk.google.com\n'),
+            ('vless-2.txt', 'youtube.com\n'),
+            ('vmess.txt', ''),
+            ('trojan.txt', ''),
+            ('shadowsocks.txt', ''),
+        ):
+            (Path(tmp) / route_file).write_text(content, encoding='utf-8')
+
+        ipsets = {
+            'unblockvless': ['64.233.162.100', '64.233.162.101'],
+            'unblockvlesspriority': ['64.233.162.100'],
+            'unblockvless2': ['64.233.162.0/24'],
+        }
+
+        def fake_run(args, stdout=None, stderr=None, text=None, timeout=None, check=None):
+            set_name = args[-1]
+            members = ipsets.get(set_name, [])
+            output = 'Name: {0}\nMembers:\n{1}\n'.format(set_name, '\n'.join(members))
+            return py_types.SimpleNamespace(stdout=output, returncode=0)
+
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=tmp,
+            run_command=fake_run,
+        )
+        assert report['file_count'] == 0
+        assert report['runtime_count'] == 1
+        assert report['runtime_match_count'] == 1
+        assert report['issues'][0]['samples'] == ['64.233.162.101 / 64.233.162.0/24']
+
+
 def test_service_route_ui_helpers():
     service_items = service_routes.route_service_items(presets=service_catalog.CUSTOM_CHECK_PRESETS)
     assert any(item['id'] == 'telegram' for item in service_items)
@@ -8062,6 +8095,7 @@ def main():
     test_route_intersections_helpers()
     test_route_intersections_filters_comments_and_ip_domain_noise()
     test_route_intersections_detect_runtime_ipset_overlap()
+    test_route_intersections_ignores_priority_runtime_overlap()
     test_service_route_ui_helpers()
     test_service_route_runtime_helpers()
     test_pool_probe_runner_failover_candidate()
