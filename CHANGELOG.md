@@ -1,3 +1,8 @@
+<a name="1.837"></a>
+# [1.837] - 26 Jun 2026
+
+- Fixes the key subscription tab layout after the router HWID switch: desktop import cards align to the same height, and the mobile subscription button stays inside its card.
+
 <a name="1.836"></a>
 # [1.836] - 26 Jun 2026
 

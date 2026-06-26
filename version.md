@@ -1,3 +1,7 @@
+*v1.837 (26 Jun 2026) -* main
+
+*Fixes the key subscription tab layout after the router HWID switch: desktop import cards align to the same height, and the mobile subscription button stays inside its card.*
+
 *v1.836 (26 Jun 2026) -* main
 
 *Reduces idle router load by backing off Telegram call-learning scans when no call clients are active, reusing route/intersection summaries by file/runtime signatures, avoiding extra pool API deep copies, and releasing large static web assets after responses.*
