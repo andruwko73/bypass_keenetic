@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.833, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.834, последнее изменение: 26.06.2026
 
 import subprocess
 import os
@@ -1575,6 +1575,7 @@ STATUS_REFRESH_PENDING_MIN_INTERVAL_SECONDS = max(
 )
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
+ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 300)))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 10.0))
 WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 12.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
@@ -6566,6 +6567,25 @@ def _recent_probe_ok(probe, field, ttl):
     return bool(checked_at and time.time() - checked_at <= ttl)
 
 
+def _active_status_can_use_recent_probe(probe, required_services=None):
+    if not isinstance(probe, dict):
+        return False
+    try:
+        checked_at = float(probe.get('ts') or 0)
+    except (TypeError, ValueError):
+        checked_at = 0.0
+    if not checked_at or time.time() - checked_at > ACTIVE_STATUS_RECENT_SUCCESS_TTL:
+        return False
+    required = {str(item or '').strip().lower() for item in (required_services or ()) if str(item or '').strip()}
+    if 'telegram' in required and probe.get('tg_ok') is not True:
+        return False
+    if 'youtube' in required and probe.get('yt_ok') is not True:
+        return False
+    if not required:
+        return probe.get('tg_ok') is True or probe.get('yt_ok') is True
+    return True
+
+
 def _check_custom_target_through_proxy(proxy_url, url, connect_timeout=2, read_timeout=3):
     return _status_check_custom_target(
         _normalize_check_url,
@@ -6672,6 +6692,24 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
     if preflight:
         return preflight
 
+    custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
+    if route_states is None:
+        route_states = _service_route_summary()
+    required_services = key_pool_web.core_services_for_protocol(route_states, key_name)
+    protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
+    cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
+    cached_probe = cache.get(_hash_key(key_value), {})
+    custom_states = key_pool_web.web_custom_probe_states(cached_probe, protocol_custom_checks)
+    if _active_status_can_use_recent_probe(cached_probe, required_services):
+        return _status_cached_protocol_status(
+            key_value,
+            cached_probe,
+            protocol_custom_checks,
+            custom_states,
+            api_required='telegram' in required_services,
+            required_services=required_services,
+        )
+
     proxy_url = proxy_settings.get(key_name)
     api_ok, api_message = _check_telegram_api_through_proxy(
         proxy_url,
@@ -6682,14 +6720,6 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
     api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
     yt_metrics = {}
     yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
-    custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    if route_states is None:
-        route_states = _service_route_summary()
-    required_services = key_pool_web.core_services_for_protocol(route_states, key_name)
-    protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
-    cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
-    cached_probe = cache.get(_hash_key(key_value), {})
-    custom_states = key_pool_web.web_custom_probe_states(cached_probe, protocol_custom_checks)
     if api_transient and _recent_probe_ok(cached_probe, 'tg_ok', TELEGRAM_TRANSIENT_OK_CACHE_TTL):
         api_ok = True
         api_transient = False

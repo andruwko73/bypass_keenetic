@@ -1,3 +1,7 @@
+*v1.834 (26 Jun 2026) -* main
+
+*Reduces web-status CPU load by reusing fresh successful active-key probe results instead of rechecking Telegram and YouTube on every status refresh while the cache is still current.*
+
 *v1.833 (26 Jun 2026) -* main
 
 *Reduces idle router CPU spikes by throttling Telegram auto-failover checks during the failure grace window, recording successful active Telegram probes, and caching the idle web pool API payload briefly.*

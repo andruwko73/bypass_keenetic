@@ -1,3 +1,8 @@
+<a name="1.834"></a>
+# [1.834] - 26 Jun 2026
+
+- Reduces web-status CPU load by reusing fresh successful active-key probe results instead of rechecking Telegram and YouTube on every status refresh while the cache is still current.
+
 <a name="1.833"></a>
 # [1.833] - 26 Jun 2026
 
