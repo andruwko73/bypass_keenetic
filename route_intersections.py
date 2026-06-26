@@ -7,6 +7,7 @@ from unblock_lists import DEFAULT_ORDER, UNBLOCK_DIR, UNBLOCK_UPDATE_SCRIPT, rea
 
 
 MAX_ISSUES = 120
+IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
 ROUTE_FILES = [name[:-4] for name in DEFAULT_ORDER]
 ROUTE_IPSET_SETS = {
     'shadowsocks': (('unblocksh', 'tcp'), ('unblockshudp', 'udp'), ('unblocksh6', 'ipv6')),
@@ -41,6 +42,16 @@ def route_files_signature(unblock_dir=UNBLOCK_DIR):
         except Exception:
             signature.append((route, -1, -1))
     return tuple(signature)
+
+
+def runtime_ipset_signature(status_path=IPSET_STATUS_FILE):
+    try:
+        stat = os.stat(status_path)
+        return (status_path, int(getattr(stat, 'st_mtime_ns', int(stat.st_mtime * 1000000000))), int(stat.st_size))
+    except FileNotFoundError:
+        return (status_path, 0, 0)
+    except Exception:
+        return (status_path, -1, -1)
 
 
 def _read_all(unblock_dir):

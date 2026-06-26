@@ -1,3 +1,8 @@
+<a name="1.836"></a>
+# [1.836] - 26 Jun 2026
+
+- Reduces idle router load by backing off Telegram call-learning scans when no call clients are active, reusing route/intersection summaries by file/runtime signatures, avoiding extra pool API deep copies, and releasing large static web assets after responses.
+
 <a name="1.835"></a>
 # [1.835] - 26 Jun 2026
 

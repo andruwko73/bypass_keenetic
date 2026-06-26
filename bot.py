@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.835, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.836, последнее изменение: 26.06.2026
 
 import subprocess
 import os
@@ -21,7 +21,6 @@ import socket
 import tempfile
 import gc
 import ctypes
-import copy
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
@@ -2877,6 +2876,7 @@ def _telegram_call_learning_auto_worker():
     added_payload = []
     was_watching = False
     idle_active_scans = 0
+    idle_no_client_scans = 0
     previous_active_clients_key = ()
     while not shutdown_requested.is_set():
         try:
@@ -2894,8 +2894,11 @@ def _telegram_call_learning_auto_worker():
                 clients = sorted(client_timeouts)
                 if clients:
                     active_clients_by_protocol[proto] = clients
-            legacy_clients = _telegram_call_learning_ipset_members(TELEGRAM_CALL_LEARNING_CLIENT_IPSET)
-            if legacy_clients and not active_clients_by_protocol:
+            if active_clients_by_protocol:
+                legacy_clients = []
+            else:
+                legacy_clients = _telegram_call_learning_ipset_members(TELEGRAM_CALL_LEARNING_CLIENT_IPSET)
+            if legacy_clients:
                 fallback_protocols, _fallback_routes = _telegram_call_learning_target_protocols()
                 for proto in fallback_protocols:
                     active_clients_by_protocol.setdefault(proto, legacy_clients)
@@ -2924,9 +2927,14 @@ def _telegram_call_learning_auto_worker():
                     _set_telegram_call_learning_state(message=_telegram_call_learning_status_message(snapshot))
                     was_watching = False
                     idle_active_scans = 0
-                shutdown_requested.wait(TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS)
+                idle_no_client_scans += 1
+                wait_seconds = TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS
+                if idle_no_client_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT:
+                    wait_seconds = max(wait_seconds, TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS)
+                shutdown_requested.wait(wait_seconds)
                 continue
             was_watching = True
+            idle_no_client_scans = 0
             changed_any = False
             combined_clients = []
             for proto, active_clients in active_clients_by_protocol.items():
@@ -6411,7 +6419,7 @@ def _get_web_pools_api_cache(current_keys, protocols, now=None):
             web_pools_api_cache.get('signature') == signature and
             now - float(web_pools_api_cache.get('timestamp') or 0.0) <= WEB_POOLS_API_CACHE_TTL
         ):
-            return copy.deepcopy(payload)
+            return payload
     return None
 
 
@@ -6420,7 +6428,7 @@ def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None)
     with web_pools_api_cache_lock:
         web_pools_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
         web_pools_api_cache['signature'] = signature
-        web_pools_api_cache['payload'] = copy.deepcopy(payload)
+        web_pools_api_cache['payload'] = payload
 
 
 def _append_status_note(note, extra):
@@ -9804,11 +9812,17 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             _release_web_form_template_cache()
             _web_response_cleanup('web html render')
         elif kind == 'text':
-            self._send_text_asset(
-                action.get('text', ''),
-                content_type=action.get('content_type', 'text/plain; charset=utf-8'),
-                cache_seconds=action.get('cache_seconds', 0),
-            )
+            try:
+                self._send_text_asset(
+                    action.get('text', ''),
+                    content_type=action.get('content_type', 'text/plain; charset=utf-8'),
+                    cache_seconds=action.get('cache_seconds', 0),
+                )
+            finally:
+                if path in ('/static/app.css', '/static/app.js'):
+                    action['text'] = ''
+                    _release_web_form_template_cache()
+                    _web_response_cleanup('web static asset render')
         elif kind == 'png':
             self._send_png(action.get('path', ''))
         else:

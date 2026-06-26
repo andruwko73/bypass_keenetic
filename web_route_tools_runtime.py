@@ -30,12 +30,61 @@ class ServiceRouteToolsRuntime:
         self.intersections_cache_ttl = max(1.0, float(intersections_cache_ttl or 1.0))
         self._intersections_lock = threading.Lock()
         self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
+        self._service_items_cache = {'signature': None, 'items': None}
+        self._summary_cache = {'signature': None, 'summary': None}
+
+    def _route_files_signature(self):
+        return route_intersections.route_files_signature()
+
+    def _custom_presets_signature(self, presets):
+        signature = []
+        for item in presets or []:
+            if not isinstance(item, dict):
+                continue
+            signature.append((
+                str(item.get('id') or ''),
+                str(item.get('label') or ''),
+                str(item.get('url') or ''),
+                str(item.get('badge') or ''),
+                str(item.get('icon') or ''),
+                tuple(str(value) for value in (item.get('urls') or [])),
+                tuple(str(value) for value in (item.get('routes') or [])),
+            ))
+        return tuple(signature)
+
+    def _intersections_signature(self):
+        return (
+            self._route_files_signature(),
+            route_intersections.runtime_ipset_signature(),
+        )
+
+    def _service_items_snapshot(self):
+        presets = self.custom_check_presets_getter()
+        signature = self._custom_presets_signature(presets)
+        with self._intersections_lock:
+            cached_items = self._service_items_cache.get('items')
+            if cached_items is not None and self._service_items_cache.get('signature') == signature:
+                return [dict(item) for item in cached_items], signature
+        items = service_routes.route_service_items(presets=presets)
+        with self._intersections_lock:
+            self._service_items_cache = {'signature': signature, 'items': [dict(item) for item in items]}
+        return [dict(item) for item in items], signature
 
     def service_items(self):
-        return service_routes.route_service_items(presets=self.custom_check_presets_getter())
+        items, _signature = self._service_items_snapshot()
+        return items
 
     def summary(self):
-        return service_routes.service_route_summary(self.service_items())
+        items, service_items_signature = self._service_items_snapshot()
+        signature = (self._route_files_signature(), service_items_signature)
+        with self._intersections_lock:
+            cached_summary = self._summary_cache.get('summary')
+            if cached_summary is not None and self._summary_cache.get('signature') == signature:
+                return dict(cached_summary)
+        summary = service_routes.service_route_summary(items)
+        with self._intersections_lock:
+            self._summary_cache = {'signature': signature, 'summary': dict(summary)}
+        return dict(summary)
 
     def standalone_custom_checks(self, custom_checks):
         route_service_ids = {item.get('id') for item in self.service_items()}
@@ -46,10 +95,7 @@ class ServiceRouteToolsRuntime:
 
     def intersections_snapshot(self):
         now = time.time()
-        signature = (
-            route_intersections.route_files_signature(),
-            int(now // self.intersections_cache_ttl),
-        )
+        signature = self._intersections_signature()
         with self._intersections_lock:
             cached_report = self._intersections_cache.get('report')
             if cached_report is not None and self._intersections_cache.get('signature') == signature:
@@ -66,6 +112,7 @@ class ServiceRouteToolsRuntime:
     def invalidate_intersections_cache(self):
         with self._intersections_lock:
             self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
+            self._summary_cache = {'signature': None, 'summary': None}
 
     def apply_service_route(self, service_key, target_protocol):
         result = service_routes.apply_service_route(

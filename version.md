@@ -1,3 +1,7 @@
+*v1.836 (26 Jun 2026) -* main
+
+*Reduces idle router load by backing off Telegram call-learning scans when no call clients are active, reusing route/intersection summaries by file/runtime signatures, avoiding extra pool API deep copies, and releasing large static web assets after responses.*
+
 *v1.835 (26 Jun 2026) -* main
 
 *Reduces idle router CPU/RSS pressure by making web response cleanup threshold-based, stretching web/pool status caches, throttling runtime route overlap refreshes, sampling router CPU without blocking, and skipping scheduled heavy YouTube prefetch when CPU is already busy.*

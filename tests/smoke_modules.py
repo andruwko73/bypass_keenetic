@@ -3304,8 +3304,10 @@ def test_telegram_call_learning_idle_backoff_source():
     auto_scan = source.split('def _telegram_call_learning_auto_scan', 1)[1].split('def _telegram_call_learning_auto_worker', 1)[0]
     assert 'TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS' in source
     assert 'TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
+    assert 'idle_no_client_scans' in source
     assert '_telegram_call_learning_ipset_members(set_name, include_timeouts=True)' in source
     assert 'active_clients_changed = active_clients_key != previous_active_clients_key' in source
+    assert 'idle_no_client_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
     assert 'idle_active_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
     assert "if not candidate.get('udp_call_cluster'):" in auto_scan
     assert "not candidate.get('udp_call_active_media')" not in auto_scan
@@ -8119,6 +8121,21 @@ def test_service_route_runtime_helpers():
     items = runtime.service_items()
     item_ids = {item['id'] for item in items}
     assert {'telegram', 'youtube', 'chatgpt_services'} <= item_ids
+    mutable_presets = [
+        dict(item)
+        for item in service_catalog.CUSTOM_CHECK_PRESETS
+        if item.get('id') != 'chatgpt_services'
+    ]
+    mutable_runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
+        custom_check_presets_getter=lambda: mutable_presets,
+        service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+    )
+    assert 'chatgpt_services' not in {item['id'] for item in mutable_runtime.service_items()}
+    chatgpt_preset = next(item for item in service_catalog.CUSTOM_CHECK_PRESETS if item.get('id') == 'chatgpt_services')
+    mutable_presets.append(dict(chatgpt_preset))
+    assert 'chatgpt_services' in {item['id'] for item in mutable_runtime.service_items()}
     standalone = runtime.standalone_custom_checks([
         {'id': 'chatgpt_services'},
         {'id': 'manual_check'},
@@ -8131,6 +8148,42 @@ def test_service_route_runtime_helpers():
     assert 'service-route-trigger' in html_text
     assert 'service-route-telegram-icon' in html_text
     assert 'service-route-youtube-icon' in html_text
+
+
+def test_service_route_runtime_intersections_cache_uses_signatures():
+    original_route_signature = web_route_tools_runtime.route_intersections.route_files_signature
+    original_runtime_signature = web_route_tools_runtime.route_intersections.runtime_ipset_signature
+    original_analyze = web_route_tools_runtime.route_intersections.analyze_route_intersections
+    route_signature = [('vless', 1, 10)]
+    runtime_signature = ('status', 1, 10)
+    calls = []
+
+    try:
+        web_route_tools_runtime.route_intersections.route_files_signature = lambda: tuple(route_signature)
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = lambda: runtime_signature
+
+        def fake_analyze():
+            calls.append((tuple(route_signature), runtime_signature))
+            return {'count': len(calls), 'issues': [], 'file_count': 0, 'runtime_count': 0}
+
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = fake_analyze
+        runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
+            custom_check_presets_getter=lambda: service_catalog.CUSTOM_CHECK_PRESETS,
+            service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+            telegram_icon_html=lambda opacity=1.0: 'TG',
+            youtube_icon_html=lambda opacity=1.0: 'YT',
+            intersections_cache_ttl=1,
+        )
+        assert runtime.intersections_snapshot()['count'] == 1
+        assert runtime.intersections_snapshot()['count'] == 1
+        assert len(calls) == 1
+        runtime_signature = ('status', 2, 20)
+        assert runtime.intersections_snapshot()['count'] == 2
+        assert len(calls) == 2
+    finally:
+        web_route_tools_runtime.route_intersections.route_files_signature = original_route_signature
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = original_runtime_signature
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = original_analyze
 
 
 def main():
@@ -8243,6 +8296,7 @@ def main():
     test_route_intersections_ignores_priority_runtime_overlap()
     test_service_route_ui_helpers()
     test_service_route_runtime_helpers()
+    test_service_route_runtime_intersections_cache_uses_signatures()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
 
