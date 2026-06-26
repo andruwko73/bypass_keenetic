@@ -1,3 +1,7 @@
+*v1.830 (26 Jun 2026) -* main
+
+*Adds Chrome Remote Desktop and Google auth/API helper domains to protected Vless priority refreshes, reducing runtime overlap windows where broad YouTube ranges could temporarily capture exact CRD/auth destinations.*
+
 *v1.829 (26 Jun 2026) -* main
 
 *Keeps route-intersection diagnostics aligned with protected Vless priority ipsets, so Chrome Remote Desktop/Telegram exact Google IP pins do not appear as unsafe overlaps with broad YouTube ranges while real unprotected route conflicts still surface.*

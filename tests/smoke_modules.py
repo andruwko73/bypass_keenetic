@@ -1919,6 +1919,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'stop_scheduler_pid "$pid"' in s99unblock
     assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
     assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in s99unblock
+    assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in s99unblock
+    assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in s99unblock
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in s99unblock
     assert 'apply_vless_priority_domain_ips' in s99unblock
     assert 'route_file_marker_count()' in s99unblock
@@ -1934,6 +1936,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'remove_runtime_overlap_from_set "unblockvless" "unblockvless2"' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless2" "unblockvless"' in ipset_script
     assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in ipset_script
+    assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in ipset_script
+    assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in ipset_script
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in ipset_script
     assert 'apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6' in ipset_script
     last_swap_idx = ipset_script.index('swap_or_preserve_set unblocktroj6')

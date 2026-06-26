@@ -1,3 +1,8 @@
+<a name="1.830"></a>
+# [1.830] - 26 Jun 2026
+
+- Adds Chrome Remote Desktop and Google auth/API helper domains to protected Vless priority refreshes, reducing runtime overlap windows where broad YouTube ranges could temporarily capture exact CRD/auth destinations.
+
 <a name="1.829"></a>
 # [1.829] - 26 Jun 2026
 
