@@ -1,3 +1,8 @@
+<a name="1.838"></a>
+# [1.838] - 28 Jun 2026
+
+- Fixes router HWID detection for Keenetic `hw_id`, guards automatic HWID subscription refresh under high CPU/RSS, backs off background checks after CPU-busy samples, quiets bot-side ipset lock contention, avoids retaining the large pool API cache under high RSS, and throttles runtime Vless dedupe when route/ipset signatures are unchanged.
+
 <a name="1.837"></a>
 # [1.837] - 26 Jun 2026
 

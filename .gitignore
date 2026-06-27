@@ -47,6 +47,7 @@ installer-mobile-review-*.png
 # Local Codex/agent workspace files. Keep them out of GitHub releases.
 .codex/
 .codex_tmp/
+diagnostics/
 .serena/
 AGENTS.md
 .github/copilot-instructions.md

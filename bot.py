@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.837, последнее изменение: 26.06.2026
+#  Файл: bot.py, Версия v1.838, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -622,6 +622,7 @@ udp_quic_drift_state = {
     'last_fast_add_event': 0.0,
 }
 background_task_skip_log_at = {}
+background_task_skip_until = {}
 youtube_edge_prefetch_state = {
     'enabled': YOUTUBE_EDGE_PREFETCH_ENABLED,
     'route_protocol': '',
@@ -764,8 +765,8 @@ def _read_router_hwid_command(command):
 def _detect_router_hwid():
     texts = []
     for command in (
-        ['ndmc', '-c', 'show system'],
         ['ndmc', '-c', 'show version'],
+        ['ndmc', '-c', 'show system'],
     ):
         text = _read_router_hwid_command(command)
         if text:
@@ -1610,6 +1611,10 @@ BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS = max(
     60.0,
     float(getattr(config, 'background_task_skip_log_interval_seconds', 300.0)),
 )
+BACKGROUND_TASK_BUSY_BACKOFF_SECONDS = max(
+    30.0,
+    float(getattr(config, 'background_task_busy_backoff_seconds', 180.0)),
+)
 POOL_PROBE_LOW_MEMORY_DELAY_SECONDS = float(getattr(config, 'pool_probe_low_memory_delay_seconds', 12.0))
 POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS = float(getattr(config, 'pool_probe_low_memory_max_wait_seconds', 180.0))
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
@@ -1989,6 +1994,7 @@ key_pool_lock = threading.RLock()
 subscription_state_lock = threading.RLock()
 subscription_hwid_lock = threading.Lock()
 subscription_hwid_cache = {'value': None, 'checked_at': 0.0}
+subscription_auto_refresh_skip_log_at = {'rss': 0.0}
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_cancel_event = threading.Event()
@@ -3569,11 +3575,14 @@ def _refresh_ipset_for_udp_quic_drift(findings):
     label = 'priority ' if priority_findings else ''
     _write_runtime_log(f'UDP/QUIC {label}drift detected; refreshing ipset. {sample}')
     try:
+        env = os.environ.copy()
+        env['UNBLOCK_IPSET_LOCK_BUSY_QUIET'] = '1'
         result = subprocess.run(
             ['/opt/bin/unblock_ipset.sh'],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            env=env,
             timeout=IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS,
             check=False,
         )
@@ -3890,10 +3899,15 @@ def _background_cpu_busy_percent():
 
 
 def _background_task_allowed(task_name):
+    now = time.time()
+    skip_until = float(background_task_skip_until.get(task_name) or 0.0)
+    if skip_until and now < skip_until:
+        return False
     cpu_busy = _background_cpu_busy_percent()
     if cpu_busy is None or cpu_busy <= BACKGROUND_TASK_MAX_CPU_PERCENT:
+        background_task_skip_until.pop(task_name, None)
         return True
-    now = time.time()
+    background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
     last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
     if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
         background_task_skip_log_at[task_name] = now
@@ -6424,6 +6438,11 @@ def _get_web_pools_api_cache(current_keys, protocols, now=None):
 
 
 def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None):
+    rss_kb = int(_process_rss_kb() or 0)
+    if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
+        with web_pools_api_cache_lock:
+            web_pools_api_cache.update({'timestamp': 0, 'signature': None, 'payload': None})
+        return
     signature = _web_pools_api_cache_signature(current_keys, protocols)
     with web_pools_api_cache_lock:
         web_pools_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
@@ -8567,6 +8586,23 @@ def _refresh_subscription_once(proto, record, *, source='auto'):
     url = str((record or {}).get('url') or '').strip()
     if not url or not bool((record or {}).get('hwid_enabled')):
         return False
+    if source == 'auto':
+        if not _background_task_allowed('Subscription auto refresh'):
+            return False
+        rss_kb = int(_process_rss_kb() or 0)
+        if rss_kb and MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 and rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
+            cleanup = _memory_cleanup('subscription auto refresh high RSS', clear_status=True, log=False)
+            rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
+            if rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
+                now = time.time()
+                last_log = float(subscription_auto_refresh_skip_log_at.get('rss') or 0.0)
+                if now - last_log >= 1800:
+                    subscription_auto_refresh_skip_log_at['rss'] = now
+                    _write_runtime_log(
+                        f'Subscription auto refresh skipped for {proto}: '
+                        f'bot RSS {rss_kb} KB >= {MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB} KB'
+                    )
+                return False
     attempt_at = time.time()
     try:
         fetched, error = _fetch_keys_from_subscription(url, use_router_hwid=True)

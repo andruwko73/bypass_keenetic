@@ -1022,6 +1022,8 @@ def test_subscription_hwid_request_helpers():
     }
     text = 'model: Keenetic\nserial number: ABCD123456\n'
     assert subscription_runtime.extract_router_hwid(text) == 'ABCD123456'
+    text = 'model: Giga (KN-1012)\nhw_id: ABCD-1234\n'
+    assert subscription_runtime.extract_router_hwid(text) == 'ABCD-1234'
 
 
 def test_subscription_pool_sync_preserves_manual_keys():
@@ -1955,7 +1957,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'apply_vless_priority_domain_ips' in s99unblock
     assert 'route_file_marker_count()' in s99unblock
     assert '"vmess:$UNBLOCK_DIR/vmess.txt"' in s99unblock
-    assert 'ipset test "$winner_set" "$entry"' in s99unblock
+    assert 'RUNTIME_DEDUPE_STATE_FILE="${BYPASS_RUNTIME_DEDUPE_STATE_FILE:-/tmp/bypass-runtime-dedupe.state}"' in s99unblock
+    assert 'DEDUP_FORCE_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_FORCE_INTERVAL_SECONDS:-900}"' in s99unblock
+    assert "awk 'NR==FNR { winner[$0] = 1; next } ($0 in winner) { print }'" in s99unblock
+    assert 'runtime_dedupe_due()' in s99unblock
+    assert 'mark_runtime_dedupe_done' in s99unblock
     assert 'acquire_runtime_dedupe_lock || return 0' in s99unblock
     assert '*unblock_ipset.sh*) continue ;;' in s99unblock
     assert 'dedupe_vless_final_ipsets()' in ipset_script

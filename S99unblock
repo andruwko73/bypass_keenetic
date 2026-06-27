@@ -10,6 +10,7 @@ NDNPROXY_INTERVAL_SECONDS="${BYPASS_UNBLOCK_NDNPROXY_REFRESH_INTERVAL_SECONDS:-$
 REFRESH_CHECK_INTERVAL_SECONDS="${BYPASS_UNBLOCK_REFRESH_CHECK_INTERVAL_SECONDS:-60}"
 DEDUP_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-60}"
 DEDUP_LOCK_STALE_SECONDS="${BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120}"
+DEDUP_FORCE_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_FORCE_INTERVAL_SECONDS:-900}"
 PRIORITY_REFRESH_INTERVAL_SECONDS="${BYPASS_VLESS_PRIORITY_REFRESH_INTERVAL_SECONDS:-900}"
 LOG_FILE="${BYPASS_UNBLOCK_REFRESH_LOG:-/opt/var/log/bypass-unblock-scheduler.log}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
@@ -17,6 +18,7 @@ DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 RUNTIME_DEDUPE_LOCK_DIR="${BYPASS_RUNTIME_DEDUPE_LOCK_DIR:-/tmp/bypass-runtime-dedupe.lock}"
+RUNTIME_DEDUPE_STATE_FILE="${BYPASS_RUNTIME_DEDUPE_STATE_FILE:-/tmp/bypass-runtime-dedupe.state}"
 PRIORITY_REFRESH_STATE_FILE="${BYPASS_VLESS_PRIORITY_REFRESH_STATE_FILE:-/tmp/bypass-vless-priority-refresh.state}"
 UNBLOCK_IPSET_LOCK_DIR="${UNBLOCK_IPSET_LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 UNBLOCK_IPSET_LOCK_STALE_SECONDS="${UNBLOCK_IPSET_LOCK_STALE_SECONDS:-600}"
@@ -298,15 +300,17 @@ dedupe_ipset_pair() {
     winner_set="$2"
     tmp_base="/tmp/bypass-runtime-dedupe.$$.$loser_set.$winner_set"
     loser_file="${tmp_base}.loser"
+    winner_file="${tmp_base}.winner"
+    overlap_file="${tmp_base}.overlap"
 
     write_ipset_members "$loser_set" "$loser_file"
+    write_ipset_members "$winner_set" "$winner_file"
+    awk 'NR==FNR { winner[$0] = 1; next } ($0 in winner) { print }' "$winner_file" "$loser_file" > "$overlap_file"
     while IFS= read -r entry; do
         [ -n "$entry" ] || continue
-        if ipset test "$winner_set" "$entry" >/dev/null 2>&1; then
-            ipset del "$loser_set" "$entry" >/dev/null 2>&1 || true
-        fi
-    done < "$loser_file"
-    rm -f "$loser_file"
+        ipset del "$loser_set" "$entry" >/dev/null 2>&1 || true
+    done < "$overlap_file"
+    rm -f "$loser_file" "$winner_file" "$overlap_file"
 }
 
 route_file_has_domain() {
@@ -451,6 +455,48 @@ mark_priority_refresh_done() {
     } > "$PRIORITY_REFRESH_STATE_FILE" 2>/dev/null || true
 }
 
+runtime_dedupe_signature() {
+    {
+        printf 'youtube_route=%s\n' "$(youtube_route_protocol)"
+        printf 'status_updated_at=%s\n' "$(status_updated_at)"
+        for route_file in "$UNBLOCK_DIR/vless.txt" "$UNBLOCK_DIR/vless-2.txt"; do
+            if [ -f "$route_file" ]; then
+                cksum "$route_file" 2>/dev/null || ls -ln "$route_file" 2>/dev/null
+            else
+                printf '%s missing\n' "$route_file"
+            fi
+        done
+    } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+}
+
+runtime_dedupe_due() {
+    now="$(date +%s 2>/dev/null || echo 0)"
+    signature="$(runtime_dedupe_signature)"
+    last_signature=""
+    last_run_at=0
+    if [ -r "$RUNTIME_DEDUPE_STATE_FILE" ]; then
+        last_signature="$(sed -n '1p' "$RUNTIME_DEDUPE_STATE_FILE" 2>/dev/null)"
+        last_run_at="$(sed -n '2p' "$RUNTIME_DEDUPE_STATE_FILE" 2>/dev/null | tr -cd '0-9')"
+        [ -n "$last_run_at" ] || last_run_at=0
+    fi
+    [ -n "$signature" ] || return 0
+    [ "$signature" != "$last_signature" ] && return 0
+    case "$now:$last_run_at:$DEDUP_FORCE_INTERVAL_SECONDS" in
+        *[!0-9:]*|0:*|*:0) return 0 ;;
+    esac
+    [ $((now - last_run_at)) -ge "$DEDUP_FORCE_INTERVAL_SECONDS" ] 2>/dev/null
+}
+
+mark_runtime_dedupe_done() {
+    now="$(date +%s 2>/dev/null || echo 0)"
+    signature="$(runtime_dedupe_signature)"
+    mkdir -p "$(dirname "$RUNTIME_DEDUPE_STATE_FILE")" 2>/dev/null || true
+    {
+        printf '%s\n' "$signature"
+        printf '%s\n' "$now"
+    } > "$RUNTIME_DEDUPE_STATE_FILE" 2>/dev/null || true
+}
+
 apply_vless_priority_domain_ips_if_due() {
     priority_refresh_due || return 0
     apply_vless_priority_domain_ips
@@ -508,21 +554,24 @@ run_runtime_dedupe() {
     [ "${DEDUP_INTERVAL_SECONDS:-0}" -gt 0 ] 2>/dev/null || return 0
     acquire_runtime_dedupe_lock || return 0
     trap cleanup_runtime_dedupe_lock EXIT INT TERM
-    youtube_route="$(youtube_route_protocol)"
-    case "$youtube_route" in
-        vless2)
-            dedupe_ipset_pair unblockvless unblockvless2
-            dedupe_ipset_pair unblockvlessudp unblockvless2udp
-            dedupe_ipset_pair unblockvless6 unblockvless2v6
-            ;;
-        vless)
-            dedupe_ipset_pair unblockvless2 unblockvless
-            dedupe_ipset_pair unblockvless2udp unblockvlessudp
-            dedupe_ipset_pair unblockvless2v6 unblockvless6
-            ;;
-        *)
-            ;;
-    esac
+    if runtime_dedupe_due; then
+        youtube_route="$(youtube_route_protocol)"
+        case "$youtube_route" in
+            vless2)
+                dedupe_ipset_pair unblockvless unblockvless2
+                dedupe_ipset_pair unblockvlessudp unblockvless2udp
+                dedupe_ipset_pair unblockvless6 unblockvless2v6
+                ;;
+            vless)
+                dedupe_ipset_pair unblockvless2 unblockvless
+                dedupe_ipset_pair unblockvless2udp unblockvlessudp
+                dedupe_ipset_pair unblockvless2v6 unblockvless6
+                ;;
+            *)
+                ;;
+        esac
+        mark_runtime_dedupe_done
+    fi
     apply_vless_priority_domain_ips_if_due
     cleanup_runtime_dedupe_lock
     trap - EXIT INT TERM

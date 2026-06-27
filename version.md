@@ -1,3 +1,7 @@
+*v1.838 (28 Jun 2026) -* main
+
+*Fixes router HWID detection for Keenetic `hw_id`, guards automatic HWID subscription refresh under high CPU/RSS, backs off background checks after CPU-busy samples, quiets bot-side ipset lock contention, avoids retaining the large pool API cache under high RSS, and throttles runtime Vless dedupe when route/ipset signatures are unchanged.*
+
 *v1.837 (26 Jun 2026) -* main
 
 *Fixes the key subscription tab layout after the router HWID switch: desktop import cards align to the same height, and the mobile subscription button stays inside its card.*

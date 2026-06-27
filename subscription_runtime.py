@@ -119,7 +119,9 @@ def apply_hwid_to_subscription_request(
 
 
 _HWID_PATTERNS = (
+    re.compile(r'\bhw[_\-\s]?id\b\s*[:=]\s*([A-Za-z0-9_.:-]{4,128})', re.I),
     re.compile(r'\b(?:hwid|hardware\s+id|device\s+id|serial(?:\s+number)?)\b\s*[:=]\s*([A-Za-z0-9_.:-]{4,128})', re.I),
+    re.compile(r'\b(?:service\s+tag|serial)\b\s*[:=]\s*([A-Za-z0-9_.:-]{4,128})', re.I),
     re.compile(r'\b(?:серийн(?:ый|ого)?\s+номер|идентификатор)\b\s*[:=]\s*([A-Za-z0-9_.:-]{4,128})', re.I),
 )
 
