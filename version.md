@@ -1,3 +1,7 @@
+*v1.840 (28 Jun 2026) -* main
+
+*Adds a subscription client User-Agent and text Accept header for HWID subscription downloads, fixing providers that reject default Python requests with 403 while keeping the import scoped to the selected protocol.*
+
 *v1.839 (28 Jun 2026) -* main
 
 *Makes S99unblock route/ipset signatures portable on Keenetic systems without `cksum`, so runtime Vless dedupe and priority refresh throttling use file size/mtime signatures instead of falling back to an always-due blank state.*

@@ -1,3 +1,8 @@
+<a name="1.840"></a>
+# [1.840] - 28 Jun 2026
+
+- Adds a subscription client User-Agent and text Accept header for HWID subscription downloads, fixing providers that reject default Python requests with 403 while keeping the import scoped to the selected protocol.
+
 <a name="1.839"></a>
 # [1.839] - 28 Jun 2026
 

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.839, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.840, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -430,6 +430,10 @@ SUBSCRIPTION_HWID_HEADER_NAMES = tuple(
     for item in getattr(config, 'subscription_hwid_header_names', subscription_runtime.DEFAULT_HWID_HEADER_NAMES)
     if str(item or '').strip()
 )
+SUBSCRIPTION_USER_AGENT = str(
+    getattr(config, 'subscription_user_agent', subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT) or ''
+).strip()
+SUBSCRIPTION_ACCEPT_HEADER = str(getattr(config, 'subscription_accept_header', 'text/plain, */*') or '').strip()
 SUBSCRIPTION_AUTO_REFRESH_ENABLED = bool(getattr(config, 'subscription_auto_refresh_enabled', True))
 SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS = max(
     3600,
@@ -812,10 +816,16 @@ def _fetch_keys_from_subscription(url, use_router_hwid=False):
         if not SUBSCRIPTION_ALLOW_PRIVATE_URLS and _private_subscription_address(parsed.hostname):
             raise ValueError('private, local and reserved subscription hosts are not allowed')
         request_url, headers = _subscription_request_url_headers(url, use_router_hwid=use_router_hwid)
+        request_headers = dict(headers or {})
+        normalized_header_names = {str(name).lower() for name in request_headers}
+        if SUBSCRIPTION_USER_AGENT and 'user-agent' not in normalized_header_names:
+            request_headers['User-Agent'] = SUBSCRIPTION_USER_AGENT
+        if SUBSCRIPTION_ACCEPT_HEADER and 'accept' not in normalized_header_names:
+            request_headers['Accept'] = SUBSCRIPTION_ACCEPT_HEADER
         session = requests.Session()
         try:
             session.trust_env = False
-            resp = session.get(request_url, headers=headers, stream=True, timeout=(5, 15))
+            resp = session.get(request_url, headers=request_headers, stream=True, timeout=(5, 15))
             try:
                 resp.raise_for_status()
                 raw = _read_limited_response(resp, SUBSCRIPTION_MAX_BYTES)

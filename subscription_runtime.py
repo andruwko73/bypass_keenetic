@@ -5,6 +5,7 @@ import key_pool_store
 
 
 DEFAULT_HWID_HEADER_NAMES = ('X-HWID', 'X-Router-HWID', 'X-Device-ID')
+DEFAULT_SUBSCRIPTION_USER_AGENT = 'v2rayN/6.45'
 PROTOCOL_SUBSCRIPTION_SOURCE = {
     'vless2': 'vless',
 }

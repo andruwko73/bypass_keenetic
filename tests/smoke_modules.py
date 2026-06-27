@@ -1010,6 +1010,7 @@ def test_key_pool_subscription_helpers():
 
 
 def test_subscription_hwid_request_helpers():
+    assert subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT == 'v2rayN/6.45'
     url, headers = subscription_runtime.apply_hwid_to_subscription_request(
         'https://sub.example.test/list?token=abc&hwid=old',
         'KN-12345',
