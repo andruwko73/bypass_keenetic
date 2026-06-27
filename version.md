@@ -1,3 +1,7 @@
+*v1.839 (28 Jun 2026) -* main
+
+*Makes S99unblock route/ipset signatures portable on Keenetic systems without `cksum`, so runtime Vless dedupe and priority refresh throttling use file size/mtime signatures instead of falling back to an always-due blank state.*
+
 *v1.838 (28 Jun 2026) -* main
 
 *Fixes router HWID detection for Keenetic `hw_id`, guards automatic HWID subscription refresh under high CPU/RSS, backs off background checks after CPU-busy samples, quiets bot-side ipset lock contention, avoids retaining the large pool API cache under high RSS, and throttles runtime Vless dedupe when route/ipset signatures are unchanged.*

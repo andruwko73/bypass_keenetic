@@ -1,3 +1,8 @@
+<a name="1.839"></a>
+# [1.839] - 28 Jun 2026
+
+- Makes S99unblock route/ipset signatures portable on Keenetic systems without `cksum`, so runtime Vless dedupe and priority refresh throttling use file size/mtime signatures instead of falling back to an always-due blank state.
+
 <a name="1.838"></a>
 # [1.838] - 28 Jun 2026
 

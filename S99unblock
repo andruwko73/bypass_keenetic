@@ -414,17 +414,26 @@ apply_vless_priority_domain_ips() {
     done
 }
 
+route_file_signature() {
+    route_file="$1"
+    if [ ! -f "$route_file" ]; then
+        printf '%s:missing' "$route_file"
+        return
+    fi
+    size="$(wc -c < "$route_file" 2>/dev/null | tr -cd '0-9')"
+    mtime="$(stat -c %Y "$route_file" 2>/dev/null | tr -cd '0-9')"
+    if [ -z "$mtime" ]; then
+        mtime="$(ls -ln "$route_file" 2>/dev/null | awk '{print $5 ":" $6 ":" $7 ":" $8}')"
+    fi
+    printf '%s:%s:%s' "$route_file" "${size:-0}" "${mtime:-0}"
+}
+
 priority_refresh_signature() {
-    {
-        printf '%s\n' "$VLESS_PRIORITY_DOMAINS"
-        for route_file in "$UNBLOCK_DIR/vless.txt" "$UNBLOCK_DIR/vless-2.txt"; do
-            if [ -f "$route_file" ]; then
-                cksum "$route_file" 2>/dev/null || ls -ln "$route_file" 2>/dev/null
-            else
-                printf '%s missing\n' "$route_file"
-            fi
-        done
-    } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+    signature="domains=$VLESS_PRIORITY_DOMAINS"
+    for route_file in "$UNBLOCK_DIR/vless.txt" "$UNBLOCK_DIR/vless-2.txt"; do
+        signature="$signature;$(route_file_signature "$route_file")"
+    done
+    printf '%s\n' "$signature"
 }
 
 priority_refresh_due() {
@@ -456,17 +465,11 @@ mark_priority_refresh_done() {
 }
 
 runtime_dedupe_signature() {
-    {
-        printf 'youtube_route=%s\n' "$(youtube_route_protocol)"
-        printf 'status_updated_at=%s\n' "$(status_updated_at)"
-        for route_file in "$UNBLOCK_DIR/vless.txt" "$UNBLOCK_DIR/vless-2.txt"; do
-            if [ -f "$route_file" ]; then
-                cksum "$route_file" 2>/dev/null || ls -ln "$route_file" 2>/dev/null
-            else
-                printf '%s missing\n' "$route_file"
-            fi
-        done
-    } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+    signature="youtube_route=$(youtube_route_protocol);status_updated_at=$(status_updated_at)"
+    for route_file in "$UNBLOCK_DIR/vless.txt" "$UNBLOCK_DIR/vless-2.txt"; do
+        signature="$signature;$(route_file_signature "$route_file")"
+    done
+    printf '%s\n' "$signature"
 }
 
 runtime_dedupe_due() {

@@ -1955,6 +1955,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in s99unblock
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in s99unblock
     assert 'apply_vless_priority_domain_ips' in s99unblock
+    assert 'route_file_signature()' in s99unblock
+    assert 'wc -c < "$route_file"' in s99unblock
     assert 'route_file_marker_count()' in s99unblock
     assert '"vmess:$UNBLOCK_DIR/vmess.txt"' in s99unblock
     assert 'RUNTIME_DEDUPE_STATE_FILE="${BYPASS_RUNTIME_DEDUPE_STATE_FILE:-/tmp/bypass-runtime-dedupe.state}"' in s99unblock
