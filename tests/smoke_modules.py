@@ -2381,7 +2381,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "if YOUTUBE_EDGE_PREFETCH_MODE != 'thread':" in source
     assert 'def _load_youtube_edge_prefetch_external_status' in source
     assert '_start_youtube_edge_prefetch_thread()' in source
-    assert 'youtube_edge_prefetch.prefetch_once(' in source
+    assert '_youtube_edge_prefetch().prefetch_once(' in source
     assert "_memory_cleanup('youtube edge prefetch skipped high RSS', force=True" in source
     assert "['ipset', 'del', set_name, address]" in source
     assert "payload['youtube_edge_prefetch'] = _youtube_edge_prefetch_snapshot()" in source
@@ -2607,8 +2607,67 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'from pool_probe_runner import' not in source
     assert 'from repo_update import' not in source
     assert 'from web_form_template import' not in source
-    assert 'not app_runtime_mode.app_mode_telegram_enabled(_runtime_mode_at_import())' in source
+    assert 'not _IMPORT_TELEGRAM_ENABLED' in source
+    assert 'from pool_probe_controller import' not in source
+    assert 'from probe_cache import' not in source
+    assert '\nimport key_pool_web\n' not in source
+    assert '\nimport telegram_pool_ui\n' not in source
+    assert '\nimport web_pool_form_blocks\n' not in source
+    assert '\nimport auto_failover_runtime\n' not in source
+    assert '\nimport telegram_call_learning\n' not in source
+    assert '\nimport youtube_edge_prefetch\n' not in source
+    assert 'def _key_pool_web()' in source
+    assert 'def _probe_cache()' in source
     assert 'class _NoopTeleBot' in source
+
+
+def test_simple_mode_import_skips_advanced_modules():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('simple\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    advanced_modules = (
+        'pool_probe_controller',
+        'probe_cache',
+        'key_pool_web',
+        'telegram_pool_ui',
+        'web_pool_form_blocks',
+        'auto_failover_runtime',
+        'telegram_call_learning',
+        'youtube_edge_prefetch',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "current_keys = bot._load_current_keys()\n"
+        "bot._web_simple_form_context(current_keys, bot._placeholder_protocol_statuses(current_keys), '', bot._placeholder_web_status_snapshot())\n"
+        f"mods = {advanced_modules!r}\n"
+        "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        loaded = json.loads(result.stdout.strip())
+        assert loaded == {name: False for name in advanced_modules}
+    finally:
+        temp_dir.cleanup()
 
 
 def test_web_response_body_ignores_client_disconnect():
@@ -8260,6 +8319,7 @@ def main():
     test_ui_smoke_package_scripts_are_declared()
     test_ipset_refresh_is_backend_aware_and_atomic()
     test_runtime_startup_limits_router_flash_and_overhead()
+    test_simple_mode_import_skips_advanced_modules()
     test_web_response_body_ignores_client_disconnect()
     test_youtube_edge_prefetch_cache_is_bounded_and_public_only()
     test_youtube_edge_prefetch_collects_limited_dns_candidates()

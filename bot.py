@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.840, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.841, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -26,6 +26,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
 
 from app_version import APP_VERSION_COUNTER, APP_VERSION_LABEL
+import app_runtime_mode
+import bot_config as config
+
+COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
+
+
+def _runtime_mode_at_import():
+    return app_runtime_mode.load_app_runtime_mode(
+        app_runtime_mode.APP_RUNTIME_MODE_FILE,
+        default_mode=getattr(config, 'app_runtime_mode', 'advanced'),
+    )
+
+
+_IMPORT_RUNTIME_MODE = _runtime_mode_at_import()
+_IMPORT_POOL_ENABLED = app_runtime_mode.app_mode_pool_enabled(_IMPORT_RUNTIME_MODE)
+_IMPORT_TELEGRAM_ENABLED = app_runtime_mode.app_mode_telegram_enabled(_IMPORT_RUNTIME_MODE)
 
 try:
     threading.stack_size(256 * 1024)
@@ -98,18 +114,11 @@ from custom_checks_store import (
     route_entries_from_values as _route_entries_from_values,
 )
 import key_pool_store
-import key_pool_web
 import subscription_runtime
-import telegram_pool_ui
-import web_pool_form_blocks
 import telegram_key_ui
 import entware_dns_runtime
 import telegram_info_runtime
-import auto_failover_runtime
-import app_runtime_mode
 import router_health_runtime
-import telegram_call_learning
-import youtube_edge_prefetch
 try:
     import xray_compat_runtime
 except Exception:
@@ -146,34 +155,6 @@ from telegram_install_ui import (
     install_action_for_text as _telegram_install_action,
     install_menu_rows as _telegram_install_menu_rows,
 )
-from pool_probe_controller import (
-    PoolProbeProgress,
-    YOUTUBE_HEALTHCHECK_MIN_OK as _POOL_YOUTUBE_HEALTHCHECK_MIN_OK,
-    YOUTUBE_HEALTHCHECK_URLS as _POOL_YOUTUBE_HEALTHCHECK_URLS,
-    available_memory_kb as _available_memory_kb,
-    check_pool_key_through_proxy as _controller_check_pool_key_through_proxy,
-    check_youtube_through_proxy as _controller_check_youtube_through_proxy,
-    failed_custom_probe_results as _failed_custom_probe_results,
-    filter_active_probe_tasks as _controller_filter_active_probe_tasks,
-    pool_probe_progress_label as _controller_pool_probe_progress_label,
-    pool_probe_timeout_budget as _controller_pool_probe_timeout_budget,
-    select_pool_probe_tasks as _controller_select_pool_probe_tasks,
-    start_pool_probe_worker,
-)
-from probe_cache import (
-    KEY_PROBE_CACHE_PATH as _KEY_PROBE_CACHE_PATH,
-    KeyProbeBatchRecorder as _KeyProbeBatchRecorder,
-    YOUTUBE_QUALITY_DEFAULT_1600P_MBPS as _YOUTUBE_QUALITY_DEFAULT_1600P_MBPS,
-    YOUTUBE_QUALITY_DEFAULT_4K_MBPS as _YOUTUBE_QUALITY_DEFAULT_4K_MBPS,
-    YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS as _YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS,
-    YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS as _YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS,
-    forget_key_probes as _forget_key_probes,
-    hash_key as _hash_key,
-    key_probe_is_fresh as _key_probe_is_fresh,
-    load_key_probe_cache as _load_key_probe_cache,
-    record_key_probe as _record_key_probe,
-    youtube_probe_state as _youtube_probe_state,
-)
 from service_catalog import (
     CONNECTIVITY_CHECK_DOMAINS,
     CUSTOM_CHECK_PRESETS,
@@ -209,7 +190,6 @@ import web_status_runtime
 import web_commands_runtime
 import event_history
 import update_status
-from web_route_tools_runtime import ServiceRouteToolsRuntime
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
@@ -221,9 +201,6 @@ import shutil
 import requests
 import json
 import html
-import bot_config as config
-
-COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
 
 
 def _config_sequence(name, default=()):
@@ -237,10 +214,89 @@ def _config_sequence(name, default=()):
 
 
 _pool_probe_runner_module = None
+_pool_probe_controller_module = None
+_probe_cache_module = None
 _repo_update_module = None
 _web_form_template_module = None
 _web_form_template_lock = threading.Lock()
 _web_route_tools_runtime = None
+_key_pool_web_module = None
+_telegram_pool_ui_module = None
+_web_pool_form_blocks_module = None
+_auto_failover_runtime_module = None
+_telegram_call_learning_module = None
+_youtube_edge_prefetch_module = None
+
+_KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
+_YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
+_YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS = 1500
+_YOUTUBE_QUALITY_DEFAULT_1600P_MBPS = 25.0
+_YOUTUBE_QUALITY_DEFAULT_4K_MBPS = 45.0
+_POOL_YOUTUBE_HEALTHCHECK_URLS = (
+    'https://www.youtube.com/generate_204',
+    'https://www.youtube.com/',
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    'https://youtu.be/dQw4w9WgXcQ',
+    'https://youtubei.googleapis.com/generate_204',
+    'https://youtubei-att.googleapis.com/',
+    'https://i.ytimg.com/generate_204',
+    'https://www.gstatic.com/generate_204',
+    'https://redirector.googlevideo.com/generate_204',
+    'https://redirector.googlevideo.com/generate_204',
+)
+_POOL_YOUTUBE_HEALTHCHECK_MIN_OK = 9
+_YOUTUBE_EDGE_PREFETCH_DEFAULT_HOSTS = (
+    'www.youtube.com',
+    'youtube.com',
+    'm.youtube.com',
+    'youtubei.googleapis.com',
+    'youtubei-att.googleapis.com',
+    'jnn-pa.googleapis.com',
+    'play-fe.googleapis.com',
+    'i.ytimg.com',
+    's.ytimg.com',
+    'yt3.ggpht.com',
+    'www.gstatic.com',
+    'manifest.googlevideo.com',
+    'redirector.googlevideo.com',
+)
+_YOUTUBE_EDGE_PREFETCH_DEFAULT_DNS_SERVERS = ('local', '1.1.1.1', '8.8.8.8')
+_TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS = {
+    'shadowsocks': ('unblocksh', 'unblockshudp'),
+    'vmess': ('unblockvmess', 'unblockvmessudp'),
+    'vless': ('unblockvless', 'unblockvlessudp'),
+    'vless2': ('unblockvless2', 'unblockvless2udp'),
+    'trojan': ('unblocktroj', 'unblocktrojudp'),
+}
+_TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = {
+    'shadowsocks': 'bypass_call_clients_sh',
+    'vmess': 'bypass_call_clients_vmess',
+    'vless': 'bypass_call_clients_vless',
+    'vless2': 'bypass_call_clients_vless2',
+    'trojan': 'bypass_call_clients_troj',
+}
+
+
+class _PoolProbeProgress:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._progress = {
+            'running': False,
+            'checked': 0,
+            'total': 0,
+            'scope': '',
+            'note': '',
+            'started_at': 0,
+            'finished_at': 0,
+        }
+
+    def update(self, **updates):
+        with self._lock:
+            self._progress.update(updates)
+
+    def snapshot(self):
+        with self._lock:
+            return dict(self._progress)
 
 
 def _pool_probe_runner():
@@ -250,6 +306,151 @@ def _pool_probe_runner():
 
         _pool_probe_runner_module = module
     return _pool_probe_runner_module
+
+
+def _pool_probe_controller():
+    global _pool_probe_controller_module
+    if _pool_probe_controller_module is None:
+        import pool_probe_controller as module
+
+        _pool_probe_controller_module = module
+    return _pool_probe_controller_module
+
+
+def _probe_cache():
+    global _probe_cache_module
+    if _probe_cache_module is None:
+        import probe_cache as module
+
+        _probe_cache_module = module
+    return _probe_cache_module
+
+
+def _key_pool_web():
+    global _key_pool_web_module
+    if _key_pool_web_module is None:
+        import key_pool_web as module
+
+        _key_pool_web_module = module
+    return _key_pool_web_module
+
+
+def _telegram_pool_ui():
+    global _telegram_pool_ui_module
+    if _telegram_pool_ui_module is None:
+        import telegram_pool_ui as module
+
+        _telegram_pool_ui_module = module
+    return _telegram_pool_ui_module
+
+
+def _web_pool_form_blocks():
+    global _web_pool_form_blocks_module
+    if _web_pool_form_blocks_module is None:
+        import web_pool_form_blocks as module
+
+        _web_pool_form_blocks_module = module
+    return _web_pool_form_blocks_module
+
+
+def _auto_failover_runtime():
+    global _auto_failover_runtime_module
+    if _auto_failover_runtime_module is None:
+        import auto_failover_runtime as module
+
+        _auto_failover_runtime_module = module
+    return _auto_failover_runtime_module
+
+
+def _telegram_call_learning():
+    global _telegram_call_learning_module
+    if _telegram_call_learning_module is None:
+        import telegram_call_learning as module
+
+        _telegram_call_learning_module = module
+    return _telegram_call_learning_module
+
+
+def _youtube_edge_prefetch():
+    global _youtube_edge_prefetch_module
+    if _youtube_edge_prefetch_module is None:
+        import youtube_edge_prefetch as module
+
+        _youtube_edge_prefetch_module = module
+    return _youtube_edge_prefetch_module
+
+
+def _available_memory_kb(*args, **kwargs):
+    return _pool_probe_controller().available_memory_kb(*args, **kwargs)
+
+
+def _controller_check_pool_key_through_proxy(*args, **kwargs):
+    return _pool_probe_controller().check_pool_key_through_proxy(*args, **kwargs)
+
+
+def _controller_check_youtube_through_proxy(*args, **kwargs):
+    return _pool_probe_controller().check_youtube_through_proxy(*args, **kwargs)
+
+
+def _failed_custom_probe_results(*args, **kwargs):
+    return _pool_probe_controller().failed_custom_probe_results(*args, **kwargs)
+
+
+def _controller_filter_active_probe_tasks(*args, **kwargs):
+    return _pool_probe_controller().filter_active_probe_tasks(*args, **kwargs)
+
+
+def _controller_pool_probe_progress_label(*args, **kwargs):
+    return _pool_probe_controller().pool_probe_progress_label(*args, **kwargs)
+
+
+def _controller_pool_probe_timeout_budget(*args, **kwargs):
+    return _pool_probe_controller().pool_probe_timeout_budget(*args, **kwargs)
+
+
+def _controller_select_pool_probe_tasks(*args, **kwargs):
+    return _pool_probe_controller().select_pool_probe_tasks(*args, **kwargs)
+
+
+def start_pool_probe_worker(*args, **kwargs):
+    return _pool_probe_controller().start_pool_probe_worker(*args, **kwargs)
+
+
+def _KeyProbeBatchRecorder(*args, **kwargs):
+    return _probe_cache().KeyProbeBatchRecorder(*args, **kwargs)
+
+
+def _forget_key_probes(*args, **kwargs):
+    return _probe_cache().forget_key_probes(*args, **kwargs)
+
+
+def _hash_key(value):
+    return hashlib.sha1((value or '').encode('utf-8', errors='ignore')).hexdigest()
+
+
+def _key_probe_is_fresh(*args, **kwargs):
+    return _probe_cache().key_probe_is_fresh(*args, **kwargs)
+
+
+def _load_key_probe_cache(*args, **kwargs):
+    return _probe_cache().load_key_probe_cache(*args, **kwargs)
+
+
+def _record_key_probe(*args, **kwargs):
+    return _probe_cache().record_key_probe(*args, **kwargs)
+
+
+def _youtube_probe_state(entry):
+    if not isinstance(entry, dict):
+        return 'unknown'
+    stability = str(entry.get('yt_stability') or '').strip().lower()
+    if entry.get('yt_ok') is True:
+        return 'ok'
+    if stability == 'unstable':
+        return 'warn'
+    if entry.get('yt_ok') is False:
+        return 'fail'
+    return 'unknown'
 
 
 def _runner_build_pool_probe_core_config_batch(*args, **kwargs):
@@ -339,13 +540,6 @@ def render_web_style_asset(*args, **kwargs):
     return _web_form_template().render_web_style_asset(*args, **kwargs)
 
 
-def _runtime_mode_at_import():
-    return app_runtime_mode.load_app_runtime_mode(
-        app_runtime_mode.APP_RUNTIME_MODE_FILE,
-        default_mode=getattr(config, 'app_runtime_mode', 'advanced'),
-    )
-
-
 class _NoopTelegramApiHelper:
     proxy = {}
 
@@ -411,7 +605,7 @@ class _NoopTelegramModule:
     TeleBot = _NoopTeleBot
 
 
-if COMMAND_WORKER_MODE or not app_runtime_mode.app_mode_telegram_enabled(_runtime_mode_at_import()):
+if COMMAND_WORKER_MODE or not _IMPORT_TELEGRAM_ENABLED:
     telebot = _NoopTelegramModule()
     types = _NoopTelegramTypes()
 else:
@@ -590,11 +784,11 @@ YOUTUBE_EDGE_PREFETCH_MAX_RSS_KB = max(
 )
 YOUTUBE_EDGE_PREFETCH_HOSTS = _config_sequence(
     'youtube_edge_prefetch_hosts',
-    youtube_edge_prefetch.DEFAULT_PREFETCH_HOSTS,
+    _YOUTUBE_EDGE_PREFETCH_DEFAULT_HOSTS,
 )
 YOUTUBE_EDGE_PREFETCH_DNS_SERVERS = _config_sequence(
     'youtube_edge_prefetch_dns_servers',
-    youtube_edge_prefetch.DEFAULT_DNS_SERVERS,
+    _YOUTUBE_EDGE_PREFETCH_DEFAULT_DNS_SERVERS,
 )
 YOUTUBE_EDGE_PREFETCH_EXCLUSIVE_IPSETS = bool(getattr(config, 'youtube_edge_prefetch_exclusive_ipsets', True))
 youtube_vless2_failover_state = {
@@ -960,7 +1154,7 @@ def _auto_failover_defer_switch_for_traffic_guard(**kwargs):
 
 
 def _attempt_auto_failover():
-    return auto_failover_runtime.attempt_auto_failover(
+    return _auto_failover_runtime().attempt_auto_failover(
         state=auto_failover_state,
         pool_probe_locked=lambda: bool(globals().get('pool_probe_lock') and pool_probe_lock.locked()),
         proxy_mode=proxy_mode,
@@ -1929,7 +2123,7 @@ TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS = max(
 )
 TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enabled', False))
 TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
-TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(telegram_call_learning.CALL_CLIENT_IPSETS)
+TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(_TELEGRAM_CALL_LEARNING_CLIENT_IPSETS)
 TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
 TELEGRAM_CALL_LEARNING_ROUTE_CACHE_TTL_SECONDS = max(
     5.0,
@@ -2016,7 +2210,7 @@ pool_probe_resume_after_cancel = True
 pool_probe_low_memory_resume_scheduled = False
 pool_probe_quality_sample_lock = threading.Lock()
 pool_probe_quality_sample_count = 0
-pool_probe_progress = PoolProbeProgress()
+pool_probe_progress = _PoolProbeProgress()
 process_started_at = time.time()
 memory_watchdog_lock = threading.Lock()
 memory_watchdog_restart_scheduled = False
@@ -2556,7 +2750,7 @@ def _telegram_call_learning_route_protocols():
 
 def _select_telegram_call_learning_protocol(requested=''):
     requested = str(requested or '').strip().lower()
-    if requested in telegram_call_learning.PROTOCOL_IPSETS:
+    if requested in _TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS:
         return requested, []
     route_protocols = _telegram_call_learning_route_protocols()
     active = ''
@@ -2569,7 +2763,7 @@ def _select_telegram_call_learning_protocol(requested=''):
         return active, route_protocols
     if route_protocols:
         return route_protocols[0], route_protocols
-    if active in telegram_call_learning.PROTOCOL_IPSETS:
+    if active in _TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS:
         notes.append('telegram_route_not_found')
         return active, route_protocols
     notes.append('telegram_route_not_found')
@@ -2578,7 +2772,7 @@ def _select_telegram_call_learning_protocol(requested=''):
 
 def _telegram_call_learning_target_protocols(requested=''):
     requested = str(requested or '').strip().lower()
-    if requested in telegram_call_learning.PROTOCOL_IPSETS:
+    if requested in _TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS:
         return [requested], _telegram_call_learning_route_protocols()
     route_protocols = _telegram_call_learning_route_protocols()
     if route_protocols:
@@ -2587,7 +2781,7 @@ def _telegram_call_learning_target_protocols(requested=''):
         active = _load_proxy_mode()
     except Exception:
         active = str(proxy_mode or '')
-    if active in telegram_call_learning.PROTOCOL_IPSETS:
+    if active in _TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS:
         return [active], route_protocols
     return ['vless'], route_protocols
 
@@ -2714,14 +2908,14 @@ def _apply_telegram_call_learning_candidate(candidate, protocols, apply_entries=
     apply_results = []
     conntrack_deleted = False
     for protocol in protocols or []:
-        apply_result = telegram_call_learning.add_candidate_to_ipsets(
+        apply_result = _telegram_call_learning().add_candidate_to_ipsets(
             candidate,
             protocol,
             apply=apply_entries,
         )
         apply_results.append(apply_result)
     if apply_entries and any(result.get('applied_sets') for result in apply_results):
-        conntrack_deleted = telegram_call_learning.delete_conntrack_candidate(candidate)
+        conntrack_deleted = _telegram_call_learning().delete_conntrack_candidate(candidate)
     return _telegram_call_learning_candidate_payload(candidate, apply_results, conntrack_deleted)
 
 
@@ -2758,7 +2952,7 @@ def _telegram_call_learning_ipset_members(set_name, include_timeouts=False):
         if not in_members or not text:
             continue
         address = text.split()[0].strip()
-        if telegram_call_learning.is_lan_ipv4(address):
+        if _telegram_call_learning().is_lan_ipv4(address):
             if include_timeouts:
                 parts = text.split()
                 timeout_value = default_timeout
@@ -2778,7 +2972,7 @@ def _telegram_call_learning_ipset_members(set_name, include_timeouts=False):
 def _apply_telegram_call_learning_call_candidate(candidate, protocols, apply_entries=True):
     apply_results = []
     for protocol in protocols or []:
-        apply_result = telegram_call_learning.add_candidate_to_call_ipset(
+        apply_result = _telegram_call_learning().add_candidate_to_call_ipset(
             candidate,
             protocol,
             timeout=TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS,
@@ -2787,7 +2981,7 @@ def _apply_telegram_call_learning_call_candidate(candidate, protocols, apply_ent
         apply_results.append(apply_result)
     conntrack_deleted = False
     if apply_entries and any(result.get('applied_sets') for result in apply_results):
-        conntrack_deleted = telegram_call_learning.delete_conntrack_candidate(candidate)
+        conntrack_deleted = _telegram_call_learning().delete_conntrack_candidate(candidate)
     return _telegram_call_learning_candidate_payload(candidate, apply_results, conntrack_deleted=conntrack_deleted)
 
 
@@ -2807,15 +3001,15 @@ def _telegram_call_learning_auto_scan(
         protocols = [
             str(proto or '').strip().lower()
             for proto in (target_protocols or [])
-            if telegram_call_learning.protocol_call_ipset(proto)
+            if _telegram_call_learning().protocol_call_ipset(proto)
         ]
         route_protocols = list(route_protocols or _telegram_call_learning_route_protocols())
     active_clients = sorted(set(str(item or '').strip() for item in (active_clients or []) if str(item or '').strip()))
-    current_flows = telegram_call_learning.read_lan_conntrack_flows(
+    current_flows = _telegram_call_learning().read_lan_conntrack_flows(
         router_ip=routerip,
         allowed_sources=active_clients,
     )
-    candidates = telegram_call_learning.learn_candidates(
+    candidates = _telegram_call_learning().learn_candidates(
         previous_flows,
         current_flows,
         seen_addresses=seen_addresses,
@@ -2830,7 +3024,7 @@ def _telegram_call_learning_auto_scan(
         address = str(candidate.get('address') or '')
         if not address:
             continue
-        if telegram_call_learning.address_in_networks(address):
+        if _telegram_call_learning().address_in_networks(address):
             continue
         if not candidate.get('udp_call_cluster'):
             continue
@@ -3015,7 +3209,7 @@ def _start_telegram_call_learning_auto_thread():
 
 
 def _telegram_call_learning_worker(device_ip, protocol, apply_entries, duration_seconds):
-    baseline = telegram_call_learning.read_conntrack_flows(device_ip)
+    baseline = _telegram_call_learning().read_conntrack_flows(device_ip)
     seen_addresses = set()
     candidates_payload = []
     added_payload = []
@@ -3023,8 +3217,8 @@ def _telegram_call_learning_worker(device_ip, protocol, apply_entries, duration_
     error = ''
     try:
         while not telegram_call_learning_cancel_event.is_set():
-            current = telegram_call_learning.read_conntrack_flows(device_ip)
-            candidates = telegram_call_learning.learn_candidates(
+            current = _telegram_call_learning().read_conntrack_flows(device_ip)
+            candidates = _telegram_call_learning().learn_candidates(
                 baseline,
                 current,
                 seen_addresses=seen_addresses,
@@ -3038,14 +3232,14 @@ def _telegram_call_learning_worker(device_ip, protocol, apply_entries, duration_
                 if not address:
                     continue
                 seen_addresses.add(address)
-                apply_result = telegram_call_learning.add_candidate_to_ipsets(
+                apply_result = _telegram_call_learning().add_candidate_to_ipsets(
                     candidate,
                     protocol,
                     apply=apply_entries,
                 )
                 conntrack_deleted = False
                 if apply_entries and apply_result.get('applied_sets'):
-                    conntrack_deleted = telegram_call_learning.delete_conntrack_candidate(candidate)
+                    conntrack_deleted = _telegram_call_learning().delete_conntrack_candidate(candidate)
                 payload = _telegram_call_learning_candidate_payload(candidate, apply_result, conntrack_deleted)
                 candidates_payload.append(payload)
                 if payload.get('applied_sets') or not payload.get('errors'):
@@ -3104,11 +3298,11 @@ def _start_telegram_call_learning(device_ip, protocol='', apply_entries=None, du
         snapshot = _telegram_call_learning_snapshot()
         return False, _telegram_call_learning_status_message(snapshot), snapshot
     device_ip = str(device_ip or '').strip()
-    if not telegram_call_learning.is_lan_ipv4(device_ip):
+    if not _telegram_call_learning().is_lan_ipv4(device_ip):
         snapshot = _telegram_call_learning_snapshot()
         return False, 'Укажите IPv4-адрес телефона или другого клиента в LAN.', snapshot
     selected_protocol, route_protocols = _select_telegram_call_learning_protocol(protocol)
-    if not telegram_call_learning.protocol_ipsets(selected_protocol):
+    if not _telegram_call_learning().protocol_ipsets(selected_protocol):
         snapshot = _telegram_call_learning_snapshot()
         return False, 'Не удалось выбрать протокол для добавления IP в ipset.', snapshot
     if apply_entries is None:
@@ -3629,7 +3823,7 @@ def _start_udp_quic_drift_watchdog_thread():
 
 
 def _youtube_edge_prefetch_hosts_for_run():
-    hosts = list(youtube_edge_prefetch.normalize_hosts(YOUTUBE_EDGE_PREFETCH_HOSTS))
+    hosts = list(_youtube_edge_prefetch().normalize_hosts(YOUTUBE_EDGE_PREFETCH_HOSTS))
     if not hosts:
         return ()
     max_hosts = min(len(hosts), YOUTUBE_EDGE_PREFETCH_MAX_HOSTS_PER_RUN)
@@ -3754,7 +3948,7 @@ def _run_youtube_edge_prefetch_once():
             if skip_reason == 'high_rss':
                 _memory_cleanup('youtube edge prefetch skipped high RSS', force=True, clear_status=False, log=False)
         else:
-            status = youtube_edge_prefetch.prefetch_once(
+            status = _youtube_edge_prefetch().prefetch_once(
                 route_protocol=_youtube_route_protocol(),
                 cache_path=YOUTUBE_EDGE_PREFETCH_CACHE_PATH,
                 hosts=_youtube_edge_prefetch_hosts_for_run(),
@@ -6207,6 +6401,8 @@ def _save_unblock_list(list_name, text):
 def _route_tools_runtime():
     global _web_route_tools_runtime
     if _web_route_tools_runtime is None:
+        from web_route_tools_runtime import ServiceRouteToolsRuntime
+
         _web_route_tools_runtime = ServiceRouteToolsRuntime(
             custom_check_presets_getter=_custom_check_presets,
             service_icon_html=_service_icon_html,
@@ -6762,11 +6958,11 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     if route_states is None:
         route_states = _service_route_summary()
-    required_services = key_pool_web.core_services_for_protocol(route_states, key_name)
-    protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
+    required_services = _key_pool_web().core_services_for_protocol(route_states, key_name)
+    protocol_custom_checks = _key_pool_web().protocol_custom_checks(custom_checks, route_states, key_name)
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     cached_probe = cache.get(_hash_key(key_value), {})
-    custom_states = key_pool_web.web_custom_probe_states(cached_probe, protocol_custom_checks)
+    custom_states = _key_pool_web().web_custom_probe_states(cached_probe, protocol_custom_checks)
     if _active_status_can_use_recent_probe(cached_probe, required_services):
         return _status_cached_protocol_status(
             key_value,
@@ -6828,8 +7024,8 @@ def _cached_protocol_status_for_key(
     custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     if route_states is None:
         route_states = _service_route_summary()
-    required_services = key_pool_web.core_services_for_protocol(route_states, key_name)
-    protocol_custom_checks = key_pool_web.protocol_custom_checks(custom_checks, route_states, key_name)
+    required_services = _key_pool_web().core_services_for_protocol(route_states, key_name)
+    protocol_custom_checks = _key_pool_web().protocol_custom_checks(custom_checks, route_states, key_name)
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     probe = cache.get(_hash_key(key_value), {})
     if (
@@ -6838,7 +7034,7 @@ def _cached_protocol_status_for_key(
         _youtube_probe_state(probe) in ('fail', 'unknown')
     ):
         _schedule_youtube_cache_confirm(key_name, key_value)
-    custom_states = key_pool_web.web_custom_probe_states(probe, protocol_custom_checks)
+    custom_states = _key_pool_web().web_custom_probe_states(probe, protocol_custom_checks)
     return _status_cached_protocol_status(
         key_value,
         probe,
@@ -7240,21 +7436,21 @@ def _pool_key_display_name(key_value):
     return label or 'Ключ прокси'
 
 
-POOL_PROTOCOL_ORDER = key_pool_web.POOL_PROTOCOL_ORDER
+POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
 # Telegram прокручивает reply-клавиатуру целиком, без закрепления нижних строк.
 # Поэтому показываем весь пул в одной прокручиваемой клавиатуре, а служебные
 # кнопки добавляем после списка ключей.
-POOL_PAGE_SIZE = telegram_pool_ui.POOL_PAGE_SIZE
+POOL_PAGE_SIZE = 1000
 
 
 def _pool_proto_label(proto):
-    return key_pool_web.pool_proto_label(proto)
+    return _key_pool_web().pool_proto_label(proto)
 
 
 def _pool_proto_from_button_prefix(prefix):
-    return telegram_pool_ui.pool_proto_from_button_prefix(prefix)
+    return _telegram_pool_ui().pool_proto_from_button_prefix(prefix)
 def _pool_protocol_markup():
-    return telegram_pool_ui.pool_protocol_markup(types, [_pool_proto_label(proto) for proto in POOL_PROTOCOL_ORDER])
+    return _telegram_pool_ui().pool_protocol_markup(types, [_pool_proto_label(proto) for proto in POOL_PROTOCOL_ORDER])
 def _resolve_pool_protocol(text):
     value = (text or '').strip().lower()
     aliases = {
@@ -7268,7 +7464,7 @@ def _resolve_pool_protocol(text):
         'vless2': 'vless2',
         'trojan': 'trojan',
     }
-    for proto, label in key_pool_web.POOL_PROTOCOL_LABELS.items():
+    for proto, label in _key_pool_web().POOL_PROTOCOL_LABELS.items():
         aliases[label.lower()] = proto
         aliases[f'📦 {label}'.lower()] = proto
     return aliases.get(value)
@@ -7298,7 +7494,7 @@ def _pool_action_markup(proto, page=0):
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
         labels.append(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto))
-    return telegram_pool_ui.pool_action_markup(types, labels, info)
+    return _telegram_pool_ui().pool_action_markup(types, labels, info)
 def _pool_delete_markup(proto, page=0):
     _, info = _format_pool_page(proto, page)
     current_keys = _load_current_keys()
@@ -7308,13 +7504,13 @@ def _pool_delete_markup(proto, page=0):
     for offset, key_value in enumerate(info['keys'][info['start']:info['end']], start=info['start'] + 1):
         probe = cache.get(_hash_key(key_value), {})
         labels.append(_pool_key_button_label(offset, key_value, probe=probe, current_key=current_key, proto=proto, action='delete'))
-    return telegram_pool_ui.pool_delete_markup(types, labels, info)
+    return _telegram_pool_ui().pool_delete_markup(types, labels, info)
 def _pool_clear_confirm_markup():
-    return telegram_pool_ui.pool_clear_confirm_markup(types)
+    return _telegram_pool_ui().pool_clear_confirm_markup(types)
 def _pool_input_markup():
-    return telegram_pool_ui.pool_input_markup(types)
+    return _telegram_pool_ui().pool_input_markup(types)
 def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto=None, action='apply'):
-    return telegram_pool_ui.pool_key_button_label(
+    return _telegram_pool_ui().pool_key_button_label(
         index,
         key_value,
         probe=probe,
@@ -7347,7 +7543,7 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
     resolved_key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
     resolved_key_probe_cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     resolved_custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    summary = key_pool_web.pool_status_summary(
+    summary = _key_pool_web().pool_status_summary(
         current_keys,
         resolved_key_pools,
         resolved_key_probe_cache,
@@ -8688,13 +8884,13 @@ def _start_subscription_auto_refresh_thread():
 
 
 def _web_custom_checks():
-    return key_pool_web.web_custom_checks(_load_custom_checks())
+    return _key_pool_web().web_custom_checks(_load_custom_checks())
 
 def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary()
-    return key_pool_web.web_pool_snapshot(
+    return _key_pool_web().web_pool_snapshot(
         current_keys,
         _ensure_current_keys_in_pools(current_keys),
         _load_key_probe_cache(),
@@ -8702,8 +8898,8 @@ def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
         include_keys=include_keys,
         hash_key=_hash_key,
         display_name=_pool_key_display_name,
-        probe_state=key_pool_web.web_probe_state,
-        probe_checked_at=key_pool_web.web_probe_checked_at,
+        probe_state=_key_pool_web().web_probe_state,
+        probe_checked_at=_key_pool_web().web_probe_checked_at,
         protocols=protocols,
         route_states=route_states,
     )
@@ -9386,6 +9582,13 @@ def _web_action_context():
 
 def _web_get_context(handler):
     pool_enabled = _app_mode_pool_enabled()
+    simple_status_snapshot = (
+        None if pool_enabled else
+        lambda current_keys: {
+            'web': _placeholder_web_status_snapshot(),
+            'protocols': _placeholder_protocol_statuses(current_keys),
+        }
+    )
     return {
         'build_form': handler._build_form,
         'build_protocol_panel': handler._build_protocol_panel,
@@ -9394,11 +9597,11 @@ def _web_get_context(handler):
         'build_script_asset': handler._build_script_asset,
         'consume_flash_message': _consume_web_flash_message,
         'load_current_keys': _load_current_keys,
-        'cached_status_snapshot': _cached_status_snapshot,
-        'stale_status_snapshot': _stale_status_snapshot,
-        'placeholder_status_snapshot': _placeholder_status_snapshot,
+        'cached_status_snapshot': _cached_status_snapshot if pool_enabled else simple_status_snapshot,
+        'stale_status_snapshot': _stale_status_snapshot if pool_enabled else None,
+        'placeholder_status_snapshot': _placeholder_status_snapshot if pool_enabled else simple_status_snapshot,
         'active_mode_status_snapshot': _active_mode_status_snapshot,
-        'refresh_status_caches_async': _refresh_status_caches_async,
+        'refresh_status_caches_async': _refresh_status_caches_async if pool_enabled else (lambda *_args, **_kwargs: None),
         'pool_probe_locked': pool_probe_lock.locked,
         'get_status_api_cache': _get_web_status_api_cache,
         'store_status_api_cache': _store_web_status_api_cache,
@@ -9446,22 +9649,22 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
     custom_presets_html = ''
     route_tools_html = ''
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
-        web_pool_form_blocks.pool_table_layout(custom_checks)
+        _web_pool_form_blocks().pool_table_layout(custom_checks)
     )
-    custom_checks_for_protocol = lambda protocol, checks: key_pool_web.protocol_custom_checks(
+    custom_checks_for_protocol = lambda protocol, checks: _key_pool_web().protocol_custom_checks(
         checks,
         route_states,
         protocol,
     )
-    custom_header_icons_for_protocol = lambda protocol, checks: key_pool_web.custom_check_header_icons(
+    custom_header_icons_for_protocol = lambda protocol, checks: _key_pool_web().custom_check_header_icons(
         checks,
         _service_icon_html,
     )
-    core_service_applicability_for_protocol = lambda protocol: key_pool_web.core_service_applicability(
+    core_service_applicability_for_protocol = lambda protocol: _key_pool_web().core_service_applicability(
         route_states,
         protocol,
     )
-    _tabs_html, panel_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+    _tabs_html, panel_html = _web_pool_form_blocks().render_protocol_tabs_and_panels(
         protocol_sections,
         current_keys,
         protocol_statuses,
@@ -9473,14 +9676,14 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         hash_key=_hash_key,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
-        custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(probe, checks, _service_icon_html),
-        probe_checked_at=key_pool_web.web_probe_checked_at,
-        custom_probe_states=key_pool_web.web_custom_probe_states,
+        custom_check_badges=lambda probe, checks: _key_pool_web().web_custom_check_badges(probe, checks, _service_icon_html),
+        probe_checked_at=_key_pool_web().web_probe_checked_at,
+        custom_probe_states=_key_pool_web().web_custom_probe_states,
         service_icon_html=_service_icon_html,
         pool_table_class=pool_table_class,
         pool_custom_col_width=pool_custom_col_width,
         pool_mobile_custom_col_width=pool_mobile_custom_col_width,
-        custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        custom_header_icons=_key_pool_web().custom_check_header_icons(custom_checks, _service_icon_html),
         subscription_settings=subscription_settings,
         custom_checks_for_protocol=custom_checks_for_protocol,
         custom_header_icons_for_protocol=custom_header_icons_for_protocol,
@@ -9502,14 +9705,14 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
         raise ValueError('Неизвестный протокол')
     _key_name, title, _rows, _placeholder = protocol_sections[0]
     custom_checks = _load_custom_checks()
-    custom_checks_html = key_pool_web.web_custom_checks_html(
+    custom_checks_html = _key_pool_web().web_custom_checks_html(
         _standalone_custom_checks(custom_checks),
         _service_icon_html,
         csrf_input_html=csrf_input_html,
         empty_message='',
     )
     route_states = _service_route_summary()
-    custom_presets_html = key_pool_web.web_custom_presets_html(
+    custom_presets_html = _key_pool_web().web_custom_presets_html(
         custom_checks,
         _custom_check_presets(),
         _service_icon_html,
@@ -9517,7 +9720,7 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
         route_states=route_states,
     )
     route_tools_html = _route_tools_html(csrf_input_html, custom_checks)
-    return web_pool_form_blocks.render_protocol_check_content(
+    return _web_pool_form_blocks().render_protocol_check_content(
         key_name=protocol,
         title=title,
         status_info=(protocol_statuses or {}).get(protocol) or _status_empty_protocol_status(),
@@ -9541,22 +9744,22 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
     custom_presets_html = ''
     route_tools_html = ''
     pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
-        web_pool_form_blocks.pool_table_layout(custom_checks)
+        _web_pool_form_blocks().pool_table_layout(custom_checks)
     )
-    custom_checks_for_protocol = lambda protocol, checks: key_pool_web.protocol_custom_checks(
+    custom_checks_for_protocol = lambda protocol, checks: _key_pool_web().protocol_custom_checks(
         checks,
         route_states,
         protocol,
     )
-    custom_header_icons_for_protocol = lambda protocol, checks: key_pool_web.custom_check_header_icons(
+    custom_header_icons_for_protocol = lambda protocol, checks: _key_pool_web().custom_check_header_icons(
         checks,
         _service_icon_html,
     )
-    core_service_applicability_for_protocol = lambda protocol: key_pool_web.core_service_applicability(
+    core_service_applicability_for_protocol = lambda protocol: _key_pool_web().core_service_applicability(
         route_states,
         protocol,
     )
-    protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+    protocol_tabs_html, protocol_panels_html = _web_pool_form_blocks().render_protocol_tabs_and_panels(
         web_form_blocks.PROTOCOL_SECTIONS,
         current_keys,
         protocol_statuses,
@@ -9568,14 +9771,14 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         hash_key=_hash_key,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
-        custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(probe, checks, _service_icon_html),
-        probe_checked_at=key_pool_web.web_probe_checked_at,
-        custom_probe_states=key_pool_web.web_custom_probe_states,
+        custom_check_badges=lambda probe, checks: _key_pool_web().web_custom_check_badges(probe, checks, _service_icon_html),
+        probe_checked_at=_key_pool_web().web_probe_checked_at,
+        custom_probe_states=_key_pool_web().web_custom_probe_states,
         service_icon_html=_service_icon_html,
         pool_table_class=pool_table_class,
         pool_custom_col_width=pool_custom_col_width,
         pool_mobile_custom_col_width=pool_mobile_custom_col_width,
-        custom_header_icons=key_pool_web.custom_check_header_icons(custom_checks, _service_icon_html),
+        custom_header_icons=_key_pool_web().custom_check_header_icons(custom_checks, _service_icon_html),
         subscription_settings=subscription_settings,
         custom_checks_for_protocol=custom_checks_for_protocol,
         custom_header_icons_for_protocol=custom_header_icons_for_protocol,
@@ -9591,9 +9794,9 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
     )
     pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)
     return {
-        'custom_checks_json': json.dumps(key_pool_web.web_custom_checks(custom_checks), ensure_ascii=False),
+        'custom_checks_json': json.dumps(_key_pool_web().web_custom_checks(custom_checks), ensure_ascii=False),
         'pool_summary': pool_summary,
-        'pool_summary_note': web_pool_form_blocks.pool_summary_note_with_progress(
+        'pool_summary_note': _web_pool_form_blocks().pool_summary_note_with_progress(
             pool_summary['note'],
             pool_probe_pending,
             progress,
@@ -9601,7 +9804,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         ),
         'protocol_panels_html': protocol_panels_html,
         'protocol_tabs_html': protocol_tabs_html,
-        'topbar_status_text': web_pool_form_blocks.pool_probe_topbar_text(
+        'topbar_status_text': _web_pool_form_blocks().pool_probe_topbar_text(
             pool_probe_pending,
             progress,
             _pool_probe_progress_label,
@@ -9611,20 +9814,52 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
 
 
 def _web_simple_form_context(current_keys, protocol_statuses, csrf_input_html, status):
-    protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-        web_form_blocks.PROTOCOL_SECTIONS,
-        current_keys,
-        protocol_statuses,
-        csrf_input_html,
-        enable_key_pool=False,
-        enable_custom_checks=False,
-    )
+    tabs = []
+    panels = []
+    current_keys = current_keys or {}
+    protocol_statuses = protocol_statuses or {}
+    for index, (key_name, title, rows, placeholder) in enumerate(web_form_blocks.PROTOCOL_SECTIONS):
+        active = index == 0
+        active_class = ' active' if active else ''
+        safe_key_name = html.escape(key_name, quote=True)
+        safe_title = html.escape(title)
+        safe_value = html.escape(current_keys.get(key_name, '') or '')
+        safe_placeholder = html.escape(placeholder)
+        status_info = protocol_statuses.get(key_name) or {}
+        safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
+        safe_label = html.escape(status_info.get('label', ''), quote=True)
+        safe_details = html.escape(str(status_info.get('details', '') or '').strip().rstrip('.'))
+        tab_count = 1 if safe_value else 0
+        tabs.append(f'''<button type="button" class="seg-tab protocol-tab{active_class}" data-protocol-target="{safe_key_name}">
+                    <span>{safe_title}</span>
+                    <span class="tab-count">{tab_count}</span>
+                </button>''')
+        panels.append(f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
+        <div class="workspace-head">
+            <div>
+                <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
+                <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
+            </div>
+            <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons></span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>
+        </div>
+        <div class="protocol-subview active" data-subview="key">
+            <form method="post" action="/install" data-async-action="install" class="key-editor-form">
+                {csrf_input_html}
+                <input type="hidden" name="type" value="{safe_key_name}">
+                <label class="field-label">Активный ключ {safe_title}</label>
+                <textarea name="key" rows="{int(rows)}" placeholder="{safe_placeholder}" required data-key-textarea>{safe_value}</textarea>
+                <div class="form-actions">
+                    <button type="submit">Сохранить {safe_title}</button>
+                </div>
+            </form>
+        </div>
+    </section>''')
     return {
         'custom_checks_json': '[]',
         'pool_summary': {'active_text': '', 'note': ''},
         'pool_summary_note': '',
-        'protocol_panels_html': protocol_panels_html,
-        'protocol_tabs_html': protocol_tabs_html,
+        'protocol_panels_html': ''.join(panels),
+        'protocol_tabs_html': ''.join(tabs),
         'topbar_status_text': status['api_status'],
     }
 
@@ -9651,6 +9886,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         return render_web_style_asset(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
 
     def _build_script_asset(self):
+        app_runtime_mode = _load_app_runtime_mode()
+        pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
         return render_web_script_asset(
             POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
@@ -9660,9 +9897,10 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             initial_command_running='false',
             initial_status_pending='false',
             enable_async_forms=True,
-            enable_custom_checks=True,
-            enable_key_pool=True,
+            enable_custom_checks=pool_enabled,
+            enable_key_pool=pool_enabled,
             enable_live_status=True,
+            enable_telegram=_app_mode_telegram_enabled(app_runtime_mode),
         )
 
     def _build_form(self, message=''):
@@ -9670,20 +9908,26 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
         command_state = _consume_web_command_state_for_render()
         current_keys = _load_current_keys()
-        snapshot = _cached_status_snapshot(current_keys)
-        status = snapshot['web'] if snapshot is not None else _placeholder_web_status_snapshot()
-        protocol_statuses = snapshot['protocols'] if snapshot is not None else _placeholder_protocol_statuses(current_keys)
-        current_pool_probe_progress = _get_pool_probe_progress()
-        pool_probe_pending = (
-            bool(current_pool_probe_progress.get('running')) and
-            int(current_pool_probe_progress.get('total') or 0) > 0
-        )
-        if snapshot is None:
-            snapshot = _placeholder_status_snapshot(current_keys)
-            status = snapshot['web']
-            protocol_statuses = snapshot['protocols']
-            if not pool_probe_pending:
-                _refresh_status_caches_async(current_keys)
+        if pool_enabled:
+            snapshot = _cached_status_snapshot(current_keys)
+            status = snapshot['web'] if snapshot is not None else _placeholder_web_status_snapshot()
+            protocol_statuses = snapshot['protocols'] if snapshot is not None else _placeholder_protocol_statuses(current_keys)
+            current_pool_probe_progress = _get_pool_probe_progress()
+            pool_probe_pending = (
+                bool(current_pool_probe_progress.get('running')) and
+                int(current_pool_probe_progress.get('total') or 0) > 0
+            )
+            if snapshot is None:
+                snapshot = _placeholder_status_snapshot(current_keys)
+                status = snapshot['web']
+                protocol_statuses = snapshot['protocols']
+                if not pool_probe_pending:
+                    _refresh_status_caches_async(current_keys)
+        else:
+            status = _placeholder_web_status_snapshot()
+            protocol_statuses = _placeholder_protocol_statuses(current_keys)
+            current_pool_probe_progress = {}
+            pool_probe_pending = False
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
         router_health = _router_health_snapshot()
@@ -9742,7 +9986,10 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         )
 
 
-        event_history_html = key_pool_web.web_event_history_html(_event_history_snapshot())
+        event_history_html = (
+            _key_pool_web().web_event_history_html(_event_history_snapshot())
+            if pool_enabled else ''
+        )
 
         return render_web_form(
             APP_BRANCH_DESCRIPTION=APP_BRANCH_DESCRIPTION,
@@ -10401,26 +10648,29 @@ def main():
     _daemonize_process()
     _register_signal_handlers()
     _write_runtime_log('main() entered', mode='w')
+    runtime_mode = _load_app_runtime_mode()
+    pool_enabled = _app_mode_pool_enabled(runtime_mode)
+    telegram_enabled = _app_mode_telegram_enabled(runtime_mode)
+    _write_runtime_log(f'app runtime mode: {runtime_mode}')
     _cleanup_pool_probe_runtime_light(kill_processes=True)
     _sync_udp_policy_config()
-    _start_udp_quic_drift_watchdog_thread()
-    _start_youtube_edge_prefetch_thread()
-    _start_telegram_call_learning_auto_thread()
+    if pool_enabled:
+        _start_udp_quic_drift_watchdog_thread()
+        _start_youtube_edge_prefetch_thread()
+        _start_telegram_call_learning_auto_thread()
     _start_memory_timeline_thread()
     _start_memory_watchdog_thread()
-    runtime_mode = _load_app_runtime_mode()
-    _write_runtime_log(f'app runtime mode: {runtime_mode}')
     start_http_server()
     _restart_core_proxy_at_startup()
     _mark_bot_ready_from_autostart()
     _restore_startup_proxy_mode()
-    if _app_mode_pool_enabled(runtime_mode):
+    if pool_enabled:
         _start_subscription_auto_refresh_thread()
         _start_auto_failover_thread()
         _start_youtube_vless2_failover_thread()
         _ensure_current_keys_in_pools()
         _load_persisted_pool_probe_resume()
-    if _app_mode_telegram_enabled(runtime_mode):
+    if telegram_enabled:
         _deliver_pending_telegram_command_result()
         _start_telegram_result_retry_worker()
         wait_for_bot_start()

@@ -1,6 +1,3 @@
-from probe_cache import youtube_probe_state
-
-
 def empty_protocol_status():
     return {
         'tone': 'empty',
@@ -18,6 +15,19 @@ def _youtube_state_text(yt_ok, yt_state=''):
     if yt_state == 'warn':
         return 'нестабильно, перепроверяется'
     return 'работает' if yt_ok else 'не работает'
+
+
+def youtube_probe_state(entry):
+    if not isinstance(entry, dict):
+        return 'unknown'
+    stability = str(entry.get('yt_stability') or '').strip().lower()
+    if entry.get('yt_ok') is True:
+        return 'ok'
+    if stability == 'unstable':
+        return 'warn'
+    if entry.get('yt_ok') is False:
+        return 'fail'
+    return 'unknown'
 
 
 def service_status_parts(api_ok, yt_ok, custom_states, custom_checks, *, api_transient=False, api_required=True, yt_state=''):

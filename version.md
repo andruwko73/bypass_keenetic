@@ -1,3 +1,7 @@
+*v1.841 (28 Jun 2026) -* main
+
+*Makes Simple mode load a lightweight web/bot runtime: pool/probe/custom-check UI helpers, route tools, Telegram pool UI, call-learning, auto-failover, and YouTube prefetch are lazy-loaded only when advanced components are enabled, while Simple initial render avoids probe/custom status refresh work.*
+
 *v1.840 (28 Jun 2026) -* main
 
 *Adds a subscription client User-Agent and text Accept header for HWID subscription downloads, fixing providers that reject default Python requests with 403 while keeping the import scoped to the selected protocol.*

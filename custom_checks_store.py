@@ -1,4 +1,5 @@
 import ipaddress
+import hashlib
 import json
 import os
 import re
@@ -6,7 +7,6 @@ import tempfile
 from urllib.parse import urlparse
 
 from service_catalog import CUSTOM_CHECK_PRESETS
-from probe_cache import hash_key
 
 
 CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
@@ -14,6 +14,10 @@ CUSTOM_CHECK_MAX = 12
 CUSTOM_CHECK_REMOVED_IDS = {'mistral'}
 CUSTOM_CHECK_CHATGPT_MERGED_IDS = {'chatgpt', 'codex', 'openai_api', 'openai_codex'}
 CUSTOM_CHECK_META_MERGED_IDS = {'meta_ai', 'instagram', 'facebook'}
+
+
+def hash_key(value):
+    return hashlib.sha1((value or '').encode('utf-8', errors='ignore')).hexdigest()
 
 
 def custom_check_preset(preset_id):

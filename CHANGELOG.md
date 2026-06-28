@@ -1,3 +1,8 @@
+<a name="1.841"></a>
+# [1.841] - 28 Jun 2026
+
+- Makes Simple mode load a lightweight web/bot runtime: pool/probe/custom-check UI helpers, route tools, Telegram pool UI, call-learning, auto-failover, and YouTube prefetch are lazy-loaded only when advanced components are enabled, while Simple initial render avoids probe/custom status refresh work.
+
 <a name="1.840"></a>
 # [1.840] - 28 Jun 2026
 
