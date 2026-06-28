@@ -479,18 +479,7 @@ def _page_html(mode="advanced"):
             key_pool_web.web_custom_checks(CUSTOM_CHECKS) if enable_custom_checks else [],
             ensure_ascii=False,
         ),
-        event_history_html=key_pool_web.web_event_history_html(
-            [
-                {
-                    "ts": int(time.time()),
-                    "action": "key_switch",
-                    "protocol_label": "Vless 1",
-                    "service": "telegram",
-                    "message": "fixture active key",
-                    "level": "info",
-                }
-            ]
-        ),
+        event_history_html="",
         fallback_block=form_basics["fallback_block"],
         initial_command_running=form_basics["initial_command_running"],
         initial_status_pending="false",
@@ -679,6 +668,19 @@ class FixtureHandler(BaseHTTPRequestHandler):
                     ],
                 }
             )
+            return
+        if path == "/api/event_history":
+            events = [
+                {
+                    "ts": int(time.time()),
+                    "action": "key_switch",
+                    "protocol_label": "Vless 1",
+                    "service": "telegram",
+                    "message": "fixture active key",
+                    "level": "info",
+                }
+            ]
+            self._json({"events": events, "html": key_pool_web.web_event_history_html(events)})
             return
         if path == "/api/command_state":
             self._json({"running": False})

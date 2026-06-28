@@ -2312,6 +2312,28 @@ def render_web_scripts(
                 }});
         }}
 
+        function fetchEventHistory() {{
+            const container = document.querySelector('[data-event-history-list]');
+            if (container && !container.querySelector('.event-history-item')) {{
+                container.innerHTML = '<section class="panel event-history-panel"><p class="section-subtitle">Р—Р°РіСЂСѓР¶Р°СЋ РёСЃС‚РѕСЂРёСЋ...</p></section>';
+            }}
+            return fetch('/api/event_history', {{
+                headers: {{'Accept': 'application/json'}},
+                cache: 'no-store'
+            }})
+                .then(function(response) {{ return response.json(); }})
+                .then(function(payload) {{
+                    if (container) {{
+                        container.innerHTML = payload.html || '';
+                    }}
+                }})
+                .catch(function() {{
+                    if (container) {{
+                        container.innerHTML = '<section class="panel event-history-panel"><p class="section-subtitle">РСЃС‚РѕСЂРёСЏ РІСЂРµРјРµРЅРЅРѕ РЅРµРґРѕСЃС‚СѓРїРЅР°</p></section>';
+                    }}
+                }});
+        }}
+
         function setupEventHistoryPanel() {{
             const modal = document.getElementById('event-history-modal');
             const openButtons = document.querySelectorAll('[data-event-history-open]');
@@ -2321,9 +2343,14 @@ def render_web_scripts(
             const closeButtons = modal.querySelectorAll('[data-event-history-close]');
             const refreshButtons = modal.querySelectorAll('[data-router-metrics-refresh]');
             let metricsLoaded = false;
+            let historyLoaded = false;
             function openPanel() {{
                 modal.classList.remove('hidden');
                 document.body.classList.add('event-history-open');
+                if (!historyLoaded) {{
+                    historyLoaded = true;
+                    fetchEventHistory();
+                }}
                 if (!metricsLoaded) {{
                     metricsLoaded = true;
                     fetchRouterMetrics();

@@ -1,3 +1,9 @@
+<a name="1.852"></a>
+# [1.852] - 28 Jun 2026
+
+- Lazily loads event history only when the history drawer is opened, reducing the initial web page render RSS pressure, and ensures event-history/router-metrics API responses enter the web-response cleanup path.
+- Extends update config migration to lower stale legacy web-response cleanup defaults without touching secrets.
+
 <a name="1.851"></a>
 # [1.851] - 28 Jun 2026
 

@@ -3,6 +3,8 @@ import posixpath
 import time
 from urllib.parse import parse_qs
 
+import web_form_blocks
+
 
 PAGE_ROUTES = ('/', '/index.html', '/command')
 
@@ -274,7 +276,12 @@ def dispatch(ctx, path, query=''):
     if path == '/api/update_status':
         return {'kind': 'json', 'payload': _ctx(ctx, 'update_status_snapshot', lambda: {})(), 'status': 200}
     if path == '/api/event_history':
-        return {'kind': 'json', 'payload': {'events': _ctx(ctx, 'event_history_snapshot', lambda: [])()}, 'status': 200}
+        events = _ctx(ctx, 'event_history_snapshot', lambda: [])()
+        return {
+            'kind': 'json',
+            'payload': {'events': events, 'html': web_form_blocks.render_event_history_html(events)},
+            'status': 200,
+        }
     if path == '/api/router_metrics':
         return {'kind': 'json', 'payload': _router_metrics_payload(ctx, query), 'status': 200}
     if path == '/api/route_intersections' and _ctx(ctx, 'pool_enabled', False):

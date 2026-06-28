@@ -1,3 +1,7 @@
+*v1.852 (28 Jun 2026) -* main
+
+*Lazily loads event history only when the history drawer is opened, reducing initial web page RSS pressure, and extends cleanup/migration for history and router metrics responses.*
+
 *v1.851 (28 Jun 2026) -* main
 
 *Keeps the 1.849 header/status layout unchanged while preserving the 1.850 router-load optimizations, and extends UI smoke so Advanced mode fails if the top header status block disappears.*

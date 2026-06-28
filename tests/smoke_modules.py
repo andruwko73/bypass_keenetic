@@ -1826,6 +1826,7 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_watch_warm_max_hosts = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert '[ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'service_route_intersections_cache_ttl = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_scheduler_max_cpu_percent = 45' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_scheduler_max_load1 = 2.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -2613,7 +2614,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "refresh_key = f'active:{signature}' if active_only else signature" in source
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
     assert "'refresh_status_caches_async': refresh_status_caches" in source
-    assert 'event_history_html = web_form_blocks.render_event_history_html(_event_history_snapshot())' in source
+    assert "event_history_html=''" in source
     assert "allow_youtube_confirm=True" in source
     assert "allow_youtube_confirm=False" in source
     assert "elif pool_locked:" in source
@@ -7755,6 +7756,8 @@ def test_web_template_scripts_helpers():
     assert 'refreshPoolData(2500)' in scripts
     assert 'function fetchRouterMetrics()' in scripts
     assert "fetch('/api/router_metrics?compact=1'" in scripts
+    assert 'function fetchEventHistory()' in scripts
+    assert "fetch('/api/event_history'" in scripts
     assert 'data-event-history-tab' not in scripts
     assert "modal.querySelectorAll('[data-router-metrics-refresh]')" in scripts
     assert 'function activateTab' not in scripts

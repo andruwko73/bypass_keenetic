@@ -256,6 +256,10 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   const historyButton = page.locator('[data-event-history-open]:visible').first();
   if (await historyButton.count()) {
+    const initialHistoryItems = await page.locator('[data-event-history-pane="events"] .event-history-item').count();
+    if (initialHistoryItems) {
+      throw new Error(`${name}: event history is rendered before drawer open`);
+    }
     await historyButton.click();
     await assertVisibleBox(page, '#event-history-modal:not(.hidden) .event-history-drawer', `${name} history drawer`);
     const historyTabs = await page.locator('[data-event-history-tab]').count();
@@ -263,6 +267,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: history drawer still renders separate tabs`);
     }
     await assertVisibleBox(page, '.router-metrics-compact', `${name} compact router metrics`);
+    await page.locator('[data-event-history-pane="events"]:not(.hidden) .event-history-item').first().waitFor({ state: 'visible', timeout: 10000 });
     await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history items`);
     await page.waitForFunction(() => {
       const value = document.getElementById('router-metrics-bot-rss');
@@ -274,6 +279,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     await page.locator('[data-event-history-close]').click();
     await historyButton.click();
+    await page.locator('[data-event-history-pane="events"]:not(.hidden) .event-history-item').first().waitFor({ state: 'visible', timeout: 10000 });
     await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history on reopen`);
     await assertVisibleBox(page, '.router-metrics-compact', `${name} compact router metrics on reopen`);
     await page.locator('[data-event-history-close]').click();

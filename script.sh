@@ -890,6 +890,17 @@ migrate_runtime_config_defaults() {
   grep -Eq '^service_route_intersections_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'service_route_intersections_cache_ttl = 60.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
+  if [ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]; then
+    if grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=[[:space:]]*67584([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^web_response_cleanup_rss_kb[[:space:]]*=.*/web_response_cleanup_rss_kb = 61440/' /opt/etc/bot_config.py || true
+    fi
+    if grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=[[:space:]]*300\.0([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^web_response_cleanup_min_interval_seconds[[:space:]]*=.*/web_response_cleanup_min_interval_seconds = 60.0/' /opt/etc/bot_config.py || true
+    fi
+    grep -Eq '^memory_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
+    grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
+    grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
+  fi
   if grep -Eq '^pool_probe_delay_seconds[[:space:]]*=[[:space:]]*1\.5([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_delay_seconds[[:space:]]*=.*/pool_probe_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true
   fi
