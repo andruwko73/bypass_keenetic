@@ -537,8 +537,20 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .event-history-drawer{width:min(720px,calc(100vw - 28px));min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);padding:14px;border:1px solid var(--border);background:rgba(17,25,35,.96);}
         .event-history-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;}
         .event-history-drawer-head h2{margin:0;font-size:18px;line-height:1.2;}
+        .event-history-tabs{display:flex;gap:6px;margin-bottom:10px;}
+        .event-history-tabs .seg-tab{min-height:32px;padding:6px 10px;border-radius:7px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);cursor:pointer;}
+        .event-history-tabs .seg-tab.active{border-color:var(--accent);background:rgba(77,163,255,.16);}
         .event-history-drawer .event-history-panel{min-height:0;margin:0;padding:0;border:0;background:transparent;box-shadow:none;overflow:hidden;}
         .event-history-drawer .event-history-list{min-height:0;overflow:auto;padding-right:4px;grid-template-columns:1fr;}
+        .router-metrics-panel{min-height:0;overflow:auto;display:grid;gap:10px;}
+        .router-metrics-panel.hidden{display:none;}
+        .router-metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;}
+        .router-metrics-grid>div{display:grid;gap:3px;padding:8px;border-radius:7px;border:1px solid rgba(91,124,150,.28);background:rgba(255,255,255,.03);}
+        .router-metrics-grid span{font-size:11px;color:var(--muted);text-transform:uppercase;}
+        .router-metrics-grid strong{font-size:15px;line-height:1.2;}
+        .router-metrics-history{list-style:none;margin:0;padding:0;display:grid;gap:4px;}
+        .router-metrics-history li{display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;padding:5px 6px;border-radius:7px;border:1px solid rgba(91,124,150,.22);background:rgba(255,255,255,.025);font-size:12px;}
+        .compact-button{min-height:30px;padding:5px 9px;}
         .service-preset-grid{display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;}
         .service-preset-grid form{margin:0;flex:0 0 86px;min-width:0;}
         .service-preset-btn{width:86px;min-width:0;display:flex;align-items:center;justify-content:center;gap:4px;height:var(--control-height);min-height:var(--control-height);padding:0 5px;background:rgba(34,67,73,.28);}

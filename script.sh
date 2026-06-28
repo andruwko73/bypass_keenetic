@@ -613,6 +613,35 @@ backup_runtime_modules() {
   done
 }
 
+backup_runtime_state_file() {
+  source_path="$1"
+  backup_name="$2"
+  [ -f "$source_path" ] || return 0
+  cp -a "$source_path" "$backup_dir/$backup_name"
+}
+
+backup_runtime_state_files() {
+  backup_runtime_state_file /opt/etc/bot_app_mode bot_app_mode
+  backup_runtime_state_file /opt/etc/bot_proxy_mode bot_proxy_mode
+  backup_runtime_state_file /opt/etc/bot_autostart bot_autostart
+  backup_runtime_state_file "$BOT_CONFIG_PATH" bot_config.py
+  backup_runtime_state_file /opt/etc/bot/key_pools.json key_pools.json
+  backup_runtime_state_file /opt/etc/bot/subscriptions.json subscriptions.json
+  backup_runtime_state_file /opt/etc/bot/custom_checks.json custom_checks.json
+  backup_runtime_state_file /opt/etc/xray/vmess.key vmess.key
+  backup_runtime_state_file /opt/etc/xray/vless.key vless.key
+  backup_runtime_state_file /opt/etc/xray/vless2.key vless2.key
+  backup_runtime_state_file /opt/etc/xray/config.json xray_config.json
+  backup_runtime_state_file /opt/etc/v2ray/config.json v2ray_config.json
+  backup_runtime_state_file /opt/etc/shadowsocks.json shadowsocks.json
+  backup_runtime_state_file /opt/etc/trojan/config.json trojan_config.json
+  backup_runtime_state_file /opt/etc/unblock/shadowsocks.txt unblock_shadowsocks.txt
+  backup_runtime_state_file /opt/etc/unblock/trojan.txt unblock_trojan.txt
+  backup_runtime_state_file /opt/etc/unblock/vmess.txt unblock_vmess.txt
+  backup_runtime_state_file /opt/etc/unblock/vless.txt unblock_vless.txt
+  backup_runtime_state_file /opt/etc/unblock/vless-2.txt unblock_vless2.txt
+}
+
 backup_static_assets() {
   static_dir="${BOT_RUNTIME_DIR}/static"
   if [ -d "$static_dir" ]; then
@@ -699,6 +728,26 @@ restore_file bot.py "\$BOT_MAIN_PATH"
 restore_file installer.py "\$INSTALLER_MAIN_PATH"
 restore_file S98telegram_bot_installer "\$INSTALLER_SERVICE_PATH"
 restore_file S99telegram_bot "\$BOT_SERVICE_PATH"
+restore_file bot_app_mode /opt/etc/bot_app_mode
+restore_file bot_proxy_mode /opt/etc/bot_proxy_mode
+restore_file bot_autostart /opt/etc/bot_autostart
+restore_file bot_config.py "\$BOT_CONFIG_PATH"
+restore_file bot_config.py /opt/etc/bot_config.py
+restore_file key_pools.json "\$BOT_RUNTIME_DIR/key_pools.json"
+restore_file subscriptions.json "\$BOT_RUNTIME_DIR/subscriptions.json"
+restore_file custom_checks.json "\$BOT_RUNTIME_DIR/custom_checks.json"
+restore_file vmess.key /opt/etc/xray/vmess.key
+restore_file vless.key /opt/etc/xray/vless.key
+restore_file vless2.key /opt/etc/xray/vless2.key
+restore_file xray_config.json /opt/etc/xray/config.json
+restore_file v2ray_config.json /opt/etc/v2ray/config.json
+restore_file shadowsocks.json /opt/etc/shadowsocks.json
+restore_file trojan_config.json /opt/etc/trojan/config.json
+restore_file unblock_shadowsocks.txt /opt/etc/unblock/shadowsocks.txt
+restore_file unblock_trojan.txt /opt/etc/unblock/trojan.txt
+restore_file unblock_vmess.txt /opt/etc/unblock/vmess.txt
+restore_file unblock_vless.txt /opt/etc/unblock/vless.txt
+restore_file unblock_vless2.txt /opt/etc/unblock/vless-2.txt
 
 for module in \$ROLLBACK_MODULES; do
   restore_file "\$module" "\$BOT_RUNTIME_DIR/\$module"
@@ -741,7 +790,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -827,10 +876,41 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_status_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_api_cache_ttl = 30.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^router_metrics_history_limit[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_history_limit = 120\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_warn_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^router_metrics_critical_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_critical_bot_rss_kb = 87040\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^router_metrics_warn_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_warn_load1 = 3.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_pools_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_pools_api_cache_ttl = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^service_route_intersections_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'service_route_intersections_cache_ttl = 60.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 67584\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 300.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^pool_probe_delay_seconds[[:space:]]*=[[:space:]]*1\.5([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^pool_probe_delay_seconds[[:space:]]*=.*/pool_probe_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^pool_probe_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_delay_seconds = 3.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^pool_probe_max_cpu_percent[[:space:]]*=[[:space:]]*70\.0?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^pool_probe_max_cpu_percent[[:space:]]*=.*/pool_probe_max_cpu_percent = 45.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^pool_probe_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_cpu_percent = 45.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^pool_probe_high_cpu_delay_seconds[[:space:]]*=[[:space:]]*5\.0?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^pool_probe_high_cpu_delay_seconds[[:space:]]*=.*/pool_probe_high_cpu_delay_seconds = 8.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^pool_probe_high_cpu_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_high_cpu_delay_seconds = 8.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^pool_probe_high_cpu_max_wait_seconds[[:space:]]*=[[:space:]]*45\.0?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^pool_probe_high_cpu_max_wait_seconds[[:space:]]*=.*/pool_probe_high_cpu_max_wait_seconds = 120.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^pool_probe_high_cpu_max_wait_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_high_cpu_max_wait_seconds = 120.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_probe_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_load1 = 2.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_probe_high_load_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_high_load_delay_seconds = 10.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_probe_high_load_max_wait_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_high_load_max_wait_seconds = 120.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^pool_probe_quality_download_bytes[[:space:]]*=[[:space:]]*1048576([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^pool_probe_quality_download_bytes[[:space:]]*=.*/pool_probe_quality_download_bytes = 524288/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^pool_probe_quality_download_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_quality_download_bytes = 524288\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^pool_probe_quality_max_samples_per_run[[:space:]]*=[[:space:]]*12([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^pool_probe_quality_max_samples_per_run[[:space:]]*=.*/pool_probe_quality_max_samples_per_run = 6/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^pool_probe_quality_max_samples_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_quality_max_samples_per_run = 6\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_udp_policy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "telegram_udp_policy = 'auto'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_mode[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_mode = 'external'\n" >> "$BOT_CONFIG_PATH"
@@ -844,22 +924,22 @@ migrate_runtime_config_defaults() {
   grep -Eq '^youtube_edge_prefetch_lock_dir[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cache_ttl_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cache_ttl_seconds = 259200\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_max_cache_entries[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_cache_entries = 128\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*4([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=.*/youtube_edge_prefetch_max_hosts_per_run = 12/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*(4|12)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=.*/youtube_edge_prefetch_max_hosts_per_run = 6/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_hosts_per_run = 12\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=[[:space:]]*12([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=.*/youtube_edge_prefetch_max_resolved_addresses = 32/' "$BOT_CONFIG_PATH" || true
+  grep -Eq '^youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_hosts_per_run = 6\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=[[:space:]]*(12|32)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=.*/youtube_edge_prefetch_max_resolved_addresses = 16/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_resolved_addresses = 32\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=[[:space:]]*32([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_prefetch_max_candidates[[:space:]]*=.*/youtube_edge_prefetch_max_candidates = 64/' "$BOT_CONFIG_PATH" || true
+  grep -Eq '^youtube_edge_prefetch_max_resolved_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_resolved_addresses = 16\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=[[:space:]]*64([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_candidates[[:space:]]*=.*/youtube_edge_prefetch_max_candidates = 32/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_candidates = 64\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=[[:space:]]*8([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=.*/youtube_edge_prefetch_max_addresses_per_run = 16/' "$BOT_CONFIG_PATH" || true
+  grep -Eq '^youtube_edge_prefetch_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_candidates = 32\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=[[:space:]]*16([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=.*/youtube_edge_prefetch_max_addresses_per_run = 8/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_addresses_per_run = 16\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_max_addresses_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_max_addresses_per_run = 8\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^youtube_edge_prefetch_min_available_kb[[:space:]]*=[[:space:]]*160000([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^youtube_edge_prefetch_min_available_kb[[:space:]]*=.*/youtube_edge_prefetch_min_available_kb = 125000/' "$BOT_CONFIG_PATH" || true
   fi
@@ -885,33 +965,52 @@ youtube_edge_prefetch_fast_hosts = (
 )
 PYCFG
   fi
-  if grep -Eq '^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=[[:space:]]*4([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=.*/youtube_edge_prefetch_fast_max_hosts_per_run = 8/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=[[:space:]]*8([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=.*/youtube_edge_prefetch_fast_max_hosts_per_run = 4/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_max_hosts_per_run = 8\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_fast_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_max_candidates = 32\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_fast_max_hosts_per_run[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_max_hosts_per_run = 4\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_fast_max_candidates[[:space:]]*=[[:space:]]*32([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_fast_max_candidates[[:space:]]*=.*/youtube_edge_prefetch_fast_max_candidates = 16/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_fast_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_fast_max_candidates = 16\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_quality_probe_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_probe_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_quality_target_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_target_ms = 1000\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_quality_timeout_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_timeout_seconds = 5\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_quality_bad_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_quality_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_max_candidates = 24\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_prefetch_scheduler_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_scheduler_max_cpu_percent = 60\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_quality_max_candidates[[:space:]]*=[[:space:]]*24([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_quality_max_candidates[[:space:]]*=.*/youtube_edge_prefetch_quality_max_candidates = 12/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_quality_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_max_candidates = 12\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_prefetch_scheduler_max_cpu_percent[[:space:]]*=[[:space:]]*60([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_scheduler_max_cpu_percent[[:space:]]*=.*/youtube_edge_prefetch_scheduler_max_cpu_percent = 45/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_prefetch_scheduler_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_scheduler_max_cpu_percent = 45\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_scheduler_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_scheduler_max_load1 = 2.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cpu_sample_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cpu_sample_ms = 250\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^active_status_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'active_status_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_vless2_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_vless2_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_urls[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ', 'https://www.youtube.com/watch?v=jfKfPfyJRdk')\n" >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*1([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_watch_warm_max_pages[[:space:]]*=.*/youtube_edge_watch_warm_max_pages = 2/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*2([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_pages[[:space:]]*=.*/youtube_edge_watch_warm_max_pages = 1/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 2\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=[[:space:]]*6([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_watch_warm_max_hosts[[:space:]]*=.*/youtube_edge_watch_warm_max_hosts = 8/' "$BOT_CONFIG_PATH" || true
+  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 1\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=[[:space:]]*(6|8)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_hosts[[:space:]]*=.*/youtube_edge_watch_warm_max_hosts = 4/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 8\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_bytes = 1800000\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_watch_warm_connect_timeout[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_connect_timeout = 6\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_edge_watch_warm_max_time[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_time = 20\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 4\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=[[:space:]]*1800000([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_bytes[[:space:]]*=.*/youtube_edge_watch_warm_max_bytes = 900000/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_bytes = 900000\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_connect_timeout[[:space:]]*=[[:space:]]*6([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_connect_timeout[[:space:]]*=.*/youtube_edge_watch_warm_connect_timeout = 4/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_watch_warm_connect_timeout[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_connect_timeout = 4\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_time[[:space:]]*=[[:space:]]*20([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_time[[:space:]]*=.*/youtube_edge_watch_warm_max_time = 10/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_edge_watch_warm_max_time[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_time = 10\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_dns_servers[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')\n" >> "$BOT_CONFIG_PATH"
   if ! grep -Eq '^youtube_edge_prefetch_hosts[[:space:]]*=' "$BOT_CONFIG_PATH"; then
     cat >> "$BOT_CONFIG_PATH" <<'PYCFG'
@@ -1254,10 +1353,23 @@ if [ "$1" = "-install" ]; then
     opkg update
     core_proxy_pkg=$(detect_core_proxy_package)
     opkg install curl mc bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip "$core_proxy_pkg" trojan
-    curl -O https://bootstrap.pypa.io/get-pip.py
-    sleep 3
-    python get-pip.py
-    pip install pyTelegramBotAPI pysocks
+    pip_cmd="python3 -m pip"
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+      if python -m pip --version >/dev/null 2>&1; then
+        pip_cmd="python -m pip"
+      else
+      curl -O https://bootstrap.pypa.io/get-pip.py
+      sleep 3
+        python3 get-pip.py
+      fi
+    fi
+    if ! python3 - <<'PY' >/dev/null 2>&1
+import socks
+import telebot
+PY
+    then
+      $pip_cmd install pyTelegramBotAPI pysocks
+    fi
     #pip install pathlib
     #pip install --upgrade pip
     #pip install pytelegrambotapi
@@ -1283,15 +1395,24 @@ if [ "$1" = "-install" ]; then
 
     # chmod 777 /opt/etc/shadowsocks.json || rm -Rfv /opt/etc/shadowsocks.json
     # chmod 777 /opt/etc/init.d/S22shadowsocks
-    curl -o /opt/etc/shadowsocks.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/shadowsocks.json
-    echo "Установлены настройки Shadowsocks"
+    if [ -s /opt/etc/shadowsocks.json ]; then
+      echo "Существующие настройки Shadowsocks сохранены."
+    else
+      curl -o /opt/etc/shadowsocks.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/shadowsocks.json
+      echo "Установлены настройки Shadowsocks"
+    fi
     sed -i "s/ss-local/${ssredir}/g" /opt/etc/init.d/S22shadowsocks
     chmod 0644 /opt/etc/shadowsocks.json
     chmod 755 /opt/etc/init.d/S22shadowsocks || chmod +x /opt/etc/init.d/S22shadowsocks
     echo "Установлен параметр ss-redir для Shadowsocks"
 
     # chmod 777 /opt/etc/trojan/config.json || rm -Rfv /opt/etc/trojan/config.json
-    curl -o /opt/etc/trojan/config.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/trojanconfig.json
+    mkdir -p /opt/etc/trojan
+    if [ -s /opt/etc/trojan/config.json ]; then
+      echo "Существующие настройки Trojan сохранены."
+    else
+      curl -o /opt/etc/trojan/config.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/trojanconfig.json
+    fi
     configure_core_proxy_service
 
     # unblock folder and files
@@ -1516,6 +1637,7 @@ if [ "$1" = "-update" ]; then
     if [ -f "$BOT_SERVICE_PATH" ]; then
       mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot
     fi
+    backup_runtime_state_files
     backup_runtime_modules $BOT_RUNTIME_MODULES
     backup_static_assets
     write_update_rollback_script

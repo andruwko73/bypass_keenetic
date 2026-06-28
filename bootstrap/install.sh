@@ -23,7 +23,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -343,6 +343,7 @@ restore_path /opt/etc/bot/app_runtime_mode.py
 restore_path /opt/etc/bot/key_pool_store.py
 restore_path /opt/etc/bot/key_pool_web.py
 restore_path /opt/etc/bot/router_health_runtime.py
+restore_path /opt/etc/bot/router_metrics.py
 restore_path /opt/etc/bot/telegram_pool_ui.py
 restore_path /opt/etc/bot/pool_probe_runner.py
 restore_path /opt/etc/bot/service_catalog.py
@@ -471,6 +472,7 @@ backup_path "$BOT_DIR/app_runtime_mode.py"
 backup_path "$BOT_DIR/key_pool_store.py"
 backup_path "$BOT_DIR/key_pool_web.py"
 backup_path "$BOT_DIR/router_health_runtime.py"
+backup_path "$BOT_DIR/router_metrics.py"
 backup_path "$BOT_DIR/telegram_call_learning.py"
 backup_path "$BOT_DIR/telegram_pool_ui.py"
 backup_path "$BOT_DIR/pool_probe_runner.py"
@@ -526,6 +528,7 @@ download_file "$RAW_BASE/app_runtime_mode.py" "$TMP_DIR/app_runtime_mode.py" 'se
 download_file "$RAW_BASE/key_pool_store.py" "$TMP_DIR/key_pool_store.py" 'def normalize_key_pools'
 download_file "$RAW_BASE/key_pool_web.py" "$TMP_DIR/key_pool_web.py" 'pool_status_summary'
 download_file "$RAW_BASE/router_health_runtime.py" "$TMP_DIR/router_health_runtime.py" 'RouterHealthRuntime'
+download_file "$RAW_BASE/router_metrics.py" "$TMP_DIR/router_metrics.py" 'RouterMetricsRuntime'
 download_file "$RAW_BASE/telegram_call_learning.py" "$TMP_DIR/telegram_call_learning.py" 'def read_lan_conntrack_flows'
 download_file "$RAW_BASE/telegram_pool_ui.py" "$TMP_DIR/telegram_pool_ui.py" 'pool_action_markup'
 download_file "$RAW_BASE/pool_probe_runner.py" "$TMP_DIR/pool_probe_runner.py" 'run_pool_probe_worker'
@@ -563,6 +566,7 @@ cp "$TMP_DIR/app_runtime_mode.py" "$BOT_DIR/app_runtime_mode.py"
 cp "$TMP_DIR/key_pool_store.py" "$BOT_DIR/key_pool_store.py"
 cp "$TMP_DIR/key_pool_web.py" "$BOT_DIR/key_pool_web.py"
 cp "$TMP_DIR/router_health_runtime.py" "$BOT_DIR/router_health_runtime.py"
+cp "$TMP_DIR/router_metrics.py" "$BOT_DIR/router_metrics.py"
 cp "$TMP_DIR/telegram_call_learning.py" "$BOT_DIR/telegram_call_learning.py"
 cp "$TMP_DIR/telegram_pool_ui.py" "$BOT_DIR/telegram_pool_ui.py"
 cp "$TMP_DIR/pool_probe_runner.py" "$BOT_DIR/pool_probe_runner.py"
@@ -593,7 +597,7 @@ cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 download_static_assets
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/app_version.py" "$BOT_DIR/app_runtime_mode.py" "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/router_health_runtime.py" "$BOT_DIR/telegram_call_learning.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_template_styles.py" "$BOT_DIR/web_template_scripts.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/web_commands_runtime.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
+chmod 644 "$BOT_DIR/app_version.py" "$BOT_DIR/app_runtime_mode.py" "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/router_health_runtime.py" "$BOT_DIR/router_metrics.py" "$BOT_DIR/telegram_call_learning.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_template_styles.py" "$BOT_DIR/web_template_scripts.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/web_commands_runtime.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
 for module in $BOT_RUNTIME_MODULES; do
     chmod 644 "$BOT_DIR/$module"
 done
@@ -640,19 +644,22 @@ pool_probe_min_available_kb = 190000
 pool_probe_pause_available_kb = 125000
 pool_probe_slow_available_kb = 190000
 pool_probe_slow_memory_delay_seconds = 3.0
-pool_probe_delay_seconds = 1.5
+pool_probe_delay_seconds = 3.0
 pool_probe_cpu_guard_enabled = True
-pool_probe_max_cpu_percent = 70.0
+pool_probe_max_cpu_percent = 45.0
 pool_probe_cpu_sample_seconds = 0.35
-pool_probe_high_cpu_delay_seconds = 5.0
-pool_probe_high_cpu_max_wait_seconds = 45.0
+pool_probe_high_cpu_delay_seconds = 8.0
+pool_probe_high_cpu_max_wait_seconds = 120.0
+pool_probe_max_load1 = 2.0
+pool_probe_high_load_delay_seconds = 10.0
+pool_probe_high_load_max_wait_seconds = 120.0
 pool_probe_max_process_rss_kb = 87040
 pool_probe_youtube_profile = 'quick'
 pool_probe_quality_enabled = True
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={{bytes}}'
-pool_probe_quality_download_bytes = 1048576
+pool_probe_quality_download_bytes = 524288
 pool_probe_quality_min_available_kb = 170000
-pool_probe_quality_max_samples_per_run = 12
+pool_probe_quality_max_samples_per_run = 6
 pool_probe_quality_download_connect_timeout = 6.0
 pool_probe_quality_download_read_timeout = 10.0
 pool_probe_quality_stable_latency_ms = 2500
@@ -669,6 +676,10 @@ memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
 status_refresh_min_interval_seconds = 180.0
 web_status_api_cache_ttl = 30.0
+router_metrics_history_limit = 120
+router_metrics_warn_bot_rss_kb = 71680
+router_metrics_critical_bot_rss_kb = 87040
+router_metrics_warn_load1 = 3.0
 web_pools_api_cache_ttl = 45.0
 service_route_intersections_cache_ttl = 60.0
 web_response_cleanup_rss_kb = 67584
@@ -698,10 +709,10 @@ youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.j
 youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'
 youtube_edge_prefetch_cache_ttl_seconds = 259200
 youtube_edge_prefetch_max_cache_entries = 128
-youtube_edge_prefetch_max_hosts_per_run = 12
-youtube_edge_prefetch_max_resolved_addresses = 32
-youtube_edge_prefetch_max_candidates = 64
-youtube_edge_prefetch_max_addresses_per_run = 16
+youtube_edge_prefetch_max_hosts_per_run = 6
+youtube_edge_prefetch_max_resolved_addresses = 16
+youtube_edge_prefetch_max_candidates = 32
+youtube_edge_prefetch_max_addresses_per_run = 8
 youtube_edge_prefetch_min_available_kb = 125000
 youtube_edge_prefetch_max_rss_kb = 66560
 youtube_edge_prefetch_exclusive_ipsets = True
@@ -720,25 +731,26 @@ youtube_edge_prefetch_fast_hosts = (
     's.ytimg.com',
     'yt3.ggpht.com',
 )
-youtube_edge_prefetch_fast_max_hosts_per_run = 8
-youtube_edge_prefetch_fast_max_candidates = 32
+youtube_edge_prefetch_fast_max_hosts_per_run = 4
+youtube_edge_prefetch_fast_max_candidates = 16
 youtube_edge_prefetch_quality_probe_enabled = True
 youtube_edge_prefetch_quality_target_ms = 1000
 youtube_edge_prefetch_quality_timeout_seconds = 5
 youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600
-youtube_edge_prefetch_quality_max_candidates = 24
-youtube_edge_prefetch_scheduler_max_cpu_percent = 60
+youtube_edge_prefetch_quality_max_candidates = 12
+youtube_edge_prefetch_scheduler_max_cpu_percent = 45
+youtube_edge_prefetch_scheduler_max_load1 = 2.0
 youtube_edge_prefetch_cpu_sample_ms = 250
 youtube_edge_watch_warm_enabled = True
 youtube_edge_watch_warm_urls = (
     'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
     'https://www.youtube.com/watch?v=jfKfPfyJRdk',
 )
-youtube_edge_watch_warm_max_pages = 2
-youtube_edge_watch_warm_max_hosts = 8
-youtube_edge_watch_warm_max_bytes = 1800000
-youtube_edge_watch_warm_connect_timeout = 6
-youtube_edge_watch_warm_max_time = 20
+youtube_edge_watch_warm_max_pages = 1
+youtube_edge_watch_warm_max_hosts = 4
+youtube_edge_watch_warm_max_bytes = 900000
+youtube_edge_watch_warm_connect_timeout = 4
+youtube_edge_watch_warm_max_time = 10
 youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')
 youtube_edge_prefetch_hosts = (
     'www.youtube.com',

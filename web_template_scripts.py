@@ -2257,6 +2257,75 @@ def render_web_scripts(
             }});
         }}
 
+        function metricMb(kb) {{
+            const value = Number(kb || 0);
+            if (!value) {{
+                return '-';
+            }}
+            return Math.round(value / 1024) + ' MB';
+        }}
+
+        function metricPercent(value) {{
+            const number = Number(value || 0);
+            if (!number) {{
+                return '0%';
+            }}
+            return (Math.round(number * 100) / 100) + '%';
+        }}
+
+        function updateRouterMetricsPanel(payload) {{
+            payload = payload || {{}};
+            const load = payload.load || {{}};
+            const processes = payload.processes || {{}};
+            const bot = processes.bot || {{}};
+            const xray = processes.xray || {{}};
+            const summary = payload.summary || {{}};
+            const status = document.getElementById('router-metrics-status');
+            if (status) {{
+                const date = payload.timestamp ? new Date(Number(payload.timestamp) * 1000) : null;
+                status.textContent = date ? 'Обновлено ' + date.toLocaleTimeString() : 'Метрики обновлены';
+            }}
+            const loadText = [load.load1, load.load5, load.load15].map(function(item) {{
+                return Number(item || 0).toFixed(2);
+            }}).join(' / ');
+            setOptionalText('router-metrics-load', loadText);
+            setOptionalText('router-metrics-bot-rss', metricMb(bot.rss_kb));
+            setOptionalText('router-metrics-bot-cpu', metricPercent(bot.cpu_percent));
+            setOptionalText('router-metrics-xray-rss', xray.running ? metricMb(xray.rss_kb) : 'не запущен');
+            setOptionalText('router-metrics-xray-cpu', xray.running ? metricPercent(xray.cpu_percent) : '-');
+            const peakText = 'bot ' + metricMb(summary.bot_rss_max_kb) + ' / xray ' + metricMb(summary.xray_rss_max_kb);
+            setOptionalText('router-metrics-peak', peakText);
+            const list = document.getElementById('router-metrics-history');
+            if (list) {{
+                const history = Array.isArray(payload.history) ? payload.history.slice(-12).reverse() : [];
+                list.innerHTML = history.map(function(item) {{
+                    const stamp = item.timestamp ? new Date(Number(item.timestamp) * 1000).toLocaleTimeString() : '';
+                    const row = 'load ' + Number(item.load1 || 0).toFixed(2) +
+                        ' · bot ' + metricMb(item.bot_rss_kb) +
+                        ' · xray ' + metricMb(item.xray_rss_kb);
+                    return '<li><span>' + escapeHtml(stamp) + '</span><span>' + escapeHtml(row) + '</span></li>';
+                }}).join('');
+            }}
+        }}
+
+        function fetchRouterMetrics() {{
+            const status = document.getElementById('router-metrics-status');
+            if (status) {{
+                status.textContent = 'Загружаю метрики...';
+            }}
+            return fetch('/api/router_metrics', {{
+                headers: {{'Accept': 'application/json'}},
+                cache: 'no-store'
+            }})
+                .then(function(response) {{ return response.json(); }})
+                .then(updateRouterMetricsPanel)
+                .catch(function() {{
+                    if (status) {{
+                        status.textContent = 'Метрики временно недоступны';
+                    }}
+                }});
+        }}
+
         function setupEventHistoryPanel() {{
             const modal = document.getElementById('event-history-modal');
             const openButtons = document.querySelectorAll('[data-event-history-open]');
@@ -2264,9 +2333,30 @@ def render_web_scripts(
                 return;
             }}
             const closeButtons = modal.querySelectorAll('[data-event-history-close]');
+            const tabButtons = modal.querySelectorAll('[data-event-history-tab]');
+            const panes = modal.querySelectorAll('[data-event-history-pane]');
+            const refreshButtons = modal.querySelectorAll('[data-router-metrics-refresh]');
+            let activeTab = 'events';
+            let metricsLoaded = false;
+            function activateTab(tab) {{
+                activeTab = tab || 'events';
+                tabButtons.forEach(function(button) {{
+                    const selected = button.dataset.eventHistoryTab === activeTab;
+                    button.classList.toggle('active', selected);
+                    button.setAttribute('aria-selected', selected ? 'true' : 'false');
+                }});
+                panes.forEach(function(pane) {{
+                    pane.classList.toggle('hidden', pane.dataset.eventHistoryPane !== activeTab);
+                }});
+                if (activeTab === 'metrics' && !metricsLoaded) {{
+                    metricsLoaded = true;
+                    fetchRouterMetrics();
+                }}
+            }}
             function openPanel() {{
                 modal.classList.remove('hidden');
                 document.body.classList.add('event-history-open');
+                activateTab(activeTab);
             }}
             function closePanel() {{
                 modal.classList.add('hidden');
@@ -2277,6 +2367,17 @@ def render_web_scripts(
             }});
             closeButtons.forEach(function(button) {{
                 button.addEventListener('click', closePanel);
+            }});
+            tabButtons.forEach(function(button) {{
+                button.addEventListener('click', function() {{
+                    activateTab(button.dataset.eventHistoryTab || 'events');
+                }});
+            }});
+            refreshButtons.forEach(function(button) {{
+                button.addEventListener('click', function() {{
+                    metricsLoaded = true;
+                    fetchRouterMetrics();
+                }});
             }});
             modal.addEventListener('click', function(event) {{
                 if (event.target === modal) {{

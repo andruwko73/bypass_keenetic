@@ -28,11 +28,11 @@ WATCH_WARM_URLS = (
     'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
     'https://www.youtube.com/watch?v=jfKfPfyJRdk',
 )
-WATCH_WARM_MAX_PAGES = 2
-WATCH_WARM_MAX_HOSTS = 8
-WATCH_WARM_MAX_BYTES = 1800000
-WATCH_WARM_CONNECT_TIMEOUT = 6
-WATCH_WARM_MAX_TIME = 20
+WATCH_WARM_MAX_PAGES = 1
+WATCH_WARM_MAX_HOSTS = 4
+WATCH_WARM_MAX_BYTES = 900000
+WATCH_WARM_CONNECT_TIMEOUT = 4
+WATCH_WARM_MAX_TIME = 10
 FAST_PREFETCH_HOSTS = (
     'www.youtube.com',
     'youtube.com',
@@ -93,6 +93,14 @@ def _config_int(name, default, minimum=0):
     except Exception:
         value = default
     return max(minimum, int(value))
+
+
+def _config_float(name, default, minimum=0.0):
+    try:
+        value = float(_config_value(name, default))
+    except Exception:
+        value = default
+    return max(float(minimum), float(value))
 
 
 def _config_str(name, default):
@@ -296,17 +304,14 @@ def collect_watch_edge_hosts(route_protocol):
     if socks_port <= 0:
         return (), {'enabled': True, 'skipped_reason': 'no_socks_port'}
 
-    max_hosts = max(
-        _config_int('youtube_edge_watch_warm_max_hosts', WATCH_WARM_MAX_HOSTS, minimum=0),
-        WATCH_WARM_MAX_HOSTS,
-    )
+    max_hosts = _config_int('youtube_edge_watch_warm_max_hosts', WATCH_WARM_MAX_HOSTS, minimum=0)
     if max_hosts <= 0:
         return (), {'enabled': True, 'socks_port': socks_port, 'skipped_reason': 'max_hosts_zero'}
 
     urls = watch_urls_for_run()
     max_pages = min(
         len(urls),
-        max(_config_int('youtube_edge_watch_warm_max_pages', WATCH_WARM_MAX_PAGES, minimum=1), WATCH_WARM_MAX_PAGES),
+        _config_int('youtube_edge_watch_warm_max_pages', WATCH_WARM_MAX_PAGES, minimum=1),
     )
     hosts = []
     seen = set()
@@ -480,12 +485,31 @@ def read_cpu_percent(sample_seconds=0.25):
     return cpu_percent_between(previous, read_cpu_stat())
 
 
+def read_load1(loadavg_path='/proc/loadavg'):
+    try:
+        with open(loadavg_path, 'r', encoding='utf-8', errors='ignore') as file:
+            parts = file.read().split()
+    except Exception:
+        return None
+    if not parts:
+        return None
+    try:
+        return float(parts[0])
+    except Exception:
+        return None
+
+
+def _scheduler_full_run_guarded_trigger(trigger):
+    text = str(trigger or '').strip().lower()
+    return text in ('scheduler', 'ipset-refresh')
+
+
 def _scheduler_full_run_cpu_busy(trigger, fast_warm):
     if fast_warm:
         return None
-    if str(trigger or '').strip().lower() != 'scheduler':
+    if not _scheduler_full_run_guarded_trigger(trigger):
         return None
-    max_cpu = _config_int('youtube_edge_prefetch_scheduler_max_cpu_percent', 60, minimum=0)
+    max_cpu = _config_int('youtube_edge_prefetch_scheduler_max_cpu_percent', 45, minimum=0)
     if max_cpu <= 0:
         return None
     cpu_percent = read_cpu_percent(
@@ -494,6 +518,20 @@ def _scheduler_full_run_cpu_busy(trigger, fast_warm):
     if cpu_percent is None or cpu_percent <= float(max_cpu):
         return None
     return cpu_percent
+
+
+def _scheduler_full_run_load_busy(trigger, fast_warm):
+    if fast_warm:
+        return None
+    if not _scheduler_full_run_guarded_trigger(trigger):
+        return None
+    max_load1 = _config_float('youtube_edge_prefetch_scheduler_max_load1', 2.0, minimum=0.0)
+    if max_load1 <= 0:
+        return None
+    load1 = read_load1()
+    if load1 is None or load1 <= float(max_load1):
+        return None
+    return load1
 
 
 def _pid_is_active(pid):
@@ -776,6 +814,19 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 'route_protocol': route_protocol,
                 'skipped_reason': 'high_cpu',
                 'cpu_percent': round(float(busy_cpu), 2),
+                'available_memory_kb': available_kb,
+                'warm_mode': 'full',
+            }
+            status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
+            _write_json_file(status_path, status)
+            return status
+        busy_load1 = _scheduler_full_run_load_busy(trigger, fast_warm)
+        if busy_load1 is not None:
+            status = {
+                'ok': False,
+                'route_protocol': route_protocol,
+                'skipped_reason': 'high_load',
+                'load1': round(float(busy_load1), 2),
                 'available_memory_kb': available_kb,
                 'warm_mode': 'full',
             }

@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.841
+# ВЕРСИЯ СКРИПТА v1.842
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -25,19 +25,22 @@ pool_probe_min_available_kb = 190000  # проверка пула не запу�
 pool_probe_pause_available_kb = 125000  # ниже этого порога проверка ставит очередь на паузу до освобождения памяти
 pool_probe_slow_available_kb = 190000  # ниже этого порога проверка идёт медленнее, но не останавливается полностью
 pool_probe_slow_memory_delay_seconds = 3.0
-pool_probe_delay_seconds = 1.5  # пауза между ключами, чтобы полная проверка пула не забивала CPU роутера
+pool_probe_delay_seconds = 3.0  # пауза между ключами, чтобы полная проверка пула не забивала CPU роутера
 pool_probe_cpu_guard_enabled = True
-pool_probe_max_cpu_percent = 70.0
+pool_probe_max_cpu_percent = 45.0
 pool_probe_cpu_sample_seconds = 0.35
-pool_probe_high_cpu_delay_seconds = 5.0
-pool_probe_high_cpu_max_wait_seconds = 45.0
+pool_probe_high_cpu_delay_seconds = 8.0
+pool_probe_high_cpu_max_wait_seconds = 120.0
+pool_probe_max_load1 = 2.0
+pool_probe_high_load_delay_seconds = 10.0
+pool_probe_high_load_max_wait_seconds = 120.0
 pool_probe_max_process_rss_kb = 87040  # рабочий потолок RSS во время проверки пула; после проверки действует restart-порог 70 MB
 pool_probe_youtube_profile = 'quick'  # quick для пула, full остаётся для детальной диагностики активного ключа
 pool_probe_quality_enabled = True  # короткий download-sample через ключ для оценки YouTube-качества перед применением
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={bytes}'
-pool_probe_quality_download_bytes = 1048576
+pool_probe_quality_download_bytes = 524288
 pool_probe_quality_min_available_kb = 170000
-pool_probe_quality_max_samples_per_run = 12
+pool_probe_quality_max_samples_per_run = 6
 pool_probe_quality_download_connect_timeout = 6.0
 pool_probe_quality_download_read_timeout = 10.0
 pool_probe_quality_stable_latency_ms = 2500
@@ -48,6 +51,10 @@ router_health_cache_ttl = 15.0  # быстрый веб-статус памят�
 router_health_dns_cache_ttl = 45.0  # dnsmasq/ipset diagnostics не дергать на каждом обновлении страницы
 router_health_ndmc_cache_ttl = 30.0  # ndmc show system тяжелее /proc, держим отдельный TTL
 web_status_api_cache_ttl = 30.0
+router_metrics_history_limit = 120
+router_metrics_warn_bot_rss_kb = 71680
+router_metrics_critical_bot_rss_kb = 87040
+router_metrics_warn_load1 = 3.0
 web_pools_api_cache_ttl = 45.0
 service_route_intersections_cache_ttl = 60.0
 memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
@@ -90,10 +97,10 @@ youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.j
 youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'
 youtube_edge_prefetch_cache_ttl_seconds = 259200
 youtube_edge_prefetch_max_cache_entries = 128
-youtube_edge_prefetch_max_hosts_per_run = 12
-youtube_edge_prefetch_max_resolved_addresses = 32
-youtube_edge_prefetch_max_candidates = 64
-youtube_edge_prefetch_max_addresses_per_run = 16
+youtube_edge_prefetch_max_hosts_per_run = 6
+youtube_edge_prefetch_max_resolved_addresses = 16
+youtube_edge_prefetch_max_candidates = 32
+youtube_edge_prefetch_max_addresses_per_run = 8
 youtube_edge_prefetch_min_available_kb = 125000
 youtube_edge_prefetch_max_rss_kb = 66560
 youtube_edge_prefetch_exclusive_ipsets = True
@@ -112,25 +119,26 @@ youtube_edge_prefetch_fast_hosts = (
     's.ytimg.com',
     'yt3.ggpht.com',
 )
-youtube_edge_prefetch_fast_max_hosts_per_run = 8
-youtube_edge_prefetch_fast_max_candidates = 32
+youtube_edge_prefetch_fast_max_hosts_per_run = 4
+youtube_edge_prefetch_fast_max_candidates = 16
 youtube_edge_prefetch_quality_probe_enabled = True
 youtube_edge_prefetch_quality_target_ms = 1000
 youtube_edge_prefetch_quality_timeout_seconds = 5
 youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600
-youtube_edge_prefetch_quality_max_candidates = 24
-youtube_edge_prefetch_scheduler_max_cpu_percent = 60
+youtube_edge_prefetch_quality_max_candidates = 12
+youtube_edge_prefetch_scheduler_max_cpu_percent = 45
+youtube_edge_prefetch_scheduler_max_load1 = 2.0
 youtube_edge_prefetch_cpu_sample_ms = 250
 youtube_edge_watch_warm_enabled = True
 youtube_edge_watch_warm_urls = (
     'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
     'https://www.youtube.com/watch?v=jfKfPfyJRdk',
 )
-youtube_edge_watch_warm_max_pages = 2
-youtube_edge_watch_warm_max_hosts = 8
-youtube_edge_watch_warm_max_bytes = 1800000
-youtube_edge_watch_warm_connect_timeout = 6
-youtube_edge_watch_warm_max_time = 20
+youtube_edge_watch_warm_max_pages = 1
+youtube_edge_watch_warm_max_hosts = 4
+youtube_edge_watch_warm_max_bytes = 900000
+youtube_edge_watch_warm_connect_timeout = 4
+youtube_edge_watch_warm_max_time = 10
 youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')
 youtube_edge_prefetch_hosts = (
     'www.youtube.com',

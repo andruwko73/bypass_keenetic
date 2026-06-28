@@ -25,6 +25,7 @@ import subscription_runtime
 import app_version
 import app_runtime_mode
 import router_health_runtime
+import router_metrics
 import xray_compat_runtime
 import telegram_pool_ui
 import web_get_actions
@@ -456,6 +457,49 @@ def test_router_health_runtime_cpu_percent_parser():
     assert router_health_runtime.cpu_percent_between((100, 0, 0, 900, 0), (110, 0, 10, 980, 0)) == 20.0
     assert router_health_runtime._format_cpu_percent(0.84) == '0.84%'
     assert router_health_runtime._format_cpu_percent(2.0) == '2%'
+
+
+def test_router_metrics_runtime_snapshot():
+    assert router_metrics.parse_loadavg('0.20 0.60 1.02 1/245 3982') == (0.2, 0.6, 1.02)
+    assert router_metrics.parse_loadavg('bad') == (0.0, 0.0, 0.0)
+    assert router_metrics.parse_proc_stat_ticks('cpu  100 0 0 900 0 0') == 1000
+    assert router_metrics.parse_process_ticks('123 (python3) S 0 0 0 0 0 0 0 0 0 0 20 5 0') == 25
+    assert router_metrics.parse_process_rss_kb('Name:\tpython\nVmRSS:\t  63480 kB\n') == 63480
+
+    original = {
+        'read_loadavg': router_metrics.read_loadavg,
+        'read_system_ticks': router_metrics.read_system_ticks,
+        'process_ticks': router_metrics.process_ticks,
+        'process_rss_kb': router_metrics.process_rss_kb,
+        'find_pid_by_cmdline': router_metrics.find_pid_by_cmdline,
+        'getpid': router_metrics.os.getpid,
+    }
+    system_ticks = iter((1000, 1100))
+    proc_ticks = {111: [100, 110], 222: [50, 70]}
+
+    try:
+        router_metrics.read_loadavg = lambda: (0.1, 0.2, 0.3)
+        router_metrics.read_system_ticks = lambda: next(system_ticks)
+        router_metrics.process_ticks = lambda pid: proc_ticks[pid].pop(0)
+        router_metrics.process_rss_kb = lambda pid: 64000 if pid == 111 else 24000
+        router_metrics.find_pid_by_cmdline = lambda marker: 222
+        router_metrics.os.getpid = lambda: 111
+        runtime = router_metrics.RouterMetricsRuntime(history_limit=10, time_provider=lambda: 100.0)
+        first = runtime.snapshot()
+        second = runtime.snapshot()
+    finally:
+        router_metrics.read_loadavg = original['read_loadavg']
+        router_metrics.read_system_ticks = original['read_system_ticks']
+        router_metrics.process_ticks = original['process_ticks']
+        router_metrics.process_rss_kb = original['process_rss_kb']
+        router_metrics.find_pid_by_cmdline = original['find_pid_by_cmdline']
+        router_metrics.os.getpid = original['getpid']
+
+    assert first['processes']['bot']['cpu_percent'] == 0.0
+    assert second['processes']['bot']['cpu_percent'] == 10.0
+    assert second['processes']['xray']['cpu_percent'] == 20.0
+    assert second['summary']['samples'] == 2
+    assert second['summary']['bot_rss_max_kb'] == 64000
 
 
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
@@ -1612,18 +1656,30 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_slow_available_kb = 190000' in example
     assert 'pool_probe_slow_available_kb = 190000' in installer
     assert 'pool_probe_slow_available_kb = 190000' in bootstrap
-    assert 'pool_probe_delay_seconds = 1.5' in example
-    assert 'pool_probe_delay_seconds = 1.5' in installer
-    assert 'pool_probe_delay_seconds = 1.5' in bootstrap
+    assert 'pool_probe_delay_seconds = 3.0' in example
+    assert 'pool_probe_delay_seconds = 3.0' in installer
+    assert 'pool_probe_delay_seconds = 3.0' in bootstrap
     assert 'pool_probe_cpu_guard_enabled = True' in example
     assert 'pool_probe_cpu_guard_enabled = True' in installer
     assert 'pool_probe_cpu_guard_enabled = True' in bootstrap
-    assert 'pool_probe_max_cpu_percent = 70.0' in example
-    assert 'pool_probe_max_cpu_percent = 70.0' in installer
-    assert 'pool_probe_max_cpu_percent = 70.0' in bootstrap
-    assert 'pool_probe_quality_max_samples_per_run = 12' in example
-    assert 'pool_probe_quality_max_samples_per_run = 12' in installer
-    assert 'pool_probe_quality_max_samples_per_run = 12' in bootstrap
+    assert 'pool_probe_max_cpu_percent = 45.0' in example
+    assert 'pool_probe_max_cpu_percent = 45.0' in installer
+    assert 'pool_probe_max_cpu_percent = 45.0' in bootstrap
+    assert 'pool_probe_high_cpu_delay_seconds = 8.0' in example
+    assert 'pool_probe_high_cpu_delay_seconds = 8.0' in installer
+    assert 'pool_probe_high_cpu_delay_seconds = 8.0' in bootstrap
+    assert 'pool_probe_high_cpu_max_wait_seconds = 120.0' in example
+    assert 'pool_probe_high_cpu_max_wait_seconds = 120.0' in installer
+    assert 'pool_probe_high_cpu_max_wait_seconds = 120.0' in bootstrap
+    assert 'pool_probe_max_load1 = 2.0' in example
+    assert 'pool_probe_max_load1 = 2.0' in installer
+    assert 'pool_probe_max_load1 = 2.0' in bootstrap
+    assert 'pool_probe_quality_download_bytes = 524288' in example
+    assert 'pool_probe_quality_download_bytes = 524288' in installer
+    assert 'pool_probe_quality_download_bytes = 524288' in bootstrap
+    assert 'pool_probe_quality_max_samples_per_run = 6' in example
+    assert 'pool_probe_quality_max_samples_per_run = 6' in installer
+    assert 'pool_probe_quality_max_samples_per_run = 6' in bootstrap
     assert 'pool_probe_max_process_rss_kb = 87040' in example
     assert 'pool_probe_max_process_rss_kb = 87040' in installer
     assert 'pool_probe_max_process_rss_kb = 87040' in bootstrap
@@ -1642,6 +1698,18 @@ def test_codex_version_matches_commit_count():
     assert 'web_status_api_cache_ttl = 30.0' in example
     assert 'web_status_api_cache_ttl = 30.0' in installer
     assert 'web_status_api_cache_ttl = 30.0' in bootstrap
+    assert 'router_metrics_history_limit = 120' in example
+    assert 'router_metrics_history_limit = 120' in installer
+    assert 'router_metrics_history_limit = 120' in bootstrap
+    assert 'router_metrics_warn_bot_rss_kb = 71680' in example
+    assert 'router_metrics_warn_bot_rss_kb = 71680' in installer
+    assert 'router_metrics_warn_bot_rss_kb = 71680' in bootstrap
+    assert 'router_metrics_critical_bot_rss_kb = 87040' in example
+    assert 'router_metrics_critical_bot_rss_kb = 87040' in installer
+    assert 'router_metrics_critical_bot_rss_kb = 87040' in bootstrap
+    assert 'router_metrics_warn_load1 = 3.0' in example
+    assert 'router_metrics_warn_load1 = 3.0' in installer
+    assert 'router_metrics_warn_load1 = 3.0' in bootstrap
     assert 'web_pools_api_cache_ttl = 45.0' in example
     assert 'web_pools_api_cache_ttl = 45.0' in installer
     assert 'web_pools_api_cache_ttl = 45.0' in bootstrap
@@ -1703,10 +1771,10 @@ def test_codex_version_matches_commit_count():
         "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'",
         'youtube_edge_prefetch_cache_ttl_seconds = 259200',
         'youtube_edge_prefetch_max_cache_entries = 128',
-        'youtube_edge_prefetch_max_hosts_per_run = 12',
-        'youtube_edge_prefetch_max_resolved_addresses = 32',
-        'youtube_edge_prefetch_max_candidates = 64',
-        'youtube_edge_prefetch_max_addresses_per_run = 16',
+        'youtube_edge_prefetch_max_hosts_per_run = 6',
+        'youtube_edge_prefetch_max_resolved_addresses = 16',
+        'youtube_edge_prefetch_max_candidates = 32',
+        'youtube_edge_prefetch_max_addresses_per_run = 8',
         'youtube_edge_prefetch_min_available_kb = 125000',
         'youtube_edge_prefetch_max_rss_kb = 66560',
         'youtube_edge_prefetch_exclusive_ipsets = True',
@@ -1716,23 +1784,24 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_cache_restore_require_quality_ok = True',
         'youtube_edge_prefetch_fast_warm_enabled = True',
         'youtube_edge_prefetch_fast_hosts = (',
-        'youtube_edge_prefetch_fast_max_hosts_per_run = 8',
-        'youtube_edge_prefetch_fast_max_candidates = 32',
+        'youtube_edge_prefetch_fast_max_hosts_per_run = 4',
+        'youtube_edge_prefetch_fast_max_candidates = 16',
         'youtube_edge_prefetch_quality_probe_enabled = True',
         'youtube_edge_prefetch_quality_target_ms = 1000',
         'youtube_edge_prefetch_quality_timeout_seconds = 5',
         'youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600',
-        'youtube_edge_prefetch_quality_max_candidates = 24',
-        'youtube_edge_prefetch_scheduler_max_cpu_percent = 60',
+        'youtube_edge_prefetch_quality_max_candidates = 12',
+        'youtube_edge_prefetch_scheduler_max_cpu_percent = 45',
+        'youtube_edge_prefetch_scheduler_max_load1 = 2.0',
         'youtube_edge_prefetch_cpu_sample_ms = 250',
         'youtube_edge_watch_warm_enabled = True',
         'youtube_edge_watch_warm_urls = (',
         "'https://www.youtube.com/watch?v=jfKfPfyJRdk'",
-        'youtube_edge_watch_warm_max_pages = 2',
-        'youtube_edge_watch_warm_max_hosts = 8',
-        'youtube_edge_watch_warm_max_bytes = 1800000',
-        'youtube_edge_watch_warm_connect_timeout = 6',
-        'youtube_edge_watch_warm_max_time = 20',
+        'youtube_edge_watch_warm_max_pages = 1',
+        'youtube_edge_watch_warm_max_hosts = 4',
+        'youtube_edge_watch_warm_max_bytes = 900000',
+        'youtube_edge_watch_warm_connect_timeout = 4',
+        'youtube_edge_watch_warm_max_time = 10',
         "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')",
         'youtube_edge_prefetch_hosts = (',
     ):
@@ -1741,18 +1810,19 @@ def test_codex_version_matches_commit_count():
         assert config_line in bootstrap
     assert "youtube_edge_prefetch_min_available_kb[[:space:]]*=[[:space:]]*160000" in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_min_available_kb = 125000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert "youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*4" in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_prefetch_max_hosts_per_run = 12' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert "youtube_edge_prefetch_max_hosts_per_run[[:space:]]*=[[:space:]]*(4|12)" in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_max_hosts_per_run = 6' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_quality_target_ms = 1000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_cache_restore_enabled = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_cache_restore_max_addresses = 16' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_cache_restore_require_quality_ok = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_watch_warm_max_pages = 2' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_pages = 1' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_hosts = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_rss_kb = 67584' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'service_route_intersections_cache_ttl = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_prefetch_scheduler_max_cpu_percent = 60' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_scheduler_max_cpu_percent = 45' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_scheduler_max_load1 = 2.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_cpu_sample_ms = 250' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'active_status_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_vless2_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -1926,6 +1996,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'priority_refresh_due()' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-1800}"' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"' in s99unblock
+    assert 'APP_RUNTIME_MODE_FILE="${APP_RUNTIME_MODE_FILE:-/opt/etc/bot_app_mode}"' in s99unblock
     assert 'dedupe_lock_pid_is_active()' in s99unblock
     assert 'dedupe_lock_age_seconds()' in s99unblock
     assert 'youtube_edge_prefetch_skipped_reason()' in s99unblock
@@ -1933,6 +2004,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'run_refresh_if_due()' in s99unblock
     assert 'run_refresh_if_check_due()' in s99unblock
     assert 'run_youtube_edge_prefetch_if_due()' in s99unblock
+    assert 'run_youtube_edge_prefetch_if_due "ipset-refresh"' in s99unblock
+    assert 'PARALLEL_JOBS="${UNBLOCK_IPSET_PARALLEL_JOBS:-4}"' in s99unblock
+    assert 'IPV6_RESOLVE_ENABLED="${UNBLOCK_IPSET_IPV6_RESOLVE_ENABLED:-auto}"' in s99unblock
+    assert 'youtube_edge_prefetch_runtime_allowed()' in s99unblock
+    assert '[ "$(app_runtime_mode_value)" != "simple" ]' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtube_edge_prefetch_runner.py}"' in s99unblock
     assert 'PYTHONPATH="/opt/etc/bot" "$python_bin" "$YOUTUBE_EDGE_PREFETCH_RUNNER" --trigger "$trigger"' in s99unblock
     assert 'UNBLOCK_IPSET_LOCK_DIR="${UNBLOCK_IPSET_LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in s99unblock
@@ -2112,7 +2188,14 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 
     assert 'LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"' in ipset_script
     assert 'LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"' in ipset_script
-    assert 'PARALLEL_JOBS="${PARALLEL_JOBS:-8}"' in ipset_script
+    assert 'PARALLEL_JOBS="${PARALLEL_JOBS:-4}"' in ipset_script
+    assert 'IPV6_RESOLVE_ENABLED="${IPV6_RESOLVE_ENABLED:-auto}"' in ipset_script
+    assert 'IPV6_ACTIVE_CONNTRACK_TEST_LIMIT="${IPV6_ACTIVE_CONNTRACK_TEST_LIMIT:-128}"' in ipset_script
+    assert 'collect_active_ipv6_addresses()' in ipset_script
+    assert 'active_ipv6_route_in_sets()' in ipset_script
+    assert 'ipv6_resolve_should_run()' in ipset_script
+    assert 'ipset test "$current_ipv6_set" "$active_ipv6"' in ipset_script
+    assert 'ipv6_resolve_should_run || return 0' in ipset_script
     assert 'lock_pid_is_active()' in ipset_script
     assert 'lock_pid_is_unblock_refresh()' in ipset_script
     assert 'stop_stale_lock_process()' in ipset_script
@@ -2340,6 +2423,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
+    assert "getattr(config, 'router_metrics_history_limit', 120)" in source
+    assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 71680)" in source
+    assert 'router_metrics.RouterMetricsRuntime' in source
+    assert "'router_metrics_snapshot': _router_metrics_snapshot" in source
     assert "memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl'" in source
     assert 'def _record_memory_timeline' in source
     assert 'def _start_memory_timeline_thread' in source
@@ -2432,6 +2519,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
+    assert 'router_metrics_history_limit = 120' in script_source
+    assert 'router_metrics_warn_bot_rss_kb = 71680' in script_source
+    assert 'router_metrics_critical_bot_rss_kb = 87040' in script_source
+    assert 'router_metrics_warn_load1 = 3.0' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
     assert 'memory_timeline_max_events = 720' in script_source
@@ -2472,16 +2563,31 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert script_source.find('run_update_ipset_refresh "Post-update"') > script_source.find('Refreshing ipset after proxy core startup.')
     assert 'write_update_rollback_script()' in script_source
     assert 'ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh' in script_source
+    assert 'backup_runtime_state_files' in script_source
+    assert 'backup_runtime_state_file /opt/etc/xray/vless2.key vless2.key' in script_source
+    assert 'backup_runtime_state_file /opt/etc/shadowsocks.json shadowsocks.json' in script_source
+    assert 'backup_runtime_state_file /opt/etc/trojan/config.json trojan_config.json' in script_source
     assert 'mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py' in script_source
     assert 'mv "$INSTALLER_SERVICE_PATH" "$backup_dir"/S98telegram_bot_installer' in script_source
     assert 'mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot' in script_source
     assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script_source
     assert 'restore_file S99telegram_bot "\\$BOT_SERVICE_PATH"' in script_source
     assert 'restore_file script.sh /opt/root/script.sh' in script_source
+    assert 'restore_file bot_app_mode /opt/etc/bot_app_mode' in script_source
+    assert 'restore_file bot_proxy_mode /opt/etc/bot_proxy_mode' in script_source
+    assert 'restore_file bot_config.py /opt/etc/bot_config.py' in script_source
+    assert 'restore_file vless2.key /opt/etc/xray/vless2.key' in script_source
+    assert 'restore_file shadowsocks.json /opt/etc/shadowsocks.json' in script_source
+    assert 'restore_file trojan_config.json /opt/etc/trojan/config.json' in script_source
+    assert 'if [ -s /opt/etc/shadowsocks.json ]; then' in script_source
+    assert 'if [ -s /opt/etc/trojan/config.json ]; then' in script_source
+    assert 'pip_cmd="python3 -m pip"' in script_source
+    assert '$pip_cmd install pyTelegramBotAPI pysocks' in script_source
     assert "for name in ('version.md', 'README.md')" in source
     assert "'crontab': ('/opt/etc/crontab', 0o644)" in source
     assert "'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755)" in source
     assert "'script.sh': ('/opt/root/script.sh', 0o755)" in source
+    assert "_restore_backup_file(bot_config_backup, '/opt/etc/bot_config.py', 0o644)" in source
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
     assert 'for key_name, key_value in (current_keys or {}).items()' in source
@@ -2691,7 +2797,7 @@ def test_runtime_modules_are_installed_by_update_scripts():
     assert script_modules == bootstrap_modules
     for module in script_modules:
         assert (ROOT / module).exists()
-    for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'telegram_call_learning.py', 'web_commands_runtime.py'):
+    for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'router_metrics.py', 'telegram_call_learning.py', 'web_commands_runtime.py'):
         assert module in script
         assert f'$RAW_BASE/{module}' in bootstrap
         assert f'$BOT_DIR/{module}' in bootstrap
@@ -3217,19 +3323,28 @@ def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
 def test_youtube_edge_prefetch_runner_skips_scheduler_full_run_on_high_cpu():
     original_config = youtube_edge_prefetch_runner.config
     original_read_cpu_percent = youtube_edge_prefetch_runner.read_cpu_percent
+    original_read_load1 = youtube_edge_prefetch_runner.read_load1
     try:
         youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
-            youtube_edge_prefetch_scheduler_max_cpu_percent=60,
+            youtube_edge_prefetch_scheduler_max_cpu_percent=45,
+            youtube_edge_prefetch_scheduler_max_load1=2.0,
             youtube_edge_prefetch_cpu_sample_ms=50,
         )
         youtube_edge_prefetch_runner.read_cpu_percent = lambda sample_seconds=0.25: 88.5
+        youtube_edge_prefetch_runner.read_load1 = lambda: 2.75
 
         assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('scheduler', False) == 88.5
+        assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('ipset-refresh', False) == 88.5
         assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('Post-update', False) is None
         assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('scheduler', True) is None
+        assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('scheduler', False) == 2.75
+        assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('ipset-refresh', False) == 2.75
+        assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('Post-update', False) is None
+        assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('scheduler', True) is None
     finally:
         youtube_edge_prefetch_runner.config = original_config
         youtube_edge_prefetch_runner.read_cpu_percent = original_read_cpu_percent
+        youtube_edge_prefetch_runner.read_load1 = original_read_load1
 
 
 def test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers():
@@ -4950,6 +5065,47 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (0, 1)
     assert remaining == [('vless', 'left')]
 
+    high_load_notes = []
+    high_load_logs = []
+    high_load_remaining = []
+    high_load_time = iter([0.0, 2.0])
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'load-high')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=high_load_logs.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: (_ for _ in ()).throw(AssertionError('load guard should stop before validation')),
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: (_ for _ in ()).throw(AssertionError('load guard should stop before xray')),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: None,
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+        on_cancelled_remaining=high_load_remaining.extend,
+        set_note=high_load_notes.append,
+        load_average=lambda: 2.75,
+        max_load1=2.0,
+        high_load_delay_seconds=0,
+        max_high_load_wait_seconds=1,
+        sleep=lambda seconds: None,
+        time_provider=lambda: next(high_load_time),
+    )
+    assert (checked, total) == (0, 1)
+    assert high_load_remaining == [('vless', 'load-high')]
+    assert any('load1 2.75' in note and '2.00' in note for note in high_load_notes)
+    assert any('Remaining keys are paused' in item for item in high_load_logs)
+
     cancel_event = threading.Event()
     cancel_started = threading.Event()
     cancel_release = threading.Event()
@@ -6310,6 +6466,7 @@ def test_web_get_actions_helpers():
         'web_custom_checks': lambda: [{'id': 'custom'}],
         'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
         'telegram_call_learning_snapshot': lambda: {'watching': True, 'seen_clients': ['192.168.1.23']},
+        'router_metrics_snapshot': lambda: {'load': {'load1': 0.1}, 'summary': {'samples': 1}},
         'time_provider': lambda: 123.0,
         'static_dir': '/tmp/static',
         'service_icons_enabled': True,
@@ -6400,6 +6557,9 @@ def test_web_get_actions_helpers():
     assert probe['payload']['status'] == 'running'
     learning = web_get_actions.dispatch(ctx, '/api/telegram_call_learning')
     assert learning['payload']['telegram_call_learning']['seen_clients'] == ['192.168.1.23']
+    metrics = web_get_actions.dispatch(ctx, '/api/router_metrics')
+    assert metrics['payload']['summary']['samples'] == 1
+    assert metrics['status'] == 200
     paused_ctx = dict(ctx)
     paused_ctx.update({
         'get_pool_probe_progress': lambda: {'running': False, 'checked': 4, 'total': 10, 'note': 'paused'},
@@ -6840,6 +7000,29 @@ def test_web_pool_form_blocks_helpers():
 
 def test_web_status_builder_helpers():
     assert web_status_builder.empty_protocol_status()['tone'] == 'empty'
+    unused_cached = web_status_builder.cached_protocol_status(
+        'key',
+        {},
+        [],
+        {},
+        required_services=(),
+    )
+    assert unused_cached['tone'] == 'empty'
+    assert unused_cached['yt_state'] == 'unused'
+    unused_active = web_status_builder.active_protocol_status(
+        endpoint_ok=True,
+        endpoint_message='SOCKS ok.',
+        api_ok=False,
+        api_message='',
+        api_transient=False,
+        yt_ok=False,
+        yt_message='',
+        custom_states={},
+        custom_checks=[],
+        required_services=(),
+    )
+    assert unused_active['tone'] == 'empty'
+    assert unused_active['yt_state'] == 'unused'
     active = web_status_builder.active_protocol_status(
         endpoint_ok=True,
         endpoint_message='SOCKS ok.',
@@ -7559,6 +7742,10 @@ def test_web_template_scripts_helpers():
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
     assert 'refreshPoolData(2500)' in scripts
+    assert 'function fetchRouterMetrics()' in scripts
+    assert "fetch('/api/router_metrics'" in scripts
+    assert "data-event-history-tab='metrics'" not in scripts
+    assert "modal.querySelectorAll('[data-event-history-tab]')" in scripts
     assert 'function poolRowMatchesState(row, state)' in scripts
     assert 'function poolStateFilterFromMode(mode)' in scripts
     assert "formData.set('confirm_switch', 'yes');" in scripts
@@ -7583,6 +7770,7 @@ def test_web_form_template_smoke():
         current_mode_label='Без прокси',
         custom_checks_json='[]',
         fallback_block='',
+        event_history_html='<section data-event-history-list></section>',
         initial_command_running='false',
         initial_status_pending='false',
         list_route_label='list',
@@ -7619,6 +7807,9 @@ def test_web_form_template_smoke():
     assert 'Liquid Glass' in page
     assert 'service-command-grid' in page
     assert 'quick-start-actions' in page
+    assert 'data-event-history-tab="metrics"' in page
+    assert 'data-router-metrics-refresh' in page
+    assert 'router-metrics-history' in page
     assert 'router-memory-text' in page
     assert 'router-memory-meter' in page
     assert 'call-learn-details' not in page
@@ -8262,6 +8453,7 @@ def main():
     test_router_health_runtime_dns_parsers()
     test_xray_compat_runtime_helpers()
     test_router_health_runtime_process_rss_parser()
+    test_router_metrics_runtime_snapshot()
     test_router_health_runtime_slow_snapshot_caches_heavy_checks()
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()

@@ -336,6 +336,10 @@ def run_pool_probe_worker(
     memory_cleanup=None,
     rss_cleanup_delay_seconds=3.0,
     max_rss_cleanup_attempts=2,
+    load_average=None,
+    max_load1=0,
+    high_load_delay_seconds=10.0,
+    max_high_load_wait_seconds=120.0,
     sleep=time.sleep,
     time_provider=time.time,
 ):
@@ -407,6 +411,7 @@ def run_pool_probe_worker(
 
     low_memory_since = None
     high_cpu_since = None
+    high_load_since = None
     paused_remaining = False
     rss_cleanup_attempts = 0
 
@@ -475,6 +480,21 @@ def run_pool_probe_worker(
             return busy
         return None
 
+    def load_above_limit():
+        if not load_average or not max_load1 or max_load1 <= 0:
+            return None
+        try:
+            load_value = load_average()
+        except Exception:
+            return None
+        try:
+            load_value = float(load_value)
+        except Exception:
+            return None
+        if load_value >= float(max_load1):
+            return load_value
+        return None
+
     def rss_above_limit():
         if not process_rss_kb or not max_process_rss_kb or max_process_rss_kb <= 0:
             return None
@@ -538,6 +558,25 @@ def run_pool_probe_worker(
                     continue
                 log(note + ' Продолжаю один ключ с низким приоритетом.')
             high_cpu_since = None
+            high_load1 = load_above_limit()
+            if high_load1 is not None:
+                if high_load_since is None:
+                    high_load_since = time_provider()
+                note = (
+                    f'Pool probe waits for lower router load: load1 {float(high_load1):.2f}, '
+                    f'threshold {float(max_load1):.2f}.'
+                )
+                update_note(note)
+                if (
+                    max_high_load_wait_seconds and
+                    time_provider() - high_load_since >= max_high_load_wait_seconds
+                ):
+                    log(note + ' Remaining keys are paused.')
+                    paused_remaining = True
+                    break
+                sleep(max(1.0, float(high_load_delay_seconds or 1.0)))
+                continue
+            high_load_since = None
             low_memory_kb = memory_below_limit(min_available_kb)
             if low_memory_kb is not None:
                 if low_memory_since is None:

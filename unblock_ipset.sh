@@ -6,7 +6,9 @@ export PATH
 DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
 DNS_WAIT_SECONDS="${DNS_WAIT_SECONDS:-60}"
-PARALLEL_JOBS="${PARALLEL_JOBS:-8}"
+PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
+IPV6_RESOLVE_ENABLED="${IPV6_RESOLVE_ENABLED:-auto}"
+IPV6_ACTIVE_CONNTRACK_TEST_LIMIT="${IPV6_ACTIVE_CONNTRACK_TEST_LIMIT:-128}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
@@ -25,6 +27,7 @@ UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.tx
 
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 LOCAL_RE='localhost|^0\.|^127\.|^10\.|^172\.16\.|^192\.168\.|^::|^fc..:|^fd..:|^fe..:'
+ipv6_resolve_auto_state=""
 
 lock_pid_is_active() {
 	pid="$(lock_pid)"
@@ -594,9 +597,68 @@ apply_vless_priority_domain_ips() {
 }
 
 xargs_parallel_flag() {
+	case "$PARALLEL_JOBS" in
+		''|*[!0-9]*) return 0 ;;
+	esac
+	[ "$PARALLEL_JOBS" -gt 1 ] 2>/dev/null || return 0
 	if printf 'test\n' | xargs -n 1 -P 1 echo >/dev/null 2>&1; then
 		printf '%s\n' "-P $PARALLEL_JOBS"
 	fi
+}
+
+collect_active_ipv6_addresses() {
+	for conntrack_file in /proc/net/nf_conntrack /proc/net/ip_conntrack; do
+		[ -r "$conntrack_file" ] || continue
+		awk '
+			/ipv6/ {
+				for (idx = 1; idx <= NF; idx++) {
+					if ($idx ~ /^(src|dst)=/) {
+						value = $idx
+						sub(/^[^=]*=/, "", value)
+						lower = tolower(value)
+						if (
+							index(value, ":") > 0 &&
+							lower !~ /^::/ &&
+							lower !~ /^fe80:/ &&
+							lower !~ /^fc/ &&
+							lower !~ /^fd/
+						) {
+							print value
+						}
+					}
+				}
+			}
+		' "$conntrack_file" 2>/dev/null
+	done
+}
+
+active_ipv6_route_in_sets() {
+	case "$ipv6_resolve_auto_state" in
+		yes) return 0 ;;
+		no) return 1 ;;
+	esac
+	ipv6_resolve_auto_state="no"
+	active_file="$tmp_dir/active_ipv6_conntrack"
+	collect_active_ipv6_addresses | sort -u | awk -v limit="$IPV6_ACTIVE_CONNTRACK_TEST_LIMIT" 'limit <= 0 || NR <= limit { print }' > "$active_file"
+	[ -s "$active_file" ] || return 1
+	while IFS= read -r active_ipv6 || [ -n "$active_ipv6" ]; do
+		[ -n "$active_ipv6" ] || continue
+		for current_ipv6_set in $IPV6_SET_NAMES; do
+			if ipset test "$current_ipv6_set" "$active_ipv6" >/dev/null 2>&1; then
+				ipv6_resolve_auto_state="yes"
+				return 0
+			fi
+		done
+	done < "$active_file"
+	return 1
+}
+
+ipv6_resolve_should_run() {
+	case "$(printf '%s' "$IPV6_RESOLVE_ENABLED" | tr 'A-Z' 'a-z')" in
+		1|true|yes|on) return 0 ;;
+		auto) active_ipv6_route_in_sets ;;
+		*) return 1 ;;
+	esac
 }
 
 resolve_domains() {
@@ -651,6 +713,7 @@ resolve_ipv6_domains() {
 	domain_file="$2"
 	[ -n "$ipv6_tmp_set" ] || return 0
 	[ -s "$domain_file" ] || return 0
+	ipv6_resolve_should_run || return 0
 
 	export DNS_HOST DNS_PORT LOCAL_RE ipv6_tmp_set YOUTUBE_DNS_SAMPLE_SERVERS
 	parallel_flag="$(xargs_parallel_flag)"

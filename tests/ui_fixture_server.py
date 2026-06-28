@@ -629,6 +629,57 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/api/service_routes":
             self._json({"route_tools_html": _route_tools_html("")})
             return
+        if path == "/api/router_metrics":
+            now = time.time()
+            self._json(
+                {
+                    "timestamp": now,
+                    "load": {"load1": 0.12, "load5": 0.10, "load15": 0.08},
+                    "processes": {
+                        "bot": {
+                            "name": "bot",
+                            "pid": 123,
+                            "running": True,
+                            "rss_kb": 65536,
+                            "cpu_percent": 1.25,
+                        },
+                        "xray": {
+                            "name": "xray",
+                            "pid": 456,
+                            "running": True,
+                            "rss_kb": 32768,
+                            "cpu_percent": 0.5,
+                        },
+                    },
+                    "summary": {
+                        "samples": 2,
+                        "bot_rss_min_kb": 64000,
+                        "bot_rss_max_kb": 65536,
+                        "xray_rss_min_kb": 32000,
+                        "xray_rss_max_kb": 32768,
+                        "load1_max": 0.12,
+                    },
+                    "history": [
+                        {
+                            "timestamp": now - 60,
+                            "load1": 0.08,
+                            "bot_rss_kb": 64000,
+                            "bot_cpu_percent": 0.4,
+                            "xray_rss_kb": 32000,
+                            "xray_cpu_percent": 0.3,
+                        },
+                        {
+                            "timestamp": now,
+                            "load1": 0.12,
+                            "bot_rss_kb": 65536,
+                            "bot_cpu_percent": 1.25,
+                            "xray_rss_kb": 32768,
+                            "xray_cpu_percent": 0.5,
+                        },
+                    ],
+                }
+            )
+            return
         if path == "/api/command_state":
             self._json({"running": False})
             return

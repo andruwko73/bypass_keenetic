@@ -247,6 +247,23 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     await page.locator('#mode-toggle-button').click();
   }
 
+  const historyButton = page.locator('[data-event-history-open]:visible').first();
+  if (await historyButton.count()) {
+    await historyButton.click();
+    await assertVisibleBox(page, '#event-history-modal:not(.hidden) .event-history-drawer', `${name} history drawer`);
+    await page.locator('[data-event-history-tab="metrics"]').click();
+    await assertVisibleBox(page, '[data-event-history-pane="metrics"]:not(.hidden) .router-metrics-grid', `${name} router metrics`);
+    await page.waitForFunction(() => {
+      const value = document.getElementById('router-metrics-bot-rss');
+      return value && value.textContent.includes('MB');
+    }, null, { timeout: 10000 });
+    const metricsText = await page.locator('#router-metrics-bot-rss').textContent();
+    if (!metricsText || !metricsText.includes('MB')) {
+      throw new Error(`${name}: router metrics did not load bot RSS`);
+    }
+    await page.locator('[data-event-history-close]').click();
+  }
+
   await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);
   await assertPoolKeysAreMasked(page, `${name} initial keys`);

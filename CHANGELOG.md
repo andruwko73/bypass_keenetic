@@ -1,3 +1,9 @@
+<a name="1.842"></a>
+# [1.842] - 28 Jun 2026
+
+- Adds an on-demand router CPU/RSS monitoring tab inside the existing history drawer, extends update rollback backups to restore runtime state, keys, proxy configs, lists and mode files, preserves existing Shadowsocks/Trojan configs during install, and treats unused protocol slots as neutral instead of failed.
+- Lowers router load from long-monitor findings: ipset DNS refresh now defaults to 4 parallel jobs with IPv6 DNS resolving in auto mode only when active IPv6 traffic already uses bypass IPv6 sets, ipset-triggered YouTube prefetch runs only when due and is skipped in simple mode, scheduler/ipset YouTube prefetch uses CPU/load guards and smaller batches, and pool probing now uses stricter CPU/loadavg pacing with smaller quality samples.
+
 <a name="1.841"></a>
 # [1.841] - 28 Jun 2026
 

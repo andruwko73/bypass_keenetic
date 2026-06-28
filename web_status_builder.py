@@ -6,6 +6,22 @@ def empty_protocol_status():
     }
 
 
+def unused_protocol_status():
+    return {
+        'tone': 'empty',
+        'label': 'Не используется',
+        'details': 'Сервисы не назначены на этот протокол; проверка не требуется',
+        'endpoint_ok': None,
+        'endpoint_message': '',
+        'api_ok': False,
+        'api_message': '',
+        'yt_ok': False,
+        'yt_state': 'unused',
+        'yt_message': '',
+        'custom': {},
+    }
+
+
 def _strip_status_period(text):
     return str(text or '').strip().rstrip('.')
 
@@ -92,6 +108,8 @@ def active_protocol_status(
     required_services=None,
 ):
     required_services = _normalize_required_services(required_services)
+    if required_services == () and not custom_checks:
+        return unused_protocol_status()
     telegram_required = (
         'telegram' in required_services
         if required_services is not None else
@@ -164,6 +182,9 @@ def cached_protocol_status(
 ):
     if not str(key_value or '').strip():
         return empty_protocol_status()
+    required_services = _normalize_required_services(required_services)
+    if required_services == () and not custom_checks:
+        return unused_protocol_status()
     has_probe_result = (
         'tg_ok' in probe or
         'yt_ok' in probe or
@@ -199,7 +220,6 @@ def cached_protocol_status(
     details = 'Показан последний результат проверки пула'
     if service_parts:
         details += '; ' + ', '.join(service_parts)
-    required_services = _normalize_required_services(required_services)
     tone, label = tone_label(
         api_ok,
         yt_ok,

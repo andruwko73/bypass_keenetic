@@ -17,6 +17,7 @@ UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
+APP_RUNTIME_MODE_FILE="${APP_RUNTIME_MODE_FILE:-/opt/etc/bot_app_mode}"
 RUNTIME_DEDUPE_LOCK_DIR="${BYPASS_RUNTIME_DEDUPE_LOCK_DIR:-/tmp/bypass-runtime-dedupe.lock}"
 RUNTIME_DEDUPE_STATE_FILE="${BYPASS_RUNTIME_DEDUPE_STATE_FILE:-/tmp/bypass-runtime-dedupe.state}"
 PRIORITY_REFRESH_STATE_FILE="${BYPASS_VLESS_PRIORITY_REFRESH_STATE_FILE:-/tmp/bypass-vless-priority-refresh.state}"
@@ -82,8 +83,10 @@ run_refresh() {
     [ -x /opt/bin/unblock_ipset.sh ] || return 0
     unblock_ipset_running && return 0
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+    PARALLEL_JOBS="${UNBLOCK_IPSET_PARALLEL_JOBS:-4}" \
+    IPV6_RESOLVE_ENABLED="${UNBLOCK_IPSET_IPV6_RESOLVE_ENABLED:-auto}" \
     UNBLOCK_IPSET_LOCK_BUSY_QUIET=1 /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true
-    run_youtube_edge_prefetch "ipset-refresh"
+    run_youtube_edge_prefetch_if_due "ipset-refresh"
 }
 
 unblock_ipset_lock_age_seconds() {
@@ -145,8 +148,20 @@ youtube_edge_prefetch_due() {
     [ $((now - last_run_at)) -ge "$interval" ] 2>/dev/null
 }
 
+app_runtime_mode_value() {
+    mode=""
+    [ -r "$APP_RUNTIME_MODE_FILE" ] && mode="$(sed -n '1p' "$APP_RUNTIME_MODE_FILE" 2>/dev/null | tr -cd 'A-Za-z0-9_-')"
+    [ -n "$mode" ] || mode="advanced"
+    printf '%s\n' "$mode"
+}
+
+youtube_edge_prefetch_runtime_allowed() {
+    [ "$(app_runtime_mode_value)" != "simple" ]
+}
+
 run_youtube_edge_prefetch() {
     trigger="${1:-scheduler}"
+    youtube_edge_prefetch_runtime_allowed || return 0
     [ -f "$YOUTUBE_EDGE_PREFETCH_RUNNER" ] || return 0
     python_bin="/opt/bin/python3"
     [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
@@ -157,7 +172,7 @@ run_youtube_edge_prefetch() {
 
 run_youtube_edge_prefetch_if_due() {
     youtube_edge_prefetch_due || return 0
-    run_youtube_edge_prefetch "scheduler"
+    run_youtube_edge_prefetch "${1:-scheduler}"
 }
 
 detect_dns_backend() {

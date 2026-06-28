@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.841, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.842, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -119,6 +119,7 @@ import telegram_key_ui
 import entware_dns_runtime
 import telegram_info_runtime
 import router_health_runtime
+import router_metrics
 try:
     import xray_compat_runtime
 except Exception:
@@ -739,7 +740,7 @@ YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS = max(
 )
 YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS = max(
     300,
-    int(getattr(config, 'youtube_edge_prefetch_interval_seconds', 900)),
+    int(getattr(config, 'youtube_edge_prefetch_interval_seconds', 1800)),
 )
 YOUTUBE_EDGE_PREFETCH_CACHE_PATH = str(
     getattr(config, 'youtube_edge_prefetch_cache_path', '/opt/etc/bot/youtube_edge_cache.json') or ''
@@ -760,11 +761,11 @@ YOUTUBE_EDGE_PREFETCH_MAX_CACHE_ENTRIES = max(
 )
 YOUTUBE_EDGE_PREFETCH_MAX_HOSTS_PER_RUN = max(
     1,
-    int(getattr(config, 'youtube_edge_prefetch_max_hosts_per_run', 4)),
+    int(getattr(config, 'youtube_edge_prefetch_max_hosts_per_run', 6)),
 )
 YOUTUBE_EDGE_PREFETCH_MAX_RESOLVED_ADDRESSES = max(
     1,
-    int(getattr(config, 'youtube_edge_prefetch_max_resolved_addresses', 12)),
+    int(getattr(config, 'youtube_edge_prefetch_max_resolved_addresses', 16)),
 )
 YOUTUBE_EDGE_PREFETCH_MAX_CANDIDATES = max(
     YOUTUBE_EDGE_PREFETCH_MAX_RESOLVED_ADDRESSES,
@@ -1786,10 +1787,14 @@ SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL = float(getattr(config, 'service_route_int
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
 ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
+ROUTER_METRICS_HISTORY_LIMIT = int(getattr(config, 'router_metrics_history_limit', 120))
+ROUTER_METRICS_WARN_BOT_RSS_KB = int(getattr(config, 'router_metrics_warn_bot_rss_kb', 71680))
+ROUTER_METRICS_CRITICAL_BOT_RSS_KB = int(getattr(config, 'router_metrics_critical_bot_rss_kb', 87040))
+ROUTER_METRICS_WARN_LOAD1 = float(getattr(config, 'router_metrics_warn_load1', 3.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
-POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 1.5))
+POOL_PROBE_DELAY_SECONDS = float(getattr(config, 'pool_probe_delay_seconds', 3.0))
 POOL_PROBE_MIN_AVAILABLE_KB = int(getattr(config, 'pool_probe_min_available_kb', 160000))
 POOL_PROBE_SLOW_AVAILABLE_KB = max(
     POOL_PROBE_MIN_AVAILABLE_KB,
@@ -1804,10 +1809,13 @@ POOL_PROBE_SLOW_MEMORY_DELAY_SECONDS = max(
     float(getattr(config, 'pool_probe_slow_memory_delay_seconds', 3.0)),
 )
 POOL_PROBE_CPU_GUARD_ENABLED = bool(getattr(config, 'pool_probe_cpu_guard_enabled', True))
-POOL_PROBE_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'pool_probe_max_cpu_percent', 70.0)))
+POOL_PROBE_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'pool_probe_max_cpu_percent', 45.0)))
 POOL_PROBE_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'pool_probe_cpu_sample_seconds', 0.35)))
-POOL_PROBE_HIGH_CPU_DELAY_SECONDS = max(1.0, float(getattr(config, 'pool_probe_high_cpu_delay_seconds', 5.0)))
-POOL_PROBE_HIGH_CPU_MAX_WAIT_SECONDS = max(0.0, float(getattr(config, 'pool_probe_high_cpu_max_wait_seconds', 45.0)))
+POOL_PROBE_HIGH_CPU_DELAY_SECONDS = max(1.0, float(getattr(config, 'pool_probe_high_cpu_delay_seconds', 8.0)))
+POOL_PROBE_HIGH_CPU_MAX_WAIT_SECONDS = max(0.0, float(getattr(config, 'pool_probe_high_cpu_max_wait_seconds', 120.0)))
+POOL_PROBE_MAX_LOAD1 = max(0.0, float(getattr(config, 'pool_probe_max_load1', 2.0)))
+POOL_PROBE_HIGH_LOAD_DELAY_SECONDS = max(1.0, float(getattr(config, 'pool_probe_high_load_delay_seconds', 10.0)))
+POOL_PROBE_HIGH_LOAD_MAX_WAIT_SECONDS = max(0.0, float(getattr(config, 'pool_probe_high_load_max_wait_seconds', 120.0)))
 BACKGROUND_TASK_CPU_GUARD_ENABLED = bool(getattr(config, 'background_task_cpu_guard_enabled', True))
 BACKGROUND_TASK_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'background_task_max_cpu_percent', 65.0)))
 BACKGROUND_TASK_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'background_task_cpu_sample_seconds', 0.35)))
@@ -1842,14 +1850,14 @@ POOL_PROBE_QUALITY_ENABLED = bool(getattr(config, 'pool_probe_quality_enabled', 
 POOL_PROBE_QUALITY_DOWNLOAD_URL = str(
     getattr(config, 'pool_probe_quality_download_url', 'https://speed.cloudflare.com/__down?bytes={bytes}') or ''
 ).strip()
-POOL_PROBE_QUALITY_DOWNLOAD_BYTES = max(0, int(getattr(config, 'pool_probe_quality_download_bytes', 1048576)))
+POOL_PROBE_QUALITY_DOWNLOAD_BYTES = max(0, int(getattr(config, 'pool_probe_quality_download_bytes', 524288)))
 POOL_PROBE_QUALITY_MIN_AVAILABLE_KB = max(
     0,
     int(getattr(config, 'pool_probe_quality_min_available_kb', POOL_PROBE_SLOW_AVAILABLE_KB)),
 )
 POOL_PROBE_QUALITY_MAX_SAMPLES_PER_RUN = max(
     0,
-    int(getattr(config, 'pool_probe_quality_max_samples_per_run', 12)),
+    int(getattr(config, 'pool_probe_quality_max_samples_per_run', 6)),
 )
 POOL_PROBE_QUALITY_DOWNLOAD_CONNECT_TIMEOUT = float(
     getattr(config, 'pool_probe_quality_download_connect_timeout', POOL_PROBE_RETRY_CONNECT_TIMEOUT)
@@ -2180,6 +2188,12 @@ router_health = router_health_runtime.RouterHealthRuntime(
     cache_ttl=ROUTER_HEALTH_CACHE_TTL,
     dns_cache_ttl=ROUTER_HEALTH_DNS_CACHE_TTL,
     ndmc_cache_ttl=ROUTER_HEALTH_NDMC_CACHE_TTL,
+)
+router_metrics_runtime = router_metrics.RouterMetricsRuntime(
+    history_limit=ROUTER_METRICS_HISTORY_LIMIT,
+    warn_bot_rss_kb=ROUTER_METRICS_WARN_BOT_RSS_KB,
+    critical_bot_rss_kb=ROUTER_METRICS_CRITICAL_BOT_RSS_KB,
+    warn_load1=ROUTER_METRICS_WARN_LOAD1,
 )
 active_mode_status_cache = {
     'timestamp': 0,
@@ -3900,6 +3914,8 @@ def _store_youtube_edge_prefetch_status(status):
 def _youtube_edge_prefetch_skip_reason():
     if not YOUTUBE_EDGE_PREFETCH_ENABLED:
         return 'disabled'
+    if not _app_mode_pool_enabled():
+        return 'simple_mode'
     try:
         if _memory_sensitive_operation_running():
             return 'busy'
@@ -4018,6 +4034,8 @@ def _start_youtube_edge_prefetch_thread():
         return
     if YOUTUBE_EDGE_PREFETCH_MODE != 'thread':
         return
+    if not _app_mode_pool_enabled():
+        return
 
     def worker():
         shutdown_requested.wait(YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS)
@@ -4083,6 +4101,20 @@ def _pool_probe_cpu_busy_percent():
     if total_delta <= 0:
         return None
     return max(0.0, min(100.0, 100.0 * (total_delta - idle_delta) / float(total_delta)))
+
+
+def _pool_probe_load_average():
+    try:
+        with open('/proc/loadavg', 'r', encoding='utf-8', errors='ignore') as file:
+            parts = file.read().split()
+    except Exception:
+        return None
+    if not parts:
+        return None
+    try:
+        return float(parts[0])
+    except Exception:
+        return None
 
 
 def _background_cpu_busy_percent():
@@ -6325,6 +6357,25 @@ def _rollback_last_update():
     except Exception as exc:
         return f'Backup найден ({backup_dir}), но static assets не удалось восстановить: {exc}'
     fixed_targets = {
+        'bot_app_mode': (APP_RUNTIME_MODE_FILE, 0o644),
+        'bot_proxy_mode': (PROXY_MODE_FILE, 0o644),
+        'bot_autostart': (BOT_AUTOSTART_FILE, 0o644),
+        'bot_config.py': (os.path.join(BOT_DIR, 'bot_config.py'), 0o644),
+        'key_pools.json': (os.path.join(BOT_DIR, 'key_pools.json'), 0o644),
+        'subscriptions.json': (os.path.join(BOT_DIR, 'subscriptions.json'), 0o644),
+        'custom_checks.json': (os.path.join(BOT_DIR, 'custom_checks.json'), 0o644),
+        'vmess.key': (VMESS_KEY_PATH, 0o600),
+        'vless.key': (VLESS_KEY_PATH, 0o600),
+        'vless2.key': (VLESS2_KEY_PATH, 0o600),
+        'xray_config.json': ('/opt/etc/xray/config.json', 0o644),
+        'v2ray_config.json': ('/opt/etc/v2ray/config.json', 0o644),
+        'shadowsocks.json': ('/opt/etc/shadowsocks.json', 0o644),
+        'trojan_config.json': ('/opt/etc/trojan/config.json', 0o644),
+        'unblock_shadowsocks.txt': ('/opt/etc/unblock/shadowsocks.txt', 0o644),
+        'unblock_trojan.txt': ('/opt/etc/unblock/trojan.txt', 0o644),
+        'unblock_vmess.txt': ('/opt/etc/unblock/vmess.txt', 0o644),
+        'unblock_vless.txt': ('/opt/etc/unblock/vless.txt', 0o644),
+        'unblock_vless2.txt': ('/opt/etc/unblock/vless-2.txt', 0o644),
         'installer.py': ('/opt/etc/bot/installer.py', 0o755),
         'S98telegram_bot_installer': ('/opt/etc/init.d/S98telegram_bot_installer', 0o755),
         'S99telegram_bot': ('/opt/etc/init.d/S99telegram_bot', 0o755),
@@ -6341,6 +6392,9 @@ def _rollback_last_update():
     for name, (target, mode) in fixed_targets.items():
         if _restore_backup_file(os.path.join(backup_dir, name), target, mode):
             restored.append(name)
+    bot_config_backup = os.path.join(backup_dir, 'bot_config.py')
+    if os.path.exists(bot_config_backup) and _restore_backup_file(bot_config_backup, '/opt/etc/bot_config.py', 0o644):
+        restored.append('bot_config.py legacy')
     restored.extend(_sanitize_xray26_compat_files())
     core_ok, core_message = _restart_core_proxy_after_validation()
     if not restored:
@@ -6699,6 +6753,13 @@ def _router_health_snapshot():
         note = str(payload.get('note') or '').strip()
         retry_note = f'После проверки пула ожидается повторная очистка памяти: RSS бота {rss_mb} MB, попытка через {retry_in} с'
         payload['note'] = _append_status_note(note, retry_note)
+    return payload
+
+
+def _router_metrics_snapshot():
+    payload = router_metrics_runtime.snapshot()
+    payload['version'] = APP_VERSION_LABEL
+    payload['app_mode'] = _load_app_runtime_mode()
     return payload
 
 
@@ -8703,6 +8764,10 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             max_cpu_percent=POOL_PROBE_MAX_CPU_PERCENT,
             high_cpu_delay_seconds=POOL_PROBE_HIGH_CPU_DELAY_SECONDS,
             max_high_cpu_wait_seconds=POOL_PROBE_HIGH_CPU_MAX_WAIT_SECONDS,
+            load_average=_pool_probe_load_average if POOL_PROBE_MAX_LOAD1 > 0 else None,
+            max_load1=POOL_PROBE_MAX_LOAD1,
+            high_load_delay_seconds=POOL_PROBE_HIGH_LOAD_DELAY_SECONDS,
+            max_high_load_wait_seconds=POOL_PROBE_HIGH_LOAD_MAX_WAIT_SECONDS,
             low_memory_delay_seconds=POOL_PROBE_LOW_MEMORY_DELAY_SECONDS,
             max_low_memory_wait_seconds=POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS,
             slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB,
@@ -9612,6 +9677,7 @@ def _web_get_context(handler):
         'get_web_command_state': _get_web_command_state,
         'update_status_snapshot': _update_status_snapshot,
         'event_history_snapshot': _event_history_snapshot,
+        'router_metrics_snapshot': _router_metrics_snapshot,
         'route_intersections_snapshot': _route_intersections_snapshot,
         'service_routes_payload': _web_service_routes_payload,
         'telegram_call_learning_snapshot': _telegram_call_learning_snapshot,
@@ -9872,6 +9938,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         '/api/command_state',
         '/api/update_status',
         '/api/event_history',
+        '/api/router_metrics',
         '/api/telegram_call_learning',
         '/api/route_intersections',
         '/api/protocol_check_panel',

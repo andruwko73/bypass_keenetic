@@ -1,3 +1,7 @@
+*v1.842 (28 Jun 2026) -* main
+
+*Adds an on-demand router CPU/RSS monitoring tab inside the existing history drawer, extends update rollback backups to restore runtime state, keys, proxy configs, lists and mode files, preserves existing Shadowsocks/Trojan configs during install, and treats unused protocol slots as neutral instead of failed.*
+
 *v1.841 (28 Jun 2026) -* main
 
 *Makes Simple mode load a lightweight web/bot runtime: pool/probe/custom-check UI helpers, route tools, Telegram pool UI, call-learning, auto-failover, and YouTube prefetch are lazy-loaded only when advanced components are enabled, while Simple initial render avoids probe/custom status refresh work.*

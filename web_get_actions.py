@@ -262,6 +262,8 @@ def dispatch(ctx, path, query=''):
         return {'kind': 'json', 'payload': _ctx(ctx, 'update_status_snapshot', lambda: {})(), 'status': 200}
     if path == '/api/event_history':
         return {'kind': 'json', 'payload': {'events': _ctx(ctx, 'event_history_snapshot', lambda: [])()}, 'status': 200}
+    if path == '/api/router_metrics':
+        return {'kind': 'json', 'payload': _ctx(ctx, 'router_metrics_snapshot', lambda: {})(), 'status': 200}
     if path == '/api/route_intersections' and _ctx(ctx, 'pool_enabled', False):
         return {'kind': 'json', 'payload': _ctx(ctx, 'route_intersections_snapshot', lambda: {})(), 'status': 200}
     if path == '/api/service_routes' and _ctx(ctx, 'pool_enabled', False):
