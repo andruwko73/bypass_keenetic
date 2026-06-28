@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.854, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.855, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -1702,6 +1702,8 @@ def _start_auto_failover_thread():
                     _attempt_auto_failover()
             except Exception as exc:
                 _write_runtime_log(f'Auto-failover error: {exc}')
+            finally:
+                _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
             shutdown_requested.wait(AUTO_FAILOVER_POLL_SECONDS)
 
     thread = threading.Thread(target=worker, daemon=True)
@@ -1719,6 +1721,8 @@ def _start_youtube_vless2_failover_thread():
                     _attempt_youtube_vless2_failover()
             except Exception as exc:
                 _write_runtime_log(f'YouTube Vless2 failover error: {exc}')
+            finally:
+                _memory_cleanup('YouTube failover cycle', clear_status=False, log=False)
             shutdown_requested.wait(YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -1819,6 +1823,7 @@ POOL_PROBE_HIGH_LOAD_MAX_WAIT_SECONDS = max(0.0, float(getattr(config, 'pool_pro
 BACKGROUND_TASK_CPU_GUARD_ENABLED = bool(getattr(config, 'background_task_cpu_guard_enabled', True))
 BACKGROUND_TASK_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'background_task_max_cpu_percent', 65.0)))
 BACKGROUND_TASK_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'background_task_cpu_sample_seconds', 0.35)))
+BACKGROUND_TASK_MAX_BOT_RSS_KB = max(0, int(getattr(config, 'background_task_max_bot_rss_kb', 65 * 1024)))
 BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS = max(
     60.0,
     float(getattr(config, 'background_task_skip_log_interval_seconds', 300.0)),
@@ -1913,7 +1918,7 @@ MEMORY_WATCHDOG_RESTART_COOLDOWN_SECONDS = max(
 )
 MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = max(
     0,
-    int(getattr(config, 'memory_watchdog_idle_restart_rss_kb', 64 * 1024)),
+    int(getattr(config, 'memory_watchdog_idle_restart_rss_kb', 70 * 1024)),
 )
 MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = max(
     60.0,
@@ -4139,6 +4144,20 @@ def _background_task_allowed(task_name):
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
     if skip_until and now < skip_until:
         return False
+    rss_kb = int(_process_rss_kb() or 0)
+    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+        cleanup = _memory_cleanup(f'{task_name} skipped high RSS', force=True, clear_status=False, log=False)
+        rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
+        if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+            background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+            last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
+            if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+                background_task_skip_log_at[task_name] = now
+                _write_runtime_log(
+                    f'{task_name}: skipped background check because bot RSS is high '
+                    f'({rss_kb} KB >= {BACKGROUND_TASK_MAX_BOT_RSS_KB} KB).'
+                )
+            return False
     cpu_busy = _background_cpu_busy_percent()
     if cpu_busy is None or cpu_busy <= BACKGROUND_TASK_MAX_CPU_PERCENT:
         background_task_skip_until.pop(task_name, None)
@@ -8943,6 +8962,8 @@ def _start_subscription_auto_refresh_thread():
                         _refresh_subscription_once(proto, record, source='auto')
             except Exception as exc:
                 _write_runtime_log(f'Subscription auto refresh error: {exc}')
+            finally:
+                _memory_cleanup('Subscription auto refresh cycle', clear_status=False, log=False)
             shutdown_requested.wait(SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -9285,6 +9306,15 @@ def _refresh_status_caches_async(current_keys, active_only=False):
     signature = _status_snapshot_signature(current_keys)
     refresh_key = f'active:{signature}' if active_only else signature
     now = time.time()
+    rss_kb = int(_process_rss_kb() or 0)
+    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+        cleanup = _memory_cleanup('status refresh skipped high RSS', force=True, clear_status=False, log=False)
+        rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
+        if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+            with status_refresh_lock:
+                status_refresh_last_started_at[refresh_key] = now
+                status_refresh_last_finished_at[refresh_key] = now
+            return
     with status_refresh_lock:
         if refresh_key in status_refresh_in_progress:
             return

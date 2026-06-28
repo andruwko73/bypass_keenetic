@@ -1691,9 +1691,9 @@ def test_codex_version_matches_commit_count():
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
-    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in example
-    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in installer
-    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in bootstrap
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
     assert 'memory_timeline_enabled = False' in example
     assert 'memory_timeline_enabled = False' in installer
     assert 'memory_timeline_enabled = False' in bootstrap
@@ -1733,6 +1733,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_timeline_max_events = 720' in example
     assert 'memory_timeline_max_events = 720' in installer
     assert 'memory_timeline_max_events = 720' in bootstrap
+    assert 'background_task_max_bot_rss_kb = 66560' in example
+    assert 'background_task_max_bot_rss_kb = 66560' in installer
+    assert 'background_task_max_bot_rss_kb = 66560' in bootstrap
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in example
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in installer
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in bootstrap
@@ -2431,7 +2434,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB' in source
     assert 'pool_probe_quality_max_samples_per_run' in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
-    assert "memory_watchdog_idle_restart_rss_kb', 64 * 1024" in source
+    assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
+    assert "background_task_max_bot_rss_kb', 65 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert "getattr(config, 'router_metrics_history_limit', 120)" in source
     assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 64 * 1024)" in source
@@ -2509,6 +2513,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'автоперезапуск уже запрошен' in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
+    assert "f'{task_name} skipped high RSS'" in source
+    assert "'status refresh skipped high RSS'" in source
     assert "_memory_cleanup('telegram polling error', force=True, clear_status=False)" in source
     assert 'def _malloc_trim' in source
     assert 'def _pool_probe_memory_checkpoint' in source
@@ -2528,7 +2534,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'не увеличивает постоянный RSS Telegram-бота' in readme_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
-    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in script_source
+    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
     assert 'router_metrics_history_limit = 120' in script_source
     assert 'router_metrics_warn_bot_rss_kb = 65536' in script_source
     assert 'router_metrics_critical_bot_rss_kb = 87040' in script_source
@@ -2539,6 +2545,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_timeline_max_events[[:space:]]*=[[:space:]]*240" in script_source
     assert 'memory_malloc_trim_enabled = True' in script_source
     assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
+    assert 'background_task_max_bot_rss_kb = 66560' in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
     assert 'youtube_edge_prefetch_enabled = True' in script_source
     assert 'youtube_edge_prefetch_max_rss_kb = 66560' in script_source

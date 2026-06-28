@@ -1,3 +1,7 @@
+*v1.855 (28 Jun 2026) -* main
+
+*Restores the idle restart threshold to 70 MB and makes background checks back off/clean up near 65 MB so the bot should not approach the restart threshold during normal work.*
+
 *v1.854 (28 Jun 2026) -* main
 
 *Lowers the idle bot RSS restart and router-metrics warning threshold to 64 MB so web UI/history rendering spikes do not remain near 70 MB.*

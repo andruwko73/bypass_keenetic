@@ -855,10 +855,10 @@ PY
 
 migrate_runtime_config_defaults() {
   [ -f "$BOT_CONFIG_PATH" ] || return 0
-  if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(71680|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^memory_watchdog_idle_restart_rss_kb[[:space:]]*=.*/memory_watchdog_idle_restart_rss_kb = 65536/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(65536|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^memory_watchdog_idle_restart_rss_kb[[:space:]]*=.*/memory_watchdog_idle_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_watchdog_idle_restart_rss_kb = 65536\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_watchdog_idle_restart_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^memory_post_pool_restart_rss_kb[[:space:]]*=[[:space:]]*(61440|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^memory_post_pool_restart_rss_kb[[:space:]]*=.*/memory_post_pool_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
   fi
@@ -881,6 +881,7 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_min_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_min_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_bot_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_status_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_api_cache_ttl = 30.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_history_limit[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_history_limit = 120\n' >> "$BOT_CONFIG_PATH"
@@ -895,8 +896,8 @@ migrate_runtime_config_defaults() {
   grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   if [ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]; then
-    if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(71680|81920)([[:space:]#]|$)' /opt/etc/bot_config.py; then
-      sed -i 's/^memory_watchdog_idle_restart_rss_kb[[:space:]]*=.*/memory_watchdog_idle_restart_rss_kb = 65536/' /opt/etc/bot_config.py || true
+    if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(65536|81920)([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^memory_watchdog_idle_restart_rss_kb[[:space:]]*=.*/memory_watchdog_idle_restart_rss_kb = 71680/' /opt/etc/bot_config.py || true
     fi
     if grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=[[:space:]]*71680([[:space:]#]|$)' /opt/etc/bot_config.py; then
       sed -i 's/^router_metrics_warn_bot_rss_kb[[:space:]]*=.*/router_metrics_warn_bot_rss_kb = 65536/' /opt/etc/bot_config.py || true
@@ -907,11 +908,12 @@ migrate_runtime_config_defaults() {
     if grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=[[:space:]]*300\.0([[:space:]#]|$)' /opt/etc/bot_config.py; then
       sed -i 's/^web_response_cleanup_min_interval_seconds[[:space:]]*=.*/web_response_cleanup_min_interval_seconds = 60.0/' /opt/etc/bot_config.py || true
     fi
-    grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_watchdog_idle_restart_rss_kb = 65536\n' >> /opt/etc/bot_config.py
+    grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_watchdog_idle_restart_rss_kb = 71680\n' >> /opt/etc/bot_config.py
     grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_metrics_warn_bot_rss_kb = 65536\n' >> /opt/etc/bot_config.py
     grep -Eq '^memory_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
+    grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
   fi
   if grep -Eq '^pool_probe_delay_seconds[[:space:]]*=[[:space:]]*1\.5([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_delay_seconds[[:space:]]*=.*/pool_probe_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true

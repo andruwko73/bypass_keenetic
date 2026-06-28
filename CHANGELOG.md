@@ -1,3 +1,8 @@
+<a name="1.855"></a>
+# [1.855] - 28 Jun 2026
+
+- Restores the idle service restart threshold to 70 MB and adds RSS guards/cleanup around background status, Telegram failover, YouTube failover and subscription refresh checks so normal service work backs off before the bot reaches the restart threshold.
+
 <a name="1.854"></a>
 # [1.854] - 28 Jun 2026
 
