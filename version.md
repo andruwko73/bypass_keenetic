@@ -1,3 +1,7 @@
+*v1.853 (28 Jun 2026) -* main
+
+*Stops compact router-metrics polling from accumulating in-memory history samples, so the lightweight history monitoring panel does not grow bot RSS while it is open.*
+
 *v1.852 (28 Jun 2026) -* main
 
 *Lazily loads event history only when the history drawer is opened, reducing initial web page RSS pressure, and extends cleanup/migration for history and router metrics responses.*

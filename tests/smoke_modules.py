@@ -498,10 +498,11 @@ def test_router_metrics_runtime_snapshot():
     assert first['processes']['bot']['cpu_percent'] == 0.0
     assert second['processes']['bot']['cpu_percent'] == 10.0
     assert second['processes']['xray']['cpu_percent'] == 20.0
-    assert second['summary']['samples'] == 2
+    assert first['summary']['samples'] == 1
+    assert second['summary']['samples'] == 1
     assert second['summary']['bot_rss_max_kb'] == 64000
     assert 'history' not in first
-    assert len(second['history']) == 2
+    assert len(second['history']) == 1
 
 
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():

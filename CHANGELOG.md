@@ -1,3 +1,8 @@
+<a name="1.853"></a>
+# [1.853] - 28 Jun 2026
+
+- Stops compact router-metrics polling from accumulating in-memory history samples, so the lightweight history monitoring panel does not grow bot RSS while it is open.
+
 <a name="1.852"></a>
 # [1.852] - 28 Jun 2026
 

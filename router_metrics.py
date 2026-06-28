@@ -172,12 +172,16 @@ class RouterMetricsRuntime:
                 'xray_rss_kb': xray.get('rss_kb') or 0,
                 'xray_cpu_percent': xray.get('cpu_percent') or 0.0,
             }
-            self._history.append(sample)
-            if len(self._history) > self.history_limit:
-                self._history = self._history[-self.history_limit:]
-            bot_rss_values = [int(item.get('bot_rss_kb') or 0) for item in self._history if item.get('bot_rss_kb')]
-            xray_rss_values = [int(item.get('xray_rss_kb') or 0) for item in self._history if item.get('xray_rss_kb')]
-            load_values = [float(item.get('load1') or 0.0) for item in self._history]
+            if include_history:
+                self._history.append(sample)
+                if len(self._history) > self.history_limit:
+                    self._history = self._history[-self.history_limit:]
+                history_samples = list(self._history)
+            else:
+                history_samples = list(self._history[-self.history_limit + 1:]) + [sample]
+            bot_rss_values = [int(item.get('bot_rss_kb') or 0) for item in history_samples if item.get('bot_rss_kb')]
+            xray_rss_values = [int(item.get('xray_rss_kb') or 0) for item in history_samples if item.get('xray_rss_kb')]
+            load_values = [float(item.get('load1') or 0.0) for item in history_samples]
             payload = {
                 'timestamp': now,
                 'load': {'load1': load1, 'load5': load5, 'load15': load15},
@@ -188,7 +192,7 @@ class RouterMetricsRuntime:
                     'warn_load1': self.warn_load1,
                 },
                 'summary': {
-                    'samples': len(self._history),
+                    'samples': len(history_samples),
                     'bot_rss_min_kb': min(bot_rss_values) if bot_rss_values else 0,
                     'bot_rss_max_kb': max(bot_rss_values) if bot_rss_values else 0,
                     'xray_rss_min_kb': min(xray_rss_values) if xray_rss_values else 0,
@@ -197,5 +201,5 @@ class RouterMetricsRuntime:
                 },
             }
             if include_history:
-                payload['history'] = list(self._history)
+                payload['history'] = history_samples
             return payload
