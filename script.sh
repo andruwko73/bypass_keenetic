@@ -882,7 +882,6 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_status_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_api_cache_ttl = 30.0\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^web_status_idle_poll_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_idle_poll_ms = 60000\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_history_limit[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_history_limit = 120\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_warn_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_critical_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_critical_bot_rss_kb = 87040\n' >> "$BOT_CONFIG_PATH"

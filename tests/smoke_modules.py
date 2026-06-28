@@ -1700,9 +1700,6 @@ def test_codex_version_matches_commit_count():
     assert 'web_status_api_cache_ttl = 30.0' in example
     assert 'web_status_api_cache_ttl = 30.0' in installer
     assert 'web_status_api_cache_ttl = 30.0' in bootstrap
-    assert 'web_status_idle_poll_ms = 60000' in example
-    assert 'web_status_idle_poll_ms = 60000' in installer
-    assert 'web_status_idle_poll_ms = 60000' in bootstrap
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap

@@ -220,8 +220,12 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (Boolean(pageConfig.enableTelegram) !== modeConfig.expectTelegram) {
     throw new Error(`${name}: enableTelegram expected ${modeConfig.expectTelegram}, got ${pageConfig.enableTelegram}`);
   }
-  if (Number(pageConfig.statusIdlePollMs) !== 60000) {
-    throw new Error(`${name}: statusIdlePollMs expected 60000, got ${pageConfig.statusIdlePollMs}`);
+  const branchText = await page.locator('.app-branch').first().textContent();
+  if (modeConfig.mode === 'advanced') {
+    if (!/Telegram/i.test(branchText || '') || !/(бот|bot)/i.test(branchText || '')) {
+      throw new Error(`${name}: advanced header mode text changed: ${branchText}`);
+    }
+    await assertVisibleBox(page, '#web-api-pill.topbar-status', `${name} top header status`);
   }
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);

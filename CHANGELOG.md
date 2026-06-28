@@ -1,3 +1,8 @@
+<a name="1.851"></a>
+# [1.851] - 28 Jun 2026
+
+- Keeps the 1.849 header/status layout unchanged while preserving the 1.850 router-load optimizations, and extends UI smoke so Advanced mode fails if the top header status block disappears.
+
 <a name="1.850"></a>
 # [1.850] - 28 Jun 2026
 

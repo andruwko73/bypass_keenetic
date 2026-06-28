@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.850, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.851, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -1782,7 +1782,6 @@ ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
 ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 900)))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 30.0))
-WEB_STATUS_IDLE_POLL_MS = max(30000, int(getattr(config, 'web_status_idle_poll_ms', 60000)))
 WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 45.0))
 SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL = float(getattr(config, 'service_route_intersections_cache_ttl', 60.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
@@ -10106,7 +10105,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             enable_key_pool=pool_enabled,
             enable_telegram=telegram_enabled,
             bot_ready=bool(bot_ready),
-            status_idle_poll_ms=WEB_STATUS_IDLE_POLL_MS,
         )
 
     def _build_protocol_panel(self, protocol):

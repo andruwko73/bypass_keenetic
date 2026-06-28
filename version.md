@@ -1,3 +1,7 @@
+*v1.851 (28 Jun 2026) -* main
+
+*Keeps the 1.849 header/status layout unchanged while preserving the 1.850 router-load optimizations, and extends UI smoke so Advanced mode fails if the top header status block disappears.*
+
 *v1.850 (28 Jun 2026) -* main
 
 *Reduces router web-monitoring overhead by slowing idle status polling to 60 seconds, making compact router metrics omit the in-memory history array unless explicitly requested, and lowering web-response memory cleanup to start near 60 MB instead of waiting for 70+ MB.*
