@@ -225,7 +225,7 @@ def _protocol_check_panel_payload(ctx, query):
     protocol = (params.get('proto') or params.get('protocol') or [''])[0]
     build_protocol_check_panel = _ctx(ctx, 'build_protocol_check_panel')
     if not protocol or not build_protocol_check_panel:
-        return {'ok': False, 'error': 'РќРµРёР·РІРµСЃС‚РЅС‹Р№ РїСЂРѕС‚РѕРєРѕР»'}
+        return {'ok': False, 'error': 'Неизвестный протокол'}
     try:
         check_html = build_protocol_check_panel(protocol)
     except ValueError as exc:

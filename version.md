@@ -1,3 +1,7 @@
+*v1.849 (28 Jun 2026) -* main
+
+*Fixes the lazy protocol-check API fallback text so an invalid protocol reports a readable Russian error instead of mojibake.*
+
 *v1.848 (28 Jun 2026) -* main
 
 *Cleans the README by removing the obsolete "Что изменилось" section so the documentation starts with current capabilities instead of migration history.*

@@ -1,3 +1,8 @@
+<a name="1.849"></a>
+# [1.849] - 28 Jun 2026
+
+- Fixes the lazy protocol-check API fallback text so an invalid protocol reports a readable Russian error instead of mojibake.
+
 <a name="1.848"></a>
 # [1.848] - 28 Jun 2026
 
