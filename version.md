@@ -1,3 +1,7 @@
+*v1.848 (28 Jun 2026) -* main
+
+*Cleans the README by removing the obsolete "Что изменилось" section so the documentation starts with current capabilities instead of migration history.*
+
 *v1.846 (28 Jun 2026) -* main
 
 *Removes the separate Monitoring tab from the history drawer and embeds a compact on-demand CPU/RSS/load strip above the event history list, keeping the drawer focused on history while preserving router monitoring.*

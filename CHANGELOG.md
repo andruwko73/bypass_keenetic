@@ -1,3 +1,8 @@
+<a name="1.848"></a>
+# [1.848] - 28 Jun 2026
+
+- Cleans the README by removing the obsolete "Что изменилось" section so the documentation starts with current capabilities instead of migration history.
+
 <a name="1.846"></a>
 # [1.846] - 28 Jun 2026
 
