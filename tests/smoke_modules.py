@@ -2603,6 +2603,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _load_persisted_pool_probe_resume' in source
     assert '_load_persisted_pool_probe_resume()' in source
     assert "_schedule_post_pool_memory_cleanup()" in source
+    assert 'def _refresh_status_caches_async(current_keys, active_only=False)' in source
+    assert "refresh_key = f'active:{signature}' if active_only else signature" in source
+    assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
+    assert "'refresh_status_caches_async': refresh_status_caches" in source
     assert "allow_youtube_confirm=True" in source
     assert "allow_youtube_confirm=False" in source
     assert "elif pool_locked:" in source
@@ -7770,7 +7774,7 @@ def test_web_form_template_smoke():
         current_mode_label='Без прокси',
         custom_checks_json='[]',
         fallback_block='',
-        event_history_html='<section data-event-history-list></section>',
+        event_history_html='',
         initial_command_running='false',
         initial_status_pending='false',
         list_route_label='list',

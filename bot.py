@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.842, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.843, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -9274,7 +9274,7 @@ def _placeholder_status_snapshot(current_keys):
     }
 
 
-def _refresh_status_caches_async(current_keys):
+def _refresh_status_caches_async(current_keys, active_only=False):
     if pool_probe_lock.locked():
         return
     try:
@@ -9283,13 +9283,14 @@ def _refresh_status_caches_async(current_keys):
     except Exception:
         pass
     signature = _status_snapshot_signature(current_keys)
+    refresh_key = f'active:{signature}' if active_only else signature
     now = time.time()
     with status_refresh_lock:
-        if signature in status_refresh_in_progress:
+        if refresh_key in status_refresh_in_progress:
             return
         last_refresh = max(
-            float(status_refresh_last_started_at.get(signature) or 0.0),
-            float(status_refresh_last_finished_at.get(signature) or 0.0),
+            float(status_refresh_last_started_at.get(refresh_key) or 0.0),
+            float(status_refresh_last_finished_at.get(refresh_key) or 0.0),
         )
         cached_snapshot = status_snapshot_cache.get('data')
         refresh_interval = (
@@ -9304,8 +9305,8 @@ def _refresh_status_caches_async(current_keys):
             isinstance(cached_snapshot, dict)
         ):
             return
-        status_refresh_in_progress.add(signature)
-        status_refresh_last_started_at[signature] = now
+        status_refresh_in_progress.add(refresh_key)
+        status_refresh_last_started_at[refresh_key] = now
 
     def worker():
         _record_memory_timeline(
@@ -9315,16 +9316,20 @@ def _refresh_status_caches_async(current_keys):
             force=True,
         )
         try:
-            _build_status_snapshot(current_keys, force_refresh=True)
+            if active_only:
+                snapshot = _active_mode_status_snapshot(current_keys)
+                _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=time.time())
+            else:
+                _build_status_snapshot(current_keys, force_refresh=True)
         except Exception as exc:
             _write_runtime_log(f'Ошибка фонового обновления статусов: {exc}')
         finally:
             with status_refresh_lock:
-                status_refresh_in_progress.discard(signature)
-                status_refresh_last_finished_at[signature] = time.time()
+                status_refresh_in_progress.discard(refresh_key)
+                status_refresh_last_finished_at[refresh_key] = time.time()
                 for cache in (status_refresh_last_started_at, status_refresh_last_finished_at):
                     for old_signature in list(cache):
-                        if old_signature != signature:
+                        if old_signature != refresh_key:
                             cache.pop(old_signature, None)
             _memory_cleanup('status refresh', clear_status=False, log=False)
             _record_memory_timeline(
@@ -9647,12 +9652,9 @@ def _web_action_context():
 
 def _web_get_context(handler):
     pool_enabled = _app_mode_pool_enabled()
-    simple_status_snapshot = (
-        None if pool_enabled else
-        lambda current_keys: {
-            'web': _placeholder_web_status_snapshot(),
-            'protocols': _placeholder_protocol_statuses(current_keys),
-        }
+    refresh_status_caches = (
+        _refresh_status_caches_async if pool_enabled else
+        (lambda current_keys: _refresh_status_caches_async(current_keys, active_only=True))
     )
     return {
         'build_form': handler._build_form,
@@ -9662,11 +9664,11 @@ def _web_get_context(handler):
         'build_script_asset': handler._build_script_asset,
         'consume_flash_message': _consume_web_flash_message,
         'load_current_keys': _load_current_keys,
-        'cached_status_snapshot': _cached_status_snapshot if pool_enabled else simple_status_snapshot,
-        'stale_status_snapshot': _stale_status_snapshot if pool_enabled else None,
-        'placeholder_status_snapshot': _placeholder_status_snapshot if pool_enabled else simple_status_snapshot,
+        'cached_status_snapshot': _cached_status_snapshot,
+        'stale_status_snapshot': _stale_status_snapshot,
+        'placeholder_status_snapshot': _placeholder_status_snapshot,
         'active_mode_status_snapshot': _active_mode_status_snapshot,
-        'refresh_status_caches_async': _refresh_status_caches_async if pool_enabled else (lambda *_args, **_kwargs: None),
+        'refresh_status_caches_async': refresh_status_caches,
         'pool_probe_locked': pool_probe_lock.locked,
         'get_status_api_cache': _get_web_status_api_cache,
         'store_status_api_cache': _store_web_status_api_cache,
@@ -9991,12 +9993,17 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 if not pool_probe_pending:
                     _refresh_status_caches_async(current_keys)
         else:
-            status = _placeholder_web_status_snapshot()
-            protocol_statuses = _placeholder_protocol_statuses(current_keys)
+            snapshot = _cached_status_snapshot(current_keys)
+            if snapshot is None:
+                snapshot = _placeholder_status_snapshot(current_keys)
+            status = snapshot['web']
+            protocol_statuses = snapshot['protocols']
             current_pool_probe_progress = {}
             pool_probe_pending = False
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
+        if not pool_enabled and status_refresh_pending:
+            _refresh_status_caches_async(current_keys, active_only=True)
         router_health = _router_health_snapshot()
 
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])

@@ -1,3 +1,8 @@
+<a name="1.843"></a>
+# [1.843] - 28 Jun 2026
+
+- Keeps the event history drawer and router monitoring tab available even when Simple mode has no pool event list, and lets Simple mode refresh the active status in the background instead of leaving Telegram API in the initial pending state.
+
 <a name="1.842"></a>
 # [1.842] - 28 Jun 2026
 

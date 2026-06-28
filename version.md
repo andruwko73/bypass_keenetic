@@ -1,3 +1,7 @@
+*v1.843 (28 Jun 2026) -* main
+
+*Keeps the event history drawer and router monitoring tab available even when Simple mode has no pool event list, and lets Simple mode refresh the active status in the background instead of leaving Telegram API in the initial pending state.*
+
 *v1.842 (28 Jun 2026) -* main
 
 *Adds an on-demand router CPU/RSS monitoring tab inside the existing history drawer, extends update rollback backups to restore runtime state, keys, proxy configs, lists and mode files, preserves existing Shadowsocks/Trojan configs during install, and treats unused protocol slots as neutral instead of failed.*

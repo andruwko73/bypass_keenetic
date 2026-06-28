@@ -292,6 +292,7 @@ def render_web_form(
             custom_checks = []
     except Exception:
         custom_checks = []
+    event_history_content_html = event_history_html or '<div data-event-history-list></div>'
     event_history_drawer_html = f'''
         <div id="event-history-modal" class="event-history-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="event-history-title">
             <aside class="event-history-drawer">
@@ -304,7 +305,7 @@ def render_web_form(
                     <button type="button" class="seg-tab" data-event-history-tab="metrics" role="tab" aria-selected="false">Мониторинг</button>
                 </div>
                 <section data-event-history-pane="events">
-                    {event_history_html}
+                    {event_history_content_html}
                 </section>
                 <section class="router-metrics-panel hidden" data-event-history-pane="metrics" aria-live="polite">
                     <div class="route-section-head">
@@ -322,7 +323,7 @@ def render_web_form(
                     <ol class="router-metrics-history" id="router-metrics-history"></ol>
                 </section>
             </aside>
-        </div>''' if event_history_html else ''
+        </div>'''
     app_config_json = _script_json({
         'csrfToken': csrf_token,
         'customChecks': custom_checks,
