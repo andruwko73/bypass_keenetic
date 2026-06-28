@@ -1,3 +1,8 @@
+<a name="1.844"></a>
+# [1.844] - 28 Jun 2026
+
+- Fixes the history drawer layout so the Monitoring tab starts directly under the tabs, and restores event history content in Simple mode without loading pool UI components.
+
 <a name="1.843"></a>
 # [1.843] - 28 Jun 2026
 

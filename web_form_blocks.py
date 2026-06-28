@@ -41,6 +41,79 @@ def render_csrf_input(csrf_token):
     return f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
 
 
+def compact_event_value(value):
+    if isinstance(value, (list, tuple, set)):
+        return ', '.join(str(item) for item in value)
+    if isinstance(value, dict):
+        return ', '.join(f'{key}={compact_event_value(item)}' for key, item in value.items())
+    return '' if value is None else str(value)
+
+
+def compact_event_details(details):
+    if not isinstance(details, dict) or not details:
+        return ''
+    parts = []
+    for key, value in details.items():
+        if value in (None, '', [], {}, ()):
+            continue
+        key_text = str(key or '').strip()
+        value_text = compact_event_value(value).replace('\r', ' ').replace('\n', ' ').strip()
+        if key_text and value_text:
+            parts.append(f'{key_text}={value_text}')
+    return ' · '.join(parts)
+
+
+def render_event_history_html(events, *, time_formatter=None):
+    events = events or []
+    if not events:
+        return '''<section class="panel event-history-panel">
+            <p class="section-subtitle">Пока нет записей о переключениях, маршрутах и обновлениях</p>
+        </section>'''
+    if time_formatter is None:
+        import time
+        time_formatter = lambda ts: time.strftime('%d.%m %H:%M', time.localtime(float(ts or 0)))
+    rows = []
+    for event in events[:50]:
+        try:
+            stamp = time_formatter(event.get('ts') or 0)
+        except Exception:
+            stamp = ''
+        level = html.escape(event.get('level') or 'info', quote=True)
+        action = html.escape(event.get('action') or '')
+        protocol = html.escape(event.get('protocol_label') or event.get('protocol') or '')
+        service = html.escape(event.get('service') or '')
+        source = html.escape(event.get('source') or '')
+        key_hash = html.escape(event.get('key_hash') or '')
+        message = html.escape(event.get('message') or '')
+        details_text = compact_event_details(event.get('details') or {})
+        details = html.escape(details_text)
+        meta = ' · '.join(item for item in (protocol, service, source, key_hash) if item)
+        message_line = ' · '.join(item for item in (message, details) if item)
+        title = html.escape(
+            ' | '.join(
+                item for item in (
+                    stamp,
+                    event.get('action') or '',
+                    meta,
+                    event.get('message') or '',
+                    details_text,
+                )
+                if item
+            ),
+            quote=True,
+        )
+        rows.append(f'''<li class="event-history-item event-{level}">
+            <span class="event-time">{html.escape(stamp)}</span>
+            <span class="event-main" title="{title}"><span class="event-title-row"><strong>{action}</strong><small>{html.escape(meta)}</small></span><em>{message_line}</em></span>
+        </li>''')
+    return f'''<section class="panel event-history-panel">
+        <div class="route-section-head">
+            <small>Последние переключения ключей, обновления и изменения маршрутов по всем протоколам</small>
+        </div>
+        <ul class="event-history-list">{"".join(rows)}</ul>
+    </section>'''
+
+
 def render_message_block(message, *, live=False):
     if message:
         safe_message = html.escape(message)

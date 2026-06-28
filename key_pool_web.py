@@ -3,6 +3,7 @@ import time
 from urllib.parse import urlparse
 
 from probe_cache import youtube_probe_state
+from web_form_blocks import render_event_history_html
 
 
 POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
@@ -49,52 +50,7 @@ def _compact_event_details(details):
 
 
 def web_event_history_html(events):
-    events = events or []
-    if not events:
-        return '''<section class="panel event-history-panel">
-            <p class="section-subtitle">Пока нет записей о переключениях, маршрутах и обновлениях</p>
-        </section>'''
-    rows = []
-    for event in events[:50]:
-        try:
-            stamp = time.strftime('%d.%m %H:%M', time.localtime(float(event.get('ts') or 0)))
-        except Exception:
-            stamp = ''
-        level = html.escape(event.get('level') or 'info', quote=True)
-        action = html.escape(event.get('action') or '')
-        protocol = html.escape(event.get('protocol_label') or event.get('protocol') or '')
-        service = html.escape(event.get('service') or '')
-        source = html.escape(event.get('source') or '')
-        key_hash = html.escape(event.get('key_hash') or '')
-        message = html.escape(event.get('message') or '')
-        meta = ' · '.join(item for item in (protocol, service) if item)
-        details_text = _compact_event_details(event.get('details') or {})
-        details = html.escape(details_text)
-        meta = ' · '.join(item for item in (protocol, service, source, key_hash) if item)
-        message_line = ' · '.join(item for item in (message, details) if item)
-        title = html.escape(
-            ' | '.join(
-                item for item in (
-                    stamp,
-                    event.get('action') or '',
-                    meta,
-                    event.get('message') or '',
-                    details_text,
-                )
-                if item
-            ),
-            quote=True,
-        )
-        rows.append(f'''<li class="event-history-item event-{level}">
-            <span class="event-time">{html.escape(stamp)}</span>
-            <span class="event-main" title="{title}"><span class="event-title-row"><strong>{action}</strong><small>{html.escape(meta)}</small></span><em>{message_line}</em></span>
-        </li>''')
-    return f'''<section class="panel event-history-panel">
-        <div class="route-section-head">
-            <small>Последние переключения ключей, обновления и изменения маршрутов по всем протоколам</small>
-        </div>
-        <ul class="event-history-list">{"".join(rows)}</ul>
-    </section>'''
+    return render_event_history_html(events)
 
 
 def _service_counter(custom_checks):
@@ -238,7 +194,6 @@ def web_custom_probe_states(probe, custom_checks):
         else:
             result[check_id] = 'unknown'
     return result
-
 
 def custom_check_applies_to_protocol(route_states, check_id, protocol):
     if not isinstance(route_states, dict):

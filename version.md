@@ -1,3 +1,7 @@
+*v1.844 (28 Jun 2026) -* main
+
+*Fixes the history drawer layout so the Monitoring tab starts directly under the tabs, and restores event history content in Simple mode without loading pool UI components.*
+
 *v1.843 (28 Jun 2026) -* main
 
 *Keeps the event history drawer and router monitoring tab available even when Simple mode has no pool event list, and lets Simple mode refresh the active status in the background instead of leaving Telegram API in the initial pending state.*

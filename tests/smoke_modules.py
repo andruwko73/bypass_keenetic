@@ -2607,6 +2607,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "refresh_key = f'active:{signature}' if active_only else signature" in source
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
     assert "'refresh_status_caches_async': refresh_status_caches" in source
+    assert 'event_history_html = web_form_blocks.render_event_history_html(_event_history_snapshot())' in source
     assert "allow_youtube_confirm=True" in source
     assert "allow_youtube_confirm=False" in source
     assert "elif pool_locked:" in source

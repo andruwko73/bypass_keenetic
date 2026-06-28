@@ -534,7 +534,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .event-main em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:normal;font-size:9.8px;color:#9fb0c8;}
         .event-history-backdrop{position:fixed;inset:0;z-index:720;display:flex;align-items:stretch;justify-content:flex-end;padding:14px;background:rgba(2,6,23,.62);}
         .event-history-backdrop.hidden{display:none;}
-        .event-history-drawer{width:min(720px,calc(100vw - 28px));min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);padding:14px;border:1px solid var(--border);background:rgba(17,25,35,.96);}
+        .event-history-drawer{width:min(720px,calc(100vw - 28px));min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);padding:14px;border:1px solid var(--border);background:rgba(17,25,35,.96);}
         .event-history-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;}
         .event-history-drawer-head h2{margin:0;font-size:18px;line-height:1.2;}
         .event-history-tabs{display:flex;gap:6px;margin-bottom:10px;}

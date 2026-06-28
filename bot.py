@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.843, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.844, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -10060,10 +10060,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         )
 
 
-        event_history_html = (
-            _key_pool_web().web_event_history_html(_event_history_snapshot())
-            if pool_enabled else ''
-        )
+        event_history_html = web_form_blocks.render_event_history_html(_event_history_snapshot())
 
         return render_web_form(
             APP_BRANCH_DESCRIPTION=APP_BRANCH_DESCRIPTION,
