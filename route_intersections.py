@@ -2,7 +2,7 @@ import ipaddress
 import os
 import subprocess
 
-from service_catalog import normalize_route_entry, shared_service_route_entries
+from service_catalog import SERVICE_LIST_SOURCES, normalize_route_entry, service_route_entries, shared_service_route_entries
 from unblock_lists import DEFAULT_ORDER, UNBLOCK_DIR, UNBLOCK_UPDATE_SCRIPT, read_unblock_list_entries, write_unblock_list_entries
 
 
@@ -103,6 +103,66 @@ def _ip_network(entry):
 
 def _owners(entries_by_route, entry):
     return [route for route, entries in entries_by_route.items() if entry in entries]
+
+
+def _service_match_index(service_sources=None):
+    sources = service_sources or SERVICE_LIST_SOURCES
+    exact = {}
+    domains = []
+    networks = []
+    for service_key, source in sources.items():
+        label = str((source or {}).get('label') or service_key).strip() or service_key
+        try:
+            entries = service_route_entries(service_key, sources)
+        except Exception:
+            entries = (source or {}).get('entries') or []
+        for entry in entries or []:
+            key = _entry_key(entry)
+            if key:
+                exact.setdefault(key, set()).add(label)
+            domain = _domain_key(entry)
+            if domain:
+                domains.append((domain, label))
+            network = _ip_network(entry)
+            if network:
+                networks.append((network, label))
+    return {'exact': exact, 'domains': domains, 'networks': networks}
+
+
+def _service_labels_for_entry(entry, service_index):
+    labels = set()
+    key = _entry_key(entry)
+    if key:
+        labels.update(service_index.get('exact', {}).get(key, set()))
+    domain = _domain_key(entry)
+    if domain:
+        for service_domain, label in service_index.get('domains', ()):
+            if domain == service_domain or domain.endswith('.' + service_domain) or service_domain.endswith('.' + domain):
+                labels.add(label)
+    network = _ip_network(entry)
+    if network:
+        for service_network, label in service_index.get('networks', ()):
+            if network.version == service_network.version and network.overlaps(service_network):
+                labels.add(label)
+    return sorted(labels)
+
+
+def _annotate_issue_services(issue, service_index, *, max_labels=6):
+    candidates = []
+    candidates.extend(issue.get('entries') or [])
+    candidates.extend(issue.get('samples') or [])
+    labels = []
+    seen = set()
+    for candidate in candidates:
+        for value in str(candidate or '').split(' / '):
+            for label in _service_labels_for_entry(value.strip(), service_index):
+                if label not in seen:
+                    seen.add(label)
+                    labels.append(label)
+    issue['services'] = labels[:max_labels]
+    issue['service_hint'] = ', '.join(issue['services'])
+    issue['service_unknown'] = not bool(labels)
+    return issue
 
 
 def _command_text(args, *, run_command=subprocess.run, timeout=3):
@@ -289,6 +349,7 @@ def analyze_route_intersections(
     run_command=subprocess.run,
 ):
     entries_by_route = _read_all(unblock_dir)
+    service_index = _service_match_index()
     issues = []
     shared_entries = {
         normalize_route_entry(entry)
@@ -385,6 +446,9 @@ def analyze_route_intersections(
             run_command=run_command,
         )
         issues.extend(runtime_issues)
+
+    for issue in issues:
+        _annotate_issue_services(issue, service_index)
 
     return {
         'issues': issues[:max_issues],

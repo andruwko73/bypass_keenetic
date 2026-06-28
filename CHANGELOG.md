@@ -1,3 +1,8 @@
+<a name="1.856"></a>
+# [1.856] - 28 Jun 2026
+
+- Adds service hints and expanded address examples to the route-intersections report, so the user can see which catalog service an overlap likely belongs to before choosing a target protocol.
+
 <a name="1.855"></a>
 # [1.855] - 28 Jun 2026
 

@@ -1,3 +1,7 @@
+*v1.856 (28 Jun 2026) -* main
+
+*Adds service hints and expanded address examples to route-intersection warnings so overlaps can be assigned to the right protocol deliberately.*
+
 *v1.855 (28 Jun 2026) -* main
 
 *Restores the idle restart threshold to 70 MB and makes background checks back off/clean up near 65 MB so the bot should not approach the restart threshold during normal work.*

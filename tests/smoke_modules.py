@@ -8206,10 +8206,13 @@ def test_service_routes_apply_and_profile():
 def test_route_intersections_helpers():
     with tempfile.TemporaryDirectory() as tmp:
         callbacks = []
-        (Path(tmp) / 'vless.txt').write_text('example.com\n198.51.100.0/24\n', encoding='utf-8')
-        (Path(tmp) / 'vless-2.txt').write_text('api.example.com\n198.51.100.10\n', encoding='utf-8')
+        (Path(tmp) / 'vless.txt').write_text('discord.com\nexample.com\n198.51.100.0/24\n', encoding='utf-8')
+        (Path(tmp) / 'vless-2.txt').write_text('discord.com\napi.example.com\n198.51.100.10\n', encoding='utf-8')
         report = route_intersections.analyze_route_intersections(unblock_dir=tmp)
         assert report['count'] >= 2
+        discord_issue = next(issue for issue in report['issues'] if 'discord.com' in issue.get('entries', []))
+        assert 'Discord' in discord_issue['services']
+        assert discord_issue['service_hint'] == 'Discord'
         result = route_intersections.resolve_route_intersections(
             'vless-2',
             unblock_dir=tmp,
@@ -8384,6 +8387,22 @@ def test_service_route_ui_helpers():
     intersections_html = key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
     assert intersections_html
     assert 'IP-сетей.</small>' not in intersections_html
+    intersections_warn_html = key_pool_web.web_route_intersections_html(
+        {
+            'count': 1,
+            'file_count': 1,
+            'issues': [{
+                'message': 'discord.com: duplicate',
+                'routes': ['vless', 'vless-2'],
+                'services': ['Discord'],
+                'entries': ['discord.com'],
+            }],
+        },
+        service_routes.protocol_options(),
+    )
+    assert 'Discord' in intersections_warn_html
+    assert 'discord.com' in intersections_warn_html
+    assert '/route_intersections_resolve' in intersections_warn_html
     profiles_html = key_pool_web.web_route_profiles_html([{'id': 'all', 'label': 'Все сервисы', 'description': 'desc'}])
     assert 'из каталога.</small>' not in profiles_html
     inactive_preset_html = key_pool_web.web_service_route_tools_html(

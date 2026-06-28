@@ -582,9 +582,22 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
             <small>Файлы обхода не содержат одинаковых доменов, вложенных доменов или пересекающихся IP-сетей</small>
         </div>'''
     examples = []
-    for issue in (report.get('issues') or [])[:3]:
-        examples.append(f'<li>{html.escape(issue.get("message") or issue.get("entry") or "")}</li>')
+    for issue in (report.get('issues') or [])[:8]:
+        message = html.escape(issue.get("message") or issue.get("entry") or "")
+        routes = ', '.join(issue.get('routes') or [])
+        services = ', '.join(issue.get('services') or [])
+        service_text = services if services else 'сервис не распознан по каталогу'
+        samples = ', '.join((issue.get('samples') or issue.get('entries') or [])[:3])
+        samples_html = f'<small>Адреса: {html.escape(samples)}</small>' if samples else ''
+        examples.append(f'''<li>
+            <strong>{message}</strong>
+            <small>Списки: {html.escape(routes)} · Сервис: {html.escape(service_text)}</small>
+            {samples_html}
+        </li>''')
     examples_html = f'<ul>{"".join(examples)}</ul>' if examples else ''
+    runtime_note = ''
+    if int(report.get('runtime_count') or 0) and not file_count:
+        runtime_note = '<small>Файлы списков уже могут быть чистыми; пересечение найдено только в загруженных ipset, обновите маршруты.</small>'
     buttons = []
     for item in ((protocol_options or []) if file_count else []):
         route_value = 'vless-2' if item['value'] == 'vless2' else item['value']
@@ -597,6 +610,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
         <div>
             <strong>Найдены пересечения списков: {count}</strong>
             <small>Это может отправлять один сервис через разные ключи и вызывать обрывы</small>
+            {runtime_note}
             {examples_html}
         </div>
         <div class="route-intersection-actions">
