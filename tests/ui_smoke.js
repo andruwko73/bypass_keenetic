@@ -251,9 +251,12 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (await historyButton.count()) {
     await historyButton.click();
     await assertVisibleBox(page, '#event-history-modal:not(.hidden) .event-history-drawer', `${name} history drawer`);
+    const historyTabs = await page.locator('[data-event-history-tab]').count();
+    if (historyTabs) {
+      throw new Error(`${name}: history drawer still renders separate tabs`);
+    }
+    await assertVisibleBox(page, '.router-metrics-compact', `${name} compact router metrics`);
     await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history items`);
-    await page.locator('[data-event-history-tab="metrics"]').click();
-    await assertVisibleBox(page, '[data-event-history-pane="metrics"]:not(.hidden) .router-metrics-grid', `${name} router metrics`);
     await page.waitForFunction(() => {
       const value = document.getElementById('router-metrics-bot-rss');
       return value && value.textContent.includes('MB');
@@ -262,16 +265,10 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (!metricsText || !metricsText.includes('MB')) {
       throw new Error(`${name}: router metrics did not load bot RSS`);
     }
-    await page.locator('[data-event-history-tab="events"]').click();
-    await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history after metrics`);
-    await page.locator('[data-event-history-tab="metrics"]').click();
     await page.locator('[data-event-history-close]').click();
     await historyButton.click();
     await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history on reopen`);
-    const metricsPaneStillOpen = await page.locator('[data-event-history-pane="metrics"]:not(.hidden)').count();
-    if (metricsPaneStillOpen) {
-      throw new Error(`${name}: history drawer reopened on Monitoring tab`);
-    }
+    await assertVisibleBox(page, '.router-metrics-compact', `${name} compact router metrics on reopen`);
     await page.locator('[data-event-history-close]').click();
   }
 

@@ -1,3 +1,7 @@
+*v1.846 (28 Jun 2026) -* main
+
+*Removes the separate Monitoring tab from the history drawer and embeds a compact on-demand CPU/RSS/load strip above the event history list, keeping the drawer focused on history while preserving router monitoring.*
+
 *v1.845 (28 Jun 2026) -* main
 
 *Keeps the history drawer opening on the History tab after router monitoring was viewed, gives the event list its own scroll area in the drawer, and extends UI smoke coverage so Simple mode fails if event history items are not visible.*

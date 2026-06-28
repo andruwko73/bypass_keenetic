@@ -300,27 +300,21 @@ def render_web_form(
                     <h2 id="event-history-title">История событий</h2>
                     <button type="button" class="secondary-button event-history-close" data-event-history-close aria-label="Закрыть историю событий">Закрыть</button>
                 </div>
-                <div class="event-history-tabs" role="tablist" aria-label="История и мониторинг">
-                    <button type="button" class="seg-tab active" data-event-history-tab="events" role="tab" aria-selected="true">История</button>
-                    <button type="button" class="seg-tab" data-event-history-tab="metrics" role="tab" aria-selected="false">Мониторинг</button>
-                </div>
-                <section data-event-history-pane="events">
+                <section class="event-history-content" data-event-history-pane="events">
+                    <div class="router-metrics-compact" aria-live="polite">
+                        <div class="router-metrics-compact-head">
+                            <small id="router-metrics-status">Метрики загрузятся при открытии истории</small>
+                            <button type="button" class="outline-button compact-button" data-router-metrics-refresh>Обновить</button>
+                        </div>
+                        <div class="router-metrics-compact-row">
+                            <span><em>Load</em><strong id="router-metrics-load">-</strong></span>
+                            <span><em>Bot RSS</em><strong id="router-metrics-bot-rss">-</strong></span>
+                            <span><em>Bot CPU</em><strong id="router-metrics-bot-cpu">-</strong></span>
+                            <span><em>Xray RSS</em><strong id="router-metrics-xray-rss">-</strong></span>
+                            <span><em>Xray CPU</em><strong id="router-metrics-xray-cpu">-</strong></span>
+                        </div>
+                    </div>
                     {event_history_content_html}
-                </section>
-                <section class="router-metrics-panel hidden" data-event-history-pane="metrics" aria-live="polite">
-                    <div class="route-section-head">
-                        <small id="router-metrics-status">Метрики будут загружены по запросу</small>
-                        <button type="button" class="outline-button compact-button" data-router-metrics-refresh>Обновить</button>
-                    </div>
-                    <div class="router-metrics-grid">
-                        <div><span>Load</span><strong id="router-metrics-load">-</strong></div>
-                        <div><span>Bot RSS</span><strong id="router-metrics-bot-rss">-</strong></div>
-                        <div><span>Bot CPU</span><strong id="router-metrics-bot-cpu">-</strong></div>
-                        <div><span>Xray RSS</span><strong id="router-metrics-xray-rss">-</strong></div>
-                        <div><span>Xray CPU</span><strong id="router-metrics-xray-cpu">-</strong></div>
-                        <div><span>Пик RSS</span><strong id="router-metrics-peak">-</strong></div>
-                    </div>
-                    <ol class="router-metrics-history" id="router-metrics-history"></ol>
                 </section>
             </aside>
         </div>'''
