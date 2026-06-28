@@ -2356,7 +2356,7 @@ def render_web_scripts(
             function openPanel() {{
                 modal.classList.remove('hidden');
                 document.body.classList.add('event-history-open');
-                activateTab(activeTab);
+                activateTab('events');
             }}
             function closePanel() {{
                 modal.classList.add('hidden');

@@ -1,3 +1,7 @@
+*v1.845 (28 Jun 2026) -* main
+
+*Keeps the history drawer opening on the History tab after router monitoring was viewed, gives the event list its own scroll area in the drawer, and extends UI smoke coverage so Simple mode fails if event history items are not visible.*
+
 *v1.844 (28 Jun 2026) -* main
 
 *Fixes the history drawer layout so the Monitoring tab starts directly under the tabs, and restores event history content in Simple mode without loading pool UI components.*

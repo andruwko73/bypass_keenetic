@@ -1,3 +1,8 @@
+<a name="1.845"></a>
+# [1.845] - 28 Jun 2026
+
+- Keeps the history drawer opening on the History tab after router monitoring was viewed, gives the event list its own scroll area in the drawer, and extends UI smoke coverage so Simple mode fails if event history items are not visible.
+
 <a name="1.844"></a>
 # [1.844] - 28 Jun 2026
 

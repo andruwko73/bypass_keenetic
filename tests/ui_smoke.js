@@ -251,6 +251,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (await historyButton.count()) {
     await historyButton.click();
     await assertVisibleBox(page, '#event-history-modal:not(.hidden) .event-history-drawer', `${name} history drawer`);
+    await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history items`);
     await page.locator('[data-event-history-tab="metrics"]').click();
     await assertVisibleBox(page, '[data-event-history-pane="metrics"]:not(.hidden) .router-metrics-grid', `${name} router metrics`);
     await page.waitForFunction(() => {
@@ -260,6 +261,16 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     const metricsText = await page.locator('#router-metrics-bot-rss').textContent();
     if (!metricsText || !metricsText.includes('MB')) {
       throw new Error(`${name}: router metrics did not load bot RSS`);
+    }
+    await page.locator('[data-event-history-tab="events"]').click();
+    await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history after metrics`);
+    await page.locator('[data-event-history-tab="metrics"]').click();
+    await page.locator('[data-event-history-close]').click();
+    await historyButton.click();
+    await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history on reopen`);
+    const metricsPaneStillOpen = await page.locator('[data-event-history-pane="metrics"]:not(.hidden)').count();
+    if (metricsPaneStillOpen) {
+      throw new Error(`${name}: history drawer reopened on Monitoring tab`);
     }
     await page.locator('[data-event-history-close]').click();
   }

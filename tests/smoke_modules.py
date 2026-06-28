@@ -7751,6 +7751,7 @@ def test_web_template_scripts_helpers():
     assert "fetch('/api/router_metrics'" in scripts
     assert "data-event-history-tab='metrics'" not in scripts
     assert "modal.querySelectorAll('[data-event-history-tab]')" in scripts
+    assert "activateTab('events');" in scripts
     assert 'function poolRowMatchesState(row, state)' in scripts
     assert 'function poolStateFilterFromMode(mode)' in scripts
     assert "formData.set('confirm_switch', 'yes');" in scripts
@@ -7815,6 +7816,7 @@ def test_web_form_template_smoke():
     assert 'data-event-history-tab="metrics"' in page
     assert 'data-router-metrics-refresh' in page
     assert 'router-metrics-history' in page
+    assert 'data-event-history-pane="events"' in page
     assert 'router-memory-text' in page
     assert 'router-memory-meter' in page
     assert 'call-learn-details' not in page
