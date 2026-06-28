@@ -1,3 +1,7 @@
+*v1.854 (28 Jun 2026) -* main
+
+*Lowers the idle bot RSS restart and router-metrics warning threshold to 64 MB so web UI/history rendering spikes do not remain near 70 MB.*
+
 *v1.853 (28 Jun 2026) -* main
 
 *Stops compact router-metrics polling from accumulating in-memory history samples, so the lightweight history monitoring panel does not grow bot RSS while it is open.*

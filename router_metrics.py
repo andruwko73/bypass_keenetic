@@ -4,6 +4,8 @@ import time
 
 
 DEFAULT_HISTORY_LIMIT = 120
+DEFAULT_WARN_BOT_RSS_KB = 64 * 1024
+DEFAULT_CRITICAL_BOT_RSS_KB = 85 * 1024
 BOT_CMD_MARKER = 'python3 /opt/etc/bot/main.py'
 XRAY_CMD_MARKER = 'xray run -c /opt/etc/xray/config.json'
 
@@ -136,8 +138,8 @@ class RouterMetricsRuntime:
         self,
         *,
         history_limit=DEFAULT_HISTORY_LIMIT,
-        warn_bot_rss_kb=71680,
-        critical_bot_rss_kb=87040,
+        warn_bot_rss_kb=DEFAULT_WARN_BOT_RSS_KB,
+        critical_bot_rss_kb=DEFAULT_CRITICAL_BOT_RSS_KB,
         warn_load1=3.0,
         time_provider=time.time,
     ):

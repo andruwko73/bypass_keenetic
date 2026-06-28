@@ -1,3 +1,8 @@
+<a name="1.854"></a>
+# [1.854] - 28 Jun 2026
+
+- Lowers the idle bot RSS restart and router-metrics warning threshold to 64 MB, so web UI/history rendering spikes are reclaimed by an idle service restart instead of sitting near 70 MB.
+
 <a name="1.853"></a>
 # [1.853] - 28 Jun 2026
 

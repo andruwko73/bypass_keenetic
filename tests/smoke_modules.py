@@ -501,6 +501,8 @@ def test_router_metrics_runtime_snapshot():
     assert first['summary']['samples'] == 1
     assert second['summary']['samples'] == 1
     assert second['summary']['bot_rss_max_kb'] == 64000
+    assert second['thresholds']['warn_bot_rss_kb'] == 65536
+    assert second['thresholds']['critical_bot_rss_kb'] == 87040
     assert 'history' not in first
     assert len(second['history']) == 1
 
@@ -1689,9 +1691,9 @@ def test_codex_version_matches_commit_count():
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
+    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in example
+    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in installer
+    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in bootstrap
     assert 'memory_timeline_enabled = False' in example
     assert 'memory_timeline_enabled = False' in installer
     assert 'memory_timeline_enabled = False' in bootstrap
@@ -1704,9 +1706,9 @@ def test_codex_version_matches_commit_count():
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
-    assert 'router_metrics_warn_bot_rss_kb = 71680' in example
-    assert 'router_metrics_warn_bot_rss_kb = 71680' in installer
-    assert 'router_metrics_warn_bot_rss_kb = 71680' in bootstrap
+    assert 'router_metrics_warn_bot_rss_kb = 65536' in example
+    assert 'router_metrics_warn_bot_rss_kb = 65536' in installer
+    assert 'router_metrics_warn_bot_rss_kb = 65536' in bootstrap
     assert 'router_metrics_critical_bot_rss_kb = 87040' in example
     assert 'router_metrics_critical_bot_rss_kb = 87040' in installer
     assert 'router_metrics_critical_bot_rss_kb = 87040' in bootstrap
@@ -2429,10 +2431,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB' in source
     assert 'pool_probe_quality_max_samples_per_run' in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
-    assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
+    assert "memory_watchdog_idle_restart_rss_kb', 64 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert "getattr(config, 'router_metrics_history_limit', 120)" in source
-    assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 71680)" in source
+    assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 64 * 1024)" in source
     assert 'router_metrics.RouterMetricsRuntime' in source
     assert "'router_metrics_snapshot': _router_metrics_snapshot" in source
     assert "memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl'" in source
@@ -2526,9 +2528,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'не увеличивает постоянный RSS Telegram-бота' in readme_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
+    assert 'memory_watchdog_idle_restart_rss_kb = 65536' in script_source
     assert 'router_metrics_history_limit = 120' in script_source
-    assert 'router_metrics_warn_bot_rss_kb = 71680' in script_source
+    assert 'router_metrics_warn_bot_rss_kb = 65536' in script_source
     assert 'router_metrics_critical_bot_rss_kb = 87040' in script_source
     assert 'router_metrics_warn_load1 = 3.0' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source

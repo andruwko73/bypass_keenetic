@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.853, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.854, последнее изменение: 28.06.2026
 
 import subprocess
 import os
@@ -1788,7 +1788,7 @@ ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0)
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
 ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
 ROUTER_METRICS_HISTORY_LIMIT = int(getattr(config, 'router_metrics_history_limit', 120))
-ROUTER_METRICS_WARN_BOT_RSS_KB = int(getattr(config, 'router_metrics_warn_bot_rss_kb', 71680))
+ROUTER_METRICS_WARN_BOT_RSS_KB = int(getattr(config, 'router_metrics_warn_bot_rss_kb', 64 * 1024))
 ROUTER_METRICS_CRITICAL_BOT_RSS_KB = int(getattr(config, 'router_metrics_critical_bot_rss_kb', 87040))
 ROUTER_METRICS_WARN_LOAD1 = float(getattr(config, 'router_metrics_warn_load1', 3.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
@@ -1913,7 +1913,7 @@ MEMORY_WATCHDOG_RESTART_COOLDOWN_SECONDS = max(
 )
 MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = max(
     0,
-    int(getattr(config, 'memory_watchdog_idle_restart_rss_kb', 70 * 1024)),
+    int(getattr(config, 'memory_watchdog_idle_restart_rss_kb', 64 * 1024)),
 )
 MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = max(
     60.0,
