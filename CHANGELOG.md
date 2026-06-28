@@ -1,3 +1,8 @@
+<a name="1.850"></a>
+# [1.850] - 28 Jun 2026
+
+- Reduces router web-monitoring overhead by slowing idle status polling to 60 seconds, making compact router metrics omit the in-memory history array unless explicitly requested, and lowering web-response memory cleanup to start near 60 MB instead of waiting for 70+ MB.
+
 <a name="1.849"></a>
 # [1.849] - 28 Jun 2026
 

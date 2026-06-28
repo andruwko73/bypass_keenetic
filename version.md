@@ -1,3 +1,7 @@
+*v1.850 (28 Jun 2026) -* main
+
+*Reduces router web-monitoring overhead by slowing idle status polling to 60 seconds, making compact router metrics omit the in-memory history array unless explicitly requested, and lowering web-response memory cleanup to start near 60 MB instead of waiting for 70+ MB.*
+
 *v1.849 (28 Jun 2026) -* main
 
 *Fixes the lazy protocol-check API fallback text so an invalid protocol reports a readable Russian error instead of mojibake.*

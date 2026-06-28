@@ -220,6 +220,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (Boolean(pageConfig.enableTelegram) !== modeConfig.expectTelegram) {
     throw new Error(`${name}: enableTelegram expected ${modeConfig.expectTelegram}, got ${pageConfig.enableTelegram}`);
   }
+  if (Number(pageConfig.statusIdlePollMs) !== 60000) {
+    throw new Error(`${name}: statusIdlePollMs expected 60000, got ${pageConfig.statusIdlePollMs}`);
+  }
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);

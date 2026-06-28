@@ -861,6 +861,12 @@ migrate_runtime_config_defaults() {
   if grep -Eq '^memory_post_pool_restart_rss_kb[[:space:]]*=[[:space:]]*(61440|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^memory_post_pool_restart_rss_kb[[:space:]]*=.*/memory_post_pool_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
   fi
+  if grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=[[:space:]]*67584([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^web_response_cleanup_rss_kb[[:space:]]*=.*/web_response_cleanup_rss_kb = 61440/' "$BOT_CONFIG_PATH" || true
+  fi
+  if grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=[[:space:]]*300\.0([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^web_response_cleanup_min_interval_seconds[[:space:]]*=.*/web_response_cleanup_min_interval_seconds = 60.0/' "$BOT_CONFIG_PATH" || true
+  fi
   if grep -Eq '^memory_timeline_enabled[[:space:]]*=[[:space:]]*True([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^memory_timeline_enabled[[:space:]]*=.*/memory_timeline_enabled = False/' "$BOT_CONFIG_PATH" || true
   fi
@@ -876,14 +882,15 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_status_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_api_cache_ttl = 30.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^web_status_idle_poll_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_idle_poll_ms = 60000\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_history_limit[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_history_limit = 120\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_warn_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_critical_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_critical_bot_rss_kb = 87040\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_warn_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_warn_load1 = 3.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_pools_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_pools_api_cache_ttl = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^service_route_intersections_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'service_route_intersections_cache_ttl = 60.0\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 67584\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 300.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^pool_probe_delay_seconds[[:space:]]*=[[:space:]]*1\.5([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_delay_seconds[[:space:]]*=.*/pool_probe_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true
   fi

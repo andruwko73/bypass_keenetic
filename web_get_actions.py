@@ -233,6 +233,19 @@ def _protocol_check_panel_payload(ctx, query):
     return {'ok': True, 'protocol': protocol, 'html': check_html}
 
 
+def _router_metrics_payload(ctx, query):
+    params = parse_qs(query or '', keep_blank_values=True)
+    raw_history = (params.get('history') or params.get('include_history') or [''])[0]
+    include_history = str(raw_history or '').strip().lower() in ('1', 'true', 'yes', 'on')
+    snapshot = _ctx(ctx, 'router_metrics_snapshot')
+    if not snapshot:
+        return {}
+    try:
+        return snapshot(include_history=include_history)
+    except TypeError:
+        return snapshot()
+
+
 def dispatch(ctx, path, query=''):
     if path in PAGE_ROUTES:
         build_form = _ctx(ctx, 'build_form')
@@ -263,7 +276,7 @@ def dispatch(ctx, path, query=''):
     if path == '/api/event_history':
         return {'kind': 'json', 'payload': {'events': _ctx(ctx, 'event_history_snapshot', lambda: [])()}, 'status': 200}
     if path == '/api/router_metrics':
-        return {'kind': 'json', 'payload': _ctx(ctx, 'router_metrics_snapshot', lambda: {})(), 'status': 200}
+        return {'kind': 'json', 'payload': _router_metrics_payload(ctx, query), 'status': 200}
     if path == '/api/route_intersections' and _ctx(ctx, 'pool_enabled', False):
         return {'kind': 'json', 'payload': _ctx(ctx, 'route_intersections_snapshot', lambda: {})(), 'status': 200}
     if path == '/api/service_routes' and _ctx(ctx, 'pool_enabled', False):

@@ -168,6 +168,7 @@ def render_web_form(
     enable_live_status=True,
     enable_telegram=True,
     bot_ready=False,
+    status_idle_poll_ms=60000,
 ):
     start_form_async_attr = ' data-async-action="start"' if enable_async_forms else ''
     quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
@@ -330,6 +331,7 @@ def render_web_form(
         'enableTelegram': bool(enable_telegram),
         'botReady': bool(bot_ready),
         'poolProbePollExtensionMs': int(POOL_PROBE_UI_POLL_EXTENSION_MS),
+        'statusIdlePollMs': int(status_idle_poll_ms or 60000),
     })
     topbar_actions_class = 'topbar-actions' + ('' if enable_telegram else ' topbar-actions-web-only')
     page_class = ' class="command-running"' if _script_bool(initial_command_running) else ''

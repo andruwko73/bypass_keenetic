@@ -485,7 +485,7 @@ def test_router_metrics_runtime_snapshot():
         router_metrics.find_pid_by_cmdline = lambda marker: 222
         router_metrics.os.getpid = lambda: 111
         runtime = router_metrics.RouterMetricsRuntime(history_limit=10, time_provider=lambda: 100.0)
-        first = runtime.snapshot()
+        first = runtime.snapshot(include_history=False)
         second = runtime.snapshot()
     finally:
         router_metrics.read_loadavg = original['read_loadavg']
@@ -500,6 +500,8 @@ def test_router_metrics_runtime_snapshot():
     assert second['processes']['xray']['cpu_percent'] == 20.0
     assert second['summary']['samples'] == 2
     assert second['summary']['bot_rss_max_kb'] == 64000
+    assert 'history' not in first
+    assert len(second['history']) == 2
 
 
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
@@ -1698,6 +1700,9 @@ def test_codex_version_matches_commit_count():
     assert 'web_status_api_cache_ttl = 30.0' in example
     assert 'web_status_api_cache_ttl = 30.0' in installer
     assert 'web_status_api_cache_ttl = 30.0' in bootstrap
+    assert 'web_status_idle_poll_ms = 60000' in example
+    assert 'web_status_idle_poll_ms = 60000' in installer
+    assert 'web_status_idle_poll_ms = 60000' in bootstrap
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
@@ -1716,9 +1721,12 @@ def test_codex_version_matches_commit_count():
     assert 'service_route_intersections_cache_ttl = 60.0' in example
     assert 'service_route_intersections_cache_ttl = 60.0' in installer
     assert 'service_route_intersections_cache_ttl = 60.0' in bootstrap
-    assert 'web_response_cleanup_rss_kb = 67584' in example
-    assert 'web_response_cleanup_rss_kb = 67584' in installer
-    assert 'web_response_cleanup_rss_kb = 67584' in bootstrap
+    assert 'web_response_cleanup_rss_kb = 61440' in example
+    assert 'web_response_cleanup_rss_kb = 61440' in installer
+    assert 'web_response_cleanup_rss_kb = 61440' in bootstrap
+    assert 'web_response_cleanup_min_interval_seconds = 60.0' in example
+    assert 'web_response_cleanup_min_interval_seconds = 60.0' in installer
+    assert 'web_response_cleanup_min_interval_seconds = 60.0' in bootstrap
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in example
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in installer
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in bootstrap
@@ -1819,7 +1827,8 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_pages = 1' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_hosts = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'web_response_cleanup_rss_kb = 67584' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'service_route_intersections_cache_ttl = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_scheduler_max_cpu_percent = 45' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_scheduler_max_load1 = 2.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -7624,7 +7633,7 @@ def test_web_template_scripts_helpers():
     assert 'const APP_CONFIG = window.BK_APP_CONFIG || {};' in scripts
     assert 'const INITIAL_STATUS_PENDING = !!APP_CONFIG.initialStatusPending;' in scripts
     assert 'const STATUS_ACTIVE_POLL_MS = 8000;' in scripts
-    assert "const STATUS_IDLE_POLL_MS = Math.max(15000, Number(APP_CONFIG.statusIdlePollMs || 30000));" in scripts
+    assert "const STATUS_IDLE_POLL_MS = Math.max(30000, Number(APP_CONFIG.statusIdlePollMs || 60000));" in scripts
     assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
     assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
     assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS);" in scripts
@@ -7748,7 +7757,7 @@ def test_web_template_scripts_helpers():
     assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
     assert 'refreshPoolData(2500)' in scripts
     assert 'function fetchRouterMetrics()' in scripts
-    assert "fetch('/api/router_metrics'" in scripts
+    assert "fetch('/api/router_metrics?compact=1'" in scripts
     assert 'data-event-history-tab' not in scripts
     assert "modal.querySelectorAll('[data-router-metrics-refresh]')" in scripts
     assert 'function activateTab' not in scripts

@@ -21,7 +21,7 @@ def render_web_scripts(
         const ENABLE_LIVE_STATUS = APP_CONFIG.enableLiveStatus !== false;
         const ENABLE_TELEGRAM = APP_CONFIG.enableTelegram !== false;
         const STATUS_ACTIVE_POLL_MS = 8000;
-        const STATUS_IDLE_POLL_MS = Math.max(15000, Number(APP_CONFIG.statusIdlePollMs || 30000));
+        const STATUS_IDLE_POLL_MS = Math.max(30000, Number(APP_CONFIG.statusIdlePollMs || 60000));
         let botReady = APP_CONFIG.botReady === true;
         const POOL_PROBE_POLL_EXTENSION_MS = Number(APP_CONFIG.poolProbePollExtensionMs || {POOL_PROBE_UI_POLL_EXTENSION_MS});
         const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
@@ -2299,7 +2299,7 @@ def render_web_scripts(
             if (status) {{
                 status.textContent = 'Загружаю метрики...';
             }}
-            return fetch('/api/router_metrics', {{
+            return fetch('/api/router_metrics?compact=1', {{
                 headers: {{'Accept': 'application/json'}},
                 cache: 'no-store'
             }})

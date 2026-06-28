@@ -150,7 +150,7 @@ class RouterMetricsRuntime:
         self._previous = {}
         self._history = []
 
-    def snapshot(self):
+    def snapshot(self, *, include_history=True):
         with self._lock:
             now = float(self.time_provider())
             load1, load5, load15 = read_loadavg()
@@ -178,7 +178,7 @@ class RouterMetricsRuntime:
             bot_rss_values = [int(item.get('bot_rss_kb') or 0) for item in self._history if item.get('bot_rss_kb')]
             xray_rss_values = [int(item.get('xray_rss_kb') or 0) for item in self._history if item.get('xray_rss_kb')]
             load_values = [float(item.get('load1') or 0.0) for item in self._history]
-            return {
+            payload = {
                 'timestamp': now,
                 'load': {'load1': load1, 'load5': load5, 'load15': load15},
                 'processes': {'bot': bot, 'xray': xray},
@@ -195,5 +195,7 @@ class RouterMetricsRuntime:
                     'xray_rss_max_kb': max(xray_rss_values) if xray_rss_values else 0,
                     'load1_max': max(load_values) if load_values else 0.0,
                 },
-                'history': list(self._history),
             }
+            if include_history:
+                payload['history'] = list(self._history)
+            return payload
