@@ -1,3 +1,8 @@
+<a name="1.857"></a>
+# [1.857] - 28 Jun 2026
+
+- Keeps only the latest automatic update/backup rollback artifacts after a successful update, matching the UI rollback behavior that restores the most recent update only.
+
 <a name="1.856"></a>
 # [1.856] - 28 Jun 2026
 

@@ -1948,6 +1948,9 @@ def test_direct_update_script_records_update_status():
     assert 'write_cli_update_status update false 100 Done "CLI update complete"' in script
     assert 'write_cli_update_status update false 100 Done "CLI update complete; installer started"' in script
     assert 'write_cli_update_status update false 100 Error "CLI update failed"' in script
+    assert 'keep_count="${1:-1}"' in script
+    assert 'cleanup_update_artifacts 1' in script
+    assert 'cleanup_update_artifacts 3' not in script
 
 
 def test_realtime_call_signal_catalog_is_call_specific():

@@ -41,7 +41,7 @@ detect_ipset_type() {
 }
 
 cleanup_update_artifacts() {
-  keep_count="${1:-3}"
+  keep_count="${1:-1}"
   ls -dt /opt/root/update-* 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
     case "$old_dir" in /opt/root/update-*) rm -rf "$old_dir" ;; esac
   done
@@ -1720,7 +1720,7 @@ if [ "$1" = "-update" ]; then
     mv "$stage_dir/S99telegram_bot" "$BOT_SERVICE_PATH"
     chmod 755 "$INSTALLER_SERVICE_PATH" "$BOT_SERVICE_PATH"
     rmdir "$stage_dir" 2>/dev/null || true
-    cleanup_update_artifacts 3
+    cleanup_update_artifacts 1
     echo "Обновления скачены, права настроены."
     write_cli_update_status update true 85 Restarting "Restarting services"
 

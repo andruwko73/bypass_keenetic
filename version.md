@@ -1,3 +1,7 @@
+*v1.857 (28 Jun 2026) -* main
+
+*Keeps only the latest automatic update/backup rollback artifacts because the UI rollback restores only the most recent update.*
+
 *v1.856 (28 Jun 2026) -* main
 
 *Adds service hints and expanded address examples to route-intersection warnings so overlaps can be assigned to the right protocol deliberately.*
