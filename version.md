@@ -1,3 +1,7 @@
+*v1.862 (29 Jun 2026) -* main
+
+*Keeps the selected app mode, proxy mode, and Telegram autostart flag during normal web updates by restoring the external runtime mode files from the update backup.*
+
 *v1.861 (29 Jun 2026) -* main
 
 *Lowers the pool-check RSS guard to 70 MB, makes long pool-check progress use lightweight polling, and targets about 62 MB RSS after full checks.*

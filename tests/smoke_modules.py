@@ -2611,6 +2611,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'backup_runtime_state_file /opt/etc/shadowsocks.json shadowsocks.json' in script_source
     assert 'backup_runtime_state_file /opt/etc/trojan/config.json trojan_config.json' in script_source
     assert 'restore_runtime_state_files_after_update()' in script_source
+    assert 'restore_runtime_state_file_after_update bot_app_mode /opt/etc/bot_app_mode 0644' in script_source
+    assert 'restore_runtime_state_file_after_update bot_proxy_mode /opt/etc/bot_proxy_mode 0644' in script_source
+    assert 'restore_runtime_state_file_after_update bot_autostart /opt/etc/bot_autostart 0644' in script_source
     assert 'restore_runtime_state_file_after_update subscriptions.json "$BOT_RUNTIME_DIR/subscriptions.json" 0644' in script_source
     assert 'restore_runtime_state_file_after_update key_pools.json "$BOT_RUNTIME_DIR/key_pools.json" 0644' in script_source
     assert 'restore_runtime_state_file_after_update custom_checks.json "$BOT_RUNTIME_DIR/custom_checks.json" 0644' in script_source

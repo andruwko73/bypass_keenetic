@@ -1,3 +1,8 @@
+<a name="1.862"></a>
+# [1.862] - 29 Jun 2026
+
+- Restores external runtime mode files during the normal web update path, keeping the selected app mode, proxy mode, and Telegram autostart flag across releases.
+
 <a name="1.861"></a>
 # [1.861] - 29 Jun 2026
 

@@ -654,6 +654,9 @@ restore_runtime_state_file_after_update() {
 }
 
 restore_runtime_state_files_after_update() {
+  restore_runtime_state_file_after_update bot_app_mode /opt/etc/bot_app_mode 0644
+  restore_runtime_state_file_after_update bot_proxy_mode /opt/etc/bot_proxy_mode 0644
+  restore_runtime_state_file_after_update bot_autostart /opt/etc/bot_autostart 0644
   restore_runtime_state_file_after_update key_pools.json "$BOT_RUNTIME_DIR/key_pools.json" 0644
   restore_runtime_state_file_after_update subscriptions.json "$BOT_RUNTIME_DIR/subscriptions.json" 0644
   restore_runtime_state_file_after_update custom_checks.json "$BOT_RUNTIME_DIR/custom_checks.json" 0644
