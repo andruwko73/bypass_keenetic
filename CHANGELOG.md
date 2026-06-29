@@ -1,3 +1,8 @@
+<a name="1.865"></a>
+# [1.865] - 29 Jun 2026
+
+- Automatically repairs known service route/ipset intersections, such as YouTube being loaded into both Vless lists, when the service has one clear current target protocol; runtime-only overlaps trigger a route refresh with a cooldown instead of repeatedly asking for a manual move.
+
 <a name="1.864"></a>
 # [1.864] - 29 Jun 2026
 

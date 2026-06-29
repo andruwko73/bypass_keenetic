@@ -598,6 +598,18 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
     runtime_note = ''
     if int(report.get('runtime_count') or 0) and not file_count:
         runtime_note = '<small>Файлы списков уже могут быть чистыми; пересечение найдено только в загруженных ipset, обновите маршруты.</small>'
+    auto_note = ''
+    auto_resolved = report.get('auto_resolved') or {}
+    auto_applied = auto_resolved.get('applied') or []
+    if auto_applied:
+        labels = []
+        for item in auto_applied[:4]:
+            service_label = item.get('service_label') or item.get('service_key') or ''
+            target_label = item.get('target_label') or item.get('target_protocol') or ''
+            if service_label and target_label:
+                labels.append(f'{service_label} -> {target_label}')
+        if labels:
+            auto_note = f'<small>Автоматически применено: {html.escape(", ".join(labels))}</small>'
     buttons = []
     for item in ((protocol_options or []) if file_count else []):
         route_value = 'vless-2' if item['value'] == 'vless2' else item['value']
@@ -611,6 +623,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
             <strong>Найдены пересечения списков: {count}</strong>
             <small>Это может отправлять один сервис через разные ключи и вызывать обрывы</small>
             {runtime_note}
+            {auto_note}
             {examples_html}
         </div>
         <div class="route-intersection-actions">

@@ -351,6 +351,126 @@ def repair_service_route_catalog_drift(
     }
 
 
+def _unique_complete_protocol_for_service(service_key, *, unblock_dir=UNBLOCK_DIR):
+    state = service_route_state(service_key, unblock_dir=unblock_dir)
+    complete = [
+        proto for proto in (state.get('complete_protocols') or [])
+        if proto in PROTOCOL_ROUTES
+    ]
+    if len(complete) == 1:
+        return complete[0], state
+    return '', state
+
+
+def auto_resolve_service_route_intersections(
+    *,
+    report=None,
+    service_items=None,
+    unblock_dir=UNBLOCK_DIR,
+    update_script=UNBLOCK_UPDATE_SCRIPT,
+    before_update=None,
+    include_runtime=True,
+    run_command=subprocess.run,
+):
+    if report is None:
+        import route_intersections
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=unblock_dir,
+            include_runtime=include_runtime,
+            run_command=run_command,
+        )
+    service_item_ids = None
+    if service_items is not None:
+        service_item_ids = {
+            str(item.get('id') if isinstance(item, dict) else item or '').strip()
+            for item in service_items
+        }
+        service_item_ids.discard('')
+
+    plans = {}
+    resolved = []
+    skipped = []
+    for issue in report.get('issues') or []:
+        service_keys = []
+        for service_key in issue.get('service_keys') or []:
+            service_key = str(service_key or '').strip()
+            if not service_key or service_key in service_keys:
+                continue
+            if service_item_ids is not None and service_key not in service_item_ids:
+                continue
+            if not _service_profile_enabled(service_key):
+                continue
+            service_keys.append(service_key)
+        if not service_keys:
+            skipped.append({'reason': 'unknown_service', 'issue': issue.get('message') or issue.get('entry') or ''})
+            continue
+
+        targets = {}
+        missing_targets = []
+        for service_key in service_keys:
+            target_protocol, _state = _unique_complete_protocol_for_service(
+                service_key,
+                unblock_dir=unblock_dir,
+            )
+            if not target_protocol:
+                missing_targets.append(service_key)
+                continue
+            targets[service_key] = target_protocol
+        if missing_targets:
+            skipped.append({
+                'reason': 'no_unique_target',
+                'services': missing_targets,
+                'issue': issue.get('message') or issue.get('entry') or '',
+            })
+            continue
+        unique_targets = set(targets.values())
+        if len(unique_targets) != 1:
+            skipped.append({
+                'reason': 'conflicting_targets',
+                'services': service_keys,
+                'targets': dict(targets),
+                'issue': issue.get('message') or issue.get('entry') or '',
+            })
+            continue
+
+        for service_key, target_protocol in targets.items():
+            plans[service_key] = target_protocol
+        resolved.append({
+            'issue': issue.get('message') or issue.get('entry') or '',
+            'services': list(service_keys),
+            'target_protocol': next(iter(unique_targets)),
+            'target_label': protocol_label(next(iter(unique_targets))),
+            'routes': list(issue.get('routes') or []),
+            'kind': issue.get('kind') or '',
+        })
+
+    applied = []
+    for service_key, target_protocol in sorted(plans.items(), key=lambda item: ROUTE_ORDER.index(item[1])):
+        applied.append(
+            apply_service_route(
+                service_key,
+                target_protocol,
+                remove_from_others=True,
+                unblock_dir=unblock_dir,
+                update_script='',
+            )
+        )
+    if applied:
+        if callable(before_update):
+            before_update()
+        _run_update(update_script)
+
+    return {
+        'issues': int(report.get('count') or 0),
+        'services': len(applied),
+        'entries_added': sum(item.get('added', 0) for item in applied),
+        'entries_removed': sum(item.get('removed', 0) for item in applied),
+        'applied': applied,
+        'resolved': resolved,
+        'skipped': skipped,
+    }
+
+
 def _profile_target(profile, service_key):
     if profile.get('id') == 'youtube_vless2_rest_vless' and service_key == 'youtube':
         return profile.get('youtube_protocol') or 'vless2'

@@ -8258,6 +8258,7 @@ def test_route_intersections_helpers():
         assert report['count'] >= 2
         discord_issue = next(issue for issue in report['issues'] if 'discord.com' in issue.get('entries', []))
         assert 'Discord' in discord_issue['services']
+        assert discord_issue['service_keys'] == ['discord']
         assert discord_issue['service_hint'] == 'Discord'
         result = route_intersections.resolve_route_intersections(
             'vless-2',
@@ -8329,6 +8330,78 @@ def test_service_route_repair_preserves_shared_entries():
         )['count'] == 0
 
 
+def test_service_route_auto_resolves_known_service_intersections():
+    with tempfile.TemporaryDirectory() as tmp:
+        callbacks = []
+        for route_file in ('vless.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        youtube_entries = service_catalog.service_route_entries('youtube')
+        (Path(tmp) / 'vless-2.txt').write_text('\n'.join(youtube_entries) + '\n', encoding='utf-8')
+        (Path(tmp) / 'vless.txt').write_text(youtube_entries[0] + '\n', encoding='utf-8')
+
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=tmp,
+            include_runtime=False,
+        )
+        assert report['file_count'] >= 1
+        assert any(issue.get('service_keys') == ['youtube'] for issue in report['issues'])
+
+        result = service_routes.auto_resolve_service_route_intersections(
+            report=report,
+            service_items=[{'id': 'youtube'}],
+            unblock_dir=tmp,
+            update_script='',
+            before_update=lambda: callbacks.append('update'),
+        )
+
+        assert result['services'] == 1
+        assert result['entries_removed'] >= 1
+        assert callbacks == ['update']
+        assert youtube_entries[0] not in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
+        assert set(youtube_entries) <= set((Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8').splitlines())
+        assert route_intersections.analyze_route_intersections(
+            unblock_dir=tmp,
+            include_runtime=False,
+        )['count'] == 0
+
+
+def test_service_route_auto_refreshes_runtime_only_known_intersections():
+    with tempfile.TemporaryDirectory() as tmp:
+        callbacks = []
+        for route_file in ('vless.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        youtube_entries = service_catalog.service_route_entries('youtube')
+        (Path(tmp) / 'vless-2.txt').write_text('\n'.join(youtube_entries) + '\n', encoding='utf-8')
+        report = {
+            'count': 1,
+            'file_count': 0,
+            'runtime_count': 1,
+            'issues': [{
+                'kind': 'runtime_ipset_overlap',
+                'routes': ['vless', 'vless-2'],
+                'set_names': ['unblockvless', 'unblockvless2'],
+                'samples': ['64.233.161.94 / 64.233.161.0/24'],
+                'services': ['YouTube'],
+                'service_keys': ['youtube'],
+                'service_matches': [{'key': 'youtube', 'label': 'YouTube'}],
+                'message': 'runtime overlap',
+            }],
+        }
+
+        result = service_routes.auto_resolve_service_route_intersections(
+            report=report,
+            service_items=[{'id': 'youtube'}],
+            unblock_dir=tmp,
+            update_script='',
+            before_update=lambda: callbacks.append('refresh'),
+        )
+
+        assert result['services'] == 1
+        assert result['entries_added'] >= 0
+        assert result['entries_removed'] >= 0
+        assert callbacks == ['refresh']
+
+
 def test_route_intersections_detect_runtime_ipset_overlap():
     with tempfile.TemporaryDirectory() as tmp:
         for route_file, content in (
@@ -8362,6 +8435,7 @@ def test_route_intersections_detect_runtime_ipset_overlap():
         assert report['runtime_match_count'] == 4
         assert {issue['kind'] for issue in report['issues']} == {'runtime_ipset_overlap'}
         assert any('142.251.156.119 / 142.251.156.0/24' in issue.get('samples', []) for issue in report['issues'])
+        assert any('youtube' in issue.get('service_keys', []) for issue in report['issues'])
 
         result = route_intersections.resolve_route_intersections(
             'vless-2',
@@ -8538,6 +8612,77 @@ def test_service_route_runtime_intersections_cache_uses_signatures():
         web_route_tools_runtime.route_intersections.analyze_route_intersections = original_analyze
 
 
+def test_service_route_runtime_auto_resolves_known_intersections():
+    original_route_signature = web_route_tools_runtime.route_intersections.route_files_signature
+    original_runtime_signature = web_route_tools_runtime.route_intersections.runtime_ipset_signature
+    original_analyze = web_route_tools_runtime.route_intersections.analyze_route_intersections
+    original_auto_resolve = web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections
+    route_signature = [('vless', 1, 10)]
+    runtime_signature = ('status', 1, 10)
+    analyze_calls = []
+    auto_calls = []
+    invalidations = []
+
+    try:
+        web_route_tools_runtime.route_intersections.route_files_signature = lambda: tuple(route_signature)
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = lambda: runtime_signature
+
+        def fake_analyze():
+            analyze_calls.append('analyze')
+            if len(analyze_calls) == 1:
+                return {
+                    'count': 1,
+                    'file_count': 0,
+                    'runtime_count': 1,
+                    'issues': [{
+                        'kind': 'runtime_ipset_overlap',
+                        'routes': ['vless', 'vless-2'],
+                        'samples': ['64.233.161.94 / 64.233.161.0/24'],
+                        'services': ['YouTube'],
+                        'service_keys': ['youtube'],
+                        'message': 'runtime overlap',
+                    }],
+                }
+            return {'count': 0, 'issues': [], 'file_count': 0, 'runtime_count': 0}
+
+        def fake_auto_resolve(**kwargs):
+            auto_calls.append(kwargs)
+            return {
+                'services': 1,
+                'applied': [{
+                    'service_key': 'youtube',
+                    'service_label': 'YouTube',
+                    'target_protocol': 'vless2',
+                    'target_label': 'Vless 2',
+                    'added': 0,
+                    'removed': 0,
+                }],
+            }
+
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = fake_analyze
+        web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections = fake_auto_resolve
+        runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
+            custom_check_presets_getter=lambda: service_catalog.CUSTOM_CHECK_PRESETS,
+            service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+            telegram_icon_html=lambda opacity=1.0: 'TG',
+            youtube_icon_html=lambda opacity=1.0: 'YT',
+            invalidate_web_status_cache=lambda: invalidations.append('status'),
+            intersections_cache_ttl=1,
+        )
+        report = runtime.intersections_snapshot()
+        assert report['count'] == 0
+        assert report['auto_resolved']['applied'][0]['service_key'] == 'youtube'
+        assert len(auto_calls) == 1
+        assert invalidations == ['status']
+        assert runtime.intersections_snapshot()['count'] == 0
+        assert len(auto_calls) == 1
+    finally:
+        web_route_tools_runtime.route_intersections.route_files_signature = original_route_signature
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = original_runtime_signature
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = original_analyze
+        web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections = original_auto_resolve
+
+
 def main():
     test_app_runtime_mode_setter_callbacks()
     test_router_health_runtime_payload_uses_keenetic_memory()
@@ -8647,11 +8792,14 @@ def main():
     test_service_routes_apply_and_profile()
     test_route_intersections_helpers()
     test_route_intersections_filters_comments_and_ip_domain_noise()
+    test_service_route_auto_resolves_known_service_intersections()
+    test_service_route_auto_refreshes_runtime_only_known_intersections()
     test_route_intersections_detect_runtime_ipset_overlap()
     test_route_intersections_ignores_priority_runtime_overlap()
     test_service_route_ui_helpers()
     test_service_route_runtime_helpers()
     test_service_route_runtime_intersections_cache_uses_signatures()
+    test_service_route_runtime_auto_resolves_known_intersections()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
 

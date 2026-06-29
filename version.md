@@ -1,3 +1,7 @@
+*v1.865 (29 Jun 2026) -* main
+
+*Automatically repairs route/ipset intersections when the overlapping addresses are confidently tied to a catalog service that is already assigned to exactly one protocol, then refreshes the loaded ipset instead of requiring a manual target choice.*
+
 *v1.864 (29 Jun 2026) -* main
 
 *Restores the pool-check guard to the intended 65 MiB instead of the accidental 64 MiB 1.863 default, while keeping post-pool cleanup aimed at 62 MiB so another pool check can start without updating or restarting the bot.*

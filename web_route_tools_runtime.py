@@ -20,6 +20,7 @@ class ServiceRouteToolsRuntime:
         sync_udp_policy_config=None,
         invalidate_web_status_cache=None,
         intersections_cache_ttl=20.0,
+        auto_resolve_cooldown=300.0,
     ):
         self.custom_check_presets_getter = custom_check_presets_getter
         self.service_icon_html = service_icon_html
@@ -28,8 +29,10 @@ class ServiceRouteToolsRuntime:
         self.sync_udp_policy_config = sync_udp_policy_config or _noop
         self.invalidate_web_status_cache = invalidate_web_status_cache or _noop
         self.intersections_cache_ttl = max(1.0, float(intersections_cache_ttl or 1.0))
+        self.auto_resolve_cooldown = max(30.0, float(auto_resolve_cooldown or 30.0))
         self._intersections_lock = threading.Lock()
         self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
+        self._auto_resolve_cache = {'signature': None, 'timestamp': 0.0}
         self._service_items_cache = {'signature': None, 'items': None}
         self._summary_cache = {'signature': None, 'summary': None}
 
@@ -57,6 +60,44 @@ class ServiceRouteToolsRuntime:
             self._route_files_signature(),
             route_intersections.runtime_ipset_signature(),
         )
+
+    def _auto_resolve_signature(self, report, signature):
+        issue_parts = []
+        for issue in (report.get('issues') or [])[:16]:
+            service_keys = tuple(sorted(str(key or '') for key in (issue.get('service_keys') or []) if key))
+            if not service_keys:
+                continue
+            samples = tuple(str(value or '') for value in (issue.get('samples') or issue.get('entries') or [])[:5])
+            issue_parts.append((
+                str(issue.get('kind') or ''),
+                tuple(str(route or '') for route in (issue.get('routes') or [])),
+                service_keys,
+                samples,
+            ))
+        return (signature[0], tuple(issue_parts))
+
+    def _maybe_auto_resolve_intersections(self, report, signature):
+        if not int(report.get('count') or 0):
+            return None
+        auto_signature = self._auto_resolve_signature(report, signature)
+        if not auto_signature[1]:
+            return None
+        now = time.time()
+        with self._intersections_lock:
+            if (
+                self._auto_resolve_cache.get('signature') == auto_signature
+                and now - float(self._auto_resolve_cache.get('timestamp') or 0.0) < self.auto_resolve_cooldown
+            ):
+                return None
+            self._auto_resolve_cache = {'signature': auto_signature, 'timestamp': now}
+        result = service_routes.auto_resolve_service_route_intersections(
+            report=report,
+            service_items=self.service_items(),
+            before_update=self.sync_udp_policy_config,
+        )
+        if result.get('services'):
+            self.invalidate_web_status_cache()
+        return result
 
     def _service_items_snapshot(self):
         presets = self.custom_check_presets_getter()
@@ -101,6 +142,11 @@ class ServiceRouteToolsRuntime:
             if cached_report is not None and self._intersections_cache.get('signature') == signature:
                 return dict(cached_report)
         report = route_intersections.analyze_route_intersections()
+        auto_result = self._maybe_auto_resolve_intersections(report, signature)
+        if auto_result and auto_result.get('services'):
+            signature = self._intersections_signature()
+            report = route_intersections.analyze_route_intersections()
+            report['auto_resolved'] = dict(auto_result)
         with self._intersections_lock:
             self._intersections_cache = {
                 'signature': signature,
@@ -112,6 +158,7 @@ class ServiceRouteToolsRuntime:
     def invalidate_intersections_cache(self):
         with self._intersections_lock:
             self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
+            self._auto_resolve_cache = {'signature': None, 'timestamp': 0.0}
             self._summary_cache = {'signature': None, 'summary': None}
 
     def apply_service_route(self, service_key, target_protocol):

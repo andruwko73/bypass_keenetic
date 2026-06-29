@@ -117,51 +117,65 @@ def _service_match_index(service_sources=None):
         except Exception:
             entries = (source or {}).get('entries') or []
         for entry in entries or []:
+            match = (service_key, label)
             key = _entry_key(entry)
             if key:
-                exact.setdefault(key, set()).add(label)
+                exact.setdefault(key, set()).add(match)
             domain = _domain_key(entry)
             if domain:
-                domains.append((domain, label))
+                domains.append((domain, match))
             network = _ip_network(entry)
             if network:
-                networks.append((network, label))
+                networks.append((network, match))
     return {'exact': exact, 'domains': domains, 'networks': networks}
 
 
-def _service_labels_for_entry(entry, service_index):
-    labels = set()
+def _service_matches_for_entry(entry, service_index):
+    matches = {}
     key = _entry_key(entry)
     if key:
-        labels.update(service_index.get('exact', {}).get(key, set()))
+        for service_key, label in service_index.get('exact', {}).get(key, set()):
+            matches[service_key] = label
     domain = _domain_key(entry)
     if domain:
-        for service_domain, label in service_index.get('domains', ()):
+        for service_domain, match in service_index.get('domains', ()):
             if domain == service_domain or domain.endswith('.' + service_domain) or service_domain.endswith('.' + domain):
-                labels.add(label)
+                service_key, label = match
+                matches[service_key] = label
     network = _ip_network(entry)
     if network:
-        for service_network, label in service_index.get('networks', ()):
+        for service_network, match in service_index.get('networks', ()):
             if network.version == service_network.version and network.overlaps(service_network):
-                labels.add(label)
-    return sorted(labels)
+                service_key, label = match
+                matches[service_key] = label
+    return [
+        {'key': service_key, 'label': matches[service_key]}
+        for service_key in sorted(matches, key=lambda key: (matches[key], key))
+    ]
+
+
+def _service_labels_for_entry(entry, service_index):
+    return [match['label'] for match in _service_matches_for_entry(entry, service_index)]
 
 
 def _annotate_issue_services(issue, service_index, *, max_labels=6):
     candidates = []
     candidates.extend(issue.get('entries') or [])
     candidates.extend(issue.get('samples') or [])
-    labels = []
+    matches = []
     seen = set()
     for candidate in candidates:
         for value in str(candidate or '').split(' / '):
-            for label in _service_labels_for_entry(value.strip(), service_index):
-                if label not in seen:
-                    seen.add(label)
-                    labels.append(label)
-    issue['services'] = labels[:max_labels]
+            for match in _service_matches_for_entry(value.strip(), service_index):
+                key = match.get('key')
+                if key and key not in seen:
+                    seen.add(key)
+                    matches.append(match)
+    issue['service_matches'] = matches[:max_labels]
+    issue['service_keys'] = [match['key'] for match in issue['service_matches']]
+    issue['services'] = [match['label'] for match in issue['service_matches']]
     issue['service_hint'] = ', '.join(issue['services'])
-    issue['service_unknown'] = not bool(labels)
+    issue['service_unknown'] = not bool(matches)
     return issue
 
 
