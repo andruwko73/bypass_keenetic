@@ -1,3 +1,10 @@
+<a name="1.861"></a>
+# [1.861] - 29 Jun 2026
+
+- Lowers the pool-check process RSS guard to 70 MB and migrates the old 85 MB default so full key checks run cleanup or pause at the same threshold used by post-pool memory recovery.
+- Makes long pool-check progress use lightweight `/api/pool_probe` polling and slows pool-list refreshes so an open web page does not keep forcing full status payload rebuilds during the check.
+- Adds a separate post-pool cleanup target near 62 MB so the bot keeps trying `gc`/`malloc_trim` after a full pool check without restarting below the 70 MB restart threshold.
+
 <a name="1.860"></a>
 # [1.860] - 29 Jun 2026
 

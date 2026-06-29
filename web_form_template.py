@@ -127,7 +127,6 @@ def render_web_form(
     APP_BRANCH_DESCRIPTION,
     APP_BRANCH_LABEL,
     APP_VERSION_LABEL,
-    POOL_PROBE_UI_POLL_EXTENSION_MS,
     TELEGRAM_SVG_B64,
     YOUTUBE_SVG_B64,
     _telegram_icon_html,
@@ -329,7 +328,6 @@ def render_web_form(
         'enableLiveStatus': bool(enable_live_status),
         'enableTelegram': bool(enable_telegram),
         'botReady': bool(bot_ready),
-        'poolProbePollExtensionMs': int(POOL_PROBE_UI_POLL_EXTENSION_MS),
     })
     topbar_actions_class = 'topbar-actions' + ('' if enable_telegram else ' topbar-actions-web-only')
     page_class = ' class="command-running"' if _script_bool(initial_command_running) else ''

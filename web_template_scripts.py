@@ -1,5 +1,4 @@
 def render_web_scripts(
-    POOL_PROBE_UI_POLL_EXTENSION_MS,
     TELEGRAM_SVG_B64,
     YOUTUBE_SVG_B64,
     csrf_token,
@@ -22,8 +21,9 @@ def render_web_scripts(
         const ENABLE_TELEGRAM = APP_CONFIG.enableTelegram !== false;
         const STATUS_ACTIVE_POLL_MS = 8000;
         const STATUS_IDLE_POLL_MS = Math.max(30000, Number(APP_CONFIG.statusIdlePollMs || 60000));
+        const POOL_PROBE_STATUS_POLL_MS = Math.max(5000, Number(APP_CONFIG.poolProbeStatusPollMs || 10000));
+        const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));
         let botReady = APP_CONFIG.botReady === true;
-        const POOL_PROBE_POLL_EXTENSION_MS = Number(APP_CONFIG.poolProbePollExtensionMs || {POOL_PROBE_UI_POLL_EXTENSION_MS});
         const TELEGRAM_ICON_SRC = 'data:image/svg+xml;base64,{TELEGRAM_SVG_B64}';
         const YOUTUBE_ICON_SRC = 'data:image/svg+xml;base64,{YOUTUBE_SVG_B64}';
         const SERVICE_ICON_BASE = '/static/service-icons/';
@@ -40,6 +40,7 @@ def render_web_scripts(
         let statusPollTimer = null;
         let statusPollUntil = 0;
         let poolProbeWasRunning = false;
+        let poolProbePollTimer = null;
         let poolDataRefreshTimer = null;
         let poolViewTimers = {{}};
         let commandPollTimer = null;
@@ -1680,8 +1681,72 @@ def render_web_scripts(
             updatePoolProbeControls(poolProbeActive, poolProbePaused);
             updatePoolStatus(payload.pools);
             if ((poolProbeActive || poolProbePaused) && !document.hidden) {{
-                refreshPoolData(2500);
+                renderStatusAttention({{
+                    pool_probe_running: poolProbeActive,
+                    pool_probe_paused: poolProbePaused,
+                    pool_probe_progress: progress
+                }});
+                schedulePoolProbePolling(POOL_PROBE_STATUS_POLL_MS);
+                refreshPoolData(POOL_PROBE_POOL_REFRESH_MS);
             }}
+        }}
+
+        function applyPoolProbeStatusPayload(payload) {{
+            if (!ENABLE_KEY_POOL || !payload) {{
+                return false;
+            }}
+            const progress = payload.progress || payload.pool_probe_progress || {{}};
+            const poolProbeActive = !!(payload.running || payload.pool_probe_running) && Number(progress.total || 0) > 0;
+            const poolProbePaused = !!(payload.paused || payload.pool_probe_paused) && Number(progress.total || 0) > 0;
+            updatePoolProbeControls(poolProbeActive, poolProbePaused);
+            if (poolProbeActive || poolProbePaused) {{
+                renderStatusAttention({{
+                    pool_probe_running: poolProbeActive,
+                    pool_probe_paused: poolProbePaused,
+                    pool_probe_progress: progress
+                }});
+                poolProbeWasRunning = true;
+                return true;
+            }}
+            if (poolProbeWasRunning) {{
+                poolProbeWasRunning = false;
+                refreshPoolData(500);
+                scheduleStatusPolling(30000);
+            }}
+            return false;
+        }}
+
+        function schedulePoolProbePolling(delayMs) {{
+            if (!ENABLE_KEY_POOL || document.hidden) {{
+                return;
+            }}
+            if (poolProbePollTimer) {{
+                window.clearTimeout(poolProbePollTimer);
+            }}
+            poolProbePollTimer = window.setTimeout(pollPoolProbeStatus, Math.max(0, Number(delayMs || 0)));
+        }}
+
+        function pollPoolProbeStatus() {{
+            if (!ENABLE_KEY_POOL || document.hidden) {{
+                poolProbePollTimer = null;
+                return;
+            }}
+            poolProbePollTimer = null;
+            fetch('/api/pool_probe', {{
+                headers: {{'Accept': 'application/json'}},
+                cache: 'no-store'
+            }})
+                .then(function(response) {{ return response.json(); }})
+                .then(function(payload) {{
+                    if (applyPoolProbeStatusPayload(payload)) {{
+                        schedulePoolProbePolling(POOL_PROBE_STATUS_POLL_MS);
+                    }}
+                }})
+                .catch(function() {{
+                    if (!document.hidden) {{
+                        schedulePoolProbePolling(Math.max(POOL_PROBE_STATUS_POLL_MS, 15000));
+                    }}
+                }});
         }}
 
         function refreshPoolData(delayMs, protocols) {{
@@ -1912,8 +1977,7 @@ def render_web_scripts(
             }}
             poolProbeWasRunning = poolProbeActive || poolProbePaused;
             if (poolProbeActive || poolProbePaused) {{
-                pending = true;
-                statusPollUntil = Math.max(statusPollUntil, Date.now() + POOL_PROBE_POLL_EXTENSION_MS);
+                schedulePoolProbePolling(POOL_PROBE_STATUS_POLL_MS);
             }}
             return pending;
         }}
@@ -2619,6 +2683,10 @@ def render_web_scripts(
                             if (action === 'pool-probe-cancel') {{
                                 refreshPoolData(1200);
                                 scheduleStatusPolling(15000);
+                            }} else if (action === 'pool-probe') {{
+                                refreshPoolData(1200);
+                                schedulePoolProbePolling(1200);
+                                scheduleStatusPolling(15000);
                             }} else if (action === 'command') {{
                                 if (showCommandState(payload.command_state)) {{
                                     scheduleActionMessageHide(2500);
@@ -2678,6 +2746,9 @@ def render_web_scripts(
             document.addEventListener('visibilitychange', function() {{
                 if (!document.hidden) {{
                     scheduleStatusPolling(30000);
+                    if (poolProbeWasRunning) {{
+                        schedulePoolProbePolling(0);
+                    }}
                 }}
             }});
             setupViewNavigation();
@@ -2698,7 +2769,10 @@ def render_web_scripts(
                 scheduleActionMessageHide(9000);
             }}
             if (INITIAL_STATUS_PENDING) {{
-                scheduleStatusPolling(POOL_PROBE_POLL_EXTENSION_MS);
+                scheduleStatusPolling(30000);
+                if (ENABLE_KEY_POOL) {{
+                    schedulePoolProbePolling(0);
+                }}
             }} else if (ENABLE_LIVE_STATUS) {{
                 scheduleStatusPolling(STATUS_IDLE_POLL_MS);
             }}

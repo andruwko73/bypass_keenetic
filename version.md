@@ -1,3 +1,7 @@
+*v1.861 (29 Jun 2026) -* main
+
+*Lowers the pool-check RSS guard to 70 MB, makes long pool-check progress use lightweight polling, and targets about 62 MB RSS after full checks.*
+
 *v1.860 (29 Jun 2026) -* main
 
 *Fixes the Vless 2 Subscription tab layout on compact screens so the add-key textarea stays inside its card and does not overlap the subscription form.*

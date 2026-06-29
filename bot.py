@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.860, последнее изменение: 29.06.2026
+#  Файл: bot.py, Версия v1.861, последнее изменение: 29.06.2026
 
 import subprocess
 import os
@@ -1930,7 +1930,6 @@ POOL_PROBE_TIMEOUTS = (
     POOL_PROBE_SINGLE_TIMEOUT_SECONDS, POOL_PROBE_BATCH_TIMEOUT_SECONDS,
     POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT,
 )
-POOL_PROBE_UI_POLL_EXTENSION_MS = int(getattr(config, 'pool_probe_ui_poll_extension_ms', 180000))
 MEMORY_WATCHDOG_ENABLED = bool(getattr(config, 'memory_watchdog_enabled', True))
 MEMORY_WATCHDOG_RSS_LIMIT_KB = max(0, int(getattr(config, 'memory_watchdog_rss_limit_kb', 110 * 1024)))
 MEMORY_WATCHDOG_RSS_SOFT_KB = max(0, int(getattr(config, 'memory_watchdog_rss_soft_kb', 85 * 1024)))
@@ -1951,6 +1950,12 @@ MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = max(
 MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = min(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS, 120.0)
 MEMORY_POST_POOL_RESTART_ENABLED = bool(getattr(config, 'memory_post_pool_restart_enabled', True))
 MEMORY_POST_POOL_RESTART_RSS_KB = max(0, int(getattr(config, 'memory_post_pool_restart_rss_kb', 70 * 1024)))
+MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB = max(
+    0,
+    int(getattr(config, 'memory_post_pool_cleanup_target_rss_kb', 62 * 1024)),
+)
+if MEMORY_POST_POOL_RESTART_RSS_KB > 0 and MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB > MEMORY_POST_POOL_RESTART_RSS_KB:
+    MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB = MEMORY_POST_POOL_RESTART_RSS_KB
 MEMORY_POST_POOL_RESTART_DELAY_SECONDS = max(
     5.0,
     float(getattr(config, 'memory_post_pool_restart_delay_seconds', 20.0)),
@@ -1965,7 +1970,7 @@ MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS = max(
 )
 POOL_PROBE_MAX_PROCESS_RSS_KB = max(
     MEMORY_POST_POOL_RESTART_RSS_KB,
-    int(getattr(config, 'pool_probe_max_process_rss_kb', MEMORY_WATCHDOG_RSS_SOFT_KB)),
+    int(getattr(config, 'pool_probe_max_process_rss_kb', MEMORY_POST_POOL_RESTART_RSS_KB)),
 )
 MEMORY_TIMELINE_ENABLED = bool(getattr(config, 'memory_timeline_enabled', False))
 MEMORY_TIMELINE_PATH = str(getattr(config, 'memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl') or '').strip()
@@ -4974,7 +4979,12 @@ def _post_pool_memory_cleanup_snapshot():
 
 
 def _schedule_post_pool_memory_cleanup():
-    if not MEMORY_POST_POOL_RESTART_ENABLED or MEMORY_POST_POOL_RESTART_RSS_KB <= 0:
+    cleanup_target_kb = (
+        MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
+        if MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB > 0 else
+        MEMORY_POST_POOL_RESTART_RSS_KB
+    )
+    if not MEMORY_POST_POOL_RESTART_ENABLED or cleanup_target_kb <= 0:
         return
     now = time.time()
     with post_pool_memory_cleanup_lock:
@@ -5002,7 +5012,7 @@ def _schedule_post_pool_memory_cleanup():
                 attempts += 1
                 cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
                 rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
-                if not rss_kb or rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB:
+                if not rss_kb or rss_kb < cleanup_target_kb:
                     _set_post_pool_memory_cleanup_state(
                         scheduled=False,
                         attempts=attempts,
@@ -5010,7 +5020,11 @@ def _schedule_post_pool_memory_cleanup():
                         last_message='post-pool memory cleanup completed without restart',
                     )
                     return
-                if _memory_restart_is_safe():
+                restart_needed = (
+                    MEMORY_POST_POOL_RESTART_RSS_KB > 0 and
+                    rss_kb >= MEMORY_POST_POOL_RESTART_RSS_KB
+                )
+                if restart_needed and _memory_restart_is_safe():
                     _write_runtime_log(
                         f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
                         f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, requesting bot service restart'
@@ -5029,10 +5043,16 @@ def _schedule_post_pool_memory_cleanup():
                 now_inner = time.time()
                 remaining = deadline_at - now_inner
                 if remaining <= 0:
-                    _write_runtime_log(
-                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
-                        f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB after retry window; idle watchdog will continue monitoring'
-                    )
+                    if restart_needed:
+                        _write_runtime_log(
+                            f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
+                            f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB after retry window; idle watchdog will continue monitoring'
+                        )
+                    else:
+                        _write_runtime_log(
+                            f'Post-pool memory cleanup: RSS {rss_kb} KB remains above cleanup target '
+                            f'{cleanup_target_kb} KB after retry window; background guards will continue limiting work'
+                        )
                     _set_post_pool_memory_cleanup_state(
                         scheduled=False,
                         attempts=attempts,
@@ -5050,10 +5070,16 @@ def _schedule_post_pool_memory_cleanup():
                     deadline_at=deadline_at,
                     last_message='post-pool memory restart pending',
                 )
-                _write_runtime_log(
-                    f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
-                    f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restart postponed; retry in {int(round(next_wait))} seconds'
-                )
+                if restart_needed:
+                    _write_runtime_log(
+                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
+                        f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restart postponed; retry in {int(round(next_wait))} seconds'
+                    )
+                else:
+                    _write_runtime_log(
+                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above cleanup target '
+                        f'{cleanup_target_kb} KB, retry in {int(round(next_wait))} seconds'
+                    )
         finally:
             if shutdown_requested.is_set():
                 _set_post_pool_memory_cleanup_state(scheduled=False, last_message='shutdown requested')
@@ -6846,6 +6872,7 @@ def _router_health_snapshot():
     payload = router_health.snapshot(_get_pool_probe_progress)
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
     payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
+    payload['post_pool_cleanup_target_kb'] = MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
     payload['memory_timeline_enabled'] = bool(MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH)
     payload['memory_timeline_path'] = MEMORY_TIMELINE_PATH if MEMORY_TIMELINE_ENABLED else ''
     payload['memory_timeline_bytes'] = _safe_file_size(MEMORY_TIMELINE_PATH) if MEMORY_TIMELINE_ENABLED else 0
@@ -10143,7 +10170,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         app_runtime_mode = _load_app_runtime_mode()
         pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
         return render_web_script_asset(
-            POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             csrf_token='',
@@ -10249,7 +10275,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             APP_BRANCH_DESCRIPTION=APP_BRANCH_DESCRIPTION,
             APP_BRANCH_LABEL=APP_BRANCH_LABEL,
             APP_VERSION_LABEL=APP_VERSION_LABEL,
-            POOL_PROBE_UI_POLL_EXTENSION_MS=POOL_PROBE_UI_POLL_EXTENSION_MS,
             TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
             YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
             _telegram_icon_html=_telegram_icon_html,

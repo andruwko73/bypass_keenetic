@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.860
+# ВЕРСИЯ СКРИПТА v1.861
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -39,7 +39,7 @@ pool_probe_high_cpu_max_wait_seconds = 120.0
 pool_probe_max_load1 = 2.0
 pool_probe_high_load_delay_seconds = 10.0
 pool_probe_high_load_max_wait_seconds = 120.0
-pool_probe_max_process_rss_kb = 87040  # рабочий потолок RSS во время проверки пула; после проверки действует restart-порог 70 MB
+pool_probe_max_process_rss_kb = 71680  # рабочий потолок RSS во время проверки пула; при превышении проверка сначала чистит память/приостанавливается
 pool_probe_youtube_profile = 'quick'  # quick для пула, full остаётся для детальной диагностики активного ключа
 pool_probe_quality_enabled = True  # короткий download-sample через ключ для оценки YouTube-качества перед применением
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={bytes}'
@@ -76,6 +76,7 @@ memory_watchdog_restart_cooldown_seconds = 1800.0
 status_refresh_min_interval_seconds = 180.0  # minimum delay between heavy web status refreshes
 memory_post_pool_restart_enabled = True  # после проверки пула бот сам снизит память и перезапустится, если Python RSS остался высоким
 memory_post_pool_restart_rss_kb = 71680
+memory_post_pool_cleanup_target_rss_kb = 63488  # после проверки пула повторять gc/malloc_trim до целевой полки около 62 MB, но не перезапускать ниже restart-порога
 memory_post_pool_restart_delay_seconds = 20.0
 memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0

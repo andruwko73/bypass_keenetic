@@ -456,7 +456,6 @@ def _page_html(mode="advanced"):
         APP_BRANCH_DESCRIPTION="fixture",
         APP_BRANCH_LABEL="ci/fixture",
         APP_VERSION_LABEL="ui-smoke",
-        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
         TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
         YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
         _telegram_icon_html=_telegram_icon_html,
@@ -551,7 +550,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/static/app.js":
             self._send(
                 web_form_template.render_web_script_asset(
-                    POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
                     TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
                     YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
                     csrf_token="",

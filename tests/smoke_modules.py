@@ -1702,9 +1702,9 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_quality_max_samples_per_run = 6' in example
     assert 'pool_probe_quality_max_samples_per_run = 6' in installer
     assert 'pool_probe_quality_max_samples_per_run = 6' in bootstrap
-    assert 'pool_probe_max_process_rss_kb = 87040' in example
-    assert 'pool_probe_max_process_rss_kb = 87040' in installer
-    assert 'pool_probe_max_process_rss_kb = 87040' in bootstrap
+    assert 'pool_probe_max_process_rss_kb = 71680' in example
+    assert 'pool_probe_max_process_rss_kb = 71680' in installer
+    assert 'pool_probe_max_process_rss_kb = 71680' in bootstrap
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
@@ -1759,6 +1759,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_post_pool_restart_rss_kb = 71680' in example
     assert 'memory_post_pool_restart_rss_kb = 71680' in installer
     assert 'memory_post_pool_restart_rss_kb = 71680' in bootstrap
+    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in example
+    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in installer
+    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in bootstrap
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in example
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in installer
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in bootstrap
@@ -2541,6 +2544,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "getattr(config, 'memory_malloc_trim_enabled', True)" in source
     assert 'malloc_trim_attempted' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
+    assert "memory_post_pool_cleanup_target_rss_kb', 62 * 1024" in source
     assert 'process_rss_kb=_process_rss_kb' in source
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
     assert 'memory_cleanup=_pool_probe_memory_checkpoint' in source
@@ -2560,6 +2564,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'router_metrics_critical_bot_rss_kb = 87040' in script_source
     assert 'router_metrics_warn_load1 = 3.0' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
+    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in script_source
+    assert 'pool_probe_max_process_rss_kb = 71680' in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
     assert 'memory_timeline_max_events = 720' in script_source
     assert "memory_timeline_max_events[[:space:]]*=[[:space:]]*240" in script_source
@@ -7656,7 +7662,6 @@ def test_pool_probe_config_does_not_pin_telegram_api_ip():
 
 def test_web_template_scripts_helpers():
     scripts = web_template_scripts.render_web_scripts(
-        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
         TELEGRAM_SVG_B64='tg',
         YOUTUBE_SVG_B64='yt',
         csrf_token='token',
@@ -7670,6 +7675,8 @@ def test_web_template_scripts_helpers():
     assert 'const INITIAL_STATUS_PENDING = !!APP_CONFIG.initialStatusPending;' in scripts
     assert 'const STATUS_ACTIVE_POLL_MS = 8000;' in scripts
     assert "const STATUS_IDLE_POLL_MS = Math.max(30000, Number(APP_CONFIG.statusIdlePollMs || 60000));" in scripts
+    assert "const POOL_PROBE_STATUS_POLL_MS = Math.max(5000, Number(APP_CONFIG.poolProbeStatusPollMs || 10000));" in scripts
+    assert "const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));" in scripts
     assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
     assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
     assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS);" in scripts
@@ -7789,9 +7796,14 @@ def test_web_template_scripts_helpers():
     assert 'poolProbeVisible' in scripts
     assert "pill.innerHTML = (showTelegramIcon" in scripts
     assert 'function updatePoolProbeControls(active, paused)' in scripts
+    assert 'function pollPoolProbeStatus()' in scripts
+    assert "fetch('/api/pool_probe'" in scripts
+    assert 'function applyPoolProbeStatusPayload(payload)' in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
-    assert 'refreshPoolData(2500)' in scripts
+    assert 'refreshPoolData(POOL_PROBE_POOL_REFRESH_MS)' in scripts
+    assert 'statusPollUntil = Math.max(statusPollUntil, Date.now() + POOL_PROBE_POLL_EXTENSION_MS)' not in scripts
+    assert 'refreshPoolData(2500)' not in scripts
     assert 'function fetchRouterMetrics()' in scripts
     assert "fetch('/api/router_metrics?compact=1'" in scripts
     assert 'function fetchEventHistory()' in scripts
@@ -7810,7 +7822,6 @@ def test_web_form_template_smoke():
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',
         APP_VERSION_LABEL='1',
-        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
         TELEGRAM_SVG_B64='tg-icon',
         YOUTUBE_SVG_B64='',
         _telegram_icon_html=lambda opacity=1.0: 'TG',
@@ -7897,7 +7908,6 @@ def test_web_form_template_smoke():
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',
         APP_VERSION_LABEL='1',
-        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
         TELEGRAM_SVG_B64='tg-icon',
         YOUTUBE_SVG_B64='',
         _telegram_icon_html=lambda opacity=1.0: 'TG',
@@ -7938,7 +7948,6 @@ def test_web_form_template_smoke():
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',
         APP_VERSION_LABEL='1',
-        POOL_PROBE_UI_POLL_EXTENSION_MS=1000,
         TELEGRAM_SVG_B64='tg-icon',
         YOUTUBE_SVG_B64='',
         _telegram_icon_html=lambda opacity=1.0: 'TG',
