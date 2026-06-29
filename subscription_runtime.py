@@ -23,23 +23,29 @@ def subscription_keys_for_protocol(proto, fetched_keys):
     return key_pool_store.dedupe_key_list(fetched_keys.get(source_proto, []) or [])
 
 
-def sync_subscription_keys_to_pool(pools, proto, fetched_keys, previous_managed_keys=None):
+def sync_subscription_keys_to_pool(pools, proto, fetched_keys, previous_managed_keys=None, preserve_keys=None):
     pools = key_pool_store.normalize_key_pools(pools)
     if proto not in pools:
         pools[proto] = []
     managed_keys = subscription_keys_for_protocol(proto, fetched_keys)
     managed_set = set(managed_keys)
     previous_set = set(key_pool_store.dedupe_key_list(previous_managed_keys or []))
+    preserve_set = set(key_pool_store.dedupe_key_list(preserve_keys or []))
+    retained_keys = [
+        key_value
+        for key_value in key_pool_store.dedupe_key_list(preserve_keys or [])
+        if key_value in previous_set and key_value not in managed_set
+    ]
     current_keys = key_pool_store.dedupe_key_list(pools.get(proto, []) or [])
     removed_keys = [
         key_value
         for key_value in current_keys
-        if key_value in previous_set and key_value not in managed_set
+        if key_value in previous_set and key_value not in managed_set and key_value not in preserve_set
     ]
     kept_keys = [
         key_value
         for key_value in current_keys
-        if key_value not in previous_set or key_value in managed_set
+        if key_value not in previous_set or key_value in managed_set or key_value in preserve_set
     ]
     existing = set(kept_keys)
     added_keys = []
@@ -50,7 +56,8 @@ def sync_subscription_keys_to_pool(pools, proto, fetched_keys, previous_managed_
         existing.add(key_value)
         added_keys.append(key_value)
     pools[proto] = kept_keys
-    return pools, added_keys, removed_keys, managed_keys
+    state_managed_keys = key_pool_store.dedupe_key_list(list(managed_keys) + retained_keys)
+    return pools, added_keys, removed_keys, state_managed_keys
 
 
 def normalize_subscription_state(payload):

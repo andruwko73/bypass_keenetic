@@ -1092,6 +1092,23 @@ def test_subscription_pool_sync_preserves_manual_keys():
     assert pools['vless2'] == [manual_key, new_key]
 
 
+def test_subscription_pool_sync_preserves_active_managed_key():
+    active_key = 'vless://active@example.com:443#active'
+    stale_key = 'vless://stale@example.com:443#stale'
+    new_key = 'vless://new@example.com:443#new'
+    pools, added, removed, managed = subscription_runtime.sync_subscription_keys_to_pool(
+        {'vless2': [active_key, stale_key]},
+        'vless2',
+        {'vless': [new_key]},
+        previous_managed_keys=[active_key, stale_key],
+        preserve_keys=[active_key],
+    )
+    assert added == [new_key]
+    assert removed == [stale_key]
+    assert managed == [new_key, active_key]
+    assert pools['vless2'] == [active_key, new_key]
+
+
 def test_youtube_healthcheck_detects_first_load_instability():
     calls = []
 
@@ -8540,6 +8557,7 @@ def main():
     test_key_pool_subscription_helpers()
     test_subscription_hwid_request_helpers()
     test_subscription_pool_sync_preserves_manual_keys()
+    test_subscription_pool_sync_preserves_active_managed_key()
     test_telegram_pool_ui()
     test_web_get_actions_helpers()
     test_web_form_blocks_helpers()

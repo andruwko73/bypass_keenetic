@@ -1,3 +1,10 @@
+<a name="1.858"></a>
+# [1.858] - 29 Jun 2026
+
+- Lets HWID subscription refresh use a lightweight RSS/CPU/load guard so vless2 subscriptions can update even when heavier background checks are backed off.
+- Preserves an active working managed subscription key if the site stops returning it, while still syncing new and removed subscription keys and keeping manual pool keys.
+- Avoids building pool web-action callbacks in Simple mode, reduces Telegram bot worker threads to one by default, and starts the bot with malloc fragmentation guards.
+
 <a name="1.857"></a>
 # [1.857] - 28 Jun 2026
 

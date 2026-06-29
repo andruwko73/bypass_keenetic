@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.857, последнее изменение: 28.06.2026
+#  Файл: bot.py, Версия v1.858, последнее изменение: 29.06.2026
 
 import subprocess
 import os
@@ -645,6 +645,22 @@ SUBSCRIPTION_AUTO_REFRESH_START_DELAY_SECONDS = max(
 SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS = max(
     300,
     int(getattr(config, 'subscription_auto_refresh_check_seconds', 3600)),
+)
+SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB = max(
+    0,
+    int(getattr(config, 'subscription_auto_refresh_max_bot_rss_kb', 70 * 1024)),
+)
+SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB = max(
+    0,
+    int(getattr(config, 'subscription_auto_refresh_min_available_kb', 90 * 1024)),
+)
+SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT = max(
+    0.0,
+    float(getattr(config, 'subscription_auto_refresh_max_cpu_percent', 80.0)),
+)
+SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1 = max(
+    0.0,
+    float(getattr(config, 'subscription_auto_refresh_max_load1', 2.5)),
 )
 AUTO_FAILOVER_GRACE_SECONDS = int(getattr(config, 'auto_failover_grace_seconds', 180))
 AUTO_FAILOVER_POLL_SECONDS = int(getattr(config, 'auto_failover_poll_seconds', 60))
@@ -1728,6 +1744,7 @@ def _start_youtube_vless2_failover_thread():
     threading.Thread(target=worker, daemon=True).start()
 
 token = getattr(config, 'token', '') or '0:WEBONLY_DISABLED'
+TELEGRAM_BOT_NUM_THREADS = max(1, int(getattr(config, 'telegram_bot_num_threads', 1)))
 usernames = getattr(config, 'usernames', [])
 routerip = config.routerip
 browser_port = config.browser_port
@@ -1760,7 +1777,14 @@ class _CommandWorkerTeleBot:
         return lambda func: func
 
 
-bot = _CommandWorkerTeleBot() if COMMAND_WORKER_MODE else telebot.TeleBot(token)
+def _create_telebot(token_value):
+    try:
+        return telebot.TeleBot(token_value, num_threads=TELEGRAM_BOT_NUM_THREADS)
+    except TypeError:
+        return telebot.TeleBot(token_value)
+
+
+bot = _CommandWorkerTeleBot() if COMMAND_WORKER_MODE else _create_telebot(token)
 sid = "0"
 PROXY_MODE_FILE = '/opt/etc/bot_proxy_mode'
 BOT_AUTOSTART_FILE = '/opt/etc/bot_autostart'
@@ -4072,6 +4096,19 @@ def _process_rss_kb(pid='self'):
     return 0
 
 
+def _mem_available_kb_light():
+    try:
+        with open('/proc/meminfo', 'r', encoding='utf-8', errors='ignore') as file:
+            for line in file:
+                if line.startswith('MemAvailable:'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return int(parts[1])
+    except Exception:
+        return 0
+    return 0
+
+
 def _read_cpu_totals():
     try:
         with open('/proc/stat', 'r', encoding='utf-8', errors='ignore') as file:
@@ -4171,6 +4208,77 @@ def _background_task_allowed(task_name):
             f'({cpu_busy:.1f}% > {BACKGROUND_TASK_MAX_CPU_PERCENT:.1f}%).'
         )
     return False
+
+
+def _log_subscription_auto_refresh_skip(reason, detail):
+    key = str(reason or 'unknown')
+    now = time.time()
+    last_log = float(subscription_auto_refresh_skip_log_at.get(key) or 0.0)
+    if now - last_log < BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+        return
+    subscription_auto_refresh_skip_log_at[key] = now
+    _write_runtime_log(f'Subscription auto refresh skipped: {detail}')
+
+
+def _subscription_auto_refresh_allowed(proto):
+    task_name = 'Subscription auto refresh'
+    now = time.time()
+    skip_until = float(background_task_skip_until.get(task_name) or 0.0)
+    if skip_until and now < skip_until:
+        return False
+    if globals().get('pool_probe_lock') and pool_probe_lock.locked():
+        background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
+        _log_subscription_auto_refresh_skip('pool_probe', f'{proto}: pool probe is running')
+        return False
+    rss_kb = int(_process_rss_kb() or 0)
+    if SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB > 0 and rss_kb >= SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB:
+        cleanup = _memory_cleanup('subscription auto refresh high RSS', clear_status=True, log=False)
+        rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
+        if rss_kb >= SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB:
+            background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+            _log_subscription_auto_refresh_skip(
+                'rss',
+                f'{proto}: bot RSS {rss_kb} KB >= {SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB} KB',
+            )
+            return False
+    available_kb = int(_mem_available_kb_light() or 0)
+    if (
+        SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB > 0 and
+        available_kb > 0 and
+        available_kb < SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB
+    ):
+        background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+        _log_subscription_auto_refresh_skip(
+            'memory',
+            f'{proto}: available memory {available_kb} KB < {SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB} KB',
+        )
+        return False
+    load1 = _pool_probe_load_average()
+    if (
+        SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1 > 0 and
+        load1 is not None and
+        load1 > SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1
+    ):
+        background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+        _log_subscription_auto_refresh_skip(
+            'load',
+            f'{proto}: load1 {load1:.2f} > {SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1:.2f}',
+        )
+        return False
+    cpu_busy = _background_cpu_busy_percent()
+    if (
+        SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT > 0 and
+        cpu_busy is not None and
+        cpu_busy > SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT
+    ):
+        background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+        _log_subscription_auto_refresh_skip(
+            'cpu',
+            f'{proto}: CPU {cpu_busy:.1f}% > {SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT:.1f}%',
+        )
+        return False
+    background_task_skip_until.pop(task_name, None)
+    return True
 
 
 def _youtube_stream_guard_state(proto):
@@ -8847,7 +8955,61 @@ def _add_keys_to_pool(proto, keys_text):
     return len(added_keys)
 
 
+def _subscription_active_key_is_working(proto, key_value):
+    key_value = str(key_value or '').strip()
+    if not key_value:
+        return False
+    current_keys = _load_current_keys()
+    if str((current_keys or {}).get(proto) or '').strip() != key_value:
+        return False
+    cache = _load_key_probe_cache()
+    probe = cache.get(_hash_key(key_value), {}) if isinstance(cache, dict) else {}
+    route_states = None
+    required_services = ()
+    try:
+        route_states = _service_route_summary()
+        required_services = _key_pool_web().core_services_for_protocol(route_states, proto)
+    except Exception:
+        route_states = None
+        required_services = ()
+    if _active_status_can_use_recent_probe(probe, required_services=required_services):
+        return True
+    if proto != proxy_mode or (globals().get('pool_probe_lock') and pool_probe_lock.locked()):
+        return False
+    try:
+        status = _protocol_status_for_key(
+            proto,
+            key_value,
+            key_probe_cache=cache,
+            route_states=route_states,
+        )
+    except Exception as exc:
+        _write_runtime_log(f'Subscription active key check for {proto} failed: {exc}')
+        return False
+    return bool(
+        status.get('tone') in ('ok', 'warn') or
+        status.get('api_ok') is True or
+        status.get('yt_ok') is True
+    )
+
+
+def _subscription_preserve_active_keys(proto, fetched_keys, previous_managed_keys=None):
+    previous_set = set(key_pool_store.dedupe_key_list(previous_managed_keys or []))
+    if not previous_set:
+        return []
+    fetched_set = set(subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys))
+    current_key = str((_load_current_keys().get(proto) or '')).strip()
+    if not current_key or current_key not in previous_set or current_key in fetched_set:
+        return []
+    if _subscription_active_key_is_working(proto, current_key):
+        return [current_key]
+    return []
+
+
 def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None):
+    retained_keys = []
+    if sync_subscription:
+        retained_keys = _subscription_preserve_active_keys(proto, fetched_keys, previous_managed_keys)
     with key_pool_lock:
         if sync_subscription:
             pools, added_keys, removed_keys, managed_keys = subscription_runtime.sync_subscription_keys_to_pool(
@@ -8855,6 +9017,7 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
                 proto,
                 fetched_keys,
                 previous_managed_keys=previous_managed_keys,
+                preserve_keys=retained_keys,
             )
         else:
             pools, added_keys = key_pool_store.add_subscription_keys_to_pool(
@@ -8869,7 +9032,7 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
         _probe_pool_keys_background(proto, added_keys)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
-    return pools, added_keys, removed_keys, managed_keys
+    return pools, added_keys, removed_keys, managed_keys, retained_keys
 
 
 def _refresh_subscription_once(proto, record, *, source='auto'):
@@ -8877,22 +9040,8 @@ def _refresh_subscription_once(proto, record, *, source='auto'):
     if not url or not bool((record or {}).get('hwid_enabled')):
         return False
     if source == 'auto':
-        if not _background_task_allowed('Subscription auto refresh'):
+        if not _subscription_auto_refresh_allowed(proto):
             return False
-        rss_kb = int(_process_rss_kb() or 0)
-        if rss_kb and MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 and rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
-            cleanup = _memory_cleanup('subscription auto refresh high RSS', clear_status=True, log=False)
-            rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
-            if rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
-                now = time.time()
-                last_log = float(subscription_auto_refresh_skip_log_at.get('rss') or 0.0)
-                if now - last_log >= 1800:
-                    subscription_auto_refresh_skip_log_at['rss'] = now
-                    _write_runtime_log(
-                        f'Subscription auto refresh skipped for {proto}: '
-                        f'bot RSS {rss_kb} KB >= {MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB} KB'
-                    )
-                return False
     attempt_at = time.time()
     try:
         fetched, error = _fetch_keys_from_subscription(url, use_router_hwid=True)
@@ -8901,7 +9050,7 @@ def _refresh_subscription_once(proto, record, *, source='auto'):
         selected_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched)
         if not selected_keys:
             raise ValueError('subscription did not return keys for the selected protocol')
-        pools, added_keys, removed_keys, _managed_keys = _add_subscription_keys_to_pool(
+        pools, added_keys, removed_keys, _managed_keys, retained_keys = _add_subscription_keys_to_pool(
             proto,
             fetched,
             sync_subscription=True,
@@ -8918,7 +9067,7 @@ def _refresh_subscription_once(proto, record, *, source='auto'):
         )
         _write_runtime_log(
             f'Subscription {source} refresh for {proto}: added={len(added_keys)}, '
-            f'removed={len(removed_keys)}, total={len(_managed_keys)}'
+            f'removed={len(removed_keys)}, retained_active={len(retained_keys)}, total={len(_managed_keys)}'
         )
         return True
     except Exception as exc:
@@ -9643,40 +9792,46 @@ def _web_action_context():
         record_event=_record_event,
         install_verify=False,
     )
-    context.update(web_post_actions.pool_action_context(
-        append_custom_checks_to_unblock_list=_append_custom_checks_to_unblock_list,
-        unblock_route_for_key_type=_unblock_route_for_key_type,
-        add_custom_check=_add_custom_check,
-        delete_custom_check=_delete_custom_check,
-        web_custom_checks=_web_custom_checks,
-        load_current_keys=_load_current_keys,
-        refresh_status_caches_async=_refresh_status_caches_async,
-        web_pool_snapshot=_web_pool_snapshot,
-        probe_all_pool_keys_async=_probe_all_pool_keys_async,
-        pool_keys_for_proto=_pool_keys_for_proto,
-        probe_pool_keys_background=_probe_pool_keys_background,
-        pause_pool_probe_for_apply=_pause_pool_probe_for_apply,
-        probe_applied_pool_key_services=_probe_applied_pool_key_services,
-        cancel_pool_probe=_cancel_pool_probe,
-        resume_cancelled_pool_probe=_resume_cancelled_pool_probe,
-        add_keys_to_pool=_add_keys_to_pool,
-        delete_pool_key=_delete_pool_key,
-        load_key_pools=_load_key_pools,
-        hash_key=_hash_key,
-        set_active_key=_set_active_key,
-        audit_key_switch=_audit_key_switch,
-        clear_pool=_clear_pool,
-        fetch_keys_from_subscription=_fetch_keys_from_subscription,
-        add_subscription_keys_to_pool=key_pool_store.add_subscription_keys_to_pool,
-        add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
-        subscription_keys_for_protocol=subscription_runtime.subscription_keys_for_protocol,
-        subscription_record=_subscription_record,
-        save_subscription_record=_update_subscription_record,
-        save_key_pools=_save_key_pools,
-        pool_apply_lock=pool_apply_lock,
-        custom_checks_enabled=pool_enabled,
-        pool_actions_enabled=pool_enabled,
-    ))
+    if pool_enabled:
+        context.update(web_post_actions.pool_action_context(
+            append_custom_checks_to_unblock_list=_append_custom_checks_to_unblock_list,
+            unblock_route_for_key_type=_unblock_route_for_key_type,
+            add_custom_check=_add_custom_check,
+            delete_custom_check=_delete_custom_check,
+            web_custom_checks=_web_custom_checks,
+            load_current_keys=_load_current_keys,
+            refresh_status_caches_async=_refresh_status_caches_async,
+            web_pool_snapshot=_web_pool_snapshot,
+            probe_all_pool_keys_async=_probe_all_pool_keys_async,
+            pool_keys_for_proto=_pool_keys_for_proto,
+            probe_pool_keys_background=_probe_pool_keys_background,
+            pause_pool_probe_for_apply=_pause_pool_probe_for_apply,
+            probe_applied_pool_key_services=_probe_applied_pool_key_services,
+            cancel_pool_probe=_cancel_pool_probe,
+            resume_cancelled_pool_probe=_resume_cancelled_pool_probe,
+            add_keys_to_pool=_add_keys_to_pool,
+            delete_pool_key=_delete_pool_key,
+            load_key_pools=_load_key_pools,
+            hash_key=_hash_key,
+            set_active_key=_set_active_key,
+            audit_key_switch=_audit_key_switch,
+            clear_pool=_clear_pool,
+            fetch_keys_from_subscription=_fetch_keys_from_subscription,
+            add_subscription_keys_to_pool=key_pool_store.add_subscription_keys_to_pool,
+            add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
+            subscription_keys_for_protocol=subscription_runtime.subscription_keys_for_protocol,
+            subscription_record=_subscription_record,
+            save_subscription_record=_update_subscription_record,
+            save_key_pools=_save_key_pools,
+            pool_apply_lock=pool_apply_lock,
+            custom_checks_enabled=True,
+            pool_actions_enabled=True,
+        ))
+    else:
+        context.update(web_post_actions.pool_action_context(
+            custom_checks_enabled=False,
+            pool_actions_enabled=False,
+        ))
     return context
 
 

@@ -1,3 +1,7 @@
+*v1.858 (29 Jun 2026) -* main
+
+*Lets HWID subscriptions refresh under the lightweight guard, preserves an active working subscription key, isolates simple mode pool actions, and reduces Telegram bot worker threads.*
+
 *v1.857 (28 Jun 2026) -* main
 
 *Keeps only the latest automatic update/backup rollback artifacts because the UI rollback restores only the most recent update.*

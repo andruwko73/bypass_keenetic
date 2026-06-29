@@ -132,6 +132,8 @@ case "$1" in
         cleanup_python_bytecode
         trim_runtime_logs
         unset BYPASS_KEENETIC_COMMAND_WORKER
+        MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-1}" \
+        MALLOC_TRIM_THRESHOLD_="${MALLOC_TRIM_THRESHOLD_:-262144}" \
         PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT" >> "$LOG_FILE" 2>&1 &
         pid=$!
         sleep 2
