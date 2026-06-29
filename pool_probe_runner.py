@@ -365,7 +365,7 @@ def run_pool_probe_worker(
         marked_tasks.add(checked_task_id)
         checked += 1
         set_checked(checked)
-        run_memory_cleanup('pool probe key checkpoint', force=False, clear_status=False)
+        run_memory_cleanup('pool probe key checkpoint', force=True, clear_status=False)
 
     def ignore_late_result(proto, key_value):
         with ignored_result_lock:
@@ -767,7 +767,7 @@ def run_pool_probe_worker(
                 del raw_batch
                 del valid_batch
                 gc.collect()
-                run_memory_cleanup('pool probe batch checkpoint', force=False, clear_status=False)
+                run_memory_cleanup('pool probe batch checkpoint', force=True, clear_status=False)
 
             if checked < total and pending_tasks:
                 sleep(delay_seconds)
@@ -781,6 +781,6 @@ def run_pool_probe_worker(
                 log(f'Не удалось сохранить очередь продолжения проверки пула: {exc}')
         invalidate_caches()
         gc.collect()
-        run_memory_cleanup('pool probe worker final checkpoint', force=False, clear_status=False)
+        run_memory_cleanup('pool probe worker final checkpoint', force=True, clear_status=False)
 
     return checked, total

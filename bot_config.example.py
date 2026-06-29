@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.862
+# ВЕРСИЯ СКРИПТА v1.863
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -39,7 +39,7 @@ pool_probe_high_cpu_max_wait_seconds = 120.0
 pool_probe_max_load1 = 2.0
 pool_probe_high_load_delay_seconds = 10.0
 pool_probe_high_load_max_wait_seconds = 120.0
-pool_probe_max_process_rss_kb = 71680  # рабочий потолок RSS во время проверки пула; при превышении проверка сначала чистит память/приостанавливается
+pool_probe_max_process_rss_kb = 65536  # рабочий потолок RSS во время проверки пула; restart-порог остаётся 70 MB, но проверка чистит память/приостанавливается раньше
 pool_probe_youtube_profile = 'quick'  # quick для пула, full остаётся для детальной диагностики активного ключа
 pool_probe_quality_enabled = True  # короткий download-sample через ключ для оценки YouTube-качества перед применением
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={bytes}'

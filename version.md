@@ -1,3 +1,7 @@
+*v1.863 (29 Jun 2026) -* main
+
+*Keeps full pool checks below the 70 MB restart threshold by lowering their working RSS guard to 64 MB and forcing memory cleanup after each checked key and batch.*
+
 *v1.862 (29 Jun 2026) -* main
 
 *Keeps the selected app mode, proxy mode, and Telegram autostart flag during normal web updates by restoring the external runtime mode files from the update backup.*

@@ -1,3 +1,8 @@
+<a name="1.863"></a>
+# [1.863] - 29 Jun 2026
+
+- Lowers the pool-check working RSS guard to 64 MB, migrates older 70/85 MB pool guard defaults, and forces cleanup after each pool key and batch so full checks back off before the bot reaches the 70 MB restart threshold.
+
 <a name="1.862"></a>
 # [1.862] - 29 Jun 2026
 

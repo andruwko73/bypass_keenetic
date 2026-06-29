@@ -952,10 +952,10 @@ migrate_runtime_config_defaults() {
     grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> /opt/etc/bot_config.py
     grep -Eq '^telegram_bot_num_threads[[:space:]]*=' /opt/etc/bot_config.py || printf 'telegram_bot_num_threads = 1\n' >> /opt/etc/bot_config.py
-    if grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*87040([[:space:]#]|$)' /opt/etc/bot_config.py; then
-      sed -i 's/^pool_probe_max_process_rss_kb[[:space:]]*=.*/pool_probe_max_process_rss_kb = 71680/' /opt/etc/bot_config.py || true
+    if grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(71680|87040)([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^pool_probe_max_process_rss_kb[[:space:]]*=.*/pool_probe_max_process_rss_kb = 65536/' /opt/etc/bot_config.py || true
     fi
-    grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_max_process_rss_kb = 71680\n' >> /opt/etc/bot_config.py
+    grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_max_process_rss_kb = 65536\n' >> /opt/etc/bot_config.py
   fi
   if grep -Eq '^pool_probe_delay_seconds[[:space:]]*=[[:space:]]*1\.5([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_delay_seconds[[:space:]]*=.*/pool_probe_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true
@@ -976,10 +976,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^pool_probe_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_load1 = 2.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_probe_high_load_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_high_load_delay_seconds = 10.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_probe_high_load_max_wait_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_high_load_max_wait_seconds = 120.0\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*87040([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^pool_probe_max_process_rss_kb[[:space:]]*=.*/pool_probe_max_process_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(71680|87040)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^pool_probe_max_process_rss_kb[[:space:]]*=.*/pool_probe_max_process_rss_kb = 65536/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_process_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_process_rss_kb = 65536\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^pool_probe_quality_download_bytes[[:space:]]*=[[:space:]]*1048576([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_quality_download_bytes[[:space:]]*=.*/pool_probe_quality_download_bytes = 524288/' "$BOT_CONFIG_PATH" || true
   fi

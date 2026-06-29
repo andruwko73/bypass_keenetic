@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.862, последнее изменение: 29.06.2026
+#  Файл: bot.py, Версия v1.863, последнее изменение: 29.06.2026
 
 import subprocess
 import os
@@ -1968,9 +1968,10 @@ MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS = max(
     MEMORY_POST_POOL_RESTART_RETRY_SECONDS,
     float(getattr(config, 'memory_post_pool_restart_max_wait_seconds', 300.0)),
 )
+POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 64 * 1024
 POOL_PROBE_MAX_PROCESS_RSS_KB = max(
-    MEMORY_POST_POOL_RESTART_RSS_KB,
-    int(getattr(config, 'pool_probe_max_process_rss_kb', MEMORY_POST_POOL_RESTART_RSS_KB)),
+    0,
+    int(getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)),
 )
 MEMORY_TIMELINE_ENABLED = bool(getattr(config, 'memory_timeline_enabled', False))
 MEMORY_TIMELINE_PATH = str(getattr(config, 'memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl') or '').strip()

@@ -1702,9 +1702,9 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_quality_max_samples_per_run = 6' in example
     assert 'pool_probe_quality_max_samples_per_run = 6' in installer
     assert 'pool_probe_quality_max_samples_per_run = 6' in bootstrap
-    assert 'pool_probe_max_process_rss_kb = 71680' in example
-    assert 'pool_probe_max_process_rss_kb = 71680' in installer
-    assert 'pool_probe_max_process_rss_kb = 71680' in bootstrap
+    assert 'pool_probe_max_process_rss_kb = 65536' in example
+    assert 'pool_probe_max_process_rss_kb = 65536' in installer
+    assert 'pool_probe_max_process_rss_kb = 65536' in bootstrap
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
@@ -2545,10 +2545,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'malloc_trim_attempted' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
     assert "memory_post_pool_cleanup_target_rss_kb', 62 * 1024" in source
+    assert 'POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 64 * 1024' in source
+    assert "getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)" in source
     assert 'process_rss_kb=_process_rss_kb' in source
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
     assert 'memory_cleanup=_pool_probe_memory_checkpoint' in source
     assert 'max_rss_cleanup_attempts=3' in source
+    assert "run_memory_cleanup('pool probe key checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "_cleanup_pool_probe_runtime_light(kill_processes=True)" in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
     assert "update_proxy('none', persist=False)" not in startup_restore
@@ -2565,7 +2570,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'router_metrics_warn_load1 = 3.0' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in script_source
-    assert 'pool_probe_max_process_rss_kb = 71680' in script_source
+    assert 'pool_probe_max_process_rss_kb = 65536' in script_source
+    assert "pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(71680|87040)" in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
     assert 'memory_timeline_max_events = 720' in script_source
     assert "memory_timeline_max_events[[:space:]]*=[[:space:]]*240" in script_source
@@ -5327,8 +5333,8 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (1, 1)
     assert rss_processed == [('vless2', 'rss-recovers')]
     assert any(call.get('reason') == 'pool probe rss guard' and call.get('force') is True for call in rss_cleanup_calls)
-    assert any(call.get('reason') == 'pool probe key checkpoint' for call in rss_cleanup_calls)
-    assert any(call.get('reason') == 'pool probe batch checkpoint' for call in rss_cleanup_calls)
+    assert any(call.get('reason') == 'pool probe key checkpoint' and call.get('force') is True for call in rss_cleanup_calls)
+    assert any(call.get('reason') == 'pool probe batch checkpoint' and call.get('force') is True for call in rss_cleanup_calls)
 
     slow_notes = []
     slow_sleeps = []
