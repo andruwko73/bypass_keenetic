@@ -1,3 +1,7 @@
+*v1.859 (29 Jun 2026) -* main
+
+*Restores runtime state files during web updates so HWID subscriptions, key pools, and custom checks survive the release update path.*
+
 *v1.858 (29 Jun 2026) -* main
 
 *Lets HWID subscriptions refresh under the lightweight guard, preserves an active working subscription key, isolates simple mode pool actions, and reduces Telegram bot worker threads.*

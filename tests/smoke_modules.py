@@ -2604,6 +2604,14 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'backup_runtime_state_file /opt/etc/xray/vless2.key vless2.key' in script_source
     assert 'backup_runtime_state_file /opt/etc/shadowsocks.json shadowsocks.json' in script_source
     assert 'backup_runtime_state_file /opt/etc/trojan/config.json trojan_config.json' in script_source
+    assert 'restore_runtime_state_files_after_update()' in script_source
+    assert 'restore_runtime_state_file_after_update subscriptions.json "$BOT_RUNTIME_DIR/subscriptions.json" 0644' in script_source
+    assert 'restore_runtime_state_file_after_update key_pools.json "$BOT_RUNTIME_DIR/key_pools.json" 0644' in script_source
+    assert 'restore_runtime_state_file_after_update custom_checks.json "$BOT_RUNTIME_DIR/custom_checks.json" 0644' in script_source
+    restore_state_call = '\n    restore_runtime_state_files_after_update\n'
+    migrate_defaults_call = '\n    migrate_runtime_config_defaults\n'
+    assert script_source.find('activate_runtime_modules $BOT_RUNTIME_MODULES') < script_source.find(restore_state_call)
+    assert script_source.find(restore_state_call) < script_source.find(migrate_defaults_call)
     assert 'mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py' in script_source
     assert 'mv "$INSTALLER_SERVICE_PATH" "$backup_dir"/S98telegram_bot_installer' in script_source
     assert 'mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot' in script_source

@@ -1,3 +1,8 @@
+<a name="1.859"></a>
+# [1.859] - 29 Jun 2026
+
+- Restores runtime state files from the update backup during the normal web update path, keeping HWID subscriptions, key pools, and custom checks across releases.
+
 <a name="1.858"></a>
 # [1.858] - 29 Jun 2026
 

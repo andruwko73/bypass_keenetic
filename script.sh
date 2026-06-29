@@ -642,6 +642,23 @@ backup_runtime_state_files() {
   backup_runtime_state_file /opt/etc/unblock/vless-2.txt unblock_vless2.txt
 }
 
+restore_runtime_state_file_after_update() {
+  backup_name="$1"
+  target_path="$2"
+  file_mode="${3:-0644}"
+  source_path="$backup_dir/$backup_name"
+  [ -f "$source_path" ] || return 0
+  mkdir -p "$(dirname "$target_path")"
+  cp -a "$source_path" "$target_path"
+  chmod "$file_mode" "$target_path" 2>/dev/null || true
+}
+
+restore_runtime_state_files_after_update() {
+  restore_runtime_state_file_after_update key_pools.json "$BOT_RUNTIME_DIR/key_pools.json" 0644
+  restore_runtime_state_file_after_update subscriptions.json "$BOT_RUNTIME_DIR/subscriptions.json" 0644
+  restore_runtime_state_file_after_update custom_checks.json "$BOT_RUNTIME_DIR/custom_checks.json" 0644
+}
+
 backup_static_assets() {
   static_dir="${BOT_RUNTIME_DIR}/static"
   if [ -d "$static_dir" ]; then
@@ -1719,6 +1736,7 @@ if [ "$1" = "-update" ]; then
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
     activate_runtime_modules $BOT_RUNTIME_MODULES
+    restore_runtime_state_files_after_update
     ensure_runtime_legacy_paths
     migrate_runtime_config_defaults
     generate_udp_quic_policy_file
