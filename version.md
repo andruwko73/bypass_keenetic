@@ -1,3 +1,7 @@
+*v1.860 (29 Jun 2026) -* main
+
+*Fixes the Vless 2 Subscription tab layout on compact screens so the add-key textarea stays inside its card and does not overlap the subscription form.*
+
 *v1.859 (29 Jun 2026) -* main
 
 *Restores runtime state files during web updates so HWID subscriptions, key pools, and custom checks survive the release update path.*

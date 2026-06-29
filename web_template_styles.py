@@ -751,6 +751,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .app-caption strong{font-size:14px;}
             .app-branch{font-size:10px;}
             .status-dashboard{gap:8px;}
+            .protocol-subview-import.active{grid-template-columns:1fr;grid-auto-rows:auto;overflow:visible;}
+            .protocol-subview-import .pool-add-form{grid-template-columns:minmax(0,1fr) minmax(136px,.34fr);grid-template-rows:auto 66px;min-height:0;}
+            .protocol-subview-import .pool-add-form textarea{min-width:0;width:100%;max-width:100%;}
+            .protocol-subview-import .pool-subscribe-form{grid-template-columns:1fr;grid-template-rows:auto auto auto auto;min-height:0;}
+            .protocol-subview-import .pool-subscribe-form > input[type="url"],.protocol-subview-import .pool-subscribe-form button{grid-column:1 / -1;width:100%;}
         }
         @media (min-width: 761px){
             .topbar{z-index:520;isolation:isolate;}

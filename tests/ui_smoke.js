@@ -181,6 +181,67 @@ async function assertActivePoolRowPinned(page, protocol, label) {
   }
 }
 
+async function assertSubscriptionImportLayout(page, label) {
+  const layout = await page.evaluate(() => {
+    const panel = document.querySelector('[data-protocol-panel="vless2"].active [data-subview="subscription"].active');
+    const addForm = panel ? panel.querySelector('.pool-add-form') : null;
+    const subscribeForm = panel ? panel.querySelector('.pool-subscribe-form') : null;
+    const textarea = addForm ? addForm.querySelector('textarea[name="keys"]') : null;
+    const addButton = addForm ? addForm.querySelector('button[type="submit"]') : null;
+    const rect = (node) => {
+      if (!node) {
+        return null;
+      }
+      const box = node.getBoundingClientRect();
+      return {
+        left: Math.round(box.left),
+        top: Math.round(box.top),
+        right: Math.round(box.right),
+        bottom: Math.round(box.bottom),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      };
+    };
+    const intersection = (a, b) => {
+      if (!a || !b) {
+        return 0;
+      }
+      const width = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+      const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+      return width * height;
+    };
+    const panelRect = rect(panel);
+    const addRect = rect(addForm);
+    const subscribeRect = rect(subscribeForm);
+    const textareaRect = rect(textarea);
+    const buttonRect = rect(addButton);
+    return {
+      panel: panelRect,
+      addForm: addRect,
+      subscribeForm: subscribeRect,
+      textarea: textareaRect,
+      addButton: buttonRect,
+      panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : null,
+      formOverlap: intersection(addRect, subscribeRect),
+      textareaSubscribeOverlap: intersection(textareaRect, subscribeRect),
+      textareaInsideAdd: Boolean(addRect && textareaRect && textareaRect.left >= addRect.left - 1 && textareaRect.right <= addRect.right + 1),
+      buttonInsideAdd: Boolean(addRect && buttonRect && buttonRect.left >= addRect.left - 1 && buttonRect.right <= addRect.right + 1),
+    };
+  });
+  if (!layout.panel || !layout.addForm || !layout.subscribeForm || !layout.textarea || !layout.addButton) {
+    throw new Error(`${label}: subscription import layout is missing nodes ${JSON.stringify(layout)}`);
+  }
+  if (layout.panelOverflow > 2) {
+    throw new Error(`${label}: subscription import overflows horizontally ${JSON.stringify(layout)}`);
+  }
+  if (layout.formOverlap > 2 || layout.textareaSubscribeOverlap > 2) {
+    throw new Error(`${label}: subscription import blocks overlap ${JSON.stringify(layout)}`);
+  }
+  if (!layout.textareaInsideAdd || !layout.buttonInsideAdd) {
+    throw new Error(`${label}: add-key controls leave their card ${JSON.stringify(layout)}`);
+  }
+}
+
 async function clickLazyProtocol(page, protocol, label) {
   const tab = page.locator(`.protocol-tab[data-protocol-target="${protocol}"]`);
   if (await tab.count() !== 1) {
@@ -363,6 +424,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     await assertActivePoolRowPinned(page, 'vless2', `${name} original pool order`);
     await assertPoolKeysAreMasked(page, `${name} lazy keys`);
     await assertNoBrokenImages(page, `${name} lazy keys`);
+    await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="subscription"]').click();
+    await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-subview="subscription"].active', `${name} vless2 subscription tab`);
+    await assertSubscriptionImportLayout(page, `${name} vless2 subscription import`);
   } else {
     const poolOnlyControls = await page.locator('[data-pool-filter], .pool-toolbar, [data-subview-target="pool"], [data-subview-target="check"], .service-route-tools').count();
     if (poolOnlyControls) {

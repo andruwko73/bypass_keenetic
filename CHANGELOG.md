@@ -1,3 +1,9 @@
+<a name="1.860"></a>
+# [1.860] - 29 Jun 2026
+
+- Fixes the Vless 2 Subscription tab layout on compact screens so the add-key textarea and button stay within their card and do not overlap the subscription form.
+- Adds a UI smoke geometry check for the subscription import panel across desktop, compact desktop, and mobile.
+
 <a name="1.859"></a>
 # [1.859] - 29 Jun 2026
 
