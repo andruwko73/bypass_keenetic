@@ -4,7 +4,7 @@ import time
 
 
 DEFAULT_HISTORY_LIMIT = 120
-DEFAULT_WARN_BOT_RSS_KB = 64 * 1024
+DEFAULT_WARN_BOT_RSS_KB = 65 * 1024
 DEFAULT_CRITICAL_BOT_RSS_KB = 85 * 1024
 BOT_CMD_MARKER = 'python3 /opt/etc/bot/main.py'
 XRAY_CMD_MARKER = 'xray run -c /opt/etc/xray/config.json'

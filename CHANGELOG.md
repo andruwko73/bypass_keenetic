@@ -1,3 +1,8 @@
+<a name="1.864"></a>
+# [1.864] - 29 Jun 2026
+
+- Raises the pool-check start/working RSS guard from the accidental 64 MiB default to the intended 65 MiB, migrates routers from the 1.863 value, and keeps the post-pool cleanup target at 62 MiB so a full check can finish near the normal shelf and still allow the next check without an update/restart.
+
 <a name="1.863"></a>
 # [1.863] - 29 Jun 2026
 

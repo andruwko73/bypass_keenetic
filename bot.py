@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.863, последнее изменение: 29.06.2026
+#  Файл: bot.py, Версия v1.864, последнее изменение: 29.06.2026
 
 import subprocess
 import os
@@ -1816,7 +1816,7 @@ ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0)
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
 ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
 ROUTER_METRICS_HISTORY_LIMIT = int(getattr(config, 'router_metrics_history_limit', 120))
-ROUTER_METRICS_WARN_BOT_RSS_KB = int(getattr(config, 'router_metrics_warn_bot_rss_kb', 64 * 1024))
+ROUTER_METRICS_WARN_BOT_RSS_KB = int(getattr(config, 'router_metrics_warn_bot_rss_kb', 65 * 1024))
 ROUTER_METRICS_CRITICAL_BOT_RSS_KB = int(getattr(config, 'router_metrics_critical_bot_rss_kb', 87040))
 ROUTER_METRICS_WARN_LOAD1 = float(getattr(config, 'router_metrics_warn_load1', 3.0))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
@@ -1968,7 +1968,7 @@ MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS = max(
     MEMORY_POST_POOL_RESTART_RETRY_SECONDS,
     float(getattr(config, 'memory_post_pool_restart_max_wait_seconds', 300.0)),
 )
-POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 64 * 1024
+POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 65 * 1024
 POOL_PROBE_MAX_PROCESS_RSS_KB = max(
     0,
     int(getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)),

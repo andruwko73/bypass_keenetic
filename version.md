@@ -1,3 +1,7 @@
+*v1.864 (29 Jun 2026) -* main
+
+*Restores the pool-check guard to the intended 65 MiB instead of the accidental 64 MiB 1.863 default, while keeping post-pool cleanup aimed at 62 MiB so another pool check can start without updating or restarting the bot.*
+
 *v1.863 (29 Jun 2026) -* main
 
 *Keeps full pool checks below the 70 MB restart threshold by lowering their working RSS guard to 64 MB and forcing memory cleanup after each checked key and batch.*

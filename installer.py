@@ -76,7 +76,7 @@ pool_probe_high_cpu_max_wait_seconds = 120.0
 pool_probe_max_load1 = 2.0
 pool_probe_high_load_delay_seconds = 10.0
 pool_probe_high_load_max_wait_seconds = 120.0
-pool_probe_max_process_rss_kb = 65536
+pool_probe_max_process_rss_kb = 66560
 pool_probe_youtube_profile = 'quick'
 pool_probe_quality_enabled = True
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={{bytes}}'
@@ -100,7 +100,7 @@ memory_watchdog_restart_cooldown_seconds = 1800.0
 status_refresh_min_interval_seconds = 180.0
 web_status_api_cache_ttl = 30.0
 router_metrics_history_limit = 120
-router_metrics_warn_bot_rss_kb = 65536
+router_metrics_warn_bot_rss_kb = 66560
 router_metrics_critical_bot_rss_kb = 87040
 router_metrics_warn_load1 = 3.0
 web_pools_api_cache_ttl = 45.0

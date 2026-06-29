@@ -501,7 +501,7 @@ def test_router_metrics_runtime_snapshot():
     assert first['summary']['samples'] == 1
     assert second['summary']['samples'] == 1
     assert second['summary']['bot_rss_max_kb'] == 64000
-    assert second['thresholds']['warn_bot_rss_kb'] == 65536
+    assert second['thresholds']['warn_bot_rss_kb'] == 66560
     assert second['thresholds']['critical_bot_rss_kb'] == 87040
     assert 'history' not in first
     assert len(second['history']) == 1
@@ -1702,9 +1702,9 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_quality_max_samples_per_run = 6' in example
     assert 'pool_probe_quality_max_samples_per_run = 6' in installer
     assert 'pool_probe_quality_max_samples_per_run = 6' in bootstrap
-    assert 'pool_probe_max_process_rss_kb = 65536' in example
-    assert 'pool_probe_max_process_rss_kb = 65536' in installer
-    assert 'pool_probe_max_process_rss_kb = 65536' in bootstrap
+    assert 'pool_probe_max_process_rss_kb = 66560' in example
+    assert 'pool_probe_max_process_rss_kb = 66560' in installer
+    assert 'pool_probe_max_process_rss_kb = 66560' in bootstrap
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
@@ -1723,9 +1723,9 @@ def test_codex_version_matches_commit_count():
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
-    assert 'router_metrics_warn_bot_rss_kb = 65536' in example
-    assert 'router_metrics_warn_bot_rss_kb = 65536' in installer
-    assert 'router_metrics_warn_bot_rss_kb = 65536' in bootstrap
+    assert 'router_metrics_warn_bot_rss_kb = 66560' in example
+    assert 'router_metrics_warn_bot_rss_kb = 66560' in installer
+    assert 'router_metrics_warn_bot_rss_kb = 66560' in bootstrap
     assert 'router_metrics_critical_bot_rss_kb = 87040' in example
     assert 'router_metrics_critical_bot_rss_kb = 87040' in installer
     assert 'router_metrics_critical_bot_rss_kb = 87040' in bootstrap
@@ -2461,7 +2461,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "background_task_max_bot_rss_kb', 65 * 1024" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert "getattr(config, 'router_metrics_history_limit', 120)" in source
-    assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 64 * 1024)" in source
+    assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 65 * 1024)" in source
     assert 'router_metrics.RouterMetricsRuntime' in source
     assert "'router_metrics_snapshot': _router_metrics_snapshot" in source
     assert "memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl'" in source
@@ -2545,7 +2545,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'malloc_trim_attempted' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
     assert "memory_post_pool_cleanup_target_rss_kb', 62 * 1024" in source
-    assert 'POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 64 * 1024' in source
+    assert 'POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 65 * 1024' in source
     assert "getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)" in source
     assert 'process_rss_kb=_process_rss_kb' in source
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
@@ -2565,13 +2565,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
     assert 'router_metrics_history_limit = 120' in script_source
-    assert 'router_metrics_warn_bot_rss_kb = 65536' in script_source
+    assert 'router_metrics_warn_bot_rss_kb = 66560' in script_source
     assert 'router_metrics_critical_bot_rss_kb = 87040' in script_source
     assert 'router_metrics_warn_load1 = 3.0' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in script_source
-    assert 'pool_probe_max_process_rss_kb = 65536' in script_source
-    assert "pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(71680|87040)" in script_source
+    assert 'pool_probe_max_process_rss_kb = 66560' in script_source
+    assert "pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(65536|71680|87040)" in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
     assert 'memory_timeline_max_events = 720' in script_source
     assert "memory_timeline_max_events[[:space:]]*=[[:space:]]*240" in script_source
