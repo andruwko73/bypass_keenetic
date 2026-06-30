@@ -55,7 +55,9 @@ def _requested_protocols(params):
     return protocols or None
 
 
-def _status_payload(ctx):
+def _status_payload(ctx, query=''):
+    params = parse_qs(query or '', keep_blank_values=True)
+    compact = str((params.get('compact') or [''])[0]).strip().lower() in ('1', 'true', 'yes', 'on')
     now = _ctx(ctx, 'time_provider', time.time)()
     cache_ttl = float(_ctx(ctx, 'status_api_cache_ttl', 0) or 0)
     pool_enabled = _ctx(ctx, 'pool_enabled', False)
@@ -68,7 +70,7 @@ def _status_payload(ctx):
     except Exception:
         web_command_running = False
     cache_getter = _ctx(ctx, 'get_status_api_cache')
-    if cache_ttl > 0 and cache_getter and not pool_probe_running and not pool_probe_paused:
+    if not compact and cache_ttl > 0 and cache_getter and not pool_probe_running and not pool_probe_paused:
         cached = cache_getter()
         if (
             isinstance(cached, dict) and
@@ -127,14 +129,14 @@ def _status_payload(ctx):
         return payload
 
     payload.update({
-        'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
+        'pool_summary': None if compact else _ctx(ctx, 'pool_status_summary')(current_keys),
         'pool_probe_running': pool_probe_running,
         'pool_probe_paused': pool_probe_paused,
         'pool_probe_progress': progress,
         'timestamp': now,
     })
     cache_store = _ctx(ctx, 'store_status_api_cache')
-    if cache_ttl > 0 and cache_store and not pool_probe_running and not pool_probe_paused:
+    if not compact and cache_ttl > 0 and cache_store and not pool_probe_running and not pool_probe_paused:
         cache_store(payload, now)
     return payload
 
@@ -165,11 +167,11 @@ def _pools_payload(ctx, query=''):
             return cached
     payload = {
         'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=False, protocols=protocols),
-        'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys),
+        'pool_summary': None if protocols else _ctx(ctx, 'pool_status_summary')(current_keys),
         'pool_probe_running': pool_probe_running,
         'pool_probe_paused': pool_probe_paused,
         'pool_probe_progress': progress,
-        'custom_checks': _ctx(ctx, 'web_custom_checks')(),
+        'custom_checks': None if protocols else _ctx(ctx, 'web_custom_checks')(),
         'timestamp': now,
     }
     cache_store = _ctx(ctx, 'store_pools_api_cache')
@@ -268,7 +270,7 @@ def dispatch(ctx, path, query=''):
             'cache_seconds': 86400,
         }
     if path == '/api/status':
-        return {'kind': 'json', 'payload': _status_payload(ctx), 'status': 200}
+        return {'kind': 'json', 'payload': _status_payload(ctx, query), 'status': 200}
     if path == '/api/pools' and _ctx(ctx, 'pool_enabled', False):
         return {'kind': 'json', 'payload': _pools_payload(ctx, query), 'status': 200}
     if path == '/api/command_state':
@@ -276,6 +278,9 @@ def dispatch(ctx, path, query=''):
     if path == '/api/update_status':
         return {'kind': 'json', 'payload': _ctx(ctx, 'update_status_snapshot', lambda: {})(), 'status': 200}
     if path == '/api/event_history':
+        event_history_payload = _ctx(ctx, 'event_history_payload')
+        if event_history_payload:
+            return {'kind': 'json', 'payload': event_history_payload(), 'status': 200}
         events = _ctx(ctx, 'event_history_snapshot', lambda: [])()
         return {
             'kind': 'json',

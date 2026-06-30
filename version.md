@@ -1,6 +1,6 @@
-*v1.874 (30 Jun 2026) -* main
+*v1.875 (30 Jun 2026) -* main
 
-*Treats web rollback as an update-style background command and delays its worker by one second, so the browser receives the command-start response before the bot restarts during rollback.*
+*Reduces routine web/API memory churn, runs full pool checks in a separate Python worker process, caches event history, avoids duplicate route-intersection scans while auto-resolve is pending, fixes partial service route cleanup, keeps the subscription import form within its card, preserves static service icons/local archive update env during pre-GitHub tests, fixes event-history loading text, and keeps simple mode on a lighter status path.*
 
 *v1.873 (30 Jun 2026) -* main
 

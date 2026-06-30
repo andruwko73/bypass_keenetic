@@ -78,8 +78,41 @@ find_bot_pid() {
     ps w 2>/dev/null | awk '/python3 .*\/opt\/etc\/bot\/(main|bot)\.py/ && $0 !~ /awk/ {print $1; exit}'
 }
 
+find_xray_pid() {
+    ps w 2>/dev/null | awk '/xray run -c \/opt\/etc\/xray\/config\.json/ && $0 !~ /awk/ {print $1; exit}'
+}
+
 ps_count() {
     ps w 2>/dev/null | grep "$1" | grep -v grep | wc -l | tr -d ' '
+}
+
+system_ticks() {
+    awk '/^cpu / {sum=0; for (i=2; i<=NF; i++) sum += $i; print sum; found=1; exit} END {if (!found) print 0}' /proc/stat 2>/dev/null
+}
+
+proc_ticks() {
+    pid=$1
+    if [ -n "$pid" ] && [ -r "/proc/$pid/stat" ]; then
+        awk '{print $14 + $15}' "/proc/$pid/stat" 2>/dev/null
+    else
+        printf '0'
+    fi
+}
+
+app_mode() {
+    if [ -f /opt/etc/bot_app_mode ]; then
+        tr -d '\r\n\t ' < /opt/etc/bot_app_mode 2>/dev/null
+    else
+        printf ''
+    fi
+}
+
+app_version() {
+    if [ -f /opt/etc/bot/app_version.py ]; then
+        awk -F= '/^APP_VERSION_COUNTER/ {gsub(/[[:space:]]/, "", $2); print $2; found=1; exit} END {if (!found) print ""}' /opt/etc/bot/app_version.py 2>/dev/null
+    else
+        printf ''
+    fi
 }
 
 temp_pool_probe_count() {
@@ -90,6 +123,17 @@ json_value() {
     field=$1
     line=$2
     printf '%s\n' "$line" | sed -n "s/.*\"$field\":\([^,}]*\).*/\1/p" | head -n 1 | tr -d '"'
+}
+
+json_file_value() {
+    field=$1
+    path=$2
+    if [ -f "$path" ]; then
+        line=$(tr -d '\n\r' < "$path" 2>/dev/null | head -c 8192)
+        json_value "$field" "$line"
+    else
+        printf ''
+    fi
 }
 
 safe_text() {
@@ -111,7 +155,7 @@ write_headers() {
     log_file=$1
     yt_log_file=$2
     if [ ! -f "$log_file" ]; then
-        printf '%s\n' 'ts	epoch	pid	bot_alive	rss_kb	hwm_kb	threads	fds	load1	load5	load15	mem_available_kb	mem_free_kb	swap_free_kb	xray_count	unblock_ipset_count	temp_pool_probe_count	pool_probe_running	pool_probe_checked	pool_probe_total	status_refresh_count	key_probe_cache_bytes	event_history_bytes	timeline_marker	timeline_reason' > "$log_file"
+        printf '%s\n' 'ts	epoch	app_version	app_mode	pid	bot_alive	rss_kb	hwm_kb	vmdata_kb	threads	fds	bot_ticks	total_ticks	load1	load5	load15	mem_available_kb	mem_free_kb	swap_free_kb	xray_pid	xray_rss_kb	xray_hwm_kb	xray_ticks	xray_count	scheduler_count	unblock_ipset_count	temp_pool_probe_count	pool_probe_running	pool_probe_checked	pool_probe_total	status_refresh_count	key_probe_cache_bytes	event_history_bytes	route_intersections_count	route_intersections_runtime_count	timeline_marker	timeline_reason' > "$log_file"
     fi
     if [ "$YT_ENABLED" = "1" ] && [ ! -f "$yt_log_file" ]; then
         printf '%s\n' 'ts	epoch	kind	port	http_code	connect_s	tls_s	starttransfer_s	total_s	size_download	probe_exit	error_type' > "$yt_log_file"
@@ -132,8 +176,11 @@ collect_sample() {
 
     rss_kb=$(status_value "$bot_pid" VmRSS)
     hwm_kb=$(status_value "$bot_pid" VmHWM)
+    vmdata_kb=$(status_value "$bot_pid" VmData)
     threads=$(dir_count "/proc/$bot_pid/task")
     fds=$(dir_count "/proc/$bot_pid/fd")
+    bot_ticks=$(proc_ticks "$bot_pid")
+    total_ticks=$(system_ticks)
     set -- $(cat /proc/loadavg 2>/dev/null)
     load1=${1:-0}
     load5=${2:-0}
@@ -141,9 +188,19 @@ collect_sample() {
     mem_available=$(meminfo_value MemAvailable)
     mem_free=$(meminfo_value MemFree)
     swap_free=$(meminfo_value SwapFree)
+    xray_pid=$(find_xray_pid)
+    if [ -z "$xray_pid" ]; then
+        xray_pid=0
+    fi
+    xray_rss_kb=$(status_value "$xray_pid" VmRSS)
+    xray_hwm_kb=$(status_value "$xray_pid" VmHWM)
+    xray_ticks=$(proc_ticks "$xray_pid")
     xray_count=$(ps_count 'xray run')
+    scheduler_count=$(ps_count 'S99unblock scheduler')
     unblock_ipset_count=$(ps_count 'unblock_ipset.sh')
     temp_count=$(temp_pool_probe_count)
+    route_intersections_count=$(json_file_value count /opt/tmp/bypass_route_intersections.json)
+    route_intersections_runtime_count=$(json_file_value runtime_count /opt/tmp/bypass_route_intersections.json)
 
     timeline_line=''
     if [ -f "$TIMELINE_FILE" ]; then
@@ -158,12 +215,12 @@ collect_sample() {
     timeline_marker=$(safe_text "$(json_value marker "$timeline_line")")
     timeline_reason=$(safe_text "$(json_value reason "$timeline_line")")
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$ts" "$epoch" "$bot_pid" "$bot_alive" "$rss_kb" "$hwm_kb" "$threads" "$fds" \
-        "$load1" "$load5" "$load15" "$mem_available" "$mem_free" "$swap_free" \
-        "$xray_count" "$unblock_ipset_count" "$temp_count" \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$ts" "$epoch" "$(app_version)" "$(app_mode)" "$bot_pid" "$bot_alive" "$rss_kb" "$hwm_kb" "$vmdata_kb" "$threads" "$fds" \
+        "$bot_ticks" "$total_ticks" "$load1" "$load5" "$load15" "$mem_available" "$mem_free" "$swap_free" \
+        "$xray_pid" "$xray_rss_kb" "$xray_hwm_kb" "$xray_ticks" "$xray_count" "$scheduler_count" "$unblock_ipset_count" "$temp_count" \
         "${pool_running:-}" "${pool_checked:-}" "${pool_total:-}" "${status_refresh_count:-}" \
-        "${key_probe_cache_bytes:-}" "${event_history_bytes:-}" "$timeline_marker" "$timeline_reason" >> "$log_file"
+        "${key_probe_cache_bytes:-}" "${event_history_bytes:-}" "${route_intersections_count:-}" "${route_intersections_runtime_count:-}" "$timeline_marker" "$timeline_reason" >> "$log_file"
 }
 
 curl_probe() {

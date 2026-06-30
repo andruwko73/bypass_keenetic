@@ -2,20 +2,89 @@ const { chromium, devices } = require('playwright');
 
 const targetUrl = process.env.BYPASS_UI_URL || 'http://192.168.1.1:8080/';
 const chromeExecutable = process.env.CHROME_EXECUTABLE || undefined;
+const httpCredentials = process.env.BYPASS_UI_USERNAME && process.env.BYPASS_UI_PASSWORD
+  ? { username: process.env.BYPASS_UI_USERNAME, password: process.env.BYPASS_UI_PASSWORD }
+  : undefined;
 const leakedFixtureKeys = [
   'vless://fixture-backup-vless',
   'vless://fixture-backup-vless2',
 ];
-const appModes = [
+const allAppModes = [
   { mode: 'advanced', expectPool: true, expectCustomChecks: true, expectTelegram: true },
   { mode: 'simple', expectPool: false, expectCustomChecks: false, expectTelegram: true },
   { mode: 'web_only', expectPool: true, expectCustomChecks: true, expectTelegram: false },
 ];
+const requestedModes = (process.env.BYPASS_UI_MODES || '')
+  .split(',')
+  .map((mode) => mode.trim())
+  .filter(Boolean);
+const appModes = requestedModes.length
+  ? requestedModes
+    .map((mode) => allAppModes.find((config) => config.mode === mode))
+    .filter(Boolean)
+  : allAppModes;
+if (!appModes.length) {
+  throw new Error(`No known UI modes selected: ${requestedModes.join(', ')}`);
+}
 
 function urlForMode(mode) {
   const url = new URL(targetUrl);
   url.searchParams.set('mode', mode);
   return url.toString();
+}
+
+function modeConfigMatches(pageConfig, modeConfig) {
+  return Boolean(pageConfig.enableKeyPool) === modeConfig.expectPool
+    && Boolean(pageConfig.enableCustomChecks) === modeConfig.expectCustomChecks
+    && Boolean(pageConfig.enableTelegram) === modeConfig.expectTelegram;
+}
+
+async function readPageConfig(page) {
+  return page.evaluate(() => window.BK_APP_CONFIG || {});
+}
+
+async function gotoModePage(page, modeConfig, label, timeoutMs = 45000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      await page.goto(urlForMode(modeConfig.mode), { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      const pageConfig = await readPageConfig(page);
+      if (modeConfigMatches(pageConfig, modeConfig)) {
+        return pageConfig;
+      }
+      lastError = new Error(`${label}: mode flags do not match yet ${JSON.stringify(pageConfig)}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await page.waitForTimeout(1500);
+  }
+  throw lastError || new Error(`${label}: timed out waiting for mode ${modeConfig.mode}`);
+}
+
+async function switchAppModeIfNeeded(page, modeConfig, label) {
+  let pageConfig = await readPageConfig(page);
+  if (modeConfigMatches(pageConfig, modeConfig)) {
+    return pageConfig;
+  }
+  const toggle = page.locator('#app-mode-toggle-button');
+  if (await toggle.count() !== 1) {
+    throw new Error(`${label}: mode mismatch and app mode toggle is missing`);
+  }
+  await toggle.click();
+  await assertVisibleBox(page, '#app-mode-picker:not(.hidden)', `${label} app mode picker`);
+  const modeButton = page.locator(`#app-mode-picker [data-app-mode-value="${modeConfig.mode}"]`);
+  if (await modeButton.count() !== 1) {
+    throw new Error(`${label}: app mode button ${modeConfig.mode} is missing`);
+  }
+  await modeButton.click();
+  const accept = page.locator('#confirm-accept');
+  if (await accept.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await accept.click();
+  }
+  await page.waitForTimeout(7000);
+  return gotoModePage(page, modeConfig, label, 60000);
 }
 
 function watchPage(page, label) {
@@ -51,6 +120,17 @@ function emitGitHubErrorAnnotation(error) {
     .replace(/\r/g, '%0D')
     .replace(/\n/g, '%0A');
   console.error(`::error title=UI smoke failed::${text}`);
+}
+
+function safeTargetLabel() {
+  try {
+    const url = new URL(targetUrl);
+    url.username = '';
+    url.password = '';
+    return url.toString();
+  } catch {
+    return '[invalid target url]';
+  }
 }
 
 async function assertNoHorizontalOverflow(page, label) {
@@ -123,11 +203,59 @@ async function assertMobileStatusGaps(page, label) {
 }
 
 async function assertVisibleBox(page, selector, label) {
-  const box = await page.locator(selector).boundingBox();
+  const box = await page.locator(selector).first().boundingBox();
   if (!box || box.width < 2 || box.height < 2) {
     throw new Error(`${label}: ${selector} is not visibly sized`);
   }
   return box;
+}
+
+async function assertNoVisibleMojibake(page, label) {
+  const text = await page.locator('body').evaluate((node) => node.innerText || '');
+  const markers = ['Рџ', 'Р ', 'Р—', 'Р', 'СЏ', 'СЋ', 'СЃ', 'С‚', 'РµР', 'РЅР'];
+  const found = markers.find((marker) => text.includes(marker));
+  if (found) {
+    throw new Error(`${label}: visible text contains mojibake marker ${found}`);
+  }
+}
+
+async function assertEventHistoryScrollLocked(page, label) {
+  const list = page.locator('#event-history-modal:not(.hidden) .event-history-list').first();
+  const box = await list.boundingBox();
+  if (!box || box.height < 40) {
+    throw new Error(`${label}: event history list is not scrollable-sized`);
+  }
+  const before = await page.evaluate(() => {
+    const listNode = document.querySelector('#event-history-modal:not(.hidden) .event-history-list');
+    return {
+      windowY: window.scrollY,
+      listTop: listNode ? listNode.scrollTop : -1,
+      bodyPosition: getComputedStyle(document.body).position,
+      bodyClass: document.body.classList.contains('event-history-open'),
+      listOverflowY: listNode ? getComputedStyle(listNode).overflowY : '',
+      listScrollHeight: listNode ? listNode.scrollHeight : 0,
+      listClientHeight: listNode ? listNode.clientHeight : 0,
+    };
+  });
+  if (!before.bodyClass || before.bodyPosition !== 'fixed') {
+    throw new Error(`${label}: event history did not lock page scroll ${JSON.stringify(before)}`);
+  }
+  if (before.listOverflowY !== 'auto' || before.listScrollHeight <= before.listClientHeight + 8) {
+    throw new Error(`${label}: event history list is not independently scrollable ${JSON.stringify(before)}`);
+  }
+  await page.mouse.move(box.x + Math.min(24, box.width / 2), box.y + Math.min(80, box.height / 2));
+  await page.mouse.wheel(0, Math.max(220, Math.floor(box.height * 0.9)));
+  await page.waitForTimeout(120);
+  const after = await page.evaluate(() => {
+    const listNode = document.querySelector('#event-history-modal:not(.hidden) .event-history-list');
+    return {
+      windowY: window.scrollY,
+      listTop: listNode ? listNode.scrollTop : -1,
+    };
+  });
+  if (after.windowY !== before.windowY || after.listTop <= before.listTop) {
+    throw new Error(`${label}: history scroll moved page instead of list ${JSON.stringify({ before, after })}`);
+  }
 }
 
 async function assertNoBrokenImages(page, label) {
@@ -264,14 +392,18 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     isMobile,
     hasTouch: isMobile,
     deviceScaleFactor: isMobile ? 2 : 1,
+    httpCredentials,
   });
   const page = await context.newPage();
   const failures = watchPage(page, name);
+  page.on('dialog', (dialog) => dialog.accept().catch(() => {}));
   await page.addInitScript(() => localStorage.setItem('router-theme', 'glass'));
   await page.goto(urlForMode(modeConfig.mode), { waitUntil: 'domcontentloaded', timeout: 20000 });
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await switchAppModeIfNeeded(page, modeConfig, name);
+  failures.length = 0;
 
-  const pageConfig = await page.evaluate(() => window.BK_APP_CONFIG || {});
+  const pageConfig = await readPageConfig(page);
   if (Boolean(pageConfig.enableKeyPool) !== modeConfig.expectPool) {
     throw new Error(`${name}: enableKeyPool expected ${modeConfig.expectPool}, got ${pageConfig.enableKeyPool}`);
   }
@@ -300,6 +432,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (!titleFits) {
     throw new Error(`${name}: header title is clipped`);
   }
+  await assertNoVisibleMojibake(page, `${name} visible text`);
 
   await page.locator('#theme-toggle-button').click();
   await assertVisibleBox(page, '#theme-picker:not(.hidden)', `${name} theme picker`);
@@ -321,15 +454,24 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (initialHistoryItems) {
       throw new Error(`${name}: event history is rendered before drawer open`);
     }
+    const historyResponse = page.waitForResponse((response) => (
+      response.url().includes('/api/event_history') && response.ok()
+    ), { timeout: 60000 }).catch(() => null);
     await historyButton.click();
     await assertVisibleBox(page, '#event-history-modal:not(.hidden) .event-history-drawer', `${name} history drawer`);
+    await assertNoVisibleMojibake(page, `${name} history loading text`);
     const historyTabs = await page.locator('[data-event-history-tab]').count();
     if (historyTabs) {
       throw new Error(`${name}: history drawer still renders separate tabs`);
     }
     await assertVisibleBox(page, '.router-metrics-compact', `${name} compact router metrics`);
-    await page.locator('[data-event-history-pane="events"]:not(.hidden) .event-history-item').first().waitFor({ state: 'visible', timeout: 10000 });
+    await historyResponse;
+    await page.locator('[data-event-history-pane="events"]:not(.hidden) .event-history-item').first().waitFor({ state: 'visible', timeout: 60000 });
     await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history items`);
+    await assertNoVisibleMojibake(page, `${name} event history loaded text`);
+    if (isMobile) {
+      await assertEventHistoryScrollLocked(page, `${name} event history scroll`);
+    }
     await page.waitForFunction(() => {
       const value = document.getElementById('router-metrics-bot-rss');
       return value && value.textContent.includes('MB');
@@ -340,7 +482,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     await page.locator('[data-event-history-close]').click();
     await historyButton.click();
-    await page.locator('[data-event-history-pane="events"]:not(.hidden) .event-history-item').first().waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-event-history-pane="events"]:not(.hidden) .event-history-item').first().waitFor({ state: 'visible', timeout: 60000 });
     await assertVisibleBox(page, '[data-event-history-pane="events"]:not(.hidden) .event-history-item', `${name} event history on reopen`);
     await assertVisibleBox(page, '.router-metrics-compact', `${name} compact router metrics on reopen`);
     await page.locator('[data-event-history-close]').click();
@@ -458,7 +600,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   } finally {
     await browser.close();
   }
-  console.log('UI smoke passed:', targetUrl, 'modes:', appModes.map(({ mode }) => mode).join(', '));
+  console.log('UI smoke passed:', safeTargetLabel(), 'modes:', appModes.map(({ mode }) => mode).join(', '));
 })().catch((error) => {
   console.error(error);
   emitGitHubErrorAnnotation(error);

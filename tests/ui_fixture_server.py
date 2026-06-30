@@ -670,13 +670,14 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/api/event_history":
             events = [
                 {
-                    "ts": int(time.time()),
-                    "action": "key_switch",
-                    "protocol_label": "Vless 1",
-                    "service": "telegram",
-                    "message": "fixture active key",
+                    "ts": int(time.time()) - index * 60,
+                    "action": "stream_guard_defer" if index % 3 == 0 else "key_switch",
+                    "protocol_label": "Vless 2" if index % 3 == 0 else "Vless 1",
+                    "service": "youtube" if index % 3 == 0 else "telegram",
+                    "message": f"fixture event {index}",
                     "level": "info",
                 }
+                for index in range(60)
             ]
             self._json({"events": events, "html": key_pool_web.web_event_history_html(events)})
             return

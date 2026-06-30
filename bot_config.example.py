@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.874
+# ВЕРСИЯ СКРИПТА v1.875
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -25,6 +25,8 @@ subscription_auto_refresh_max_bot_rss_kb = 71680  # lightweight subscription ref
 subscription_auto_refresh_min_available_kb = 92160
 subscription_auto_refresh_max_cpu_percent = 80.0
 subscription_auto_refresh_max_load1 = 2.5
+pool_probe_process_worker_enabled = True  # run full pool checks in a separate Python process so main bot RSS can return to baseline
+pool_probe_process_worker_poll_seconds = 0.75
 telegram_bot_num_threads = 1  # keep Telegram command worker pool small on routers with limited RAM
 pool_probe_min_available_kb = 190000  # проверка пула не запускает временный xray, если доступной памяти меньше этого порога
 pool_probe_pause_available_kb = 125000  # ниже этого порога проверка ставит очередь на паузу до освобождения памяти
@@ -207,6 +209,7 @@ youtube_vless2_failover_consecutive_failures = 3
 youtube_vless2_hard_failure_recovery_cooldown_seconds = 90
 youtube_stream_guard_scan_cache_seconds = 8.0  # reuse recent conntrack scan results to avoid repeated CPU spikes
 youtube_stream_guard_failover_hold_seconds = 45  # Если при просмотре YouTube трафик пропал, автозамена Vless2 сможет продолжиться после этой паузы
+youtube_stream_guard_event_interval_seconds = 1800  # не чаще одного stream_guard_defer в истории за 30 минут
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять
 localportsh = '1082'  # локальный порт для shadowsocks

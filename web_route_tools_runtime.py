@@ -330,7 +330,12 @@ class ServiceRouteToolsRuntime:
         cacheable_report = True
         if auto_result and auto_result.get('status') in ('scheduled', 'running'):
             report['auto_resolve_pending'] = dict(auto_result)
-            cacheable_report = False
+            auto_signature = auto_result.get('signature')
+            with self._intersections_lock:
+                cacheable_report = bool(
+                    self._auto_resolve_cache.get('running') and
+                    self._auto_resolve_cache.get('signature') == auto_signature
+                )
         elif auto_result and auto_result.get('services'):
             report['auto_resolved'] = dict(auto_result)
         if cacheable_report:

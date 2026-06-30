@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.874, последнее изменение: 30.06.2026
+#  Файл: bot.py, Версия v1.875, последнее изменение: 30.06.2026
 
 import subprocess
 import os
@@ -30,6 +30,7 @@ import app_runtime_mode
 import bot_config as config
 
 COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
+POOL_PROBE_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_POOL_PROBE_WORKER') == '1'
 
 
 def _runtime_mode_at_import():
@@ -113,7 +114,6 @@ from custom_checks_store import (
     normalize_check_url as _normalize_check_url,
     route_entries_from_values as _route_entries_from_values,
 )
-import key_pool_store
 import subscription_runtime
 import telegram_key_ui
 import entware_dns_runtime
@@ -217,6 +217,7 @@ def _config_sequence(name, default=()):
 _pool_probe_runner_module = None
 _pool_probe_controller_module = None
 _probe_cache_module = None
+_key_pool_store_module = None
 _repo_update_module = None
 _web_form_template_module = None
 _web_form_template_lock = threading.Lock()
@@ -325,6 +326,15 @@ def _probe_cache():
 
         _probe_cache_module = module
     return _probe_cache_module
+
+
+def _key_pool_store():
+    global _key_pool_store_module
+    if _key_pool_store_module is None:
+        import key_pool_store as module
+
+        _key_pool_store_module = module
+    return _key_pool_store_module
 
 
 def _key_pool_web():
@@ -744,6 +754,10 @@ YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS = max(15, int(getattr(config, 'youtub
 YOUTUBE_STREAM_GUARD_MIN_BYTES = max(1024, int(getattr(config, 'youtube_stream_guard_min_bytes', 8192)))
 YOUTUBE_STREAM_GUARD_MIN_PACKETS = max(1, int(getattr(config, 'youtube_stream_guard_min_packets', 8)))
 YOUTUBE_STREAM_GUARD_LOG_INTERVAL = max(60, int(getattr(config, 'youtube_stream_guard_log_interval_seconds', 180)))
+YOUTUBE_STREAM_GUARD_EVENT_INTERVAL = max(
+    1800,
+    int(getattr(config, 'youtube_stream_guard_event_interval_seconds', 1800)),
+)
 YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS = max(
     1.0,
     float(getattr(config, 'youtube_stream_guard_scan_cache_seconds', 8.0)),
@@ -819,6 +833,7 @@ youtube_failover_states = {'vless2': youtube_vless2_failover_state}
 youtube_stream_guard_state = {
     'last_active': 0.0,
     'last_log': 0.0,
+    'last_event': 0.0,
     'last_count': 0,
     'conntrack': {},
     'last_samples': [],
@@ -901,16 +916,16 @@ def _service_icon_html(icon, alt, opacity=1.0, size=18):
 
 def _load_key_pools():
     with key_pool_lock:
-        return key_pool_store.load_key_pools(KEY_POOLS_PATH)
+        return _key_pool_store().load_key_pools(KEY_POOLS_PATH)
 
 
 def _dedupe_key_list(keys):
-    return key_pool_store.dedupe_key_list(keys)
+    return _key_pool_store().dedupe_key_list(keys)
 
 
 def _save_key_pools(pools):
     with key_pool_lock:
-        return key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+        return _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
 
 
 def _private_subscription_address(hostname):
@@ -1044,7 +1059,7 @@ def _fetch_keys_from_subscription(url, use_router_hwid=False):
                 resp.close()
         finally:
             session.close()
-        return key_pool_store.classify_subscription_keys(raw), None
+        return _key_pool_store().classify_subscription_keys(raw), None
     except requests.RequestException as exc:
         return None, f'Ошибка загрузки subscription: {exc}'
     except Exception as exc:
@@ -1054,8 +1069,8 @@ def _fetch_keys_from_subscription(url, use_router_hwid=False):
 
 def _set_active_key(proto, key):
     with key_pool_lock:
-        pools = key_pool_store.set_active_key(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto, key)
-        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+        pools = _key_pool_store().set_active_key(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto, key)
+        _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
 
 
 def _install_key_for_protocol(proto, key_value, verify=True):
@@ -1179,7 +1194,7 @@ def _attempt_auto_failover():
         check_telegram_api=_check_telegram_api_through_proxy,
         load_current_keys=_load_current_keys,
         load_key_pools=_load_key_pools,
-        failover_candidates=key_pool_store.failover_candidates,
+        failover_candidates=_key_pool_store().failover_candidates,
         find_pool_failover_candidate=_find_pool_failover_candidate,
         install_key_for_protocol=_install_key_for_protocol,
         update_proxy=update_proxy,
@@ -1575,7 +1590,7 @@ def _attempt_youtube_failover():
     original_key = active_key
     try:
         pools = _load_key_pools()
-        candidates = key_pool_store.failover_candidates(
+        candidates = _key_pool_store().failover_candidates(
             pools,
             route_proto,
             active_key,
@@ -1973,6 +1988,11 @@ POOL_PROBE_MAX_PROCESS_RSS_KB = max(
     0,
     int(getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)),
 )
+POOL_PROBE_PROCESS_WORKER_ENABLED = bool(getattr(config, 'pool_probe_process_worker_enabled', True))
+POOL_PROBE_PROCESS_WORKER_POLL_SECONDS = max(
+    0.2,
+    float(getattr(config, 'pool_probe_process_worker_poll_seconds', 0.75)),
+)
 MEMORY_TIMELINE_ENABLED = bool(getattr(config, 'memory_timeline_enabled', False))
 MEMORY_TIMELINE_PATH = str(getattr(config, 'memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl') or '').strip()
 MEMORY_TIMELINE_INTERVAL_SECONDS = max(
@@ -2219,6 +2239,10 @@ pool_summary_cache = {
     'signature': None,
     'summary': None,
 }
+event_history_api_cache = {
+    'signature': None,
+    'payload': None,
+}
 router_health = router_health_runtime.RouterHealthRuntime(
     cache_ttl=ROUTER_HEALTH_CACHE_TTL,
     dns_cache_ttl=ROUTER_HEALTH_DNS_CACHE_TTL,
@@ -2239,6 +2263,7 @@ active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
 web_pools_api_cache_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
+event_history_api_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 status_refresh_last_started_at = {}
@@ -2257,6 +2282,13 @@ vless2_youtube_cache_confirm_lock = youtube_cache_confirm_lock
 pool_probe_resume_payload = None
 pool_probe_resume_after_cancel = True
 pool_probe_low_memory_resume_scheduled = False
+pool_probe_process_state = {
+    'process': None,
+    'input_path': '',
+    'progress_path': '',
+    'result_path': '',
+    'cancel_path': '',
+}
 pool_probe_quality_sample_lock = threading.Lock()
 pool_probe_quality_sample_count = 0
 pool_probe_progress = _PoolProbeProgress()
@@ -2278,6 +2310,10 @@ post_pool_memory_cleanup_state = {
     'scheduled': False,
     'attempts': 0,
     'rss_kb': 0,
+    'initial_rss_kb': 0,
+    'finished_rss_kb': 0,
+    'hwm_kb': 0,
+    'target_rss_kb': 0,
     'next_retry_at': 0.0,
     'deadline_at': 0.0,
     'last_message': '',
@@ -2641,6 +2677,14 @@ def _write_json_file(path, payload):
                 os.remove(temp_path)
             except Exception:
                 pass
+
+
+def _write_json_file_private(path, payload):
+    _write_json_file(path, payload)
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
 
 
 def _load_subscription_state():
@@ -4339,6 +4383,7 @@ def _youtube_stream_guard_state(proto):
         youtube_stream_guard_states[proto] = {
             'last_active': 0.0,
             'last_log': 0.0,
+            'last_event': 0.0,
             'last_count': 0,
             'last_scan_at': 0.0,
             'last_scan_count': 0,
@@ -4545,24 +4590,28 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
                 f'{guard_label}: deferred {reason_text}; '
                 f'active {_pool_proto_label(proto)} connections={count}, last activity {age}s ago.'
             )
-            route_diagnostic = _conntrack_route_diagnostic(proto)
             _write_runtime_log(message)
-            _record_event(
-                'stream_guard_defer',
-                message,
-                level='info',
-                source='watchdog',
-                protocol=proto,
-                service=service_name,
-                details={
-                    'reason': reason or 'operation',
-                    'active_connections': count,
-                    'last_activity_age_s': age,
-                    'hold_seconds': int(max(1.0, hold)),
-                    'scan_active_count': active_count,
-                    'route_diagnostic': route_diagnostic,
-                },
-            )
+            last_event = float(state.get('last_event') or 0.0)
+            if now - last_event >= YOUTUBE_STREAM_GUARD_EVENT_INTERVAL:
+                state['last_event'] = now
+                route_diagnostic = _conntrack_route_diagnostic(proto)
+                _record_event(
+                    'stream_guard_defer',
+                    message,
+                    level='info',
+                    source='watchdog',
+                    protocol=proto,
+                    service=service_name,
+                    details={
+                        'reason': reason or 'operation',
+                        'active_connections': count,
+                        'last_activity_age_s': age,
+                        'hold_seconds': int(max(1.0, hold)),
+                        'scan_active_count': active_count,
+                        'event_interval_seconds': int(YOUTUBE_STREAM_GUARD_EVENT_INTERVAL),
+                        'route_diagnostic': route_diagnostic,
+                    },
+                )
     return guarded
 
 
@@ -4595,6 +4644,8 @@ def _clear_runtime_memory_caches(clear_status=False, *, clear_pool_summary=False
         with pool_summary_cache_lock:
             pool_summary_cache.update({'signature': None, 'summary': None})
         _invalidate_web_pools_api_cache()
+    with event_history_api_cache_lock:
+        event_history_api_cache.update({'signature': None, 'payload': None})
     try:
         router_health.invalidate()
     except Exception:
@@ -4866,14 +4917,19 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
     }
 
 
-def _web_response_cleanup(reason='web response'):
+def _web_response_cleanup(reason='web response', *, heavy=False):
     global web_response_cleanup_last_at
+    heavy = bool(heavy or reason in (
+        'web html render',
+        'protocol panel render',
+        'protocol check render',
+    ))
     rss_before = _process_rss_kb()
     now = time.time()
     if (
         WEB_RESPONSE_CLEANUP_RSS_KB > 0 and
         rss_before >= WEB_RESPONSE_CLEANUP_RSS_KB and
-        now - web_response_cleanup_last_at >= WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS
+        (heavy or now - web_response_cleanup_last_at >= WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS)
     ):
         web_response_cleanup_last_at = now
         return _memory_cleanup(reason, clear_status=False, log=False)
@@ -5026,7 +5082,7 @@ def _post_pool_memory_cleanup_snapshot():
         return dict(post_pool_memory_cleanup_state)
 
 
-def _schedule_post_pool_memory_cleanup():
+def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_kb=0, scope=''):
     cleanup_target_kb = (
         MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
         if MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB > 0 else
@@ -5042,6 +5098,10 @@ def _schedule_post_pool_memory_cleanup():
             'scheduled': True,
             'attempts': 0,
             'rss_kb': 0,
+            'initial_rss_kb': int(initial_rss_kb or 0),
+            'finished_rss_kb': int(finished_rss_kb or 0),
+            'hwm_kb': int(hwm_kb or 0),
+            'target_rss_kb': int(cleanup_target_kb or 0),
             'next_retry_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS,
             'deadline_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS + MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS,
             'last_message': 'post-pool memory cleanup scheduled',
@@ -5067,6 +5127,21 @@ def _schedule_post_pool_memory_cleanup():
                         rss_kb=int(rss_kb or 0),
                         last_message='post-pool memory cleanup completed without restart',
                     )
+                    _record_event(
+                        'post_pool_memory_cleanup',
+                        'Память после проверки пула вернулась к целевой полке.',
+                        source='memory',
+                        protocol='system',
+                        details={
+                            'scope': scope,
+                            'initial_rss_kb': int(initial_rss_kb or 0),
+                            'finished_rss_kb': int(finished_rss_kb or 0),
+                            'cleanup_rss_kb': int(rss_kb or 0),
+                            'hwm_kb': int(hwm_kb or 0),
+                            'target_rss_kb': int(cleanup_target_kb or 0),
+                            'attempts': attempts,
+                        },
+                    )
                     return
                 restart_needed = (
                     MEMORY_POST_POOL_RESTART_RSS_KB > 0 and
@@ -5083,6 +5158,23 @@ def _schedule_post_pool_memory_cleanup():
                             attempts=attempts,
                             rss_kb=int(rss_kb),
                             last_message='post-pool memory restart requested',
+                        )
+                        _record_event(
+                            'post_pool_memory_cleanup',
+                            'Память после проверки пула осталась выше restart-порога; запрошен мягкий перезапуск бота.',
+                            level='warn',
+                            source='memory',
+                            protocol='system',
+                            details={
+                                'scope': scope,
+                                'initial_rss_kb': int(initial_rss_kb or 0),
+                                'finished_rss_kb': int(finished_rss_kb or 0),
+                                'cleanup_rss_kb': int(rss_kb or 0),
+                                'hwm_kb': int(hwm_kb or 0),
+                                'target_rss_kb': int(cleanup_target_kb or 0),
+                                'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
+                                'attempts': attempts,
+                            },
                         )
                         return
                     _write_runtime_log(
@@ -5106,6 +5198,23 @@ def _schedule_post_pool_memory_cleanup():
                         attempts=attempts,
                         rss_kb=int(rss_kb),
                         last_message='post-pool memory restart retry window expired',
+                    )
+                    _record_event(
+                        'post_pool_memory_cleanup',
+                        'Память после проверки пула не вернулась к целевой полке за окно повторных очисток.',
+                        level='warn',
+                        source='memory',
+                        protocol='system',
+                        details={
+                            'scope': scope,
+                            'initial_rss_kb': int(initial_rss_kb or 0),
+                            'finished_rss_kb': int(finished_rss_kb or 0),
+                            'cleanup_rss_kb': int(rss_kb or 0),
+                            'hwm_kb': int(hwm_kb or 0),
+                            'target_rss_kb': int(cleanup_target_kb or 0),
+                            'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
+                            'attempts': attempts,
+                        },
                     )
                     return
                 next_wait = min(MEMORY_POST_POOL_RESTART_RETRY_SECONDS, remaining)
@@ -5202,29 +5311,35 @@ def _cleanup_pool_probe_runtime_light(kill_processes=False):
         for name in os.listdir('/proc'):
             if not name.isdigit():
                 continue
+            pid = int(name)
+            if pid == os.getpid():
+                continue
             try:
                 with open(f'/proc/{name}/cmdline', 'rb') as file:
                     cmdline = file.read().replace(b'\x00', b' ')
             except Exception:
                 continue
-            if b'/tmp/bypass_pool_probe_' not in cmdline:
+            if b'bypass_pool_probe_' not in cmdline:
                 continue
             try:
-                os.kill(int(name), signal.SIGTERM)
+                os.kill(pid, signal.SIGTERM)
             except Exception:
                 pass
     try:
-        for name in os.listdir('/tmp'):
-            if not name.startswith('bypass_pool_probe_'):
+        for directory in ('/tmp', '/opt/tmp'):
+            if not os.path.isdir(directory):
                 continue
-            path = os.path.join('/tmp', name)
-            try:
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-                else:
-                    os.remove(path)
-            except Exception:
-                pass
+            for name in os.listdir(directory):
+                if not name.startswith('bypass_pool_probe_'):
+                    continue
+                path = os.path.join(directory, name)
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        os.remove(path)
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -6702,6 +6817,30 @@ def _event_history_snapshot(limit=50):
     return event_history.load_events(limit=limit)
 
 
+def _event_history_payload(limit=50):
+    try:
+        limit_value = max(1, int(limit or 50))
+    except Exception:
+        limit_value = 50
+    signature = (
+        limit_value,
+        _file_cache_signature(getattr(event_history, 'EVENT_HISTORY_PATH', '')),
+    )
+    with event_history_api_cache_lock:
+        cached = event_history_api_cache.get('payload')
+        if cached is not None and event_history_api_cache.get('signature') == signature:
+            return cached
+    events = _event_history_snapshot(limit=limit_value)
+    payload = {
+        'events': events,
+        'html': web_form_blocks.render_event_history_html(events),
+    }
+    with event_history_api_cache_lock:
+        event_history_api_cache['signature'] = signature
+        event_history_api_cache['payload'] = payload
+    return payload
+
+
 def _update_status_snapshot():
     state = update_status.read_update_status()
     command_state = _get_web_command_state()
@@ -6796,7 +6935,7 @@ def _load_current_keys():
 
 def _ensure_current_keys_in_pools(current_keys=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
-    pools, changed = key_pool_store.ensure_current_keys_in_pools(_load_key_pools(), current_keys)
+    pools, changed = _key_pool_store().ensure_current_keys_in_pools(_load_key_pools(), current_keys)
     if changed:
         _save_key_pools(pools)
     return pools
@@ -6872,6 +7011,11 @@ def _get_web_status_api_cache():
 
 
 def _store_web_status_api_cache(payload, timestamp=None):
+    rss_kb = int(_process_rss_kb() or 0)
+    if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
+        with web_status_api_cache_lock:
+            web_status_api_cache.update({'timestamp': 0, 'payload': None})
+        return
     with web_status_api_cache_lock:
         web_status_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
         web_status_api_cache['payload'] = payload
@@ -8324,7 +8468,7 @@ def _clear_installed_key_for_protocol(proto):
 
 def _delete_pool_key(proto, key_value):
     with key_pool_lock:
-        pools, removed = key_pool_store.delete_pool_key(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto, key_value)
+        pools, removed = _key_pool_store().delete_pool_key(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto, key_value)
         if not removed:
             raise ValueError('\u041a\u043b\u044e\u0447 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0432 \u043f\u0443\u043b\u0435.')
         current_key = (_load_current_keys().get(proto) or '').strip()
@@ -8333,7 +8477,7 @@ def _delete_pool_key(proto, key_value):
         promoted_key = keys[0] if was_current and keys else ''
         should_clear_current = was_current and not promoted_key
         if not was_current:
-            key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+            _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
             should_clear_current = False
     if promoted_key:
         _install_key_for_protocol(proto, promoted_key, verify=False)
@@ -8342,14 +8486,14 @@ def _delete_pool_key(proto, key_value):
         _clear_installed_key_for_protocol(proto)
     if was_current:
         with key_pool_lock:
-            latest_pools, _ = key_pool_store.delete_pool_key(
-                key_pool_store.load_key_pools(KEY_POOLS_PATH),
+            latest_pools, _ = _key_pool_store().delete_pool_key(
+                _key_pool_store().load_key_pools(KEY_POOLS_PATH),
                 proto,
                 key_value,
             )
             if promoted_key:
-                latest_pools = key_pool_store.set_active_key(latest_pools, proto, promoted_key)
-            key_pool_store.save_key_pools(KEY_POOLS_PATH, latest_pools)
+                latest_pools = _key_pool_store().set_active_key(latest_pools, proto, promoted_key)
+            _key_pool_store().save_key_pools(KEY_POOLS_PATH, latest_pools)
     _forget_key_probes([key_value])
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
@@ -8357,8 +8501,8 @@ def _delete_pool_key(proto, key_value):
 
 def _clear_pool(proto):
     with key_pool_lock:
-        pools, removed_keys = key_pool_store.clear_pool(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto)
-        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+        pools, removed_keys = _key_pool_store().clear_pool(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto)
+        _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
         current_key = (_load_current_keys().get(proto) or '').strip()
         if current_key and current_key in removed_keys:
             _clear_installed_key_for_protocol(proto)
@@ -8793,10 +8937,398 @@ def _schedule_low_memory_pool_probe_resume():
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _pool_probe_process_tmp_dir():
+    for candidate in ('/opt/tmp', tempfile.gettempdir()):
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            if os.path.isdir(candidate):
+                return candidate
+        except Exception:
+            continue
+    return tempfile.gettempdir()
+
+
+def _pool_probe_process_paths():
+    base = os.path.join(
+        _pool_probe_process_tmp_dir(),
+        f'bypass_pool_probe_worker_{os.getpid()}_{int(time.time() * 1000)}',
+    )
+    return {
+        'input_path': base + '.input.json',
+        'progress_path': base + '.progress.json',
+        'result_path': base + '.result.json',
+        'cancel_path': base + '.cancel',
+    }
+
+
+def _pool_probe_progress_payload(*, running, checked, total, scope, note='', started_at=0, finished_at=0):
+    return {
+        'running': bool(running),
+        'checked': max(0, int(checked or 0)),
+        'total': max(0, int(total or 0)),
+        'scope': str(scope or ''),
+        'note': str(note or ''),
+        'started_at': float(started_at or 0),
+        'finished_at': float(finished_at or 0),
+    }
+
+
+def _pool_probe_write_progress(progress_path, **updates):
+    current = _read_json_file(progress_path, {}) or {}
+    if not isinstance(current, dict):
+        current = {}
+    current.update(updates)
+    payload = _pool_probe_progress_payload(
+        running=current.get('running'),
+        checked=current.get('checked'),
+        total=current.get('total'),
+        scope=current.get('scope'),
+        note=current.get('note', ''),
+        started_at=current.get('started_at', 0),
+        finished_at=current.get('finished_at', 0),
+    )
+    _write_json_file(progress_path, payload)
+    return payload
+
+
+def _pool_probe_sync_process_progress(progress_path):
+    progress = _read_json_file(progress_path, {}) or {}
+    if not isinstance(progress, dict):
+        return {}
+    updates = {}
+    for key in ('running', 'checked', 'total', 'scope', 'note', 'started_at', 'finished_at'):
+        if key in progress:
+            updates[key] = progress[key]
+    if updates:
+        _set_pool_probe_progress(**updates)
+    return progress
+
+
+class _PoolProbeFileCancelEvent:
+    def __init__(self, cancel_path):
+        self.cancel_path = cancel_path
+
+    def is_set(self):
+        if shutdown_requested.is_set():
+            return True
+        return bool(self.cancel_path and os.path.exists(self.cancel_path))
+
+
+def _pool_probe_cancel_allows_resume(cancel_path):
+    if not cancel_path:
+        return True
+    try:
+        with open(cancel_path, 'r', encoding='utf-8', errors='ignore') as file:
+            text = file.read(128)
+        return 'no-resume' not in text
+    except Exception:
+        return True
+
+
+def _pool_probe_process_worker_code(input_path, progress_path, result_path, cancel_path):
+    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
+    module_dir = os.path.dirname(BOT_SOURCE_PATH)
+    return (
+        'import os, sys; '
+        'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
+        'os.environ["BYPASS_KEENETIC_POOL_PROBE_WORKER"] = "1"; '
+        f"sys.path.insert(0, {module_dir!r}); "
+        f'import {module_name} as bot_module; '
+        'sys.exit(bot_module._run_pool_probe_process_worker('
+        f'{input_path!r}, {progress_path!r}, {result_path!r}, {cancel_path!r}))'
+    )
+
+
+def _run_pool_probe_process_worker(input_path, progress_path, result_path, cancel_path):
+    payload = _read_json_file(input_path, {}) or {}
+    _remove_file(input_path)
+    if not isinstance(payload, dict):
+        payload = {}
+    tasks = [
+        (str(item[0] or ''), str(item[1] or ''))
+        for item in (payload.get('tasks') or [])
+        if isinstance(item, (list, tuple)) and len(item) >= 2 and str(item[0] or '') in POOL_PROTOCOL_ORDER and str(item[1] or '').strip()
+    ]
+    checks = [dict(item) for item in (payload.get('checks') or []) if isinstance(item, dict)]
+    scope = str(payload.get('scope') or 'manual')
+    initial_checked = max(0, int(payload.get('initial_checked') or 0))
+    total_count = max(initial_checked + len(tasks), int(payload.get('total_count') or 0), len(tasks))
+    started_at = float(payload.get('started_at') or time.time())
+    cancel_event = _PoolProbeFileCancelEvent(cancel_path)
+
+    def write_progress(**updates):
+        _set_pool_probe_progress(**updates)
+        snapshot = _get_pool_probe_progress()
+        snapshot.update(updates)
+        return _pool_probe_write_progress(progress_path, **snapshot)
+
+    write_progress(
+        running=True,
+        checked=initial_checked,
+        total=total_count,
+        scope=scope,
+        note='',
+        started_at=started_at,
+        finished_at=0,
+    )
+    result = {
+        'ok': False,
+        'checked': 0,
+        'absolute_checked': initial_checked,
+        'total': total_count,
+        'scope': scope,
+        'started_at': started_at,
+        'finished_at': 0,
+        'rss_before_kb': int(_process_rss_kb() or 0),
+        'rss_after_kb': 0,
+        'hwm_kb': 0,
+        'cancelled': False,
+        'error': '',
+    }
+    exit_code = 1
+    try:
+        checked, total = _run_selected_pool_probe(
+            tasks,
+            checks,
+            lambda value: write_progress(checked=initial_checked + int(value or 0)),
+            _invalidate_probe_status_caches,
+            scope=scope,
+            cancel_event=cancel_event,
+            set_note=lambda note: write_progress(note=note),
+            store_cancelled_probe=lambda remaining: (
+                _store_cancelled_pool_probe(remaining, checks, scope)
+                if _pool_probe_cancel_allows_resume(cancel_path) else None
+            ),
+        )
+        result.update({
+            'ok': True,
+            'checked': int(checked or 0),
+            'absolute_checked': initial_checked + int(checked or 0),
+            'total': max(total_count, int(total or 0)),
+            'cancelled': bool(cancel_event.is_set()),
+        })
+        exit_code = 0
+    except BaseException as exc:
+        result['error'] = f'{type(exc).__name__}: {str(exc).splitlines()[0][:180]}'
+        _write_runtime_log(f'Pool probe process worker failed: {result["error"]}')
+    finally:
+        finished_at = time.time()
+        result.update({
+            'finished_at': finished_at,
+            'rss_after_kb': int(_process_rss_kb() or 0),
+            'hwm_kb': int(_process_hwm_kb() or 0),
+        })
+        write_progress(
+            running=False,
+            checked=int(result.get('absolute_checked') or initial_checked),
+            total=total_count,
+            scope=scope,
+            note=result.get('error') or '',
+            finished_at=finished_at,
+        )
+        _write_json_file(result_path, result)
+        try:
+            tasks.clear()
+            checks.clear()
+        except Exception:
+            pass
+        _remove_file(cancel_path)
+        _memory_cleanup('pool probe process worker finished', force=True, clear_status=True, log=False)
+    return exit_code
+
+
+def _cleanup_pool_probe_process_files(state=None):
+    state = state or pool_probe_process_state
+    for key in ('input_path', 'progress_path', 'result_path', 'cancel_path'):
+        path = state.get(key) if isinstance(state, dict) else ''
+        if path:
+            _remove_file(path)
+
+
+def _request_pool_probe_process_cancel(resume=True):
+    with pool_probe_resume_lock:
+        cancel_path = pool_probe_process_state.get('cancel_path')
+    if not cancel_path:
+        return False
+    try:
+        with open(cancel_path, 'w', encoding='utf-8') as file:
+            file.write(('resume' if resume else 'no-resume') + f' {time.time()}')
+        try:
+            os.chmod(cancel_path, 0o600)
+        except Exception:
+            pass
+        return True
+    except Exception as exc:
+        _write_runtime_log(f'Failed to request pool probe process cancel: {exc}')
+        return False
+
+
+def _terminate_pool_probe_process_worker():
+    with pool_probe_resume_lock:
+        process = pool_probe_process_state.get('process')
+    if not process or process.poll() is not None:
+        return False
+    _request_pool_probe_process_cancel()
+    try:
+        process.terminate()
+    except Exception:
+        pass
+    deadline = time.time() + 3.0
+    while process.poll() is None and time.time() < deadline:
+        time.sleep(0.1)
+    if process.poll() is None:
+        try:
+            process.kill()
+        except Exception:
+            pass
+    return True
+
+
+def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initial_checked=0, total_count=None, started_at=None):
+    selected = list(selected or [])
+    if not selected:
+        return False, 0
+    queued_count = len(selected)
+    if not pool_probe_lock.acquire(blocking=False):
+        return False, queued_count
+    pool_probe_cancel_event.clear()
+    initial_checked = max(0, int(initial_checked or 0))
+    total_count = len(selected) if total_count is None else max(initial_checked, int(total_count or 0))
+    started_at = time.time() if started_at is None else float(started_at or time.time())
+    paths = _pool_probe_process_paths()
+    payload = {
+        'tasks': selected,
+        'checks': list(custom_checks or []),
+        'scope': scope,
+        'initial_checked': initial_checked,
+        'total_count': total_count,
+        'started_at': started_at,
+    }
+    try:
+        _write_json_file_private(paths['input_path'], payload)
+        _pool_probe_write_progress(
+            paths['progress_path'],
+            running=True,
+            checked=initial_checked,
+            total=total_count,
+            scope=scope,
+            note='',
+            started_at=started_at,
+            finished_at=0,
+        )
+        env = dict(os.environ)
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        env['BYPASS_KEENETIC_POOL_PROBE_WORKER'] = '1'
+        process = subprocess.Popen(
+            [sys.executable, '-c', _pool_probe_process_worker_code(
+                paths['input_path'],
+                paths['progress_path'],
+                paths['result_path'],
+                paths['cancel_path'],
+            )],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            env=env,
+        )
+    except Exception:
+        _cleanup_pool_probe_process_files(paths)
+        pool_probe_lock.release()
+        raise
+    finally:
+        try:
+            selected.clear()
+            payload['tasks'] = []
+        except Exception:
+            pass
+
+    with pool_probe_resume_lock:
+        pool_probe_process_state.update(paths)
+        pool_probe_process_state['process'] = process
+    _set_pool_probe_progress(
+        running=True,
+        checked=initial_checked,
+        total=total_count,
+        scope=scope,
+        note='',
+        started_at=started_at,
+        finished_at=0,
+    )
+
+    def monitor():
+        try:
+            while process.poll() is None:
+                if pool_probe_cancel_event.is_set():
+                    _request_pool_probe_process_cancel()
+                _pool_probe_sync_process_progress(paths['progress_path'])
+                shutdown_requested.wait(POOL_PROBE_PROCESS_WORKER_POLL_SECONDS)
+            progress = _pool_probe_sync_process_progress(paths['progress_path'])
+            result = _read_json_file(paths['result_path'], {}) or {}
+            if not isinstance(result, dict):
+                result = {}
+            checked = int(result.get('absolute_checked') or progress.get('checked') or initial_checked)
+            note = ''
+            if process.returncode != 0:
+                note = str(result.get('error') or f'pool probe worker exited with code {process.returncode}')
+                _write_runtime_log(note)
+            _set_pool_probe_progress(
+                running=False,
+                checked=max(0, checked),
+                total=max(total_count, int(result.get('total') or progress.get('total') or total_count)),
+                scope=scope,
+                note=note,
+                started_at=started_at,
+                finished_at=float(result.get('finished_at') or time.time()),
+            )
+            _record_memory_timeline(
+                'pool probe process finished',
+                marker='pool_probe_process_finish',
+                extra={
+                    'pool_probe_scope': str(scope or ''),
+                    'worker_returncode': int(process.returncode or 0),
+                    'worker_rss_before_kb': int(result.get('rss_before_kb') or 0),
+                    'worker_rss_after_kb': int(result.get('rss_after_kb') or 0),
+                    'worker_hwm_kb': int(result.get('hwm_kb') or 0),
+                    'main_rss_kb': int(_process_rss_kb() or 0),
+                },
+                force=True,
+            )
+        finally:
+            _invalidate_probe_status_caches()
+            _cleanup_pool_probe_process_files(paths)
+            with pool_probe_resume_lock:
+                if pool_probe_process_state.get('process') is process:
+                    pool_probe_process_state.update({
+                        'process': None,
+                        'input_path': '',
+                        'progress_path': '',
+                        'result_path': '',
+                        'cancel_path': '',
+                    })
+            try:
+                pool_probe_lock.release()
+            except RuntimeError:
+                pass
+            _memory_cleanup('pool probe process monitor finished', force=True, clear_status=True, log=False)
+
+    threading.Thread(target=monitor, daemon=True).start()
+    return True, queued_count
+
+
 def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_checked=0, total_count=None, started_at=None):
     global pool_probe_resume_after_cancel
     pool_probe_resume_after_cancel = True
     _reset_pool_probe_quality_sample_budget()
+    if POOL_PROBE_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE:
+        return _start_selected_pool_probe_process(
+            selected,
+            custom_checks,
+            scope,
+            initial_checked=initial_checked,
+            total_count=total_count,
+            started_at=started_at,
+        )
     return start_pool_probe_worker(
         selected,
         custom_checks,
@@ -8867,12 +9399,14 @@ def _pause_pool_probe_for_apply(timeout=12.0):
         return False, ''
     pool_probe_resume_after_cancel = True
     pool_probe_cancel_event.set()
+    _request_pool_probe_process_cancel()
     _set_pool_probe_progress(note='Проверка пула приостанавливается для применения выбранного ключа.')
     deadline = time.time() + max(0.5, float(timeout or 0))
     while pool_probe_lock.locked() and time.time() < deadline:
         time.sleep(0.2)
     if pool_probe_lock.locked():
         _cleanup_pool_probe_runtime_light(kill_processes=True)
+        _terminate_pool_probe_process_worker()
         force_deadline = time.time() + 5.0
         while pool_probe_lock.locked() and time.time() < force_deadline:
             time.sleep(0.2)
@@ -8899,6 +9433,7 @@ def _cancel_pool_probe(timeout=2.0):
         pool_probe_resume_payload = None
     _delete_pool_probe_resume_file()
     pool_probe_cancel_event.set()
+    _request_pool_probe_process_cancel(resume=False)
     _set_pool_probe_progress(note='Остановка проверки пула после текущего ключа.')
     deadline = time.time() + max(0.2, float(timeout or 0))
     while pool_probe_lock.locked() and time.time() < deadline:
@@ -8908,11 +9443,21 @@ def _cancel_pool_probe(timeout=2.0):
     return True, 'Проверка пула остановлена.'
 
 
-def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches, scope='manual', cancel_event=None):
+def _run_selected_pool_probe(
+    probe_tasks,
+    checks,
+    set_checked,
+    invalidate_caches,
+    scope='manual',
+    cancel_event=None,
+    set_note=None,
+    store_cancelled_probe=None,
+):
     probe_recorder = _KeyProbeBatchRecorder(
         flush_every=POOL_PROBE_CACHE_FLUSH_EVERY,
         flush_interval=POOL_PROBE_CACHE_FLUSH_INTERVAL,
     )
+    start_rss_kb = int(_process_rss_kb() or 0)
     batch_size = POOL_PROBE_BATCH_SIZE
     if not POOL_PROBE_BATCH_SIZE_CONFIGURED:
         available_kb = _available_memory_kb()
@@ -8962,8 +9507,10 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
             cleanup_runtime=_runner_cleanup_pool_probe_runtime,
             invalidate_caches=invalidate_caches,
             cancel_event=cancel_event,
-            on_cancelled_remaining=lambda remaining: _store_cancelled_pool_probe(remaining, checks, scope),
-            set_note=lambda note: _set_pool_probe_progress(note=note),
+            on_cancelled_remaining=store_cancelled_probe or (
+                lambda remaining: _store_cancelled_pool_probe(remaining, checks, scope)
+            ),
+            set_note=set_note or (lambda note: _set_pool_probe_progress(note=note)),
             cpu_busy_percent=_pool_probe_cpu_busy_percent if POOL_PROBE_CPU_GUARD_ENABLED else None,
             max_cpu_percent=POOL_PROBE_MAX_CPU_PERCENT,
             high_cpu_delay_seconds=POOL_PROBE_HIGH_CPU_DELAY_SECONDS,
@@ -8987,13 +9534,28 @@ def _run_selected_pool_probe(probe_tasks, checks, set_checked, invalidate_caches
         _runner_cleanup_pool_probe_runtime(kill_processes=True)
         _cleanup_pool_probe_runtime_light(kill_processes=True)
         _memory_cleanup('pool probe finished', force=True, clear_status=True)
+        finished_rss_kb = int(_process_rss_kb() or 0)
+        hwm_kb = int(_process_hwm_kb() or 0)
         _record_memory_timeline(
             'pool probe finished',
             marker='pool_probe_finish',
-            extra={'pool_probe_scope': str(scope or '')},
+            extra={
+                'pool_probe_scope': str(scope or ''),
+                'rss_before_kb': start_rss_kb,
+                'rss_after_kb': finished_rss_kb,
+                'hwm_kb': hwm_kb,
+            },
             force=True,
         )
-        _schedule_post_pool_memory_cleanup()
+        if start_rss_kb <= 0 and finished_rss_kb <= 0 and hwm_kb <= 0 and not scope:
+            _schedule_post_pool_memory_cleanup()
+        else:
+            _schedule_post_pool_memory_cleanup(
+                initial_rss_kb=start_rss_kb,
+                finished_rss_kb=finished_rss_kb,
+                hwm_kb=hwm_kb,
+                scope=scope,
+            )
 
 
 def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):
@@ -9024,8 +9586,8 @@ def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, sta
 
 def _add_keys_to_pool(proto, keys_text):
     with key_pool_lock:
-        pools, added_keys = key_pool_store.add_keys_to_pool(key_pool_store.load_key_pools(KEY_POOLS_PATH), proto, keys_text)
-        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+        pools, added_keys = _key_pool_store().add_keys_to_pool(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto, keys_text)
+        _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
     _probe_pool_keys_background(proto, added_keys)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
@@ -9071,7 +9633,7 @@ def _subscription_active_key_is_working(proto, key_value):
 
 
 def _subscription_preserve_active_keys(proto, fetched_keys, previous_managed_keys=None):
-    previous_set = set(key_pool_store.dedupe_key_list(previous_managed_keys or []))
+    previous_set = set(_key_pool_store().dedupe_key_list(previous_managed_keys or []))
     if not previous_set:
         return []
     fetched_set = set(subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys))
@@ -9090,21 +9652,21 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
     with key_pool_lock:
         if sync_subscription:
             pools, added_keys, removed_keys, managed_keys = subscription_runtime.sync_subscription_keys_to_pool(
-                key_pool_store.load_key_pools(KEY_POOLS_PATH),
+                _key_pool_store().load_key_pools(KEY_POOLS_PATH),
                 proto,
                 fetched_keys,
                 previous_managed_keys=previous_managed_keys,
                 preserve_keys=retained_keys,
             )
         else:
-            pools, added_keys = key_pool_store.add_subscription_keys_to_pool(
-                key_pool_store.load_key_pools(KEY_POOLS_PATH),
+            pools, added_keys = _key_pool_store().add_subscription_keys_to_pool(
+                _key_pool_store().load_key_pools(KEY_POOLS_PATH),
                 proto,
                 fetched_keys,
             )
             removed_keys = []
             managed_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys)
-        key_pool_store.save_key_pools(KEY_POOLS_PATH, pools)
+        _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
     if added_keys:
         _probe_pool_keys_background(proto, added_keys)
     _invalidate_web_status_cache()
@@ -9483,8 +10045,13 @@ def _placeholder_web_status_snapshot():
     }
 
 
-def _placeholder_status_snapshot(current_keys):
+def _placeholder_status_snapshot(current_keys, include_pool_details=True):
     protocols = _placeholder_protocol_statuses(current_keys)
+    if not include_pool_details:
+        return {
+            'web': _build_web_status(current_keys, protocols=protocols),
+            'protocols': protocols,
+        }
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary() if custom_checks else None
@@ -9894,7 +10461,7 @@ def _web_action_context():
             audit_key_switch=_audit_key_switch,
             clear_pool=_clear_pool,
             fetch_keys_from_subscription=_fetch_keys_from_subscription,
-            add_subscription_keys_to_pool=key_pool_store.add_subscription_keys_to_pool,
+            add_subscription_keys_to_pool=_key_pool_store().add_subscription_keys_to_pool,
             add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
             subscription_keys_for_protocol=subscription_runtime.subscription_keys_for_protocol,
             subscription_record=_subscription_record,
@@ -9941,6 +10508,7 @@ def _web_get_context(handler):
         'get_web_command_state': _get_web_command_state,
         'update_status_snapshot': _update_status_snapshot,
         'event_history_snapshot': _event_history_snapshot,
+        'event_history_payload': _event_history_payload,
         'router_metrics_snapshot': _router_metrics_snapshot,
         'route_intersections_snapshot': _route_intersections_snapshot,
         'service_routes_payload': _web_service_routes_payload,
@@ -10256,15 +10824,15 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         else:
             snapshot = _cached_status_snapshot(current_keys)
             if snapshot is None:
-                snapshot = _placeholder_status_snapshot(current_keys)
+                snapshot = _placeholder_status_snapshot(current_keys, include_pool_details=False)
             status = snapshot['web']
             protocol_statuses = snapshot['protocols']
             current_pool_probe_progress = {}
             pool_probe_pending = False
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
-        if not pool_enabled and status_refresh_pending:
-            _refresh_status_caches_async(current_keys, active_only=True)
+        if not pool_enabled:
+            status_refresh_pending = False
         router_health = _router_health_snapshot()
 
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
@@ -10419,18 +10987,25 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if kind == 'json':
             payload = action.get('payload', {})
             self._send_json(payload, status=action.get('status', 200))
-            if path in (
-                '/api/status',
+            heavy_api = path in (
                 '/api/pools',
                 '/api/event_history',
-                '/api/router_metrics',
                 '/api/protocol_panel',
                 '/api/protocol_check_panel',
                 '/api/service_routes',
-            ):
+                '/api/route_intersections',
+            )
+            cleanup_api = heavy_api or path in (
+                '/api/status',
+                '/api/router_metrics',
+            )
+            if cleanup_api:
                 action['payload'] = None
                 payload = None
-                _web_response_cleanup('web json api render')
+                if heavy_api:
+                    _web_response_cleanup('web json api render', heavy=True)
+                else:
+                    _web_response_cleanup('web json api render')
         elif kind == 'html':
             self._send_html(action.get('html', ''))
             _release_web_form_template_cache()

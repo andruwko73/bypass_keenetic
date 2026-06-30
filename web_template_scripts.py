@@ -1996,7 +1996,7 @@ def render_web_scripts(
                 return;
             }}
             statusPollTimer = null;
-            fetch('/api/status', {{
+            fetch('/api/status?compact=1', {{
                 headers: {{'Accept': 'application/json'}},
                 cache: 'no-store'
             }})
@@ -2387,7 +2387,7 @@ def render_web_scripts(
         function fetchEventHistory() {{
             const container = document.querySelector('[data-event-history-list]');
             if (container && !container.querySelector('.event-history-item')) {{
-                container.innerHTML = '<section class="panel event-history-panel"><p class="section-subtitle">Р—Р°РіСЂСѓР¶Р°СЋ РёСЃС‚РѕСЂРёСЋ...</p></section>';
+                container.innerHTML = '<section class="panel event-history-panel"><p class="section-subtitle">Загружаю историю...</p></section>';
             }}
             return fetch('/api/event_history', {{
                 headers: {{'Accept': 'application/json'}},
@@ -2401,7 +2401,7 @@ def render_web_scripts(
                 }})
                 .catch(function() {{
                     if (container) {{
-                        container.innerHTML = '<section class="panel event-history-panel"><p class="section-subtitle">РСЃС‚РѕСЂРёСЏ РІСЂРµРјРµРЅРЅРѕ РЅРµРґРѕСЃС‚СѓРїРЅР°</p></section>';
+                        container.innerHTML = '<section class="panel event-history-panel"><p class="section-subtitle">История временно недоступна</p></section>';
                     }}
                 }});
         }}
@@ -2416,9 +2416,36 @@ def render_web_scripts(
             const refreshButtons = modal.querySelectorAll('[data-router-metrics-refresh]');
             let metricsLoaded = false;
             let historyLoaded = false;
+            let lockedScrollY = 0;
+            let scrollLocked = false;
+            function lockPageScroll() {{
+                if (scrollLocked) {{
+                    return;
+                }}
+                lockedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+                document.body.style.position = 'fixed';
+                document.body.style.top = '-' + lockedScrollY + 'px';
+                document.body.style.left = '0';
+                document.body.style.right = '0';
+                document.body.style.width = '100%';
+                scrollLocked = true;
+            }}
+            function unlockPageScroll() {{
+                if (!scrollLocked) {{
+                    return;
+                }}
+                document.body.style.position = '';
+                document.body.style.top = '';
+                document.body.style.left = '';
+                document.body.style.right = '';
+                document.body.style.width = '';
+                window.scrollTo(0, lockedScrollY);
+                scrollLocked = false;
+            }}
             function openPanel() {{
                 modal.classList.remove('hidden');
                 document.body.classList.add('event-history-open');
+                lockPageScroll();
                 if (!historyLoaded) {{
                     historyLoaded = true;
                     fetchEventHistory();
@@ -2431,6 +2458,7 @@ def render_web_scripts(
             function closePanel() {{
                 modal.classList.add('hidden');
                 document.body.classList.remove('event-history-open');
+                unlockPageScroll();
             }}
             openButtons.forEach(function(button) {{
                 button.addEventListener('click', openPanel);

@@ -1,3 +1,25 @@
+<a name="1.875"></a>
+# [1.875] - 30 Jun 2026
+
+- Runs full pool checks in a separate Python worker process, with the main bot only dispatching raw keys through a temporary `0600` input file and then following sanitized progress/result files.
+- Keeps manual pool cancellation distinct from apply-key pauses: cancel writes `no-resume`, while apply-key pause can still preserve the remaining queue for continuation.
+- Makes simple mode render a lightweight status snapshot without loading probe-cache, custom checks, service route summaries, or starting a background pool status refresh.
+- Adds install/update config defaults for `pool_probe_process_worker_enabled` and `pool_probe_process_worker_poll_seconds`.
+
+- Снижена регулярная нагрузка веб-интерфейса: live status использует компактный API-ответ без пересчёта summary пула.
+- Добавлен кэш HTML истории событий, protocol-scoped `/api/pools` больше не пересчитывает общий summary, а `key_pool_store` загружается лениво.
+- Ускорен анализ пересечений маршрутов: кэшируется индекс сервисов, pending auto-resolve не запускает повторные ipset-сканы, частично назначенные сервисы переносятся в доминирующий протокол.
+- Исправлена мобильная форма добавления ключей/subscription: textarea больше не распирает сетку и не перекрывает соседний блок.
+- Расширен post-pool отчёт по памяти и временный мониторинг RSS/CPU для роутера.
+
+- Local archive updates now install `static/` assets, so service icons are not lost when testing a release before GitHub upload.
+- Local archive updates now preserve explicit `UPDATE_ARCHIVE_ROOT`/`RAW_GITHUB_BYPASS`, so pre-GitHub router tests cannot silently fall back to the current GitHub `main`.
+- UI smoke can authenticate against the real router without putting credentials in the tested URL.
+- Mobile event history now locks page scroll and scrolls its own event list.
+- Event history loading/fallback text is valid UTF-8, and UI smoke checks visible pages for mojibake markers.
+- Repeated `stream_guard_defer` events are coalesced in event history, and expensive route diagnostics run only when an event is actually recorded.
+- Post-pool memory cleanup keeps restart as a 70 MB emergency fallback while reducing repeated diagnostics and history churn.
+
 <a name="1.874"></a>
 # [1.874] - 30 Jun 2026
 

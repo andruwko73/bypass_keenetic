@@ -1977,6 +1977,28 @@ def test_direct_update_script_records_update_status():
     assert 'cleanup_update_artifacts 3' not in script
 
 
+def test_update_static_assets_use_archive_fallback():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    function_body = re.search(r'download_static_asset\(\) \{(?P<body>.*?)\n\}', script, re.S).group('body')
+    archive_index = function_body.index('download_repo_file_from_archive "$url" "$target"')
+    api_index = function_body.index('download_repo_file_via_api "$url" "$target"')
+    curl_index = function_body.index('curl -fsSL')
+    assert archive_index < api_index < curl_index
+    assert 'install_static_assets' in script
+    assert 'static/service-icons/${icon}.png' in script
+
+
+def test_local_archive_update_env_is_preserved():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    top_block = script.split('config_get() {', 1)[0]
+    assert 'if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then' in top_block
+    assert 'unset UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN' in top_block
+    clear_body = re.search(r'clear_runtime_update_env\(\) \{(?P<body>.*?)\n\}', script, re.S).group('body')
+    assert 'if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then' in clear_body
+    assert 'unset RAW_GITHUB_USE_SOCKS RAW_GITHUB_SOCKS_NOTICE_SHOWN' in clear_body
+    assert 'unset REPO_REF UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN' in clear_body
+
+
 def test_realtime_call_signal_catalog_is_call_specific():
     entries = set(service_catalog.REALTIME_CALL_SIGNAL_ROUTE_ENTRIES)
     assert 'api.telegram.org' in entries
@@ -2562,6 +2584,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_post_pool_cleanup_target_rss_kb', 62 * 1024" in source
     assert 'POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 65 * 1024' in source
     assert "getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)" in source
+    assert "getattr(config, 'pool_probe_process_worker_enabled', True)" in source
+    assert "BYPASS_KEENETIC_POOL_PROBE_WORKER" in source
+    assert "def _run_pool_probe_process_worker" in source
+    assert "def _start_selected_pool_probe_process" in source
+    assert "def _pool_probe_cancel_allows_resume" in source
+    assert "_request_pool_probe_process_cancel(resume=False)" in source
+    assert "'no-resume'" in source
+    assert "_write_json_file_private(paths['input_path'], payload)" in source
+    assert "selected.clear()" in source
+    assert "payload['tasks'] = []" in source
     assert 'process_rss_kb=_process_rss_kb' in source
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
     assert 'memory_cleanup=_pool_probe_memory_checkpoint' in source
@@ -2570,6 +2602,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "_cleanup_pool_probe_runtime_light(kill_processes=True)" in source
+    assert 'if pid == os.getpid()' in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
     assert "update_proxy('none', persist=False)" not in startup_restore
     readme_source = (ROOT / 'README.md').read_text(encoding='utf-8')
@@ -2586,6 +2619,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in script_source
     assert 'pool_probe_max_process_rss_kb = 66560' in script_source
+    assert 'pool_probe_process_worker_enabled = True' in script_source
+    assert 'pool_probe_process_worker_poll_seconds = 0.75' in script_source
     assert "pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(65536|71680|87040)" in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
     assert 'memory_timeline_max_events = 720' in script_source
@@ -2681,6 +2716,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _refresh_status_caches_async(current_keys, active_only=False)' in source
     assert "refresh_key = f'active:{signature}' if active_only else signature" in source
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
+    assert 'def _placeholder_status_snapshot(current_keys, include_pool_details=True)' in source
+    assert '_placeholder_status_snapshot(current_keys, include_pool_details=False)' in source
+    assert 'if not pool_enabled:\n            status_refresh_pending = False' in source
     assert "'refresh_status_caches_async': refresh_status_caches" in source
     assert "event_history_html=''" in source
     assert "allow_youtube_confirm=True" in source
@@ -2725,9 +2763,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
     assert "youtube_stream_guard_failover_hold_seconds" in source
     assert "youtube_stream_guard_scan_cache_seconds" in source
+    assert "youtube_stream_guard_event_interval_seconds" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "YOUTUBE_STREAM_GUARD_EVENT_INTERVAL" in source
+    assert "state['last_event'] = now" in source
+    assert source.find("last_event = float(state.get('last_event') or 0.0)") < source.find("_conntrack_route_diagnostic(proto)")
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
     assert 'def _release_web_form_template_cache()' in source
     assert "sys.modules.pop(module_name, None)" in source
+    assert 'def _key_pool_store()' in source
+    assert '\nimport key_pool_store\n' not in source
     assert "service_route_intersections_cache_ttl', 60.0" in source
     assert 'intersections_cache_ttl=SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL' in source
     assert "_release_web_form_template_cache()\n            _web_response_cleanup('web html render')" in source
@@ -4732,12 +4776,15 @@ def test_pool_probe_controller_helpers():
     state = {}
     invalidated = []
     collected = []
+    task_list = [('vless', 'key')]
+    worker_task_ref = {}
     times = iter([10.0, 20.0])
 
     def set_progress(**updates):
         state.update(updates)
 
     def run_worker(tasks, checks, set_checked, invalidate_caches):
+        worker_task_ref['tasks'] = tasks
         assert tasks == [('vless', 'key')]
         assert checks == [{'id': 'custom'}]
         set_checked(1)
@@ -4745,7 +4792,7 @@ def test_pool_probe_controller_helpers():
         return 1, len(tasks)
 
     started, count = pool_probe_controller.start_pool_probe_worker(
-        [('vless', 'key')],
+        task_list,
         [{'id': 'custom'}],
         scope='manual_all',
         lock=threading.Lock(),
@@ -4753,7 +4800,7 @@ def test_pool_probe_controller_helpers():
         run_worker=run_worker,
         invalidate_caches=lambda: invalidated.append('cache'),
         time_provider=lambda: next(times),
-        collect_garbage=lambda: collected.append('gc'),
+        collect_garbage=lambda: collected.append(('gc', list(worker_task_ref['tasks']))),
         thread_factory=_InlineThread,
     )
     assert started is True
@@ -4764,7 +4811,8 @@ def test_pool_probe_controller_helpers():
     assert state['started_at'] == 10.0
     assert state['finished_at'] == 20.0
     assert invalidated == ['cache', 'cache']
-    assert collected == ['gc']
+    assert task_list == [('vless', 'key')]
+    assert collected == [('gc', [])]
 
     state = {}
     checked_updates = []
@@ -6637,6 +6685,7 @@ def test_repo_update_helpers():
 def test_web_get_actions_helpers():
     refreshed = []
     pool_snapshot_calls = []
+    pool_summary_calls = []
     current_keys = {'vless': 'key'}
     def pool_snapshot(keys, include_keys=False, protocols=None):
         pool_snapshot_calls.append((keys, include_keys, protocols))
@@ -6656,7 +6705,7 @@ def test_web_get_actions_helpers():
         'bot_ready': lambda: True,
         'get_pool_probe_progress': lambda: {'running': True, 'total': 2},
         'web_pool_snapshot': pool_snapshot,
-        'pool_status_summary': lambda keys: {'active_text': '1 / 5'},
+        'pool_status_summary': lambda keys: pool_summary_calls.append(keys) or {'active_text': '1 / 5'},
         'web_custom_checks': lambda: [{'id': 'custom'}],
         'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
         'telegram_call_learning_snapshot': lambda: {'watching': True, 'seen_clients': ['192.168.1.23']},
@@ -6708,15 +6757,22 @@ def test_web_get_actions_helpers():
     pools = web_get_actions.dispatch(ctx, '/api/pools')
     assert pools['payload']['pools'] == {'vless': {'rows': []}}
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
+    assert pools['payload']['pool_summary'] == {'active_text': '1 / 5'}
     assert pools['payload']['pool_probe_running'] is True
     assert pools['payload']['pool_probe_progress'] == {'running': True, 'total': 2}
+    summary_calls_before_scoped_pools = len(pool_summary_calls)
     sensitive_pools = web_get_actions.dispatch(ctx, '/api/pools', 'include_keys=1&protocols=vless')
     assert sensitive_pools['payload']['pools'] == {'vless': {'rows': []}}
+    assert sensitive_pools['payload']['pool_summary'] is None
+    assert sensitive_pools['payload']['custom_checks'] is None
     assert pool_snapshot_calls[-1] == (current_keys, False, ['vless'])
     service_routes_payload = web_get_actions.dispatch(ctx, '/api/service_routes')
     assert service_routes_payload['payload'] == {'route_tools_html': '<div>routes</div>'}
     scoped_pools = web_get_actions.dispatch(ctx, '/api/pools', 'protocols=vless,vmess')
     assert scoped_pools['payload']['pools'] == {'vless': {'rows': []}, 'vmess': {'rows': []}}
+    assert scoped_pools['payload']['pool_summary'] is None
+    assert scoped_pools['payload']['custom_checks'] is None
+    assert len(pool_summary_calls) == summary_calls_before_scoped_pools
     assert pool_snapshot_calls[-1] == (current_keys, False, ['vless', 'vmess'])
     cached_pool_ctx = dict(ctx)
     cached_pool_payload = {
@@ -7301,6 +7357,12 @@ def test_web_template_styles_helpers():
     assert 'radial-gradient(circle at var(--mx, 50%) var(--my, 50%)' in styles
     assert '.liquid-global-lens' in styles
     assert '.liquid-global-lens-active' in styles
+    assert 'body.event-history-open{overflow:hidden;}' in styles
+    assert '.event-history-backdrop{position:fixed;inset:0;z-index:720;display:flex;align-items:stretch;justify-content:flex-end;padding:14px;background:rgba(2,6,23,.62);overscroll-behavior:contain;}' in styles
+    assert '.event-history-drawer{width:min(720px,calc(100vw - 28px));max-height:calc(100dvh - 28px);' in styles
+    assert '.event-history-drawer [data-event-history-list]{min-height:0;overflow:hidden;display:grid;}' in styles
+    assert '.event-history-drawer .event-history-list{min-height:0;max-height:100%;overflow:auto;padding-right:4px;grid-template-columns:1fr;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}' in styles
+    assert '.event-history-drawer{width:100%;height:100dvh;max-height:100dvh;' in styles
     assert '.liquid-global-lens::before' in styles
     assert '@keyframes liquid-caustic' not in styles
     assert '--lsx' not in styles
@@ -7361,6 +7423,9 @@ def test_web_template_styles_helpers():
     assert '--surface:#e7ebf0;' in styles
     assert '.pool-apply-btn{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;justify-content:flex-start;gap:6px;}' in styles
     assert '.pool-apply-btn{display:flex;width:100%;font-size:10.5px;line-height:1.18;text-align:left;justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;gap:4px;}' in styles
+    assert '.protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:auto;min-height:148px;padding:8px;align-self:stretch;min-width:0;overflow:hidden;}' in styles
+    assert '.protocol-subview-import .pool-add-form textarea{grid-column:1;min-width:0;width:100%;max-width:100%;min-height:66px;height:66px;max-height:66px;resize:none;overflow:auto;}' in styles
+    assert '.protocol-subview-import .pool-add-form textarea,.protocol-subview-import .pool-add-form button{grid-column:1 / -1;}' in styles
     assert '.health-meter.warn span' in styles
     assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
     assert '.topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,tg-icon");}' in styles
@@ -7947,6 +8012,13 @@ def test_web_template_scripts_helpers():
     assert "fetch('/api/router_metrics?compact=1'" in scripts
     assert 'function fetchEventHistory()' in scripts
     assert "fetch('/api/event_history'" in scripts
+    assert 'Загружаю историю...' in scripts
+    assert 'История временно недоступна' in scripts
+    assert 'Р—Р°РіСЂ' not in scripts
+    assert 'function lockPageScroll()' in scripts
+    assert "document.body.style.position = 'fixed';" in scripts
+    assert 'function unlockPageScroll()' in scripts
+    assert 'window.scrollTo(0, lockedScrollY);' in scripts
     assert 'data-event-history-tab' not in scripts
     assert "modal.querySelectorAll('[data-router-metrics-refresh]')" in scripts
     assert 'function activateTab' not in scripts
@@ -8495,6 +8567,34 @@ def test_service_route_auto_resolves_known_service_intersections():
         )['count'] == 0
 
 
+def test_service_route_auto_resolves_partial_service_target():
+    with tempfile.TemporaryDirectory() as tmp:
+        for route_file in ('vless.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        youtube_entries = service_catalog.service_route_entries('youtube')
+        (Path(tmp) / 'vless-2.txt').write_text(
+            '\n'.join(youtube_entries[:2]) + '\n',
+            encoding='utf-8',
+        )
+        (Path(tmp) / 'vless.txt').write_text(youtube_entries[0] + '\n', encoding='utf-8')
+
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=tmp,
+            include_runtime=False,
+        )
+        result = service_routes.auto_resolve_service_route_intersections(
+            report=report,
+            service_items=[{'id': 'youtube'}],
+            unblock_dir=tmp,
+            update_script='',
+        )
+
+        assert result['services'] == 1
+        assert result['applied'][0]['target_protocol'] == 'vless2'
+        assert youtube_entries[0] not in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
+        assert set(youtube_entries) <= set((Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8').splitlines())
+
+
 def test_service_route_auto_refreshes_runtime_only_known_intersections():
     with tempfile.TemporaryDirectory() as tmp:
         callbacks = []
@@ -9008,6 +9108,69 @@ def test_service_route_runtime_auto_resolves_known_intersections():
         web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections = original_auto_resolve
 
 
+def test_service_route_runtime_pending_auto_resolve_is_cached():
+    original_route_signature = web_route_tools_runtime.route_intersections.route_files_signature
+    original_runtime_signature = web_route_tools_runtime.route_intersections.runtime_ipset_signature
+    original_analyze = web_route_tools_runtime.route_intersections.analyze_route_intersections
+    route_signature = [('vless', 1, 10)]
+    runtime_signature = ('status', 1, 10)
+    analyze_calls = []
+
+    class DeferredThread:
+        def __init__(self, target, args=(), daemon=None):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+            self._alive = False
+
+        def start(self):
+            self._alive = True
+
+        def is_alive(self):
+            return self._alive
+
+    try:
+        web_route_tools_runtime.route_intersections.route_files_signature = lambda: tuple(route_signature)
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = lambda: runtime_signature
+
+        def fake_analyze():
+            analyze_calls.append('analyze')
+            return {
+                'count': 1,
+                'file_count': 0,
+                'runtime_count': 1,
+                'issues': [{
+                    'kind': 'runtime_ipset_overlap',
+                    'routes': ['vless', 'vless-2'],
+                    'samples': ['64.233.161.94 / 64.233.161.0/24'],
+                    'services': ['YouTube'],
+                    'service_keys': ['youtube'],
+                    'message': 'runtime overlap',
+                }],
+            }
+
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = fake_analyze
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
+                custom_check_presets_getter=lambda: service_catalog.CUSTOM_CHECK_PRESETS,
+                service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+                telegram_icon_html=lambda opacity=1.0: 'TG',
+                youtube_icon_html=lambda opacity=1.0: 'YT',
+                intersections_cache_ttl=60,
+                auto_resolve_lock_path=str(Path(tmp) / 'auto-resolve.lock'),
+                thread_factory=DeferredThread,
+            )
+            first = runtime.intersections_snapshot()
+            second = runtime.intersections_snapshot()
+            assert first['auto_resolve_pending']['status'] == 'scheduled'
+            assert second['auto_resolve_pending']['status'] == 'scheduled'
+            assert len(analyze_calls) == 1
+    finally:
+        web_route_tools_runtime.route_intersections.route_files_signature = original_route_signature
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = original_runtime_signature
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = original_analyze
+
+
 def test_service_route_runtime_auto_resolve_uses_cross_runtime_lock():
     original_route_signature = web_route_tools_runtime.route_intersections.route_files_signature
     original_runtime_signature = web_route_tools_runtime.route_intersections.runtime_ipset_signature
@@ -9093,6 +9256,8 @@ def main():
     test_primary_vless_does_not_capture_gmail_domains()
     test_custom_check_service_sources_are_synced()
     test_direct_update_script_records_update_status()
+    test_update_static_assets_use_archive_fallback()
+    test_local_archive_update_env_is_preserved()
     test_chatgpt_codex_custom_check_migration()
     test_preset_custom_checks_are_hydrated_from_catalog()
     test_meta_custom_check_migration()
@@ -9184,6 +9349,7 @@ def main():
     test_route_intersections_helpers()
     test_route_intersections_filters_comments_and_ip_domain_noise()
     test_service_route_auto_resolves_known_service_intersections()
+    test_service_route_auto_resolves_partial_service_target()
     test_service_route_auto_refreshes_runtime_only_known_intersections()
     test_route_intersections_detect_runtime_ipset_overlap()
     test_route_intersections_ignores_priority_runtime_overlap()
@@ -9191,6 +9357,7 @@ def main():
     test_service_route_runtime_helpers()
     test_service_route_runtime_intersections_cache_uses_signatures()
     test_service_route_runtime_auto_resolves_known_intersections()
+    test_service_route_runtime_pending_auto_resolve_is_cached()
     test_service_route_runtime_auto_resolve_uses_cross_runtime_lock()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')

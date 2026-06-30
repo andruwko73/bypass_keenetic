@@ -12,7 +12,11 @@
 
 repo="andruwko73"
 REPO_REF="${REPO_REF:-main}"
-unset UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN
+if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then
+  unset RAW_GITHUB_USE_SOCKS RAW_GITHUB_SOCKS_NOTICE_SHOWN
+else
+  unset UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN
+fi
 
 config_get() {
   key="$1"
@@ -99,7 +103,11 @@ fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 
 clear_runtime_update_env() {
-  unset REPO_REF UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN
+  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then
+    unset RAW_GITHUB_USE_SOCKS RAW_GITHUB_SOCKS_NOTICE_SHOWN
+  else
+    unset REPO_REF UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN
+  fi
 }
 
 sanitize_xray26_compat() {
@@ -128,6 +136,7 @@ download_static_asset() {
   url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${repo_path}"
 
   rm -f "$target"
+  download_repo_file_from_archive "$url" "$target" >/dev/null 2>&1 || true
   GITHUB_API_TIMEOUT=12 download_repo_file_via_api "$url" "$target" >/dev/null 2>&1 || true
   if [ ! -s "$target" ]; then
     curl -fsSL --connect-timeout 12 --max-time 30 --retry 2 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1 || true
@@ -956,6 +965,8 @@ migrate_runtime_config_defaults() {
       sed -i 's/^pool_probe_max_process_rss_kb[[:space:]]*=.*/pool_probe_max_process_rss_kb = 66560/' /opt/etc/bot_config.py || true
     fi
     grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_max_process_rss_kb = 66560\n' >> /opt/etc/bot_config.py
+    grep -Eq '^pool_probe_process_worker_enabled[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_process_worker_enabled = True\n' >> /opt/etc/bot_config.py
+    grep -Eq '^pool_probe_process_worker_poll_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_process_worker_poll_seconds = 0.75\n' >> /opt/etc/bot_config.py
   fi
   if grep -Eq '^pool_probe_delay_seconds[[:space:]]*=[[:space:]]*1\.5([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_delay_seconds[[:space:]]*=.*/pool_probe_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true
@@ -965,6 +976,8 @@ migrate_runtime_config_defaults() {
     sed -i 's/^pool_probe_max_cpu_percent[[:space:]]*=.*/pool_probe_max_cpu_percent = 45.0/' "$BOT_CONFIG_PATH" || true
   fi
   grep -Eq '^pool_probe_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_cpu_percent = 45.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_probe_process_worker_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_process_worker_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_probe_process_worker_poll_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_process_worker_poll_seconds = 0.75\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^pool_probe_high_cpu_delay_seconds[[:space:]]*=[[:space:]]*5\.0?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_high_cpu_delay_seconds[[:space:]]*=.*/pool_probe_high_cpu_delay_seconds = 8.0/' "$BOT_CONFIG_PATH" || true
   fi

@@ -363,6 +363,32 @@ def _unique_complete_protocol_for_service(service_key, *, unblock_dir=UNBLOCK_DI
     return '', state
 
 
+def _intersection_target_for_service(service_key, *, unblock_dir=UNBLOCK_DIR):
+    complete_protocol, state = _unique_complete_protocol_for_service(
+        service_key,
+        unblock_dir=unblock_dir,
+    )
+    if complete_protocol:
+        return complete_protocol, state
+    scores = []
+    for proto in ROUTE_ORDER:
+        route_state = (state.get('routes') or {}).get(proto) or {}
+        try:
+            matched = int(route_state.get('matched') or 0)
+        except Exception:
+            matched = 0
+        if matched > 0:
+            scores.append((matched, -ROUTE_ORDER.index(proto), proto))
+    if not scores:
+        return '', state
+    scores.sort(reverse=True)
+    if len(scores) == 1:
+        return scores[0][2], state
+    if scores[0][0] > scores[1][0]:
+        return scores[0][2], state
+    return '', state
+
+
 def _service_item_id_set(service_items):
     if service_items is None:
         return None
@@ -392,7 +418,7 @@ def _service_targets(service_keys, *, unblock_dir=UNBLOCK_DIR):
     targets = {}
     missing_targets = []
     for service_key in service_keys:
-        target_protocol, _state = _unique_complete_protocol_for_service(
+        target_protocol, _state = _intersection_target_for_service(
             service_key,
             unblock_dir=unblock_dir,
         )

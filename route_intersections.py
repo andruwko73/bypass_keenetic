@@ -28,6 +28,7 @@ ROUTE_PRIORITY_IPSET_SETS = {
         'ipv6': 'unblockvless2priority6',
     },
 }
+_SERVICE_MATCH_INDEX_CACHE = None
 
 
 def route_files_signature(unblock_dir=UNBLOCK_DIR):
@@ -106,6 +107,9 @@ def _owners(entries_by_route, entry):
 
 
 def _service_match_index(service_sources=None):
+    global _SERVICE_MATCH_INDEX_CACHE
+    if service_sources is None and _SERVICE_MATCH_INDEX_CACHE is not None:
+        return _SERVICE_MATCH_INDEX_CACHE
     sources = service_sources or SERVICE_LIST_SOURCES
     exact = {}
     domains = []
@@ -127,7 +131,10 @@ def _service_match_index(service_sources=None):
             network = _ip_network(entry)
             if network:
                 networks.append((network, match))
-    return {'exact': exact, 'domains': domains, 'networks': networks}
+    index = {'exact': exact, 'domains': domains, 'networks': networks}
+    if service_sources is None:
+        _SERVICE_MATCH_INDEX_CACHE = index
+    return index
 
 
 def _service_matches_for_entry(entry, service_index):

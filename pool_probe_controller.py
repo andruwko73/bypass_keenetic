@@ -293,8 +293,9 @@ def start_pool_probe_worker(
     probe_tasks = list(probe_tasks or [])
     if not probe_tasks:
         return False, 0
+    queued_count = len(probe_tasks)
     if not lock.acquire(blocking=False):
-        return False, len(probe_tasks)
+        return False, queued_count
     if cancel_event is not None:
         cancel_event.clear()
 
@@ -332,8 +333,12 @@ def start_pool_probe_worker(
                 note='',
                 finished_at=time_provider(),
             )
+            try:
+                probe_tasks.clear()
+            except Exception:
+                pass
             lock.release()
             collect_garbage()
 
     thread_factory(target=worker, daemon=True).start()
-    return True, len(probe_tasks)
+    return True, queued_count
