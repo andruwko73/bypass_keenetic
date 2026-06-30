@@ -1,7 +1,7 @@
 import os
 
 
-WEB_UPDATE_COMMANDS = ('update',)
+WEB_UPDATE_COMMANDS = ('update', 'rollback_update')
 WEB_COMMAND_LABELS = {
     'install_original': 'Установить оригинальную версию',
     'update': 'Обновить до последнего релиза',

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.873, последнее изменение: 30.06.2026
+#  Файл: bot.py, Версия v1.874, последнее изменение: 30.06.2026
 
 import subprocess
 import os
@@ -7375,9 +7375,11 @@ def _shared_command_job_running(state=None, source=None):
 def _web_background_command_code(command):
     module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
     module_dir = os.path.dirname(BOT_SOURCE_PATH)
+    start_delay = 1.0 if command == 'rollback_update' else 0.0
     return (
-        'import os, sys; '
+        'import os, sys, time; '
         'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
+        f'time.sleep({start_delay!r}); '
         f"sys.path.insert(0, {module_dir!r}); "
         f'import {module_name} as bot_module; '
         f'bot_module._run_web_command_worker({command!r})'

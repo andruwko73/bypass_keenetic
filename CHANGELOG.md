@@ -1,3 +1,8 @@
+<a name="1.874"></a>
+# [1.874] - 30 Jun 2026
+
+- Treats web rollback as an update-style background command and delays its worker by one second, so the browser receives the command-start response before the bot restarts during rollback.
+
 <a name="1.873"></a>
 # [1.873] - 30 Jun 2026
 

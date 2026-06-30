@@ -598,6 +598,10 @@ def test_web_commands_runtime_dispatch():
 
     assert web_commands_runtime.web_command_label('dns_on') == 'DNS Override ВКЛ'
     assert web_commands_runtime.web_command_label('custom') == 'custom'
+    assert web_commands_runtime.WEB_UPDATE_COMMANDS == ('update', 'rollback_update')
+    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "start_delay = 1.0 if command == 'rollback_update' else 0.0" in bot_source
+    assert 'time.sleep({start_delay!r}); ' in bot_source
     assert web_commands_runtime.run_web_command(
         'update_no_bot',
         run_script_action=run_script,

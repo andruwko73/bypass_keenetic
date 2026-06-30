@@ -1,3 +1,7 @@
+*v1.874 (30 Jun 2026) -* main
+
+*Treats web rollback as an update-style background command and delays its worker by one second, so the browser receives the command-start response before the bot restarts during rollback.*
+
 *v1.873 (30 Jun 2026) -* main
 
 *Adds live route-ipset hashes to the S99unblock runtime-dedupe signature, so service route overlaps are cleaned right after the real ipset contents change instead of waiting for the force interval when route files and status timestamps stay unchanged.*
