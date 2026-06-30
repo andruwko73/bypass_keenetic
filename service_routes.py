@@ -1,3 +1,4 @@
+import ipaddress
 import math
 import os
 import subprocess
@@ -362,6 +363,367 @@ def _unique_complete_protocol_for_service(service_key, *, unblock_dir=UNBLOCK_DI
     return '', state
 
 
+def _service_item_id_set(service_items):
+    if service_items is None:
+        return None
+    service_item_ids = {
+        str(item.get('id') if isinstance(item, dict) else item or '').strip()
+        for item in service_items
+    }
+    service_item_ids.discard('')
+    return service_item_ids
+
+
+def _issue_service_keys(issue, service_item_ids=None):
+    service_keys = []
+    for service_key in issue.get('service_keys') or []:
+        service_key = str(service_key or '').strip()
+        if not service_key or service_key in service_keys:
+            continue
+        if service_item_ids is not None and service_key not in service_item_ids:
+            continue
+        if not _service_profile_enabled(service_key):
+            continue
+        service_keys.append(service_key)
+    return service_keys
+
+
+def _service_targets(service_keys, *, unblock_dir=UNBLOCK_DIR):
+    targets = {}
+    missing_targets = []
+    for service_key in service_keys:
+        target_protocol, _state = _unique_complete_protocol_for_service(
+            service_key,
+            unblock_dir=unblock_dir,
+        )
+        if not target_protocol:
+            missing_targets.append(service_key)
+            continue
+        targets[service_key] = target_protocol
+    unique_targets = set(targets.values())
+    return targets, missing_targets, unique_targets
+
+
+def _runtime_command(args, *, run_command=subprocess.run, stdout=subprocess.PIPE, timeout=3):
+    try:
+        return run_command(
+            args,
+            stdout=stdout,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except TypeError:
+        try:
+            return run_command(args)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+
+def _runtime_command_stdout(args, *, run_command=subprocess.run, timeout=3):
+    result = _runtime_command(args, run_command=run_command, stdout=subprocess.PIPE, timeout=timeout)
+    if result is None:
+        return ''
+    if isinstance(result, str):
+        return result
+    stdout = getattr(result, 'stdout', '') or ''
+    if isinstance(stdout, bytes):
+        return stdout.decode('utf-8', errors='ignore')
+    return str(stdout or '')
+
+
+def _runtime_command_ok(args, *, run_command=subprocess.run, timeout=3):
+    result = _runtime_command(args, run_command=run_command, stdout=subprocess.DEVNULL, timeout=timeout)
+    if isinstance(result, bool):
+        return result
+    if result is None:
+        return False
+    try:
+        return int(getattr(result, 'returncode', 1) or 0) == 0
+    except Exception:
+        return False
+
+
+def _read_runtime_ipset_members(set_name, *, run_command=subprocess.run):
+    if not set_name:
+        return set()
+    text = _runtime_command_stdout(['ipset', 'list', set_name], run_command=run_command)
+    members = set()
+    in_members = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == 'Members:':
+            in_members = True
+            continue
+        if in_members:
+            members.add(line.split()[0])
+    return members
+
+
+def _runtime_ip_network(value):
+    value = str(value or '').strip().split()[0] if str(value or '').strip() else ''
+    try:
+        return ipaddress.ip_network(value, strict=False)
+    except Exception:
+        return None
+
+
+def _runtime_network_items(members):
+    items = {4: [], 6: []}
+    for value in members or []:
+        network = _runtime_ip_network(value)
+        if not network:
+            continue
+        items[network.version].append((
+            int(network.network_address),
+            int(network.broadcast_address),
+            value,
+            network,
+        ))
+    for version in items:
+        items[version].sort(key=lambda item: (item[0], item[1], item[2]))
+    return items
+
+
+def _runtime_priority_networks(members):
+    networks = {4: [], 6: []}
+    for value in members or []:
+        network = _runtime_ip_network(value)
+        if network:
+            networks[network.version].append(network)
+    return networks
+
+
+def _runtime_network_is_host(network):
+    return bool(network and network.prefixlen == network.max_prefixlen)
+
+
+def _runtime_network_in_priority(network, priority_networks):
+    if not network:
+        return False
+    for priority_network in priority_networks.get(network.version, []):
+        if network.subnet_of(priority_network):
+            return True
+    return False
+
+
+def _runtime_priority_overlap_is_protected(left_network, right_network, left_priority, right_priority):
+    left_priority_hit = _runtime_network_in_priority(left_network, left_priority)
+    right_priority_hit = _runtime_network_in_priority(right_network, right_priority)
+    if left_priority_hit and right_priority_hit:
+        return False
+    if left_priority_hit and _runtime_network_is_host(left_network):
+        return True
+    if right_priority_hit and _runtime_network_is_host(right_network):
+        return True
+    return False
+
+
+def _runtime_overlapping_loser_members(
+    loser_members,
+    winner_members,
+    *,
+    loser_priority_members=None,
+    winner_priority_members=None,
+):
+    loser_items = _runtime_network_items(loser_members)
+    winner_items = _runtime_network_items(winner_members)
+    loser_priority = _runtime_priority_networks(loser_priority_members)
+    winner_priority = _runtime_priority_networks(winner_priority_members)
+    delete_members = []
+    seen = set()
+    for version in (4, 6):
+        winners = winner_items[version]
+        winner_index = 0
+        for loser_start, loser_end, loser_value, loser_network in loser_items[version]:
+            while winner_index < len(winners) and winners[winner_index][1] < loser_start:
+                winner_index += 1
+            scan_index = winner_index
+            while scan_index < len(winners) and winners[scan_index][0] <= loser_end:
+                winner_start, winner_end, _winner_value, winner_network = winners[scan_index]
+                if winner_end >= loser_start and not _runtime_priority_overlap_is_protected(
+                    loser_network,
+                    winner_network,
+                    loser_priority,
+                    winner_priority,
+                ):
+                    if loser_value not in seen:
+                        seen.add(loser_value)
+                        delete_members.append(loser_value)
+                    break
+                scan_index += 1
+    return delete_members
+
+
+def _runtime_set_index():
+    import route_intersections
+
+    index = {}
+    for route, sets in route_intersections.ROUTE_IPSET_SETS.items():
+        for set_name, kind in sets:
+            index[set_name] = {'route': route, 'kind': kind}
+    return index
+
+
+def _runtime_priority_set(route, kind):
+    import route_intersections
+
+    return (route_intersections.ROUTE_PRIORITY_IPSET_SETS.get(route) or {}).get(kind) or ''
+
+
+def _runtime_cleanup_pairs_for_issue(issue, target_protocol):
+    target_route = PROTOCOL_ROUTES.get(target_protocol)
+    if not target_route:
+        return []
+    set_index = _runtime_set_index()
+    issue_sets = [
+        str(set_name or '').strip()
+        for set_name in issue.get('set_names') or []
+        if str(set_name or '').strip()
+    ]
+    pairs = []
+    for winner_set in issue_sets:
+        winner_meta = set_index.get(winner_set) or {}
+        if winner_meta.get('route') != target_route:
+            continue
+        winner_kind = winner_meta.get('kind')
+        for loser_set in issue_sets:
+            if loser_set == winner_set:
+                continue
+            loser_meta = set_index.get(loser_set) or {}
+            if not loser_meta or loser_meta.get('route') == target_route:
+                continue
+            if loser_meta.get('kind') != winner_kind:
+                continue
+            pairs.append({
+                'loser_set': loser_set,
+                'winner_set': winner_set,
+                'loser_route': loser_meta.get('route') or '',
+                'winner_route': target_route,
+                'kind': winner_kind or '',
+            })
+    return pairs
+
+
+def _delete_runtime_pair_overlaps(pair, *, run_command=subprocess.run):
+    loser_set = pair.get('loser_set') or ''
+    winner_set = pair.get('winner_set') or ''
+    loser_members = _read_runtime_ipset_members(loser_set, run_command=run_command)
+    winner_members = _read_runtime_ipset_members(winner_set, run_command=run_command)
+    kind = pair.get('kind') or ''
+    loser_priority = _read_runtime_ipset_members(
+        _runtime_priority_set(pair.get('loser_route'), kind),
+        run_command=run_command,
+    )
+    winner_priority = _read_runtime_ipset_members(
+        _runtime_priority_set(pair.get('winner_route'), kind),
+        run_command=run_command,
+    )
+    delete_members = _runtime_overlapping_loser_members(
+        loser_members,
+        winner_members,
+        loser_priority_members=loser_priority,
+        winner_priority_members=winner_priority,
+    )
+    deleted = 0
+    failed = 0
+    for member in delete_members:
+        if _runtime_command_ok(['ipset', 'del', loser_set, member], run_command=run_command):
+            deleted += 1
+        else:
+            failed += 1
+    return {
+        **pair,
+        'overlap_members': len(delete_members),
+        'deleted_members': deleted,
+        'failed_members': failed,
+    }
+
+
+def cleanup_runtime_service_route_intersections(
+    *,
+    report=None,
+    service_items=None,
+    unblock_dir=UNBLOCK_DIR,
+    include_runtime=True,
+    run_command=subprocess.run,
+):
+    if report is None:
+        import route_intersections
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=unblock_dir,
+            include_runtime=include_runtime,
+            run_command=run_command,
+        )
+    service_item_ids = _service_item_id_set(service_items)
+    pair_keys = set()
+    pair_plans = []
+    planned_services = set()
+    skipped = []
+    for issue in report.get('issues') or []:
+        if issue.get('kind') != 'runtime_ipset_overlap':
+            continue
+        service_keys = _issue_service_keys(issue, service_item_ids)
+        if not service_keys:
+            skipped.append({'reason': 'unknown_service', 'issue': issue.get('message') or issue.get('entry') or ''})
+            continue
+        targets, missing_targets, unique_targets = _service_targets(service_keys, unblock_dir=unblock_dir)
+        if missing_targets:
+            skipped.append({
+                'reason': 'no_unique_target',
+                'services': missing_targets,
+                'issue': issue.get('message') or issue.get('entry') or '',
+            })
+            continue
+        if len(unique_targets) != 1:
+            skipped.append({
+                'reason': 'conflicting_targets',
+                'services': service_keys,
+                'targets': dict(targets),
+                'issue': issue.get('message') or issue.get('entry') or '',
+            })
+            continue
+        target_protocol = next(iter(unique_targets))
+        pairs = _runtime_cleanup_pairs_for_issue(issue, target_protocol)
+        if not pairs:
+            skipped.append({
+                'reason': 'no_runtime_pair',
+                'services': service_keys,
+                'target_protocol': target_protocol,
+                'issue': issue.get('message') or issue.get('entry') or '',
+            })
+            continue
+        for pair in pairs:
+            key = (pair.get('loser_set'), pair.get('winner_set'), pair.get('kind'))
+            if key in pair_keys:
+                continue
+            pair_keys.add(key)
+            pair['services'] = list(service_keys)
+            pair['target_protocol'] = target_protocol
+            pair_plans.append(pair)
+            planned_services.update(service_keys)
+
+    applied = [
+        _delete_runtime_pair_overlaps(pair, run_command=run_command)
+        for pair in pair_plans
+    ]
+    return {
+        'services': len(planned_services),
+        'service_keys': sorted(planned_services),
+        'pairs': len(applied),
+        'deleted_members': sum(item.get('deleted_members', 0) for item in applied),
+        'failed_members': sum(item.get('failed_members', 0) for item in applied),
+        'overlap_members': sum(item.get('overlap_members', 0) for item in applied),
+        'applied': applied,
+        'skipped': skipped,
+    }
+
+
 def auto_resolve_service_route_intersections(
     *,
     report=None,
@@ -379,43 +741,18 @@ def auto_resolve_service_route_intersections(
             include_runtime=include_runtime,
             run_command=run_command,
         )
-    service_item_ids = None
-    if service_items is not None:
-        service_item_ids = {
-            str(item.get('id') if isinstance(item, dict) else item or '').strip()
-            for item in service_items
-        }
-        service_item_ids.discard('')
+    service_item_ids = _service_item_id_set(service_items)
 
     plans = {}
     resolved = []
     skipped = []
     for issue in report.get('issues') or []:
-        service_keys = []
-        for service_key in issue.get('service_keys') or []:
-            service_key = str(service_key or '').strip()
-            if not service_key or service_key in service_keys:
-                continue
-            if service_item_ids is not None and service_key not in service_item_ids:
-                continue
-            if not _service_profile_enabled(service_key):
-                continue
-            service_keys.append(service_key)
+        service_keys = _issue_service_keys(issue, service_item_ids)
         if not service_keys:
             skipped.append({'reason': 'unknown_service', 'issue': issue.get('message') or issue.get('entry') or ''})
             continue
 
-        targets = {}
-        missing_targets = []
-        for service_key in service_keys:
-            target_protocol, _state = _unique_complete_protocol_for_service(
-                service_key,
-                unblock_dir=unblock_dir,
-            )
-            if not target_protocol:
-                missing_targets.append(service_key)
-                continue
-            targets[service_key] = target_protocol
+        targets, missing_targets, unique_targets = _service_targets(service_keys, unblock_dir=unblock_dir)
         if missing_targets:
             skipped.append({
                 'reason': 'no_unique_target',
@@ -423,7 +760,6 @@ def auto_resolve_service_route_intersections(
                 'issue': issue.get('message') or issue.get('entry') or '',
             })
             continue
-        unique_targets = set(targets.values())
         if len(unique_targets) != 1:
             skipped.append({
                 'reason': 'conflicting_targets',
@@ -433,8 +769,9 @@ def auto_resolve_service_route_intersections(
             })
             continue
 
-        for service_key, target_protocol in targets.items():
-            plans[service_key] = target_protocol
+        if issue.get('kind') != 'runtime_ipset_overlap':
+            for service_key, target_protocol in targets.items():
+                plans[service_key] = target_protocol
         resolved.append({
             'issue': issue.get('message') or issue.get('entry') or '',
             'services': list(service_keys),
@@ -455,17 +792,37 @@ def auto_resolve_service_route_intersections(
                 update_script='',
             )
         )
+    runtime_cleanup = cleanup_runtime_service_route_intersections(
+        report=report,
+        service_items=service_items,
+        unblock_dir=unblock_dir,
+        run_command=run_command,
+    )
     if applied:
         if callable(before_update):
             before_update()
         _run_update(update_script)
 
+    resolved_service_keys = {
+        str(item.get('service_key') or '').strip()
+        for item in applied
+        if str(item.get('service_key') or '').strip()
+    }
+    resolved_service_keys.update(
+        str(service_key or '').strip()
+        for service_key in runtime_cleanup.get('service_keys') or []
+        if str(service_key or '').strip()
+    )
     return {
         'issues': int(report.get('count') or 0),
-        'services': len(applied),
+        'services': len(resolved_service_keys),
         'entries_added': sum(item.get('added', 0) for item in applied),
-        'entries_removed': sum(item.get('removed', 0) for item in applied),
+        'entries_removed': (
+            sum(item.get('removed', 0) for item in applied) +
+            int(runtime_cleanup.get('deleted_members') or 0)
+        ),
         'applied': applied,
+        'runtime_cleanup': runtime_cleanup,
         'resolved': resolved,
         'skipped': skipped,
     }

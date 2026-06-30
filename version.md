@@ -1,3 +1,7 @@
+*v1.871 (30 Jun 2026) -* main
+
+*Makes runtime ipset intersection repair service-aware for the whole service catalog: live overlaps are cleaned from the losing route based on the service's selected protocol, without forcing a full unblock rebuild for runtime-only conflicts.*
+
 *v1.870 (30 Jun 2026) -* main
 
 *Also cleans non-YouTube runtime ipsets when the selected YouTube route already contains a dynamic IP through a covering network, so prefetch cleanup runs even when no new target ipset entry has to be added.*

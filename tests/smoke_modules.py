@@ -2062,7 +2062,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '"$0" scheduler &' in s99unblock
     assert 'cleanup_orphan_schedulers' in s99unblock
     assert 'stop_scheduler_pid "$pid"' in s99unblock
-    assert 'dedupe_ipset_pair unblockvless unblockvless2' in s99unblock
+    assert 'run_service_runtime_dedupe()' in s99unblock
+    assert 'cleanup_runtime_service_route_intersections' in s99unblock
+    assert 'run_service_runtime_dedupe' in s99unblock
     assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in s99unblock
     assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in s99unblock
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in s99unblock
@@ -2074,7 +2076,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '"vmess:$UNBLOCK_DIR/vmess.txt"' in s99unblock
     assert 'RUNTIME_DEDUPE_STATE_FILE="${BYPASS_RUNTIME_DEDUPE_STATE_FILE:-/tmp/bypass-runtime-dedupe.state}"' in s99unblock
     assert 'DEDUP_FORCE_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_FORCE_INTERVAL_SECONDS:-900}"' in s99unblock
-    assert "awk 'NR==FNR { winner[$0] = 1; next } ($0 in winner) { print }'" in s99unblock
+    assert '"$UNBLOCK_DIR/shadowsocks.txt"' in s99unblock
+    assert '"$UNBLOCK_DIR/trojan.txt"' in s99unblock
     assert 'runtime_dedupe_due()' in s99unblock
     assert 'mark_runtime_dedupe_done' in s99unblock
     assert 'acquire_runtime_dedupe_lock || return 0' in s99unblock
@@ -8483,10 +8486,31 @@ def test_service_route_auto_resolves_known_service_intersections():
 def test_service_route_auto_refreshes_runtime_only_known_intersections():
     with tempfile.TemporaryDirectory() as tmp:
         callbacks = []
+        deleted = []
         for route_file in ('vless.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
             (Path(tmp) / route_file).write_text('', encoding='utf-8')
         youtube_entries = service_catalog.service_route_entries('youtube')
         (Path(tmp) / 'vless-2.txt').write_text('\n'.join(youtube_entries) + '\n', encoding='utf-8')
+        ipsets = {
+            'unblockvless': ['64.233.161.94'],
+            'unblockvless2': ['64.233.161.0/24'],
+        }
+
+        def fake_run(args, stdout=None, stderr=None, text=None, timeout=None, check=None):
+            if args[:2] == ['ipset', 'list']:
+                set_name = args[-1]
+                members = ipsets.get(set_name, [])
+                output = 'Name: {0}\nMembers:\n{1}\n'.format(set_name, '\n'.join(members))
+                return py_types.SimpleNamespace(stdout=output, returncode=0)
+            if args[:2] == ['ipset', 'del']:
+                _, _, set_name, member = args
+                deleted.append((set_name, member))
+                if member in ipsets.get(set_name, []):
+                    ipsets[set_name].remove(member)
+                    return py_types.SimpleNamespace(stdout='', returncode=0)
+                return py_types.SimpleNamespace(stdout='', returncode=1)
+            return py_types.SimpleNamespace(stdout='', returncode=0)
+
         report = {
             'count': 1,
             'file_count': 0,
@@ -8509,12 +8533,71 @@ def test_service_route_auto_refreshes_runtime_only_known_intersections():
             unblock_dir=tmp,
             update_script='',
             before_update=lambda: callbacks.append('refresh'),
+            run_command=fake_run,
         )
 
         assert result['services'] == 1
         assert result['entries_added'] >= 0
-        assert result['entries_removed'] >= 0
-        assert callbacks == ['refresh']
+        assert result['entries_removed'] == 1
+        assert result['runtime_cleanup']['deleted_members'] == 1
+        assert deleted == [('unblockvless', '64.233.161.94')]
+        assert callbacks == []
+
+
+def test_service_route_runtime_cleanup_uses_service_owner_for_catalog_services():
+    with tempfile.TemporaryDirectory() as tmp:
+        deleted = []
+        for route_file in ('vless.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        discord_entries = service_catalog.service_route_entries('discord')
+        (Path(tmp) / 'vless-2.txt').write_text('\n'.join(discord_entries) + '\n', encoding='utf-8')
+        ipsets = {
+            'unblockvless': ['203.0.113.10', '198.51.100.1'],
+            'unblockvless2': ['203.0.113.0/24'],
+        }
+
+        def fake_run(args, stdout=None, stderr=None, text=None, timeout=None, check=None):
+            if args[:2] == ['ipset', 'list']:
+                set_name = args[-1]
+                members = ipsets.get(set_name, [])
+                output = 'Name: {0}\nMembers:\n{1}\n'.format(set_name, '\n'.join(members))
+                return py_types.SimpleNamespace(stdout=output, returncode=0)
+            if args[:2] == ['ipset', 'del']:
+                _, _, set_name, member = args
+                deleted.append((set_name, member))
+                if member in ipsets.get(set_name, []):
+                    ipsets[set_name].remove(member)
+                    return py_types.SimpleNamespace(stdout='', returncode=0)
+                return py_types.SimpleNamespace(stdout='', returncode=1)
+            return py_types.SimpleNamespace(stdout='', returncode=0)
+
+        result = service_routes.cleanup_runtime_service_route_intersections(
+            report={
+                'count': 1,
+                'file_count': 0,
+                'runtime_count': 1,
+                'issues': [{
+                    'kind': 'runtime_ipset_overlap',
+                    'routes': ['vless', 'vless-2'],
+                    'set_names': ['unblockvless', 'unblockvless2'],
+                    'samples': ['203.0.113.10 / 203.0.113.0/24'],
+                    'services': ['Discord'],
+                    'service_keys': ['discord'],
+                    'service_matches': [{'key': 'discord', 'label': 'Discord'}],
+                    'message': 'runtime overlap',
+                }],
+            },
+            service_items=[{'id': 'discord'}],
+            unblock_dir=tmp,
+            run_command=fake_run,
+        )
+
+        assert result['services'] == 1
+        assert result['service_keys'] == ['discord']
+        assert result['pairs'] == 1
+        assert result['deleted_members'] == 1
+        assert deleted == [('unblockvless', '203.0.113.10')]
+        assert ipsets['unblockvless'] == ['198.51.100.1']
 
 
 def test_route_intersections_detect_runtime_ipset_overlap():

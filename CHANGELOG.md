@@ -1,3 +1,8 @@
+<a name="1.871"></a>
+# [1.871] - 30 Jun 2026
+
+- Makes runtime ipset intersection repair service-aware for the whole service catalog: live overlaps are cleaned from the losing route based on the service's selected protocol, without forcing a full `unblock_update.sh` rebuild for runtime-only conflicts.
+
 <a name="1.870"></a>
 # [1.870] - 30 Jun 2026
 

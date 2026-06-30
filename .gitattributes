@@ -5,6 +5,7 @@ crontab text eol=lf
 unblock.dnsmasq text eol=lf
 S98telegram_bot_installer text eol=lf
 S99telegram_bot text eol=lf
+S99unblock text eol=lf
 *.py text eol=lf
 *.json text eol=lf
 *.md text eol=lf

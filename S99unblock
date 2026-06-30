@@ -480,8 +480,13 @@ mark_priority_refresh_done() {
 }
 
 runtime_dedupe_signature() {
-    signature="youtube_route=$(youtube_route_protocol);status_updated_at=$(status_updated_at)"
-    for route_file in "$UNBLOCK_DIR/vless.txt" "$UNBLOCK_DIR/vless-2.txt"; do
+    signature="status_updated_at=$(status_updated_at)"
+    for route_file in \
+        "$UNBLOCK_DIR/shadowsocks.txt" \
+        "$UNBLOCK_DIR/vmess.txt" \
+        "$UNBLOCK_DIR/vless.txt" \
+        "$UNBLOCK_DIR/vless-2.txt" \
+        "$UNBLOCK_DIR/trojan.txt"; do
         signature="$signature;$(route_file_signature "$route_file")"
     done
     printf '%s\n' "$signature"
@@ -519,6 +524,26 @@ apply_vless_priority_domain_ips_if_due() {
     priority_refresh_due || return 0
     apply_vless_priority_domain_ips
     mark_priority_refresh_done
+}
+
+run_service_runtime_dedupe() {
+    python_bin="/opt/bin/python3"
+    [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+    [ -n "$python_bin" ] || return 0
+    [ -f /opt/etc/bot/service_routes.py ] || return 0
+    PYTHONPATH="/opt/etc/bot" "$python_bin" - <<'PY' || true
+from service_routes import cleanup_runtime_service_route_intersections
+
+result = cleanup_runtime_service_route_intersections()
+deleted = int(result.get('deleted_members') or 0)
+failed = int(result.get('failed_members') or 0)
+if deleted or failed:
+    print(
+        'Service runtime dedupe: '
+        f'{deleted} removed, {failed} failed, '
+        f'{result.get("pairs", 0)} pair(s).'
+    )
+PY
 }
 
 dedupe_lock_pid_is_active() {
@@ -573,21 +598,7 @@ run_runtime_dedupe() {
     acquire_runtime_dedupe_lock || return 0
     trap cleanup_runtime_dedupe_lock EXIT INT TERM
     if runtime_dedupe_due; then
-        youtube_route="$(youtube_route_protocol)"
-        case "$youtube_route" in
-            vless2)
-                dedupe_ipset_pair unblockvless unblockvless2
-                dedupe_ipset_pair unblockvlessudp unblockvless2udp
-                dedupe_ipset_pair unblockvless6 unblockvless2v6
-                ;;
-            vless)
-                dedupe_ipset_pair unblockvless2 unblockvless
-                dedupe_ipset_pair unblockvless2udp unblockvlessudp
-                dedupe_ipset_pair unblockvless2v6 unblockvless6
-                ;;
-            *)
-                ;;
-        esac
+        run_service_runtime_dedupe
         mark_runtime_dedupe_done
     fi
     apply_vless_priority_domain_ips_if_due
