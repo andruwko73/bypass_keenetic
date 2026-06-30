@@ -870,9 +870,10 @@ class RouterHealthRuntime:
             self._cache['payload'] = payload
         return dict(payload)
 
-    def invalidate(self):
+    def invalidate(self, include_heavy=True):
         with self._lock:
             self._cache = {'timestamp': 0, 'payload': None}
-            self._core_proxy_cache = {'timestamp': 0, 'payload': None}
-            self._dns_cache = {'timestamp': 0, 'payload': None}
-            self._ndmc_cache = {'timestamp': 0, 'payload': None}
+            if include_heavy:
+                self._core_proxy_cache = {'timestamp': 0, 'payload': None}
+                self._dns_cache = {'timestamp': 0, 'payload': None}
+                self._ndmc_cache = {'timestamp': 0, 'payload': None}

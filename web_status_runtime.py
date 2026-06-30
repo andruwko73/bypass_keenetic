@@ -19,6 +19,12 @@ def protocol_status_is_pending(protocol_status):
         return False
     if status.get('api_pending'):
         return True
+    if (
+        status.get('tone') == 'warn' and
+        status.get('api_ok') is not True and
+        not str(status.get('api_message') or '').strip()
+    ):
+        return True
     label = str(status.get('label') or '').casefold()
     details = str(status.get('details') or '').casefold()
     pending_markers = (

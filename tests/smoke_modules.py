@@ -587,6 +587,15 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     assert first['flash_used_percent'] == 25
     assert 'Flash-носитель: занято 256 из 1024 MB (25%)' in first['note']
     assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu_stat': 2, 'flash': 2}
+    runtime.invalidate(include_heavy=False)
+    assert runtime._cache['payload'] is None
+    assert runtime._ndmc_cache['payload'] is not None
+    assert runtime._dns_cache['payload'] is not None
+    assert runtime._core_proxy_cache['payload'] is not None
+    runtime.invalidate()
+    assert runtime._ndmc_cache['payload'] is None
+    assert runtime._dns_cache['payload'] is None
+    assert runtime._core_proxy_cache['payload'] is None
 
 
 def test_web_commands_runtime_dispatch():
@@ -2575,6 +2584,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _memory_cleanup' in source
     assert "f'{task_name} skipped high RSS'" in source
     assert "'status refresh skipped high RSS'" in source
+    assert 'rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not active_only' in source
+    assert 'def _recent_event_history_match' in source
+    stream_guard_block = source.split('def _youtube_stream_guard_active', 1)[1].split('def _youtube_vless2_stream_guard_active', 1)[0]
+    assert "_recent_event_history_match(\n                    'stream_guard_defer'" in stream_guard_block
     assert "_memory_cleanup('telegram polling error', force=True, clear_status=False)" in source
     assert 'def _malloc_trim' in source
     assert 'def _pool_probe_memory_checkpoint' in source
@@ -2588,6 +2601,17 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "BYPASS_KEENETIC_POOL_PROBE_WORKER" in source
     assert "def _run_pool_probe_process_worker" in source
     assert "def _start_selected_pool_probe_process" in source
+    process_monitor_block = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
+    assert "_schedule_post_pool_memory_cleanup(" in process_monitor_block
+    assert 'def _forget_unreferenced_key_probes' in source
+    delete_pool_block = source.split('def _delete_pool_key', 1)[1].split('def _clear_pool', 1)[0]
+    clear_pool_block = source.split('def _clear_pool', 1)[1].split('def _proxy_config_snapshot_paths', 1)[0]
+    subscription_add_block = source.split('def _add_subscription_keys_to_pool', 1)[1].split('def _refresh_subscription_once', 1)[0]
+    assert '_forget_unreferenced_key_probes([key_value], final_pools)' in delete_pool_block
+    assert '_forget_key_probes([key_value])' not in delete_pool_block
+    assert '_forget_unreferenced_key_probes(removed_keys, pools)' in clear_pool_block
+    assert '_forget_key_probes(removed_keys)' not in clear_pool_block
+    assert '_forget_unreferenced_key_probes(removed_keys, pools)' in subscription_add_block
     assert "def _pool_probe_cancel_allows_resume" in source
     assert "_request_pool_probe_process_cancel(resume=False)" in source
     assert "'no-resume'" in source
@@ -3669,6 +3693,18 @@ def test_web_status_runtime_helpers():
     )
     assert placeholder['api_status'].startswith('⏳ Telegram API')
     assert 'не проходит:' not in placeholder['api_status']
+    unchecked = web_status_runtime.build_web_status_snapshot(
+        state_label='state',
+        proxy_mode='vless',
+        protocols={'vless': {'tone': 'warn', 'label': 'unchecked', 'details': 'waiting for background check', 'api_ok': False, 'api_message': ''}},
+        ports={'vless': 10811},
+        check_socks5=lambda port: False,
+        check_telegram_api=lambda **kwargs: 'unused',
+        is_transient=lambda text: False,
+        fallback_reason='',
+    )
+    assert unchecked['api_status'].startswith('⏳ Telegram API')
+    assert 'не проходит:' not in unchecked['api_status']
     fallback = web_status_runtime.build_web_status_snapshot(
         state_label='state',
         proxy_mode='vless',
@@ -8000,9 +8036,13 @@ def test_web_template_scripts_helpers():
     assert 'poolProbeVisible' in scripts
     assert "pill.innerHTML = (showTelegramIcon" in scripts
     assert 'function updatePoolProbeControls(active, paused)' in scripts
+    assert 'function freshPoolProbeProgress(progress)' in scripts
+    assert 'startedAt === previousStartedAt && checked < previousChecked' in scripts
+    assert 'function poolProbeSummaryText(progress, fallbackNote)' in scripts
     assert 'function pollPoolProbeStatus()' in scripts
     assert "fetch('/api/pool_probe'" in scripts
     assert 'function applyPoolProbeStatusPayload(payload)' in scripts
+    assert "setOptionalText('pool-summary-note', progressSummary)" in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
     assert 'refreshPoolData(POOL_PROBE_POOL_REFRESH_MS)' in scripts

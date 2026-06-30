@@ -40,6 +40,7 @@ def render_web_scripts(
         let statusPollTimer = null;
         let statusPollUntil = 0;
         let poolProbeWasRunning = false;
+        let latestPoolProbeProgress = null;
         let poolProbePollTimer = null;
         let poolDataRefreshTimer = null;
         let poolViewTimers = {{}};
@@ -1645,14 +1646,48 @@ def render_web_scripts(
             }});
         }}
 
+        function freshPoolProbeProgress(progress) {{
+            progress = progress || {{}};
+            const total = Number(progress.total || 0);
+            if (total <= 0) {{
+                return progress;
+            }}
+            const checked = Number(progress.checked || 0);
+            const startedAt = Number(progress.started_at || 0);
+            if (latestPoolProbeProgress && Number(latestPoolProbeProgress.total || 0) > 0) {{
+                const previousStartedAt = Number(latestPoolProbeProgress.started_at || 0);
+                const previousChecked = Number(latestPoolProbeProgress.checked || 0);
+                if (startedAt && previousStartedAt && startedAt < previousStartedAt) {{
+                    return latestPoolProbeProgress;
+                }}
+                if (startedAt && previousStartedAt && startedAt === previousStartedAt && checked < previousChecked) {{
+                    return latestPoolProbeProgress;
+                }}
+            }}
+            latestPoolProbeProgress = progress;
+            return progress;
+        }}
+
+        function poolProbeSummaryText(progress, fallbackNote) {{
+            progress = progress || {{}};
+            if (Number(progress.total || 0) <= 0) {{
+                return fallbackNote || '';
+            }}
+            const progressNote = progress.note ? String(progress.note) : (fallbackNote || '');
+            let summary = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total;
+            if (progressNote) {{
+                summary += ' - ' + progressNote;
+            }}
+            return summary;
+        }}
+
         function updatePoolSummaryBlock(poolSummary, progress, running, paused) {{
             if (!poolSummary) {{
                 return;
             }}
             let summaryNote = poolSummary.note || '';
             if ((running || paused) && progress && Number(progress.total || 0) > 0) {{
-                const progressNote = progress.note ? String(progress.note) : summaryNote;
-                summaryNote = poolProbeProgressLabel(progress.scope || '') + ': ' + (progress.checked || 0) + '/' + progress.total + ' - ' + progressNote;
+                summaryNote = poolProbeSummaryText(progress, summaryNote);
             }}
             setOptionalText('pool-active-summary', poolSummary.active_text || '');
             setOptionalText('pool-summary-note', summaryNote);
@@ -1682,7 +1717,7 @@ def render_web_scripts(
             if (ENABLE_CUSTOM_CHECKS && payload.custom_checks) {{
                 renderCustomChecks(payload.custom_checks);
             }}
-            const progress = payload.pool_probe_progress || {{}};
+            const progress = freshPoolProbeProgress(payload.pool_probe_progress || {{}});
             const poolProbeActive = !!payload.pool_probe_running && Number(progress.total || 0) > 0;
             const poolProbePaused = !!payload.pool_probe_paused && Number(progress.total || 0) > 0;
             updatePoolSummaryBlock(payload.pool_summary || null, progress, poolProbeActive, poolProbePaused);
@@ -1703,11 +1738,15 @@ def render_web_scripts(
             if (!ENABLE_KEY_POOL || !payload) {{
                 return false;
             }}
-            const progress = payload.progress || payload.pool_probe_progress || {{}};
+            const progress = freshPoolProbeProgress(payload.progress || payload.pool_probe_progress || {{}});
             const poolProbeActive = !!(payload.running || payload.pool_probe_running) && Number(progress.total || 0) > 0;
             const poolProbePaused = !!(payload.paused || payload.pool_probe_paused) && Number(progress.total || 0) > 0;
             updatePoolProbeControls(poolProbeActive, poolProbePaused);
             if (poolProbeActive || poolProbePaused) {{
+                const progressSummary = poolProbeSummaryText(progress, '');
+                if (progressSummary) {{
+                    setOptionalText('pool-summary-note', progressSummary);
+                }}
                 renderStatusAttention({{
                     pool_probe_running: poolProbeActive,
                     pool_probe_paused: poolProbePaused,
@@ -1842,7 +1881,7 @@ def render_web_scripts(
 
         function topbarStatusFromSnapshot(snapshot) {{
             snapshot = snapshot || {{}};
-            const progress = ENABLE_KEY_POOL ? (snapshot.pool_probe_progress || {{}}) : {{}};
+            const progress = ENABLE_KEY_POOL ? freshPoolProbeProgress(snapshot.pool_probe_progress || {{}}) : {{}};
             const poolProbeVisible = ENABLE_KEY_POOL && !!snapshot.pool_probe_running && Number(progress.total || 0) > 0;
             const poolProbePaused = ENABLE_KEY_POOL && !!snapshot.pool_probe_paused && Number(progress.total || 0) > 0;
             if (poolProbeVisible || poolProbePaused) {{

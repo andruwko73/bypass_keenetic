@@ -1,3 +1,7 @@
+*v1.876 (30 Jun 2026) -* main
+
+*Uses lightweight router-health invalidation after memory cleanup, watchdog state changes and YouTube edge prefetch status updates, keeps stream-guard history throttled across restarts, prevents one protocol pool cleanup from deleting probe-cache results still used by another pool or active key, keeps active status refreshes running under high RSS, shows unchecked Telegram API state as pending instead of an empty red failure, schedules post-pool cleanup after the worker-process path, and keeps pool-check progress synchronized between the header and compact pool card.*
+
 *v1.875 (30 Jun 2026) -* main
 
 *Reduces routine web/API memory churn, runs full pool checks in a separate Python worker process, caches event history, avoids duplicate route-intersection scans while auto-resolve is pending, fixes partial service route cleanup, keeps the subscription import form within its card, preserves static service icons/local archive update env during pre-GitHub tests, fixes event-history loading text, and keeps simple mode on a lighter status path.*

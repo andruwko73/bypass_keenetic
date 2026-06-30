@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.875, последнее изменение: 30.06.2026
+#  Файл: bot.py, Версия v1.876, последнее изменение: 30.06.2026
 
 import subprocess
 import os
@@ -2562,6 +2562,37 @@ def _record_event(action, message='', level='info', source='system', protocol='s
     )
 
 
+def _recent_event_history_match(action, *, protocol='', service='', max_age_seconds=0, limit=40):
+    try:
+        now = time.time()
+        max_age = float(max_age_seconds or 0)
+    except Exception:
+        return False
+    if max_age <= 0:
+        return False
+    action = str(action or '')
+    protocol = str(protocol or '').strip().lower()
+    service = str(service or '').strip().lower()
+    try:
+        events = event_history.load_events(limit=limit)
+    except Exception:
+        return False
+    for event in events:
+        if str((event or {}).get('action') or '') != action:
+            continue
+        if protocol and str((event or {}).get('protocol') or '').strip().lower() != protocol:
+            continue
+        if service and str((event or {}).get('service') or '').strip().lower() != service:
+            continue
+        try:
+            ts = float((event or {}).get('ts') or 0)
+        except Exception:
+            ts = 0.0
+        if ts > 0 and now - ts < max_age:
+            return True
+    return False
+
+
 def _audit_key_switch(source, proto, key_value, reason=''):
     key_value = (key_value or '').strip()
     key_id = _hash_key(key_value)[:12] if key_value else ''
@@ -4030,7 +4061,7 @@ def _store_youtube_edge_prefetch_status(status):
     if int(status.get('added_addresses') or 0) > 0:
         youtube_edge_prefetch_state['last_added_at'] = now
     try:
-        router_health.invalidate()
+        router_health.invalidate(include_heavy=False)
     except Exception:
         pass
     return youtube_edge_prefetch_state['last_message']
@@ -4594,24 +4625,30 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
             last_event = float(state.get('last_event') or 0.0)
             if now - last_event >= YOUTUBE_STREAM_GUARD_EVENT_INTERVAL:
                 state['last_event'] = now
-                route_diagnostic = _conntrack_route_diagnostic(proto)
-                _record_event(
+                if not _recent_event_history_match(
                     'stream_guard_defer',
-                    message,
-                    level='info',
-                    source='watchdog',
                     protocol=proto,
                     service=service_name,
-                    details={
-                        'reason': reason or 'operation',
-                        'active_connections': count,
-                        'last_activity_age_s': age,
-                        'hold_seconds': int(max(1.0, hold)),
-                        'scan_active_count': active_count,
-                        'event_interval_seconds': int(YOUTUBE_STREAM_GUARD_EVENT_INTERVAL),
-                        'route_diagnostic': route_diagnostic,
-                    },
-                )
+                    max_age_seconds=YOUTUBE_STREAM_GUARD_EVENT_INTERVAL,
+                ):
+                    route_diagnostic = _conntrack_route_diagnostic(proto)
+                    _record_event(
+                        'stream_guard_defer',
+                        message,
+                        level='info',
+                        source='watchdog',
+                        protocol=proto,
+                        service=service_name,
+                        details={
+                            'reason': reason or 'operation',
+                            'active_connections': count,
+                            'last_activity_age_s': age,
+                            'hold_seconds': int(max(1.0, hold)),
+                            'scan_active_count': active_count,
+                            'event_interval_seconds': int(YOUTUBE_STREAM_GUARD_EVENT_INTERVAL),
+                            'route_diagnostic': route_diagnostic,
+                        },
+                    )
     return guarded
 
 
@@ -4647,7 +4684,7 @@ def _clear_runtime_memory_caches(clear_status=False, *, clear_pool_summary=False
     with event_history_api_cache_lock:
         event_history_api_cache.update({'signature': None, 'payload': None})
     try:
-        router_health.invalidate()
+        router_health.invalidate(include_heavy=False)
     except Exception:
         pass
 
@@ -5011,7 +5048,7 @@ def _schedule_memory_watchdog_restart(rss_kb):
         memory_watchdog_restart_scheduled = True
         memory_watchdog_last_restart_at = now
     try:
-        router_health.invalidate()
+        router_health.invalidate(include_heavy=False)
     except Exception:
         pass
     _record_memory_timeline(
@@ -5265,7 +5302,7 @@ def _start_memory_watchdog_thread():
                     if not memory_watchdog_high_rss_since:
                         memory_watchdog_high_rss_since = now
                         try:
-                            router_health.invalidate()
+                            router_health.invalidate(include_heavy=False)
                         except Exception:
                             pass
                     elif (
@@ -5284,14 +5321,14 @@ def _start_memory_watchdog_thread():
                                 return
                         memory_watchdog_high_rss_since = 0.0
                         try:
-                            router_health.invalidate()
+                            router_health.invalidate(include_heavy=False)
                         except Exception:
                             pass
                 else:
                     if memory_watchdog_high_rss_since:
                         memory_watchdog_high_rss_since = 0.0
                         try:
-                            router_health.invalidate()
+                            router_health.invalidate(include_heavy=False)
                         except Exception:
                             pass
                 if rss_kb and rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _memory_restart_is_safe():
@@ -8466,7 +8503,38 @@ def _clear_installed_key_for_protocol(proto):
     _restart_proxy_services_for_protocols([proto])
 
 
+def _forget_unreferenced_key_probes(key_values, pools=None):
+    candidates = []
+    seen = set()
+    for key_value in key_values or []:
+        value = str(key_value or '').strip()
+        if value and value not in seen:
+            candidates.append(value)
+            seen.add(value)
+    if not candidates:
+        return 0
+    referenced = set()
+    try:
+        current_pools = pools if isinstance(pools, dict) else _key_pool_store().load_key_pools(KEY_POOLS_PATH)
+        for values in (current_pools or {}).values():
+            for value in values or []:
+                value = str(value or '').strip()
+                if value:
+                    referenced.add(value)
+    except Exception:
+        referenced.update(candidates)
+    try:
+        for value in (_load_current_keys() or {}).values():
+            value = str(value or '').strip()
+            if value:
+                referenced.add(value)
+    except Exception:
+        referenced.update(candidates)
+    return _forget_key_probes([value for value in candidates if value not in referenced])
+
+
 def _delete_pool_key(proto, key_value):
+    final_pools = None
     with key_pool_lock:
         pools, removed = _key_pool_store().delete_pool_key(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto, key_value)
         if not removed:
@@ -8478,6 +8546,7 @@ def _delete_pool_key(proto, key_value):
         should_clear_current = was_current and not promoted_key
         if not was_current:
             _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
+            final_pools = pools
             should_clear_current = False
     if promoted_key:
         _install_key_for_protocol(proto, promoted_key, verify=False)
@@ -8494,7 +8563,8 @@ def _delete_pool_key(proto, key_value):
             if promoted_key:
                 latest_pools = _key_pool_store().set_active_key(latest_pools, proto, promoted_key)
             _key_pool_store().save_key_pools(KEY_POOLS_PATH, latest_pools)
-    _forget_key_probes([key_value])
+            final_pools = latest_pools
+    _forget_unreferenced_key_probes([key_value], final_pools)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
 
@@ -8507,7 +8577,7 @@ def _clear_pool(proto):
         if current_key and current_key in removed_keys:
             _clear_installed_key_for_protocol(proto)
     if removed_keys:
-        _forget_key_probes(removed_keys)
+        _forget_unreferenced_key_probes(removed_keys, pools)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     return len(removed_keys)
@@ -9311,6 +9381,13 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             except RuntimeError:
                 pass
             _memory_cleanup('pool probe process monitor finished', force=True, clear_status=True, log=False)
+            finished_rss_kb = int(_process_rss_kb() or 0)
+            _schedule_post_pool_memory_cleanup(
+                initial_rss_kb=int(result.get('rss_before_kb') or 0),
+                finished_rss_kb=finished_rss_kb,
+                hwm_kb=int(_process_hwm_kb() or 0),
+                scope=scope,
+            )
 
     threading.Thread(target=monitor, daemon=True).start()
     return True, queued_count
@@ -9667,6 +9744,8 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
             removed_keys = []
             managed_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys)
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
+    if removed_keys:
+        _forget_unreferenced_key_probes(removed_keys, pools)
     if added_keys:
         _probe_pool_keys_background(proto, added_keys)
     _invalidate_web_status_cache()
@@ -10103,7 +10182,7 @@ def _refresh_status_caches_async(current_keys, active_only=False):
     if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
         cleanup = _memory_cleanup('status refresh skipped high RSS', force=True, clear_status=False, log=False)
         rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
-        if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+        if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not active_only:
             with status_refresh_lock:
                 status_refresh_last_started_at[refresh_key] = now
                 status_refresh_last_finished_at[refresh_key] = now

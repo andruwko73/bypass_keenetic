@@ -1,3 +1,16 @@
+<a name="1.876"></a>
+# [1.876] - 30 Jun 2026
+
+- Uses lightweight router-health invalidation after memory cleanup, watchdog state changes and YouTube edge prefetch status updates, keeping DNS/core/ndmc health subcaches warm instead of rerunning heavier router checks unnecessarily.
+- Keeps `stream_guard_defer` history events throttled across bot restarts, so mode switches and updates do not flood the history with repeated YouTube stream-guard deferrals.
+- Prevents clearing or syncing one protocol pool from deleting probe-cache results that are still referenced by another pool or by the active installed key.
+- Keeps the current protocol status recoverable under high RSS by allowing active-only status refreshes while heavier background refreshes stay guarded.
+- Treats unchecked warn statuses with an empty Telegram API message as a pending recheck, avoiding a red header with an empty failure reason while the current mode is still being verified.
+- Schedules post-pool memory cleanup after the external worker-process path, matching the in-process pool-check cleanup behavior.
+- Keeps pool-check progress synchronized between the header status banner and the compact key-pool card.
+- Updates the key-pool summary from `/api/pool_probe`, so it no longer waits for the slower `/api/pools` refresh during a running check.
+- Ignores stale out-of-order pool progress snapshots from the same run, preventing visual regressions such as `156/158` in one block and `139/158` in another.
+
 <a name="1.875"></a>
 # [1.875] - 30 Jun 2026
 
