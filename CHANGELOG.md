@@ -1,3 +1,9 @@
+<a name="1.866"></a>
+# [1.866] - 30 Jun 2026
+
+- Prevents the lazy protocol Checks tab from blocking on automatic service-route cleanup: known route/ipset intersections are now repaired in the background, the UI shows that cleanup was scheduled, and transient fetch failures are retried before displaying an error.
+- Bumps the static asset revision so browsers load the fixed JavaScript instead of a cached 1.865 bundle.
+
 <a name="1.865"></a>
 # [1.865] - 29 Jun 2026
 

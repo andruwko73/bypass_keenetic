@@ -804,7 +804,7 @@ def render_web_scripts(
             activate(localStorage.getItem(storageKey));
         }}
 
-        function loadProtocolCheck(panel) {{
+        function loadProtocolCheck(panel, retryCount) {{
             if ((!ENABLE_KEY_POOL && !ENABLE_CUSTOM_CHECKS) || !panel || panel.dataset.protocolCheckLoaded === '1' || panel.dataset.protocolCheckLoading === '1') {{
                 return;
             }}
@@ -813,6 +813,7 @@ def render_web_scripts(
             if (!protocol || !target) {{
                 return;
             }}
+            retryCount = Number(retryCount || 0);
             panel.dataset.protocolCheckLoading = '1';
             fetch('/api/protocol_check_panel?proto=' + encodeURIComponent(protocol), {{
                 headers: {{ 'Accept': 'application/json' }},
@@ -837,6 +838,13 @@ def render_web_scripts(
                     setupAsyncForms(subview);
                 }})
                 .catch(function(error) {{
+                    if (retryCount < 2) {{
+                        panel.dataset.protocolCheckLoading = '0';
+                        window.setTimeout(function() {{
+                            loadProtocolCheck(panel, retryCount + 1);
+                        }}, 1200 + retryCount * 1800);
+                        return;
+                    }}
                     const message = error && error.message ? error.message : 'Loading failed';
                     target.innerHTML = '<span class="status-label">Checks</span><p class="status-note">' + escapeHtml(message) + '</p>';
                 }})

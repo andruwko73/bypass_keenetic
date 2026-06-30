@@ -32,7 +32,7 @@ class ServiceRouteToolsRuntime:
         self.auto_resolve_cooldown = max(30.0, float(auto_resolve_cooldown or 30.0))
         self._intersections_lock = threading.Lock()
         self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
-        self._auto_resolve_cache = {'signature': None, 'timestamp': 0.0}
+        self._auto_resolve_cache = {'signature': None, 'timestamp': 0.0, 'running': False, 'result': None}
         self._service_items_cache = {'signature': None, 'items': None}
         self._summary_cache = {'signature': None, 'summary': None}
 
@@ -84,20 +84,51 @@ class ServiceRouteToolsRuntime:
             return None
         now = time.time()
         with self._intersections_lock:
-            if (
-                self._auto_resolve_cache.get('signature') == auto_signature
-                and now - float(self._auto_resolve_cache.get('timestamp') or 0.0) < self.auto_resolve_cooldown
-            ):
-                return None
-            self._auto_resolve_cache = {'signature': auto_signature, 'timestamp': now}
-        result = service_routes.auto_resolve_service_route_intersections(
-            report=report,
-            service_items=self.service_items(),
-            before_update=self.sync_udp_policy_config,
+            cached = dict(self._auto_resolve_cache)
+            if cached.get('signature') == auto_signature:
+                if cached.get('running'):
+                    return {'status': 'running', 'signature': auto_signature}
+                if now - float(cached.get('timestamp') or 0.0) < self.auto_resolve_cooldown:
+                    result = cached.get('result')
+                    if isinstance(result, dict):
+                        return dict(result)
+                    return None
+            self._auto_resolve_cache = {
+                'signature': auto_signature,
+                'timestamp': now,
+                'running': True,
+                'result': None,
+            }
+        service_items = self.service_items()
+        worker = threading.Thread(
+            target=self._auto_resolve_intersections_worker,
+            args=(dict(report), service_items, auto_signature),
+            daemon=True,
         )
+        worker.start()
+        return {'status': 'scheduled', 'signature': auto_signature}
+
+    def _auto_resolve_intersections_worker(self, report, service_items, auto_signature):
+        try:
+            result = service_routes.auto_resolve_service_route_intersections(
+                report=report,
+                service_items=service_items,
+                before_update=self.sync_udp_policy_config,
+            )
+            result['status'] = 'finished'
+        except Exception as exc:
+            result = {'status': 'error', 'services': 0, 'error': str(exc)}
         if result.get('services'):
             self.invalidate_web_status_cache()
-        return result
+        with self._intersections_lock:
+            self._auto_resolve_cache = {
+                'signature': auto_signature,
+                'timestamp': time.time(),
+                'running': False,
+                'result': dict(result),
+            }
+            self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
+            self._summary_cache = {'signature': None, 'summary': None}
 
     def _service_items_snapshot(self):
         presets = self.custom_check_presets_getter()
@@ -143,9 +174,9 @@ class ServiceRouteToolsRuntime:
                 return dict(cached_report)
         report = route_intersections.analyze_route_intersections()
         auto_result = self._maybe_auto_resolve_intersections(report, signature)
-        if auto_result and auto_result.get('services'):
-            signature = self._intersections_signature()
-            report = route_intersections.analyze_route_intersections()
+        if auto_result and auto_result.get('status') in ('scheduled', 'running'):
+            report['auto_resolve_pending'] = dict(auto_result)
+        elif auto_result and auto_result.get('services'):
             report['auto_resolved'] = dict(auto_result)
         with self._intersections_lock:
             self._intersections_cache = {
@@ -158,7 +189,7 @@ class ServiceRouteToolsRuntime:
     def invalidate_intersections_cache(self):
         with self._intersections_lock:
             self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
-            self._auto_resolve_cache = {'signature': None, 'timestamp': 0.0}
+            self._auto_resolve_cache = {'signature': None, 'timestamp': 0.0, 'running': False, 'result': None}
             self._summary_cache = {'signature': None, 'summary': None}
 
     def apply_service_route(self, service_key, target_protocol):

@@ -7790,8 +7790,9 @@ def test_web_template_scripts_helpers():
     assert 'function setupAsyncForms' in scripts
     assert 'function setupProtocolTabs()' in scripts
     assert "fetch('/api/protocol_panel?proto='" in scripts
-    assert 'function loadProtocolCheck(panel)' in scripts
+    assert 'function loadProtocolCheck(panel, retryCount)' in scripts
     assert "fetch('/api/protocol_check_panel?proto='" in scripts
+    assert 'loadProtocolCheck(panel, retryCount + 1)' in scripts
     assert 'data-protocol-check-deferred' in scripts
     assert 'setupServiceRouteMenus(subview)' in scripts
     assert 'setupAsyncForms(subview)' in scripts
@@ -8622,6 +8623,8 @@ def test_service_route_runtime_auto_resolves_known_intersections():
     analyze_calls = []
     auto_calls = []
     invalidations = []
+    worker_started = threading.Event()
+    worker_release = threading.Event()
 
     try:
         web_route_tools_runtime.route_intersections.route_files_signature = lambda: tuple(route_signature)
@@ -8647,8 +8650,11 @@ def test_service_route_runtime_auto_resolves_known_intersections():
 
         def fake_auto_resolve(**kwargs):
             auto_calls.append(kwargs)
+            worker_started.set()
+            worker_release.wait(timeout=3)
             return {
                 'services': 1,
+                'status': 'finished',
                 'applied': [{
                     'service_key': 'youtube',
                     'service_label': 'YouTube',
@@ -8670,9 +8676,16 @@ def test_service_route_runtime_auto_resolves_known_intersections():
             intersections_cache_ttl=1,
         )
         report = runtime.intersections_snapshot()
-        assert report['count'] == 0
-        assert report['auto_resolved']['applied'][0]['service_key'] == 'youtube'
+        assert report['count'] == 1
+        assert report['auto_resolve_pending']['status'] == 'scheduled'
+        assert worker_started.wait(timeout=1)
         assert len(auto_calls) == 1
+        assert invalidations == []
+        worker_release.set()
+        for _ in range(20):
+            if invalidations == ['status']:
+                break
+            time.sleep(0.05)
         assert invalidations == ['status']
         assert runtime.intersections_snapshot()['count'] == 0
         assert len(auto_calls) == 1

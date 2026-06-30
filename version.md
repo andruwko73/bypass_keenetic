@@ -1,3 +1,7 @@
+*v1.866 (30 Jun 2026) -* main
+
+*Moves automatic service-intersection repair out of the protocol-check HTTP response path, so the lazy Checks tab returns quickly while route/ipset cleanup runs in the background; also retries transient protocol-check fetch failures and refreshes the static asset revision.*
+
 *v1.865 (29 Jun 2026) -* main
 
 *Automatically repairs route/ipset intersections when the overlapping addresses are confidently tied to a catalog service that is already assigned to exactly one protocol, then refreshes the loaded ipset instead of requiring a manual target choice.*
