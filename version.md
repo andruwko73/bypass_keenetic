@@ -1,3 +1,7 @@
+*v1.868 (30 Jun 2026) -* main
+
+*Clarifies the protocol Checks UI while runtime-only ipset intersections are being refreshed: when list files are already clean and background route application is running, the UI now shows a route-application status instead of listing transient addresses as unresolved intersections.*
+
 *v1.867 (30 Jun 2026) -* main
 
 *Adds a cross-process guard for automatic service-route intersection repair so repeated protocol-check or service-route requests cannot start duplicate unblock_update/ipset refresh jobs; also makes the intersections cache TTL active so pending cleanup state refreshes instead of sticking indefinitely.*

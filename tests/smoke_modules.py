@@ -8524,6 +8524,24 @@ def test_service_route_ui_helpers():
     assert 'Discord' in intersections_warn_html
     assert 'discord.com' in intersections_warn_html
     assert '/route_intersections_resolve' in intersections_warn_html
+    runtime_pending_html = key_pool_web.web_route_intersections_html(
+        {
+            'count': 1,
+            'file_count': 0,
+            'runtime_count': 1,
+            'auto_resolve_pending': {'status': 'running', 'external': True},
+            'issues': [{
+                'message': 'runtime overlap',
+                'routes': ['vless', 'vless-2'],
+                'services': ['YouTube'],
+                'samples': ['64.233.161.94 / 64.233.161.0/24'],
+            }],
+        },
+        service_routes.protocol_options(),
+    )
+    assert 'ipset' in runtime_pending_html
+    assert '64.233.161.94' not in runtime_pending_html
+    assert '/route_intersections_resolve' not in runtime_pending_html
     profiles_html = key_pool_web.web_route_profiles_html([{'id': 'all', 'label': 'Все сервисы', 'description': 'desc'}])
     assert 'из каталога.</small>' not in profiles_html
     inactive_preset_html = key_pool_web.web_service_route_tools_html(

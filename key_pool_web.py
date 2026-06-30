@@ -611,10 +611,18 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
         if labels:
             auto_note = f'<small>Автоматически применено: {html.escape(", ".join(labels))}</small>'
     auto_pending = report.get('auto_resolve_pending') or {}
+    auto_status = str(auto_pending.get('status') or '').strip()
     if auto_pending and not auto_note:
-        auto_status = str(auto_pending.get('status') or '').strip()
         if auto_status in ('scheduled', 'running'):
             auto_note = '<small>Автоматическое исправление известных пересечений запущено в фоне. Обновите проверку через минуту.</small>'
+    if int(report.get('runtime_count') or 0) and not file_count and auto_status in ('scheduled', 'running'):
+        return f'''<div class="route-intersection-card route-intersection-warn">
+            <div>
+                <strong>Маршруты применяются</strong>
+                <small>Файлы списков уже очищены, загруженные ipset обновляются в фоне. Пересечения исчезнут после завершения refresh.</small>
+                {auto_note}
+            </div>
+        </div>'''
     buttons = []
     for item in ((protocol_options or []) if file_count else []):
         route_value = 'vless-2' if item['value'] == 'vless2' else item['value']

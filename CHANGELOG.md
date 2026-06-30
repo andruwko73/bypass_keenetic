@@ -1,3 +1,8 @@
+<a name="1.868"></a>
+# [1.868] - 30 Jun 2026
+
+- Clarifies the route-intersection UI for runtime-only ipset refreshes: when the list files are already clean and background auto-repair is applying routes, the Checks tab now shows a route-application status instead of exposing transient addresses as unresolved intersections.
+
 <a name="1.867"></a>
 # [1.867] - 30 Jun 2026
 
