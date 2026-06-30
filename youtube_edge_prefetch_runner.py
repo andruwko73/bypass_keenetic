@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import os
 import subprocess
 import sys
@@ -620,6 +621,42 @@ def ipset_delete(set_name, address):
         return False
 
 
+def _ipset_member_contains_address(member, address):
+    try:
+        address_obj = ipaddress.ip_address(str(address or '').strip())
+        network = ipaddress.ip_network(str(member or '').strip(), strict=False)
+    except Exception:
+        return False
+    return address_obj.version == network.version and address_obj in network
+
+
+def ipset_delete_overlaps(set_name, address):
+    if not youtube_edge_prefetch.is_public_ipv4(address):
+        return 0
+    try:
+        result = _run_command(['ipset', 'list', str(set_name)], timeout=3)
+    except Exception:
+        return 0
+    if result.returncode != 0:
+        return 0
+    deleted = 0
+    in_members = False
+    for raw_line in (result.stdout or '').splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == 'Members:':
+            in_members = True
+            continue
+        if not in_members:
+            continue
+        member = line.split()[0]
+        if member == address or _ipset_member_contains_address(member, address):
+            if ipset_delete(set_name, member):
+                deleted += 1
+    return deleted
+
+
 def delete_conntrack_for_address(address):
     deleted = 0
     for proto in ('tcp', 'udp'):
@@ -750,6 +787,7 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 ipset_contains=ipset_contains,
                 ipset_add=ipset_add,
                 ipset_delete=ipset_delete,
+                ipset_delete_overlaps=ipset_delete_overlaps,
                 delete_conntrack=delete_conntrack_for_address,
                 cache_ttl_seconds=_config_int(
                     'youtube_edge_prefetch_cache_ttl_seconds',
@@ -865,6 +903,7 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             ipset_contains=ipset_contains,
             ipset_add=ipset_add,
             ipset_delete=ipset_delete,
+            ipset_delete_overlaps=ipset_delete_overlaps,
             delete_conntrack=delete_conntrack_for_address,
             cache_ttl_seconds=_config_int(
                 'youtube_edge_prefetch_cache_ttl_seconds',

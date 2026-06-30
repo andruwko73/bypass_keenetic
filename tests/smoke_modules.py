@@ -3024,6 +3024,7 @@ def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
     present = {
         ('unblockvless', address),
         ('unblockvlessudp', address),
+        ('unblockvmess', '142.250.150.0/24'),
     }
     added = []
     deleted = []
@@ -3043,6 +3044,23 @@ def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
             deleted.append((set_name, ip))
         return existed
 
+    def ipset_delete_overlaps(set_name, ip):
+        removed = []
+        for existing_set, member in list(present):
+            if existing_set != set_name:
+                continue
+            try:
+                address_obj = youtube_edge_prefetch.ipaddress.ip_address(ip)
+                network = youtube_edge_prefetch.ipaddress.ip_network(member, strict=False)
+            except Exception:
+                continue
+            if address_obj.version == network.version and address_obj in network:
+                removed.append((existing_set, member))
+        for item in removed:
+            present.discard(item)
+            deleted.append(item)
+        return len(removed)
+
     def fake_getaddrinfo(host, port, family, socktype):
         return [(family, socktype, 0, '', (address, port))]
 
@@ -3055,6 +3073,7 @@ def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
             ipset_contains=ipset_contains,
             ipset_add=ipset_add,
             ipset_delete=ipset_delete,
+            ipset_delete_overlaps=ipset_delete_overlaps,
             delete_conntrack=lambda ip: 1,
             now_provider=lambda: 1_800_000,
             max_addresses_per_run=1,
@@ -3068,8 +3087,39 @@ def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
     assert ('unblockvless2udp', address) in added
     assert ('unblockvless', address) in deleted
     assert ('unblockvlessudp', address) in deleted
+    assert ('unblockvmess', '142.250.150.0/24') in deleted
     assert ('unblockvless', address) not in present
+    assert ('unblockvmess', '142.250.150.0/24') not in present
     assert ('unblockvless2', address) in present
+
+
+def test_youtube_edge_prefetch_runner_deletes_covering_ipset_network():
+    original_run_command = youtube_edge_prefetch_runner._run_command
+    deleted = []
+
+    def fake_run_command(args, timeout=3):
+        if args[:2] == ['ipset', 'list']:
+            return py_types.SimpleNamespace(
+                returncode=0,
+                stdout='Name: unblockvless\nMembers:\n142.250.150.0/24\n8.8.8.8\n',
+            )
+        if args[:2] == ['ipset', 'del']:
+            deleted.append(tuple(args[1:]))
+            return py_types.SimpleNamespace(returncode=0, stdout='')
+        return py_types.SimpleNamespace(returncode=1, stdout='')
+
+    try:
+        youtube_edge_prefetch_runner._run_command = fake_run_command
+        count = youtube_edge_prefetch_runner.ipset_delete_overlaps(
+            'unblockvless',
+            '142.250.150.119',
+        )
+    finally:
+        youtube_edge_prefetch_runner._run_command = original_run_command
+
+    assert count == 1
+    assert ('del', 'unblockvless', '142.250.150.0/24') in deleted
+    assert ('del', 'unblockvless', '8.8.8.8') not in deleted
 
 
 def test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof():
@@ -8874,6 +8924,7 @@ def main():
     test_youtube_edge_prefetch_extracts_watch_edge_hosts()
     test_youtube_edge_prefetch_priority_hosts_are_tried_before_cache()
     test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps()
+    test_youtube_edge_prefetch_runner_deletes_covering_ipset_network()
     test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof()
     test_youtube_edge_prefetch_skips_recent_bad_quality_cache()
     test_youtube_edge_prefetch_quality_probe_can_score_existing_ipset_entries()

@@ -460,6 +460,29 @@ def _other_sets(route_protocol):
     return tuple(sets)
 
 
+def _delete_from_other_sets(protocol, address, *, ipset_delete=None, ipset_delete_overlaps=None):
+    deleted = 0
+    for set_name in _other_sets(protocol):
+        deleted_here = 0
+        if ipset_delete_overlaps is not None:
+            try:
+                result = ipset_delete_overlaps(set_name, address)
+                if isinstance(result, bool):
+                    deleted_here += 1 if result else 0
+                elif result is not None:
+                    deleted_here += max(0, int(result or 0))
+            except Exception:
+                pass
+        if not deleted_here and ipset_delete is not None:
+            try:
+                if ipset_delete(set_name, address):
+                    deleted_here += 1
+            except Exception:
+                pass
+        deleted += deleted_here
+    return deleted
+
+
 def _recent_quality_failure(entry, now, cooldown_seconds):
     cooldown_seconds = max(0, int(cooldown_seconds or 0))
     if cooldown_seconds <= 0:
@@ -570,6 +593,7 @@ def restore_cached_ipsets(
     ipset_contains=None,
     ipset_add=None,
     ipset_delete=None,
+    ipset_delete_overlaps=None,
     delete_conntrack=None,
     now_provider=None,
     max_cache_entries=DEFAULT_MAX_CACHE_ENTRIES,
@@ -649,13 +673,13 @@ def restore_cached_ipsets(
         if not missing_sets:
             continue
 
-        if remove_from_other_sets and ipset_delete is not None:
-            for set_name in _other_sets(protocol):
-                try:
-                    if ipset_delete(set_name, address):
-                        status['deleted_sets'] += 1
-                except Exception:
-                    continue
+        if remove_from_other_sets and (ipset_delete is not None or ipset_delete_overlaps is not None):
+            status['deleted_sets'] += _delete_from_other_sets(
+                protocol,
+                address,
+                ipset_delete=ipset_delete,
+                ipset_delete_overlaps=ipset_delete_overlaps,
+            )
 
         added_any = False
         for set_name in missing_sets:
@@ -755,6 +779,7 @@ def prefetch_once(
     ipset_contains=None,
     ipset_add=None,
     ipset_delete=None,
+    ipset_delete_overlaps=None,
     delete_conntrack=None,
     now_provider=None,
     max_cache_entries=DEFAULT_MAX_CACHE_ENTRIES,
@@ -901,13 +926,13 @@ def prefetch_once(
             if score_candidate(candidate, address):
                 continue
 
-        if remove_from_other_sets and ipset_delete is not None:
-            for set_name in _other_sets(protocol):
-                try:
-                    if ipset_delete(set_name, address):
-                        status['deleted_sets'] += 1
-                except Exception:
-                    continue
+        if remove_from_other_sets and (ipset_delete is not None or ipset_delete_overlaps is not None):
+            status['deleted_sets'] += _delete_from_other_sets(
+                protocol,
+                address,
+                ipset_delete=ipset_delete,
+                ipset_delete_overlaps=ipset_delete_overlaps,
+            )
 
         added_any = False
         for set_name in missing_sets:

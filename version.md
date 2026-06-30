@@ -1,3 +1,7 @@
+*v1.869 (30 Jun 2026) -* main
+
+*Removes covering runtime ipset networks from non-YouTube routes when YouTube edge prefetch adds dynamic IPs to the selected route, preventing runtime-only route intersections from reappearing after refresh.*
+
 *v1.868 (30 Jun 2026) -* main
 
 *Clarifies the protocol Checks UI while runtime-only ipset intersections are being refreshed: when list files are already clean and background route application is running, the UI now shows a route-application status instead of listing transient addresses as unresolved intersections.*

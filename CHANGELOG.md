@@ -1,3 +1,8 @@
+<a name="1.869"></a>
+# [1.869] - 30 Jun 2026
+
+- Removes covering runtime ipset networks from non-YouTube routes when YouTube edge prefetch adds dynamic IPs to the selected YouTube route, so host-IP vs `/24` overlaps do not keep reappearing as runtime-only route intersections after refresh.
+
 <a name="1.868"></a>
 # [1.868] - 30 Jun 2026
 

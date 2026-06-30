@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.868, последнее изменение: 30.06.2026
+#  Файл: bot.py, Версия v1.869, последнее изменение: 30.06.2026
 
 import subprocess
 import os
@@ -3629,6 +3629,52 @@ def _ipset_delete_address(set_name, address):
         return False
 
 
+def _ipset_member_contains_address(member, address):
+    try:
+        address_obj = ipaddress.ip_address(str(address or '').strip())
+        network = ipaddress.ip_network(str(member or '').strip(), strict=False)
+    except Exception:
+        return False
+    return address_obj.version == network.version and address_obj in network
+
+
+def _ipset_delete_overlaps(set_name, address):
+    try:
+        if not _youtube_edge_prefetch().is_public_ipv4(address):
+            return 0
+    except Exception:
+        return 0
+    try:
+        result = subprocess.run(
+            ['ipset', 'list', str(set_name)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return 0
+    if result.returncode != 0:
+        return 0
+    deleted = 0
+    in_members = False
+    for raw_line in (result.stdout or '').splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == 'Members:':
+            in_members = True
+            continue
+        if not in_members:
+            continue
+        member = line.split()[0]
+        if member == address or _ipset_member_contains_address(member, address):
+            if _ipset_delete_address(set_name, member):
+                deleted += 1
+    return deleted
+
+
 def _delete_conntrack_for_address(address):
     deleted = 0
     for proto in ('tcp', 'udp'):
@@ -4007,6 +4053,7 @@ def _run_youtube_edge_prefetch_once():
                 ipset_contains=_ipset_contains,
                 ipset_add=_ipset_add_address,
                 ipset_delete=_ipset_delete_address,
+                ipset_delete_overlaps=_ipset_delete_overlaps,
                 delete_conntrack=_delete_conntrack_for_address,
                 cache_ttl_seconds=YOUTUBE_EDGE_PREFETCH_CACHE_TTL_SECONDS,
                 max_cache_entries=YOUTUBE_EDGE_PREFETCH_MAX_CACHE_ENTRIES,
