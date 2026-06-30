@@ -8544,6 +8544,7 @@ def test_service_route_runtime_helpers():
         service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
         telegram_icon_html=lambda opacity=1.0: 'TG',
         youtube_icon_html=lambda opacity=1.0: 'YT',
+        auto_resolve_lock_path='',
     )
     items = runtime.service_items()
     item_ids = {item['id'] for item in items}
@@ -8558,6 +8559,7 @@ def test_service_route_runtime_helpers():
         service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
         telegram_icon_html=lambda opacity=1.0: 'TG',
         youtube_icon_html=lambda opacity=1.0: 'YT',
+        auto_resolve_lock_path='',
     )
     assert 'chatgpt_services' not in {item['id'] for item in mutable_runtime.service_items()}
     chatgpt_preset = next(item for item in service_catalog.CUSTOM_CHECK_PRESETS if item.get('id') == 'chatgpt_services')
@@ -8583,6 +8585,7 @@ def test_service_route_runtime_intersections_cache_uses_signatures():
     original_analyze = web_route_tools_runtime.route_intersections.analyze_route_intersections
     route_signature = [('vless', 1, 10)]
     runtime_signature = ('status', 1, 10)
+    now = [1000.0]
     calls = []
 
     try:
@@ -8600,6 +8603,8 @@ def test_service_route_runtime_intersections_cache_uses_signatures():
             telegram_icon_html=lambda opacity=1.0: 'TG',
             youtube_icon_html=lambda opacity=1.0: 'YT',
             intersections_cache_ttl=1,
+            auto_resolve_lock_path='',
+            time_provider=lambda: now[0],
         )
         assert runtime.intersections_snapshot()['count'] == 1
         assert runtime.intersections_snapshot()['count'] == 1
@@ -8607,6 +8612,9 @@ def test_service_route_runtime_intersections_cache_uses_signatures():
         runtime_signature = ('status', 2, 20)
         assert runtime.intersections_snapshot()['count'] == 2
         assert len(calls) == 2
+        now[0] += 1.05
+        assert runtime.intersections_snapshot()['count'] == 3
+        assert len(calls) == 3
     finally:
         web_route_tools_runtime.route_intersections.route_files_signature = original_route_signature
         web_route_tools_runtime.route_intersections.runtime_ipset_signature = original_runtime_signature
@@ -8623,8 +8631,26 @@ def test_service_route_runtime_auto_resolves_known_intersections():
     analyze_calls = []
     auto_calls = []
     invalidations = []
-    worker_started = threading.Event()
-    worker_release = threading.Event()
+
+    class ImmediateThread:
+        def __init__(self, target, args=(), daemon=None):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+            self._alive = False
+
+        def start(self):
+            self._alive = True
+            try:
+                self.target(*self.args)
+            finally:
+                self._alive = False
+
+        def join(self, timeout=None):
+            return None
+
+        def is_alive(self):
+            return self._alive
 
     try:
         web_route_tools_runtime.route_intersections.route_files_signature = lambda: tuple(route_signature)
@@ -8650,8 +8676,6 @@ def test_service_route_runtime_auto_resolves_known_intersections():
 
         def fake_auto_resolve(**kwargs):
             auto_calls.append(kwargs)
-            worker_started.set()
-            worker_release.wait(timeout=3)
             return {
                 'services': 1,
                 'status': 'finished',
@@ -8667,28 +8691,89 @@ def test_service_route_runtime_auto_resolves_known_intersections():
 
         web_route_tools_runtime.route_intersections.analyze_route_intersections = fake_analyze
         web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections = fake_auto_resolve
-        runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
-            custom_check_presets_getter=lambda: service_catalog.CUSTOM_CHECK_PRESETS,
-            service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
-            telegram_icon_html=lambda opacity=1.0: 'TG',
-            youtube_icon_html=lambda opacity=1.0: 'YT',
-            invalidate_web_status_cache=lambda: invalidations.append('status'),
-            intersections_cache_ttl=1,
-        )
-        report = runtime.intersections_snapshot()
-        assert report['count'] == 1
-        assert report['auto_resolve_pending']['status'] == 'scheduled'
-        assert worker_started.wait(timeout=1)
-        assert len(auto_calls) == 1
-        assert invalidations == []
-        worker_release.set()
-        for _ in range(20):
-            if invalidations == ['status']:
-                break
-            time.sleep(0.05)
-        assert invalidations == ['status']
-        assert runtime.intersections_snapshot()['count'] == 0
-        assert len(auto_calls) == 1
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
+                custom_check_presets_getter=lambda: service_catalog.CUSTOM_CHECK_PRESETS,
+                service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+                telegram_icon_html=lambda opacity=1.0: 'TG',
+                youtube_icon_html=lambda opacity=1.0: 'YT',
+                invalidate_web_status_cache=lambda: invalidations.append('status'),
+                intersections_cache_ttl=1,
+                auto_resolve_lock_path=str(Path(tmp) / 'auto-resolve.lock'),
+                thread_factory=ImmediateThread,
+            )
+            report = runtime.intersections_snapshot()
+            assert report['count'] == 1
+            assert report['auto_resolve_pending']['status'] == 'scheduled'
+            assert len(auto_calls) == 1
+            assert not runtime._auto_resolve_worker.is_alive()
+            assert invalidations == ['status']
+            assert runtime.intersections_snapshot()['count'] == 0
+            assert len(auto_calls) == 1
+    finally:
+        web_route_tools_runtime.route_intersections.route_files_signature = original_route_signature
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = original_runtime_signature
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = original_analyze
+        web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections = original_auto_resolve
+
+
+def test_service_route_runtime_auto_resolve_uses_cross_runtime_lock():
+    original_route_signature = web_route_tools_runtime.route_intersections.route_files_signature
+    original_runtime_signature = web_route_tools_runtime.route_intersections.runtime_ipset_signature
+    original_analyze = web_route_tools_runtime.route_intersections.analyze_route_intersections
+    original_auto_resolve = web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections
+    route_signature = [('vless', 1, 10)]
+    runtime_signature = ('status', 1, 10)
+    auto_calls = []
+
+    try:
+        web_route_tools_runtime.route_intersections.route_files_signature = lambda: tuple(route_signature)
+        web_route_tools_runtime.route_intersections.runtime_ipset_signature = lambda: runtime_signature
+
+        def fake_analyze():
+            return {
+                'count': 1,
+                'file_count': 0,
+                'runtime_count': 1,
+                'issues': [{
+                    'kind': 'runtime_ipset_overlap',
+                    'routes': ['vless', 'vless-2'],
+                    'samples': ['64.233.161.94 / 64.233.161.0/24'],
+                    'services': ['YouTube'],
+                    'service_keys': ['youtube'],
+                    'message': 'runtime overlap',
+                }],
+            }
+
+        def fake_auto_resolve(**kwargs):
+            auto_calls.append(kwargs)
+            return {'services': 1, 'status': 'finished', 'applied': []}
+
+        web_route_tools_runtime.route_intersections.analyze_route_intersections = fake_analyze
+        web_route_tools_runtime.service_routes.auto_resolve_service_route_intersections = fake_auto_resolve
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = str(Path(tmp) / 'auto-resolve.lock')
+            Path(lock_path).write_text(f'{os.getpid()} 1000.0\n', encoding='utf-8')
+
+            def make_runtime():
+                return web_route_tools_runtime.ServiceRouteToolsRuntime(
+                    custom_check_presets_getter=lambda: service_catalog.CUSTOM_CHECK_PRESETS,
+                    service_icon_html=lambda icon, label, opacity=1.0, size=18: f'<span>{label}</span>',
+                    telegram_icon_html=lambda opacity=1.0: 'TG',
+                    youtube_icon_html=lambda opacity=1.0: 'YT',
+                    intersections_cache_ttl=1,
+                    auto_resolve_lock_path=lock_path,
+                    auto_resolve_lock_ttl=60,
+                    time_provider=lambda: 1001.0,
+                )
+
+            second = make_runtime()
+            second_report = second.intersections_snapshot()
+            assert second_report['auto_resolve_pending']['status'] == 'running'
+            assert second_report['auto_resolve_pending'].get('external') is True
+            assert len(auto_calls) == 0
+            assert Path(lock_path).exists()
     finally:
         web_route_tools_runtime.route_intersections.route_files_signature = original_route_signature
         web_route_tools_runtime.route_intersections.runtime_ipset_signature = original_runtime_signature
@@ -8813,6 +8898,7 @@ def main():
     test_service_route_runtime_helpers()
     test_service_route_runtime_intersections_cache_uses_signatures()
     test_service_route_runtime_auto_resolves_known_intersections()
+    test_service_route_runtime_auto_resolve_uses_cross_runtime_lock()
     test_pool_probe_runner_failover_candidate()
     print('smoke_modules: ok')
 

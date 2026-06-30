@@ -1,3 +1,9 @@
+<a name="1.867"></a>
+# [1.867] - 30 Jun 2026
+
+- Adds a cross-process lock and active unblock-update detection around automatic service-route intersection repair, preventing parallel protocol-check/service-route requests or bot restarts from spawning duplicate `unblock_update.sh` / `unblock_ipset.sh` refreshes.
+- Enforces the route-intersection cache TTL so a pending auto-repair state is refreshed instead of being held indefinitely by an unchanged route signature.
+
 <a name="1.866"></a>
 # [1.866] - 30 Jun 2026
 

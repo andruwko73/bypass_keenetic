@@ -1,3 +1,7 @@
+*v1.867 (30 Jun 2026) -* main
+
+*Adds a cross-process guard for automatic service-route intersection repair so repeated protocol-check or service-route requests cannot start duplicate unblock_update/ipset refresh jobs; also makes the intersections cache TTL active so pending cleanup state refreshes instead of sticking indefinitely.*
+
 *v1.866 (30 Jun 2026) -* main
 
 *Moves automatic service-intersection repair out of the protocol-check HTTP response path, so the lazy Checks tab returns quickly while route/ipset cleanup runs in the background; also retries transient protocol-check fetch failures and refreshes the static asset revision.*

@@ -1,12 +1,80 @@
 import key_pool_web
+import os
 import route_intersections
 import service_routes
 import threading
 import time
 
 
+AUTO_RESOLVE_LOCK_PATH = '/opt/var/run/bypass_service_route_auto_resolve.lock'
+AUTO_RESOLVE_BUSY_MARKERS = (
+    '/opt/bin/unblock_update.sh',
+    '/opt/bin/unblock_ipset.sh',
+    '/opt/bin/unblock_dnsmasq.sh',
+)
+
+
 def _noop():
     return None
+
+
+def _process_running(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if os.name == 'nt':
+        return pid == os.getpid()
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _read_process_cmdline(pid, proc_root='/proc'):
+    try:
+        with open(os.path.join(proc_root, str(pid), 'cmdline'), 'rb') as file:
+            return file.read(4096).replace(b'\x00', b' ').decode('utf-8', 'ignore')
+    except Exception:
+        return ''
+
+
+def _busy_update_process_running(proc_root='/proc', markers=AUTO_RESOLVE_BUSY_MARKERS):
+    try:
+        names = os.listdir(proc_root)
+    except Exception:
+        return False
+    for name in names:
+        if not str(name).isdigit():
+            continue
+        cmdline = _read_process_cmdline(name, proc_root=proc_root)
+        if cmdline and any(marker in cmdline for marker in markers):
+            return True
+    return False
+
+
+def _read_auto_resolve_lock(lock_path):
+    try:
+        with open(lock_path, 'r', encoding='utf-8', errors='ignore') as file:
+            parts = file.read().strip().split()
+    except Exception:
+        return 0, 0.0
+    pid = 0
+    timestamp = 0.0
+    if parts:
+        try:
+            pid = int(parts[0])
+        except (TypeError, ValueError):
+            pid = 0
+    if len(parts) > 1:
+        try:
+            timestamp = float(parts[1])
+        except (TypeError, ValueError):
+            timestamp = 0.0
+    return pid, timestamp
 
 
 class ServiceRouteToolsRuntime:
@@ -21,6 +89,10 @@ class ServiceRouteToolsRuntime:
         invalidate_web_status_cache=None,
         intersections_cache_ttl=20.0,
         auto_resolve_cooldown=300.0,
+        auto_resolve_lock_path=AUTO_RESOLVE_LOCK_PATH,
+        auto_resolve_lock_ttl=600.0,
+        time_provider=time.time,
+        thread_factory=threading.Thread,
     ):
         self.custom_check_presets_getter = custom_check_presets_getter
         self.service_icon_html = service_icon_html
@@ -30,9 +102,14 @@ class ServiceRouteToolsRuntime:
         self.invalidate_web_status_cache = invalidate_web_status_cache or _noop
         self.intersections_cache_ttl = max(1.0, float(intersections_cache_ttl or 1.0))
         self.auto_resolve_cooldown = max(30.0, float(auto_resolve_cooldown or 30.0))
+        self.auto_resolve_lock_path = str(auto_resolve_lock_path or '').strip()
+        self.auto_resolve_lock_ttl = max(60.0, float(auto_resolve_lock_ttl or 60.0))
+        self._time = time_provider or time.time
+        self._thread_factory = thread_factory or threading.Thread
         self._intersections_lock = threading.Lock()
         self._intersections_cache = {'signature': None, 'timestamp': 0.0, 'report': None}
         self._auto_resolve_cache = {'signature': None, 'timestamp': 0.0, 'running': False, 'result': None}
+        self._auto_resolve_worker = None
         self._service_items_cache = {'signature': None, 'items': None}
         self._summary_cache = {'signature': None, 'summary': None}
 
@@ -76,18 +153,76 @@ class ServiceRouteToolsRuntime:
             ))
         return (signature[0], tuple(issue_parts))
 
+    def _auto_resolve_lock_active(self, lock_path, now):
+        if _busy_update_process_running():
+            return True
+        pid, timestamp = _read_auto_resolve_lock(lock_path)
+        if pid and _process_running(pid):
+            return True
+        if timestamp and now - timestamp < self.auto_resolve_lock_ttl:
+            return True
+        try:
+            os.unlink(lock_path)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            return True
+        return False
+
+    def _acquire_auto_resolve_lock(self, auto_signature):
+        if not self.auto_resolve_lock_path:
+            return '', None
+        now = self._time()
+        if _busy_update_process_running():
+            return '', {'status': 'running', 'signature': auto_signature, 'external': True}
+        directory = os.path.dirname(self.auto_resolve_lock_path)
+        if directory:
+            try:
+                os.makedirs(directory, exist_ok=True)
+            except Exception:
+                return '', {'status': 'running', 'signature': auto_signature, 'external': True}
+        payload = f'{os.getpid()} {now:.3f}\n'
+        for _attempt in range(2):
+            try:
+                fd = os.open(self.auto_resolve_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                try:
+                    os.write(fd, payload.encode('ascii', 'ignore'))
+                finally:
+                    os.close(fd)
+                return self.auto_resolve_lock_path, None
+            except FileExistsError:
+                if self._auto_resolve_lock_active(self.auto_resolve_lock_path, now):
+                    return '', {'status': 'running', 'signature': auto_signature, 'external': True}
+            except Exception:
+                return '', {'status': 'running', 'signature': auto_signature, 'external': True}
+        return '', {'status': 'running', 'signature': auto_signature, 'external': True}
+
+    def _release_auto_resolve_lock(self, lock_path):
+        if not lock_path:
+            return
+        pid, _timestamp = _read_auto_resolve_lock(lock_path)
+        if pid and pid != os.getpid():
+            return
+        try:
+            os.unlink(lock_path)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
     def _maybe_auto_resolve_intersections(self, report, signature):
         if not int(report.get('count') or 0):
             return None
         auto_signature = self._auto_resolve_signature(report, signature)
         if not auto_signature[1]:
             return None
-        now = time.time()
+        now = self._time()
         with self._intersections_lock:
             cached = dict(self._auto_resolve_cache)
             if cached.get('signature') == auto_signature:
                 if cached.get('running'):
-                    return {'status': 'running', 'signature': auto_signature}
+                    if now - float(cached.get('timestamp') or 0.0) < self.auto_resolve_lock_ttl:
+                        return {'status': 'running', 'signature': auto_signature}
                 if now - float(cached.get('timestamp') or 0.0) < self.auto_resolve_cooldown:
                     result = cached.get('result')
                     if isinstance(result, dict):
@@ -99,16 +234,27 @@ class ServiceRouteToolsRuntime:
                 'running': True,
                 'result': None,
             }
+        lock_path, external_result = self._acquire_auto_resolve_lock(auto_signature)
+        if external_result:
+            with self._intersections_lock:
+                self._auto_resolve_cache = {
+                    'signature': auto_signature,
+                    'timestamp': now,
+                    'running': True,
+                    'result': dict(external_result),
+                }
+            return dict(external_result)
         service_items = self.service_items()
-        worker = threading.Thread(
+        worker = self._thread_factory(
             target=self._auto_resolve_intersections_worker,
-            args=(dict(report), service_items, auto_signature),
+            args=(dict(report), service_items, auto_signature, lock_path),
             daemon=True,
         )
+        self._auto_resolve_worker = worker
         worker.start()
         return {'status': 'scheduled', 'signature': auto_signature}
 
-    def _auto_resolve_intersections_worker(self, report, service_items, auto_signature):
+    def _auto_resolve_intersections_worker(self, report, service_items, auto_signature, lock_path):
         try:
             result = service_routes.auto_resolve_service_route_intersections(
                 report=report,
@@ -118,12 +264,14 @@ class ServiceRouteToolsRuntime:
             result['status'] = 'finished'
         except Exception as exc:
             result = {'status': 'error', 'services': 0, 'error': str(exc)}
+        finally:
+            self._release_auto_resolve_lock(lock_path)
         if result.get('services'):
             self.invalidate_web_status_cache()
         with self._intersections_lock:
             self._auto_resolve_cache = {
                 'signature': auto_signature,
-                'timestamp': time.time(),
+                'timestamp': self._time(),
                 'running': False,
                 'result': dict(result),
             }
@@ -166,24 +314,32 @@ class ServiceRouteToolsRuntime:
         ]
 
     def intersections_snapshot(self):
-        now = time.time()
+        now = self._time()
         signature = self._intersections_signature()
         with self._intersections_lock:
             cached_report = self._intersections_cache.get('report')
-            if cached_report is not None and self._intersections_cache.get('signature') == signature:
+            cached_timestamp = float(self._intersections_cache.get('timestamp') or 0.0)
+            if (
+                cached_report is not None
+                and self._intersections_cache.get('signature') == signature
+                and now - cached_timestamp < self.intersections_cache_ttl
+            ):
                 return dict(cached_report)
         report = route_intersections.analyze_route_intersections()
         auto_result = self._maybe_auto_resolve_intersections(report, signature)
+        cacheable_report = True
         if auto_result and auto_result.get('status') in ('scheduled', 'running'):
             report['auto_resolve_pending'] = dict(auto_result)
+            cacheable_report = False
         elif auto_result and auto_result.get('services'):
             report['auto_resolved'] = dict(auto_result)
-        with self._intersections_lock:
-            self._intersections_cache = {
-                'signature': signature,
-                'timestamp': now,
-                'report': dict(report),
-            }
+        if cacheable_report:
+            with self._intersections_lock:
+                self._intersections_cache = {
+                    'signature': signature,
+                    'timestamp': now,
+                    'report': dict(report),
+                }
         return dict(report)
 
     def invalidate_intersections_cache(self):
