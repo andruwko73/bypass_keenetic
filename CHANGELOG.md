@@ -1,3 +1,8 @@
+<a name="1.872"></a>
+# [1.872] - 30 Jun 2026
+
+- Splits mixed runtime ipset intersections by service owner, so one overlap report containing YouTube and Telegram can clean each losing route separately instead of skipping the issue because the services target different protocols.
+
 <a name="1.871"></a>
 # [1.871] - 30 Jun 2026
 

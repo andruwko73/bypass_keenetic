@@ -1,3 +1,7 @@
+*v1.872 (30 Jun 2026) -* main
+
+*Splits mixed runtime ipset intersections by service owner, so one overlap report containing YouTube and Telegram can clean each losing route separately instead of skipping the issue because the services target different protocols.*
+
 *v1.871 (30 Jun 2026) -* main
 
 *Makes runtime ipset intersection repair service-aware for the whole service catalog: live overlaps are cleaned from the losing route based on the service's selected protocol, without forcing a full unblock rebuild for runtime-only conflicts.*

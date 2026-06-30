@@ -8600,6 +8600,70 @@ def test_service_route_runtime_cleanup_uses_service_owner_for_catalog_services()
         assert ipsets['unblockvless'] == ['198.51.100.1']
 
 
+def test_service_route_runtime_cleanup_splits_mixed_service_targets():
+    with tempfile.TemporaryDirectory() as tmp:
+        deleted = []
+        for route_file in ('vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        telegram_entries = service_catalog.service_route_entries('telegram')
+        youtube_entries = service_catalog.service_route_entries('youtube')
+        (Path(tmp) / 'vless.txt').write_text('\n'.join(telegram_entries) + '\n', encoding='utf-8')
+        (Path(tmp) / 'vless-2.txt').write_text('\n'.join(youtube_entries) + '\n', encoding='utf-8')
+        ipsets = {
+            'unblockvless': ['64.233.161.97', '104.21.0.0/16'],
+            'unblockvless2': ['64.233.161.0/24', '104.21.72.109'],
+        }
+
+        def fake_run(args, stdout=None, stderr=None, text=None, timeout=None, check=None):
+            if args[:2] == ['ipset', 'list']:
+                set_name = args[-1]
+                members = ipsets.get(set_name, [])
+                output = 'Name: {0}\nMembers:\n{1}\n'.format(set_name, '\n'.join(members))
+                return py_types.SimpleNamespace(stdout=output, returncode=0)
+            if args[:2] == ['ipset', 'del']:
+                _, _, set_name, member = args
+                deleted.append((set_name, member))
+                if member in ipsets.get(set_name, []):
+                    ipsets[set_name].remove(member)
+                    return py_types.SimpleNamespace(stdout='', returncode=0)
+                return py_types.SimpleNamespace(stdout='', returncode=1)
+            return py_types.SimpleNamespace(stdout='', returncode=0)
+
+        result = service_routes.cleanup_runtime_service_route_intersections(
+            report={
+                'count': 1,
+                'file_count': 0,
+                'runtime_count': 1,
+                'issues': [{
+                    'kind': 'runtime_ipset_overlap',
+                    'routes': ['vless', 'vless-2'],
+                    'set_names': ['unblockvless', 'unblockvless2'],
+                        'samples': [
+                            '64.233.161.97 / 64.233.161.0/24',
+                            '104.21.0.0/16 / 104.21.72.109',
+                        ],
+                    'services': ['YouTube', 'Telegram'],
+                    'service_keys': ['youtube', 'telegram'],
+                    'message': 'mixed runtime overlap',
+                }],
+            },
+            service_items=[{'id': 'youtube'}, {'id': 'telegram'}],
+            unblock_dir=tmp,
+            run_command=fake_run,
+        )
+
+        assert result['services'] == 2
+        assert result['service_keys'] == ['telegram', 'youtube']
+        assert result['pairs'] == 2
+        assert result['deleted_members'] == 2
+        assert deleted == [
+            ('unblockvless', '64.233.161.97'),
+            ('unblockvless2', '104.21.72.109'),
+        ]
+        assert ipsets['unblockvless'] == ['104.21.0.0/16']
+        assert ipsets['unblockvless2'] == ['64.233.161.0/24']
+
+
 def test_route_intersections_detect_runtime_ipset_overlap():
     with tempfile.TemporaryDirectory() as tmp:
         for route_file, content in (

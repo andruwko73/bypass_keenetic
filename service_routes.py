@@ -404,6 +404,24 @@ def _service_targets(service_keys, *, unblock_dir=UNBLOCK_DIR):
     return targets, missing_targets, unique_targets
 
 
+def _service_runtime_networks(service_key):
+    networks = []
+    for entry in _service_entries(service_key):
+        network = _runtime_ip_network(entry)
+        if network:
+            networks.append(network)
+    return tuple(networks)
+
+
+def _runtime_network_overlaps_any(network, networks):
+    if not network:
+        return False
+    for service_network in networks or ():
+        if network.version == service_network.version and network.overlaps(service_network):
+            return True
+    return False
+
+
 def _runtime_command(args, *, run_command=subprocess.run, stdout=subprocess.PIPE, timeout=3):
     try:
         return run_command(
@@ -630,6 +648,12 @@ def _delete_runtime_pair_overlaps(pair, *, run_command=subprocess.run):
         loser_priority_members=loser_priority,
         winner_priority_members=winner_priority,
     )
+    service_networks = pair.get('service_networks')
+    if service_networks is not None:
+        delete_members = [
+            member for member in delete_members
+            if _runtime_network_overlaps_any(_runtime_ip_network(member), service_networks)
+        ]
     deleted = 0
     failed = 0
     for member in delete_members:
@@ -637,12 +661,14 @@ def _delete_runtime_pair_overlaps(pair, *, run_command=subprocess.run):
             deleted += 1
         else:
             failed += 1
-    return {
+    result = {
         **pair,
         'overlap_members': len(delete_members),
         'deleted_members': deleted,
         'failed_members': failed,
     }
+    result.pop('service_networks', None)
+    return result
 
 
 def cleanup_runtime_service_route_intersections(
@@ -679,34 +705,38 @@ def cleanup_runtime_service_route_intersections(
                 'services': missing_targets,
                 'issue': issue.get('message') or issue.get('entry') or '',
             })
-            continue
-        if len(unique_targets) != 1:
-            skipped.append({
-                'reason': 'conflicting_targets',
-                'services': service_keys,
-                'targets': dict(targets),
-                'issue': issue.get('message') or issue.get('entry') or '',
-            })
-            continue
-        target_protocol = next(iter(unique_targets))
-        pairs = _runtime_cleanup_pairs_for_issue(issue, target_protocol)
-        if not pairs:
-            skipped.append({
-                'reason': 'no_runtime_pair',
-                'services': service_keys,
-                'target_protocol': target_protocol,
-                'issue': issue.get('message') or issue.get('entry') or '',
-            })
-            continue
-        for pair in pairs:
-            key = (pair.get('loser_set'), pair.get('winner_set'), pair.get('kind'))
-            if key in pair_keys:
+        mixed_targets = len(unique_targets) > 1
+        for service_key, target_protocol in targets.items():
+            service_networks = None
+            if mixed_targets:
+                service_networks = _service_runtime_networks(service_key)
+                if not service_networks:
+                    skipped.append({
+                        'reason': 'no_service_network_filter',
+                        'services': [service_key],
+                        'target_protocol': target_protocol,
+                        'issue': issue.get('message') or issue.get('entry') or '',
+                    })
+                    continue
+            pairs = _runtime_cleanup_pairs_for_issue(issue, target_protocol)
+            if not pairs:
+                skipped.append({
+                    'reason': 'no_runtime_pair',
+                    'services': [service_key],
+                    'target_protocol': target_protocol,
+                    'issue': issue.get('message') or issue.get('entry') or '',
+                })
                 continue
-            pair_keys.add(key)
-            pair['services'] = list(service_keys)
-            pair['target_protocol'] = target_protocol
-            pair_plans.append(pair)
-            planned_services.update(service_keys)
+            for pair in pairs:
+                key = (service_key, pair.get('loser_set'), pair.get('winner_set'), pair.get('kind'))
+                if key in pair_keys:
+                    continue
+                pair_keys.add(key)
+                pair['services'] = [service_key]
+                pair['target_protocol'] = target_protocol
+                pair['service_networks'] = service_networks
+                pair_plans.append(pair)
+                planned_services.add(service_key)
 
     applied = [
         _delete_runtime_pair_overlaps(pair, run_command=run_command)
