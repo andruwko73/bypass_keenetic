@@ -1,3 +1,7 @@
+*v1.870 (30 Jun 2026) -* main
+
+*Also cleans non-YouTube runtime ipsets when the selected YouTube route already contains a dynamic IP through a covering network, so prefetch cleanup runs even when no new target ipset entry has to be added.*
+
 *v1.869 (30 Jun 2026) -* main
 
 *Removes covering runtime ipset networks from non-YouTube routes when YouTube edge prefetch adds dynamic IPs to the selected route, preventing runtime-only route intersections from reappearing after refresh.*

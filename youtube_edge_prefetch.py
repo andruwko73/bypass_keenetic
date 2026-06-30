@@ -671,6 +671,13 @@ def restore_cached_ipsets(
             if not present:
                 missing_sets.append(set_name)
         if not missing_sets:
+            if remove_from_other_sets and (ipset_delete is not None or ipset_delete_overlaps is not None):
+                status['deleted_sets'] += _delete_from_other_sets(
+                    protocol,
+                    address,
+                    ipset_delete=ipset_delete,
+                    ipset_delete_overlaps=ipset_delete_overlaps,
+                )
             continue
 
         if remove_from_other_sets and (ipset_delete is not None or ipset_delete_overlaps is not None):
@@ -918,6 +925,15 @@ def prefetch_once(
             if not present:
                 missing_sets.append(set_name)
         if not missing_sets:
+            if not quality_reject and remove_from_other_sets and (
+                ipset_delete is not None or ipset_delete_overlaps is not None
+            ):
+                status['deleted_sets'] += _delete_from_other_sets(
+                    protocol,
+                    address,
+                    ipset_delete=ipset_delete,
+                    ipset_delete_overlaps=ipset_delete_overlaps,
+                )
             continue
         if quality_reject:
             continue

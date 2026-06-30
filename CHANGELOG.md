@@ -1,3 +1,8 @@
+<a name="1.870"></a>
+# [1.870] - 30 Jun 2026
+
+- Also cleans non-YouTube runtime ipsets when the selected YouTube route already contains a dynamic IP through a covering network, so prefetch cleanup runs even when no new target ipset entry has to be added.
+
 <a name="1.869"></a>
 # [1.869] - 30 Jun 2026
 

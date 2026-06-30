@@ -3122,6 +3122,70 @@ def test_youtube_edge_prefetch_runner_deletes_covering_ipset_network():
     assert ('del', 'unblockvless', '8.8.8.8') not in deleted
 
 
+def test_youtube_edge_prefetch_cleans_other_sets_when_target_network_already_contains_ip():
+    address = '142.250.150.119'
+    present = {
+        ('unblockvless2', '142.250.150.0/24'),
+        ('unblockvless2udp', '142.250.150.0/24'),
+        ('unblockvless', address),
+    }
+    added = []
+    deleted = []
+
+    def member_contains_ip(member, ip):
+        try:
+            address_obj = youtube_edge_prefetch.ipaddress.ip_address(ip)
+            network = youtube_edge_prefetch.ipaddress.ip_network(member, strict=False)
+        except Exception:
+            return False
+        return address_obj.version == network.version and address_obj in network
+
+    def ipset_contains(set_name, ip):
+        return any(existing_set == set_name and member_contains_ip(member, ip) for existing_set, member in present)
+
+    def ipset_add(set_name, ip):
+        added.append((set_name, ip))
+        return True, ''
+
+    def ipset_delete_overlaps(set_name, ip):
+        removed = [
+            (existing_set, member)
+            for existing_set, member in list(present)
+            if existing_set == set_name and member_contains_ip(member, ip)
+        ]
+        for item in removed:
+            present.discard(item)
+            deleted.append(item)
+        return len(removed)
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        return [(family, socktype, 0, '', (address, port))]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        status = youtube_edge_prefetch.prefetch_once(
+            route_protocol='vless2',
+            cache_path=str(Path(tmp) / 'youtube_edge_cache.json'),
+            hosts=('www.youtube.com',),
+            dns_servers=('local',),
+            ipset_contains=ipset_contains,
+            ipset_add=ipset_add,
+            ipset_delete_overlaps=ipset_delete_overlaps,
+            delete_conntrack=lambda ip: 1,
+            now_provider=lambda: 1_800_000,
+            max_addresses_per_run=1,
+            getaddrinfo=fake_getaddrinfo,
+            run_command=lambda args, timeout: '',
+        )
+
+    assert status['ok'] is True
+    assert status['added_addresses'] == 0
+    assert added == []
+    assert status['deleted_sets'] == 1
+    assert ('unblockvless', address) in deleted
+    assert ('unblockvless', address) not in present
+    assert ('unblockvless2', '142.250.150.0/24') in present
+
+
 def test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof():
     addresses = {
         'www.youtube.com': '142.250.150.119',
@@ -8925,6 +8989,7 @@ def main():
     test_youtube_edge_prefetch_priority_hosts_are_tried_before_cache()
     test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps()
     test_youtube_edge_prefetch_runner_deletes_covering_ipset_network()
+    test_youtube_edge_prefetch_cleans_other_sets_when_target_network_already_contains_ip()
     test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof()
     test_youtube_edge_prefetch_skips_recent_bad_quality_cache()
     test_youtube_edge_prefetch_quality_probe_can_score_existing_ipset_entries()
