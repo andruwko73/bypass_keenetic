@@ -2066,11 +2066,19 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'cleanup_runtime_service_route_intersections' in s99unblock
     assert 'run_service_runtime_dedupe' in s99unblock
     assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in s99unblock
+    assert 'ROUTE_IPSET_SIGNATURE_SETS="${ROUTE_IPSET_SIGNATURE_SETS:-unblocksh unblockshudp unblocksh6' in s99unblock
     assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in s99unblock
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in s99unblock
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in s99unblock
     assert 'apply_vless_priority_domain_ips' in s99unblock
     assert 'route_file_signature()' in s99unblock
+    assert 'portable_stream_signature()' in s99unblock
+    assert 'ipset_members_signature()' in s99unblock
+    assert 'runtime_ipset_save_signature()' in s99unblock
+    assert 'runtime_ipset_signature()' in s99unblock
+    assert 'runtime_ipsets=$(runtime_ipset_signature)' in s99unblock
+    assert 'ipset save 2>/dev/null | awk' in s99unblock
+    assert 'sha256sum 2>/dev/null | awk' in s99unblock
     assert 'wc -c < "$route_file"' in s99unblock
     assert 'route_file_marker_count()' in s99unblock
     assert '"vmess:$UNBLOCK_DIR/vmess.txt"' in s99unblock

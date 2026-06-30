@@ -1,3 +1,8 @@
+<a name="1.873"></a>
+# [1.873] - 30 Jun 2026
+
+- Adds live route-ipset hashes to the `S99unblock` runtime-dedupe signature, so service route overlaps are cleaned right after the real ipset contents change instead of waiting for the force interval when route files and status timestamps stay unchanged.
+
 <a name="1.872"></a>
 # [1.872] - 30 Jun 2026
 

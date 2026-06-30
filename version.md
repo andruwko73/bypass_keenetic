@@ -1,3 +1,7 @@
+*v1.873 (30 Jun 2026) -* main
+
+*Adds live route-ipset hashes to the S99unblock runtime-dedupe signature, so service route overlaps are cleaned right after the real ipset contents change instead of waiting for the force interval when route files and status timestamps stay unchanged.*
+
 *v1.872 (30 Jun 2026) -* main
 
 *Splits mixed runtime ipset intersections by service owner, so one overlap report containing YouTube and Telegram can clean each losing route separately instead of skipping the issue because the services target different protocols.*
