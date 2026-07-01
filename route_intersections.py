@@ -313,6 +313,96 @@ def _network_overlap_samples(
     return samples, match_count
 
 
+def _domain_suffix_issues(entries_by_route, shared_entries, max_issues):
+    domain_items = []
+    domain_index = {}
+    for route, entries in entries_by_route.items():
+        for entry in entries:
+            domain = _domain_key(entry)
+            if not domain:
+                continue
+            item = (domain, entry, route)
+            domain_items.append(item)
+            domain_index.setdefault(domain, []).append(item)
+
+    issues = []
+    suffix_pairs = set()
+    for domain, entry, route in domain_items:
+        labels = domain.split('.')
+        for offset in range(1, len(labels)):
+            suffix = '.'.join(labels[offset:])
+            if not suffix:
+                continue
+            for _other_domain, other_entry, other_route in domain_index.get(suffix, ()):
+                if route == other_route:
+                    continue
+                if (
+                    _entry_key(entry) in shared_entries
+                    and _entry_key(other_entry) in shared_entries
+                ):
+                    continue
+                pair = tuple(sorted((entry, other_entry))) + tuple(sorted((route, other_route)))
+                if pair in suffix_pairs:
+                    continue
+                suffix_pairs.add(pair)
+                issues.append({
+                    'kind': 'domain_suffix',
+                    'entry': other_entry,
+                    'entries': sorted({entry, other_entry}),
+                    'routes': sorted({route, other_route}),
+                    'message': f'{entry} пересекается с {other_entry}',
+                })
+                if len(issues) >= max_issues:
+                    return issues
+    return issues
+
+
+def _file_network_overlap_issues(entries_by_route, max_issues):
+    networks_by_version = {4: [], 6: []}
+    for route, entries in entries_by_route.items():
+        for entry in entries:
+            network = _ip_network(entry)
+            if not network:
+                continue
+            networks_by_version[network.version].append((
+                int(network.network_address),
+                int(network.broadcast_address),
+                entry,
+                route,
+                network,
+            ))
+
+    issues = []
+    seen_pairs = set()
+    for version in (4, 6):
+        items = sorted(networks_by_version[version], key=lambda item: (item[0], item[1], item[2], item[3]))
+        for index, (start, end, entry, route, network) in enumerate(items):
+            scan_index = index + 1
+            while scan_index < len(items) and items[scan_index][0] <= end:
+                _other_start, other_end, other_entry, other_route, other_network = items[scan_index]
+                scan_index += 1
+                if route == other_route:
+                    continue
+                if network == other_network:
+                    continue
+                if other_end < start or not network.overlaps(other_network):
+                    continue
+                pair = tuple(sorted((entry, other_entry))) + tuple(sorted((route, other_route)))
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                issues.append({
+                    'kind': 'ip_overlap',
+                    'entry': entry,
+                    'entries': sorted({entry, other_entry}),
+                    'routes': sorted({route, other_route}),
+                    'message': f'{entry} пересекается с {other_entry}',
+                })
+                if len(issues) >= max_issues:
+                    return issues
+    return issues
+
+
 def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subprocess.run):
     members_by_set = {}
     for sets in ROUTE_IPSET_SETS.values():
@@ -341,8 +431,6 @@ def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subproces
                 )
                 if not match_count:
                     continue
-                sample = samples
-                shared = [None] * match_count
                 issues.append({
                     'kind': 'runtime_ipset_overlap',
                     'runtime': True,
@@ -353,8 +441,8 @@ def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subproces
                     'match_count': match_count,
                     'samples': samples,
                     'message': (
-                        f'{set_name} и {other_set}: {len(shared)} общих IP '
-                        f'в реальных ipset ({", ".join(sample)})'
+                        f'{set_name} и {other_set}: {match_count} общих IP '
+                        f'в реальных ipset ({", ".join(samples)})'
                     ),
                 })
                 if len(issues) >= max_issues:
@@ -398,66 +486,11 @@ def analyze_route_intersections(
                 'message': f'{display}: точное совпадение в {", ".join(routes)}',
             })
 
-    domains = []
-    for route, entries in entries_by_route.items():
-        for entry in entries:
-            domain = _domain_key(entry)
-            if domain:
-                domains.append((domain, entry, route))
-    domains.sort()
-    suffix_pairs = set()
-    for index, (domain, entry, route) in enumerate(domains):
-        for other_domain, other_entry, other_route in domains[index + 1:]:
-            if route == other_route:
-                continue
-            if (
-                other_domain.endswith('.' + domain)
-                or domain.endswith('.' + other_domain)
-            ):
-                if (
-                    _entry_key(entry) in shared_entries
-                    and _entry_key(other_entry) in shared_entries
-                ):
-                    continue
-                pair = tuple(sorted((entry, other_entry))) + tuple(sorted((route, other_route)))
-                if pair not in suffix_pairs:
-                    suffix_pairs.add(pair)
-                    issues.append({
-                        'kind': 'domain_suffix',
-                        'entry': entry,
-                        'entries': sorted({entry, other_entry}),
-                        'routes': sorted({route, other_route}),
-                        'message': f'{other_entry} пересекается с {entry}',
-                    })
-            if len(issues) >= max_issues:
-                break
-        if len(issues) >= max_issues:
-            break
+    if len(issues) < max_issues:
+        issues.extend(_domain_suffix_issues(entries_by_route, shared_entries, max_issues - len(issues)))
 
-    networks = []
-    for route, entries in entries_by_route.items():
-        for entry in entries:
-            network = _ip_network(entry)
-            if network:
-                networks.append((network, entry, route))
-    for index, (network, entry, route) in enumerate(networks):
-        for other_network, other_entry, other_route in networks[index + 1:]:
-            if route == other_route:
-                continue
-            if network == other_network:
-                continue
-            if network.version == other_network.version and network.overlaps(other_network):
-                issues.append({
-                    'kind': 'ip_overlap',
-                    'entry': entry,
-                    'entries': sorted({entry, other_entry}),
-                    'routes': sorted({route, other_route}),
-                    'message': f'{entry} пересекается с {other_entry}',
-                })
-            if len(issues) >= max_issues:
-                break
-        if len(issues) >= max_issues:
-            break
+    if len(issues) < max_issues:
+        issues.extend(_file_network_overlap_issues(entries_by_route, max_issues - len(issues)))
 
     file_issues = list(issues)
     runtime_issues = []

@@ -1,6 +1,6 @@
-*v1.876 (30 Jun 2026) -* main
+*v1.877 (30 Jun 2026) -* main
 
-*Uses lightweight router-health invalidation after memory cleanup, watchdog state changes and YouTube edge prefetch status updates, keeps stream-guard history throttled across restarts, prevents one protocol pool cleanup from deleting probe-cache results still used by another pool or active key, keeps active status refreshes running under high RSS, shows unchecked Telegram API state as pending instead of an empty red failure, schedules post-pool cleanup after the worker-process path, and keeps pool-check progress synchronized between the header and compact pool card.*
+*Reduces route-tools CPU/RSS pressure by deferring runtime ipset intersection scans, reusing route-file snapshots and replacing pairwise intersection checks with indexed passes. Fast app-mode switches now coalesce bot restarts, and pool checks release their lazy helper modules after the worker exits while post-pool cleanup skips force cleanup when RSS is already back at the target shelf.*
 
 *v1.875 (30 Jun 2026) -* main
 

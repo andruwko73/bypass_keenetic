@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.876, последнее изменение: 30.06.2026
+#  Файл: bot.py, Версия v1.877, последнее изменение: 30.06.2026
 
 import subprocess
 import os
@@ -317,6 +317,26 @@ def _pool_probe_controller():
 
         _pool_probe_controller_module = module
     return _pool_probe_controller_module
+
+
+def _unload_pool_probe_modules(reason=''):
+    global _pool_probe_controller_module, _pool_probe_runner_module
+    _pool_probe_controller_module = None
+    _pool_probe_runner_module = None
+    for module_name in ('pool_probe_controller', 'pool_probe_runner'):
+        try:
+            sys.modules.pop(module_name, None)
+        except Exception:
+            pass
+    try:
+        gc.collect()
+    except Exception:
+        pass
+    if reason:
+        try:
+            _write_runtime_log(f'Pool probe modules unloaded after {reason}.')
+        except Exception:
+            pass
 
 
 def _probe_cache():
@@ -2297,6 +2317,8 @@ memory_watchdog_lock = threading.Lock()
 memory_watchdog_restart_scheduled = False
 memory_watchdog_last_restart_at = 0.0
 memory_watchdog_high_rss_since = 0.0
+app_service_restart_lock = threading.Lock()
+app_service_restart_scheduled = False
 memory_timeline_lock = threading.Lock()
 memory_timeline_last_sample_at = 0.0
 memory_timeline_last_error_at = 0.0
@@ -2428,6 +2450,12 @@ def _app_mode_telegram_enabled(mode=None):
 
 
 def _schedule_app_service_restart():
+    global app_service_restart_scheduled
+    with app_service_restart_lock:
+        if app_service_restart_scheduled:
+            _write_runtime_log('App mode restart already scheduled; keeping latest saved mode for pending restart')
+            return False
+        app_service_restart_scheduled = True
     command = f'sleep 1.5; {BOT_SERVICE_SCRIPT} restart >/tmp/bypass-bot-service-restart.log 2>&1'
     try:
         subprocess.Popen(
@@ -2437,8 +2465,11 @@ def _schedule_app_service_restart():
             start_new_session=True,
         )
     except Exception as exc:
+        with app_service_restart_lock:
+            app_service_restart_scheduled = False
         _write_runtime_log(f'Failed to schedule detached bot restart: {exc}')
         os.system(f'nohup /bin/sh -c {shlex.quote(command)} >/dev/null 2>&1 &')
+    return True
 
 
 def _set_app_runtime_mode(mode):
@@ -5128,6 +5159,34 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
     if not MEMORY_POST_POOL_RESTART_ENABLED or cleanup_target_kb <= 0:
         return
     now = time.time()
+    current_rss_kb = int(_process_rss_kb() or finished_rss_kb or 0)
+    if current_rss_kb and current_rss_kb <= cleanup_target_kb:
+        _set_post_pool_memory_cleanup_state(
+            scheduled=False,
+            attempts=0,
+            rss_kb=current_rss_kb,
+            initial_rss_kb=int(initial_rss_kb or 0),
+            finished_rss_kb=int(finished_rss_kb or 0),
+            hwm_kb=int(hwm_kb or 0),
+            target_rss_kb=int(cleanup_target_kb or 0),
+            last_message='post-pool memory already at target',
+        )
+        _record_event(
+            'post_pool_memory_cleanup',
+            'Память после проверки пула уже на целевой полке; дополнительная очистка не требуется.',
+            source='memory',
+            protocol='system',
+            details={
+                'scope': scope,
+                'initial_rss_kb': int(initial_rss_kb or 0),
+                'finished_rss_kb': int(finished_rss_kb or 0),
+                'cleanup_rss_kb': current_rss_kb,
+                'hwm_kb': int(hwm_kb or 0),
+                'target_rss_kb': int(cleanup_target_kb or 0),
+                'attempts': 0,
+            },
+        )
+        return
     with post_pool_memory_cleanup_lock:
         if post_pool_memory_cleanup_state.get('scheduled'):
             return
@@ -5153,6 +5212,30 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
             while not shutdown_requested.is_set():
                 shutdown_requested.wait(max(0.0, next_wait))
                 if shutdown_requested.is_set():
+                    return
+                current_rss = int(_process_rss_kb() or 0)
+                if current_rss and current_rss <= cleanup_target_kb:
+                    _set_post_pool_memory_cleanup_state(
+                        scheduled=False,
+                        attempts=attempts,
+                        rss_kb=current_rss,
+                        last_message='post-pool memory cleanup skipped; already at target',
+                    )
+                    _record_event(
+                        'post_pool_memory_cleanup',
+                        'Память после проверки пула вернулась к целевой полке без дополнительной очистки.',
+                        source='memory',
+                        protocol='system',
+                        details={
+                            'scope': scope,
+                            'initial_rss_kb': int(initial_rss_kb or 0),
+                            'finished_rss_kb': int(finished_rss_kb or 0),
+                            'cleanup_rss_kb': current_rss,
+                            'hwm_kb': int(hwm_kb or 0),
+                            'target_rss_kb': int(cleanup_target_kb or 0),
+                            'attempts': attempts,
+                        },
+                    )
                     return
                 attempts += 1
                 cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
@@ -6895,14 +6978,30 @@ def _update_status_snapshot():
     return state
 
 
-def _route_tools_html(csrf_input_html, custom_checks=None):
-    return _route_tools_runtime().tools_html(csrf_input_html, custom_checks)
+def _route_tools_html(
+    csrf_input_html,
+    custom_checks=None,
+    *,
+    include_intersections=True,
+    include_runtime_intersections=False,
+):
+    return _route_tools_runtime().tools_html(
+        csrf_input_html,
+        custom_checks,
+        include_intersections=include_intersections,
+        include_runtime_intersections=include_runtime_intersections,
+    )
 
 
 def _web_service_routes_payload():
     custom_checks = _load_custom_checks()
     return {
-        'route_tools_html': _route_tools_html('', custom_checks),
+        'route_tools_html': _route_tools_html(
+            '',
+            custom_checks,
+            include_intersections=True,
+            include_runtime_intersections=False,
+        ),
     }
 
 
@@ -9380,6 +9479,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
                 pool_probe_lock.release()
             except RuntimeError:
                 pass
+            _unload_pool_probe_modules('pool probe process monitor')
             _memory_cleanup('pool probe process monitor finished', force=True, clear_status=True, log=False)
             finished_rss_kb = int(_process_rss_kb() or 0)
             _schedule_post_pool_memory_cleanup(
@@ -9610,6 +9710,7 @@ def _run_selected_pool_probe(
         probe_recorder.flush()
         _runner_cleanup_pool_probe_runtime(kill_processes=True)
         _cleanup_pool_probe_runtime_light(kill_processes=True)
+        _unload_pool_probe_modules('pool probe worker')
         _memory_cleanup('pool probe finished', force=True, clear_status=True)
         finished_rss_kb = int(_process_rss_kb() or 0)
         hwm_kb = int(_process_hwm_kb() or 0)
@@ -10696,7 +10797,12 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
         csrf_input_html=csrf_input_html,
         route_states=route_states,
     )
-    route_tools_html = _route_tools_html(csrf_input_html, custom_checks)
+    route_tools_html = _route_tools_html(
+        csrf_input_html,
+        custom_checks,
+        include_intersections=True,
+        include_runtime_intersections=False,
+    )
     return _web_pool_form_blocks().render_protocol_check_content(
         key_name=protocol,
         title=title,

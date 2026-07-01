@@ -2599,6 +2599,28 @@ def render_web_scripts(
             }});
         }}
 
+        function refreshDeferredServiceRouteTools() {{
+            const roots = Array.from(document.querySelectorAll('[data-route-tools-root]')).filter(function(root) {{
+                return root.querySelector('[data-route-tools-deferred]');
+            }});
+            if (!roots.length) {{
+                return;
+            }}
+            fetch('/api/service_routes', {{
+                credentials: 'same-origin',
+                cache: 'no-store'
+            }}).then(function(response) {{
+                if (!response.ok) {{
+                    throw new Error('service routes failed');
+                }}
+                return response.json();
+            }}).then(function(payload) {{
+                if (payload && payload.route_tools_html) {{
+                    updateServiceRouteTools(payload.route_tools_html);
+                }}
+            }}).catch(function() {{}});
+        }}
+
         function setupAsyncForms(root) {{
             if (!ENABLE_ASYNC_FORMS) {{
                 return;
@@ -2837,6 +2859,7 @@ def render_web_scripts(
             }}
             setupServiceRouteMenus();
             setupEventHistoryPanel();
+            refreshDeferredServiceRouteTools();
             setupLiquidPointer();
             setupAsyncForms();
             const actionBlock = document.getElementById('web-action-message');

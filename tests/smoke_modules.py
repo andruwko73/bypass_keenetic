@@ -2498,6 +2498,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'threading.stack_size(256 * 1024)' in source
     assert 'subprocess.Popen(' in source
     assert 'bypass-bot-service-restart.log' in source
+    assert 'app_service_restart_scheduled = False' in source
+    assert 'App mode restart already scheduled' in source
+    assert "sys.modules.pop(module_name, None)" in source
+    assert "_unload_pool_probe_modules('pool probe process monitor')" in source
+    assert 'post-pool memory already at target' in source
+    assert 'cleanup skipped; already at target' in source
     assert "pool_probe_min_available_kb', 160000" in source
     assert "pool_probe_pause_available_kb', min(125000, POOL_PROBE_MIN_AVAILABLE_KB)" in source
     assert 'slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB' in source

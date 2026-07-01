@@ -132,10 +132,11 @@ class ServiceRouteToolsRuntime:
             ))
         return tuple(signature)
 
-    def _intersections_signature(self):
+    def _intersections_signature(self, include_runtime=True):
         return (
             self._route_files_signature(),
-            route_intersections.runtime_ipset_signature(),
+            route_intersections.runtime_ipset_signature() if include_runtime else None,
+            bool(include_runtime),
         )
 
     def _auto_resolve_signature(self, report, signature):
@@ -313,9 +314,10 @@ class ServiceRouteToolsRuntime:
             if check.get('id') not in route_service_ids
         ]
 
-    def intersections_snapshot(self):
+    def intersections_snapshot(self, include_runtime=True):
         now = self._time()
-        signature = self._intersections_signature()
+        include_runtime = bool(include_runtime)
+        signature = self._intersections_signature(include_runtime=include_runtime)
         with self._intersections_lock:
             cached_report = self._intersections_cache.get('report')
             cached_timestamp = float(self._intersections_cache.get('timestamp') or 0.0)
@@ -325,7 +327,12 @@ class ServiceRouteToolsRuntime:
                 and now - cached_timestamp < self.intersections_cache_ttl
             ):
                 return dict(cached_report)
-        report = route_intersections.analyze_route_intersections()
+        try:
+            report = route_intersections.analyze_route_intersections(include_runtime=include_runtime)
+        except TypeError as exc:
+            if 'include_runtime' not in str(exc) and 'unexpected keyword' not in str(exc):
+                raise
+            report = route_intersections.analyze_route_intersections()
         auto_result = self._maybe_auto_resolve_intersections(report, signature)
         cacheable_report = True
         if auto_result and auto_result.get('status') in ('scheduled', 'running'):
@@ -382,21 +389,35 @@ class ServiceRouteToolsRuntime:
         self.invalidate_web_status_cache()
         return result
 
-    def tools_html(self, csrf_input_html, custom_checks=None):
+    def tools_html(
+        self,
+        csrf_input_html,
+        custom_checks=None,
+        *,
+        include_intersections=True,
+        include_runtime_intersections=False,
+    ):
         service_items = self.service_items()
         route_states = service_routes.service_route_summary(service_items)
         protocol_options = service_routes.protocol_options()
         active_check_ids = {check.get('id') for check in custom_checks or []}
+        if include_intersections:
+            intersections_html = key_pool_web.web_route_intersections_html(
+                self.intersections_snapshot(include_runtime=include_runtime_intersections),
+                protocol_options,
+                csrf_input_html=csrf_input_html,
+            )
+        else:
+            intersections_html = '''<div class="route-intersection-card" data-route-tools-deferred="1">
+                <strong>Проверяю пересечения списков</strong>
+                <small>Маршруты загрузятся без блокировки интерфейса.</small>
+            </div>'''
         return ''.join([
             key_pool_web.web_route_profiles_html(
                 service_routes.ROUTE_PROFILES,
                 csrf_input_html=csrf_input_html,
             ),
-            key_pool_web.web_route_intersections_html(
-                self.intersections_snapshot(),
-                protocol_options,
-                csrf_input_html=csrf_input_html,
-            ),
+            intersections_html,
             key_pool_web.web_service_route_tools_html(
                 service_items,
                 route_states,

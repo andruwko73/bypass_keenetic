@@ -1,3 +1,12 @@
+<a name="1.877"></a>
+# [1.877] - 30 Jun 2026
+
+- Defers expensive service-route intersection checks from the initial protocol-check HTML and loads them through the existing service-routes API, reducing first-render CPU/RSS pressure on the router.
+- Optimizes service-route summaries by reading route files once per summary instead of once per service/protocol pair.
+- Replaces route-intersection domain and network scans with indexed/sweep passes and avoids allocating a dummy list for runtime ipset overlap counts.
+- Debounces app-mode service restarts so fast Advanced/Simple/Web-only switches do not schedule duplicate bot restarts.
+- Releases lazy pool-probe modules after worker-process checks finish and skips post-pool force cleanup when RSS is already back at the target, preventing cleanup itself from raising the idle RSS shelf.
+
 <a name="1.876"></a>
 # [1.876] - 30 Jun 2026
 

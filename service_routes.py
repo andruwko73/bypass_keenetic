@@ -66,6 +66,12 @@ def protocol_options():
 def route_service_items(*, include_core=True, presets=None):
     items = []
     seen = set()
+    preset_items = list(presets or CUSTOM_CHECK_PRESETS)
+    presets_by_id = {
+        str(item.get('id') or ''): item
+        for item in preset_items
+        if isinstance(item, dict) and item.get('id')
+    }
 
     def add(service_key, source=None):
         if service_key in seen:
@@ -74,7 +80,7 @@ def route_service_items(*, include_core=True, presets=None):
         if not source.get('entries'):
             return
         seen.add(service_key)
-        preset = next((item for item in (presets or CUSTOM_CHECK_PRESETS) if item.get('id') == service_key), {})
+        preset = presets_by_id.get(service_key, {})
         item = {
             'id': service_key,
             'label': source.get('label') or preset.get('label') or service_key,
@@ -93,7 +99,7 @@ def route_service_items(*, include_core=True, presets=None):
     if include_core:
         add('telegram')
         add('youtube')
-    for preset in presets or CUSTOM_CHECK_PRESETS:
+    for preset in preset_items:
         add(preset.get('id'))
     return items
 
@@ -126,6 +132,13 @@ def _read_route(route, unblock_dir):
         return set(read_unblock_list_entries(route, unblock_dir=unblock_dir))
     except FileNotFoundError:
         return set()
+
+
+def _read_all_routes(unblock_dir):
+    return {
+        route: _read_route(route, unblock_dir)
+        for route in PROTOCOL_ROUTES.values()
+    }
 
 
 def _write_routes(route_entries, unblock_dir):
@@ -169,19 +182,19 @@ def _run_update(update_script):
         subprocess.run([update_script], check=False)
 
 
-def service_route_state(service_key, *, unblock_dir=UNBLOCK_DIR):
+def service_route_state(service_key, *, unblock_dir=UNBLOCK_DIR, route_entries=None, service_entries=None):
     try:
-        entries = set(_service_state_entries(service_key))
+        entries = set(service_entries) if service_entries is not None else set(_service_state_entries(service_key))
     except ValueError:
         entries = set()
     total = len(entries)
     routes = {}
     complete = []
     partial = []
+    route_entries = route_entries if route_entries is not None else _read_all_routes(unblock_dir)
     for proto in ROUTE_ORDER:
         route = PROTOCOL_ROUTES[proto]
-        route_entries = _read_route(route, unblock_dir)
-        matched = len(entries & route_entries)
+        matched = len(entries & (route_entries.get(route) or set()))
         routes[proto] = {'matched': matched, 'total': total}
         if total and matched == total:
             complete.append(proto)
@@ -205,11 +218,25 @@ def route_state_label(complete, partial):
     return 'не добавлен'
 
 
-def service_route_summary(service_items, *, unblock_dir=UNBLOCK_DIR):
-    return {
-        item['id']: service_route_state(item['id'], unblock_dir=unblock_dir)
-        for item in service_items or []
-    }
+def service_route_summary(service_items, *, unblock_dir=UNBLOCK_DIR, route_entries=None):
+    route_entries = route_entries if route_entries is not None else _read_all_routes(unblock_dir)
+    summary = {}
+    service_entries_cache = {}
+    for item in service_items or []:
+        service_key = item.get('id') if isinstance(item, dict) else str(item or '')
+        if not service_key:
+            continue
+        try:
+            service_entries_cache[service_key] = set(_service_state_entries(service_key))
+        except ValueError:
+            service_entries_cache[service_key] = set()
+        summary[service_key] = service_route_state(
+            service_key,
+            unblock_dir=unblock_dir,
+            route_entries=route_entries,
+            service_entries=service_entries_cache[service_key],
+        )
+    return summary
 
 
 def apply_service_route(
@@ -225,7 +252,7 @@ def apply_service_route(
         raise ValueError('Неизвестный протокол')
     entries = set(_service_entries(service_key))
     target_route = PROTOCOL_ROUTES[target_protocol]
-    route_entries = {route: _read_route(route, unblock_dir) for route in PROTOCOL_ROUTES.values()}
+    route_entries = _read_all_routes(unblock_dir)
     shared_entries = _shared_service_entry_set()
     removable_entries = _removable_service_entries(entries, shared_entries)
     removed = _remove_global_route_excludes(route_entries)
@@ -265,7 +292,7 @@ def repair_service_route_catalog_drift(
     before_update=None,
 ):
     service_items = service_items or route_service_items()
-    route_entries = {route: _read_route(route, unblock_dir) for route in PROTOCOL_ROUTES.values()}
+    route_entries = _read_all_routes(unblock_dir)
     repaired = []
     global_removed = _remove_global_route_excludes(route_entries)
     shared_entries = _shared_service_entry_set()
@@ -352,8 +379,8 @@ def repair_service_route_catalog_drift(
     }
 
 
-def _unique_complete_protocol_for_service(service_key, *, unblock_dir=UNBLOCK_DIR):
-    state = service_route_state(service_key, unblock_dir=unblock_dir)
+def _unique_complete_protocol_for_service(service_key, *, unblock_dir=UNBLOCK_DIR, route_entries=None):
+    state = service_route_state(service_key, unblock_dir=unblock_dir, route_entries=route_entries)
     complete = [
         proto for proto in (state.get('complete_protocols') or [])
         if proto in PROTOCOL_ROUTES
@@ -363,10 +390,11 @@ def _unique_complete_protocol_for_service(service_key, *, unblock_dir=UNBLOCK_DI
     return '', state
 
 
-def _intersection_target_for_service(service_key, *, unblock_dir=UNBLOCK_DIR):
+def _intersection_target_for_service(service_key, *, unblock_dir=UNBLOCK_DIR, route_entries=None):
     complete_protocol, state = _unique_complete_protocol_for_service(
         service_key,
         unblock_dir=unblock_dir,
+        route_entries=route_entries,
     )
     if complete_protocol:
         return complete_protocol, state
@@ -414,13 +442,14 @@ def _issue_service_keys(issue, service_item_ids=None):
     return service_keys
 
 
-def _service_targets(service_keys, *, unblock_dir=UNBLOCK_DIR):
+def _service_targets(service_keys, *, unblock_dir=UNBLOCK_DIR, route_entries=None):
     targets = {}
     missing_targets = []
     for service_key in service_keys:
         target_protocol, _state = _intersection_target_for_service(
             service_key,
             unblock_dir=unblock_dir,
+            route_entries=route_entries,
         )
         if not target_protocol:
             missing_targets.append(service_key)
@@ -713,6 +742,7 @@ def cleanup_runtime_service_route_intersections(
             run_command=run_command,
         )
     service_item_ids = _service_item_id_set(service_items)
+    route_entries = _read_all_routes(unblock_dir)
     pair_keys = set()
     pair_plans = []
     planned_services = set()
@@ -724,7 +754,11 @@ def cleanup_runtime_service_route_intersections(
         if not service_keys:
             skipped.append({'reason': 'unknown_service', 'issue': issue.get('message') or issue.get('entry') or ''})
             continue
-        targets, missing_targets, unique_targets = _service_targets(service_keys, unblock_dir=unblock_dir)
+        targets, missing_targets, unique_targets = _service_targets(
+            service_keys,
+            unblock_dir=unblock_dir,
+            route_entries=route_entries,
+        )
         if missing_targets:
             skipped.append({
                 'reason': 'no_unique_target',
@@ -798,6 +832,7 @@ def auto_resolve_service_route_intersections(
             run_command=run_command,
         )
     service_item_ids = _service_item_id_set(service_items)
+    route_entries = _read_all_routes(unblock_dir)
 
     plans = {}
     resolved = []
@@ -808,7 +843,11 @@ def auto_resolve_service_route_intersections(
             skipped.append({'reason': 'unknown_service', 'issue': issue.get('message') or issue.get('entry') or ''})
             continue
 
-        targets, missing_targets, unique_targets = _service_targets(service_keys, unblock_dir=unblock_dir)
+        targets, missing_targets, unique_targets = _service_targets(
+            service_keys,
+            unblock_dir=unblock_dir,
+            route_entries=route_entries,
+        )
         if missing_targets:
             skipped.append({
                 'reason': 'no_unique_target',
