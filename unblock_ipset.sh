@@ -17,7 +17,7 @@ LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
-VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
+VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
 VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
@@ -951,11 +951,17 @@ dedupe_vless_final_ipsets() {
 			remove_runtime_overlap_from_set "unblockvless" "unblockvless2"
 			remove_runtime_overlap_from_set "unblockvlessudp" "unblockvless2udp"
 			remove_runtime_overlap_from_set "unblockvless6" "unblockvless2v6"
+			remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2"
+			remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2udp"
+			remove_runtime_overlap_from_set "unblockvlesspriority6" "unblockvless2v6"
 			;;
 		vless)
 			remove_runtime_overlap_from_set "unblockvless2" "unblockvless"
 			remove_runtime_overlap_from_set "unblockvless2udp" "unblockvlessudp"
 			remove_runtime_overlap_from_set "unblockvless2v6" "unblockvless6"
+			remove_runtime_overlap_from_set "unblockvless2priority" "unblockvless"
+			remove_runtime_overlap_from_set "unblockvless2priority" "unblockvlessudp"
+			remove_runtime_overlap_from_set "unblockvless2priority6" "unblockvless6"
 			;;
 		*)
 			;;
@@ -1045,6 +1051,8 @@ swap_or_preserve_set unblocktroj6 "tmp_unblocktroj6_$$"
 dedupe_vless_final_ipsets
 
 apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6
+
+dedupe_vless_final_ipsets
 
 if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
 	message="ipset refresh completed with preserved/fallback sets."

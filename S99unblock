@@ -28,7 +28,7 @@ YOUTUBE_EDGE_PREFETCH_STATUS_FILE="${YOUTUBE_EDGE_PREFETCH_STATUS_FILE:-/opt/etc
 YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-1800}"
 YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"
 YOUTUBE_EDGE_PREFETCH_LOG="${YOUTUBE_EDGE_PREFETCH_LOG:-/opt/var/log/bypass-youtube-edge-prefetch.log}"
-VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
+VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
 ROUTE_IPSET_SIGNATURE_SETS="${ROUTE_IPSET_SIGNATURE_SETS:-unblocksh unblockshudp unblocksh6 unblockvmess unblockvmessudp unblockvmess6 unblockvless unblockvlessudp unblockvless6 unblockvless2 unblockvless2udp unblockvless2v6 unblocktroj unblocktrojudp unblocktroj6 unblockvlesspriority unblockvlesspriority6 unblockvless2priority unblockvless2priority6}"
 
 IPV4_RE='[0-9]{1,3}(\.[0-9]{1,3}){3}'
@@ -48,7 +48,7 @@ scheduler_pids() {
             ''|PID|*[!0-9]*) continue ;;
         esac
         case "$line" in
-            *"/opt/etc/init.d/S99unblock scheduler"*|*"/opt/etc/init.d/S99unblock start"*|*"/opt/etc/init.d/S99unblock restart"*) printf '%s\n' "$pid" ;;
+            *"/opt/etc/init.d/S99unblock scheduler"*) printf '%s\n' "$pid" ;;
         esac
     done
 }
@@ -430,6 +430,40 @@ apply_vless_priority_domain_ips() {
     done
 }
 
+remove_runtime_overlap_from_set() {
+    loser_set="$1"
+    winner_set="$2"
+    [ -n "$loser_set" ] && [ -n "$winner_set" ] || return 0
+    ipset list "$loser_set" >/dev/null 2>&1 || return 0
+    ipset list "$winner_set" >/dev/null 2>&1 || return 0
+    ipset list "$loser_set" 2>/dev/null | awk '
+        /^Members:/ { members=1; next }
+        members && NF { print $1 }
+    ' | while IFS= read -r member; do
+        [ -n "$member" ] || continue
+        if ipset test "$winner_set" "$member" >/dev/null 2>&1; then
+            ipset del "$loser_set" "$member" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+dedupe_vless_priority_overlaps() {
+    case "$(youtube_route_protocol)" in
+        vless2)
+            remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2"
+            remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2udp"
+            remove_runtime_overlap_from_set "unblockvlesspriority6" "unblockvless2v6"
+            ;;
+        vless)
+            remove_runtime_overlap_from_set "unblockvless2priority" "unblockvless"
+            remove_runtime_overlap_from_set "unblockvless2priority" "unblockvlessudp"
+            remove_runtime_overlap_from_set "unblockvless2priority6" "unblockvless6"
+            ;;
+        *)
+            ;;
+    esac
+}
+
 route_file_signature() {
     route_file="$1"
     if [ ! -f "$route_file" ]; then
@@ -591,6 +625,7 @@ mark_runtime_dedupe_done() {
 apply_vless_priority_domain_ips_if_due() {
     priority_refresh_due || return 0
     apply_vless_priority_domain_ips
+    dedupe_vless_priority_overlaps
     mark_priority_refresh_done
 }
 

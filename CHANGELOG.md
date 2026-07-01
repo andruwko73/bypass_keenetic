@@ -1,3 +1,12 @@
+<a name="1.881"></a>
+# [1.881] - 1 Jul 2026
+
+- Removes YouTube warmed edge IPs from the opposite Vless priority ipset so Google/gstatic priority refreshes cannot send YouTube startup traffic through the wrong Vless route.
+- Adds YouTube startup/API domains to the existing Vless priority winner selection, so shared Google edge IPs follow the route where YouTube is assigned.
+- Runs the Vless priority dedupe again after full ipset refresh rebuilds priority sets.
+- Applies the same priority cleanup from the S99unblock scheduler without adding a new background job.
+- Fixes S99unblock orphan-scheduler cleanup so `start`/`restart` no longer match and terminate their own command line.
+
 <a name="1.880"></a>
 # [1.880] - 1 Jul 2026
 

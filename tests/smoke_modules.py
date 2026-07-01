@@ -2254,8 +2254,14 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120' in s99unblock
     assert 'BYPASS_VLESS_PRIORITY_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
     assert 'BYPASS_VLESS_PRIORITY_REFRESH_STATE_FILE' in s99unblock
+    scheduler_pids_block = s99unblock.split('scheduler_pids() {', 1)[1].split('\n}', 1)[0]
+    assert 'S99unblock scheduler' in scheduler_pids_block
+    assert 'S99unblock start' not in scheduler_pids_block
+    assert 'S99unblock restart' not in scheduler_pids_block
     assert 'apply_vless_priority_domain_ips_if_due()' in s99unblock
     assert 'priority_refresh_due()' in s99unblock
+    assert 'dedupe_vless_priority_overlaps()' in s99unblock
+    assert 'remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2udp"' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-1800}"' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"' in s99unblock
     assert 'APP_RUNTIME_MODE_FILE="${APP_RUNTIME_MODE_FILE:-/opt/etc/bot_app_mode}"' in s99unblock
@@ -2323,9 +2329,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'lock_busy_exit()' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless" "unblockvless2"' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless2" "unblockvless"' in ipset_script
+    assert 'remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2udp"' in ipset_script
+    assert 'remove_runtime_overlap_from_set "unblockvless2priority" "unblockvlessudp"' in ipset_script
     assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in ipset_script
     assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in ipset_script
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in ipset_script
+    assert 'youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com' in ipset_script
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in ipset_script
     assert 'apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6' in ipset_script
     last_swap_idx = ipset_script.index('swap_or_preserve_set unblocktroj6')
@@ -2334,7 +2343,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
         'apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6',
         final_dedupe_call_idx,
     )
-    assert last_swap_idx < final_dedupe_call_idx < priority_call_idx
+    post_priority_dedupe_call_idx = ipset_script.index('dedupe_vless_final_ipsets', priority_call_idx)
+    assert last_swap_idx < final_dedupe_call_idx < priority_call_idx < post_priority_dedupe_call_idx
     assert 'run_update_ipset_refresh()' in script
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
     assert 'continuing update while refresh finishes in background' in script
@@ -3721,11 +3731,45 @@ def test_youtube_edge_prefetch_restores_only_quality_approved_cache():
     assert status['added_addresses'] == 1
     assert ('unblockvless2', good_address) in added
     assert ('unblockvless2udp', good_address) in added
+    assert ('unblockvlesspriority', good_address) in deleted
     assert all(ip == good_address for _set_name, ip in added)
     assert all(ip == good_address for _set_name, ip in deleted)
     assert status['shared_candidates_skipped'] == 1
     assert status['cache_restore_skipped_recent_bad_quality'] == 1
     assert status['cache_restore_skipped_no_quality'] == 1
+
+
+def test_youtube_edge_prefetch_removes_opposite_priority_for_existing_target():
+    address = '216.58.198.174'
+    deleted = []
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        return [(family, socktype, 0, '', (address, port))]
+
+    def fake_contains(set_name, ip):
+        return set_name in ('unblockvless2', 'unblockvless2udp')
+
+    with tempfile.TemporaryDirectory() as tmp:
+        status = youtube_edge_prefetch.prefetch_once(
+            route_protocol='vless2',
+            cache_path=str(Path(tmp) / 'youtube_edge_cache.json'),
+            hosts=('www.youtube.com',),
+            dns_servers=('local',),
+            ipset_contains=fake_contains,
+            ipset_add=lambda set_name, ip: False,
+            ipset_delete=lambda set_name, ip: deleted.append((set_name, ip)) or True,
+            now_provider=lambda: 1_800_000,
+            max_hosts_per_run=1,
+            max_resolved_addresses=1,
+            getaddrinfo=fake_getaddrinfo,
+            run_command=lambda args, timeout: '',
+        )
+
+    assert status['ok'] is True
+    assert status['added_addresses'] == 0
+    assert ('unblockvlesspriority', address) in deleted
+    assert ('unblockvless', address) in deleted
+    assert ('unblockvlessudp', address) in deleted
 
 
 def test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks():

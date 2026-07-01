@@ -73,6 +73,11 @@ ROUTE_IPSETS = {
     'trojan': ('unblocktroj', 'unblocktrojudp'),
 }
 
+ROUTE_PRIORITY_IPSETS = {
+    'vless': ('unblockvlesspriority',),
+    'vless2': ('unblockvless2priority',),
+}
+
 
 def _as_tuple(value, default=()):
     if value is None:
@@ -457,6 +462,7 @@ def _other_sets(route_protocol):
         if proto == protocol:
             continue
         sets.extend(names)
+        sets.extend(ROUTE_PRIORITY_IPSETS.get(proto, ()))
     return tuple(sets)
 
 

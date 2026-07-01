@@ -1,3 +1,7 @@
+*v1.881 (1 Jul 2026) -* main
+
+*Keeps YouTube on the selected Vless route when Google priority domains resolve to the same edge IPs: YouTube startup/API domains now participate in the existing Vless priority winner selection, YouTube prefetch removes warmed addresses from the opposite Vless priority ipset, full ipset refresh dedupes priority sets after rebuilding them, and the S99unblock priority refresh applies the same cleanup without adding another background loop. S99unblock start/restart also avoids matching its own command line as an orphan scheduler.*
+
 *v1.880 (1 Jul 2026) -* main
 
 *Keeps the router card text stable on first load: the CPU row always uses the `Нагрузка CPU` label and shows `-` until the first percent sample is available, router/program details are separated with a single line break instead of an extra blank paragraph, and the `Web only` header restores the wider theme button layout on tablet-width screens.*
