@@ -6,6 +6,40 @@ LOG_FILE="$BOT_DIR/error.log"
 BOT_CONFIG_PATH="$BOT_DIR/bot_config.py"
 LEGACY_CONFIG_PATH="/opt/etc/bot_config.py"
 INSTALLER_SERVICE_PATH="/opt/etc/init.d/S98telegram_bot_installer"
+SERVICE_LOCK_DIR="/tmp/bypass_telegram_bot_service.lock"
+SERVICE_LOCK_HELD=0
+
+release_service_lock() {
+    if [ "$SERVICE_LOCK_HELD" = "1" ]; then
+        rm -rf "$SERVICE_LOCK_DIR" 2>/dev/null || true
+        SERVICE_LOCK_HELD=0
+    fi
+}
+
+acquire_service_lock() {
+    if [ "${BYPASS_BOT_SERVICE_LOCKED:-0}" = "1" ]; then
+        return 0
+    fi
+    attempts=0
+    while ! mkdir "$SERVICE_LOCK_DIR" 2>/dev/null; do
+        lock_pid=""
+        [ -f "$SERVICE_LOCK_DIR/pid" ] && lock_pid=$(cat "$SERVICE_LOCK_DIR/pid" 2>/dev/null || true)
+        if [ -n "$lock_pid" ] && [ ! -d "/proc/$lock_pid" ]; then
+            rm -rf "$SERVICE_LOCK_DIR" 2>/dev/null || true
+            continue
+        fi
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge 60 ]; then
+            echo "Error: timed out waiting for bot service lock"
+            exit 1
+        fi
+        sleep 1
+    done
+    SERVICE_LOCK_HELD=1
+    echo "$$" > "$SERVICE_LOCK_DIR/pid" 2>/dev/null || true
+    export BYPASS_BOT_SERVICE_LOCKED=1
+    trap release_service_lock EXIT INT TERM
+}
 
 cleanup_python_bytecode() {
     if [ -d "$BOT_DIR" ]; then
@@ -35,6 +69,7 @@ trim_runtime_logs() {
 }
 
 check_process() {
+    found=0
     for proc in /proc/[0-9]*; do
         [ -r "$proc/cmdline" ] || continue
         exe=$(readlink "$proc/exe" 2>/dev/null || true)
@@ -42,12 +77,12 @@ check_process() {
             *python3*)
                 if grep -qa "$MAIN_SCRIPT" "$proc/cmdline"; then
                     echo "${proc##*/}"
-                    return 0
+                    found=1
                 fi
                 ;;
         esac
     done
-    return 1
+    [ "$found" = "1" ] || return 1
 }
 
 has_running_process() {
@@ -118,6 +153,7 @@ start_installer_instead() {
 
 case "$1" in
     start)
+        acquire_service_lock
         if ! has_config; then
             echo "bot_config.py not found, starting installer instead"
             start_installer_instead
@@ -147,6 +183,7 @@ case "$1" in
         exit 1
         ;;
     stop)
+        acquire_service_lock
         if ! has_config; then
             stop_main_process
             if [ -x "$INSTALLER_SERVICE_PATH" ]; then
@@ -167,6 +204,7 @@ case "$1" in
         exit 0
         ;;
     restart)
+        acquire_service_lock
         if ! has_config; then
             if [ -x "$INSTALLER_SERVICE_PATH" ]; then
                 "$INSTALLER_SERVICE_PATH" stop >/dev/null 2>&1 || true

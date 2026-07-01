@@ -1,3 +1,7 @@
+*v1.878 (1 Jul 2026) -* main
+
+*Keeps pool-only changes lightweight: adding, deleting, clearing or syncing subscription keys no longer resets the full active-mode status when the active key is unchanged. Pool action responses now carry background pool-probe progress, the web UI performs one short status refresh after pool mutations, compact live-status API responses are cached separately from full payloads, and post-pool router cleanup snapshots are written to logs instead of a separate UI field. Post-pool progress labels, MemAvailable checks and Telegram pool healthcheck helpers stay off the hot runtime path after a pool probe, while the Telegram bot service/main.py singleton guard prevents duplicate bot instances. The router card now separates router-wide memory/CPU from program resource use and includes related helper RSS such as Xray, pool workers, temporary Xray, YouTube prefetch and command workers.*
+
 *v1.877 (30 Jun 2026) -* main
 
 *Reduces route-tools CPU/RSS pressure by deferring runtime ipset intersection scans, reusing route-file snapshots and replacing pairwise intersection checks with indexed passes. Fast app-mode switches now coalesce bot restarts, and pool checks release their lazy helper modules after the worker exits while post-pool cleanup skips force cleanup when RSS is already back at the target shelf.*

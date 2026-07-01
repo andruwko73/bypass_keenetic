@@ -80,7 +80,26 @@ def _pool_payload(ctx):
     load_current_keys = _ctx(ctx, 'load_current_keys')
     if not web_pool_snapshot or not load_current_keys:
         return {}
-    return {'pools': web_pool_snapshot(load_current_keys(), include_keys=False)}
+    payload = {'pools': web_pool_snapshot(load_current_keys(), include_keys=False)}
+    get_progress = _ctx(ctx, 'get_pool_probe_progress')
+    if get_progress:
+        try:
+            progress = get_progress() or {}
+        except Exception:
+            progress = {}
+        try:
+            total = int(progress.get('total') or 0)
+        except Exception:
+            total = 0
+        running = bool(progress.get('running')) and total > 0
+        has_resume = _ctx(ctx, 'has_pool_probe_resume_payload')
+        paused = bool(has_resume and has_resume() and not running and total > 0)
+        payload.update({
+            'pool_probe_running': running,
+            'pool_probe_paused': paused,
+            'pool_probe_progress': progress,
+        })
+    return payload
 
 
 def _route_tools_payload(ctx):

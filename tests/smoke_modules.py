@@ -270,14 +270,45 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['used_percent'] == 55
     assert payload['cpu_percent'] == 0.84
     assert payload['pool_probe_text'] == 'Не запущена'
+    assert payload['note'].split('\n\n')[0] == 'Занято по данным роутера: 281 MB (55%); Нагрузка CPU: 0.84%'
     assert 'Нагрузка CPU: 0.84%' in payload['note']
-    assert 'Бот использует 52 MB RAM' in payload['note']
+    assert 'Программа использует 52 MB RAM' in payload['note']
     assert 'Flash-носитель: занято 768 из 2048 MB (38%)' in payload['note']
+    assert 'Свободно:' not in payload['note']
+    assert 'Доступно для приложений:' not in payload['note']
+    assert 'Кэш и буферы:' not in payload['note']
     assert 'Swap:' not in payload['note']
     assert payload['flash_storage_path'] == '/opt'
     assert payload['flash_used_percent'] == 38
     assert not payload['note'].endswith('.')
     assert 'Проверка пула' not in payload['note']
+
+
+def test_router_health_runtime_program_rss_includes_related_processes():
+    payload = router_health_runtime.build_router_health_payload(
+        meminfo={'MemTotal': 512 * 1024, 'MemFree': 64 * 1024, 'MemAvailable': 160 * 1024},
+        ndmc_system={'memory_used': 318 * 1024, 'memory_total': 512 * 1024},
+        load_text='0.46 / 0.37 / 0.35',
+        cpu_percent=53.28,
+        bot_rss_kb=63 * 1024,
+        xray_rss_kb=24 * 1024,
+        pool_worker_rss_kb=38 * 1024,
+        temporary_xray_rss_kb=18 * 1024,
+        youtube_prefetch_rss_kb=14 * 1024,
+        background_worker_rss_kb=7 * 1024,
+        probe_progress={'running': True, 'checked': 104, 'total': 158},
+        temp_xray_count=1,
+        flash_storage={'path': '/opt', 'total_kb': 29527 * 1024, 'used_kb': 774 * 1024, 'free_kb': 28753 * 1024},
+    )
+    assert payload['program_rss_kb'] == 164 * 1024
+    assert payload['xray_rss_kb'] == 24 * 1024
+    assert payload['pool_worker_rss_kb'] == 38 * 1024
+    assert payload['temporary_xray_rss_kb'] == 18 * 1024
+    assert payload['youtube_prefetch_rss_kb'] == 14 * 1024
+    assert payload['background_worker_rss_kb'] == 7 * 1024
+    assert payload['note'].split('\n\n')[0] == 'Занято по данным роутера: 318 MB (62%); Нагрузка CPU: 53.28%'
+    assert 'Программа использует 164 MB RAM: бот 63 MB, Xray 24 MB, проверка пула 38 MB, временный Xray 18 MB, YouTube prefetch 14 MB, фоновые задачи 7 MB' in payload['note']
+    assert 'Flash-носитель: занято 774 из 29527 MB (3%)' in payload['note']
 
 
 def test_router_health_runtime_dns_payload():
@@ -451,6 +482,55 @@ def test_router_health_runtime_process_rss_parser():
     assert router_health_runtime.process_rss_kb('self', read_text=fake_read) == 54321
 
 
+def test_router_health_runtime_related_process_snapshot():
+    temp_dir = tempfile.TemporaryDirectory()
+    proc_root = Path(temp_dir.name) / 'proc'
+    proc_root.mkdir()
+
+    def add_proc(pid, cmdline, rss_kb):
+        proc_dir = proc_root / str(pid)
+        proc_dir.mkdir()
+        (proc_dir / 'cmdline').write_text(cmdline, encoding='utf-8')
+        (proc_dir / 'status').write_text(f'Name:\tproc\nVmRSS:\t  {rss_kb} kB\n', encoding='utf-8')
+
+    add_proc(101, 'xray\x00run\x00-c\x00/opt/etc/xray/config.json\x00', 24000)
+    add_proc(102, '/opt/sbin/xray\x00run\x00-c\x00/tmp/bypass_pool_probe_101.json\x00', 18000)
+    add_proc(103, 'python3\x00-c\x00BYPASS_KEENETIC_POOL_PROBE_WORKER=1 _run_pool_probe_process_worker\x00', 38000)
+    add_proc(104, 'python3\x00/opt/etc/bot/main.py\x00', 64000)
+    add_proc(105, 'python3\x00/opt/etc/bot/youtube_edge_prefetch_runner.py\x00--trigger\x00ipset-refresh\x00', 14000)
+    add_proc(106, 'python3\x00-c\x00BYPASS_KEENETIC_COMMAND_WORKER=1 other worker\x00', 7000)
+
+    def fake_read(path, max_bytes=16384):
+        return Path(path).read_text(encoding='utf-8')
+
+    snapshot = router_health_runtime.related_program_process_snapshot(
+        probe_running=True,
+        proc_root=str(proc_root),
+        read_text=fake_read,
+    )
+    assert snapshot == {
+        'xray_count': 1,
+        'xray_rss_kb': 24000,
+        'pool_worker_count': 1,
+        'pool_worker_rss_kb': 38000,
+        'temporary_xray_count': 1,
+        'temporary_xray_rss_kb': 18000,
+        'youtube_prefetch_count': 1,
+        'youtube_prefetch_rss_kb': 14000,
+        'background_worker_count': 1,
+        'background_worker_rss_kb': 7000,
+    }
+    idle_snapshot = router_health_runtime.related_program_process_snapshot(
+        probe_running=False,
+        proc_root=str(proc_root),
+        read_text=fake_read,
+    )
+    assert idle_snapshot['pool_worker_count'] == 0
+    assert idle_snapshot['youtube_prefetch_count'] == 1
+    assert idle_snapshot['background_worker_count'] == 1
+    temp_dir.cleanup()
+
+
 def test_router_health_runtime_cpu_percent_parser():
     stat_text = 'cpu  100 0 0 900 0 0 0 0 0 0\ncpu0 50 0 0 450 0 0 0 0 0 0\n'
     assert router_health_runtime.parse_cpu_stat(stat_text) == (100, 0, 0, 900, 0, 0, 0, 0, 0, 0)
@@ -508,14 +588,14 @@ def test_router_metrics_runtime_snapshot():
 
 
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
-    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0, 'cpu_stat': 0, 'flash': 0}
+    calls = {'ndmc': 0, 'dns': 0, 'core': 0, 'call': 0, 'cpu_stat': 0, 'flash': 0, 'proc': 0}
     original = {
         'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
         'read_proc_text': router_health_runtime.read_proc_text,
         'read_cpu_stat': router_health_runtime.read_cpu_stat,
         'read_flash_storage': router_health_runtime.read_flash_storage,
         'process_rss_kb': router_health_runtime.process_rss_kb,
-        'count_proc_cmdline': router_health_runtime.count_proc_cmdline,
+        'related_program_process_snapshot': router_health_runtime.related_program_process_snapshot,
         'read_ndmc_system_snapshot': router_health_runtime.read_ndmc_system_snapshot,
         'read_dns_health': router_health_runtime.read_dns_health,
         'telegram_call_proxy_health': router_health_runtime.telegram_call_proxy_health,
@@ -541,6 +621,7 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     cpu_stats = iter((
         (100, 0, 0, 900, 0),
         (110, 0, 10, 980, 0),
+        (120, 0, 20, 1060, 0),
     ))
 
     def fake_cpu_stat(stat_path='/proc/stat'):
@@ -551,6 +632,21 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
         calls['flash'] += 1
         return {'path': '/opt', 'total_kb': 1024 * 1024, 'used_kb': 256 * 1024, 'free_kb': 768 * 1024}
 
+    def fake_related_processes(probe_running=False):
+        calls['proc'] += 1
+        return {
+            'xray_count': 1,
+            'xray_rss_kb': 20 * 1024,
+            'pool_worker_count': 1 if probe_running else 0,
+            'pool_worker_rss_kb': 30 * 1024 if probe_running else 0,
+            'temporary_xray_count': 2,
+            'temporary_xray_rss_kb': 40 * 1024,
+            'youtube_prefetch_count': 1,
+            'youtube_prefetch_rss_kb': 14 * 1024,
+            'background_worker_count': 1,
+            'background_worker_rss_kb': 7 * 1024,
+        }
+
     now = [100.0]
     try:
         router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
@@ -558,7 +654,7 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
         router_health_runtime.read_cpu_stat = fake_cpu_stat
         router_health_runtime.read_flash_storage = fake_flash_storage
         router_health_runtime.process_rss_kb = lambda pid='self': 64000
-        router_health_runtime.count_proc_cmdline = lambda marker: 0
+        router_health_runtime.related_program_process_snapshot = fake_related_processes
         router_health_runtime.read_ndmc_system_snapshot = fake_ndmc
         router_health_runtime.read_dns_health = fake_dns
         router_health_runtime.telegram_call_proxy_health = fake_call_health
@@ -576,6 +672,8 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
         first = runtime.snapshot(lambda: {'running': False, 'total': 0})
         now[0] += 10
         second = runtime.snapshot(lambda: {'running': False, 'total': 0})
+        now[0] += 10
+        third = runtime.snapshot(lambda: {'running': True, 'total': 10})
     finally:
         for name, value in original.items():
             setattr(router_health_runtime, name, value)
@@ -586,7 +684,10 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     assert second['cpu_percent'] == 20.0
     assert first['flash_used_percent'] == 25
     assert 'Flash-носитель: занято 256 из 1024 MB (25%)' in first['note']
-    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu_stat': 2, 'flash': 2}
+    assert first['program_rss_kb'] == 64000 + (20 + 40 + 14 + 7) * 1024
+    assert third['temporary_xray_count'] == 2
+    assert third['program_rss_kb'] == 64000 + (20 + 30 + 40 + 14 + 7) * 1024
+    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu_stat': 3, 'flash': 3, 'proc': 3}
     runtime.invalidate(include_heavy=False)
     assert runtime._cache['payload'] is None
     assert runtime._ndmc_cache['payload'] is not None
@@ -2495,12 +2596,21 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'cleanup_python_bytecode' in service
     assert 'trim_runtime_logs' in service
     assert 'unset BYPASS_KEENETIC_COMMAND_WORKER' in service
+    assert 'SERVICE_LOCK_DIR="/tmp/bypass_telegram_bot_service.lock"' in service
+    assert 'def release_service_lock' not in service
+    assert 'release_service_lock()' in service
+    assert 'acquire_service_lock()' in service
+    assert 'export BYPASS_BOT_SERVICE_LOCKED=1' in service
+    assert 'found=0' in service
+    assert 'found=1' in service
+    assert 'return 0' not in service.split('check_process() {', 1)[1].split('has_running_process()', 1)[0]
     assert 'threading.stack_size(256 * 1024)' in source
     assert 'subprocess.Popen(' in source
     assert 'bypass-bot-service-restart.log' in source
     assert 'app_service_restart_scheduled = False' in source
     assert 'App mode restart already scheduled' in source
     assert "sys.modules.pop(module_name, None)" in source
+    assert "('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck')" in source
     assert "_unload_pool_probe_modules('pool probe process monitor')" in source
     assert 'post-pool memory already at target' in source
     assert 'cleanup skipped; already at target' in source
@@ -2586,6 +2696,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_watchdog_idle_restart_pending' in source
     assert 'memory_watchdog_idle_restart_in_seconds' in source
     assert 'автоперезапуск уже запрошен' in source
+    assert 'Автоперезапуск бота в простое: порог' not in source
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert "f'{task_name} skipped high RSS'" in source
@@ -2597,6 +2708,19 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_memory_cleanup('telegram polling error', force=True, clear_status=False)" in source
     assert 'def _malloc_trim' in source
     assert 'def _pool_probe_memory_checkpoint' in source
+    assert "'payloads': {}" in source
+    assert "def _get_web_status_api_cache(cache_key='full')" in source
+    assert "def _store_web_status_api_cache(payload, timestamp=None, cache_key='full')" in source
+    assert 'def _record_post_pool_router_cleanup' in source
+    assert "'post_pool_router_cleanup'" in source
+    assert "count_proc_cmdline('/tmp/bypass_pool_probe_')" in source
+    assert "count_proc_cmdline('bypass_pool_probe_worker_')" in source
+    assert "MAIN_INSTANCE_LOCK_DIR = '/tmp/bypass_telegram_bot_main.lock'" in source
+    assert 'def _acquire_main_instance_lock()' in source
+    assert 'if COMMAND_WORKER_MODE or POOL_PROBE_WORKER_MODE:' in source
+    assert 'Duplicate bot start skipped' in source
+    assert 'if not _acquire_main_instance_lock()' in source
+    assert '_release_main_instance_lock()' in source
     assert "getattr(config, 'memory_malloc_trim_enabled', True)" in source
     assert 'malloc_trim_attempted' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
@@ -2607,6 +2731,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "BYPASS_KEENETIC_POOL_PROBE_WORKER" in source
     assert "def _run_pool_probe_process_worker" in source
     assert "def _start_selected_pool_probe_process" in source
+    available_memory_block = source.split('def _available_memory_kb', 1)[1].split('def _controller_check_pool_key_through_proxy', 1)[0]
+    assert '_mem_available_kb_light' in available_memory_block
+    assert '_pool_probe_controller().available_memory_kb' not in available_memory_block
+    progress_label_block = source.split('def _pool_probe_progress_label', 1)[1].split('def _pool_probe_timeout_budget', 1)[0]
+    assert '_controller_pool_probe_progress_label' not in progress_label_block
+    assert "\\u041f\\u043e\\u043b\\u043d\\u0430\\u044f" in progress_label_block
     process_monitor_block = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
     assert "_schedule_post_pool_memory_cleanup(" in process_monitor_block
     assert 'def _forget_unreferenced_key_probes' in source
@@ -2618,6 +2748,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_forget_unreferenced_key_probes(removed_keys, pools)' in clear_pool_block
     assert '_forget_key_probes(removed_keys)' not in clear_pool_block
     assert '_forget_unreferenced_key_probes(removed_keys, pools)' in subscription_add_block
+    assert 'def _invalidate_pool_data_cache' in source
+    add_pool_block = source.split('def _add_keys_to_pool', 1)[1].split('def _subscription_active_key_is_working', 1)[0]
+    probe_invalidate_block = source.split('def _invalidate_probe_status_caches', 1)[1].split('def _delete_pool_probe_resume_file', 1)[0]
+    assert '_invalidate_pool_data_cache()' in add_pool_block
+    assert '_invalidate_pool_data_cache()' in subscription_add_block
+    assert '_invalidate_pool_data_cache()' in probe_invalidate_block
+    assert '_invalidate_key_status_cache()' not in probe_invalidate_block
     assert "def _pool_probe_cancel_allows_resume" in source
     assert "_request_pool_probe_process_cancel(resume=False)" in source
     assert "'no-resume'" in source
@@ -6796,6 +6933,31 @@ def test_web_get_actions_helpers():
     command_status = web_get_actions.dispatch(command_ctx, '/api/status')
     assert command_status['payload']['web'] == {'state': 'placeholder'}
     assert command_refreshed == []
+    cached_status_ctx = dict(ctx)
+    cached_status_ctx.update({
+        'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
+        'status_api_cache_ttl': 30,
+        'get_status_api_cache': lambda cache_key='full': {
+            'timestamp': 122.0,
+            'payload': {'cached': cache_key},
+        } if cache_key == 'compact' else None,
+        'cached_status_snapshot': lambda keys: (_ for _ in ()).throw(AssertionError('cached compact status should not rebuild snapshot')),
+        'time_provider': lambda: 123.0,
+    })
+    cached_compact_status = web_get_actions.dispatch(cached_status_ctx, '/api/status', 'compact=1')
+    assert cached_compact_status['payload'] == {'cached': 'compact'}
+    stored_status_payloads = []
+    stored_status_ctx = dict(ctx)
+    stored_status_ctx.update({
+        'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
+        'status_api_cache_ttl': 30,
+        'cached_status_snapshot': lambda keys: {'web': {'state': 'cached'}, 'protocols': {'vless': {}}},
+        'get_status_api_cache': lambda cache_key='full': None,
+        'store_status_api_cache': lambda payload, timestamp=None, cache_key='full': stored_status_payloads.append((cache_key, timestamp, payload)),
+    })
+    stored_compact_status = web_get_actions.dispatch(stored_status_ctx, '/api/status', 'compact=1')
+    assert stored_compact_status['payload']['pool_summary'] is None
+    assert stored_status_payloads and stored_status_payloads[0][0] == 'compact'
     pools = web_get_actions.dispatch(ctx, '/api/pools')
     assert pools['payload']['pools'] == {'vless': {'rows': []}}
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
@@ -7447,6 +7609,7 @@ def test_web_template_styles_helpers():
     assert '.view-head,.segmented,.status-dashboard,.overview-service-grid{margin-bottom:0;}' in styles
     assert '.status-dashboard-with-pool .status-dashboard-column{display:grid;grid-template-rows:auto minmax(0,1fr);gap:8px;align-content:stretch;align-items:stretch;min-width:0;height:100%;}' in styles
     assert '.status-dashboard-with-pool .router-health-card,.status-dashboard-with-pool .key-pool-card{height:100%;align-self:stretch;}' in styles
+    assert '.router-health-card #router-health-note{white-space:pre-line;}' in styles
     assert '.inline-page-title{display:flex;align-items:baseline;gap:8px;min-width:0;margin:0 0 4px;color:var(--text);font-size:13px;font-weight:800;line-height:1.22;' in styles
     assert '.inline-page-title .title-kicker{flex:none;color:#d3a557;font-size:inherit;font-weight:inherit;letter-spacing:0;text-transform:none;line-height:inherit;}' in styles
     assert '.section-subtitle{font-size:12px;line-height:1.35;}' in styles
@@ -7924,7 +8087,7 @@ def test_web_template_scripts_helpers():
     assert "const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));" in scripts
     assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
     assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
-    assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS);" in scripts
+    assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS);" in scripts
     assert 'const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;' in scripts
     assert "const CSRF_TOKEN = String(APP_CONFIG.csrfToken || '');" in scripts
     assert '"token"' not in scripts
@@ -7960,6 +8123,9 @@ def test_web_template_scripts_helpers():
     assert 'Object.prototype.hasOwnProperty.call(stateMap, check.id)' in scripts
     assert "fetch('/api/pools' + loadedPoolProtocolQuery(protocols)" in scripts
     assert 'function webStatusIsPending(apiStatus)' in scripts
+    assert 'function scheduleStatusPolling(durationMs, initialDelayMs)' in scripts
+    assert 'const initialDelay = Math.max(0, Number(initialDelayMs || 0));' in scripts
+    assert 'scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS)' in scripts
     assert "let pending = webStatusIsPending(web.api_status || '')" in scripts
     assert "proto === web.proxy_mode && status && (status.label === 'Проверяется' || status.api_pending)" in scripts
     assert "(web.api_status || '').indexOf('перепроверяется')" not in scripts
@@ -8048,6 +8214,9 @@ def test_web_template_scripts_helpers():
     assert 'function pollPoolProbeStatus()' in scripts
     assert "fetch('/api/pool_probe'" in scripts
     assert 'function applyPoolProbeStatusPayload(payload)' in scripts
+    assert 'function refreshStatusSoon(delayMs, durationMs)' in scripts
+    assert "['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe']" in scripts
+    assert 'schedulePoolProbePolling(1200)' in scripts
     assert "setOptionalText('pool-summary-note', progressSummary)" in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
@@ -9284,11 +9453,13 @@ def test_service_route_runtime_auto_resolve_uses_cross_runtime_lock():
 def main():
     test_app_runtime_mode_setter_callbacks()
     test_router_health_runtime_payload_uses_keenetic_memory()
+    test_router_health_runtime_program_rss_includes_related_processes()
     test_router_health_runtime_dns_payload()
     test_router_health_runtime_core_proxy_payload()
     test_router_health_runtime_dns_parsers()
     test_xray_compat_runtime_helpers()
     test_router_health_runtime_process_rss_parser()
+    test_router_health_runtime_related_process_snapshot()
     test_router_metrics_runtime_snapshot()
     test_router_health_runtime_slow_snapshot_caches_heavy_checks()
     test_proxy_config_builder()

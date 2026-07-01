@@ -1,3 +1,17 @@
+<a name="1.878"></a>
+# [1.878] - 1 Jul 2026
+
+- Keeps pool-only mutations from resetting the full active-mode status when the active key is unchanged.
+- Includes background pool-probe progress in pool action responses so the UI follows checks started by add/subscription actions.
+- Refreshes status once after pool mutations to clear stale topbar warnings without increasing idle polling.
+- Keeps post-pool progress labels, MemAvailable checks and Telegram pool healthcheck helpers off the hot runtime path after a pool probe.
+- Caches compact live-status API responses separately from full status payloads and skips temp Xray process scans when no pool probe is active, reducing CPU spikes from an open web interface.
+- Records post-pool router cleanup snapshots in runtime/event logs instead of adding another web UI field.
+- Serializes Telegram bot service start/stop/restart, stops all matching main.py processes, and adds a main.py singleton guard so overlapping or delayed restarts cannot leave a duplicate bot process on the router.
+- Separates router-wide memory/CPU from program resource use in the router status card.
+- Includes related helper RSS in the program line during diagnostics: Xray, pool workers, temporary Xray, YouTube prefetch and command workers.
+- Preserves multiline router status text in the web UI so the compact card stays readable on desktop and mobile.
+
 <a name="1.877"></a>
 # [1.877] - 30 Jun 2026
 

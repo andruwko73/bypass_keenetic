@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.877, последнее изменение: 30.06.2026
+#  Файл: bot.py, Версия v1.878, последнее изменение: 01.07.2026
 
 import subprocess
 import os
@@ -21,6 +21,7 @@ import socket
 import tempfile
 import gc
 import ctypes
+import atexit
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
@@ -323,7 +324,7 @@ def _unload_pool_probe_modules(reason=''):
     global _pool_probe_controller_module, _pool_probe_runner_module
     _pool_probe_controller_module = None
     _pool_probe_runner_module = None
-    for module_name in ('pool_probe_controller', 'pool_probe_runner'):
+    for module_name in ('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck'):
         try:
             sys.modules.pop(module_name, None)
         except Exception:
@@ -412,7 +413,8 @@ def _youtube_edge_prefetch():
 
 
 def _available_memory_kb(*args, **kwargs):
-    return _pool_probe_controller().available_memory_kb(*args, **kwargs)
+    value = _mem_available_kb_light(*args, **kwargs)
+    return value if value > 0 else None
 
 
 def _controller_check_pool_key_through_proxy(*args, **kwargs):
@@ -2249,6 +2251,7 @@ status_snapshot_cache = {
 web_status_api_cache = {
     'timestamp': 0,
     'payload': None,
+    'payloads': {},
 }
 web_pools_api_cache = {
     'timestamp': 0,
@@ -4705,7 +4708,7 @@ def _clear_runtime_memory_caches(clear_status=False, *, clear_pool_summary=False
         status_refresh_last_started_at.clear()
         status_refresh_last_finished_at.clear()
     with web_status_api_cache_lock:
-        web_status_api_cache.update({'timestamp': 0, 'payload': None})
+        web_status_api_cache.update({'timestamp': 0, 'payload': None, 'payloads': {}})
     with active_mode_status_cache_lock:
         active_mode_status_cache.update({'timestamp': 0, 'signature': None, 'status': None})
     if clear_pool_summary:
@@ -5150,6 +5153,82 @@ def _post_pool_memory_cleanup_snapshot():
         return dict(post_pool_memory_cleanup_state)
 
 
+def _post_pool_router_cleanup_snapshot():
+    temp_xray_count = 0
+    pool_worker_count = 0
+    try:
+        temp_xray_count = int(router_health_runtime.count_proc_cmdline('/tmp/bypass_pool_probe_') or 0)
+    except Exception:
+        temp_xray_count = 0
+    try:
+        pool_worker_count = int(router_health_runtime.count_proc_cmdline('bypass_pool_probe_worker_') or 0)
+    except Exception:
+        pool_worker_count = 0
+    try:
+        payload = router_health_runtime.build_router_health_payload(
+            meminfo=router_health_runtime.read_proc_meminfo(),
+            ndmc_system=router_health_runtime.read_ndmc_system_snapshot(),
+            load_text=' / '.join((_read_text_file('/proc/loadavg').split()[:3] or [])),
+            cpu_percent=None,
+            bot_rss_kb=_process_rss_kb(),
+            probe_progress=_get_pool_probe_progress(),
+            temp_xray_count=temp_xray_count,
+            dns_health={},
+            core_proxy_health={},
+            flash_storage={},
+        )
+    except Exception:
+        payload = {}
+    return {
+        'used_percent': int(payload.get('used_percent') or 0),
+        'available_kb': int(payload.get('available_kb') or 0),
+        'bot_rss_kb': int(payload.get('bot_rss_kb') or _process_rss_kb() or 0),
+        'load_text': str(payload.get('load_text') or '').strip(),
+        'temp_xray_count': temp_xray_count,
+        'pool_worker_count': pool_worker_count,
+    }
+
+
+def _record_post_pool_router_cleanup(stage, scope='', attempts=0, cleanup_rss_kb=0, level='info'):
+    snapshot = _post_pool_router_cleanup_snapshot()
+    used_percent = int(snapshot.get('used_percent') or 0)
+    available_mb = int(round((snapshot.get('available_kb') or 0) / 1024.0))
+    bot_rss_mb = int(round((snapshot.get('bot_rss_kb') or 0) / 1024.0))
+    temp_xray_count = int(snapshot.get('temp_xray_count') or 0)
+    pool_worker_count = int(snapshot.get('pool_worker_count') or 0)
+    if temp_xray_count > 0 or pool_worker_count > 0 or used_percent >= 65:
+        level = 'warn'
+    message = (
+        f'Очистка после проверки пула: память роутера занята {used_percent}%, '
+        f'доступно {available_mb} MB; бот RSS {bot_rss_mb} MB; '
+        f'временных Xray {temp_xray_count}; pool worker {pool_worker_count}.'
+    )
+    _write_runtime_log(
+        f'Post-pool cleanup ({stage}): router used={used_percent}%, '
+        f'available={available_mb} MB, bot_rss={bot_rss_mb} MB, '
+        f'temp_xray={temp_xray_count}, pool_workers={pool_worker_count}.'
+    )
+    _record_event(
+        'post_pool_router_cleanup',
+        message,
+        level=level,
+        source='memory',
+        protocol='system',
+        details={
+            'stage': str(stage or ''),
+            'scope': str(scope or ''),
+            'attempts': int(attempts or 0),
+            'cleanup_rss_kb': int(cleanup_rss_kb or 0),
+            'used_percent': used_percent,
+            'available_kb': int(snapshot.get('available_kb') or 0),
+            'bot_rss_kb': int(snapshot.get('bot_rss_kb') or 0),
+            'temp_xray_count': temp_xray_count,
+            'pool_worker_count': pool_worker_count,
+            'load_text': str(snapshot.get('load_text') or ''),
+        },
+    )
+
+
 def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_kb=0, scope=''):
     cleanup_target_kb = (
         MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
@@ -5185,6 +5264,12 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                 'target_rss_kb': int(cleanup_target_kb or 0),
                 'attempts': 0,
             },
+        )
+        _record_post_pool_router_cleanup(
+            'already_at_target',
+            scope=scope,
+            attempts=0,
+            cleanup_rss_kb=current_rss_kb,
         )
         return
     with post_pool_memory_cleanup_lock:
@@ -5236,6 +5321,12 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                             'attempts': attempts,
                         },
                     )
+                    _record_post_pool_router_cleanup(
+                        'skipped_at_target',
+                        scope=scope,
+                        attempts=attempts,
+                        cleanup_rss_kb=current_rss,
+                    )
                     return
                 attempts += 1
                 cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
@@ -5261,6 +5352,12 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                             'target_rss_kb': int(cleanup_target_kb or 0),
                             'attempts': attempts,
                         },
+                    )
+                    _record_post_pool_router_cleanup(
+                        'cleanup_completed',
+                        scope=scope,
+                        attempts=attempts,
+                        cleanup_rss_kb=int(rss_kb or 0),
                     )
                     return
                 restart_needed = (
@@ -5295,6 +5392,13 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                                 'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
                                 'attempts': attempts,
                             },
+                        )
+                        _record_post_pool_router_cleanup(
+                            'restart_requested',
+                            scope=scope,
+                            attempts=attempts,
+                            cleanup_rss_kb=int(rss_kb or 0),
+                            level='warn',
                         )
                         return
                     _write_runtime_log(
@@ -5335,6 +5439,13 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                             'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
                             'attempts': attempts,
                         },
+                    )
+                    _record_post_pool_router_cleanup(
+                        'retry_window_expired',
+                        scope=scope,
+                        attempts=attempts,
+                        cleanup_rss_kb=int(rss_kb or 0),
+                        level='warn',
                     )
                     return
                 next_wait = min(MEMORY_POST_POOL_RESTART_RETRY_SECONDS, remaining)
@@ -5545,6 +5656,8 @@ def _finalize_shutdown():
         else:
             _write_runtime_log(f'Не удалось закрыть bot instance при остановке: {exc}')
 
+    _release_main_instance_lock()
+
 
 def _register_signal_handlers():
     if os.name != 'posix':
@@ -5562,6 +5675,97 @@ def _register_signal_handlers():
             signal.signal(sig, _handle_stop_signal)
         except Exception:
             pass
+
+
+MAIN_INSTANCE_LOCK_DIR = '/tmp/bypass_telegram_bot_main.lock'
+MAIN_INSTANCE_PID_FILE = os.path.join(MAIN_INSTANCE_LOCK_DIR, 'pid')
+main_instance_lock_acquired = False
+
+
+def _main_instance_cmdline(pid):
+    try:
+        with open(f'/proc/{int(pid)}/cmdline', 'rb') as file:
+            return file.read(4096).replace(b'\x00', b' ').decode('utf-8', errors='ignore')
+    except Exception:
+        return ''
+
+
+def _pid_is_main_instance(pid):
+    try:
+        pid = int(pid)
+    except Exception:
+        return False
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    cmdline = _main_instance_cmdline(pid)
+    if not cmdline:
+        return False
+    markers = {
+        os.path.abspath(__file__),
+        os.path.abspath(sys.argv[0]) if sys.argv else '',
+        '/opt/etc/bot/main.py',
+        '/opt/etc/bot/bot.py',
+    }
+    return 'python' in cmdline.lower() and any(marker and marker in cmdline for marker in markers)
+
+
+def _read_main_instance_lock_pid():
+    try:
+        with open(MAIN_INSTANCE_PID_FILE, 'r', encoding='utf-8', errors='ignore') as file:
+            return int((file.read(32) or '').strip() or '0')
+    except Exception:
+        return 0
+
+
+def _release_main_instance_lock():
+    global main_instance_lock_acquired
+    if not main_instance_lock_acquired:
+        return
+    pid = _read_main_instance_lock_pid()
+    if pid in (0, os.getpid()):
+        try:
+            shutil.rmtree(MAIN_INSTANCE_LOCK_DIR, ignore_errors=True)
+        except Exception:
+            pass
+    main_instance_lock_acquired = False
+
+
+def _acquire_main_instance_lock():
+    global main_instance_lock_acquired
+    if COMMAND_WORKER_MODE or POOL_PROBE_WORKER_MODE:
+        return True
+    for _ in range(2):
+        try:
+            os.mkdir(MAIN_INSTANCE_LOCK_DIR)
+            with open(MAIN_INSTANCE_PID_FILE, 'w', encoding='utf-8') as file:
+                file.write(str(os.getpid()))
+            main_instance_lock_acquired = True
+            atexit.register(_release_main_instance_lock)
+            return True
+        except FileExistsError:
+            locked_pid = _read_main_instance_lock_pid()
+            if locked_pid and locked_pid != os.getpid() and _pid_is_main_instance(locked_pid):
+                message = f'Duplicate bot start skipped: main.py is already running as PID {locked_pid}'
+                try:
+                    _write_runtime_log(message)
+                except Exception:
+                    pass
+                print(message, file=sys.stderr)
+                return False
+            try:
+                shutil.rmtree(MAIN_INSTANCE_LOCK_DIR, ignore_errors=True)
+            except Exception:
+                pass
+            continue
+        except Exception as exc:
+            try:
+                _write_runtime_log(f'Main instance lock unavailable, continuing without singleton guard: {exc}')
+            except Exception:
+                pass
+            return True
+    return True
 
 
 def _is_polling_conflict(err):
@@ -7091,7 +7295,12 @@ def _invalidate_web_status_api_cache():
     with web_status_api_cache_lock:
         web_status_api_cache['timestamp'] = 0
         web_status_api_cache['payload'] = None
+        web_status_api_cache['payloads'] = {}
     _invalidate_pool_summary_cache()
+
+
+def _invalidate_pool_data_cache():
+    _invalidate_web_status_api_cache()
 
 
 def _invalidate_pool_summary_cache():
@@ -7137,24 +7346,36 @@ def _pool_summary_cache_signature(current_keys, route_states=None):
     )
 
 
-def _get_web_status_api_cache():
+def _get_web_status_api_cache(cache_key='full'):
     with web_status_api_cache_lock:
+        payloads = web_status_api_cache.get('payloads') or {}
+        cached = payloads.get(str(cache_key or 'full'))
+        if isinstance(cached, dict) and cached.get('payload') is not None:
+            return {
+                'timestamp': cached.get('timestamp', 0),
+                'payload': cached.get('payload'),
+            }
         payload = web_status_api_cache.get('payload')
         return {
             'timestamp': web_status_api_cache.get('timestamp', 0),
             'payload': payload,
-        } if payload is not None else None
+        } if payload is not None and str(cache_key or 'full') == 'full' else None
 
 
-def _store_web_status_api_cache(payload, timestamp=None):
+def _store_web_status_api_cache(payload, timestamp=None, cache_key='full'):
     rss_kb = int(_process_rss_kb() or 0)
     if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
         with web_status_api_cache_lock:
-            web_status_api_cache.update({'timestamp': 0, 'payload': None})
+            web_status_api_cache.update({'timestamp': 0, 'payload': None, 'payloads': {}})
         return
+    key = str(cache_key or 'full')
+    cache_timestamp = time.time() if timestamp is None else timestamp
     with web_status_api_cache_lock:
-        web_status_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
-        web_status_api_cache['payload'] = payload
+        payloads = web_status_api_cache.setdefault('payloads', {})
+        payloads[key] = {'timestamp': cache_timestamp, 'payload': payload}
+        if key == 'full':
+            web_status_api_cache['timestamp'] = cache_timestamp
+            web_status_api_cache['payload'] = payload
 
 
 def _web_pools_api_cache_signature(current_keys, protocols):
@@ -7192,8 +7413,17 @@ def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None)
 
 
 def _append_status_note(note, extra):
-    parts = [str(value or '').strip().rstrip('.') for value in (note, extra)]
-    return '; '.join(part for part in parts if part)
+    clean_note = str(note or '').strip().rstrip('.')
+    clean_extra = str(extra or '').strip().rstrip('.')
+    if not clean_note:
+        return clean_extra
+    if not clean_extra:
+        return clean_note
+    note_lines = clean_note.split('\n\n')
+    if len(note_lines) >= 2:
+        note_lines[1] = '; '.join(part for part in (note_lines[1].strip().rstrip('.'), clean_extra) if part)
+        return '\n\n'.join(note_lines)
+    return '; '.join(part for part in (clean_note, clean_extra) if part)
 
 
 def _router_health_snapshot():
@@ -7225,10 +7455,6 @@ def _router_health_snapshot():
             idle_note = f'RSS бота выше порога {threshold_mb} MB; watchdog выполнит очистку и перезапуск на ближайшем цикле'
         note = str(payload.get('note') or '').strip()
         payload['note'] = _append_status_note(note, idle_note)
-    elif threshold_mb and payload.get('bot_rss_kb'):
-        note = str(payload.get('note') or '').strip()
-        threshold_note = f'Автоперезапуск бота в простое: порог {threshold_mb} MB'
-        payload['note'] = _append_status_note(note, threshold_note)
     if post_pool_state.get('scheduled'):
         rss_mb = int(round((post_pool_state.get('rss_kb') or 0) / 1024.0))
         retry_in = max(0, int(round((post_pool_state.get('next_retry_at') or 0.0) - time.time())))
@@ -8664,21 +8890,29 @@ def _delete_pool_key(proto, key_value):
             _key_pool_store().save_key_pools(KEY_POOLS_PATH, latest_pools)
             final_pools = latest_pools
     _forget_unreferenced_key_probes([key_value], final_pools)
-    _invalidate_web_status_cache()
-    _invalidate_key_status_cache()
+    if was_current:
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+    else:
+        _invalidate_pool_data_cache()
 
 
 def _clear_pool(proto):
+    current_removed = False
     with key_pool_lock:
         pools, removed_keys = _key_pool_store().clear_pool(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto)
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
         current_key = (_load_current_keys().get(proto) or '').strip()
         if current_key and current_key in removed_keys:
+            current_removed = True
             _clear_installed_key_for_protocol(proto)
     if removed_keys:
         _forget_unreferenced_key_probes(removed_keys, pools)
-    _invalidate_web_status_cache()
-    _invalidate_key_status_cache()
+    if current_removed:
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+    else:
+        _invalidate_pool_data_cache()
     return len(removed_keys)
 
 
@@ -8719,7 +8953,12 @@ def _get_pool_probe_progress():
 
 
 def _pool_probe_progress_label(progress=None):
-    return _controller_pool_probe_progress_label(progress or _get_pool_probe_progress())
+    scope = (progress or _get_pool_probe_progress()).get('scope')
+    if scope == 'manual_all':
+        return '\u041f\u043e\u043b\u043d\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0432\u0441\u0435\u0445 \u043a\u043b\u044e\u0447\u0435\u0439'
+    if scope == 'protocol':
+        return '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0433\u043e \u043f\u0443\u043b\u0430'
+    return '\u0424\u043e\u043d\u043e\u0432\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u0443\u043b\u0430 \u043a\u043b\u044e\u0447\u0435\u0439'
 
 
 def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
@@ -8838,8 +9077,7 @@ def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
 
 
 def _invalidate_probe_status_caches():
-    _invalidate_web_status_cache()
-    _invalidate_key_status_cache()
+    _invalidate_pool_data_cache()
 
 
 def _delete_pool_probe_resume_file():
@@ -9767,8 +10005,7 @@ def _add_keys_to_pool(proto, keys_text):
         pools, added_keys = _key_pool_store().add_keys_to_pool(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto, keys_text)
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
     _probe_pool_keys_background(proto, added_keys)
-    _invalidate_web_status_cache()
-    _invalidate_key_status_cache()
+    _invalidate_pool_data_cache()
     return len(added_keys)
 
 
@@ -9849,8 +10086,7 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
         _forget_unreferenced_key_probes(removed_keys, pools)
     if added_keys:
         _probe_pool_keys_background(proto, added_keys)
-    _invalidate_web_status_cache()
-    _invalidate_key_status_cache()
+    _invalidate_pool_data_cache()
     return pools, added_keys, removed_keys, managed_keys, retained_keys
 
 
@@ -10626,6 +10862,8 @@ def _web_action_context():
             load_current_keys=_load_current_keys,
             refresh_status_caches_async=_refresh_status_caches_async,
             web_pool_snapshot=_web_pool_snapshot,
+            get_pool_probe_progress=_get_pool_probe_progress,
+            has_pool_probe_resume_payload=_has_pool_probe_resume_payload,
             probe_all_pool_keys_async=_probe_all_pool_keys_async,
             pool_keys_for_proto=_pool_keys_for_proto,
             probe_pool_keys_background=_probe_pool_keys_background,
@@ -11736,6 +11974,8 @@ def _run_telegram_polling_loop():
 
 
 def main():
+    if not _acquire_main_instance_lock():
+        return
     _daemonize_process()
     _register_signal_handlers()
     _write_runtime_log('main() entered', mode='w')

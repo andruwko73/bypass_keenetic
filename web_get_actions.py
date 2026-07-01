@@ -58,8 +58,11 @@ def _requested_protocols(params):
 def _status_payload(ctx, query=''):
     params = parse_qs(query or '', keep_blank_values=True)
     compact = str((params.get('compact') or [''])[0]).strip().lower() in ('1', 'true', 'yes', 'on')
+    cache_key = 'compact' if compact else 'full'
     now = _ctx(ctx, 'time_provider', time.time)()
     cache_ttl = float(_ctx(ctx, 'status_api_cache_ttl', 0) or 0)
+    if compact and cache_ttl > 0:
+        cache_ttl = min(cache_ttl, float(_ctx(ctx, 'status_api_compact_cache_ttl', 15.0) or 15.0))
     pool_enabled = _ctx(ctx, 'pool_enabled', False)
     progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})() if pool_enabled else {}
     pool_probe_running = _pool_probe_running(progress)
@@ -70,8 +73,11 @@ def _status_payload(ctx, query=''):
     except Exception:
         web_command_running = False
     cache_getter = _ctx(ctx, 'get_status_api_cache')
-    if not compact and cache_ttl > 0 and cache_getter and not pool_probe_running and not pool_probe_paused:
-        cached = cache_getter()
+    if cache_ttl > 0 and cache_getter and not pool_probe_running and not pool_probe_paused:
+        try:
+            cached = cache_getter(cache_key)
+        except TypeError:
+            cached = cache_getter()
         if (
             isinstance(cached, dict) and
             cached.get('payload') is not None and
@@ -136,8 +142,11 @@ def _status_payload(ctx, query=''):
         'timestamp': now,
     })
     cache_store = _ctx(ctx, 'store_status_api_cache')
-    if not compact and cache_ttl > 0 and cache_store and not pool_probe_running and not pool_probe_paused:
-        cache_store(payload, now)
+    if cache_ttl > 0 and cache_store and not pool_probe_running and not pool_probe_paused:
+        try:
+            cache_store(payload, now, cache_key)
+        except TypeError:
+            cache_store(payload, now)
     return payload
 
 

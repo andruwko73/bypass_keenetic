@@ -2057,14 +2057,35 @@ def render_web_scripts(
                 }});
         }}
 
-        function scheduleStatusPolling(durationMs) {{
+        function scheduleStatusPolling(durationMs, initialDelayMs) {{
             if (!ENABLE_LIVE_STATUS) {{
                 return;
             }}
             statusPollUntil = Math.max(statusPollUntil, Date.now() + durationMs);
             if (!statusPollTimer && !document.hidden) {{
-                pollStatus();
+                const initialDelay = Math.max(0, Number(initialDelayMs || 0));
+                if (initialDelay > 0) {{
+                    statusPollTimer = window.setTimeout(pollStatus, initialDelay);
+                }} else {{
+                    pollStatus();
+                }}
             }}
+        }}
+
+        function refreshStatusSoon(delayMs, durationMs) {{
+            if (!ENABLE_LIVE_STATUS) {{
+                return;
+            }}
+            statusPollUntil = Math.max(statusPollUntil, Date.now() + (durationMs || 30000));
+            window.setTimeout(function() {{
+                if (statusPollTimer) {{
+                    window.clearTimeout(statusPollTimer);
+                    statusPollTimer = null;
+                }}
+                if (!document.hidden) {{
+                    pollStatus();
+                }}
+            }}, Math.max(0, Number(delayMs || 0)));
         }}
 
         function clearActionMessageTimer() {{
@@ -2777,6 +2798,7 @@ def render_web_scripts(
                                     window.location.reload();
                                 }}, Number(payload.reload_after_ms) || 900);
                             }}
+                            const poolMutationAction = ['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe'].indexOf(action) !== -1;
                             if (action === 'pool-probe-cancel') {{
                                 refreshPoolData(1200);
                                 scheduleStatusPolling(15000);
@@ -2784,6 +2806,12 @@ def render_web_scripts(
                                 refreshPoolData(1200);
                                 schedulePoolProbePolling(1200);
                                 scheduleStatusPolling(15000);
+                            }} else if (poolMutationAction) {{
+                                refreshPoolData(1200, proto ? [proto] : null);
+                                if (payload.pool_probe_running || payload.pool_probe_paused) {{
+                                    schedulePoolProbePolling(1200);
+                                }}
+                                refreshStatusSoon(600, 30000);
                             }} else if (action === 'command') {{
                                 if (showCommandState(payload.command_state)) {{
                                     scheduleActionMessageHide(2500);
@@ -2872,7 +2900,7 @@ def render_web_scripts(
                     schedulePoolProbePolling(0);
                 }}
             }} else if (ENABLE_LIVE_STATUS) {{
-                scheduleStatusPolling(STATUS_IDLE_POLL_MS);
+                scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS);
             }}
             if (INITIAL_COMMAND_RUNNING) {{
                 setCommandRunningLayout(true);

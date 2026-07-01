@@ -381,6 +381,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .status-card-wide .status-value{font-size:12px;font-weight:600;line-height:1.35;color:#dce8f1;}
         .status-note{margin:3px 0 0;font-size:12px;line-height:1.35;}
         .router-health-card .status-note{font-size:11.5px;line-height:1.28;}
+        .router-health-card #router-health-note{white-space:pre-line;}
         .router-health-card #router-core-proxy-note,
         .router-health-card #router-telegram-call-note{margin-top:5px;}
         .health-meter{height:5px;margin:6px 0 1px;}
