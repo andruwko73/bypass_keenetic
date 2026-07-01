@@ -747,9 +747,12 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         }
         @media (min-width: 761px) and (max-width: 1023px){
             .topbar-actions{grid-template-columns:minmax(0,1fr) minmax(170px,.38fr) auto;grid-template-areas:"caption api version" "caption theme theme";gap:6px;}
+            .topbar-actions.topbar-actions-web-only{grid-template-columns:minmax(0,1fr) minmax(170px,.38fr) auto;}
             .app-caption{grid-area:caption;align-self:center;}
             .api-pill{grid-area:api;}
             .theme-control{grid-area:theme;}
+            .topbar-actions-web-only .theme-control{justify-self:stretch;width:100%;}
+            .topbar-actions-web-only .theme-toggle{width:100%;min-width:0;}
             .version-badge{grid-area:version;}
             .app-caption strong{font-size:14px;}
             .app-branch{font-size:10px;}
@@ -870,7 +873,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .section-subtitle,.status-note,.status-value{overflow-wrap:anywhere;}
             .api-pill{grid-column:1 / -1;grid-row:2;}
             .theme-control{grid-column:1 / -1;grid-row:3;}
-            .topbar-actions-web-only .theme-control{grid-column:1 / -1;grid-row:2;}
+            .topbar-actions-web-only .theme-control{grid-column:1 / -1;grid-row:2;justify-self:stretch;width:100%;}
             .topbar-actions-web-only .theme-toggle{width:100%;min-width:0;}
             .mode-control,.theme-control{width:100%;}
             .mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:330;}

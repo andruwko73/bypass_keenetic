@@ -1,3 +1,10 @@
+<a name="1.880"></a>
+# [1.880] - 1 Jul 2026
+
+- Keeps the router card CPU label stable during the first page snapshot, showing `Нагрузка CPU: -` instead of switching to average load.
+- Removes the extra blank paragraph inside the router card note so router, program, proxy and call lines keep even spacing.
+- Restores the wider theme button layout for `Web only` headers on tablet-width screens.
+
 <a name="1.879"></a>
 # [1.879] - 1 Jul 2026
 

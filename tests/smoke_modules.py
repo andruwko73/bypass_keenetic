@@ -270,10 +270,11 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['used_percent'] == 55
     assert payload['cpu_percent'] == 0.84
     assert payload['pool_probe_text'] == 'Не запущена'
-    assert payload['note'].split('\n\n')[0] == 'Занято по данным роутера: 281 MB (55%); Нагрузка CPU: 0.84%'
+    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 281 MB (55%); Нагрузка CPU: 0.84%'
     assert 'Нагрузка CPU: 0.84%' in payload['note']
     assert 'Программа использует 52 MB RAM' in payload['note']
     assert 'Flash-носитель: занято 768 из 2048 MB (38%)' in payload['note']
+    assert '\n\n' not in payload['note']
     assert 'Свободно:' not in payload['note']
     assert 'Доступно для приложений:' not in payload['note']
     assert 'Кэш и буферы:' not in payload['note']
@@ -282,6 +283,22 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['flash_used_percent'] == 38
     assert not payload['note'].endswith('.')
     assert 'Проверка пула' not in payload['note']
+
+
+def test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample():
+    payload = router_health_runtime.build_router_health_payload(
+        meminfo={'MemTotal': 512 * 1024, 'MemFree': 256 * 1024, 'MemAvailable': 256 * 1024},
+        ndmc_system={'memory_used': 291 * 1024, 'memory_total': 512 * 1024},
+        load_text='0.23 / 0.18 / 0.16',
+        cpu_percent=None,
+        bot_rss_kb=63 * 1024,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+        flash_storage={'path': '/opt', 'total_kb': 29527 * 1024, 'used_kb': 862 * 1024, 'free_kb': 28665 * 1024},
+    )
+    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 291 MB (57%); Нагрузка CPU: -'
+    assert 'Средняя нагрузка' not in payload['note']
+    assert '\n\n' not in payload['note']
 
 
 def test_router_health_runtime_program_rss_includes_related_processes():
@@ -306,9 +323,10 @@ def test_router_health_runtime_program_rss_includes_related_processes():
     assert payload['temporary_xray_rss_kb'] == 18 * 1024
     assert payload['youtube_prefetch_rss_kb'] == 14 * 1024
     assert payload['background_worker_rss_kb'] == 7 * 1024
-    assert payload['note'].split('\n\n')[0] == 'Занято по данным роутера: 318 MB (62%); Нагрузка CPU: 53.28%'
+    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 318 MB (62%); Нагрузка CPU: 53.28%'
     assert 'Программа использует 164 MB RAM: бот 63 MB, Xray 24 MB, проверка пула 38 MB, временный Xray 18 MB, YouTube prefetch 14 MB, фоновые задачи 7 MB' in payload['note']
     assert 'Flash-носитель: занято 774 из 29527 MB (3%)' in payload['note']
+    assert '\n\n' not in payload['note']
 
 
 def test_router_health_runtime_dns_payload():
@@ -7669,6 +7687,10 @@ def test_web_template_styles_helpers():
     assert '.theme-control{justify-self:end;width:100%;}' in styles
     assert '.app-caption strong{display:block;max-width:none;font-size:15px;font-weight:800;line-height:1.18;letter-spacing:0;white-space:normal;overflow:visible;text-overflow:clip;' in styles
     assert '.topbar-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));justify-content:stretch;gap:8px;}' in styles
+    assert '.topbar-actions.topbar-actions-web-only{grid-template-columns:minmax(0,1fr) minmax(170px,.38fr) auto;}' in styles
+    assert '.topbar-actions-web-only .theme-control{justify-self:stretch;width:100%;}' in styles
+    assert '.topbar-actions-web-only .theme-toggle{width:100%;min-width:0;}' in styles
+    assert '.topbar-actions-web-only .theme-control{grid-column:1 / -1;grid-row:2;justify-self:stretch;width:100%;}' in styles
     assert '.app-caption strong{max-width:none;padding-right:60px;font-size:14px;line-height:1.18;white-space:normal;}' in styles
     assert '.app-branch{font-size:10.5px;line-height:1.18;white-space:nowrap;overflow:hidden;text-overflow:clip;overflow-wrap:normal;word-break:normal;}' in styles
     assert '.topbar{position:relative;z-index:260;' in styles

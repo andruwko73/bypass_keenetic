@@ -758,8 +758,8 @@ def build_router_health_payload(
     cpu_percent_text = _format_cpu_percent(normalized_cpu_percent)
     if cpu_percent_text:
         router_details.append(f'Нагрузка CPU: {cpu_percent_text}')
-    elif load_text:
-        router_details.append(f'Средняя нагрузка: {_current_load_text(load_text)}')
+    else:
+        router_details.append('Нагрузка CPU: -')
     xray_rss_kb = int(xray_rss_kb or 0)
     pool_worker_rss_kb = int(pool_worker_rss_kb or 0)
     temporary_xray_rss_kb = int(temporary_xray_rss_kb or 0)
@@ -822,7 +822,7 @@ def build_router_health_payload(
         note_lines.append(program_note)
     return {
         'memory_text': memory_text,
-        'note': '\n\n'.join(note_lines),
+        'note': '\n'.join(note_lines),
         'dns_note': dns_note,
         'core_proxy_note': core_proxy_note,
         'core_proxy_health': compact_core_health,

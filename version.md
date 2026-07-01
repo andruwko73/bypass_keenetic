@@ -1,3 +1,7 @@
+*v1.880 (1 Jul 2026) -* main
+
+*Keeps the router card text stable on first load: the CPU row always uses the `Нагрузка CPU` label and shows `-` until the first percent sample is available, router/program details are separated with a single line break instead of an extra blank paragraph, and the `Web only` header restores the wider theme button layout on tablet-width screens.*
+
 *v1.879 (1 Jul 2026) -* main
 
 *Reduces idle web/router health overhead without changing pool-check behavior: router CPU in the status card is smoothed to avoid treating one short sample as sustained load, related process RSS scans are cached while no pool probe is running, and background CPU guards reuse a fresh sample across service checks instead of sampling /proc repeatedly. Clean install/bootstrap now rotates its own rollback backups to the latest copy, matching the existing web-update backup policy, and existing installs receive the new lightweight config defaults during update.*
