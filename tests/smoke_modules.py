@@ -668,6 +668,8 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
             core_proxy_cache_ttl=60,
             dns_cache_ttl=60,
             ndmc_cache_ttl=60,
+            related_process_cache_ttl=45,
+            cpu_smoothing_factor=1.0,
         )
         first = runtime.snapshot(lambda: {'running': False, 'total': 0})
         now[0] += 10
@@ -685,18 +687,73 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     assert first['flash_used_percent'] == 25
     assert 'Flash-носитель: занято 256 из 1024 MB (25%)' in first['note']
     assert first['program_rss_kb'] == 64000 + (20 + 40 + 14 + 7) * 1024
+    assert second['program_rss_kb'] == 64000 + (20 + 40 + 14 + 7) * 1024
     assert third['temporary_xray_count'] == 2
     assert third['program_rss_kb'] == 64000 + (20 + 30 + 40 + 14 + 7) * 1024
-    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu_stat': 3, 'flash': 3, 'proc': 3}
+    assert calls == {'ndmc': 1, 'dns': 1, 'core': 1, 'call': 1, 'cpu_stat': 3, 'flash': 3, 'proc': 2}
     runtime.invalidate(include_heavy=False)
     assert runtime._cache['payload'] is None
     assert runtime._ndmc_cache['payload'] is not None
     assert runtime._dns_cache['payload'] is not None
     assert runtime._core_proxy_cache['payload'] is not None
+    assert runtime._related_process_cache['payload'] is not None
     runtime.invalidate()
     assert runtime._ndmc_cache['payload'] is None
     assert runtime._dns_cache['payload'] is None
     assert runtime._core_proxy_cache['payload'] is None
+    assert runtime._related_process_cache['payload'] is None
+
+
+def test_router_health_runtime_smooths_short_cpu_spikes():
+    original = {
+        'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
+        'read_proc_text': router_health_runtime.read_proc_text,
+        'read_cpu_stat': router_health_runtime.read_cpu_stat,
+        'read_flash_storage': router_health_runtime.read_flash_storage,
+        'process_rss_kb': router_health_runtime.process_rss_kb,
+        'related_program_process_snapshot': router_health_runtime.related_program_process_snapshot,
+        'read_ndmc_system_snapshot': router_health_runtime.read_ndmc_system_snapshot,
+        'read_dns_health': router_health_runtime.read_dns_health,
+        'telegram_call_proxy_health': router_health_runtime.telegram_call_proxy_health,
+        'xray_compat_runtime': router_health_runtime.xray_compat_runtime,
+    }
+    cpu_stats = iter((
+        (100, 0, 0, 900, 0),
+        (150, 0, 50, 900, 0),
+        (160, 0, 50, 990, 0),
+    ))
+    now = [100.0]
+    try:
+        router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
+        router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
+        router_health_runtime.read_cpu_stat = lambda stat_path='/proc/stat': next(cpu_stats)
+        router_health_runtime.read_flash_storage = lambda: {}
+        router_health_runtime.process_rss_kb = lambda pid='self': 64000
+        router_health_runtime.related_program_process_snapshot = lambda probe_running=False: {}
+        router_health_runtime.read_ndmc_system_snapshot = lambda: {}
+        router_health_runtime.read_dns_health = lambda **kwargs: {}
+        router_health_runtime.telegram_call_proxy_health = lambda: {}
+        router_health_runtime.xray_compat_runtime = None
+        runtime = router_health_runtime.RouterHealthRuntime(
+            cache_ttl=0,
+            time_provider=lambda: now[0],
+            core_proxy_cache_ttl=60,
+            dns_cache_ttl=60,
+            ndmc_cache_ttl=60,
+            cpu_smoothing_factor=0.35,
+        )
+        first = runtime.snapshot(lambda: {'running': False, 'total': 0})
+        now[0] += 10
+        second = runtime.snapshot(lambda: {'running': False, 'total': 0})
+        now[0] += 10
+        third = runtime.snapshot(lambda: {'running': False, 'total': 0})
+    finally:
+        for name, value in original.items():
+            setattr(router_health_runtime, name, value)
+
+    assert first['cpu_percent'] is None
+    assert second['cpu_percent'] == 100.0
+    assert 60.0 < third['cpu_percent'] < 70.0
 
 
 def test_web_commands_runtime_dispatch():
@@ -1831,6 +1888,12 @@ def test_codex_version_matches_commit_count():
     assert 'status_refresh_min_interval_seconds = 180.0' in example
     assert 'status_refresh_min_interval_seconds = 180.0' in installer
     assert 'status_refresh_min_interval_seconds = 180.0' in bootstrap
+    assert 'router_health_related_process_cache_ttl = 45.0' in example
+    assert 'router_health_related_process_cache_ttl = 45.0' in installer
+    assert 'router_health_related_process_cache_ttl = 45.0' in bootstrap
+    assert 'router_health_cpu_smoothing_factor = 0.35' in example
+    assert 'router_health_cpu_smoothing_factor = 0.35' in installer
+    assert 'router_health_cpu_smoothing_factor = 0.35' in bootstrap
     assert 'web_status_api_cache_ttl = 30.0' in example
     assert 'web_status_api_cache_ttl = 30.0' in installer
     assert 'web_status_api_cache_ttl = 30.0' in bootstrap
@@ -1864,6 +1927,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_timeline_max_events = 720' in example
     assert 'memory_timeline_max_events = 720' in installer
     assert 'memory_timeline_max_events = 720' in bootstrap
+    assert 'background_task_cpu_cache_ttl_seconds = 20.0' in example
+    assert 'background_task_cpu_cache_ttl_seconds = 20.0' in installer
+    assert 'background_task_cpu_cache_ttl_seconds = 20.0' in bootstrap
     assert 'background_task_max_bot_rss_kb = 66560' in example
     assert 'background_task_max_bot_rss_kb = 66560' in installer
     assert 'background_task_max_bot_rss_kb = 66560' in bootstrap
@@ -1966,6 +2032,9 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_watch_warm_max_hosts = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'router_health_related_process_cache_ttl = 45.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'router_health_cpu_smoothing_factor = 0.35' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'background_task_cpu_cache_ttl_seconds = 20.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert '[ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'service_route_intersections_cache_ttl = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_scheduler_max_cpu_percent = 45' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -2085,6 +2154,9 @@ def test_direct_update_script_records_update_status():
     assert 'keep_count="${1:-1}"' in script
     assert 'cleanup_update_artifacts 1' in script
     assert 'cleanup_update_artifacts 3' not in script
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    assert 'cleanup_bootstrap_backups()' in bootstrap
+    assert 'cleanup_bootstrap_backups 1' in bootstrap
 
 
 def test_update_static_assets_use_archive_fallback():
@@ -2700,6 +2772,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _start_memory_watchdog_thread' in source
     assert 'def _memory_cleanup' in source
     assert "f'{task_name} skipped high RSS'" in source
+    assert 'background_task_cpu_cache_ttl_seconds' in source
+    assert 'background_cpu_busy_cache' in source
     assert "'status refresh skipped high RSS'" in source
     assert 'rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not active_only' in source
     assert 'def _recent_event_history_match' in source

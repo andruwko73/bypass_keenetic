@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.878, последнее изменение: 01.07.2026
+#  Файл: bot.py, Версия v1.879, последнее изменение: 01.07.2026
 
 import subprocess
 import os
@@ -1852,6 +1852,11 @@ SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL = float(getattr(config, 'service_route_int
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
 ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
+ROUTER_HEALTH_RELATED_PROCESS_CACHE_TTL = float(getattr(config, 'router_health_related_process_cache_ttl', 45.0))
+ROUTER_HEALTH_CPU_SMOOTHING_FACTOR = min(
+    1.0,
+    max(0.0, float(getattr(config, 'router_health_cpu_smoothing_factor', 0.35))),
+)
 ROUTER_METRICS_HISTORY_LIMIT = int(getattr(config, 'router_metrics_history_limit', 120))
 ROUTER_METRICS_WARN_BOT_RSS_KB = int(getattr(config, 'router_metrics_warn_bot_rss_kb', 65 * 1024))
 ROUTER_METRICS_CRITICAL_BOT_RSS_KB = int(getattr(config, 'router_metrics_critical_bot_rss_kb', 87040))
@@ -1884,6 +1889,10 @@ POOL_PROBE_HIGH_LOAD_MAX_WAIT_SECONDS = max(0.0, float(getattr(config, 'pool_pro
 BACKGROUND_TASK_CPU_GUARD_ENABLED = bool(getattr(config, 'background_task_cpu_guard_enabled', True))
 BACKGROUND_TASK_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'background_task_max_cpu_percent', 65.0)))
 BACKGROUND_TASK_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'background_task_cpu_sample_seconds', 0.35)))
+BACKGROUND_TASK_CPU_CACHE_TTL_SECONDS = max(
+    0.0,
+    float(getattr(config, 'background_task_cpu_cache_ttl_seconds', 20.0)),
+)
 BACKGROUND_TASK_MAX_BOT_RSS_KB = max(0, int(getattr(config, 'background_task_max_bot_rss_kb', 65 * 1024)))
 BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS = max(
     60.0,
@@ -2270,6 +2279,8 @@ router_health = router_health_runtime.RouterHealthRuntime(
     cache_ttl=ROUTER_HEALTH_CACHE_TTL,
     dns_cache_ttl=ROUTER_HEALTH_DNS_CACHE_TTL,
     ndmc_cache_ttl=ROUTER_HEALTH_NDMC_CACHE_TTL,
+    related_process_cache_ttl=ROUTER_HEALTH_RELATED_PROCESS_CACHE_TTL,
+    cpu_smoothing_factor=ROUTER_HEALTH_CPU_SMOOTHING_FACTOR,
 )
 router_metrics_runtime = router_metrics.RouterMetricsRuntime(
     history_limit=ROUTER_METRICS_HISTORY_LIMIT,
@@ -2291,6 +2302,8 @@ status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 status_refresh_last_started_at = {}
 status_refresh_last_finished_at = {}
+background_cpu_busy_cache_lock = threading.Lock()
+background_cpu_busy_cache = {'timestamp': 0.0, 'value': None}
 key_pool_lock = threading.RLock()
 subscription_state_lock = threading.RLock()
 subscription_hwid_lock = threading.Lock()
@@ -4324,6 +4337,12 @@ def _pool_probe_load_average():
 def _background_cpu_busy_percent():
     if not BACKGROUND_TASK_CPU_GUARD_ENABLED:
         return None
+    now = time.time()
+    if BACKGROUND_TASK_CPU_CACHE_TTL_SECONDS > 0:
+        with background_cpu_busy_cache_lock:
+            cached_at = float(background_cpu_busy_cache.get('timestamp') or 0.0)
+            if now - cached_at < BACKGROUND_TASK_CPU_CACHE_TTL_SECONDS:
+                return background_cpu_busy_cache.get('value')
     before = _read_cpu_totals()
     if not before:
         return None
@@ -4335,7 +4354,12 @@ def _background_cpu_busy_percent():
     idle_delta = after[1] - before[1]
     if total_delta <= 0:
         return None
-    return max(0.0, min(100.0, 100.0 * (total_delta - idle_delta) / float(total_delta)))
+    value = max(0.0, min(100.0, 100.0 * (total_delta - idle_delta) / float(total_delta)))
+    if BACKGROUND_TASK_CPU_CACHE_TTL_SECONDS > 0:
+        with background_cpu_busy_cache_lock:
+            background_cpu_busy_cache['timestamp'] = time.time()
+            background_cpu_busy_cache['value'] = value
+    return value
 
 
 def _background_task_allowed(task_name):

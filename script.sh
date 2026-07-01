@@ -914,6 +914,7 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_min_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_min_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_bot_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> "$BOT_CONFIG_PATH"
@@ -921,6 +922,8 @@ migrate_runtime_config_defaults() {
   grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_bot_num_threads[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_bot_num_threads = 1\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^router_health_related_process_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_health_related_process_cache_ttl = 45.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^router_health_cpu_smoothing_factor[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_health_cpu_smoothing_factor = 0.35\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_status_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_api_cache_ttl = 30.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_metrics_history_limit[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_history_limit = 120\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=[[:space:]]*(65536|71680)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
@@ -955,12 +958,15 @@ migrate_runtime_config_defaults() {
     grep -Eq '^memory_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
+    grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> /opt/etc/bot_config.py
     grep -Eq '^telegram_bot_num_threads[[:space:]]*=' /opt/etc/bot_config.py || printf 'telegram_bot_num_threads = 1\n' >> /opt/etc/bot_config.py
+    grep -Eq '^router_health_related_process_cache_ttl[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_health_related_process_cache_ttl = 45.0\n' >> /opt/etc/bot_config.py
+    grep -Eq '^router_health_cpu_smoothing_factor[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_health_cpu_smoothing_factor = 0.35\n' >> /opt/etc/bot_config.py
     if grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(65536|71680|87040)([[:space:]#]|$)' /opt/etc/bot_config.py; then
       sed -i 's/^pool_probe_max_process_rss_kb[[:space:]]*=.*/pool_probe_max_process_rss_kb = 66560/' /opt/etc/bot_config.py || true
     fi

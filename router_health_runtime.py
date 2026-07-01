@@ -874,17 +874,22 @@ class RouterHealthRuntime:
         core_proxy_cache_ttl=60.0,
         dns_cache_ttl=45.0,
         ndmc_cache_ttl=30.0,
+        related_process_cache_ttl=45.0,
+        cpu_smoothing_factor=0.35,
     ):
         self.cache_ttl = float(cache_ttl or 0)
         self.core_proxy_cache_ttl = float(core_proxy_cache_ttl or 0)
         self.dns_cache_ttl = float(dns_cache_ttl or 0)
         self.ndmc_cache_ttl = float(ndmc_cache_ttl or 0)
+        self.related_process_cache_ttl = float(related_process_cache_ttl or 0)
+        self.cpu_smoothing_factor = min(1.0, max(0.0, float(cpu_smoothing_factor or 0.0)))
         self.time_provider = time_provider
         self._lock = threading.Lock()
         self._cache = {'timestamp': 0, 'payload': None}
         self._core_proxy_cache = {'timestamp': 0, 'payload': None}
         self._dns_cache = {'timestamp': 0, 'payload': None}
         self._ndmc_cache = {'timestamp': 0, 'payload': None}
+        self._related_process_cache = {'timestamp': 0, 'payload': None, 'probe_running': False}
         self._last_cpu_stat = None
         self._last_cpu_percent = None
 
@@ -950,8 +955,32 @@ class RouterHealthRuntime:
             return self._last_cpu_percent
         value = cpu_percent_between(previous_stat, current_stat)
         if value is not None:
-            self._last_cpu_percent = value
+            if self._last_cpu_percent is None or self.cpu_smoothing_factor >= 1.0:
+                self._last_cpu_percent = value
+            elif self.cpu_smoothing_factor <= 0.0:
+                pass
+            else:
+                alpha = self.cpu_smoothing_factor
+                self._last_cpu_percent = (alpha * value) + ((1.0 - alpha) * self._last_cpu_percent)
         return self._last_cpu_percent
+
+    def _related_process_snapshot(self, now, probe_running):
+        cache_ttl = 0.0 if probe_running else self.related_process_cache_ttl
+        if cache_ttl > 0:
+            cached = self._related_process_cache.get('payload')
+            if (
+                cached is not None and
+                self._related_process_cache.get('probe_running') == bool(probe_running) and
+                now - float(self._related_process_cache.get('timestamp') or 0) < cache_ttl
+            ):
+                return dict(cached)
+        payload = related_program_process_snapshot(probe_running=probe_running)
+        self._related_process_cache = {
+            'timestamp': now,
+            'payload': dict(payload) if isinstance(payload, dict) else payload,
+            'probe_running': bool(probe_running),
+        }
+        return dict(payload) if isinstance(payload, dict) else payload
 
     def snapshot(self, pool_probe_progress_getter):
         now = self.time_provider()
@@ -962,7 +991,7 @@ class RouterHealthRuntime:
 
         probe_progress = pool_probe_progress_getter() if pool_probe_progress_getter else {}
         probe_running = bool((probe_progress or {}).get('running')) and int((probe_progress or {}).get('total') or 0) > 0
-        related_processes = related_program_process_snapshot(probe_running=probe_running)
+        related_processes = self._related_process_snapshot(now, probe_running)
         payload = build_router_health_payload(
             meminfo=read_proc_meminfo(),
             ndmc_system=self._ndmc_snapshot(now),
@@ -992,3 +1021,4 @@ class RouterHealthRuntime:
                 self._core_proxy_cache = {'timestamp': 0, 'payload': None}
                 self._dns_cache = {'timestamp': 0, 'payload': None}
                 self._ndmc_cache = {'timestamp': 0, 'payload': None}
+                self._related_process_cache = {'timestamp': 0, 'payload': None, 'probe_running': False}

@@ -1,3 +1,7 @@
+*v1.879 (1 Jul 2026) -* main
+
+*Reduces idle web/router health overhead without changing pool-check behavior: router CPU in the status card is smoothed to avoid treating one short sample as sustained load, related process RSS scans are cached while no pool probe is running, and background CPU guards reuse a fresh sample across service checks instead of sampling /proc repeatedly. Clean install/bootstrap now rotates its own rollback backups to the latest copy, matching the existing web-update backup policy, and existing installs receive the new lightweight config defaults during update.*
+
 *v1.878 (1 Jul 2026) -* main
 
 *Keeps pool-only changes lightweight: adding, deleting, clearing or syncing subscription keys no longer resets the full active-mode status when the active key is unchanged. Pool action responses now carry background pool-probe progress, the web UI performs one short status refresh after pool mutations, compact live-status API responses are cached separately from full payloads, and post-pool router cleanup snapshots are written to logs instead of a separate UI field. Post-pool progress labels, MemAvailable checks and Telegram pool healthcheck helpers stay off the hot runtime path after a pool probe, while the Telegram bot service/main.py singleton guard prevents duplicate bot instances. The router card now separates router-wide memory/CPU from program resource use and includes related helper RSS such as Xray, pool workers, temporary Xray, YouTube prefetch and command workers.*

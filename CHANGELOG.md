@@ -1,3 +1,13 @@
+<a name="1.879"></a>
+# [1.879] - 1 Jul 2026
+
+- Smooths router CPU in the status card so one short `/proc/stat` sample does not look like sustained idle load.
+- Caches related process RSS scans while no pool probe is running, reducing `/proc` work from open web pages without hiding pool workers during checks.
+- Reuses a fresh background CPU-guard sample across service checks, avoiding repeated short CPU samplings when guards run close together.
+- Adds update/clean-install config defaults for the lighter router-health and background-guard behavior.
+- Rotates bootstrap clean-install rollback backups to the latest copy; web-update backups already keep the latest rollback.
+- Keeps pool probe behavior unchanged; long pool checks still require an explicit user start.
+
 <a name="1.878"></a>
 # [1.878] - 1 Jul 2026
 

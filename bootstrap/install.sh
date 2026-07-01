@@ -31,6 +31,14 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+cleanup_bootstrap_backups() {
+    keep_count="${1:-1}"
+    [ -d "$BACKUP_ROOT" ] || return 0
+    ls -dt "$BACKUP_ROOT"/* 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
+        case "$old_dir" in "$BACKUP_ROOT"/*) rm -rf "$old_dir" ;; esac
+    done
+}
+
 fail() {
     echo "ERROR: $1" >&2
     exit 1
@@ -606,6 +614,7 @@ ensure_symlink_or_copy "$BOT_MAIN_PATH" "$BOT_DIR/bot.py"
 generate_udp_quic_policy_file
 
 /bin/sh "$TMP_DIR/script.sh" -install
+cleanup_bootstrap_backups 1
 
 if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then
     TG_WEB_AUTH_TOKEN_VALUE="${TG_WEB_AUTH_TOKEN:-}"
@@ -677,6 +686,8 @@ memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
 status_refresh_min_interval_seconds = 180.0
+router_health_related_process_cache_ttl = 45.0
+router_health_cpu_smoothing_factor = 0.35
 web_status_api_cache_ttl = 30.0
 router_metrics_history_limit = 120
 router_metrics_warn_bot_rss_kb = 66560
@@ -696,6 +707,7 @@ memory_timeline_enabled = False
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0
 memory_timeline_max_events = 720
+background_task_cpu_cache_ttl_seconds = 20.0
 background_task_max_bot_rss_kb = 66560
 udp_quic_block_shadowsocks_enabled = True
 udp_quic_block_vmess_enabled = True

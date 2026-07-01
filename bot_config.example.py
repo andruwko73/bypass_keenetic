@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.878
+# ВЕРСИЯ СКРИПТА v1.879
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -57,6 +57,8 @@ pool_probe_quality_4k_min_mbps = 45.0
 router_health_cache_ttl = 15.0  # быстрый веб-статус памяти/CPU
 router_health_dns_cache_ttl = 45.0  # dnsmasq/ipset diagnostics не дергать на каждом обновлении страницы
 router_health_ndmc_cache_ttl = 30.0  # ndmc show system тяжелее /proc, держим отдельный TTL
+router_health_related_process_cache_ttl = 45.0  # не сканировать все /proc на каждый веб-статус в простое
+router_health_cpu_smoothing_factor = 0.35  # сглаживать короткие CPU-пики в блоке Роутер
 web_status_api_cache_ttl = 30.0
 router_metrics_history_limit = 120
 router_metrics_warn_bot_rss_kb = 66560
@@ -89,6 +91,7 @@ memory_timeline_max_events = 720
 memory_malloc_trim_enabled = True  # после тяжёлой очистки просит libc вернуть свободные арены памяти системе
 memory_malloc_trim_min_rss_kb = 61440
 memory_malloc_trim_cooldown_seconds = 20.0
+background_task_cpu_cache_ttl_seconds = 20.0
 background_task_max_bot_rss_kb = 66560  # skip service background checks near 65 MB RSS so the bot does not approach the restart threshold
 udp_quic_block_shadowsocks_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Shadowsocks list
 udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Vmess list
