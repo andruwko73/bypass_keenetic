@@ -104,10 +104,28 @@ YOUTUBE_EDGE_IP_ENTRIES = [
     '209.85.233.190',
 ]
 
+YOUTUBE_AD_DECISION_ROUTE_ENTRIES = [
+    'ad.doubleclick.net',
+    'adservice.google.com',
+    'googleads.g.doubleclick.net',
+    'googleadservices.com',
+    'pagead-googlehosted.l.google.com',
+    'pagead.l.doubleclick.net',
+    'pagead2.googlesyndication.com',
+    'pubads.g.doubleclick.net',
+    'securepubads.g.doubleclick.net',
+    'static.doubleclick.net',
+    'td.doubleclick.net',
+    'tpc.googlesyndication.com',
+    'www.googleadservices.com',
+    'www.googletagservices.com',
+]
+
 YOUTUBE_UNBLOCK_ENTRIES = [
     *YOUTUBE_CDN_IP_RANGES,
     *YOUTUBE_PLAYER_API_IP_ENTRIES,
     *YOUTUBE_EDGE_IP_ENTRIES,
+    *YOUTUBE_AD_DECISION_ROUTE_ENTRIES,
     'youtube.com',
     'www.youtube.com',
     'c.youtube.com',
@@ -319,9 +337,6 @@ GEMINI_ROUTE_ENTRIES = [
     'csp.withgoogle.com',
     'www.googletagmanager.com',
     'www.google-analytics.com',
-    'static.doubleclick.net',
-    'td.doubleclick.net',
-    'googleads.g.doubleclick.net',
     'optimizationguide-pa.googleapis.com',
     'content-autofill.googleapis.com',
     'encrypted-tbn0.gstatic.com',

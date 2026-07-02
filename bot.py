@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.885, последнее изменение: 02.07.2026
+#  Файл: bot.py, Версия v1.886, последнее изменение: 02.07.2026
 
 import subprocess
 import os
@@ -1277,11 +1277,25 @@ def _auto_failover_defer_switch_for_traffic_guard(**kwargs):
 
 
 def _attempt_auto_failover():
+    telegram_route_proto = _telegram_route_protocol()
+    if not telegram_route_proto:
+        return False
+    if proxy_mode != telegram_route_proto:
+        _auto_failover_log(
+            f'Auto-failover: restoring Telegram route protocol {telegram_route_proto} '
+            f'instead of current mode {proxy_mode}.'
+        )
+        ok, error = update_proxy(telegram_route_proto)
+        if not ok:
+            _auto_failover_log(
+                f'Auto-failover: cannot restore Telegram route protocol {telegram_route_proto}: {error}'
+            )
+            return False
     return _auto_failover_runtime().attempt_auto_failover(
         state=auto_failover_state,
         pool_probe_locked=lambda: bool(globals().get('pool_probe_lock') and pool_probe_lock.locked()),
-        proxy_mode=proxy_mode,
-        proxy_url=proxy_settings.get(proxy_mode),
+        proxy_mode=telegram_route_proto,
+        proxy_url=proxy_settings.get(telegram_route_proto),
         check_telegram_api=_check_telegram_api_through_proxy,
         load_current_keys=_load_current_keys,
         load_key_pools=_load_key_pools,
@@ -1306,7 +1320,7 @@ def _attempt_auto_failover():
         startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS,
         min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES,
         repair_active_proxy=_repair_active_reality_endpoint,
-        protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER,
+        protocols=(telegram_route_proto,),
         defer_switch=_auto_failover_defer_switch_for_traffic_guard,
     )
 
@@ -7835,8 +7849,32 @@ def _key_requires_xray(key_name, key_value):
     return security == 'reality' or flow == 'xtls-rprx-vision'
 
 
+def _service_route_protocol(service_key, fallback=''):
+    try:
+        state = (_service_route_summary() or {}).get(service_key) or {}
+    except Exception:
+        return fallback
+    complete = [
+        str(proto or '').strip()
+        for proto in (state.get('complete_protocols') or [])
+        if str(proto or '').strip() in POOL_PROTOCOL_ORDER
+    ]
+    if not complete:
+        return fallback
+    if fallback in complete:
+        return fallback
+    return complete[0]
+
+
+def _telegram_route_protocol():
+    if not _app_mode_telegram_enabled():
+        return ''
+    fallback = proxy_mode if proxy_mode in POOL_PROTOCOL_ORDER else ''
+    return _service_route_protocol('telegram', fallback=fallback)
+
+
 def _telegram_required_for_protocol(key_name):
-    return bool(key_name and key_name == proxy_mode)
+    return bool(key_name and key_name == _telegram_route_protocol())
 
 
 def _core_proxy_runtime_name():

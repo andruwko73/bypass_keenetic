@@ -3044,7 +3044,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
     assert "'probe_applied_pool_key_services'" in (ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
-    assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
+    assert 'def _telegram_route_protocol' in source
+    assert "telegram_route_proto = _telegram_route_protocol()" in source
+    assert 'proxy_mode=telegram_route_proto' in source
+    assert 'protocols=(telegram_route_proto,)' in source
     assert "auto_failover_recent_success_ttl', 900" in source
     assert "auto_failover_candidate_failure_backoff_seconds', 900" in source
     assert "auto_failover_startup_hold_seconds', 180" in source
@@ -6471,6 +6474,8 @@ def test_vless2_youtube_routes_are_scoped():
         'youtubego.in',
         'youtubemobilesupport.com',
     } <= entries
+    assert set(service_catalog.YOUTUBE_AD_DECISION_ROUTE_ENTRIES) <= entries
+    assert not (set(service_catalog.YOUTUBE_AD_DECISION_ROUTE_ENTRIES) & vless_entries)
     assert set(service_catalog.YOUTUBE_PLAYER_API_IP_ENTRIES) <= entries
     assert not (set(service_catalog.YOUTUBE_PLAYER_API_IP_ENTRIES) & vless_entries)
     assert set(service_catalog.YOUTUBE_EDGE_IP_ENTRIES) <= entries
@@ -6602,6 +6607,9 @@ def test_ai_assistant_custom_routes_are_synced():
     assert 'gemini.google.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     assert 'generativelanguage.googleapis.com' in service_catalog.UDP_QUIC_ROUTE_ENTRIES
     assert {'www.youtube.com', 'i.ytimg.com', 'yt3.ggpht.com', 'jnn-pa.googleapis.com'}.isdisjoint(
+        service_catalog.GEMINI_ROUTE_ENTRIES
+    )
+    assert set(service_catalog.YOUTUBE_AD_DECISION_ROUTE_ENTRIES).isdisjoint(
         service_catalog.GEMINI_ROUTE_ENTRIES
     )
     bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')

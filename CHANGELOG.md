@@ -1,3 +1,9 @@
+<a name="1.886"></a>
+# [1.886] - 2 Jul 2026
+
+- Moves YouTube ad-decision domains such as DoubleClick and Google ad services into the YouTube route so the `YouTube -> Vless 2, rest -> Vless 1` profile keeps more of the YouTube playback context on Vless 2.
+- Keeps Telegram auto-failover scoped to the protocol where Telegram is actually routed, preventing a Telegram recovery attempt from replacing the selected Vless 2 YouTube key.
+
 <a name="1.885"></a>
 # [1.885] - 2 Jul 2026
 

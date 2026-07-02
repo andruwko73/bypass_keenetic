@@ -1,3 +1,7 @@
+*v1.886 (2 Jul 2026) -* main
+
+*Keeps the YouTube route on Vless 2 more completely by moving YouTube ad-decision domains out of the generic Google/Gemini route, and keeps Telegram auto-failover on the protocol where Telegram is actually routed so it cannot replace the selected YouTube key.*
+
 *v1.885 (2 Jul 2026) -* main
 
 *Keeps background status-refresh cleanup from running GC at the normal 62 MB bot RSS shelf, matching the lighter `/api/status` response cleanup threshold so an open web page does not create CPU spikes while the router is idle.*

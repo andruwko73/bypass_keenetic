@@ -290,7 +290,6 @@ githubassets.com
 githubcopilot.com
 githubcopilotusercontent.com
 githubusercontent.com
-googleads.g.doubleclick.net
 graph.facebook.com
 graph.org
 grouple.co
@@ -379,7 +378,6 @@ stable.dl2.discordapp.net
 stel.com
 static.ads-twitter.com
 static.auth0.com
-static.doubleclick.net
 statsig.anthropic.com
 statsig.com
 statsigapi.net
@@ -392,7 +390,6 @@ t.co
 t.me
 tbank.ru
 tcr9i.chat.openai.com
-td.doubleclick.net
 tdesktop.com
 teleg.xyz
 telega.one
