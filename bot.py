@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.882, последнее изменение: 01.07.2026
+#  Файл: bot.py, Версия v1.883, последнее изменение: 02.07.2026
 
 import subprocess
 import os
@@ -699,7 +699,7 @@ AUTO_FAILOVER_POLL_SECONDS = int(getattr(config, 'auto_failover_poll_seconds', 6
 AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switch_cooldown_seconds', 180))
 AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT = float(getattr(config, 'auto_failover_check_connect_timeout', 2))
 AUTO_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'auto_failover_check_read_timeout', 3))
-AUTO_FAILOVER_RECENT_SUCCESS_TTL = max(0, int(getattr(config, 'auto_failover_recent_success_ttl', 300)))
+AUTO_FAILOVER_RECENT_SUCCESS_TTL = max(0, int(getattr(config, 'auto_failover_recent_success_ttl', 900)))
 AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS = max(
     AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
     int(getattr(config, 'auto_failover_candidate_failure_backoff_seconds', 900)),
@@ -792,6 +792,7 @@ def _mark_active_telegram_failure(message):
         )
     _prime_auto_failover_after_telegram_failure(message)
     background_task_skip_until.pop('Telegram auto-failover', None)
+    background_task_skip_reason.pop('Telegram auto-failover', None)
     _invalidate_key_status_cache()
     last_log = float(background_task_skip_log_at.get('Telegram polling failure') or 0.0)
     if now - last_log >= 60.0:
@@ -942,6 +943,7 @@ udp_quic_drift_state = {
 }
 background_task_skip_log_at = {}
 background_task_skip_until = {}
+background_task_skip_reason = {}
 youtube_edge_prefetch_state = {
     'enabled': YOUTUBE_EDGE_PREFETCH_ENABLED,
     'route_protocol': '',
@@ -1921,7 +1923,7 @@ ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_re
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 30.0))
 WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 45.0))
 SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL = float(getattr(config, 'service_route_intersections_cache_ttl', 60.0))
-ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 15.0))
+ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 30.0))
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
 ROUTER_HEALTH_NDMC_CACHE_TTL = float(getattr(config, 'router_health_ndmc_cache_ttl', 30.0))
 ROUTER_HEALTH_RELATED_PROCESS_CACHE_TTL = float(getattr(config, 'router_health_related_process_cache_ttl', 45.0))
@@ -4452,7 +4454,8 @@ def _background_cpu_busy_percent():
 def _background_task_allowed(task_name, *, allow_high_rss=False):
     now = time.time()
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
-    if skip_until and now < skip_until and not allow_high_rss:
+    skip_reason = str(background_task_skip_reason.get(task_name) or '')
+    if skip_until and now < skip_until and not (allow_high_rss and skip_reason == 'rss'):
         return False
     rss_kb = int(_process_rss_kb() or 0)
     if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not allow_high_rss:
@@ -4460,6 +4463,7 @@ def _background_task_allowed(task_name, *, allow_high_rss=False):
         rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
         if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
             background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+            background_task_skip_reason[task_name] = 'rss'
             last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
             if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
                 background_task_skip_log_at[task_name] = now
@@ -4471,8 +4475,10 @@ def _background_task_allowed(task_name, *, allow_high_rss=False):
     cpu_busy = _background_cpu_busy_percent()
     if cpu_busy is None or cpu_busy <= BACKGROUND_TASK_MAX_CPU_PERCENT:
         background_task_skip_until.pop(task_name, None)
+        background_task_skip_reason.pop(task_name, None)
         return True
     background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+    background_task_skip_reason[task_name] = 'cpu'
     last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
     if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
         background_task_skip_log_at[task_name] = now
@@ -10659,6 +10665,8 @@ def _placeholder_status_snapshot(current_keys, include_pool_details=True):
 
 def _refresh_status_caches_async(current_keys, active_only=False):
     if pool_probe_lock.locked():
+        return
+    if not _background_task_allowed('status refresh'):
         return
     try:
         if _read_web_command_state_file().get('running') or _shared_command_job_running(source='web'):

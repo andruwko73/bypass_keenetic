@@ -1,3 +1,10 @@
+<a name="1.883"></a>
+# [1.883] - 2 Jul 2026
+
+- Reduces idle router CPU spikes by extending the recent-success window that lets Telegram auto-failover trust an already working active key instead of rechecking Bot API every few minutes.
+- Keeps CPU backoff effective for emergency Telegram recovery: `allow_high_rss` can bypass only RSS pressure, not a CPU-busy cooldown.
+- Routes async web status refresh through the background CPU/RSS guard and stretches router-health polling to 30 seconds, reducing self-load from an open web interface.
+
 <a name="1.882"></a>
 # [1.882] - 2 Jul 2026
 

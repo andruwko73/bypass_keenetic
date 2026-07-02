@@ -1,3 +1,7 @@
+*v1.883 (2 Jul 2026) -* main
+
+*Reduces idle router CPU spikes by keeping Telegram auto-failover on recent successful active-key checks longer, preserving CPU backoff even when emergency Telegram recovery is allowed to ignore RSS pressure, and making background status refresh/router health polling less aggressive.*
+
 *v1.882 (2 Jul 2026) -* main
 
 *Keeps Telegram bot recovery from being blocked by the generic high-RSS background guard, checks authenticated Telegram Bot API access for the active protocol, and keeps raw Telegram connection errors out of the web status banner while logging the technical cause.*

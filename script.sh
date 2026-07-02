@@ -922,6 +922,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_bot_num_threads[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_bot_num_threads = 1\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^router_health_cache_ttl[[:space:]]*=[[:space:]]*15\.0([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^router_health_cache_ttl[[:space:]]*=.*/router_health_cache_ttl = 30.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^router_health_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_health_cache_ttl = 30.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_health_related_process_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_health_related_process_cache_ttl = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^router_health_cpu_smoothing_factor[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_health_cpu_smoothing_factor = 0.35\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_status_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_status_api_cache_ttl = 30.0\n' >> "$BOT_CONFIG_PATH"
@@ -965,6 +969,10 @@ migrate_runtime_config_defaults() {
     grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> /opt/etc/bot_config.py
     grep -Eq '^telegram_bot_num_threads[[:space:]]*=' /opt/etc/bot_config.py || printf 'telegram_bot_num_threads = 1\n' >> /opt/etc/bot_config.py
+    if grep -Eq '^router_health_cache_ttl[[:space:]]*=[[:space:]]*15\.0([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^router_health_cache_ttl[[:space:]]*=.*/router_health_cache_ttl = 30.0/' /opt/etc/bot_config.py || true
+    fi
+    grep -Eq '^router_health_cache_ttl[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_health_cache_ttl = 30.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^router_health_related_process_cache_ttl[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_health_related_process_cache_ttl = 45.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^router_health_cpu_smoothing_factor[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_health_cpu_smoothing_factor = 0.35\n' >> /opt/etc/bot_config.py
     if grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(65536|71680|87040)([[:space:]#]|$)' /opt/etc/bot_config.py; then
@@ -1084,6 +1092,7 @@ PYCFG
   grep -Eq '^youtube_edge_prefetch_scheduler_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_scheduler_max_load1 = 2.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cpu_sample_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cpu_sample_ms = 250\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^active_status_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'active_status_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^auto_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_vless2_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_vless2_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_urls[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ', 'https://www.youtube.com/watch?v=jfKfPfyJRdk')\n" >> "$BOT_CONFIG_PATH"

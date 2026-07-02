@@ -1933,6 +1933,9 @@ def test_codex_version_matches_commit_count():
     assert 'status_refresh_min_interval_seconds = 180.0' in example
     assert 'status_refresh_min_interval_seconds = 180.0' in installer
     assert 'status_refresh_min_interval_seconds = 180.0' in bootstrap
+    assert 'router_health_cache_ttl = 30.0' in example
+    assert 'router_health_cache_ttl = 30.0' in installer
+    assert 'router_health_cache_ttl = 30.0' in bootstrap
     assert 'router_health_related_process_cache_ttl = 45.0' in example
     assert 'router_health_related_process_cache_ttl = 45.0' in installer
     assert 'router_health_related_process_cache_ttl = 45.0' in bootstrap
@@ -1942,6 +1945,9 @@ def test_codex_version_matches_commit_count():
     assert 'web_status_api_cache_ttl = 30.0' in example
     assert 'web_status_api_cache_ttl = 30.0' in installer
     assert 'web_status_api_cache_ttl = 30.0' in bootstrap
+    assert 'auto_failover_recent_success_ttl = 900' in example
+    assert 'auto_failover_recent_success_ttl = 900' in installer
+    assert 'auto_failover_recent_success_ttl = 900' in bootstrap
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
@@ -2078,6 +2084,7 @@ def test_codex_version_matches_commit_count():
     assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_related_process_cache_ttl = 45.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'router_health_cache_ttl = 30.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_cpu_smoothing_factor = 0.35' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert '[ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -2086,6 +2093,7 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_prefetch_scheduler_max_load1 = 2.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_cpu_sample_ms = 250' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'active_status_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'auto_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_vless2_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'jfKfPfyJRdk' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
@@ -2830,6 +2838,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "f'{task_name} skipped high RSS'" in source
     assert 'background_task_cpu_cache_ttl_seconds' in source
     assert 'background_cpu_busy_cache' in source
+    assert 'background_task_skip_reason = {}' in source
+    assert "skip_reason = str(background_task_skip_reason.get(task_name) or '')" in source
+    assert "not (allow_high_rss and skip_reason == 'rss')" in source
+    assert "background_task_skip_reason[task_name] = 'cpu'" in source
     assert "'status refresh skipped high RSS'" in source
     assert 'rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not active_only' in source
     assert 'def _recent_event_history_match' in source
@@ -3011,6 +3023,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_load_persisted_pool_probe_resume()' in source
     assert "_schedule_post_pool_memory_cleanup()" in source
     assert 'def _refresh_status_caches_async(current_keys, active_only=False)' in source
+    assert "if not _background_task_allowed('status refresh')" in source
     assert "refresh_key = f'active:{signature}' if active_only else signature" in source
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
     assert 'def _placeholder_status_snapshot(current_keys, include_pool_details=True)' in source
@@ -3028,7 +3041,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
     assert "'probe_applied_pool_key_services'" in (ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
-    assert "auto_failover_recent_success_ttl', 300" in source
+    assert "auto_failover_recent_success_ttl', 900" in source
     assert "auto_failover_candidate_failure_backoff_seconds', 900" in source
     assert "auto_failover_startup_hold_seconds', 180" in source
     assert "auto_failover_consecutive_failures', 3" in source
@@ -3049,6 +3062,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'Telegram API status check through' in source
     assert 'allow_recent_success_downgrade=True' in source
     assert "background_task_skip_until.pop('Telegram auto-failover', None)" in source
+    assert "background_task_skip_reason.pop('Telegram auto-failover', None)" in source
     assert 'active key marked failed and recovery scheduled' in source
     assert 'telegram polling preflight failed' in source
     assert 'authenticated=True' in source

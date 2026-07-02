@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.882
+# ВЕРСИЯ СКРИПТА v1.883
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -54,7 +54,7 @@ pool_probe_quality_stable_latency_ms = 2500
 pool_probe_quality_fast_latency_ms = 1500
 pool_probe_quality_1600p_min_mbps = 25.0
 pool_probe_quality_4k_min_mbps = 45.0
-router_health_cache_ttl = 15.0  # быстрый веб-статус памяти/CPU
+router_health_cache_ttl = 30.0  # быстрый веб-статус памяти/CPU без лишнего опроса роутера
 router_health_dns_cache_ttl = 45.0  # dnsmasq/ipset diagnostics не дергать на каждом обновлении страницы
 router_health_ndmc_cache_ttl = 30.0  # ndmc show system тяжелее /proc, держим отдельный TTL
 router_health_related_process_cache_ttl = 45.0  # не сканировать все /proc на каждый веб-статус в простое
@@ -205,6 +205,7 @@ youtube_vless2_failover_check_read_timeout = 10
 youtube_vless2_failover_confirm_retries = 3
 youtube_vless2_failover_confirm_delay_seconds = 8.0
 active_status_recent_success_ttl = 900
+auto_failover_recent_success_ttl = 900
 youtube_vless2_failover_recent_success_ttl = 900
 youtube_vless2_restart_recheck_enabled = True
 youtube_vless2_restart_recheck_cooldown_seconds = 300
