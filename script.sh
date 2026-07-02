@@ -1789,6 +1789,7 @@ if [ "$1" = "-update" ]; then
     ensure_runtime_legacy_paths
     migrate_runtime_config_defaults
     generate_udp_quic_policy_file
+    repair_service_route_catalog_drift
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"

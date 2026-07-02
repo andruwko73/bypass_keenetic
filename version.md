@@ -1,3 +1,7 @@
+*v1.887 (2 Jul 2026) -* main
+
+*Repairs existing router route lists during GitHub updates and after route-profile changes, so the `YouTube -> Vless 2, rest -> Vless 1` split gets the new YouTube ad-decision domains on Vless 2 instead of leaving old runtime files partially routed.*
+
 *v1.886 (2 Jul 2026) -* main
 
 *Keeps the YouTube route on Vless 2 more completely by moving YouTube ad-decision domains out of the generic Google/Gemini route, and keeps Telegram auto-failover on the protocol where Telegram is actually routed so it cannot replace the selected YouTube key.*

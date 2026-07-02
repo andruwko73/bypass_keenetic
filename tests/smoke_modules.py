@@ -2442,9 +2442,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'def repair_service_route_catalog_drift(' in service_routes_source
     assert 'update_script=UNBLOCK_UPDATE_SCRIPT' in service_routes_source
     assert 'ensure_runtime_legacy_paths\n    generate_udp_quic_policy_file' in script
-    assert 'migrate_runtime_config_defaults\n    generate_udp_quic_policy_file' in script
+    assert 'migrate_runtime_config_defaults\n    generate_udp_quic_policy_file\n    repair_service_route_catalog_drift' in script
     assert 'Service route catalog repaired:' in script
-    assert script.count('repair_service_route_catalog_drift') == 2
+    assert script.count('repair_service_route_catalog_drift') == 3
     assert bootstrap.count('repair_service_route_catalog_drift') == 0
 
     for script_path in (ROOT / 'script.sh', ROOT / 'bootstrap' / 'install.sh'):
@@ -8998,7 +8998,10 @@ def test_service_routes_apply_and_profile():
         assert service_catalog.YOUTUBE_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8')
         assert service_catalog.TELEGRAM_UNBLOCK_ENTRIES[0] in (Path(tmp) / 'vless.txt').read_text(encoding='utf-8')
         vless_after_profile = set((Path(tmp) / 'vless.txt').read_text(encoding='utf-8').splitlines())
+        vless2_after_profile = set((Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8').splitlines())
         assert set(service_catalog.service_route_entries('telegram')) <= vless_after_profile
+        assert set(service_catalog.service_route_entries('youtube')) <= vless2_after_profile
+        assert service_routes.service_route_state('youtube', unblock_dir=tmp)['label'] == 'Vless 2'
         assert not (set(service_catalog.SERVICE_LIST_SOURCES['telegram'].get('route_state_exclude') or []) & vless_after_profile)
         assert not (set(service_catalog.CHROME_REMOTE_DESKTOP_CORE_ROUTE_ENTRIES) & vless_after_profile)
         same_route_dir = Path(tmp) / 'same-route'

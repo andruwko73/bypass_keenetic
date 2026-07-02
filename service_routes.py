@@ -955,6 +955,11 @@ def apply_service_profile(
                 update_script='',
             )
         )
+    repair = repair_service_route_catalog_drift(
+        service_items=service_items,
+        unblock_dir=unblock_dir,
+        update_script='',
+    )
     if callable(before_update):
         before_update()
     _run_update(update_script)
@@ -964,4 +969,5 @@ def apply_service_profile(
         'services': len(results),
         'entries': sum(item.get('entries', 0) for item in results),
         'results': results,
+        'repair': repair,
     }

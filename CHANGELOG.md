@@ -1,3 +1,10 @@
+<a name="1.887"></a>
+# [1.887] - 2 Jul 2026
+
+- Runs the service-route catalog repair during GitHub updates so existing router installs migrate new YouTube route entries into the selected YouTube protocol instead of keeping old runtime lists.
+- Re-runs the same repair after applying a route profile, keeping `YouTube -> Vless 2, rest -> Vless 1` complete even when later services would otherwise remove allowed shared Google entries.
+- Extends route-profile smoke coverage so YouTube must be fully assigned to Vless 2 after the profile is applied.
+
 <a name="1.886"></a>
 # [1.886] - 2 Jul 2026
 
