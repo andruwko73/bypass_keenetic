@@ -1,3 +1,10 @@
+<a name="1.882"></a>
+# [1.882] - 2 Jul 2026
+
+- Lets Telegram auto-failover run even when the generic background RSS guard is holding non-critical jobs, so repeated bot API failures can still switch to a working pool key.
+- Makes the active protocol status use authenticated Telegram Bot API checks when the Telegram bot is enabled, avoiding a false "Telegram works" state from a bare api.telegram.org reachability check.
+- Prevents long Telegram API connection errors from leaking into the web status banner; technical details are logged, while the UI now shows the current recovery action.
+
 <a name="1.881"></a>
 # [1.881] - 1 Jul 2026
 

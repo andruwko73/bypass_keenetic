@@ -91,30 +91,41 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool, 
     return items
 
 
-def _topbar_status_item(status, router_health, pool_summary_note, enable_key_pool, enable_telegram=True, bot_ready=False, topbar_status_text=''):
+def _topbar_status_item(status, router_health, pool_summary_note, enable_key_pool, enable_telegram=True, bot_ready=False, bot_polling=False, topbar_status_text=''):
     status = status or {}
     override_text = str(topbar_status_text or '').strip()
     api_status = str(status.get('api_status') or '').strip()
+    if enable_telegram and bot_ready and not bot_polling:
+        pending_text = api_status if (
+            _api_status_requires_attention(api_status) and
+            'Программа подбирает рабочий ключ из пула текущего режима' in api_status
+        ) else (
+            'Telegram API не ответил вовремя через текущий режим. '
+            'Программа подбирает рабочий ключ из пула текущего режима; '
+            'если подходящих кандидатов нет, повторит проверку позже. '
+            'Статус обновится без перезагрузки страницы'
+        )
+        return 'warn', 'Telegram API требует внимания', pending_text
     if override_text and override_text != api_status:
         tone = 'warn' if any(marker in override_text.casefold() for marker in ('ошибка', 'не работает', 'failed', 'error')) else 'info'
         return tone, 'Статус обновляется', override_text
 
     tone, title, text = _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram)[0]
     if tone == 'ok' and enable_telegram:
-        title = 'Telegram-бот работает' if bot_ready else 'Telegram API отвечает'
+        title = 'Telegram-бот работает' if bot_polling else 'Telegram API отвечает'
         text = 'API отвечает, память роутера в норме'
     return tone, title, text
 
 
-def _topbar_status_html(status_item, *, enable_telegram=True, bot_ready=False):
+def _topbar_status_html(status_item, *, enable_telegram=True, bot_ready=False, bot_polling=False):
     tone, title, text = status_item
     safe_tone = html.escape(tone or 'info', quote=True)
     icon_html = (
         '<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"></span>'
-        if enable_telegram and bot_ready else
+        if enable_telegram and bot_polling else
         ''
     )
-    return f'''<span class="api-pill topbar-status topbar-status-{safe_tone}" id="web-api-pill" data-bot-ready="{str(bool(bot_ready)).lower()}">
+    return f'''<span class="api-pill topbar-status topbar-status-{safe_tone}" id="web-api-pill" data-bot-ready="{str(bool(bot_ready)).lower()}" data-bot-polling="{str(bool(bot_polling)).lower()}">
                     {icon_html}
                     <span class="topbar-status-copy">
                         <strong id="topbar-status-title">{html.escape(title)}</strong>
@@ -167,6 +178,7 @@ def render_web_form(
     enable_live_status=True,
     enable_telegram=True,
     bot_ready=False,
+    bot_polling=False,
 ):
     start_form_async_attr = ' data-async-action="start"' if enable_async_forms else ''
     quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
@@ -276,10 +288,11 @@ def render_web_form(
         enable_key_pool,
         enable_telegram,
         bot_ready=bot_ready,
+        bot_polling=bot_polling,
         topbar_status_text=topbar_status_text,
     )
     telegram_topbar_block = (
-        _topbar_status_html(topbar_status_item, enable_telegram=enable_telegram, bot_ready=bot_ready)
+        _topbar_status_html(topbar_status_item, enable_telegram=enable_telegram, bot_ready=bot_ready, bot_polling=bot_polling)
         if enable_telegram else
         ''
     )
@@ -328,6 +341,7 @@ def render_web_form(
         'enableLiveStatus': bool(enable_live_status),
         'enableTelegram': bool(enable_telegram),
         'botReady': bool(bot_ready),
+        'botPolling': bool(bot_polling),
     })
     topbar_actions_class = 'topbar-actions' + ('' if enable_telegram else ' topbar-actions-web-only')
     page_class = ' class="command-running"' if _script_bool(initial_command_running) else ''

@@ -1216,7 +1216,34 @@ def test_key_pool_subscription_helpers():
         },
         hash_key=_hash_key,
     )
-    assert scored_candidates[:3] == [('vless', 'good'), ('vless', 'unknown'), ('vless', 'bad')]
+    assert scored_candidates[:4] == [('vless', 'good'), ('vless', 'unknown'), ('vmess', 'vmess-key'), ('vless', 'bad')]
+    recent_failure_filtered_candidates = key_pool_store.failover_candidates(
+        {'vless': ['active', 'fresh-bad', 'old-bad', 'unknown']},
+        'vless',
+        'active',
+        protocols=('vless',),
+        key_probe_cache={
+            _hash_key('fresh-bad'): {'tg_ok': False, 'ts': 900},
+            _hash_key('old-bad'): {'tg_ok': False, 'ts': 100},
+        },
+        hash_key=_hash_key,
+        recent_failure_backoff_seconds=300,
+        now=1000,
+    )
+    assert recent_failure_filtered_candidates == [('vless', 'unknown'), ('vless', 'old-bad')]
+    failed_skipped_candidates = key_pool_store.failover_candidates(
+        {'vless': ['active', 'bad', 'unknown']},
+        'vless',
+        'active',
+        protocols=('vless',),
+        key_probe_cache={
+            _hash_key('bad'): {'tg_ok': False, 'ts': 100},
+        },
+        hash_key=_hash_key,
+        skip_failed=True,
+        now=1000,
+    )
+    assert failed_skipped_candidates == [('vless', 'unknown')]
     youtube_scored_candidates = key_pool_store.failover_candidates(
         {'vless2': ['active', 'slow', 'fast', 'unchecked']},
         'vless2',
@@ -2751,7 +2778,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_repair_active_reality_endpoint(route_proto, confirm_message, service='youtube')" in source
     assert "_probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service=service)" in source
     assert "proto not in ('vless', 'vless2')" in source
-    assert 'authenticated=False' in source
+    assert 'active_telegram_required = bool(_app_mode_telegram_enabled() and _telegram_required_for_protocol(key_name))' in source
+    assert 'authenticated=active_telegram_required' in source
     assert 'def _start_udp_quic_drift_watchdog_thread' in source
     assert 'UDP_QUIC_DRIFT_SENTINEL_DOMAINS' in source
     assert 'UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS' in source
@@ -3001,6 +3029,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'probe_applied_pool_key_services'" in (ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
     assert 'protocols=(proxy_mode,) if proxy_mode in POOL_PROTOCOL_ORDER else POOL_PROTOCOL_ORDER' in source
     assert "auto_failover_recent_success_ttl', 300" in source
+    assert "auto_failover_candidate_failure_backoff_seconds', 900" in source
     assert "auto_failover_startup_hold_seconds', 180" in source
     assert "auto_failover_consecutive_failures', 3" in source
     assert "auto_failover_traffic_guard_bypass_failures" in source
@@ -3012,6 +3041,24 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bypassing traffic guard after' in source
     assert 'def _auto_failover_log' in source
     assert "'auto_failover_confirm_fail'" in source
+    assert "allow_high_rss=True" in source
+    assert 'recent_failure_backoff_seconds=AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS' in source
+    assert 'skip_failed_candidates=True' in source
+    assert 'def _mark_active_telegram_failure' in source
+    assert 'def _log_telegram_api_status_failure' in source
+    assert 'Telegram API status check through' in source
+    assert 'allow_recent_success_downgrade=True' in source
+    assert "background_task_skip_until.pop('Telegram auto-failover', None)" in source
+    assert 'active key marked failed and recovery scheduled' in source
+    assert 'telegram polling preflight failed' in source
+    assert 'authenticated=True' in source
+    assert 'if _is_telegram_connectivity_error(err):' in source
+    assert '_mark_active_telegram_failure(err)' in source
+    assert 'not (active_telegram_required and not bot_polling)' in source
+    assert 'def _web_render_status_with_polling_guard' in source
+    assert "active_status['api_transient'] = True" in source
+    assert 'bool(bot_ready)' in source
+    assert 'bool(bot_polling)' in source
     assert "'stream_guard_defer'" in source
     assert "youtube_vless2_failover_recent_success_ttl', 900" in source
     assert 'def _youtube_route_protocol' in source
@@ -3936,6 +3983,7 @@ def test_web_status_runtime_helpers():
         fallback_reason='fallback',
     )
     assert pending['api_status'].startswith('⏳ Telegram API')
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in pending['api_status']
     assert pending['socks_details'] == 'SOCKS ok.'
     ok_with_service_recheck = web_status_runtime.build_web_status_snapshot(
         state_label='state',
@@ -3960,6 +4008,43 @@ def test_web_status_runtime_helpers():
         'api_ok': True,
         'details': 'Telegram: работает, YouTube: нестабильно, перепроверяется',
     })
+    raw_failure = web_status_runtime.build_web_status_snapshot(
+        state_label='state',
+        proxy_mode='vless',
+        protocols={
+            'vless': {
+                'endpoint_ok': True,
+                'endpoint_message': 'SOCKS ok.',
+                'api_ok': False,
+                'api_message': 'HTTPSConnectionPool(host="api.telegram.org", port=443): Max retries exceeded',
+            }
+        },
+        ports={'vless': 10811},
+        check_socks5=lambda port: False,
+        check_telegram_api=lambda **kwargs: 'unused',
+        is_transient=lambda text: False,
+        fallback_reason='',
+    )
+    assert raw_failure['api_status'].startswith('❌ Доступ к Telegram API через режим vless не проходит.')
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in raw_failure['api_status']
+    assert 'Техническая ошибка записана в лог' in raw_failure['api_status']
+    assert 'HTTPSConnectionPool' not in raw_failure['api_status']
+    assert 'Max retries exceeded' not in raw_failure['api_status']
+    direct_raw_failure = web_status_runtime.build_web_status_snapshot(
+        state_label='state',
+        proxy_mode='none',
+        protocols={},
+        ports={},
+        check_socks5=lambda port: False,
+        check_telegram_api=lambda **kwargs: '❌ Прямой доступ к api.telegram.org не проходит: HTTPSConnectionPool(host="api.telegram.org", port=443): Max retries exceeded',
+        is_transient=lambda text: False,
+        fallback_reason='',
+    )
+    assert direct_raw_failure['api_status'].startswith('❌ Прямой доступ к api.telegram.org не проходит.')
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in direct_raw_failure['api_status']
+    assert 'Техническая ошибка записана в лог' in direct_raw_failure['api_status']
+    assert 'HTTPSConnectionPool' not in direct_raw_failure['api_status']
+    assert 'Max retries exceeded' not in direct_raw_failure['api_status']
     placeholder = web_status_runtime.build_web_status_snapshot(
         state_label='state',
         proxy_mode='vless',
@@ -3971,6 +4056,7 @@ def test_web_status_runtime_helpers():
         fallback_reason='',
     )
     assert placeholder['api_status'].startswith('⏳ Telegram API')
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in placeholder['api_status']
     assert 'не проходит:' not in placeholder['api_status']
     unchecked = web_status_runtime.build_web_status_snapshot(
         state_label='state',
@@ -3983,6 +4069,7 @@ def test_web_status_runtime_helpers():
         fallback_reason='',
     )
     assert unchecked['api_status'].startswith('⏳ Telegram API')
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in unchecked['api_status']
     assert 'не проходит:' not in unchecked['api_status']
     fallback = web_status_runtime.build_web_status_snapshot(
         state_label='state',
@@ -3996,6 +4083,7 @@ def test_web_status_runtime_helpers():
     )
     assert fallback['socks_details'].endswith('доступен')
     assert fallback['api_status'].startswith('⏳ Telegram API')
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in fallback['api_status']
     attention = web_form_template._attention_items(
         {'api_status': '❌ Доступ к Telegram API через режим vless не проходит:'},
         {'used_percent': 0},
@@ -5534,6 +5622,32 @@ def test_pool_probe_runner_failover_candidate():
     assert failover_http_calls == [{'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4}]
     assert stopped == [('process', 'config.json')]
     assert cleaned == [True]
+
+    records.clear()
+    result = pool_probe_runner.find_pool_failover_candidate(
+        [('vless', 'fail'), ('vless', 'ok')],
+        service='telegram',
+        batch_size=2,
+        test_port='1200',
+        proxy_outbound_from_key=lambda *args, **kwargs: {},
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_telegram_api=lambda proxy, **kwargs: (not proxy.endswith(':1200'), 'telegram'),
+        check_http=lambda proxy, **kwargs: (True, 'telegram web ok'),
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        proto_label=lambda proto: proto,
+        log=logs.append,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(3, 4),
+        validate_outbound=lambda *args, **kwargs: None,
+        build_config_batch=lambda valid_batch, test_port, proxy_outbound_from_key: {'valid': valid_batch},
+        start_xray=lambda config: ('process', 'config.json'),
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        collect_garbage=lambda: None,
+    )
+    assert result == ('vless', 'ok', True, None)
+    assert records[0] == ('vless', 'fail', {'tg_ok': False, 'yt_ok': None, 'allow_recent_success_downgrade': True})
+    assert records[1] == ('vless', 'ok', {'tg_ok': True, 'yt_ok': None})
     assert 'не подготовлен' in logs[0]
 
     api_only_records = []
@@ -5559,7 +5673,7 @@ def test_pool_probe_runner_failover_candidate():
         collect_garbage=lambda: None,
     )
     assert api_only_result is None
-    assert api_only_records == [('vless', 'api-only', {'tg_ok': False, 'yt_ok': None})]
+    assert api_only_records == [('vless', 'api-only', {'tg_ok': False, 'yt_ok': None, 'allow_recent_success_downgrade': True})]
 
     youtube_records = []
     youtube_result = pool_probe_runner.find_pool_failover_candidate(
@@ -8425,6 +8539,7 @@ def test_web_form_template_smoke():
         enable_key_pool=False,
         enable_custom_checks=False,
         bot_ready=True,
+        bot_polling=True,
     )
     assert '/static/app.css?v=' in page
     assert '/static/app.js?v=' in page
@@ -8450,6 +8565,7 @@ def test_web_form_template_smoke():
     assert 'status-attention-list' not in page
     assert 'topbar-status-icon-telegram' in page
     assert '"botReady":true' in page
+    assert '"botPolling":true' in page
     assert 'status-overview-head' in page
     assert 'Панель состояния' not in page
     assert '10 / 64 MB' in page
@@ -8470,6 +8586,104 @@ def test_web_form_template_smoke():
     assert 'command-running' not in page
     assert 'command-progress-track' not in page
     assert 'data-command-progress-fill' not in page
+    process_without_polling_page = web_form_template.render_web_form(
+        APP_BRANCH_DESCRIPTION='test',
+        APP_BRANCH_LABEL='codex/test',
+        APP_VERSION_LABEL='1',
+        TELEGRAM_SVG_B64='tg-icon',
+        YOUTUBE_SVG_B64='',
+        _telegram_icon_html=lambda opacity=1.0: 'TG',
+        csrf_token='token',
+        command_block='',
+        command_buttons_html='',
+        app_runtime_mode_description='test',
+        app_runtime_mode_label='test',
+        app_runtime_mode_picker_block='',
+        current_mode_label='test',
+        custom_checks_json='[]',
+        fallback_block='',
+        event_history_html='',
+        initial_command_running='false',
+        initial_status_pending='false',
+        list_route_label='list',
+        message_block='',
+        mode_picker_block='',
+        mode_toggle_label='mode',
+        pool_summary={'active_text': 'none'},
+        pool_summary_note='',
+        protocol_panels_html='',
+        protocol_tabs_html='',
+        quick_key_label='Vless 1',
+        quick_key_proto='vless',
+        quick_key_value='',
+        quick_start_note='note',
+        router_health={'memory_text': '10 / 64 MB', 'note': 'load 0.01'},
+        socks_block='',
+        start_button_label='start',
+        status={'api_status': 'ok'},
+        topbar_status_text='ok',
+        unblock_panels_html='',
+        unblock_tabs_html='',
+        enable_key_pool=False,
+        enable_custom_checks=False,
+        bot_ready=True,
+        bot_polling=False,
+    )
+    assert 'Telegram-бот работает' not in process_without_polling_page
+    assert 'Telegram API требует внимания' in process_without_polling_page
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in process_without_polling_page
+    assert 'Telegram API отвечает' not in process_without_polling_page
+    assert 'topbar-status-icon-telegram' not in process_without_polling_page
+    assert 'data-bot-ready="true"' in process_without_polling_page
+    assert 'data-bot-polling="false"' in process_without_polling_page
+    assert '"botReady":true' in process_without_polling_page
+    assert '"botPolling":false' in process_without_polling_page
+    pending_page = web_form_template.render_web_form(
+        APP_BRANCH_DESCRIPTION='test',
+        APP_BRANCH_LABEL='codex/test',
+        APP_VERSION_LABEL='1',
+        TELEGRAM_SVG_B64='tg-icon',
+        YOUTUBE_SVG_B64='',
+        _telegram_icon_html=lambda opacity=1.0: 'TG',
+        csrf_token='token',
+        command_block='',
+        command_buttons_html='',
+        app_runtime_mode_description='test',
+        app_runtime_mode_label='test',
+        app_runtime_mode_picker_block='',
+        current_mode_label='test',
+        custom_checks_json='[]',
+        fallback_block='',
+        event_history_html='',
+        initial_command_running='false',
+        initial_status_pending='false',
+        list_route_label='list',
+        message_block='',
+        mode_picker_block='',
+        mode_toggle_label='mode',
+        pool_summary={'active_text': 'none'},
+        pool_summary_note='',
+        protocol_panels_html='',
+        protocol_tabs_html='',
+        quick_key_label='Vless 1',
+        quick_key_proto='vless',
+        quick_key_value='',
+        quick_start_note='note',
+        router_health={'memory_text': '10 / 64 MB', 'note': 'load 0.01'},
+        socks_block='',
+        start_button_label='start',
+        status={'api_status': '⏳ Telegram API не ответил вовремя через текущий режим.'},
+        topbar_status_text='⏳ Telegram API не ответил вовремя через текущий режим.',
+        unblock_panels_html='',
+        unblock_tabs_html='',
+        enable_key_pool=False,
+        enable_custom_checks=False,
+        bot_ready=True,
+        bot_polling=False,
+    )
+    assert 'Telegram API требует внимания' in pending_page
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' in pending_page
+    assert 'Telegram API отвечает' not in pending_page
     running_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',

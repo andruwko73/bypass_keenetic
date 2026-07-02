@@ -1,3 +1,7 @@
+*v1.882 (2 Jul 2026) -* main
+
+*Keeps Telegram bot recovery from being blocked by the generic high-RSS background guard, checks authenticated Telegram Bot API access for the active protocol, and keeps raw Telegram connection errors out of the web status banner while logging the technical cause.*
+
 *v1.881 (1 Jul 2026) -* main
 
 *Keeps YouTube on the selected Vless route when Google priority domains resolve to the same edge IPs: YouTube startup/API domains now participate in the existing Vless priority winner selection, YouTube prefetch removes warmed addresses from the opposite Vless priority ipset, full ipset refresh dedupes priority sets after rebuilding them, and the S99unblock priority refresh applies the same cleanup without adding another background loop. S99unblock start/restart also avoids matching its own command line as an orphan scheduler.*

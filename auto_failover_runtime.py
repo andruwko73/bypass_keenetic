@@ -88,6 +88,8 @@ def attempt_auto_failover(
     is_transient_failure=None,
     transient_success_ttl=0,
     recent_success_ttl=0,
+    recent_failure_backoff_seconds=0,
+    skip_failed_candidates=False,
     startup_hold_seconds=0,
     min_consecutive_failures=1,
     repair_active_proxy=None,
@@ -317,10 +319,16 @@ def attempt_auto_failover(
             hash_key=hash_key,
             service='telegram',
             exclude_keys=exclude_keys,
+            recent_failure_backoff_seconds=recent_failure_backoff_seconds,
+            skip_failed=skip_failed_candidates,
+            now=now,
         )
 
         if not candidates:
-            log('Auto-failover: ключей в пулах нет, переключать не на что.')
+            if recent_failure_backoff_seconds:
+                log('Auto-failover: нет кандидатов вне окна недавних отказов; повторная проверка отложена.')
+            else:
+                log('Auto-failover: ключей в пулах нет, переключать не на что.')
             return False
 
         log(

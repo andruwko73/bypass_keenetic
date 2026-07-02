@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.881, последнее изменение: 01.07.2026
+#  Файл: bot.py, Версия v1.882, последнее изменение: 01.07.2026
 
 import subprocess
 import os
@@ -700,6 +700,10 @@ AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switc
 AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT = float(getattr(config, 'auto_failover_check_connect_timeout', 2))
 AUTO_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'auto_failover_check_read_timeout', 3))
 AUTO_FAILOVER_RECENT_SUCCESS_TTL = max(0, int(getattr(config, 'auto_failover_recent_success_ttl', 300)))
+AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS = max(
+    AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
+    int(getattr(config, 'auto_failover_candidate_failure_backoff_seconds', 900)),
+)
 AUTO_FAILOVER_CONSECUTIVE_FAILURES = max(1, int(getattr(config, 'auto_failover_consecutive_failures', 3)))
 AUTO_FAILOVER_TRAFFIC_GUARD_BYPASS_FAILURES = max(
     AUTO_FAILOVER_CONSECUTIVE_FAILURES,
@@ -734,6 +738,69 @@ auto_failover_state = {
     'consecutive_failures': 0,
     'in_progress': False,
 }
+
+
+def _prime_auto_failover_after_telegram_failure(message):
+    now = time.time()
+    try:
+        started_at = float(auto_failover_state.get('started_at') or now)
+    except (TypeError, ValueError):
+        started_at = now
+    auto_failover_state['started_at'] = min(
+        started_at,
+        now - max(0, AUTO_FAILOVER_STARTUP_HOLD_SECONDS),
+    )
+    auto_failover_state['last_fail'] = now - max(0, AUTO_FAILOVER_GRACE_SECONDS)
+    auto_failover_state['last_failure_message'] = str(message or 'Telegram API failure')[:500]
+    try:
+        failures = int(auto_failover_state.get('consecutive_failures') or 0)
+    except (TypeError, ValueError):
+        failures = 0
+    auto_failover_state['consecutive_failures'] = max(
+        failures,
+        max(1, AUTO_FAILOVER_CONSECUTIVE_FAILURES - 1),
+    )
+
+
+def _is_telegram_connectivity_error(error):
+    text = f'{error.__class__.__name__}: {error}'.lower()
+    markers = (
+        'connectionerror',
+        'connecttimeout',
+        'readtimeout',
+        'sslerror',
+        'protocolerror',
+        'connection reset',
+        'connection aborted',
+        'remote disconnected',
+        'max retries',
+        'timed out',
+        'api.telegram.org',
+    )
+    return any(marker in text for marker in markers)
+
+
+def _mark_active_telegram_failure(message):
+    now = time.time()
+    active_key = (_load_current_keys().get(proxy_mode, '') if proxy_mode in POOL_PROTOCOL_ORDER else '').strip()
+    if active_key:
+        _record_key_probe(
+            proxy_mode,
+            active_key,
+            tg_ok=False,
+            allow_recent_success_downgrade=True,
+        )
+    _prime_auto_failover_after_telegram_failure(message)
+    background_task_skip_until.pop('Telegram auto-failover', None)
+    _invalidate_key_status_cache()
+    last_log = float(background_task_skip_log_at.get('Telegram polling failure') or 0.0)
+    if now - last_log >= 60.0:
+        background_task_skip_log_at['Telegram polling failure'] = now
+        _write_runtime_log(
+            f'Auto-failover: Telegram polling failed through {proxy_mode}; active key marked failed and recovery scheduled.'
+        )
+
+
 YOUTUBE_VLESS2_FAILOVER_ENABLED = bool(getattr(config, 'youtube_vless2_failover_enabled', True))
 YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS = max(180, int(getattr(config, 'youtube_vless2_failover_grace_seconds', 180)))
 YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS = max(120, int(getattr(config, 'youtube_vless2_failover_poll_seconds', 120)))
@@ -1232,6 +1299,8 @@ def _attempt_auto_failover():
         is_transient_failure=_is_transient_telegram_api_failure,
         transient_success_ttl=TELEGRAM_TRANSIENT_OK_CACHE_TTL,
         recent_success_ttl=AUTO_FAILOVER_RECENT_SUCCESS_TTL,
+        recent_failure_backoff_seconds=AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS,
+        skip_failed_candidates=True,
         startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS,
         min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES,
         repair_active_proxy=_repair_active_reality_endpoint,
@@ -1751,7 +1820,10 @@ def _start_auto_failover_thread():
     def worker():
         while not shutdown_requested.is_set():
             try:
-                if _app_mode_pool_enabled() and _background_task_allowed('Telegram auto-failover'):
+                if _app_mode_pool_enabled() and _background_task_allowed(
+                    'Telegram auto-failover',
+                    allow_high_rss=True,
+                ):
                     _attempt_auto_failover()
             except Exception as exc:
                 _write_runtime_log(f'Auto-failover error: {exc}')
@@ -2674,6 +2746,21 @@ def _redact_sensitive_text(text):
     if token_value:
         safe_text = safe_text.replace(token_value, '<redacted-token>')
     return re.sub(r'bot[0-9]+:[A-Za-z0-9_-]+', 'bot<redacted-token>', event_history.redact_sensitive_text(safe_text))
+
+
+def _log_telegram_api_status_failure(key_name, api_message):
+    message = str(api_message or '').strip()
+    if not message:
+        return
+    log_key = f'Telegram API status failure {key_name}'
+    now = time.time()
+    last_log = float(background_task_skip_log_at.get(log_key) or 0.0)
+    if now - last_log < BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+        return
+    background_task_skip_log_at[log_key] = now
+    _write_runtime_log(
+        f'Telegram API status check through {key_name} failed: {_redact_sensitive_text(message)}'
+    )
 
 
 def _telegram_send_error_is_transient(error):
@@ -4362,13 +4449,13 @@ def _background_cpu_busy_percent():
     return value
 
 
-def _background_task_allowed(task_name):
+def _background_task_allowed(task_name, *, allow_high_rss=False):
     now = time.time()
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
-    if skip_until and now < skip_until:
+    if skip_until and now < skip_until and not allow_high_rss:
         return False
     rss_kb = int(_process_rss_kb() or 0)
-    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not allow_high_rss:
         cleanup = _memory_cleanup(f'{task_name} skipped high RSS', force=True, clear_status=False, log=False)
         rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
         if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
@@ -7756,7 +7843,11 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     cached_probe = cache.get(_hash_key(key_value), {})
     custom_states = _key_pool_web().web_custom_probe_states(cached_probe, protocol_custom_checks)
-    if _active_status_can_use_recent_probe(cached_probe, required_services):
+    active_telegram_required = bool(_app_mode_telegram_enabled() and _telegram_required_for_protocol(key_name))
+    if (
+        _active_status_can_use_recent_probe(cached_probe, required_services) and
+        not (active_telegram_required and not bot_polling)
+    ):
         return _status_cached_protocol_status(
             key_value,
             cached_probe,
@@ -7771,12 +7862,18 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
         proxy_url,
         connect_timeout=5,
         read_timeout=8,
-        authenticated=False,
+        authenticated=active_telegram_required,
     )
+    if active_telegram_required and not api_ok:
+        _log_telegram_api_status_failure(key_name, api_message)
     api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
     yt_metrics = {}
     yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
-    if api_transient and _recent_probe_ok(cached_probe, 'tg_ok', TELEGRAM_TRANSIENT_OK_CACHE_TTL):
+    if (
+        api_transient and
+        not active_telegram_required and
+        _recent_probe_ok(cached_probe, 'tg_ok', TELEGRAM_TRANSIENT_OK_CACHE_TTL)
+    ):
         api_ok = True
         api_transient = False
         api_message = f'Последняя успешная проверка Telegram сохранена; свежая проверка временно не ответила: {api_message}'
@@ -10295,10 +10392,11 @@ def check_telegram_api(retries=2, retry_delay=7, connect_timeout=30, read_timeou
         if 'PySocks' in probe_message:
             return ('❌ Не удалось подключиться к Telegram API: отсутствует поддержка SOCKS (PySocks). '
                     'Установите python3-pysocks или используйте режим без SOCKS.')
+        _log_telegram_api_status_failure(proxy_mode if proxy_mode != 'none' else 'direct', probe_message)
         if proxy_mode == 'none':
-            last_result = f'❌ Прямой доступ к api.telegram.org не проходит: {probe_message}'
+            last_result = web_status_runtime.telegram_api_direct_recovery_message()
         else:
-            last_result = f'❌ Доступ к Telegram API через режим {proxy_mode} не проходит: {probe_message}'
+            last_result = web_status_runtime.telegram_api_recovery_message(proxy_mode)
             if attempt < retries:
                 time.sleep(retry_delay)
     return last_result
@@ -10312,6 +10410,27 @@ def _telegram_state_label():
     if not _app_mode_telegram_enabled():
         return 'Web only: Telegram-бот отключен'
     return 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
+
+
+def _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime_mode=None):
+    if not (_app_mode_telegram_enabled(app_runtime_mode) and bot_ready and not bot_polling):
+        return status, protocol_statuses
+    guarded_status = dict(status or {})
+    guarded_status['state_label'] = _telegram_state_label()
+    guarded_status['api_status'] = web_status_runtime.telegram_api_pending_message()
+
+    guarded_protocols = dict(protocol_statuses or {})
+    active_status = guarded_protocols.get(proxy_mode)
+    if isinstance(active_status, dict) and active_status.get('api_ok') is True:
+        active_status = dict(active_status)
+        active_status['api_ok'] = False
+        active_status['api_transient'] = True
+        active_status['api_message'] = guarded_status['api_status']
+        active_status['tone'] = 'warn'
+        active_status['label'] = 'Частично работает'
+        active_status['details'] = guarded_status['api_status']
+        guarded_protocols[proxy_mode] = active_status
+    return guarded_status, guarded_protocols
 
 
 def _build_web_status(current_keys, protocols=None):
@@ -10329,7 +10448,13 @@ def _build_web_status(current_keys, protocols=None):
 
 
 def _status_snapshot_signature(current_keys):
-    return _status_snapshot_signature_impl(current_keys, _load_custom_checks())
+    return (
+        _status_snapshot_signature_impl(current_keys, _load_custom_checks()),
+        proxy_mode,
+        _load_app_runtime_mode(),
+        bool(bot_ready),
+        bool(bot_polling),
+    )
 
 
 def _build_status_snapshot(current_keys, force_refresh=False):
@@ -10454,7 +10579,11 @@ def _status_snapshot_has_pending_check(snapshot):
 
 
 def _active_mode_status_signature(current_keys):
-    return _status_active_mode_signature(proxy_mode, current_keys, _load_custom_checks())
+    return (
+        _status_active_mode_signature(proxy_mode, current_keys, _load_custom_checks()),
+        _load_app_runtime_mode(),
+        bool(bot_polling),
+    )
 
 
 def _cached_active_mode_protocol_status(current_keys):
@@ -11276,6 +11405,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             protocol_statuses = snapshot['protocols']
             current_pool_probe_progress = {}
             pool_probe_pending = False
+        status, protocol_statuses = _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime_mode)
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
         if not pool_enabled:
@@ -11378,6 +11508,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             enable_key_pool=pool_enabled,
             enable_telegram=telegram_enabled,
             bot_ready=bool(bot_ready),
+            bot_polling=bool(bot_polling),
         )
 
     def _build_protocol_panel(self, protocol):
@@ -11976,11 +12107,26 @@ def _run_telegram_polling_loop():
     global bot_polling
     while not shutdown_requested.is_set():
         try:
+            if proxy_mode in PROXY_LOCAL_PORTS:
+                preflight_ok, preflight_message = _check_telegram_api_through_proxy(
+                    proxy_settings.get(proxy_mode),
+                    connect_timeout=max(2.0, AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT),
+                    read_timeout=max(3.0, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
+                    authenticated=True,
+                )
+                if not preflight_ok:
+                    bot_polling = False
+                    _mark_active_telegram_failure(preflight_message)
+                    _memory_cleanup('telegram polling preflight failed', clear_status=False, log=False)
+                    shutdown_requested.wait(10)
+                    continue
             bot_polling = True
             bot.infinity_polling(timeout=60, long_polling_timeout=50)
         except Exception as err:
             bot_polling = False
             _write_runtime_log(err)
+            if _is_telegram_connectivity_error(err):
+                _mark_active_telegram_failure(err)
             _reset_telegram_http_session('polling error')
             _memory_cleanup('telegram polling error', force=True, clear_status=False)
             if shutdown_requested.is_set():

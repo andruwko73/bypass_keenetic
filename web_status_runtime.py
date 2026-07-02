@@ -8,9 +8,41 @@ def telegram_api_success_message():
 def telegram_api_pending_message():
     return (
         '⏳ Telegram API не ответил вовремя через текущий режим. '
-        'Локальный SOCKS работает, идёт повторная проверка. '
+        'Программа подбирает рабочий ключ из пула текущего режима; '
+        'если подходящих кандидатов нет, повторит проверку позже. '
         'Статус обновится без перезагрузки страницы'
     )
+
+
+def telegram_api_recovery_message(proxy_mode):
+    mode = str(proxy_mode or '').strip() or 'текущий'
+    return (
+        f'❌ Доступ к Telegram API через режим {mode} не проходит. '
+        'Программа подбирает рабочий ключ из пула текущего режима; '
+        'если подходящих кандидатов нет, повторит проверку позже. '
+        'Техническая ошибка записана в лог.'
+    )
+
+
+def telegram_api_direct_recovery_message():
+    return (
+        '❌ Прямой доступ к api.telegram.org не проходит. '
+        'Если Telegram должен работать через ключ, включите режим с пулом. '
+        'Программа подбирает рабочий ключ из пула текущего режима; '
+        'если включён прямой режим, повторит проверку позже. '
+        'Техническая ошибка записана в лог.'
+    )
+
+
+def api_status_from_runtime_check(proxy_mode, api_status, socks_ok, is_transient):
+    status_text = str(api_status or '').strip()
+    if status_text.startswith('✅'):
+        return status_text
+    if proxy_mode != 'none' and socks_ok and is_transient(status_text):
+        return telegram_api_pending_message()
+    if proxy_mode == 'none':
+        return telegram_api_direct_recovery_message()
+    return telegram_api_recovery_message(proxy_mode)
 
 
 def protocol_status_is_pending(protocol_status):
@@ -72,8 +104,8 @@ def api_status_from_protocol(proxy_mode, protocol_status, socks_ok, is_transient
     if not has_api_result:
         api_message = str((protocol_status or {}).get('details') or '').strip() or 'нет результата проверки'
     if proxy_mode == 'none':
-        return f'❌ Прямой доступ к api.telegram.org не проходит: {api_message}'
-    return f'❌ Доступ к Telegram API через режим {proxy_mode} не проходит: {api_message}'
+        return telegram_api_direct_recovery_message()
+    return telegram_api_recovery_message(proxy_mode)
 
 
 def build_web_status_snapshot(
@@ -101,11 +133,19 @@ def build_web_status_snapshot(
             socks_ok = check_socks5(port)
             socks_state = 'доступен' if socks_ok else 'не отвечает как SOCKS5'
             socks_details = f'Локальный SOCKS {proxy_mode} 127.0.0.1:{port}: {socks_state}'
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
-        if proxy_mode != 'none' and socks_ok and not api_status.startswith('✅') and is_transient(api_status):
-            api_status = telegram_api_pending_message()
+        api_status = api_status_from_runtime_check(
+            proxy_mode,
+            check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8),
+            socks_ok,
+            is_transient,
+        )
     else:
-        api_status = check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8)
+        api_status = api_status_from_runtime_check(
+            'none',
+            check_telegram_api(retries=0, retry_delay=0, connect_timeout=5, read_timeout=8),
+            False,
+            is_transient,
+        )
     return {
         'state_label': state_label,
         'proxy_mode': proxy_mode,

@@ -284,7 +284,10 @@ def find_pool_failover_candidate(
                     tg_ok = primary_ok
                     yt_ok = None
                     yt_metrics = {}
-                record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok, **yt_metrics)
+                record_kwargs = dict(yt_metrics)
+                if service != 'youtube' and tg_ok is False:
+                    record_kwargs['allow_recent_success_downgrade'] = True
+                record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok, **record_kwargs)
                 if primary_ok:
                     return proto, key_value, tg_ok, yt_ok
         except Exception as exc:

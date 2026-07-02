@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import tempfile
+import time
 
 
 PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
@@ -169,6 +170,9 @@ def failover_candidates(
     hash_key=None,
     service='telegram',
     exclude_keys=None,
+    recent_failure_backoff_seconds=0,
+    skip_failed=False,
+    now=None,
 ):
     pools = normalize_key_pools(pools)
     current_proto = str(current_proto or '').strip()
@@ -176,13 +180,27 @@ def failover_candidates(
     exclude_keys = {str(key or '').strip() for key in (exclude_keys or ()) if str(key or '').strip()}
     key_probe_cache = key_probe_cache or {}
     service_field = 'yt_ok' if service == 'youtube' else 'tg_ok'
+    try:
+        now_ts = int(time.time() if now is None else now)
+    except Exception:
+        now_ts = 0
+    try:
+        failure_backoff = max(0, int(recent_failure_backoff_seconds or 0))
+    except Exception:
+        failure_backoff = 0
 
     def probe_score(key_value):
+        probe = {}
         if not key_probe_cache or not hash_key:
-            return (2, 0)
-        probe = key_probe_cache.get(hash_key(key_value), {})
-        if not isinstance(probe, dict):
-            return (2, 0)
+            pass
+        else:
+            probe = key_probe_cache.get(hash_key(key_value), {})
+            if not isinstance(probe, dict):
+                probe = {}
+        try:
+            checked_ts = int(probe.get('ts') or 0)
+        except Exception:
+            checked_ts = 0
         if service == 'youtube':
             try:
                 score = int(probe.get('yt_score'))
@@ -214,11 +232,15 @@ def failover_candidates(
             score = 1
         else:
             score = 2
-        try:
-            checked_ts = int(probe.get('ts') or 0)
-        except Exception:
-            checked_ts = 0
-        return (score, checked_ts)
+        recently_failed = bool(
+            service != 'youtube' and
+            probe.get(service_field) is False and
+            failure_backoff > 0 and
+            checked_ts > 0 and
+            now_ts > 0 and
+            now_ts - checked_ts < failure_backoff
+        )
+        return (score, checked_ts, recently_failed)
 
     protocol_order = [proto for proto in (protocols or PROTOCOLS) if proto in pools]
     priority = []
@@ -233,7 +255,6 @@ def failover_candidates(
             priority.append(proto)
     candidates = []
     for proto in priority:
-        proto_candidates = []
         for index, key_value in enumerate(pools.get(proto, []) or []):
             key_value = str(key_value or '').strip()
             if not key_value:
@@ -242,8 +263,23 @@ def failover_candidates(
                 continue
             if key_value in exclude_keys:
                 continue
-            score, checked_ts = probe_score(key_value)
-            proto_candidates.append((proto, key_value, score, checked_ts, index))
-        proto_candidates.sort(key=lambda item: (-item[2], -item[3], item[4]))
-        candidates.extend((proto, key_value) for proto, key_value, _score, _checked_ts, _index in proto_candidates)
+            score, checked_ts, recently_failed = probe_score(key_value)
+            if recently_failed:
+                continue
+            proto_rank = priority.index(proto)
+            if service != 'youtube' and skip_failed and score <= 1:
+                continue
+            candidates.append((proto, key_value, score, checked_ts, proto_rank, index))
+    if service == 'youtube':
+        candidates.sort(key=lambda item: (item[4], -item[2], -item[3], item[5]))
+    else:
+        candidates.sort(
+            key=lambda item: (
+                -item[2],
+                item[3] if item[2] <= 1 else -item[3],
+                item[4],
+                item[5],
+            )
+        )
+    candidates = [(proto, key_value) for proto, key_value, _score, _checked_ts, _proto_rank, _index in candidates]
     return candidates
