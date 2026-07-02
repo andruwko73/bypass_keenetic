@@ -3016,7 +3016,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'for key_name, key_value in (current_keys or {}).items()' in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source
     assert 'allow_youtube_confirm=False' in source
-    assert "_memory_cleanup('status refresh', clear_status=False, log=False)" in source
+    assert "_status_refresh_memory_cleanup('status refresh')" in source
     assert 'def _pool_probe_cpu_busy_percent' in source
     assert 'def _schedule_post_pool_memory_cleanup' in source
     assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
@@ -3116,6 +3116,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "WEB_RESPONSE_CLEANUP_RSS_KB" in source
     assert "WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
     assert "cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
+    assert "def _status_refresh_memory_cleanup" in source
+    assert "rss_before < WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
+    assert "_status_refresh_memory_cleanup('status refresh')" in source
     assert "MEMORY_CLEANUP_RSS_KB" in source
     assert 'clear_pool_summary=bool(should_collect)' in source
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source

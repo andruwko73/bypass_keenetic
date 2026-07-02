@@ -1,3 +1,7 @@
+*v1.885 (2 Jul 2026) -* main
+
+*Keeps background status-refresh cleanup from running GC at the normal 62 MB bot RSS shelf, matching the lighter `/api/status` response cleanup threshold so an open web page does not create CPU spikes while the router is idle.*
+
 *v1.884 (2 Jul 2026) -* main
 
 *Keeps light web/status API polling from running GC at the normal 62 MB bot RSS shelf by adding a separate 65 MB cleanup threshold for non-heavy responses while preserving earlier cleanup for heavy pages.*

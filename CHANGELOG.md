@@ -1,3 +1,9 @@
+<a name="1.885"></a>
+# [1.885] - 2 Jul 2026
+
+- Stops background status refresh from calling memory cleanup at the normal ~62 MB bot RSS shelf; it now waits for the same 65 MB light-response threshold as `/api/status`.
+- Keeps heavy page/protocol cleanup unchanged so real memory pressure still releases caches and allocator pages.
+
 <a name="1.884"></a>
 # [1.884] - 2 Jul 2026
 

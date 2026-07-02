@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.884, последнее изменение: 02.07.2026
+#  Файл: bot.py, Версия v1.885, последнее изменение: 02.07.2026
 
 import subprocess
 import os
@@ -5132,6 +5132,18 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
         'collected': 0,
         'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
     }
+
+
+def _status_refresh_memory_cleanup(reason='status refresh'):
+    rss_before = int(_process_rss_kb() or 0)
+    if WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB <= 0 or rss_before < WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB:
+        return {
+            'rss_before_kb': rss_before,
+            'rss_after_kb': rss_before,
+            'collected': 0,
+            'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
+        }
+    return _memory_cleanup(reason, clear_status=False, log=False)
 
 
 def _pool_probe_memory_checkpoint(reason='', force=False, clear_status=False):
@@ -10736,7 +10748,7 @@ def _refresh_status_caches_async(current_keys, active_only=False):
                     for old_signature in list(cache):
                         if old_signature != refresh_key:
                             cache.pop(old_signature, None)
-            _memory_cleanup('status refresh', clear_status=False, log=False)
+            _status_refresh_memory_cleanup('status refresh')
             _record_memory_timeline(
                 'status refresh finished',
                 marker='status_refresh_finish',
