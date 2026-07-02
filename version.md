@@ -1,3 +1,7 @@
+*v1.884 (2 Jul 2026) -* main
+
+*Keeps light web/status API polling from running GC at the normal 62 MB bot RSS shelf by adding a separate 65 MB cleanup threshold for non-heavy responses while preserving earlier cleanup for heavy pages.*
+
 *v1.883 (2 Jul 2026) -* main
 
 *Reduces idle router CPU spikes by keeping Telegram auto-failover on recent successful active-key checks longer, preserving CPU backoff even when emergency Telegram recovery is allowed to ignore RSS pressure, and making background status refresh/router health polling less aggressive.*

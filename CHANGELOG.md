@@ -1,3 +1,9 @@
+<a name="1.884"></a>
+# [1.884] - 2 Jul 2026
+
+- Adds a separate 65 MB cleanup threshold for light web/API responses so `/api/status` polling does not trigger `gc.collect()`/`malloc_trim` at the normal ~62 MB bot RSS shelf.
+- Keeps the lower 60 MB cleanup threshold for heavy HTML/protocol-panel responses where memory release is worth the work.
+
 <a name="1.883"></a>
 # [1.883] - 2 Jul 2026
 

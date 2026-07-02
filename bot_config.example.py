@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.883
+# ВЕРСИЯ СКРИПТА v1.884
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -69,6 +69,7 @@ service_route_intersections_cache_ttl = 60.0
 memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
 memory_cleanup_rss_kb = 61440  # тихая очистка gc/malloc_trim без перезапуска, когда RSS держится около 60 MB
 web_response_cleanup_rss_kb = 61440  # веб-ответы освобождают память уже около 60 MB, не дожидаясь 70+ MB
+web_response_light_cleanup_rss_kb = 66560  # легкие status/api ответы не запускают gc на рабочей полке около 62 MB
 web_response_cleanup_min_interval_seconds = 60.0
 memory_watchdog_rss_soft_kb = 87040  # при достижении порога очищаются кэши статуса и запускается gc.collect()
 memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот перезапустится, если сейчас не идёт обновление или проверка пула

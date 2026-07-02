@@ -1969,6 +1969,9 @@ def test_codex_version_matches_commit_count():
     assert 'web_response_cleanup_rss_kb = 61440' in example
     assert 'web_response_cleanup_rss_kb = 61440' in installer
     assert 'web_response_cleanup_rss_kb = 61440' in bootstrap
+    assert 'web_response_light_cleanup_rss_kb = 66560' in example
+    assert 'web_response_light_cleanup_rss_kb = 66560' in installer
+    assert 'web_response_light_cleanup_rss_kb = 66560' in bootstrap
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in example
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in installer
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in bootstrap
@@ -2082,6 +2085,7 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_watch_warm_max_pages = 1' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_hosts = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_light_cleanup_rss_kb = 66560' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_related_process_cache_ttl = 45.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_cache_ttl = 30.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -3108,7 +3112,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_web_response_cleanup('web json api render')" in source
     assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "web_response_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "web_response_light_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "WEB_RESPONSE_CLEANUP_RSS_KB" in source
+    assert "WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
+    assert "cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
     assert "MEMORY_CLEANUP_RSS_KB" in source
     assert 'clear_pool_summary=bool(should_collect)' in source
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source

@@ -939,6 +939,7 @@ migrate_runtime_config_defaults() {
   grep -Eq '^web_pools_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_pools_api_cache_ttl = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^service_route_intersections_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'service_route_intersections_cache_ttl = 60.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_light_cleanup_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   if [ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]; then
     if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(65536|81920)([[:space:]#]|$)' /opt/etc/bot_config.py; then
@@ -961,6 +962,7 @@ migrate_runtime_config_defaults() {
     grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_metrics_warn_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
     grep -Eq '^memory_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
+    grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_light_cleanup_rss_kb = 66560\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py

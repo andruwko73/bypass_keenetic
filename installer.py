@@ -111,6 +111,7 @@ router_metrics_warn_load1 = 3.0
 web_pools_api_cache_ttl = 45.0
 service_route_intersections_cache_ttl = 60.0
 web_response_cleanup_rss_kb = 61440
+web_response_light_cleanup_rss_kb = 66560
 web_response_cleanup_min_interval_seconds = 60.0
 memory_post_pool_restart_enabled = True
 memory_post_pool_restart_rss_kb = 71680

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.883, последнее изменение: 02.07.2026
+#  Файл: bot.py, Версия v1.884, последнее изменение: 02.07.2026
 
 import subprocess
 import os
@@ -2124,6 +2124,10 @@ MEMORY_CLEANUP_RSS_KB = max(
 WEB_RESPONSE_CLEANUP_RSS_KB = max(
     0,
     int(getattr(config, 'web_response_cleanup_rss_kb', MEMORY_CLEANUP_RSS_KB or (60 * 1024))),
+)
+WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB = max(
+    WEB_RESPONSE_CLEANUP_RSS_KB,
+    int(getattr(config, 'web_response_light_cleanup_rss_kb', 65 * 1024)),
 )
 WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS = max(
     30.0,
@@ -5114,9 +5118,10 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
     ))
     rss_before = _process_rss_kb()
     now = time.time()
+    cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB
     if (
-        WEB_RESPONSE_CLEANUP_RSS_KB > 0 and
-        rss_before >= WEB_RESPONSE_CLEANUP_RSS_KB and
+        cleanup_threshold > 0 and
+        rss_before >= cleanup_threshold and
         (heavy or now - web_response_cleanup_last_at >= WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS)
     ):
         web_response_cleanup_last_at = now
