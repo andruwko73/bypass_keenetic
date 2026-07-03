@@ -1,3 +1,7 @@
+*v1.889 (3 Jul 2026) -* main
+
+*Makes Vless priority refresh follow the selected YouTube route for shared Google static/ad domains, so `ssl.gstatic.com` and related startup domains cannot remove observed YouTube edge IPs from Vless 2 after ipset refresh.*
+
 *v1.888 (3 Jul 2026) -* main
 
 *Keeps newly observed YouTube/Google edge and ad bootstrap IPs on the selected YouTube route, preventing Vless priority refresh from sending part of YouTube page/video startup through the other Vless key.*

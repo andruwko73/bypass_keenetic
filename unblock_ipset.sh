@@ -17,7 +17,8 @@ LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
 YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
-VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
+VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
+YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com}"
 VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
@@ -513,6 +514,15 @@ route_file_has_domain() {
 	' "$route_file"
 }
 
+domain_in_list() {
+	list_values="$1"
+	target_domain="$2"
+	for list_domain in $list_values; do
+		[ "$list_domain" = "$target_domain" ] && return 0
+	done
+	return 1
+}
+
 resolve_priority_ipv4() {
 	priority_domain="$1"
 	dig +time=2 +tries=1 +short "$priority_domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null \
@@ -551,11 +561,14 @@ apply_vless_priority_domain_ips() {
 	ipset flush "$vless2_priority6_set" >/dev/null 2>&1 || true
 
 	for priority_domain in $VLESS_PRIORITY_DOMAINS; do
-		route_file_has_domain "$UNBLOCK_DIR/vless.txt" "$priority_domain"
-		in_vless=$?
-		route_file_has_domain "$UNBLOCK_DIR/vless-2.txt" "$priority_domain"
-		in_vless2=$?
-		if [ "$in_vless" -eq 0 ] && [ "$in_vless2" -ne 0 ]; then
+		youtube_route="$(youtube_route_protocol)"
+		force_youtube_route=0
+		case "$youtube_route" in
+			vless|vless2)
+				domain_in_list "$YOUTUBE_ROUTE_PRIORITY_DOMAINS" "$priority_domain" && force_youtube_route=1
+				;;
+		esac
+		if [ "$force_youtube_route" -eq 1 ] && [ "$youtube_route" = "vless" ]; then
 			winner_set="$vless_set"
 			loser_set="$vless2_set"
 			winner_priority_set="$vless_priority_set"
@@ -564,7 +577,7 @@ apply_vless_priority_domain_ips() {
 			loser6_set="$vless2v6_set"
 			winner_priority6_set="$vless_priority6_set"
 			loser_priority6_set="$vless2_priority6_set"
-		elif [ "$in_vless2" -eq 0 ] && [ "$in_vless" -ne 0 ]; then
+		elif [ "$force_youtube_route" -eq 1 ] && [ "$youtube_route" = "vless2" ]; then
 			winner_set="$vless2_set"
 			loser_set="$vless_set"
 			winner_priority_set="$vless2_priority_set"
@@ -574,7 +587,31 @@ apply_vless_priority_domain_ips() {
 			winner_priority6_set="$vless2_priority6_set"
 			loser_priority6_set="$vless_priority6_set"
 		else
-			continue
+			route_file_has_domain "$UNBLOCK_DIR/vless.txt" "$priority_domain"
+			in_vless=$?
+			route_file_has_domain "$UNBLOCK_DIR/vless-2.txt" "$priority_domain"
+			in_vless2=$?
+			if [ "$in_vless" -eq 0 ] && [ "$in_vless2" -ne 0 ]; then
+				winner_set="$vless_set"
+				loser_set="$vless2_set"
+				winner_priority_set="$vless_priority_set"
+				loser_priority_set="$vless2_priority_set"
+				winner6_set="$vless6_set"
+				loser6_set="$vless2v6_set"
+				winner_priority6_set="$vless_priority6_set"
+				loser_priority6_set="$vless2_priority6_set"
+			elif [ "$in_vless2" -eq 0 ] && [ "$in_vless" -ne 0 ]; then
+				winner_set="$vless2_set"
+				loser_set="$vless_set"
+				winner_priority_set="$vless2_priority_set"
+				loser_priority_set="$vless_priority_set"
+				winner6_set="$vless2v6_set"
+				loser6_set="$vless6_set"
+				winner_priority6_set="$vless2_priority6_set"
+				loser_priority6_set="$vless_priority6_set"
+			else
+				continue
+			fi
 		fi
 
 		resolve_priority_ipv4 "$priority_domain" | while IFS= read -r priority_ip; do

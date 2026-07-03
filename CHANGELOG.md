@@ -1,3 +1,9 @@
+<a name="1.889"></a>
+# [1.889] - 3 Jul 2026
+
+- Makes Vless priority refresh follow the selected YouTube route for shared Google static/ad domains such as `ssl.gstatic.com`, `fonts.gstatic.com`, and `www.googletagmanager.com`.
+- Prevents priority refresh from deleting observed YouTube edge IPs from Vless 2 after the route list already assigned YouTube to Vless 2.
+
 <a name="1.888"></a>
 # [1.888] - 3 Jul 2026
 

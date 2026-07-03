@@ -2340,6 +2340,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ROUTE_IPSET_SIGNATURE_SETS="${ROUTE_IPSET_SIGNATURE_SETS:-unblocksh unblockshudp unblocksh6' in s99unblock
     assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in s99unblock
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in s99unblock
+    assert 'fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com' in s99unblock
+    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-ssl.gstatic.com' in s99unblock
+    assert 'domain_in_list "$YOUTUBE_ROUTE_PRIORITY_DOMAINS" "$priority_domain"' in s99unblock
+    assert 'force_youtube_route=1' in s99unblock
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in s99unblock
     assert 'apply_vless_priority_domain_ips' in s99unblock
     assert 'route_file_signature()' in s99unblock
@@ -2373,6 +2377,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com' in ipset_script
     assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in ipset_script
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in ipset_script
+    assert 'fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com' in ipset_script
+    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-ssl.gstatic.com' in ipset_script
+    assert 'domain_in_list "$YOUTUBE_ROUTE_PRIORITY_DOMAINS" "$priority_domain"' in ipset_script
+    assert 'force_youtube_route=1' in ipset_script
     assert 'youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com' in ipset_script
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in ipset_script
     assert 'apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6' in ipset_script
