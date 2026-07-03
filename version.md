@@ -1,3 +1,7 @@
+*v1.891 (3 Jul 2026) -* main
+
+*Adds the remaining observed Googlevideo `.119` startup edges to the YouTube route without broadening whole Google `/24` ranges, keeping live YouTube traffic on Vless 2 while avoiding unnecessary route bleed for other Google services.*
+
 *v1.890 (3 Jul 2026) -* main
 
 *Adds live Googlevideo edge IPs observed during the YouTube load test to the YouTube route, keeping additional video startup traffic from bypassing the selected Vless route.*

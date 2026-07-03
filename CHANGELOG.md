@@ -1,3 +1,9 @@
+<a name="1.891"></a>
+# [1.891] - 3 Jul 2026
+
+- Adds the remaining observed Googlevideo `.119` startup edge IPs to the YouTube route without broadening whole Google `/24` ranges.
+- Keeps live YouTube startup traffic on the selected YouTube route while limiting route bleed into other Google services.
+
 <a name="1.890"></a>
 # [1.890] - 3 Jul 2026
 
