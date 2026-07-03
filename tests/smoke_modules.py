@@ -6480,6 +6480,14 @@ def test_vless2_youtube_routes_are_scoped():
     assert not (set(service_catalog.YOUTUBE_PLAYER_API_IP_ENTRIES) & vless_entries)
     assert set(service_catalog.YOUTUBE_EDGE_IP_ENTRIES) <= entries
     assert not (set(service_catalog.YOUTUBE_EDGE_IP_ENTRIES) & vless_entries)
+    assert {
+        '142.251.38.67',
+        '142.251.38.72',
+        '142.251.38.81',
+        '142.251.38.91',
+        '142.251.152.119',
+        '216.239.34.36',
+    } <= set(service_catalog.YOUTUBE_EDGE_IP_ENTRIES)
     assert '74.125.172.0/24' in entries
     assert '173.194.31.0/24' in entries
     assert '74.125.174.0/24' in entries

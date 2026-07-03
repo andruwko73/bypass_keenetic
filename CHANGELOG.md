@@ -1,3 +1,9 @@
+<a name="1.888"></a>
+# [1.888] - 3 Jul 2026
+
+- Adds observed YouTube/Google edge and ad-bootstrap IPs to the YouTube route catalog so the `YouTube -> Vless 2, rest -> Vless 1` split does not let Vless1 priority refresh steal part of YouTube page/video startup traffic.
+- Covers the new edge entries in smoke tests to keep them in the shipped Vless 2 route list.
+
 <a name="1.887"></a>
 # [1.887] - 2 Jul 2026
 

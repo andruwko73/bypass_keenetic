@@ -1,3 +1,7 @@
+*v1.888 (3 Jul 2026) -* main
+
+*Keeps newly observed YouTube/Google edge and ad bootstrap IPs on the selected YouTube route, preventing Vless priority refresh from sending part of YouTube page/video startup through the other Vless key.*
+
 *v1.887 (2 Jul 2026) -* main
 
 *Repairs existing router route lists during GitHub updates and after route-profile changes, so the `YouTube -> Vless 2, rest -> Vless 1` split gets the new YouTube ad-decision domains on Vless 2 instead of leaving old runtime files partially routed.*

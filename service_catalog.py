@@ -91,12 +91,20 @@ YOUTUBE_PLAYER_API_IP_ENTRIES = [
 
 YOUTUBE_EDGE_IP_ENTRIES = [
     '142.250.150.119',
+    # YouTube page/ad bootstrap can reuse shared Google static edges; keep
+    # these explicit so Vless1 priority refresh cannot steal them.
+    '142.251.38.67',
+    '142.251.38.72',
+    '142.251.38.81',
+    '142.251.38.91',
     '142.251.38.106',
     '142.251.38.110',
     '142.251.142.234',
+    '142.251.152.119',
     '172.217.20.170',
     '172.253.130.119',
     '173.194.73.119',
+    '216.239.34.36',
     '209.85.233.91',
     '209.85.233.93',
     '209.85.233.119',
