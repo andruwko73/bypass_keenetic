@@ -1,3 +1,9 @@
+<a name="1.890"></a>
+# [1.890] - 3 Jul 2026
+
+- Adds live Googlevideo edge IPs observed during the YouTube load test to the YouTube route catalog and shipped Vless 2 list.
+- Extends smoke coverage so these additional video startup addresses stay on the selected YouTube route.
+
 <a name="1.889"></a>
 # [1.889] - 3 Jul 2026
 

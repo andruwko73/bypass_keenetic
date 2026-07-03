@@ -1,3 +1,7 @@
+*v1.890 (3 Jul 2026) -* main
+
+*Adds live Googlevideo edge IPs observed during the YouTube load test to the YouTube route, keeping additional video startup traffic from bypassing the selected Vless route.*
+
 *v1.889 (3 Jul 2026) -* main
 
 *Makes Vless priority refresh follow the selected YouTube route for shared Google static/ad domains, so `ssl.gstatic.com` and related startup domains cannot remove observed YouTube edge IPs from Vless 2 after ipset refresh.*
