@@ -1,3 +1,8 @@
+<a name="1.910"></a>
+# [1.910] - 4 Jul 2026
+
+- Queues lazy web pool refreshes by protocol so quickly opening Vless 1 and Vless 2 cannot cancel one pool request and leave it stuck on loading.
+
 <a name="1.909"></a>
 # [1.909] - 4 Jul 2026
 

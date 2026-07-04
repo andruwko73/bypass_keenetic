@@ -43,6 +43,9 @@ def render_web_scripts(
         let latestPoolProbeProgress = null;
         let poolProbePollTimer = null;
         let poolDataRefreshTimer = null;
+        let poolDataRefreshDueAt = 0;
+        let poolDataRefreshAll = false;
+        const pendingPoolDataProtocols = new Set();
         let poolDataRetryCount = {{}};
         let poolViewTimers = {{}};
         let commandPollTimer = null;
@@ -1824,12 +1827,29 @@ def render_web_scripts(
             if (!ENABLE_KEY_POOL) {{
                 return;
             }}
+            const requestedNow = protocolList(protocols);
+            if (requestedNow.length) {{
+                requestedNow.forEach(function(proto) {{
+                    pendingPoolDataProtocols.add(proto);
+                }});
+            }} else {{
+                poolDataRefreshAll = true;
+            }}
+            const delay = Math.max(0, Number(delayMs || 0));
+            const dueAt = Date.now() + delay;
+            if (poolDataRefreshTimer && poolDataRefreshDueAt && dueAt >= poolDataRefreshDueAt) {{
+                return;
+            }}
             if (poolDataRefreshTimer) {{
                 window.clearTimeout(poolDataRefreshTimer);
             }}
+            poolDataRefreshDueAt = dueAt;
             poolDataRefreshTimer = window.setTimeout(function() {{
                 poolDataRefreshTimer = null;
-                const requestedProtocols = protocolList(protocols);
+                poolDataRefreshDueAt = 0;
+                const requestedProtocols = poolDataRefreshAll ? [] : Array.from(pendingPoolDataProtocols);
+                pendingPoolDataProtocols.clear();
+                poolDataRefreshAll = false;
                 const loadingProtocols = requestedProtocols.length ? requestedProtocols : deferredPoolProtocols();
                 loadingProtocols.forEach(function(proto) {{
                     const body = document.querySelector('[data-pool-body="' + proto + '"]');

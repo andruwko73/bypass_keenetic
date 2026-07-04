@@ -1,3 +1,7 @@
+*v1.910 (4 Jul 2026) -* main
+
+*Queues lazy web pool refreshes by protocol so quickly opening Vless 1 and Vless 2 cannot cancel one pool request and leave it stuck on loading.*
+
 *v1.909 (4 Jul 2026) -* main
 
 *Fills inactive protocol statuses in the compact/active-mode snapshot from the cached pool probe result, so a protocol such as Vless 2 does not stay stuck on “Проверяется” after no pool probe is running.*

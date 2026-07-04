@@ -8649,6 +8649,9 @@ def test_web_template_scripts_helpers():
     assert 'function clearPoolDeferred(body)' in scripts
     assert 'body.removeAttribute(\'data-pool-deferred\')' in scripts
     assert '[data-pool-deferred="1"]' in scripts
+    assert 'const pendingPoolDataProtocols = new Set();' in scripts
+    assert 'pendingPoolDataProtocols.add(proto);' in scripts
+    assert 'const requestedProtocols = poolDataRefreshAll ? [] : Array.from(pendingPoolDataProtocols);' in scripts
     assert 'refreshPoolData(0, protocol)' in scripts
     assert 'function schedulePoolView(proto, delayMs)' in scripts
     assert 'const rowByKeyId = new Map();' in scripts
