@@ -174,13 +174,29 @@ def _pools_payload(ctx, query=''):
         cached = cache_getter(current_keys, protocols, now=now)
         if cached is not None:
             return cached
+    include_summary = not protocols
+    include_custom_checks = not protocols
+    payload_builder = _ctx(ctx, 'web_pools_payload')
+    if payload_builder:
+        pool_payload = payload_builder(
+            current_keys,
+            protocols=protocols,
+            include_summary=include_summary,
+            include_custom_checks=include_custom_checks,
+        )
+    else:
+        pool_payload = {
+            'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=False, protocols=protocols),
+            'pool_summary': _ctx(ctx, 'pool_status_summary')(current_keys) if include_summary else None,
+            'custom_checks': _ctx(ctx, 'web_custom_checks')() if include_custom_checks else None,
+        }
     payload = {
-        'pools': _ctx(ctx, 'web_pool_snapshot')(current_keys, include_keys=False, protocols=protocols),
-        'pool_summary': None if protocols else _ctx(ctx, 'pool_status_summary')(current_keys),
+        'pools': pool_payload.get('pools', {}) if isinstance(pool_payload, dict) else {},
+        'pool_summary': pool_payload.get('pool_summary') if include_summary and isinstance(pool_payload, dict) else None,
         'pool_probe_running': pool_probe_running,
         'pool_probe_paused': pool_probe_paused,
         'pool_probe_progress': progress,
-        'custom_checks': None if protocols else _ctx(ctx, 'web_custom_checks')(),
+        'custom_checks': pool_payload.get('custom_checks') if include_custom_checks and isinstance(pool_payload, dict) else None,
         'timestamp': now,
     }
     cache_store = _ctx(ctx, 'store_pools_api_cache')

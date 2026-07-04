@@ -8,6 +8,7 @@ DEFAULT_WARN_BOT_RSS_KB = 65 * 1024
 DEFAULT_CRITICAL_BOT_RSS_KB = 85 * 1024
 BOT_CMD_MARKER = 'python3 /opt/etc/bot/main.py'
 XRAY_CMD_MARKER = 'xray run -c /opt/etc/xray/config.json'
+DEFAULT_PID_CACHE_TTL = 30.0
 
 
 def read_proc_text(path, max_bytes=16384):
@@ -101,6 +102,20 @@ def find_pid_by_cmdline(marker, proc_root='/proc', read_text=read_proc_text):
     return None
 
 
+def pid_matches_cmdline(pid, marker, proc_root='/proc', read_text=read_proc_text):
+    try:
+        pid_value = int(pid)
+    except Exception:
+        return False
+    if pid_value <= 0:
+        return False
+    marker = str(marker or '')
+    if not marker:
+        return False
+    cmdline = read_text(os.path.join(proc_root, str(pid_value), 'cmdline'), max_bytes=4096)
+    return marker in cmdline.replace('\x00', ' ')
+
+
 def _cpu_percent(current_ticks, previous, current_system_ticks):
     if not previous:
         return 0.0
@@ -141,16 +156,33 @@ class RouterMetricsRuntime:
         warn_bot_rss_kb=DEFAULT_WARN_BOT_RSS_KB,
         critical_bot_rss_kb=DEFAULT_CRITICAL_BOT_RSS_KB,
         warn_load1=3.0,
+        pid_cache_ttl=DEFAULT_PID_CACHE_TTL,
         time_provider=time.time,
     ):
         self.history_limit = max(10, int(history_limit or DEFAULT_HISTORY_LIMIT))
         self.warn_bot_rss_kb = int(warn_bot_rss_kb or 0)
         self.critical_bot_rss_kb = int(critical_bot_rss_kb or 0)
         self.warn_load1 = float(warn_load1 or 0.0)
+        self.pid_cache_ttl = max(0.0, float(pid_cache_ttl or 0.0))
         self.time_provider = time_provider
         self._lock = threading.Lock()
         self._previous = {}
         self._history = []
+        self._pid_cache = {}
+
+    def _pid_by_cmdline(self, name, marker, now):
+        cache = self._pid_cache.get(name) or {}
+        cached_pid = cache.get('pid')
+        cached_at = float(cache.get('timestamp') or 0.0)
+        if (
+            self.pid_cache_ttl > 0 and
+            now - cached_at < self.pid_cache_ttl and
+            (cached_pid is None or pid_matches_cmdline(cached_pid, marker))
+        ):
+            return cached_pid
+        pid = find_pid_by_cmdline(marker)
+        self._pid_cache[name] = {'timestamp': now, 'pid': pid}
+        return pid
 
     def snapshot(self, *, include_history=True):
         with self._lock:
@@ -158,7 +190,7 @@ class RouterMetricsRuntime:
             load1, load5, load15 = read_loadavg()
             system_ticks = read_system_ticks()
             bot_pid = os.getpid()
-            xray_pid = find_pid_by_cmdline(XRAY_CMD_MARKER)
+            xray_pid = self._pid_by_cmdline('xray', XRAY_CMD_MARKER, now)
             bot = _process_snapshot('bot', bot_pid, system_ticks, self._previous.get('bot'))
             xray = _process_snapshot('xray', xray_pid, system_ticks, self._previous.get('xray'))
             self._previous['bot'] = (bot.get('ticks') or 0, system_ticks)

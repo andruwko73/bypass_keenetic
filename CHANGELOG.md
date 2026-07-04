@@ -1,3 +1,11 @@
+<a name="1.899"></a>
+# [1.899] - 4 Jul 2026
+
+- Stops caching large `/api/pools` and event-history payloads in the main bot process after they are rendered.
+- Renders the initial pool page without loading the full probe cache; the existing `/api/pools` hydration fills detailed rows after the page loads.
+- Builds `/api/pools` rows, summary and custom-check metadata in a short-lived worker process, so large probe-cache reads do not raise the long-lived bot RSS shelf.
+- Reuses the Xray process id and compact router-metrics snapshots, and releases lazy module references without removing modules from `sys.modules`, reducing repeated `/proc` scans and import churn.
+
 <a name="1.898"></a>
 # [1.898] - 4 Jul 2026
 

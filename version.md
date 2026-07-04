@@ -1,3 +1,7 @@
+*v1.899 (4 Jul 2026) -* main
+
+*Reduces retained bot memory after web UI activity by keeping pool/history payloads out of long-lived caches, rendering the initial pool page without loading the full probe cache, building `/api/pools` rows in a short-lived worker process, reusing the Xray PID and compact router-metrics snapshots, and releasing module references without removing modules from `sys.modules`.*
+
 *v1.898 (4 Jul 2026) -* main
 
 *Preserves user bypass route lists during GitHub updates and makes manual ipset refresh run even while the scheduler is active.*

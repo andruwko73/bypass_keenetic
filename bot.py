@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.898, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.899, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -325,18 +325,13 @@ def _unload_pool_probe_modules(reason=''):
     _pool_probe_controller_module = None
     _pool_probe_runner_module = None
     _probe_cache_module = None
-    for module_name in ('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck', 'probe_cache'):
-        try:
-            sys.modules.pop(module_name, None)
-        except Exception:
-            pass
     try:
         gc.collect()
     except Exception:
         pass
     if reason:
         try:
-            _write_runtime_log(f'Pool probe modules unloaded after {reason}.')
+            _write_runtime_log(f'Pool probe module references released after {reason}.')
         except Exception:
             pass
 
@@ -558,8 +553,6 @@ def _release_web_form_template_cache():
     global _web_form_template_module
     with _web_form_template_lock:
         _web_form_template_module = None
-        for module_name in ('web_form_template', 'web_template_styles', 'web_template_scripts'):
-            sys.modules.pop(module_name, None)
 
 
 def _clear_youtube_edge_prefetch_snapshot_cache():
@@ -1997,6 +1990,11 @@ TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cac
 ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 900)))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 30.0))
 WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 45.0))
+WEB_POOL_SNAPSHOT_WORKER_ENABLED = bool(getattr(config, 'web_pool_snapshot_worker_enabled', True))
+WEB_POOL_SNAPSHOT_WORKER_TIMEOUT_SECONDS = max(
+    2.0,
+    float(getattr(config, 'web_pool_snapshot_worker_timeout_seconds', 8.0)),
+)
 SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL = float(getattr(config, 'service_route_intersections_cache_ttl', 60.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 30.0))
 ROUTER_HEALTH_DNS_CACHE_TTL = float(getattr(config, 'router_health_dns_cache_ttl', 45.0))
@@ -2010,6 +2008,7 @@ ROUTER_METRICS_HISTORY_LIMIT = int(getattr(config, 'router_metrics_history_limit
 ROUTER_METRICS_WARN_BOT_RSS_KB = int(getattr(config, 'router_metrics_warn_bot_rss_kb', 65 * 1024))
 ROUTER_METRICS_CRITICAL_BOT_RSS_KB = int(getattr(config, 'router_metrics_critical_bot_rss_kb', 87040))
 ROUTER_METRICS_WARN_LOAD1 = float(getattr(config, 'router_metrics_warn_load1', 3.0))
+ROUTER_METRICS_COMPACT_CACHE_TTL = max(1.0, float(getattr(config, 'router_metrics_compact_cache_ttl', 8.0)))
 WEB_STATUS_STARTUP_GRACE_PERIOD = 45
 KEY_PROBE_MAX_PER_RUN = None
 POOL_PROBE_ACTIVE_ONLY = False
@@ -2428,6 +2427,10 @@ event_history_api_cache = {
     'signature': None,
     'payload': None,
 }
+router_metrics_compact_cache = {
+    'timestamp': 0.0,
+    'payload': None,
+}
 router_health = router_health_runtime.RouterHealthRuntime(
     cache_ttl=ROUTER_HEALTH_CACHE_TTL,
     dns_cache_ttl=ROUTER_HEALTH_DNS_CACHE_TTL,
@@ -2451,6 +2454,7 @@ web_status_api_cache_lock = threading.Lock()
 web_pools_api_cache_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
 event_history_api_cache_lock = threading.Lock()
+router_metrics_compact_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
 status_refresh_in_progress = set()
 status_refresh_last_started_at = {}
@@ -7390,23 +7394,11 @@ def _event_history_payload(limit=50):
         limit_value = max(1, int(limit or 50))
     except Exception:
         limit_value = 50
-    signature = (
-        limit_value,
-        _file_cache_signature(getattr(event_history, 'EVENT_HISTORY_PATH', '')),
-    )
-    with event_history_api_cache_lock:
-        cached = event_history_api_cache.get('payload')
-        if cached is not None and event_history_api_cache.get('signature') == signature:
-            return cached
     events = _event_history_snapshot(limit=limit_value)
-    payload = {
+    return {
         'events': events,
         'html': web_form_blocks.render_event_history_html(events),
     }
-    with event_history_api_cache_lock:
-        event_history_api_cache['signature'] = signature
-        event_history_api_cache['payload'] = payload
-    return payload
 
 
 def _update_status_snapshot():
@@ -7644,6 +7636,10 @@ def _get_web_pools_api_cache(current_keys, protocols, now=None):
 
 
 def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None):
+    if isinstance(payload, dict) and payload.get('pools') is not None:
+        with web_pools_api_cache_lock:
+            web_pools_api_cache.update({'timestamp': 0, 'signature': None, 'payload': None})
+        return
     rss_kb = int(_process_rss_kb() or 0)
     if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
         with web_pools_api_cache_lock:
@@ -7709,9 +7705,20 @@ def _router_health_snapshot():
 
 
 def _router_metrics_snapshot(include_history=False):
+    if not include_history and ROUTER_METRICS_COMPACT_CACHE_TTL > 0:
+        now = time.time()
+        with router_metrics_compact_cache_lock:
+            cached = router_metrics_compact_cache.get('payload')
+            cached_at = float(router_metrics_compact_cache.get('timestamp') or 0.0)
+            if cached is not None and now - cached_at <= ROUTER_METRICS_COMPACT_CACHE_TTL:
+                return dict(cached)
     payload = router_metrics_runtime.snapshot(include_history=include_history)
     payload['version'] = APP_VERSION_LABEL
     payload['app_mode'] = _load_app_runtime_mode()
+    if not include_history and ROUTER_METRICS_COMPACT_CACHE_TTL > 0:
+        with router_metrics_compact_cache_lock:
+            router_metrics_compact_cache['timestamp'] = time.time()
+            router_metrics_compact_cache['payload'] = dict(payload)
     return payload
 
 
@@ -10460,7 +10467,105 @@ def _start_subscription_auto_refresh_thread():
 def _web_custom_checks():
     return _key_pool_web().web_custom_checks(_load_custom_checks())
 
+def _web_pool_snapshot_worker_payload(protocols=None, include_summary=False, include_custom_checks=False):
+    if not WEB_POOL_SNAPSHOT_WORKER_ENABLED:
+        return None
+    worker_path = os.path.join(BOT_DIR, 'web_pool_snapshot_worker.py')
+    if not os.path.isfile(worker_path):
+        return None
+    request = {
+        'protocols': list(protocols or []),
+        'include_summary': bool(include_summary),
+        'include_custom_checks': bool(include_custom_checks),
+        'route_states': _service_route_summary(),
+    }
+    try:
+        result = subprocess.run(
+            [sys.executable or 'python3', worker_path],
+            input=json.dumps(request, ensure_ascii=False, separators=(',', ':')),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=WEB_POOL_SNAPSHOT_WORKER_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception as exc:
+        _write_runtime_log(f'Web pool snapshot worker unavailable: {type(exc).__name__}')
+        return None
+    if result.returncode != 0:
+        error_text = str(result.stderr or '').strip().splitlines()[:1]
+        error_label = error_text[0][:120] if error_text else f'exit {result.returncode}'
+        _write_runtime_log(f'Web pool snapshot worker failed: {error_label}')
+        return None
+    try:
+        payload = json.loads(result.stdout or '{}')
+    except Exception as exc:
+        _write_runtime_log(f'Web pool snapshot worker returned invalid JSON: {type(exc).__name__}')
+        return None
+    return payload if isinstance(payload, dict) and isinstance(payload.get('pools'), dict) else None
+
+
+def _web_pools_payload(current_keys=None, protocols=None, include_summary=False, include_custom_checks=False):
+    if not current_keys:
+        current_keys = _load_current_keys()
+    key_pools = _ensure_current_keys_in_pools(current_keys)
+    if not include_summary and not include_custom_checks:
+        worker_payload = _web_pool_snapshot_worker_payload(
+            protocols=protocols,
+            include_summary=False,
+            include_custom_checks=False,
+        )
+        if worker_payload is not None:
+            return worker_payload
+    else:
+        worker_payload = _web_pool_snapshot_worker_payload(
+            protocols=protocols,
+            include_summary=include_summary,
+            include_custom_checks=include_custom_checks,
+        )
+        if worker_payload is not None:
+            return worker_payload
+    custom_checks = _load_custom_checks()
+    route_states = _service_route_summary()
+    key_probe_cache = _load_key_probe_cache()
+    payload = {
+        'pools': _key_pool_web().web_pool_snapshot(
+            current_keys,
+            key_pools,
+            key_probe_cache,
+            custom_checks,
+            include_keys=False,
+            hash_key=_hash_key,
+            display_name=_pool_key_display_name,
+            probe_state=_key_pool_web().web_probe_state,
+            probe_checked_at=_key_pool_web().web_probe_checked_at,
+            protocols=protocols,
+            route_states=route_states,
+        ),
+        'pool_summary': None,
+        'custom_checks': None,
+    }
+    if include_summary:
+        payload['pool_summary'] = _pool_status_summary(
+            current_keys,
+            key_pools,
+            key_probe_cache,
+            custom_checks,
+            route_states,
+        )
+    if include_custom_checks:
+        payload['custom_checks'] = _key_pool_web().web_custom_checks(custom_checks)
+    return payload
+
+
 def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
+    if not include_keys:
+        return _web_pools_payload(
+            current_keys,
+            protocols=protocols,
+            include_summary=False,
+            include_custom_checks=False,
+        ).get('pools', {})
     current_keys = current_keys if current_keys is not None else _load_current_keys()
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary()
@@ -11254,6 +11359,7 @@ def _web_get_context(handler):
         'pool_enabled': pool_enabled,
         'get_pool_probe_progress': _get_pool_probe_progress,
         'has_pool_probe_resume_payload': _has_pool_probe_resume_payload,
+        'web_pools_payload': _web_pools_payload,
         'web_pool_snapshot': _web_pool_snapshot,
         'pool_status_summary': _pool_status_summary,
         'web_custom_checks': _web_custom_checks,
@@ -11376,7 +11482,8 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
 def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
     key_pools = _ensure_current_keys_in_pools(current_keys)
     subscription_settings = _subscription_public_settings()
-    key_probe_cache = _load_key_probe_cache()
+    # Initial HTML is hydrated by /api/pools; avoid loading the full probe cache twice.
+    key_probe_cache = {}
     custom_checks = _load_custom_checks()
     custom_checks_html = ''
     route_states = _service_route_summary()

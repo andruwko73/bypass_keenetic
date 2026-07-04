@@ -35,6 +35,7 @@ import web_form_blocks
 import web_form_template
 import web_http_common
 import web_pool_form_blocks
+import web_pool_snapshot_worker
 import web_route_tools_runtime
 import web_status_builder
 import web_template_styles
@@ -570,17 +571,20 @@ def test_router_metrics_runtime_snapshot():
         'process_ticks': router_metrics.process_ticks,
         'process_rss_kb': router_metrics.process_rss_kb,
         'find_pid_by_cmdline': router_metrics.find_pid_by_cmdline,
+        'pid_matches_cmdline': router_metrics.pid_matches_cmdline,
         'getpid': router_metrics.os.getpid,
     }
     system_ticks = iter((1000, 1100))
     proc_ticks = {111: [100, 110], 222: [50, 70]}
+    pid_scans = []
 
     try:
         router_metrics.read_loadavg = lambda: (0.1, 0.2, 0.3)
         router_metrics.read_system_ticks = lambda: next(system_ticks)
         router_metrics.process_ticks = lambda pid: proc_ticks[pid].pop(0)
         router_metrics.process_rss_kb = lambda pid: 64000 if pid == 111 else 24000
-        router_metrics.find_pid_by_cmdline = lambda marker: 222
+        router_metrics.find_pid_by_cmdline = lambda marker: pid_scans.append(marker) or 222
+        router_metrics.pid_matches_cmdline = lambda pid, marker: pid == 222 and marker == router_metrics.XRAY_CMD_MARKER
         router_metrics.os.getpid = lambda: 111
         runtime = router_metrics.RouterMetricsRuntime(history_limit=10, time_provider=lambda: 100.0)
         first = runtime.snapshot(include_history=False)
@@ -591,6 +595,7 @@ def test_router_metrics_runtime_snapshot():
         router_metrics.process_ticks = original['process_ticks']
         router_metrics.process_rss_kb = original['process_rss_kb']
         router_metrics.find_pid_by_cmdline = original['find_pid_by_cmdline']
+        router_metrics.pid_matches_cmdline = original['pid_matches_cmdline']
         router_metrics.os.getpid = original['getpid']
 
     assert first['processes']['bot']['cpu_percent'] == 0.0
@@ -603,6 +608,7 @@ def test_router_metrics_runtime_snapshot():
     assert second['thresholds']['critical_bot_rss_kb'] == 87040
     assert 'history' not in first
     assert len(second['history']) == 1
+    assert pid_scans == [router_metrics.XRAY_CMD_MARKER]
 
 
 def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
@@ -1133,6 +1139,85 @@ def test_key_pool_web():
     ]
     assert scoped_summary['checked_pool_count'] == 2
     assert scoped_summary['all_services_count'] == 1
+
+
+def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        bot_dir = temp_path / 'bot'
+        xray_dir = temp_path / 'xray'
+        bot_dir.mkdir()
+        xray_dir.mkdir()
+        proxy_scheme = 'vless'
+        active_key = f'{proxy_scheme}://00000000-0000-0000-0000-000000000000@example.test:443#active-vless'
+        backup_key = f'{proxy_scheme}://00000000-0000-0000-0000-000000000001@backup.test:443#backup-vless'
+        key_pools_path = bot_dir / 'key_pools.json'
+        key_probe_path = bot_dir / 'key_probe_cache.json'
+        custom_checks_path = bot_dir / 'custom_checks.json'
+        (xray_dir / 'vless.key').write_text(active_key, encoding='utf-8')
+        (xray_dir / 'vless2.key').write_text('', encoding='utf-8')
+        (xray_dir / 'vmess.key').write_text('', encoding='utf-8')
+        key_pools_path.write_text(json.dumps({'vless': [active_key, backup_key]}, ensure_ascii=False), encoding='utf-8')
+        key_probe_path.write_text(json.dumps({
+            probe_cache.hash_key(active_key): {
+                'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+                'tg_ok': True,
+                'yt_ok': False,
+                'yt_stability': 'fail',
+                'ts': 123,
+            },
+            probe_cache.hash_key(backup_key): {
+                'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+                'tg_ok': False,
+                'yt_ok': True,
+                'yt_stability': 'stable',
+                'ts': 124,
+            },
+        }, ensure_ascii=False), encoding='utf-8')
+        custom_checks_path.write_text('[]', encoding='utf-8')
+
+        old_worker_values = {
+            'KEY_POOLS_PATH': web_pool_snapshot_worker.KEY_POOLS_PATH,
+            'CORE_PROXY_CONFIG_DIR': web_pool_snapshot_worker.CORE_PROXY_CONFIG_DIR,
+            'VMESS_KEY_PATH': web_pool_snapshot_worker.VMESS_KEY_PATH,
+            'VLESS_KEY_PATH': web_pool_snapshot_worker.VLESS_KEY_PATH,
+            'VLESS2_KEY_PATH': web_pool_snapshot_worker.VLESS2_KEY_PATH,
+            'XRAY_CONFIG_DIR': web_pool_snapshot_worker.XRAY_CONFIG_DIR,
+            'V2RAY_CONFIG_DIR': web_pool_snapshot_worker.V2RAY_CONFIG_DIR,
+        }
+        old_probe_path = probe_cache.KEY_PROBE_CACHE_PATH
+        old_custom_path = custom_checks_store.CUSTOM_CHECKS_PATH
+        try:
+            web_pool_snapshot_worker.KEY_POOLS_PATH = str(key_pools_path)
+            web_pool_snapshot_worker.CORE_PROXY_CONFIG_DIR = str(xray_dir)
+            web_pool_snapshot_worker.VMESS_KEY_PATH = str(xray_dir / 'vmess.key')
+            web_pool_snapshot_worker.VLESS_KEY_PATH = str(xray_dir / 'vless.key')
+            web_pool_snapshot_worker.VLESS2_KEY_PATH = str(xray_dir / 'vless2.key')
+            web_pool_snapshot_worker.XRAY_CONFIG_DIR = str(xray_dir)
+            web_pool_snapshot_worker.V2RAY_CONFIG_DIR = str(temp_path / 'v2ray')
+            probe_cache.KEY_PROBE_CACHE_PATH = str(key_probe_path)
+            custom_checks_store.CUSTOM_CHECKS_PATH = str(custom_checks_path)
+            payload = web_pool_snapshot_worker.build_payload(
+                protocols=['vless'],
+                include_summary=True,
+                include_custom_checks=True,
+            )
+        finally:
+            for name, value in old_worker_values.items():
+                setattr(web_pool_snapshot_worker, name, value)
+            probe_cache.KEY_PROBE_CACHE_PATH = old_probe_path
+            custom_checks_store.CUSTOM_CHECKS_PATH = old_custom_path
+
+    assert list(payload['pools']) == ['vless']
+    assert payload['pools']['vless']['count'] == 2
+    assert payload['pools']['vless']['rows'][0]['active'] is True
+    assert payload['pools']['vless']['rows'][0]['display_name'] == 'active-vless'
+    assert payload['pool_summary']['pool_total_count'] == 2
+    assert payload['pool_summary']['checked_pool_count'] == 2
+    assert payload['custom_checks'] == []
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert 'vless://' not in serialized
+    scoped_summary = payload['pool_summary']
     assert '\u0412\u0441\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b' not in scoped_summary['note']
     assert '\u0425\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d' not in scoped_summary['note']
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
@@ -2784,8 +2869,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bypass-bot-service-restart.log' in source
     assert 'app_service_restart_scheduled = False' in source
     assert 'App mode restart already scheduled' in source
-    assert "sys.modules.pop(module_name, None)" in source
-    assert "('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck', 'probe_cache')" in source
+    assert 'sys.modules.pop' not in source
+    assert 'Pool probe module references released after' in source
     assert "_unload_pool_probe_modules('pool probe process monitor')" in source
     assert 'post-pool memory already at target' in source
     assert 'cleanup skipped; already at target' in source
@@ -2799,8 +2884,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert "getattr(config, 'router_metrics_history_limit', 120)" in source
     assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 65 * 1024)" in source
+    assert "getattr(config, 'router_metrics_compact_cache_ttl', 8.0)" in source
+    assert 'router_metrics_compact_cache' in source
     assert 'router_metrics.RouterMetricsRuntime' in source
     assert "'router_metrics_snapshot': _router_metrics_snapshot" in source
+    assert "'web_pools_payload': _web_pools_payload" in source
+    assert 'web_pool_snapshot_worker.py' in source
+    assert "input=json.dumps(request" in source
     assert "memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl'" in source
     assert 'def _record_memory_timeline' in source
     assert 'def _start_memory_timeline_thread' in source
@@ -3154,7 +3244,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert source.find("last_event = float(state.get('last_event') or 0.0)") < source.find("_conntrack_route_diagnostic(proto)")
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
     assert 'def _release_web_form_template_cache()' in source
-    assert "sys.modules.pop(module_name, None)" in source
+    assert 'sys.modules.pop' not in source
     runtime_release_block = source.split('def _release_runtime_pressure_modules', 1)[1].split('\n\ndef render_web_form', 1)[0]
     assert 'sys.modules.pop' not in runtime_release_block
     assert "released.extend(module_names)" in runtime_release_block
@@ -3182,6 +3272,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "MEMORY_CLEANUP_RSS_KB" in source
     assert 'clear_pool_summary=bool(should_collect)' in source
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source
+    assert "payload.get('pools') is not None" in source
+    assert 'avoid loading the full probe cache twice' in source
+    assert 'event_history_api_cache[\'payload\'] = payload' not in source
     assert "last_scan_count" in source
     assert "cached_fail_since or now" in source
     assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
@@ -3325,6 +3418,8 @@ def test_runtime_modules_are_installed_by_update_scripts():
         assert module in script
         assert f'$RAW_BASE/{module}' in bootstrap
         assert f'$BOT_DIR/{module}' in bootstrap
+    assert 'web_pool_snapshot_worker.py' in script_modules
+    assert 'web_pool_snapshot_worker.py' in bootstrap_modules
     assert 'youtube_edge_prefetch.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in bootstrap_modules
@@ -7318,6 +7413,30 @@ def test_web_get_actions_helpers():
     assert pools['payload']['pool_summary'] == {'active_text': '1 / 5'}
     assert pools['payload']['pool_probe_running'] is True
     assert pools['payload']['pool_probe_progress'] == {'running': True, 'total': 2}
+    builder_calls = []
+    builder_ctx = dict(ctx)
+    builder_ctx.update({
+        'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
+        'web_pools_payload': lambda keys, protocols=None, include_summary=False, include_custom_checks=False: builder_calls.append(
+            (keys, protocols, include_summary, include_custom_checks)
+        ) or {
+            'pools': {'worker': {'rows': []}},
+            'pool_summary': {'active_text': 'worker'},
+            'custom_checks': [{'id': 'worker'}],
+        },
+        'web_pool_snapshot': lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('builder should replace direct pool snapshot')),
+        'pool_status_summary': lambda keys: (_ for _ in ()).throw(AssertionError('builder should replace direct pool summary')),
+        'web_custom_checks': lambda: (_ for _ in ()).throw(AssertionError('builder should replace direct custom checks')),
+    })
+    builder_pools = web_get_actions.dispatch(builder_ctx, '/api/pools')
+    assert builder_pools['payload']['pools'] == {'worker': {'rows': []}}
+    assert builder_pools['payload']['pool_summary'] == {'active_text': 'worker'}
+    assert builder_pools['payload']['custom_checks'] == [{'id': 'worker'}]
+    assert builder_calls == [(current_keys, None, True, True)]
+    scoped_builder = web_get_actions.dispatch(builder_ctx, '/api/pools', 'protocols=vless')
+    assert scoped_builder['payload']['pool_summary'] is None
+    assert scoped_builder['payload']['custom_checks'] is None
+    assert builder_calls[-1] == (current_keys, ['vless'], False, False)
     summary_calls_before_scoped_pools = len(pool_summary_calls)
     sensitive_pools = web_get_actions.dispatch(ctx, '/api/pools', 'include_keys=1&protocols=vless')
     assert sensitive_pools['payload']['pools'] == {'vless': {'rows': []}}
@@ -9947,6 +10066,7 @@ def main():
     test_installer_page_is_bot_setup_only()
     test_repo_update_helpers()
     test_key_pool_web()
+    test_web_pool_snapshot_worker_payload_is_safe_and_complete()
     test_youtube_healthcheck_detects_first_load_instability()
     test_youtube_healthcheck_requires_watch_page()
     test_youtube_healthcheck_retries_transient_watch_page()
