@@ -923,6 +923,7 @@ migrate_runtime_config_defaults() {
     sed -i 's/^memory_timeline_max_events[[:space:]]*=.*/memory_timeline_max_events = 720/' "$BOT_CONFIG_PATH" || true
   fi
   grep -Eq '^memory_timeline_max_events[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_timeline_max_events = 720\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^memory_timeline_trim_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_timeline_trim_min_interval_seconds = 300.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_min_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_min_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
@@ -995,6 +996,9 @@ migrate_runtime_config_defaults() {
     grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_max_process_rss_kb = 66560\n' >> /opt/etc/bot_config.py
     grep -Eq '^pool_probe_process_worker_enabled[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_process_worker_enabled = True\n' >> /opt/etc/bot_config.py
     grep -Eq '^pool_probe_process_worker_poll_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_process_worker_poll_seconds = 0.75\n' >> /opt/etc/bot_config.py
+    grep -Eq '^pool_failover_process_worker_enabled[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_failover_process_worker_enabled = True\n' >> /opt/etc/bot_config.py
+    grep -Eq '^pool_failover_process_worker_timeout_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_failover_process_worker_timeout_seconds = 180.0\n' >> /opt/etc/bot_config.py
+    grep -Eq '^memory_timeline_trim_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_timeline_trim_min_interval_seconds = 300.0\n' >> /opt/etc/bot_config.py
   fi
   if grep -Eq '^pool_probe_delay_seconds[[:space:]]*=[[:space:]]*1\.5([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_delay_seconds[[:space:]]*=.*/pool_probe_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true
@@ -1006,6 +1010,8 @@ migrate_runtime_config_defaults() {
   grep -Eq '^pool_probe_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_cpu_percent = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_probe_process_worker_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_process_worker_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_probe_process_worker_poll_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_process_worker_poll_seconds = 0.75\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_failover_process_worker_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_failover_process_worker_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_failover_process_worker_timeout_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_failover_process_worker_timeout_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^pool_probe_high_cpu_delay_seconds[[:space:]]*=[[:space:]]*5\.0?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^pool_probe_high_cpu_delay_seconds[[:space:]]*=.*/pool_probe_high_cpu_delay_seconds = 8.0/' "$BOT_CONFIG_PATH" || true
   fi

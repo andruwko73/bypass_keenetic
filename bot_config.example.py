@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.904
+# ВЕРСИЯ СКРИПТА v1.905
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -27,6 +27,8 @@ subscription_auto_refresh_max_cpu_percent = 80.0
 subscription_auto_refresh_max_load1 = 2.5
 pool_probe_process_worker_enabled = True  # run full pool checks in a separate Python process so main bot RSS can return to baseline
 pool_probe_process_worker_poll_seconds = 0.75
+pool_failover_process_worker_enabled = True  # check auto-failover candidates in a short-lived process so main bot RSS does not keep temporary xray/probe modules
+pool_failover_process_worker_timeout_seconds = 180.0
 telegram_bot_num_threads = 1  # keep Telegram command worker pool small on routers with limited RAM
 pool_probe_min_available_kb = 190000  # проверка пула не запускает временный xray, если доступной памяти меньше этого порога
 pool_probe_pause_available_kb = 125000  # ниже этого порога проверка ставит очередь на паузу до освобождения памяти
@@ -89,6 +91,7 @@ memory_timeline_enabled = False
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0
 memory_timeline_max_events = 720
+memory_timeline_trim_min_interval_seconds = 300.0
 memory_malloc_trim_enabled = True  # после тяжёлой очистки просит libc вернуть свободные арены памяти системе
 memory_malloc_trim_min_rss_kb = 61440
 memory_malloc_trim_cooldown_seconds = 20.0

@@ -1,3 +1,7 @@
+*v1.905 (4 Jul 2026) -* main
+
+*Moves Telegram/YouTube failover candidate checks into a short-lived worker process so temporary Xray probing does not inflate the main bot RSS, and makes debug memory timeline trimming interval-based instead of rereading the file on every sample.*
+
 *v1.904 (4 Jul 2026) -* main
 
 *Removes the unsafe runtime `sys.modules` unloading from 1.903 and instead reduces web UI startup pressure by not auto-fetching deferred pool data for every protocol on page load.*

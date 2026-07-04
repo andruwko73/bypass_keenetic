@@ -2031,6 +2031,12 @@ def test_codex_version_matches_commit_count():
     assert 'pool_probe_max_process_rss_kb = 66560' in example
     assert 'pool_probe_max_process_rss_kb = 66560' in installer
     assert 'pool_probe_max_process_rss_kb = 66560' in bootstrap
+    assert 'pool_failover_process_worker_enabled = True' in example
+    assert 'pool_failover_process_worker_enabled = True' in installer
+    assert 'pool_failover_process_worker_enabled = True' in bootstrap
+    assert 'pool_failover_process_worker_timeout_seconds = 180.0' in example
+    assert 'pool_failover_process_worker_timeout_seconds = 180.0' in installer
+    assert 'pool_failover_process_worker_timeout_seconds = 180.0' in bootstrap
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
@@ -2091,6 +2097,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_timeline_max_events = 720' in example
     assert 'memory_timeline_max_events = 720' in installer
     assert 'memory_timeline_max_events = 720' in bootstrap
+    assert 'memory_timeline_trim_min_interval_seconds = 300.0' in example
+    assert 'memory_timeline_trim_min_interval_seconds = 300.0' in installer
+    assert 'memory_timeline_trim_min_interval_seconds = 300.0' in bootstrap
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in example
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in installer
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in bootstrap
@@ -3037,6 +3046,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
     assert 'memory_cleanup=_pool_probe_memory_checkpoint' in source
     assert 'max_rss_cleanup_attempts=3' in source
+    assert "getattr(config, 'pool_failover_process_worker_enabled', True)" in source
+    assert 'def _find_pool_failover_candidate_inline' in source
+    assert 'def _find_pool_failover_candidate_in_process' in source
+    assert 'def _run_failover_candidate_process_worker' in source
+    assert 'POOL_FAILOVER_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE' in source
+    assert 'failover candidate process finished' in source
+    assert 'memory_timeline_trim_min_interval_seconds' in source
+    assert 'def _maybe_trim_memory_timeline_file' in source
+    assert '_maybe_trim_memory_timeline_file(MEMORY_TIMELINE_PATH, now=now)' in source
     assert "run_memory_cleanup('pool probe key checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
@@ -3060,10 +3078,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'pool_probe_max_process_rss_kb = 66560' in script_source
     assert 'pool_probe_process_worker_enabled = True' in script_source
     assert 'pool_probe_process_worker_poll_seconds = 0.75' in script_source
+    assert 'pool_failover_process_worker_enabled = True' in script_source
+    assert 'pool_failover_process_worker_timeout_seconds = 180.0' in script_source
     assert "pool_probe_max_process_rss_kb[[:space:]]*=[[:space:]]*(65536|71680|87040)" in script_source
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in script_source
     assert 'memory_timeline_max_events = 720' in script_source
     assert "memory_timeline_max_events[[:space:]]*=[[:space:]]*240" in script_source
+    assert 'memory_timeline_trim_min_interval_seconds = 300.0' in script_source
     assert 'memory_malloc_trim_enabled = True' in script_source
     assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
     assert 'background_task_max_bot_rss_kb = 66560' in script_source

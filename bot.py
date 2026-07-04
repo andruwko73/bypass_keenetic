@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.904, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.905, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -2054,6 +2054,11 @@ POOL_PROBE_LOW_MEMORY_DELAY_SECONDS = float(getattr(config, 'pool_probe_low_memo
 POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS = float(getattr(config, 'pool_probe_low_memory_max_wait_seconds', 180.0))
 POOL_PROBE_TEST_PORT = str(getattr(config, 'pool_probe_test_port', 10991))
 POOL_FAILOVER_TEST_PORT = str(getattr(config, 'pool_failover_test_port', int(POOL_PROBE_TEST_PORT) + 64))
+POOL_FAILOVER_PROCESS_WORKER_ENABLED = bool(getattr(config, 'pool_failover_process_worker_enabled', True))
+POOL_FAILOVER_PROCESS_WORKER_TIMEOUT_SECONDS = max(
+    45.0,
+    float(getattr(config, 'pool_failover_process_worker_timeout_seconds', 180.0)),
+)
 POOL_PROBE_BATCH_SIZE_CONFIGURED = hasattr(config, 'pool_probe_batch_size')
 POOL_PROBE_BATCH_SIZE = max(1, int(getattr(config, 'pool_probe_batch_size', 1)))
 POOL_PROBE_CONCURRENCY = max(1, min(int(getattr(config, 'pool_probe_concurrency', 1)), POOL_PROBE_BATCH_SIZE))
@@ -2179,6 +2184,10 @@ MEMORY_TIMELINE_INTERVAL_SECONDS = max(
     float(getattr(config, 'memory_timeline_interval_seconds', 60.0)),
 )
 MEMORY_TIMELINE_MAX_EVENTS = max(30, int(getattr(config, 'memory_timeline_max_events', 720)))
+MEMORY_TIMELINE_TRIM_MIN_INTERVAL_SECONDS = max(
+    60.0,
+    float(getattr(config, 'memory_timeline_trim_min_interval_seconds', 300.0)),
+)
 MEMORY_MALLOC_TRIM_ENABLED = bool(getattr(config, 'memory_malloc_trim_enabled', True))
 MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS = max(
     5.0,
@@ -2495,6 +2504,7 @@ app_service_restart_scheduled = False
 memory_timeline_lock = threading.Lock()
 memory_timeline_last_sample_at = 0.0
 memory_timeline_last_error_at = 0.0
+memory_timeline_last_trim_at = 0.0
 memory_malloc_trim_lock = threading.Lock()
 memory_malloc_trim_last_at = 0.0
 memory_malloc_trim_libc = None
@@ -5042,6 +5052,27 @@ def _trim_jsonl_file(path, max_events):
         pass
 
 
+def _maybe_trim_memory_timeline_file(path, now=None):
+    global memory_timeline_last_trim_at
+    if not path or MEMORY_TIMELINE_MAX_EVENTS <= 0:
+        return
+    now = time.time() if now is None else float(now or 0)
+    if (
+        memory_timeline_last_trim_at and
+        now - memory_timeline_last_trim_at < MEMORY_TIMELINE_TRIM_MIN_INTERVAL_SECONDS
+    ):
+        return
+    try:
+        size = os.path.getsize(path)
+    except Exception:
+        size = 0
+    min_size = max(64 * 1024, MEMORY_TIMELINE_MAX_EVENTS * 512)
+    if size and size < min_size:
+        return
+    _trim_jsonl_file(path, MEMORY_TIMELINE_MAX_EVENTS)
+    memory_timeline_last_trim_at = now
+
+
 def _record_memory_timeline(reason='', marker='', extra=None, force=False):
     global memory_timeline_last_sample_at, memory_timeline_last_error_at
     if not MEMORY_TIMELINE_ENABLED or not MEMORY_TIMELINE_PATH:
@@ -5061,7 +5092,7 @@ def _record_memory_timeline(reason='', marker='', extra=None, force=False):
             with open(MEMORY_TIMELINE_PATH, 'a', encoding='utf-8') as file:
                 file.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')) + '\n')
             memory_timeline_last_sample_at = now
-            _trim_jsonl_file(MEMORY_TIMELINE_PATH, MEMORY_TIMELINE_MAX_EVENTS)
+            _maybe_trim_memory_timeline_file(MEMORY_TIMELINE_PATH, now=now)
             return True
         except Exception as exc:
             if now - memory_timeline_last_error_at >= 300:
@@ -9323,7 +9354,7 @@ def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
     return _store_proxy_outbound_from_key(proto, key_value, tag, email=email)
 
 
-def _find_pool_failover_candidate(candidates, service='telegram'):
+def _find_pool_failover_candidate_inline(candidates, service='telegram'):
     """Find one working pool key through a temporary xray before touching the active proxy."""
     http_timeouts = (
         (YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)
@@ -9345,6 +9376,146 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
         telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
         http_timeouts=http_timeouts,
     )
+
+
+def _cleanup_failover_candidate_process_files(paths=None):
+    for path in (paths or {}).values():
+        _remove_file(path)
+
+
+def _failover_candidate_process_worker_code(input_path, result_path):
+    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
+    module_dir = os.path.dirname(BOT_SOURCE_PATH)
+    return (
+        'import os, sys; '
+        'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
+        'os.environ["BYPASS_KEENETIC_POOL_PROBE_WORKER"] = "1"; '
+        f"sys.path.insert(0, {module_dir!r}); "
+        f'import {module_name} as bot_module; '
+        'sys.exit(bot_module._run_failover_candidate_process_worker('
+        f'{input_path!r}, {result_path!r}))'
+    )
+
+
+def _run_failover_candidate_process_worker(input_path, result_path):
+    payload = _read_json_file(input_path, {}) or {}
+    _remove_file(input_path)
+    if not isinstance(payload, dict):
+        payload = {}
+    candidates = [
+        (str(item[0] or ''), str(item[1] or ''))
+        for item in (payload.get('candidates') or [])
+        if isinstance(item, (list, tuple)) and len(item) >= 2 and str(item[0] or '') in POOL_PROTOCOL_ORDER and str(item[1] or '').strip()
+    ]
+    service = str(payload.get('service') or 'telegram').strip().lower()
+    if service not in ('telegram', 'youtube'):
+        service = 'telegram'
+    result = {
+        'ok': False,
+        'candidate': None,
+        'error': '',
+        'rss_before_kb': int(_process_rss_kb() or 0),
+        'rss_after_kb': 0,
+        'hwm_kb': 0,
+    }
+    exit_code = 1
+    try:
+        candidate = _find_pool_failover_candidate_inline(candidates, service=service)
+        if candidate:
+            proto, key_value, tg_ok, yt_ok = candidate
+            result.update({
+                'ok': True,
+                'candidate': [proto, key_value, tg_ok, yt_ok],
+            })
+            exit_code = 0
+        else:
+            exit_code = 2
+    except Exception as exc:
+        result['error'] = f'{type(exc).__name__}: {_redact_sensitive_text(exc)}'
+        exit_code = 1
+    finally:
+        _cleanup_pool_probe_runtime_light(kill_processes=True)
+        _memory_cleanup('failover candidate worker finished', force=True, clear_status=True, log=False)
+        result['rss_after_kb'] = int(_process_rss_kb() or 0)
+        result['hwm_kb'] = int(_process_hwm_kb() or 0)
+        try:
+            _write_json_file_private(result_path, result)
+        except Exception:
+            pass
+    return exit_code
+
+
+def _find_pool_failover_candidate_in_process(candidates, service='telegram'):
+    candidates = [
+        (str(proto or ''), str(key_value or '').strip())
+        for proto, key_value in (candidates or [])
+        if str(proto or '') in POOL_PROTOCOL_ORDER and str(key_value or '').strip()
+    ]
+    if not candidates:
+        return None
+    paths = _failover_candidate_process_paths()
+    payload = {
+        'service': str(service or 'telegram'),
+        'candidates': candidates,
+    }
+    try:
+        _write_json_file_private(paths['input_path'], payload)
+        env = dict(os.environ)
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        env['BYPASS_KEENETIC_POOL_PROBE_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', _failover_candidate_process_worker_code(
+                paths['input_path'],
+                paths['result_path'],
+            )],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            env=env,
+            timeout=POOL_FAILOVER_PROCESS_WORKER_TIMEOUT_SECONDS,
+            check=False,
+        )
+        worker_payload = _read_json_file(paths['result_path'], {}) or {}
+        if not isinstance(worker_payload, dict):
+            worker_payload = {}
+        if result.returncode not in (0, 2):
+            error = str(worker_payload.get('error') or '').strip()
+            if error:
+                _write_runtime_log(f'Auto-failover: worker failed while checking candidates: {error}')
+            else:
+                _write_runtime_log(f'Auto-failover: worker returned code {result.returncode} while checking candidates.')
+            return None
+        candidate = worker_payload.get('candidate')
+        if not worker_payload.get('ok') or not isinstance(candidate, list) or len(candidate) < 4:
+            return None
+        proto, key_value, tg_ok, yt_ok = candidate[:4]
+        proto = str(proto or '')
+        key_value = str(key_value or '').strip()
+        if proto not in POOL_PROTOCOL_ORDER or not key_value:
+            return None
+        return proto, key_value, tg_ok, yt_ok
+    except subprocess.TimeoutExpired:
+        _write_runtime_log('Auto-failover: worker timed out while checking candidates.')
+        return None
+    except Exception as exc:
+        _write_runtime_log(f'Auto-failover: worker could not start candidate check: {exc}')
+        return None
+    finally:
+        _cleanup_failover_candidate_process_files(paths)
+        try:
+            candidates.clear()
+            payload['candidates'] = []
+        except Exception:
+            pass
+        _cleanup_pool_probe_runtime_light(kill_processes=True)
+        _memory_cleanup('failover candidate process finished', force=True, clear_status=False, log=False)
+
+
+def _find_pool_failover_candidate(candidates, service='telegram'):
+    if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE:
+        return _find_pool_failover_candidate_in_process(candidates, service=service)
+    return _find_pool_failover_candidate_inline(candidates, service=service)
 
 
 def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
@@ -9650,6 +9821,17 @@ def _pool_probe_process_paths():
         'progress_path': base + '.progress.json',
         'result_path': base + '.result.json',
         'cancel_path': base + '.cancel',
+    }
+
+
+def _failover_candidate_process_paths():
+    base = os.path.join(
+        _pool_probe_process_tmp_dir(),
+        f'bypass_failover_worker_{os.getpid()}_{int(time.time() * 1000)}',
+    )
+    return {
+        'input_path': base + '.input.json',
+        'result_path': base + '.result.json',
     }
 
 

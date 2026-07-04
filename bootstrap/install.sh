@@ -665,6 +665,8 @@ pool_probe_high_load_max_wait_seconds = 120.0
 pool_probe_max_process_rss_kb = 66560
 pool_probe_process_worker_enabled = True
 pool_probe_process_worker_poll_seconds = 0.75
+pool_failover_process_worker_enabled = True
+pool_failover_process_worker_timeout_seconds = 180.0
 pool_probe_youtube_profile = 'quick'
 pool_probe_quality_enabled = True
 pool_probe_quality_download_url = 'https://speed.cloudflare.com/__down?bytes={{bytes}}'
@@ -709,6 +711,7 @@ memory_timeline_enabled = False
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0
 memory_timeline_max_events = 720
+memory_timeline_trim_min_interval_seconds = 300.0
 background_task_cpu_cache_ttl_seconds = 20.0
 background_task_max_bot_rss_kb = 66560
 udp_quic_block_shadowsocks_enabled = True

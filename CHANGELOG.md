@@ -1,3 +1,9 @@
+<a name="1.905"></a>
+# [1.905] - 4 Jul 2026
+
+- Moves Telegram/YouTube failover candidate checks into a short-lived worker process so temporary Xray probing does not inflate the main bot RSS.
+- Makes debug memory timeline trimming interval-based instead of rereading the JSONL file on every sample during long monitoring runs.
+
 <a name="1.904"></a>
 # [1.904] - 4 Jul 2026
 
