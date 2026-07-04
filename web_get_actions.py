@@ -68,7 +68,8 @@ def _requested_protocols(params):
 def _status_payload(ctx, query=''):
     params = parse_qs(query or '', keep_blank_values=True)
     compact = str((params.get('compact') or [''])[0]).strip().lower() in ('1', 'true', 'yes', 'on')
-    cache_key = 'compact' if compact else 'full'
+    lite = str((params.get('lite') or [''])[0]).strip().lower() in ('1', 'true', 'yes', 'on')
+    cache_key = 'lite' if lite else ('compact' if compact else 'full')
     now = _ctx(ctx, 'time_provider', time.time)()
     cache_ttl = float(_ctx(ctx, 'status_api_cache_ttl', 0) or 0)
     if compact and cache_ttl > 0:
@@ -139,8 +140,9 @@ def _status_payload(ctx, query=''):
     payload = {
         'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},
         'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
-        'router_health': _ctx(ctx, 'router_health_snapshot', lambda: {})(),
     }
+    if not lite:
+        payload['router_health'] = _ctx(ctx, 'router_health_snapshot', lambda: {})()
     bot_ready = _ctx(ctx, 'bot_ready')
     if bot_ready is not None:
         payload['bot_ready'] = bool(bot_ready() if callable(bot_ready) else bot_ready)

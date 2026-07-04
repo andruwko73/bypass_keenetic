@@ -2035,7 +2035,7 @@ def render_web_scripts(
                 return;
             }}
             statusPollTimer = null;
-            fetch('/api/status?compact=1', {{
+            fetch('/api/status?compact=1&lite=1', {{
                 headers: {{'Accept': 'application/json'}},
                 cache: 'no-store'
             }})

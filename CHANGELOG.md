@@ -1,3 +1,9 @@
+<a name="1.902"></a>
+# [1.902] - 4 Jul 2026
+
+- Treats transient Telegram API recovery/key-selection messages as pending status so the header refreshes itself after update without a manual page reload.
+- Makes live header status polling use a lightweight `/api/status` payload that does not rebuild the full router-health block on every poll.
+
 <a name="1.901"></a>
 # [1.901] - 4 Jul 2026
 

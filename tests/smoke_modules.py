@@ -7407,6 +7407,15 @@ def test_web_get_actions_helpers():
     stored_compact_status = web_get_actions.dispatch(stored_status_ctx, '/api/status', 'compact=1')
     assert stored_compact_status['payload']['pool_summary'] is None
     assert stored_status_payloads and stored_status_payloads[0][0] == 'compact'
+    lite_status_payloads = []
+    lite_status_ctx = dict(stored_status_ctx)
+    lite_status_ctx.update({
+        'router_health_snapshot': lambda: (_ for _ in ()).throw(AssertionError('lite status must not rebuild router health')),
+        'store_status_api_cache': lambda payload, timestamp=None, cache_key='full': lite_status_payloads.append((cache_key, timestamp, payload)),
+    })
+    lite_status = web_get_actions.dispatch(lite_status_ctx, '/api/status', 'compact=1&lite=1')
+    assert 'router_health' not in lite_status['payload']
+    assert lite_status_payloads and lite_status_payloads[0][0] == 'lite'
     pools = web_get_actions.dispatch(ctx, '/api/pools')
     assert pools['payload']['pools'] == {'vless': {'rows': []}}
     assert pools['payload']['custom_checks'] == [{'id': 'custom'}]
@@ -7537,6 +7546,16 @@ def test_web_form_blocks_helpers():
     assert web_form_blocks.status_refresh_pending(
         {'proxy_mode': 'vless', 'api_status': '✅ ok'},
         {'vless': {'label': 'Проверяется'}},
+        pool_probe_pending=False,
+    ) is True
+    assert web_form_blocks.status_refresh_pending(
+        {'proxy_mode': 'vless', 'api_status': '⏳ Telegram API не ответил вовремя через текущий режим.'},
+        {'vless': {'label': 'Работает'}},
+        pool_probe_pending=False,
+    ) is True
+    assert web_form_blocks.status_refresh_pending(
+        {'proxy_mode': 'vless', 'api_status': 'Программа подбирает рабочий ключ из пула текущего режима; статус обновится без перезагрузки страницы'},
+        {'vless': {'label': 'Работает'}},
         pool_probe_pending=False,
     ) is True
     quick_key = web_form_blocks.quick_key_context({'proxy_mode': 'none'}, {'vless': 'vless://sample'}, 'Без прокси')
@@ -8563,6 +8582,7 @@ def test_web_template_scripts_helpers():
     assert "const POOL_PROBE_STATUS_POLL_MS = Math.max(5000, Number(APP_CONFIG.poolProbeStatusPollMs || 10000));" in scripts
     assert "const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));" in scripts
     assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
+    assert "fetch('/api/status?compact=1&lite=1'" in scripts
     assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
     assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS);" in scripts
     assert 'const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;' in scripts

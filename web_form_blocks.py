@@ -10,6 +10,14 @@ PROTOCOL_SECTIONS = [
     ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
 ]
 
+STATUS_REFRESH_PENDING_MARKERS = (
+    'Проверяется связь текущего режима',
+    'Фоновая проверка связи выполняется',
+    'Telegram API не ответил вовремя',
+    'Программа подбирает рабочий ключ',
+    'Статус обновится без перезагрузки страницы',
+)
+
 
 def js_bool(value):
     return 'true' if value else 'false'
@@ -18,8 +26,9 @@ def js_bool(value):
 def status_refresh_pending(status, protocol_statuses, pool_probe_pending=False):
     proxy_mode = (status or {}).get('proxy_mode')
     active_status = (protocol_statuses or {}).get(proxy_mode, {}) if proxy_mode else {}
+    api_status = (status or {}).get('api_status', '')
     return (
-        'Фоновая проверка связи выполняется' in (status or {}).get('api_status', '') or
+        any(marker in api_status for marker in STATUS_REFRESH_PENDING_MARKERS) or
         active_status.get('label') == 'Проверяется' or
         bool(active_status.get('api_pending')) or
         bool(pool_probe_pending)

@@ -1,3 +1,7 @@
+*v1.902 (4 Jul 2026) -* main
+
+*Refreshes transient Telegram API warnings after update by treating key-selection messages as pending status, and makes live header polling use a lightweight status payload that does not rebuild the full router-health block.*
+
 *v1.901 (4 Jul 2026) -* main
 
 *Keeps lazy protocol panel and protocol check panel rendering on the lightweight status path when the status cache is cold, avoiding an extra full probe-cache warmup from opening protocol tabs.*
