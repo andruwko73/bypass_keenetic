@@ -662,6 +662,27 @@ def render_web_scripts(
             }});
         }}
 
+        function keysViewActive() {{
+            const panel = document.querySelector('[data-view="keys"]');
+            return !!(panel && panel.classList.contains('active'));
+        }}
+
+        function refreshDeferredPoolForProtocol(protocol) {{
+            if (!ENABLE_KEY_POOL || !keysViewActive()) {{
+                return;
+            }}
+            let proto = String(protocol || '').trim();
+            let panel = proto ? document.querySelector('[data-protocol-panel="' + proto + '"]') : null;
+            if (!panel || !panel.classList.contains('active')) {{
+                panel = document.querySelector('[data-protocol-panel].active');
+                proto = panel ? String(panel.getAttribute('data-protocol-panel') || '').trim() : '';
+            }}
+            if (!proto || !panel || !panel.querySelector('[data-pool-deferred="1"]')) {{
+                return;
+            }}
+            refreshPoolData(0, proto);
+        }}
+
         function setupViewNavigation() {{
             const targets = document.querySelectorAll('[data-view-target]');
             function activate(view) {{
@@ -675,6 +696,11 @@ def render_web_scripts(
                 targets.forEach(function(button) {{
                     button.classList.toggle('active', button.dataset.viewTarget === selected);
                 }});
+                if (selected === 'keys') {{
+                    window.setTimeout(function() {{
+                        refreshDeferredPoolForProtocol();
+                    }}, 0);
+                }}
             }}
             targets.forEach(function(button) {{
                 button.addEventListener('click', function() {{
@@ -823,6 +849,8 @@ def render_web_scripts(
                 const selectedPanel = findPanel(selected);
                 if (selectedPanel && selectedPanel.dataset.protocolPanelLazy === '1' && selectedPanel.dataset.protocolLoaded !== '1') {{
                     loadPanel(selected, selectedPanel);
+                }} else {{
+                    refreshDeferredPoolForProtocol(selected);
                 }}
             }}
 

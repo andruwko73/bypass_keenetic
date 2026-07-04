@@ -1,3 +1,8 @@
+<a name="1.912"></a>
+# [1.912] - 5 Jul 2026
+
+- Hydrates the already-rendered active Vless 1 pool when the Keys view opens, matching lazy Vless 2 panel loading so the first protocol cannot stay on "Загружаю пул ключей...".
+
 <a name="1.911"></a>
 # [1.911] - 4 Jul 2026
 

@@ -8649,6 +8649,10 @@ def test_web_template_scripts_helpers():
     assert 'function clearPoolDeferred(body)' in scripts
     assert 'body.removeAttribute(\'data-pool-deferred\')' in scripts
     assert '[data-pool-deferred="1"]' in scripts
+    assert 'function keysViewActive()' in scripts
+    assert 'function refreshDeferredPoolForProtocol(protocol)' in scripts
+    assert "if (selected === 'keys')" in scripts
+    assert 'refreshDeferredPoolForProtocol(selected)' in scripts
     assert 'const pendingPoolDataProtocols = new Set();' in scripts
     assert 'pendingPoolDataProtocols.add(proto);' in scripts
     assert 'const requestedProtocols = poolDataRefreshAll ? [] : Array.from(pendingPoolDataProtocols);' in scripts

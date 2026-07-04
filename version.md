@@ -1,3 +1,7 @@
+*v1.912 (5 Jul 2026) -* main
+
+*Hydrates the already-rendered active Vless 1 pool when the Keys view opens, matching lazy Vless 2 panel loading so the first protocol cannot stay on “Загружаю пул ключей...”.*
+
 *v1.911 (4 Jul 2026) -* main
 
 *Retries lazy protocol panel loading after transient fetch failures and replaces raw browser errors with a localised message, so flaky external access does not immediately strand the Keys view on an error card.*
