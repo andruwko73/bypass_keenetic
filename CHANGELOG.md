@@ -1,3 +1,9 @@
+<a name="1.900"></a>
+# [1.900] - 4 Jul 2026
+
+- Keeps compact web status and the initial pool-mode page on the lightweight active-mode path so header refreshes do not load the full key probe cache in the main bot process.
+- Starts background status refresh from compact status calls in active-only mode, reducing idle web polling memory and CPU pressure.
+
 <a name="1.899"></a>
 # [1.899] - 4 Jul 2026
 

@@ -20,6 +20,16 @@ def _call(ctx, name, *args, **kwargs):
     return func(*args, **kwargs)
 
 
+def _refresh_status_async(ctx, current_keys, active_only=False):
+    func = _ctx(ctx, 'refresh_status_caches_async')
+    if not func:
+        return None
+    try:
+        return func(current_keys, active_only=bool(active_only))
+    except TypeError:
+        return func(current_keys)
+
+
 def _pool_probe_running(progress):
     try:
         total = int((progress or {}).get('total') or 0)
@@ -87,34 +97,44 @@ def _status_payload(ctx, query=''):
 
     current_keys = _ctx(ctx, 'load_current_keys')()
     snapshot = _ctx(ctx, 'cached_status_snapshot')(current_keys)
+    pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
+    if snapshot is None and compact:
+        active_snapshot = _ctx(ctx, 'active_mode_status_snapshot')
+        if active_snapshot:
+            snapshot = active_snapshot(current_keys)
+            if snapshot is not None and not web_command_running and not pool_probe_locked():
+                _refresh_status_async(ctx, current_keys, active_only=True)
     if snapshot is None:
         stale_snapshot = _ctx(ctx, 'stale_status_snapshot')
         if stale_snapshot:
             snapshot = stale_snapshot(current_keys)
-            pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
             if snapshot is not None and not web_command_running and not pool_probe_locked():
-                _call(ctx, 'refresh_status_caches_async', current_keys)
+                _refresh_status_async(ctx, current_keys, active_only=compact)
     if snapshot is None:
         placeholder_snapshot = _ctx(ctx, 'placeholder_status_snapshot')
         if placeholder_snapshot:
-            snapshot = placeholder_snapshot(current_keys)
-            pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
+            if compact:
+                try:
+                    snapshot = placeholder_snapshot(current_keys, include_pool_details=False)
+                except TypeError:
+                    snapshot = placeholder_snapshot(current_keys)
+            else:
+                snapshot = placeholder_snapshot(current_keys)
             if not web_command_running and not pool_probe_locked():
-                _call(ctx, 'refresh_status_caches_async', current_keys)
+                _refresh_status_async(ctx, current_keys, active_only=compact)
         else:
             active_snapshot = _ctx(ctx, 'active_mode_status_snapshot')
             if active_snapshot:
                 snapshot = active_snapshot(current_keys)
-                pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
                 if not web_command_running and not pool_probe_locked():
-                    _call(ctx, 'refresh_status_caches_async', current_keys)
+                    _refresh_status_async(ctx, current_keys, active_only=compact)
             else:
                 snapshot = {
                     'web': _ctx(ctx, 'placeholder_web_status_snapshot')(),
                     'protocols': _ctx(ctx, 'placeholder_protocol_statuses')(current_keys),
                 }
     if _ctx(ctx, 'refresh_status_on_api', False) and not web_command_running:
-        _call(ctx, 'refresh_status_caches_async', current_keys)
+        _refresh_status_async(ctx, current_keys, active_only=compact)
 
     payload = {
         'web': snapshot.get('web', {}) if isinstance(snapshot, dict) else {},

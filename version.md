@@ -1,3 +1,7 @@
+*v1.900 (4 Jul 2026) -* main
+
+*Keeps compact web status and the initial pool-mode page on the lightweight active-mode path so opening or polling the header does not load the full key probe cache in the main bot process.*
+
 *v1.899 (4 Jul 2026) -* main
 
 *Reduces retained bot memory after web UI activity by keeping pool/history payloads out of long-lived caches, rendering the initial pool page without loading the full probe cache, building `/api/pools` rows in a short-lived worker process, reusing the Xray PID and compact router-metrics snapshots, and releasing module references without removing modules from `sys.modules`.*

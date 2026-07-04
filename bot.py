@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.899, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.900, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -11664,11 +11664,11 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 int(current_pool_probe_progress.get('total') or 0) > 0
             )
             if snapshot is None:
-                snapshot = _placeholder_status_snapshot(current_keys)
+                snapshot = _placeholder_status_snapshot(current_keys, include_pool_details=False)
                 status = snapshot['web']
                 protocol_statuses = snapshot['protocols']
                 if not pool_probe_pending:
-                    _refresh_status_caches_async(current_keys)
+                    _refresh_status_caches_async(current_keys, active_only=True)
         else:
             snapshot = _cached_status_snapshot(current_keys)
             if snapshot is None:
