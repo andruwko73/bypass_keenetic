@@ -676,6 +676,11 @@ restore_runtime_state_files_after_update() {
   restore_runtime_state_file_after_update v2ray_config.json /opt/etc/v2ray/config.json 0644
   restore_runtime_state_file_after_update shadowsocks.json /opt/etc/shadowsocks.json 0600
   restore_runtime_state_file_after_update trojan_config.json /opt/etc/trojan/config.json 0600
+  restore_runtime_state_file_after_update unblock_shadowsocks.txt /opt/etc/unblock/shadowsocks.txt 0644
+  restore_runtime_state_file_after_update unblock_trojan.txt /opt/etc/unblock/trojan.txt 0644
+  restore_runtime_state_file_after_update unblock_vmess.txt /opt/etc/unblock/vmess.txt 0644
+  restore_runtime_state_file_after_update unblock_vless.txt /opt/etc/unblock/vless.txt 0644
+  restore_runtime_state_file_after_update unblock_vless2.txt /opt/etc/unblock/vless-2.txt 0644
 }
 
 backup_static_assets() {

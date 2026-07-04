@@ -1,3 +1,9 @@
+<a name="1.898"></a>
+# [1.898] - 4 Jul 2026
+
+- Preserves user bypass route lists during GitHub updates, matching rollback behavior for `vless.txt`, `vless-2.txt`, `vmess.txt`, `trojan.txt`, and `shadowsocks.txt`.
+- Makes `/opt/etc/init.d/S99unblock refresh` run a real ipset refresh even when the scheduler process is active, so manual/web refresh no longer exits silently.
+
 <a name="1.897"></a>
 # [1.897] - 4 Jul 2026
 

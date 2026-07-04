@@ -2350,7 +2350,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'UNBLOCK_IPSET_LOCK_BUSY_QUIET=1 /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true' in s99unblock
     assert 'last_refresh_check=0' in s99unblock
     assert 'refresh)' in s99unblock
-    assert 'refresh)\n        if is_running; then\n            exit 0\n        fi' in s99unblock
+    refresh_case = s99unblock.split('\n    refresh)\n', 1)[1].split(';;', 1)[0]
+    assert 'if is_running' not in refresh_case
+    assert 'run_refresh\n' in refresh_case
+    assert 'run_refresh_if_due' not in refresh_case
     assert 'while :' in s99unblock
     assert 'scheduler_pids()' in s99unblock
     assert 'run_scheduler_loop()' in s99unblock
@@ -3026,6 +3029,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'restore_runtime_state_file_after_update v2ray_config.json /opt/etc/v2ray/config.json 0644' in script_source
     assert 'restore_runtime_state_file_after_update shadowsocks.json /opt/etc/shadowsocks.json 0600' in script_source
     assert 'restore_runtime_state_file_after_update trojan_config.json /opt/etc/trojan/config.json 0600' in script_source
+    assert 'restore_runtime_state_file_after_update unblock_shadowsocks.txt /opt/etc/unblock/shadowsocks.txt 0644' in script_source
+    assert 'restore_runtime_state_file_after_update unblock_trojan.txt /opt/etc/unblock/trojan.txt 0644' in script_source
+    assert 'restore_runtime_state_file_after_update unblock_vmess.txt /opt/etc/unblock/vmess.txt 0644' in script_source
+    assert 'restore_runtime_state_file_after_update unblock_vless.txt /opt/etc/unblock/vless.txt 0644' in script_source
+    assert 'restore_runtime_state_file_after_update unblock_vless2.txt /opt/etc/unblock/vless-2.txt 0644' in script_source
     restore_state_call = '\n    restore_runtime_state_files_after_update\n'
     migrate_defaults_call = '\n    migrate_runtime_config_defaults\n'
     assert script_source.find('activate_runtime_modules $BOT_RUNTIME_MODULES') < script_source.find(restore_state_call)

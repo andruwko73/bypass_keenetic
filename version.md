@@ -1,3 +1,7 @@
+*v1.898 (4 Jul 2026) -* main
+
+*Preserves user bypass route lists during GitHub updates and makes manual ipset refresh run even while the scheduler is active.*
+
 *v1.897 (4 Jul 2026) -* main
 
 *Keeps runtime memory cleanup from removing modules out of `sys.modules` while the multithreaded web UI is serving status and protocol panels, preventing transient `key_pool_web`/`probe_cache` errors under concurrent requests.*

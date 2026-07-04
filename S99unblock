@@ -793,10 +793,8 @@ case "$1" in
         start_scheduler
         ;;
     refresh)
-        if is_running; then
-            exit 0
-        fi
-        run_refresh_if_due
+        cleanup_orphan_schedulers
+        run_refresh
         run_youtube_edge_prefetch_if_due
         run_runtime_dedupe
         ;;
