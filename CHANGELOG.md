@@ -1,3 +1,8 @@
+<a name="1.907"></a>
+# [1.907] - 4 Jul 2026
+
+- Runs background Telegram and YouTube failover health checks in a short-lived worker process so periodic checks do not raise the main bot RSS after startup.
+
 <a name="1.906"></a>
 # [1.906] - 4 Jul 2026
 

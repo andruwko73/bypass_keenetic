@@ -3050,8 +3050,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _find_pool_failover_candidate_inline' in source
     assert 'def _find_pool_failover_candidate_in_process' in source
     assert 'def _run_failover_candidate_process_worker' in source
+    assert 'BYPASS_KEENETIC_HEALTH_WORKER' in source
+    assert 'def _run_health_check_process_worker' in source
+    assert 'def _check_telegram_api_for_background' in source
+    assert 'def _check_youtube_protocol_for_background' in source
     assert 'POOL_FAILOVER_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE' in source
+    assert 'POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE' in source
+    assert 'check_telegram_api=_check_telegram_api_for_background' in source
+    assert '_check_youtube_protocol_for_background(route_proto, metrics=yt_metrics)' in source
     assert 'failover candidate process finished' in source
+    assert 'health check process finished' in source
     assert 'memory_timeline_trim_min_interval_seconds' in source
     assert 'def _maybe_trim_memory_timeline_file' in source
     assert '_maybe_trim_memory_timeline_file(MEMORY_TIMELINE_PATH, now=now)' in source
@@ -3314,7 +3322,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "['dig', '+time=2', '+tries=1', '+short', 'A'" in source
     assert "['nslookup', str(domain), str(dns_server)]" in source
     assert 'def _recover_current_youtube_route_after_hard_failure' in source
-    assert source.find("_recent_probe_ok(cached_active_probe, 'yt_ok'") < source.find('ok, message = _check_youtube_protocol_once(route_proto')
+    assert source.find("_recent_probe_ok(cached_active_probe, 'yt_ok'") < source.find('ok, message = _check_youtube_protocol_for_background(route_proto')
     assert 'Required YouTube endpoint did not respond through this key: ' in youtube_health_source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
     assert 'http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT)' in source

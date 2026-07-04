@@ -1,3 +1,7 @@
+*v1.907 (4 Jul 2026) -* main
+
+*Runs background Telegram and YouTube failover health checks in a short-lived worker process so periodic checks do not raise the main bot RSS after startup.*
+
 *v1.906 (4 Jul 2026) -* main
 
 *Defers importing the heavy HTTP client stack until subscription, status, Telegram API, YouTube, or custom service checks actually run, reducing idle bot memory pressure.*

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.906, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.907, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -32,6 +32,7 @@ import bot_config as config
 
 COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
 POOL_PROBE_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_POOL_PROBE_WORKER') == '1'
+HEALTH_CHECK_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_HEALTH_WORKER') == '1'
 
 
 def _runtime_mode_at_import():
@@ -1355,7 +1356,7 @@ def _attempt_auto_failover():
         pool_probe_locked=lambda: bool(globals().get('pool_probe_lock') and pool_probe_lock.locked()),
         proxy_mode=telegram_route_proto,
         proxy_url=proxy_settings.get(telegram_route_proto),
-        check_telegram_api=_check_telegram_api_through_proxy,
+        check_telegram_api=_check_telegram_api_for_background,
         load_current_keys=_load_current_keys,
         load_key_pools=_load_key_pools,
         failover_candidates=_key_pool_store().failover_candidates,
@@ -1480,7 +1481,7 @@ def _schedule_vless2_youtube_cache_confirm(key_value):
 def _confirm_youtube_key(proto):
     last_message = ''
     for attempt in range(YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES):
-        ok, message = _check_youtube_protocol_once(proto)
+        ok, message = _check_youtube_protocol_for_background(proto)
         if ok:
             return True, message
         last_message = message
@@ -1686,7 +1687,7 @@ def _attempt_youtube_failover():
         return False
 
     yt_metrics = {}
-    ok, message = _check_youtube_protocol_once(route_proto, metrics=yt_metrics)
+    ok, message = _check_youtube_protocol_for_background(route_proto, metrics=yt_metrics)
     if ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0
@@ -1851,7 +1852,7 @@ def _attempt_youtube_failover():
                 continue
 
             if proxy_mode == route_proto:
-                tg_ok, tg_message = _check_telegram_api_through_proxy(
+                tg_ok, tg_message = _check_telegram_api_for_background(
                     proxy_settings.get(route_proto),
                     connect_timeout=AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT,
                     read_timeout=AUTO_FAILOVER_CHECK_READ_TIMEOUT,
@@ -9393,6 +9394,11 @@ def _cleanup_failover_candidate_process_files(paths=None):
         _remove_file(path)
 
 
+def _cleanup_health_check_process_files(paths=None):
+    for path in (paths or {}).values():
+        _remove_file(path)
+
+
 def _failover_candidate_process_worker_code(input_path, result_path):
     module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
     module_dir = os.path.dirname(BOT_SOURCE_PATH)
@@ -9405,6 +9411,152 @@ def _failover_candidate_process_worker_code(input_path, result_path):
         'sys.exit(bot_module._run_failover_candidate_process_worker('
         f'{input_path!r}, {result_path!r}))'
     )
+
+
+def _health_check_process_worker_code(input_path, result_path):
+    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
+    module_dir = os.path.dirname(BOT_SOURCE_PATH)
+    return (
+        'import os, sys; '
+        'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
+        'os.environ["BYPASS_KEENETIC_HEALTH_WORKER"] = "1"; '
+        f"sys.path.insert(0, {module_dir!r}); "
+        f'import {module_name} as bot_module; '
+        'sys.exit(bot_module._run_health_check_process_worker('
+        f'{input_path!r}, {result_path!r}))'
+    )
+
+
+def _run_health_check_process_worker(input_path, result_path):
+    payload = _read_json_file(input_path, {}) or {}
+    _remove_file(input_path)
+    if not isinstance(payload, dict):
+        payload = {}
+    kind = str(payload.get('kind') or '').strip().lower()
+    result = {
+        'ok': False,
+        'message': '',
+        'metrics': {},
+        'error': '',
+        'rss_before_kb': int(_process_rss_kb() or 0),
+        'rss_after_kb': 0,
+        'hwm_kb': 0,
+    }
+    exit_code = 0
+    try:
+        if kind == 'telegram':
+            ok, message = _check_telegram_api_through_proxy(
+                str(payload.get('proxy_url') or '').strip() or None,
+                connect_timeout=float(payload.get('connect_timeout') or AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT),
+                read_timeout=float(payload.get('read_timeout') or AUTO_FAILOVER_CHECK_READ_TIMEOUT),
+            )
+            result['ok'] = bool(ok)
+            result['message'] = _redact_sensitive_text(message)
+        elif kind == 'youtube':
+            metrics = {}
+            ok, message = _check_youtube_protocol_once(
+                str(payload.get('proto') or '').strip() or None,
+                metrics=metrics,
+            )
+            result['ok'] = bool(ok)
+            result['message'] = _redact_sensitive_text(message)
+            result['metrics'] = {
+                str(key): value
+                for key, value in metrics.items()
+                if isinstance(value, (bool, int, float, str)) or value is None
+            }
+        else:
+            result['error'] = f'unsupported health check kind: {kind}'
+            exit_code = 1
+    except Exception as exc:
+        result['error'] = f'{type(exc).__name__}: {_redact_sensitive_text(exc)}'
+        exit_code = 1
+    finally:
+        _cleanup_pool_probe_runtime_light(kill_processes=True)
+        _memory_cleanup('health check worker finished', force=True, clear_status=True, log=False)
+        result['rss_after_kb'] = int(_process_rss_kb() or 0)
+        result['hwm_kb'] = int(_process_hwm_kb() or 0)
+        try:
+            _write_json_file_private(result_path, result)
+        except Exception:
+            pass
+    return exit_code
+
+
+def _health_check_in_process(payload):
+    payload = dict(payload or {})
+    paths = _health_check_process_paths()
+    try:
+        _write_json_file_private(paths['input_path'], payload)
+        env = dict(os.environ)
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        env['BYPASS_KEENETIC_HEALTH_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', _health_check_process_worker_code(
+                paths['input_path'],
+                paths['result_path'],
+            )],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            env=env,
+            timeout=POOL_FAILOVER_PROCESS_WORKER_TIMEOUT_SECONDS,
+            check=False,
+        )
+        worker_payload = _read_json_file(paths['result_path'], {}) or {}
+        if not isinstance(worker_payload, dict):
+            worker_payload = {}
+        if result.returncode != 0:
+            error = str(worker_payload.get('error') or '').strip()
+            if error:
+                _write_runtime_log(f'Health check worker failed: {error}')
+            else:
+                _write_runtime_log(f'Health check worker returned code {result.returncode}.')
+            return None
+        return worker_payload
+    except subprocess.TimeoutExpired:
+        _write_runtime_log('Health check worker timed out.')
+        return None
+    except Exception as exc:
+        _write_runtime_log(f'Health check worker could not start: {_redact_sensitive_text(exc)}')
+        return None
+    finally:
+        _cleanup_health_check_process_files(paths)
+        _memory_cleanup('health check process finished', force=True, clear_status=False, log=False)
+
+
+def _check_telegram_api_for_background(proxy_url=None, connect_timeout=6, read_timeout=10):
+    if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE:
+        payload = _health_check_in_process({
+            'kind': 'telegram',
+            'proxy_url': str(proxy_url or ''),
+            'connect_timeout': float(connect_timeout or 0),
+            'read_timeout': float(read_timeout or 0),
+        })
+        if payload is None:
+            return True, 'Telegram API check skipped: health worker unavailable.'
+        return bool(payload.get('ok')), str(payload.get('message') or '')
+    return _check_telegram_api_through_proxy(
+        proxy_url,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+    )
+
+
+def _check_youtube_protocol_for_background(proto=None, metrics=None):
+    if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE:
+        payload = _health_check_in_process({
+            'kind': 'youtube',
+            'proto': str(proto or ''),
+        })
+        if payload is None:
+            return True, 'YouTube check skipped: health worker unavailable.'
+        worker_metrics = payload.get('metrics') or {}
+        if isinstance(metrics, dict) and isinstance(worker_metrics, dict):
+            metrics.update(worker_metrics)
+        return bool(payload.get('ok')), str(payload.get('message') or '')
+    return _check_youtube_protocol_once(proto, metrics=metrics)
 
 
 def _run_failover_candidate_process_worker(input_path, result_path):
@@ -9838,6 +9990,17 @@ def _failover_candidate_process_paths():
     base = os.path.join(
         _pool_probe_process_tmp_dir(),
         f'bypass_failover_worker_{os.getpid()}_{int(time.time() * 1000)}',
+    )
+    return {
+        'input_path': base + '.input.json',
+        'result_path': base + '.result.json',
+    }
+
+
+def _health_check_process_paths():
+    base = os.path.join(
+        _pool_probe_process_tmp_dir(),
+        f'bypass_health_worker_{os.getpid()}_{int(time.time() * 1000)}',
     )
     return {
         'input_path': base + '.input.json',
