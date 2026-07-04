@@ -17,7 +17,14 @@ import types as py_types
 
 
 ROOT = Path(__file__).resolve().parents[1]
+APP_ROOT = ROOT / 'app'
+ROOT_RUNTIME_DOCS = {'version.md', 'README.md', 'CHANGELOG.md'}
+sys.path.insert(0, str(APP_ROOT))
 sys.path.insert(0, str(ROOT))
+
+
+def source_path(name):
+    return ROOT / name if name in ROOT_RUNTIME_DOCS else APP_ROOT / name
 
 import key_pool_web
 import key_pool_store
@@ -790,7 +797,7 @@ def test_web_commands_runtime_dispatch():
     assert web_commands_runtime.web_command_label('dns_on') == 'DNS Override ВКЛ'
     assert web_commands_runtime.web_command_label('custom') == 'custom'
     assert web_commands_runtime.WEB_UPDATE_COMMANDS == ('update', 'rollback_update')
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "start_delay = 1.0 if command == 'rollback_update' else 0.0" in bot_source
     assert 'time.sleep({start_delay!r}); ' in bot_source
     assert web_commands_runtime.run_web_command(
@@ -1380,7 +1387,7 @@ def test_key_pool_subscription_helpers():
         service='youtube',
     )
     assert youtube_stable_candidates[:2] == [('vless2', 'stable'), ('vless2', 'unstable')]
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert 'finally:\n            session.close()' in bot_source
 
 
@@ -1982,12 +1989,12 @@ def _expected_codex_version_counter():
 
 def test_codex_version_matches_commit_count():
     expected = _expected_codex_version_counter()
-    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     version_md = (ROOT / 'version.md').read_text(encoding='utf-8')
     changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
-    installer = (ROOT / 'installer.py').read_text(encoding='utf-8')
+    installer = (APP_ROOT / 'installer.py').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
-    example = (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    example = (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert app_version.APP_VERSION_COUNTER == expected
     assert re.search(rf'Версия\s+v{re.escape(expected)}\b', source)
     assert version_md.startswith(f'*v{expected} ')
@@ -2291,7 +2298,7 @@ def test_ui_smoke_package_scripts_are_declared():
 
 def test_update_script_socks_download_notice_is_not_repeated():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
-    unblock_dnsmasq = (ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
+    unblock_dnsmasq = (APP_ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
     assert 'Downloaded via local SOCKS port' not in script
     assert 'Downloading GitHub files via local SOCKS port ${port}.' in script
     assert 'RAW_GITHUB_SOCKS_NOTICE_SHOWN=1' in script
@@ -2318,7 +2325,7 @@ def test_direct_update_script_records_update_status():
     assert "path = '/opt/etc/bot/update_status.json'" in script
     assert 'write_cli_update_status update true 3 Preparing "CLI update started"' in script
     assert 'write_cli_update_status update true 10 Downloading "Downloading update files"' in script
-    assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/script.sh"' in script
+    assert 'download_update_file "$(repo_file_url script.sh)"' in script
     assert '"$stage_dir/script.sh" "#!/bin/sh" "script.sh"' in script
     assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script
     assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
@@ -2372,21 +2379,21 @@ def test_realtime_call_signal_catalog_is_call_specific():
 def test_ipset_refresh_is_backend_aware_and_atomic():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
-    installer_source = (ROOT / 'installer.py').read_text(encoding='utf-8')
-    update_script = (ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
-    unblock_dnsmasq = (ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
-    ipset_script = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
-    ipset_boot_script = (ROOT / '100-ipset.sh').read_text(encoding='utf-8')
-    redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
-    crontab = (ROOT / 'crontab').read_text(encoding='utf-8')
-    s99unblock = (ROOT / 'S99unblock').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    installer_source = (APP_ROOT / 'installer.py').read_text(encoding='utf-8')
+    update_script = (APP_ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
+    unblock_dnsmasq = (APP_ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
+    ipset_script = (APP_ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
+    ipset_boot_script = (APP_ROOT / '100-ipset.sh').read_text(encoding='utf-8')
+    redirect_script = (APP_ROOT / '100-redirect.sh').read_text(encoding='utf-8')
+    crontab = (APP_ROOT / 'crontab').read_text(encoding='utf-8')
+    s99unblock = (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
 
     assert 'flush_set' not in update_script
     assert 'Use DNS Override ON button to make dnsmasq the primary DNS' in update_script
     assert 'Using Keenetic ndnproxy fallback, preloading ipset' in update_script
     assert '/opt/bin/unblock_ipset.sh &' not in update_script
-    assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab"' in script
+    assert 'download_update_file "$(repo_file_url crontab)"' in script
     assert '"$stage_dir/crontab" "S99unblock refresh" "crontab"' in script
     assert 'mv "$stage_dir/crontab" /opt/etc/crontab' in script
     assert 'install_unblock_ipset_cron_job()' in script
@@ -2402,7 +2409,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'chmod 600 /opt/var/spool/cron/crontabs/root' in script
     assert 'chmod 600 /opt/var/spool/cron/crontabs/root' in bootstrap
     assert '/opt/etc/init.d/S10cron restart' in script
-    assert 'download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99unblock"' in script
+    assert 'download_update_file "$(repo_file_url S99unblock)"' in script
     assert 'mv "$stage_dir/S99unblock" /opt/etc/init.d/S99unblock' in script
     assert '/opt/etc/init.d/S99unblock restart' in script
     assert 'BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
@@ -2568,7 +2575,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert "BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" in script
     assert "TELEGRAM_CALL_TPROXY_PORT_VLESS" in script
     assert "TELEGRAM_CALL_TPROXY_PORT_VLESS2" in bootstrap
-    service_routes_source = (ROOT / 'service_routes.py').read_text(encoding='utf-8')
+    service_routes_source = (APP_ROOT / 'service_routes.py').read_text(encoding='utf-8')
     assert 'def repair_service_route_catalog_drift(' in service_routes_source
     assert 'update_script=UNBLOCK_UPDATE_SCRIPT' in service_routes_source
     assert 'ensure_runtime_legacy_paths\n    generate_udp_quic_policy_file' in script
@@ -2812,7 +2819,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
 
 
 def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
-    redirect_script = (ROOT / '100-redirect.sh').read_text(encoding='utf-8')
+    redirect_script = (APP_ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     assert 'refresh_vless_tcp_priority()' in redirect_script
     assert 'telegram_route_protocol()' in redirect_script
     assert 'refresh_mobile_push_priority()' in redirect_script
@@ -2854,12 +2861,12 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
-    service = (ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
-    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
-    pool_controller_source = (ROOT / 'pool_probe_controller.py').read_text(encoding='utf-8')
-    pool_runner_source = (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
-    proxy_apply_source = (ROOT / 'proxy_apply_runtime.py').read_text(encoding='utf-8')
-    youtube_health_source = (ROOT / 'youtube_healthcheck.py').read_text(encoding='utf-8')
+    service = (APP_ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    pool_controller_source = (APP_ROOT / 'pool_probe_controller.py').read_text(encoding='utf-8')
+    pool_runner_source = (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    proxy_apply_source = (APP_ROOT / 'proxy_apply_runtime.py').read_text(encoding='utf-8')
+    youtube_health_source = (APP_ROOT / 'youtube_healthcheck.py').read_text(encoding='utf-8')
     youtube_source = source + pool_controller_source + pool_runner_source + proxy_apply_source + youtube_health_source
     assert 'PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT"' in service
     assert 'cleanup_python_bytecode' in service
@@ -3065,12 +3072,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_maybe_trim_memory_timeline_file(MEMORY_TIMELINE_PATH, now=now)' in source
     assert '\nimport requests\n' not in source
     assert 'def _requests_module' in source
-    proxy_status_source = (ROOT / 'proxy_status.py').read_text(encoding='utf-8')
+    proxy_status_source = (APP_ROOT / 'proxy_status.py').read_text(encoding='utf-8')
     assert '\nimport requests\n' not in proxy_status_source
     assert 'def _requests_module' in proxy_status_source
-    assert "run_memory_cleanup('pool probe key checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
-    assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
-    assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    assert "run_memory_cleanup('pool probe key checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "_cleanup_pool_probe_runtime_light(kill_processes=True)" in source
     assert 'if pid == os.getpid()' in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
@@ -3215,7 +3222,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _probe_applied_pool_key_services' in source
     assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
-    assert "'probe_applied_pool_key_services'" in (ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
+    assert "'probe_applied_pool_key_services'" in (APP_ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
     assert 'def _telegram_route_protocol' in source
     assert "telegram_route_proto = _telegram_route_protocol()" in source
     assert 'proxy_mode=telegram_route_proto' in source
@@ -3272,7 +3279,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
     assert "youtube_stream_guard_failover_hold_seconds" in source
     assert "youtube_stream_guard_scan_cache_seconds" in source
-    assert "youtube_stream_guard_event_interval_seconds" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "youtube_stream_guard_event_interval_seconds" in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "YOUTUBE_STREAM_GUARD_EVENT_INTERVAL" in source
     assert "state['last_event'] = now" in source
     assert source.find("last_event = float(state.get('last_event') or 0.0)") < source.find("_conntrack_route_diagnostic(proto)")
@@ -3294,9 +3301,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "malloc_trim_info = _malloc_trim(reason, force=True, rss_kb=rss_before)" in source
     assert "router_health.invalidate(include_heavy=bool(clear_status))" in source
     assert "if not POOL_PROBE_WORKER_MODE:" in source
-    assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
-    assert "web_response_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
-    assert "web_response_light_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "memory_cleanup_rss_kb" in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "web_response_cleanup_rss_kb" in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "web_response_light_cleanup_rss_kb" in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "WEB_RESPONSE_CLEANUP_RSS_KB" in source
     assert "WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
     assert "cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
@@ -3340,7 +3347,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'youtubei-att.googleapis.com' in youtube_source
     assert 'yt_error_rate' in youtube_source
     assert 'yt_stability' in youtube_source
-    unblock_source = (ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
+    unblock_source = (APP_ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
     assert 'yt4.googleusercontent.com' in unblock_source
     assert 'add_cidr64="$youtube_ipv6_domain"' in unblock_source
     assert 'extra_dns_servers="$YOUTUBE_DNS_SAMPLE_SERVERS"' in unblock_source
@@ -3384,7 +3391,7 @@ def test_simple_mode_import_skips_advanced_modules():
     mode_file = temp_path / 'bot_app_mode'
     mode_file.write_text('simple\n', encoding='utf-8')
     (temp_path / 'bot_config.py').write_text(
-        (ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
         encoding='utf-8',
     )
     advanced_modules = (
@@ -3399,6 +3406,7 @@ def test_simple_mode_import_skips_advanced_modules():
     )
     script = (
         "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
         f"sys.path.insert(0, {str(ROOT)!r})\n"
         f"sys.path.insert(0, {str(temp_path)!r})\n"
         "import app_runtime_mode\n"
@@ -3447,10 +3455,10 @@ def test_runtime_modules_are_installed_by_update_scripts():
     bootstrap_modules = set(re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', bootstrap).group(1).split())
     assert script_modules == bootstrap_modules
     for module in script_modules:
-        assert (ROOT / module).exists()
+        assert source_path(module).exists()
     for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'router_metrics.py', 'telegram_call_learning.py', 'web_commands_runtime.py'):
         assert module in script
-        assert f'$RAW_BASE/{module}' in bootstrap
+        assert f'repo_file_url {module}' in bootstrap or f'repo_file_url "$module"' in bootstrap
         assert f'$BOT_DIR/{module}' in bootstrap
     assert 'web_pool_snapshot_worker.py' in script_modules
     assert 'web_pool_snapshot_worker.py' in bootstrap_modules
@@ -4174,7 +4182,7 @@ def test_entware_dns_runtime_helpers():
     assert entware_dns_runtime.entware_dns_is_available(run_quiet=lambda args: _Result(0))
     assert not entware_dns_runtime.entware_dns_is_available(run_quiet=lambda args: _Result(1))
     assert entware_dns_runtime.entware_ip_from_lookup('Address 1: 1.1.1.1\nAddress 2: 2.2.2.2') == '2.2.2.2'
-    source = (ROOT / 'entware_dns_runtime.py').read_text(encoding='utf-8')
+    source = (APP_ROOT / 'entware_dns_runtime.py').read_text(encoding='utf-8')
     assert "no opkg dns-override" not in source
 
 
@@ -4335,8 +4343,8 @@ def test_telegram_call_router_health_note():
 
 
 def test_telegram_call_learning_idle_backoff_source():
-    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
-    config_source = (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    config_source = (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     installer_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     auto_scan = source.split('def _telegram_call_learning_auto_scan', 1)[1].split('def _telegram_call_learning_auto_worker', 1)[0]
     assert 'TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS' in source
@@ -4390,8 +4398,8 @@ def test_active_protocol_status_description_has_no_trailing_period():
 
 
 def test_telegram_confirm_state_source():
-    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
-    install_source = (ROOT / 'telegram_install_ui.py').read_text(encoding='utf-8')
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    install_source = (APP_ROOT / 'telegram_install_ui.py').read_text(encoding='utf-8')
     assert 'def _handle_telegram_confirmation(' in source
     assert '_handle_telegram_confirmation(message, level, bypass, set_menu_state, service)' in source
     assert 'if level != TELEGRAM_CONFIRM_LEVEL:' in source
@@ -6583,7 +6591,7 @@ def test_unblock_lists_hide_legacy_txt_files():
 def test_vless2_youtube_routes_are_scoped():
     entries = {
         line.strip()
-        for line in (ROOT / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
     assert set(service_catalog.service_route_entries('youtube')) <= entries
@@ -6621,7 +6629,7 @@ def test_vless2_youtube_routes_are_scoped():
     } <= entries
     vless_entries = {
         line.strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.strip() and not line.lstrip().startswith('#')
     }
     assert 'accounts.google.com' in vless_entries
@@ -6629,10 +6637,10 @@ def test_vless2_youtube_routes_are_scoped():
     assert set(service_catalog.global_route_exclude_entries()) & vless_entries <= router_preserved_global
     assert 'rutracker.org' in entries
     assert 'rutracker.wiki' in entries
-    assert service_routes.service_route_state('telegram', unblock_dir=str(ROOT))['label'] == 'Vless 1'
-    assert service_routes.service_route_state('youtube', unblock_dir=str(ROOT))['label'] == 'Vless 2'
-    assert service_routes.service_route_state('gemini', unblock_dir=str(ROOT))['label'] == 'Vless 1'
-    chrome_remote_desktop_state = service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(ROOT))
+    assert service_routes.service_route_state('telegram', unblock_dir=str(APP_ROOT))['label'] == 'Vless 1'
+    assert service_routes.service_route_state('youtube', unblock_dir=str(APP_ROOT))['label'] == 'Vless 2'
+    assert service_routes.service_route_state('gemini', unblock_dir=str(APP_ROOT))['label'] == 'Vless 1'
+    chrome_remote_desktop_state = service_routes.service_route_state('chrome_remote_desktop', unblock_dir=str(APP_ROOT))
     assert chrome_remote_desktop_state['complete_protocols'] == []
     assert chrome_remote_desktop_state['partial_protocols'] == []
     assert 'static.rutracker.cc' in entries
@@ -6719,7 +6727,7 @@ def test_vless2_youtube_routes_are_scoped():
 def test_chrome_remote_desktop_routes_stay_manual_only():
     entries = {
         line.split('#', 1)[0].strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
     source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
@@ -6735,7 +6743,7 @@ def test_chrome_remote_desktop_routes_stay_manual_only():
 def test_chatgpt_codex_routes_are_synced():
     entries = {
         line.split('#', 1)[0].strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
     assert set(service_catalog.service_route_entries('chatgpt_services')) <= entries
@@ -6777,7 +6785,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert '8.6.112.6' in udp_routes
     assert '8.47.69.6' in udp_routes
     assert not set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) & set(service_catalog.UDP_QUIC_EXCLUDE_ENTRIES)
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "'chatgpt_services'" in bot_source
     assert "'youtube'" in bot_source
 
@@ -6785,7 +6793,7 @@ def test_chatgpt_codex_routes_are_synced():
 def test_ai_assistant_custom_routes_are_synced():
     entries = {
         line.split('#', 1)[0].strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
@@ -6813,7 +6821,7 @@ def test_ai_assistant_custom_routes_are_synced():
     assert set(service_catalog.YOUTUBE_AD_DECISION_ROUTE_ENTRIES).isdisjoint(
         service_catalog.GEMINI_ROUTE_ENTRIES
     )
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "'claude'" in bot_source
     assert "'gemini'" in bot_source
 
@@ -6821,7 +6829,7 @@ def test_ai_assistant_custom_routes_are_synced():
 def test_primary_vless_does_not_capture_gmail_domains():
     entries = {
         line.split('#', 1)[0].strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
     assert not ({
@@ -6842,10 +6850,10 @@ def test_primary_vless_does_not_capture_gmail_domains():
 def test_custom_check_service_sources_are_synced():
     entries = {
         line.split('#', 1)[0].strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     keys_match = re.search(r'SOCIALNET_SERVICE_KEYS\s*=\s*\((.*?)\)', bot_source, re.S)
     assert keys_match
     button_keys = set(re.findall(r"'([^']+)'", keys_match.group(1)))
@@ -6893,7 +6901,7 @@ def test_custom_check_service_sources_are_synced():
 def test_telegram_routes_include_mini_app_dependencies():
     entries = {
         line.split('#', 1)[0].strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
     expected = {
@@ -6970,7 +6978,7 @@ def test_meta_custom_check_migration():
 def test_chrome_remote_desktop_routes_are_manual_only():
     entries = {
         line.split('#', 1)[0].strip()
-        for line in (ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
+        for line in (APP_ROOT / 'vless.txt').read_text(encoding='utf-8').splitlines()
         if line.split('#', 1)[0].strip()
     }
     source = service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']
@@ -6981,7 +6989,7 @@ def test_chrome_remote_desktop_routes_are_manual_only():
     assert service_catalog.SERVICE_LIST_SOURCES['chrome_remote_desktop']['entries'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
     assert presets['chrome_remote_desktop']['routes'] == service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "'chrome_remote_desktop'" in bot_source
 
 
@@ -7336,7 +7344,7 @@ def test_repo_update_helpers():
     assert '/abc123def456/script.sh' in script_url
     assert script_session.trust_env is False
 
-    bot_source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "direct_env['REPO_REF'] = repo_ref" in bot_source
     assert "direct_env['REPO_REF'] = branch" not in bot_source
     assert repo_update.download_repo_script.__defaults__ == ('main',)
@@ -9091,7 +9099,7 @@ def test_telegram_pool_ui():
 
 
 def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
-    source = (ROOT / 'bot.py').read_text(encoding='utf-8')
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert 'key_name == _youtube_route_protocol()' in source
     assert "_youtube_probe_state(probe) in ('fail', 'unknown')" in source
     assert "def _schedule_youtube_cache_confirm" in source

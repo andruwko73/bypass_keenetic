@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.912, последнее изменение: 05.07.2026
+#  Файл: bot.py, Версия v1.913, последнее изменение: 05.07.2026
 
 import subprocess
 import os
@@ -2697,8 +2697,15 @@ def _set_app_runtime_mode(mode):
     )
 
 
+GITHUB_ROOT_ASSETS = {'version.md', 'README.md', 'CHANGELOG.md', 'script.sh'}
+GITHUB_APP_DIR = 'app'
+
+
 def _raw_github_url(path):
-    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/{APP_BRANCH_LABEL}/{path}?ts={int(time.time())}'
+    normalized_path = str(path or '').lstrip('/')
+    if normalized_path and normalized_path not in GITHUB_ROOT_ASSETS and not normalized_path.startswith((GITHUB_APP_DIR + '/', 'bootstrap/')):
+        normalized_path = f'{GITHUB_APP_DIR}/{normalized_path}'
+    return f'https://raw.githubusercontent.com/{fork_repo_owner}/{fork_repo_name}/{APP_BRANCH_LABEL}/{normalized_path}?ts={int(time.time())}'
 
 
 SOCIALNET_SOURCE_URL = 'https://raw.githubusercontent.com/tas-unn/bypass_keenetic/main/socialnet.txt'

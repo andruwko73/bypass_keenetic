@@ -5,6 +5,7 @@ REPO_OWNER="${BYPASS_REPO_OWNER:-andruwko73}"
 REPO_NAME="${BYPASS_REPO_NAME:-bypass_keenetic}"
 REPO_BRANCH="${BYPASS_REPO_BRANCH:-main}"
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
+REPO_APP_DIR="${BYPASS_REPO_APP_DIR:-app}"
 
 BOT_DIR="/opt/etc/bot"
 STATIC_DIR="$BOT_DIR/static"
@@ -63,13 +64,25 @@ download_file() {
     [ -z "$marker" ] || grep -q "$marker" "$target" || fail "Файл $url не прошёл проверку содержимого"
 }
 
+repo_file_url() {
+    repo_path="$1"
+    case "$repo_path" in
+        script.sh|version.md|README.md|CHANGELOG.md|LICENSE|bootstrap/*)
+            printf '%s/%s\n' "$RAW_BASE" "$repo_path"
+            ;;
+        *)
+            printf '%s/%s/%s\n' "$RAW_BASE" "$REPO_APP_DIR" "$repo_path"
+            ;;
+    esac
+}
+
 download_static_assets() {
     icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
     mkdir -p "$STATIC_DIR/service-icons"
-    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/telegram.png" "$RAW_BASE/static/telegram.png" || true
-    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/youtube.png" "$RAW_BASE/static/youtube.png" || true
+    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/telegram.png" "$(repo_file_url static/telegram.png)" || true
+    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/youtube.png" "$(repo_file_url static/youtube.png)" || true
     for icon in $icons; do
-        curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/service-icons/${icon}.png" "$RAW_BASE/static/service-icons/${icon}.png" || true
+        curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/service-icons/${icon}.png" "$(repo_file_url "static/service-icons/${icon}.png")" || true
     done
     find "$STATIC_DIR" -type d -exec chmod 755 {} \; 2>/dev/null || true
     find "$STATIC_DIR" -type f -exec chmod 644 {} \; 2>/dev/null || true
@@ -528,44 +541,44 @@ backup_path "/opt/etc/dnsmasq.conf"
 backup_path "/opt/etc/crontab"
 write_rollback_script
 
-download_file "$RAW_BASE/script.sh" "$TMP_DIR/script.sh" 'if \[ "$1" = "-install" \]; then'
-download_file "$RAW_BASE/bot.py" "$TMP_DIR/main.py" 'KeyInstallHTTPRequestHandler'
-download_file "$RAW_BASE/installer.py" "$TMP_DIR/installer.py" 'ThreadingHTTPServer'
-download_file "$RAW_BASE/app_version.py" "$TMP_DIR/app_version.py" 'APP_VERSION_COUNTER'
-download_file "$RAW_BASE/app_runtime_mode.py" "$TMP_DIR/app_runtime_mode.py" 'set_app_runtime_mode'
-download_file "$RAW_BASE/key_pool_store.py" "$TMP_DIR/key_pool_store.py" 'def normalize_key_pools'
-download_file "$RAW_BASE/key_pool_web.py" "$TMP_DIR/key_pool_web.py" 'pool_status_summary'
-download_file "$RAW_BASE/router_health_runtime.py" "$TMP_DIR/router_health_runtime.py" 'RouterHealthRuntime'
-download_file "$RAW_BASE/router_metrics.py" "$TMP_DIR/router_metrics.py" 'RouterMetricsRuntime'
-download_file "$RAW_BASE/telegram_call_learning.py" "$TMP_DIR/telegram_call_learning.py" 'def read_lan_conntrack_flows'
-download_file "$RAW_BASE/telegram_pool_ui.py" "$TMP_DIR/telegram_pool_ui.py" 'pool_action_markup'
-download_file "$RAW_BASE/pool_probe_runner.py" "$TMP_DIR/pool_probe_runner.py" 'run_pool_probe_worker'
-download_file "$RAW_BASE/service_catalog.py" "$TMP_DIR/service_catalog.py" 'CUSTOM_CHECK_PRESETS'
-download_file "$RAW_BASE/probe_cache.py" "$TMP_DIR/probe_cache.py" 'record_key_probe'
-download_file "$RAW_BASE/custom_checks_store.py" "$TMP_DIR/custom_checks_store.py" 'add_custom_check'
-download_file "$RAW_BASE/web_form_template.py" "$TMP_DIR/web_form_template.py" 'render_web_form'
-download_file "$RAW_BASE/web_template_styles.py" "$TMP_DIR/web_template_styles.py" 'render_web_styles'
-download_file "$RAW_BASE/web_template_scripts.py" "$TMP_DIR/web_template_scripts.py" 'render_web_scripts'
-download_file "$RAW_BASE/web_form_blocks.py" "$TMP_DIR/web_form_blocks.py" 'render_message_block'
-download_file "$RAW_BASE/web_pool_form_blocks.py" "$TMP_DIR/web_pool_form_blocks.py" 'render_protocol_panel'
-download_file "$RAW_BASE/web_http_common.py" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
-download_file "$RAW_BASE/web_get_actions.py" "$TMP_DIR/web_get_actions.py" 'dispatch'
-download_file "$RAW_BASE/web_post_actions.py" "$TMP_DIR/web_post_actions.py" 'dispatch'
-download_file "$RAW_BASE/web_command_state.py" "$TMP_DIR/web_command_state.py" 'start_command'
-download_file "$RAW_BASE/web_commands_runtime.py" "$TMP_DIR/web_commands_runtime.py" 'run_web_command'
-download_file "$RAW_BASE/unblock_lists.py" "$TMP_DIR/unblock_lists.py" 'save_unblock_list_file'
-download_file "$RAW_BASE/proxy_key_store.py" "$TMP_DIR/proxy_key_store.py" 'load_current_keys'
-download_file "$RAW_BASE/proxy_protocols.py" "$TMP_DIR/proxy_protocols.py" 'proxy_outbound_from_key'
-download_file "$RAW_BASE/proxy_config_builder.py" "$TMP_DIR/proxy_config_builder.py" 'build_proxy_core_config'
-download_file "$RAW_BASE/proxy_status.py" "$TMP_DIR/proxy_status.py" 'status_snapshot_signature'
-download_file "$RAW_BASE/installer_common.py" "$TMP_DIR/installer_common.py" 'browser_port_is_valid'
+download_file "$(repo_file_url script.sh)" "$TMP_DIR/script.sh" 'if \[ "$1" = "-install" \]; then'
+download_file "$(repo_file_url bot.py)" "$TMP_DIR/main.py" 'KeyInstallHTTPRequestHandler'
+download_file "$(repo_file_url installer.py)" "$TMP_DIR/installer.py" 'ThreadingHTTPServer'
+download_file "$(repo_file_url app_version.py)" "$TMP_DIR/app_version.py" 'APP_VERSION_COUNTER'
+download_file "$(repo_file_url app_runtime_mode.py)" "$TMP_DIR/app_runtime_mode.py" 'set_app_runtime_mode'
+download_file "$(repo_file_url key_pool_store.py)" "$TMP_DIR/key_pool_store.py" 'def normalize_key_pools'
+download_file "$(repo_file_url key_pool_web.py)" "$TMP_DIR/key_pool_web.py" 'pool_status_summary'
+download_file "$(repo_file_url router_health_runtime.py)" "$TMP_DIR/router_health_runtime.py" 'RouterHealthRuntime'
+download_file "$(repo_file_url router_metrics.py)" "$TMP_DIR/router_metrics.py" 'RouterMetricsRuntime'
+download_file "$(repo_file_url telegram_call_learning.py)" "$TMP_DIR/telegram_call_learning.py" 'def read_lan_conntrack_flows'
+download_file "$(repo_file_url telegram_pool_ui.py)" "$TMP_DIR/telegram_pool_ui.py" 'pool_action_markup'
+download_file "$(repo_file_url pool_probe_runner.py)" "$TMP_DIR/pool_probe_runner.py" 'run_pool_probe_worker'
+download_file "$(repo_file_url service_catalog.py)" "$TMP_DIR/service_catalog.py" 'CUSTOM_CHECK_PRESETS'
+download_file "$(repo_file_url probe_cache.py)" "$TMP_DIR/probe_cache.py" 'record_key_probe'
+download_file "$(repo_file_url custom_checks_store.py)" "$TMP_DIR/custom_checks_store.py" 'add_custom_check'
+download_file "$(repo_file_url web_form_template.py)" "$TMP_DIR/web_form_template.py" 'render_web_form'
+download_file "$(repo_file_url web_template_styles.py)" "$TMP_DIR/web_template_styles.py" 'render_web_styles'
+download_file "$(repo_file_url web_template_scripts.py)" "$TMP_DIR/web_template_scripts.py" 'render_web_scripts'
+download_file "$(repo_file_url web_form_blocks.py)" "$TMP_DIR/web_form_blocks.py" 'render_message_block'
+download_file "$(repo_file_url web_pool_form_blocks.py)" "$TMP_DIR/web_pool_form_blocks.py" 'render_protocol_panel'
+download_file "$(repo_file_url web_http_common.py)" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
+download_file "$(repo_file_url web_get_actions.py)" "$TMP_DIR/web_get_actions.py" 'dispatch'
+download_file "$(repo_file_url web_post_actions.py)" "$TMP_DIR/web_post_actions.py" 'dispatch'
+download_file "$(repo_file_url web_command_state.py)" "$TMP_DIR/web_command_state.py" 'start_command'
+download_file "$(repo_file_url web_commands_runtime.py)" "$TMP_DIR/web_commands_runtime.py" 'run_web_command'
+download_file "$(repo_file_url unblock_lists.py)" "$TMP_DIR/unblock_lists.py" 'save_unblock_list_file'
+download_file "$(repo_file_url proxy_key_store.py)" "$TMP_DIR/proxy_key_store.py" 'load_current_keys'
+download_file "$(repo_file_url proxy_protocols.py)" "$TMP_DIR/proxy_protocols.py" 'proxy_outbound_from_key'
+download_file "$(repo_file_url proxy_config_builder.py)" "$TMP_DIR/proxy_config_builder.py" 'build_proxy_core_config'
+download_file "$(repo_file_url proxy_status.py)" "$TMP_DIR/proxy_status.py" 'status_snapshot_signature'
+download_file "$(repo_file_url installer_common.py)" "$TMP_DIR/installer_common.py" 'browser_port_is_valid'
 for module in $BOT_RUNTIME_MODULES; do
     if [ ! -f "$TMP_DIR/$module" ]; then
-        download_file "$RAW_BASE/$module" "$TMP_DIR/$module" ''
+        download_file "$(repo_file_url "$module")" "$TMP_DIR/$module" ''
     fi
 done
-download_file "$RAW_BASE/S99telegram_bot" "$TMP_DIR/S99telegram_bot" 'Bot started successfully'
-download_file "$RAW_BASE/S98telegram_bot_installer" "$TMP_DIR/S98telegram_bot_installer" 'Installer started successfully'
+download_file "$(repo_file_url S99telegram_bot)" "$TMP_DIR/S99telegram_bot" 'Bot started successfully'
+download_file "$(repo_file_url S98telegram_bot_installer)" "$TMP_DIR/S98telegram_bot_installer" 'Installer started successfully'
 
 cp "$TMP_DIR/main.py" "$BOT_MAIN_PATH"
 cp "$TMP_DIR/installer.py" "$INSTALLER_PATH"

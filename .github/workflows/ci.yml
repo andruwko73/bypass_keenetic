@@ -40,14 +40,14 @@ jobs:
           bash -n \
             script.sh \
             bootstrap/install.sh \
-            update_fork.sh \
-            unblock_update.sh \
-            unblock_ipset.sh \
-            100-ipset.sh \
-            100-redirect.sh \
-            S99telegram_bot \
-            S98telegram_bot_installer \
-            S99unblock
+            app/update_fork.sh \
+            app/unblock_update.sh \
+            app/unblock_ipset.sh \
+            app/100-ipset.sh \
+            app/100-redirect.sh \
+            app/S99telegram_bot \
+            app/S98telegram_bot_installer \
+            app/S99unblock
 
       - name: JavaScript syntax
         run: npm run ui:check

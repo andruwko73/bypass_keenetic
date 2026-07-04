@@ -12,11 +12,24 @@
 
 repo="andruwko73"
 REPO_REF="${REPO_REF:-main}"
+REPO_APP_DIR="${BYPASS_REPO_APP_DIR:-app}"
 if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then
   unset RAW_GITHUB_USE_SOCKS RAW_GITHUB_SOCKS_NOTICE_SHOWN
 else
   unset UPDATE_ARCHIVE_ROOT RAW_GITHUB_USE_SOCKS RAW_GITHUB_BYPASS RAW_GITHUB_SOCKS_NOTICE_SHOWN
 fi
+
+repo_file_url() {
+  repo_path="$1"
+  case "$repo_path" in
+    script.sh|version.md|README.md|CHANGELOG.md|LICENSE|bootstrap/*)
+      printf '%s\n' "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${repo_path}"
+      ;;
+    *)
+      printf '%s\n' "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${REPO_APP_DIR}/${repo_path}"
+      ;;
+  esac
+}
 
 config_get() {
   key="$1"
@@ -133,7 +146,7 @@ validate_xray_core_config() {
 download_static_asset() {
   repo_path="$1"
   target="$2"
-  url="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${repo_path}"
+  url="$(repo_file_url "$repo_path")"
 
   rm -f "$target"
   download_repo_file_from_archive "$url" "$target" >/dev/null 2>&1 || true
@@ -317,7 +330,7 @@ install_unblock_ipset_cron_job() {
 }
 
 configure_core_proxy_service() {
-  core_config_source="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/vmessconfig.json"
+  core_config_source="$(repo_file_url vmessconfig.json)"
 
   if [ ! -x /opt/etc/init.d/S24xray ] && [ -x /opt/sbin/xray ]; then
     cat > /opt/etc/init.d/S24xray <<'EOF'
@@ -584,7 +597,7 @@ download_update_file() {
 }
 
 runtime_module_url() {
-  printf '%s\n' "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/$1"
+  printf '%s\n' "$(repo_file_url "$1")"
 }
 
 install_runtime_module() {
@@ -1513,7 +1526,7 @@ PY
     # создания множеств IP-адресов unblock
     # rm -rf /opt/etc/ndm/fs.d/100-ipset.sh
     # chmod 777 /opt/etc/ndm/fs.d/100-ipset.sh || rm -rfv /opt/etc/ndm/fs.d/100-ipset.sh
-    curl -o /opt/etc/ndm/fs.d/100-ipset.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-ipset.sh
+    curl -o /opt/etc/ndm/fs.d/100-ipset.sh "$(repo_file_url 100-ipset.sh)"
     chmod 755 /opt/etc/ndm/fs.d/100-ipset.sh || chmod +x /opt/etc/ndm/fs.d/100-ipset.sh
     sed -i "s/hash:net/${set_type}/g" /opt/etc/ndm/fs.d/100-ipset.sh
     echo "Созданы файлы под множества"
@@ -1523,7 +1536,7 @@ PY
     if [ -s /opt/etc/shadowsocks.json ]; then
       echo "Существующие настройки Shadowsocks сохранены."
     else
-      curl -o /opt/etc/shadowsocks.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/shadowsocks.json
+      curl -o /opt/etc/shadowsocks.json "$(repo_file_url shadowsocks.json)"
       echo "Установлены настройки Shadowsocks"
     fi
     sed -i "s/ss-local/${ssredir}/g" /opt/etc/init.d/S22shadowsocks
@@ -1536,7 +1549,7 @@ PY
     if [ -s /opt/etc/trojan/config.json ]; then
       echo "Существующие настройки Trojan сохранены."
     else
-      curl -o /opt/etc/trojan/config.json https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/trojanconfig.json
+      curl -o /opt/etc/trojan/config.json "$(repo_file_url trojanconfig.json)"
     fi
     configure_core_proxy_service
 
@@ -1552,14 +1565,14 @@ PY
 
     # unblock_ipset.sh
     # chmod 777 /opt/bin/unblock_ipset.sh || rm -rfv /opt/bin/unblock_ipset.sh
-    curl -o /opt/bin/unblock_ipset.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_ipset.sh
+    curl -o /opt/bin/unblock_ipset.sh "$(repo_file_url unblock_ipset.sh)"
     chmod 755 /opt/bin/unblock_ipset.sh || chmod +x /opt/bin/unblock_ipset.sh
     sed -i "s/40500/${dnsovertlsport}/g" /opt/bin/unblock_ipset.sh
     echo "Установлен скрипт для заполнения множеств unblock IP-адресами заданного списка доменов"
 
     # unblock_dnsmasq.sh
     # chmod 777 /opt/bin/unblock_dnsmasq.sh || rm -rfv /opt/bin/unblock_dnsmasq.sh
-    curl -o /opt/bin/unblock_dnsmasq.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock.dnsmasq
+    curl -o /opt/bin/unblock_dnsmasq.sh "$(repo_file_url unblock.dnsmasq)"
     chmod 755 /opt/bin/unblock_dnsmasq.sh || chmod +x /opt/bin/unblock_dnsmasq.sh
     sed -i "s/40500/${dnsovertlsport}/g" /opt/bin/unblock_dnsmasq.sh
     /opt/bin/unblock_dnsmasq.sh
@@ -1567,19 +1580,19 @@ PY
 
     # unblock_update.sh
     # chmod 777 /opt/bin/unblock_update.sh || rm -rfv /opt/bin/unblock_update.sh
-    curl -o /opt/bin/unblock_update.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh
+    curl -o /opt/bin/unblock_update.sh "$(repo_file_url unblock_update.sh)"
     chmod 755 /opt/bin/unblock_update.sh || chmod +x /opt/bin/unblock_update.sh
     echo "Установлен скрипт ручного принудительного обновления системы после редактирования списка доменов"
 
     # s99unblock
     # chmod 777 /opt/etc/init.d/S99unblock || rm -Rfv /opt/etc/init.d/S99unblock
-    curl -o /opt/etc/init.d/S99unblock https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99unblock
+    curl -o /opt/etc/init.d/S99unblock "$(repo_file_url S99unblock)"
     chmod 755 /opt/etc/init.d/S99unblock || chmod +x /opt/etc/init.d/S99unblock
     echo "Установлен cкрипт автоматического заполнения множества unblock при загрузке маршрутизатора"
 
     # 100-redirect.sh
     # chmod 777 /opt/etc/ndm/netfilter.d/100-redirect.sh || rm -rfv /opt/etc/ndm/netfilter.d/100-redirect.sh
-    curl -o /opt/etc/ndm/netfilter.d/100-redirect.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-redirect.sh
+    curl -o /opt/etc/ndm/netfilter.d/100-redirect.sh "$(repo_file_url 100-redirect.sh)"
     chmod 755 /opt/etc/ndm/netfilter.d/100-redirect.sh || chmod +x /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/hash:net/${set_type}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/192.168.1.1/${lanip}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
@@ -1595,7 +1608,7 @@ PY
     # dnsmasq.conf
     #rm -rf /opt/etc/dnsmasq.conf
     rm -f /opt/etc/dnsmasq.conf
-    curl -o /opt/etc/dnsmasq.conf https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf
+    curl -o /opt/etc/dnsmasq.conf "$(repo_file_url dnsmasq.conf)"
     chmod 755 /opt/etc/dnsmasq.conf
     sed -i "s/192.168.1.1/${lanip}/g" /opt/etc/dnsmasq.conf
     sed -i "s/40500/${dnsovertlsport}/g" /opt/etc/dnsmasq.conf
@@ -1605,7 +1618,7 @@ PY
     # cron file
     #rm -rf /opt/etc/crontab
     rm -f /opt/etc/crontab
-    curl -o /opt/etc/crontab https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab
+    curl -o /opt/etc/crontab "$(repo_file_url crontab)"
     chmod 755 /opt/etc/crontab
     install_unblock_ipset_cron_job || true
     [ -x /opt/etc/init.d/S10cron ] && /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
@@ -1632,7 +1645,7 @@ PY
 fi
 
 if [ "$1" = "-reinstall" ]; then
-    curl -s -o /opt/root/script.sh https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/script.sh
+    curl -s -o /opt/root/script.sh "$(repo_file_url script.sh)"
     chmod 755 /opt/root/script.sh || chmod +x /opt/root/script.sh
     echo "Начинаем переустановку"
     #opkg update
@@ -1670,16 +1683,16 @@ if [ "$1" = "-update" ]; then
 
     echo "Скачиваем обновления во временную папку и проверяем файлы."
     write_cli_update_status update true 10 Downloading "Downloading update files"
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/script.sh" "$stage_dir/script.sh" "#!/bin/sh" "script.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-ipset.sh" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/100-redirect.sh" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_ipset.sh" "$stage_dir/unblock_ipset.sh" "#!/bin/sh" "unblock_ipset.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock.dnsmasq" "$stage_dir/unblock_dnsmasq.sh" "#!/bin/sh" "unblock.dnsmasq" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/unblock_update.sh" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/dnsmasq.conf" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/crontab" "$stage_dir/crontab" "S99unblock refresh" "crontab" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99unblock" "$stage_dir/S99unblock" "bypass unblock scheduler" "S99unblock" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/bot.py" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
+    download_update_file "$(repo_file_url script.sh)" "$stage_dir/script.sh" "#!/bin/sh" "script.sh" || exit 1
+    download_update_file "$(repo_file_url 100-ipset.sh)" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
+    download_update_file "$(repo_file_url 100-redirect.sh)" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
+    download_update_file "$(repo_file_url unblock_ipset.sh)" "$stage_dir/unblock_ipset.sh" "#!/bin/sh" "unblock_ipset.sh" || exit 1
+    download_update_file "$(repo_file_url unblock.dnsmasq)" "$stage_dir/unblock_dnsmasq.sh" "#!/bin/sh" "unblock.dnsmasq" || exit 1
+    download_update_file "$(repo_file_url unblock_update.sh)" "$stage_dir/unblock_update.sh" "#!/bin/sh" "unblock_update.sh" || exit 1
+    download_update_file "$(repo_file_url dnsmasq.conf)" "$stage_dir/dnsmasq.conf" "listen-address=" "dnsmasq.conf" || exit 1
+    download_update_file "$(repo_file_url crontab)" "$stage_dir/crontab" "S99unblock refresh" "crontab" || exit 1
+    download_update_file "$(repo_file_url S99unblock)" "$stage_dir/S99unblock" "bypass unblock scheduler" "S99unblock" || exit 1
+    download_update_file "$(repo_file_url bot.py)" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
     for module in $BOT_RUNTIME_MODULES; do
       stage_runtime_module "$module" "" || exit 1
     done
@@ -1704,10 +1717,10 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module proxy_protocols.py proxy_outbound_from_key || exit 1
     stage_runtime_module proxy_config_builder.py build_proxy_core_config || exit 1
     stage_runtime_module proxy_status.py status_snapshot_signature || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/installer.py" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
+    download_update_file "$(repo_file_url installer.py)" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
     stage_runtime_module installer_common.py browser_port_is_valid || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S98telegram_bot_installer" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
-    download_update_file "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/S99telegram_bot" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
+    download_update_file "$(repo_file_url S98telegram_bot_installer)" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
+    download_update_file "$(repo_file_url S99telegram_bot)" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
 
     set_type="$(detect_ipset_type)"
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-ipset.sh"

@@ -1,3 +1,7 @@
+*v1.913 (5 Jul 2026) -* main
+
+*Moves runtime source files, router scripts, route lists and static assets into `app/`, while keeping the root installer/update entry points stable for existing GitHub installs and updates.*
+
 *v1.912 (5 Jul 2026) -* main
 
 *Hydrates the already-rendered active Vless 1 pool when the Keys view opens, matching lazy Vless 2 panel loading so the first protocol cannot stay on “Загружаю пул ключей...”.*

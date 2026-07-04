@@ -1,3 +1,9 @@
+<a name="1.913"></a>
+# [1.913] - 5 Jul 2026
+
+- Moves router runtime files, Python modules, route lists, static assets, and helper configs under `app/` while keeping root `script.sh`, `bootstrap/install.sh`, `version.md`, README, and changelog as stable GitHub install/update entry points.
+- Updates clean install and GitHub update download paths so existing routers fetch runtime files from `app/` without changing the installed `/opt/etc/bot` layout.
+
 <a name="1.912"></a>
 # [1.912] - 5 Jul 2026
 

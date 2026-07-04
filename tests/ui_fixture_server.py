@@ -14,6 +14,8 @@ from urllib.parse import parse_qs, urlparse
 
 
 ROOT = Path(__file__).resolve().parents[1]
+APP_ROOT = ROOT / "app"
+sys.path.insert(0, str(APP_ROOT))
 sys.path.insert(0, str(ROOT))
 
 import key_pool_web  # noqa: E402
