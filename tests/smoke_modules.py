@@ -2782,7 +2782,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'app_service_restart_scheduled = False' in source
     assert 'App mode restart already scheduled' in source
     assert "sys.modules.pop(module_name, None)" in source
-    assert "('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck')" in source
+    assert "('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck', 'probe_cache')" in source
     assert "_unload_pool_probe_modules('pool probe process monitor')" in source
     assert 'post-pool memory already at target' in source
     assert 'cleanup skipped; already at target' in source

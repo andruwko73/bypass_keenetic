@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.892, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.893, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -321,10 +321,11 @@ def _pool_probe_controller():
 
 
 def _unload_pool_probe_modules(reason=''):
-    global _pool_probe_controller_module, _pool_probe_runner_module
+    global _pool_probe_controller_module, _pool_probe_runner_module, _probe_cache_module
     _pool_probe_controller_module = None
     _pool_probe_runner_module = None
-    for module_name in ('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck'):
+    _probe_cache_module = None
+    for module_name in ('pool_probe_controller', 'pool_probe_runner', 'telegram_healthcheck', 'probe_cache'):
         try:
             sys.modules.pop(module_name, None)
         except Exception:
@@ -559,6 +560,55 @@ def _release_web_form_template_cache():
         _web_form_template_module = None
         for module_name in ('web_form_template', 'web_template_styles', 'web_template_scripts'):
             sys.modules.pop(module_name, None)
+
+
+def _clear_youtube_edge_prefetch_snapshot_cache():
+    youtube_edge_prefetch_snapshot_cache['timestamp'] = 0.0
+    youtube_edge_prefetch_snapshot_cache['payload'] = None
+
+
+def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, include_route_tools=False):
+    global _pool_probe_controller_module, _pool_probe_runner_module, _probe_cache_module
+    global _key_pool_web_module, _telegram_pool_ui_module, _web_pool_form_blocks_module
+    global _web_route_tools_runtime
+    released = []
+
+    def release_module_attr(attr_name, module_names):
+        globals()[attr_name] = None
+        for module_name in module_names:
+            if sys.modules.pop(module_name, None) is not None:
+                released.append(module_name)
+
+    probe_busy = False
+    try:
+        probe_busy = bool(globals().get('pool_probe_lock') and pool_probe_lock.locked())
+    except Exception:
+        probe_busy = False
+    if not probe_busy:
+        release_module_attr('_pool_probe_controller_module', ('pool_probe_controller',))
+        release_module_attr('_pool_probe_runner_module', ('pool_probe_runner', 'telegram_healthcheck'))
+        release_module_attr('_probe_cache_module', ('probe_cache',))
+
+    if include_pool_ui:
+        release_module_attr('_key_pool_web_module', ('key_pool_web',))
+        release_module_attr('_telegram_pool_ui_module', ('telegram_pool_ui',))
+        release_module_attr('_web_pool_form_blocks_module', ('web_pool_form_blocks',))
+
+    if include_route_tools:
+        _web_route_tools_runtime = None
+        for module_name in ('web_route_tools_runtime', 'route_intersections', 'service_routes'):
+            if sys.modules.pop(module_name, None) is not None:
+                released.append(module_name)
+
+    _clear_youtube_edge_prefetch_snapshot_cache()
+    if released and reason:
+        try:
+            _write_runtime_log(
+                f'Memory pressure released runtime modules after {reason}: {", ".join(sorted(set(released)))}'
+            )
+        except Exception:
+            pass
+    return released
 
 
 def render_web_form(*args, **kwargs):
@@ -960,6 +1010,10 @@ youtube_edge_prefetch_state = {
     'last_message': 'not run',
     'last_log_signature': (),
     'next_host_index': 0,
+}
+youtube_edge_prefetch_snapshot_cache = {
+    'timestamp': 0.0,
+    'payload': None,
 }
 
 def _add_custom_check(label='', url='', preset_id=''):
@@ -4158,6 +4212,14 @@ def _youtube_edge_prefetch_hosts_for_run():
 
 
 def _youtube_edge_prefetch_snapshot():
+    now = time.time()
+    try:
+        ttl = max(1.0, min(15.0, float(ROUTER_HEALTH_CACHE_TTL or 0)))
+    except Exception:
+        ttl = 10.0
+    cached = youtube_edge_prefetch_snapshot_cache.get('payload')
+    if isinstance(cached, dict) and now - float(youtube_edge_prefetch_snapshot_cache.get('timestamp') or 0.0) < ttl:
+        return dict(cached)
     snapshot = dict(youtube_edge_prefetch_state)
     snapshot['enabled'] = bool(YOUTUBE_EDGE_PREFETCH_ENABLED)
     snapshot['mode'] = YOUTUBE_EDGE_PREFETCH_MODE
@@ -4174,6 +4236,8 @@ def _youtube_edge_prefetch_snapshot():
         snapshot['last_message'] = str(snapshot.get('last_message') or _youtube_edge_prefetch_status_message(snapshot))
     else:
         snapshot['running'] = youtube_edge_prefetch_lock.locked()
+    youtube_edge_prefetch_snapshot_cache['timestamp'] = now
+    youtube_edge_prefetch_snapshot_cache['payload'] = dict(snapshot)
     return snapshot
 
 
@@ -4214,6 +4278,7 @@ def _store_youtube_edge_prefetch_status(status):
         youtube_edge_prefetch_state['last_success_at'] = now
     if int(status.get('added_addresses') or 0) > 0:
         youtube_edge_prefetch_state['last_added_at'] = now
+    _clear_youtube_edge_prefetch_snapshot_cache()
     try:
         router_health.invalidate(include_heavy=False)
     except Exception:
@@ -4852,8 +4917,9 @@ def _clear_runtime_memory_caches(clear_status=False, *, clear_pool_summary=False
         _invalidate_web_pools_api_cache()
     with event_history_api_cache_lock:
         event_history_api_cache.update({'signature': None, 'payload': None})
+    _clear_youtube_edge_prefetch_snapshot_cache()
     try:
-        router_health.invalidate(include_heavy=False)
+        router_health.invalidate(include_heavy=bool(clear_status or clear_pool_summary))
     except Exception:
         pass
 
@@ -5084,6 +5150,13 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
         clear_status=bool(clear_status or should_collect),
         clear_pool_summary=bool(should_collect),
     )
+    released_modules = []
+    if should_collect or force or clear_status:
+        released_modules = _release_runtime_pressure_modules(
+            reason or 'memory cleanup',
+            include_pool_ui=bool(clear_status or should_collect),
+            include_route_tools=bool(clear_status or should_collect),
+        )
     collected = gc.collect() if should_collect else 0
     malloc_trim_info = {'attempted': False, 'ok': False, 'result': None, 'available': None}
     trim_requested = bool(force or clear_status or should_collect)
@@ -5104,6 +5177,7 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
                 'rss_before_kb': int(rss_before or 0),
                 'rss_after_kb': int(rss_after or 0),
                 'gc_collected': int(collected or 0),
+                'released_modules': len(released_modules),
                 'malloc_trim_attempted': bool(malloc_trim_info.get('attempted')),
                 'malloc_trim_ok': bool(malloc_trim_info.get('ok')),
                 'malloc_trim_result': malloc_trim_info.get('result'),

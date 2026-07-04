@@ -1,3 +1,10 @@
+<a name="1.893"></a>
+# [1.893] - 4 Jul 2026
+
+- Releases lazy pool/probe/route modules during memory cleanup so the bot can return closer to its fresh RSS after heavy UI and pool operations.
+- Clears heavier router-health caches on forced cleanup and caches the lightweight YouTube prefetch snapshot to reduce idle UI polling CPU spikes.
+- Reuses related-process snapshots briefly while pool probe is running so the router block does not rescan `/proc` on every status refresh.
+
 <a name="1.892"></a>
 # [1.892] - 4 Jul 2026
 

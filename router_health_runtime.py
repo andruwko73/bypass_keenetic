@@ -965,7 +965,7 @@ class RouterHealthRuntime:
         return self._last_cpu_percent
 
     def _related_process_snapshot(self, now, probe_running):
-        cache_ttl = 0.0 if probe_running else self.related_process_cache_ttl
+        cache_ttl = min(5.0, self.related_process_cache_ttl) if probe_running else self.related_process_cache_ttl
         if cache_ttl > 0:
             cached = self._related_process_cache.get('payload')
             if (

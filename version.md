@@ -1,3 +1,7 @@
+*v1.893 (4 Jul 2026) -* main
+
+*Reduces router memory/CPU pressure without changing limits by unloading lazy pool/probe/route modules during memory cleanup, clearing heavier router-health caches on forced cleanup, caching the lightweight YouTube prefetch snapshot, and reusing related-process snapshots briefly while pool probe is running.*
+
 *v1.892 (4 Jul 2026) -* main
 
 *Routes mixed key imports by protocol scheme so Vmess, Trojan, and Shadowsocks entries go to their own pools instead of polluting Vless 2, ignores non-key text lines without supported schemes, and repairs saved pool files on write.*
