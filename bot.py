@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.905, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.906, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -200,7 +200,6 @@ from web_status_builder import (
 
 import shutil
 # import datetime
-import requests
 import json
 import html
 
@@ -213,6 +212,11 @@ def _config_sequence(name, default=()):
         return tuple(value)
     except Exception:
         return tuple(default)
+
+
+def _requests_module():
+    import requests
+    return requests
 
 
 _pool_probe_runner_module = None
@@ -1180,6 +1184,7 @@ def _subscription_request_url_headers(url, use_router_hwid=False):
 
 def _fetch_keys_from_subscription(url, use_router_hwid=False):
     """Загружает ключи из subscription-ссылки (base64-encoded список)."""
+    requests = _requests_module()
     try:
         parsed = urlparse(str(url or '').strip())
         if parsed.scheme not in ('http', 'https') or not parsed.hostname:
@@ -6148,6 +6153,7 @@ def _send_telegram_chunks(chat_id, text, reply_markup=None):
 
 
 def _send_remote_markdown_file(message, path, error_message, reply_markup=None):
+    requests = _requests_module()
     try:
         text = _fetch_remote_text(_raw_github_url(path))
     except requests.RequestException as exc:
@@ -6494,6 +6500,7 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
         return
 
     source = SERVICE_LIST_SOURCES[service_key]
+    requests = _requests_module()
     try:
         if source.get('entries'):
             entries = service_route_entries(service_key)
@@ -6855,6 +6862,7 @@ def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, m
 
 
 def _send_telegram_update_status(message, reply_markup):
+    requests = _requests_module()
     try:
         bot_new_version = _fetch_remote_text(_raw_github_url('version.md'))
     except requests.RequestException as exc:
@@ -7825,6 +7833,7 @@ def _measure_quality_download_through_proxy(proxy_url, url='', bytes_limit=0, co
     target_url = str(url or _pool_probe_quality_download_url(bytes_limit)).strip()
     if not target_url or bytes_limit <= 0:
         return None, 'quality download sample is disabled'
+    requests = _requests_module()
     session = requests.Session()
     session.trust_env = False
     started_at = time.monotonic()
@@ -7939,6 +7948,7 @@ def _check_telegram_api_through_proxy(proxy_url=None, connect_timeout=6, read_ti
     authenticated_check = _app_mode_telegram_enabled() if authenticated is None else bool(authenticated)
     url = f'https://api.telegram.org/bot{token}/getMe' if authenticated_check else 'https://api.telegram.org/'
     proxies = {'https': proxy_url, 'http': proxy_url} if proxy_url else None
+    requests = _requests_module()
     session = requests.Session()
     session.trust_env = False
     try:

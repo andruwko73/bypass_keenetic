@@ -1,5 +1,4 @@
 import os
-import requests
 import socket
 import subprocess
 import time
@@ -29,6 +28,11 @@ TRANSIENT_STATUS_MARKERS = (
 )
 
 YOUTUBE_HEALTHCHECK_URL = 'https://www.youtube.com/generate_204'
+
+
+def _requests_module():
+    import requests
+    return requests
 
 
 def wait_for_port(hosts, port, timeout=15, *, sleep=time.sleep):
@@ -215,6 +219,7 @@ def protocol_error_status(exc):
 
 
 def check_http_through_proxy(proxy_url, url=YOUTUBE_HEALTHCHECK_URL, connect_timeout=2, read_timeout=3):
+    requests = _requests_module()
     session = requests.Session()
     session.trust_env = False
     try:
@@ -267,6 +272,7 @@ def _custom_target_denied(response):
 
 
 def check_custom_target_through_proxy(normalize_url, proxy_url, url, connect_timeout=2, read_timeout=3):
+    requests = _requests_module()
     session = requests.Session()
     session.trust_env = False
     try:

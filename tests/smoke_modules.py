@@ -3055,6 +3055,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_timeline_trim_min_interval_seconds' in source
     assert 'def _maybe_trim_memory_timeline_file' in source
     assert '_maybe_trim_memory_timeline_file(MEMORY_TIMELINE_PATH, now=now)' in source
+    assert '\nimport requests\n' not in source
+    assert 'def _requests_module' in source
+    proxy_status_source = (ROOT / 'proxy_status.py').read_text(encoding='utf-8')
+    assert '\nimport requests\n' not in proxy_status_source
+    assert 'def _requests_module' in proxy_status_source
     assert "run_memory_cleanup('pool probe key checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
@@ -6396,7 +6401,7 @@ def test_proxy_status_runtime_helpers():
         8080,
         command_runner=lambda *args, **kwargs: 'tcp 0 0 0.0.0.0:8080 0.0.0.0:* LISTEN\n',
     )
-    original_session = proxy_status.requests.Session
+    original_requests_module = proxy_status._requests_module
 
     class _Response:
         status_code = 204
@@ -6424,7 +6429,7 @@ def test_proxy_status_runtime_helpers():
             def close(self):
                 pass
 
-        proxy_status.requests.Session = _Session
+        proxy_status._requests_module = lambda: py_types.SimpleNamespace(Session=_Session)
         ok, message = proxy_status.check_http_through_proxy('socks5://127.0.0.1:1080')
         assert ok is True
         assert 'HTTP 204' in message
@@ -6478,7 +6483,7 @@ def test_proxy_status_runtime_helpers():
         ok, _ = proxy_status.check_custom_target_through_proxy(lambda value: value, 'proxy', 'https://api.anthropic.com/v1/models')
         assert ok is True
     finally:
-        proxy_status.requests.Session = original_session
+        proxy_status._requests_module = original_requests_module
 
     custom_results = proxy_status.probe_custom_targets(
         'proxy',

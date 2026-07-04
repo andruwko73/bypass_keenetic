@@ -1,3 +1,7 @@
+*v1.906 (4 Jul 2026) -* main
+
+*Defers importing the heavy HTTP client stack until subscription, status, Telegram API, YouTube, or custom service checks actually run, reducing idle bot memory pressure.*
+
 *v1.905 (4 Jul 2026) -* main
 
 *Moves Telegram/YouTube failover candidate checks into a short-lived worker process so temporary Xray probing does not inflate the main bot RSS, and makes debug memory timeline trimming interval-based instead of rereading the file on every sample.*

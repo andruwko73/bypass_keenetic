@@ -1,3 +1,8 @@
+<a name="1.906"></a>
+# [1.906] - 4 Jul 2026
+
+- Defers importing the heavy HTTP client stack until subscription, status, Telegram API, YouTube, or custom service checks actually run, reducing idle bot memory pressure.
+
 <a name="1.905"></a>
 # [1.905] - 4 Jul 2026
 
