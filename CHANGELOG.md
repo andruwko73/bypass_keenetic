@@ -1,3 +1,9 @@
+<a name="1.903"></a>
+# [1.903] - 4 Jul 2026
+
+- Drops selected lazy UI, route, probe, and prefetch modules from `sys.modules` after heavy web/status/watchdog work.
+- Keeps the unload scoped to idle pool/prefetch paths so active pool checks and YouTube prefetch runs are not interrupted.
+
 <a name="1.902"></a>
 # [1.902] - 4 Jul 2026
 

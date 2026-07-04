@@ -1,3 +1,7 @@
+*v1.903 (4 Jul 2026) -* main
+
+*Drops selected lazy UI, route, probe, and prefetch modules from `sys.modules` after heavy web/status/watchdog work so Python can actually release more memory instead of only clearing local module references.*
+
 *v1.902 (4 Jul 2026) -* main
 
 *Refreshes transient Telegram API warnings after update by treating key-selection messages as pending status, and makes live header polling use a lightweight status payload that does not rebuild the full router-health block.*

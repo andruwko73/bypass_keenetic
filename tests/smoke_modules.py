@@ -2869,7 +2869,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bypass-bot-service-restart.log' in source
     assert 'app_service_restart_scheduled = False' in source
     assert 'App mode restart already scheduled' in source
-    assert 'sys.modules.pop' not in source
+    assert 'def _drop_runtime_modules(module_names):' in source
+    assert source.count('sys.modules.pop(module_name, None)') == 1
     assert 'Pool probe module references released after' in source
     assert "_unload_pool_probe_modules('pool probe process monitor')" in source
     assert 'post-pool memory already at target' in source
@@ -3244,9 +3245,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert source.find("last_event = float(state.get('last_event') or 0.0)") < source.find("_conntrack_route_diagnostic(proto)")
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
     assert 'def _release_web_form_template_cache()' in source
-    assert 'sys.modules.pop' not in source
+    assert 'def _drop_runtime_modules(module_names):' in source
+    assert source.count('sys.modules.pop(module_name, None)') == 1
     runtime_release_block = source.split('def _release_runtime_pressure_modules', 1)[1].split('\n\ndef render_web_form', 1)[0]
     assert 'sys.modules.pop' not in runtime_release_block
+    assert '_drop_runtime_modules((' in runtime_release_block
     assert "released.extend(module_names)" in runtime_release_block
     assert "released.extend(('web_route_tools_runtime', 'route_intersections', 'service_routes'))" in runtime_release_block
     assert 'def _key_pool_store()' in source
