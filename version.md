@@ -1,3 +1,7 @@
+*v1.895 (4 Jul 2026) -* main
+
+*Forces allocator trim after heavy web UI module cleanup and prevents pool-worker child processes from writing misleading post-pool cleanup events, so memory diagnostics belong to the main bot process and released UI memory returns closer to the fresh-start baseline.*
+
 *v1.894 (4 Jul 2026) -* main
 
 *Releases heavy pool/route/prefetch UI modules immediately after heavy web responses and keeps expensive router-health subcaches during routine memory cleanup, lowering baseline memory pressure and avoiding extra CPU spikes from status polling without changing limits.*

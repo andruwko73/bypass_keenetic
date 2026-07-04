@@ -1,3 +1,10 @@
+<a name="1.895"></a>
+# [1.895] - 4 Jul 2026
+
+- Forces `malloc_trim` after heavy web UI module cleanup so memory released by pool, route, and check panels can return closer to the fresh-start baseline.
+- Prevents pool-probe child workers from scheduling/reporting post-pool cleanup for themselves; the main bot process remains responsible for final memory diagnostics.
+- Keeps the existing RSS/restart limits unchanged.
+
 <a name="1.894"></a>
 # [1.894] - 4 Jul 2026
 

@@ -3148,7 +3148,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_web_response_cleanup('web json api render')" in source
     assert "include_pool_ui=True" in source
     assert "include_route_tools=True" in source
+    assert "malloc_trim_info = _malloc_trim(reason, force=True, rss_kb=rss_before)" in source
     assert "router_health.invalidate(include_heavy=bool(clear_status))" in source
+    assert "if not POOL_PROBE_WORKER_MODE:" in source
     assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "web_response_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "web_response_light_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')

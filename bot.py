@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.894, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.895, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -5216,6 +5216,7 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
     rss_before = _process_rss_kb()
     now = time.time()
     released_modules = []
+    malloc_trim_info = {'attempted': False, 'ok': False, 'result': None, 'available': None}
     if heavy:
         released_modules = _release_runtime_pressure_modules(
             reason,
@@ -5227,6 +5228,7 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
                 gc.collect()
             except Exception:
                 pass
+            malloc_trim_info = _malloc_trim(reason, force=True, rss_kb=rss_before)
     cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB
     if (
         cleanup_threshold > 0 and
@@ -5240,7 +5242,7 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
         'rss_after_kb': rss_before,
         'collected': 0,
         'released_modules': len(released_modules),
-        'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
+        'malloc_trim': malloc_trim_info,
     }
 
 
@@ -10241,15 +10243,16 @@ def _run_selected_pool_probe(
             },
             force=True,
         )
-        if start_rss_kb <= 0 and finished_rss_kb <= 0 and hwm_kb <= 0 and not scope:
-            _schedule_post_pool_memory_cleanup()
-        else:
-            _schedule_post_pool_memory_cleanup(
-                initial_rss_kb=start_rss_kb,
-                finished_rss_kb=finished_rss_kb,
-                hwm_kb=hwm_kb,
-                scope=scope,
-            )
+        if not POOL_PROBE_WORKER_MODE:
+            if start_rss_kb <= 0 and finished_rss_kb <= 0 and hwm_kb <= 0 and not scope:
+                _schedule_post_pool_memory_cleanup()
+            else:
+                _schedule_post_pool_memory_cleanup(
+                    initial_rss_kb=start_rss_kb,
+                    finished_rss_kb=finished_rss_kb,
+                    hwm_kb=hwm_kb,
+                    scope=scope,
+                )
 
 
 def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'):
