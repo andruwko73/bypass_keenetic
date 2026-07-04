@@ -1,3 +1,7 @@
+*v1.896 (4 Jul 2026) -* main
+
+*Restores active protocol keys and proxy config files during web/GitHub updates, so the router keeps the same selected Vless, Vmess, Trojan, and Shadowsocks keys after update; existing failover then switches only if the restored active key fails runtime checks.*
+
 *v1.895 (4 Jul 2026) -* main
 
 *Forces allocator trim after heavy web UI module cleanup and prevents pool-worker child processes from writing misleading post-pool cleanup events, so memory diagnostics belong to the main bot process and released UI memory returns closer to the fresh-start baseline.*

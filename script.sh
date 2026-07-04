@@ -669,6 +669,13 @@ restore_runtime_state_files_after_update() {
   restore_runtime_state_file_after_update key_pools.json "$BOT_RUNTIME_DIR/key_pools.json" 0644
   restore_runtime_state_file_after_update subscriptions.json "$BOT_RUNTIME_DIR/subscriptions.json" 0644
   restore_runtime_state_file_after_update custom_checks.json "$BOT_RUNTIME_DIR/custom_checks.json" 0644
+  restore_runtime_state_file_after_update vmess.key /opt/etc/xray/vmess.key 0600
+  restore_runtime_state_file_after_update vless.key /opt/etc/xray/vless.key 0600
+  restore_runtime_state_file_after_update vless2.key /opt/etc/xray/vless2.key 0600
+  restore_runtime_state_file_after_update xray_config.json /opt/etc/xray/config.json 0644
+  restore_runtime_state_file_after_update v2ray_config.json /opt/etc/v2ray/config.json 0644
+  restore_runtime_state_file_after_update shadowsocks.json /opt/etc/shadowsocks.json 0600
+  restore_runtime_state_file_after_update trojan_config.json /opt/etc/trojan/config.json 0600
 }
 
 backup_static_assets() {

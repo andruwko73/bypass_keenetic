@@ -1,3 +1,10 @@
+<a name="1.896"></a>
+# [1.896] - 4 Jul 2026
+
+- Restores active protocol key files and proxy config files during web/GitHub updates, matching rollback behavior for Vless 1, Vless 2, Vmess, Shadowsocks, and Trojan.
+- Keeps the existing Telegram and YouTube failover paths responsible for switching to a better pool key only after the restored active key fails runtime checks.
+- Adds smoke coverage so update restore cannot regress to preserving only pools/subscriptions while clobbering active keys.
+
 <a name="1.895"></a>
 # [1.895] - 4 Jul 2026
 
