@@ -1,3 +1,7 @@
+*v1.897 (4 Jul 2026) -* main
+
+*Keeps runtime memory cleanup from removing modules out of `sys.modules` while the multithreaded web UI is serving status and protocol panels, preventing transient `key_pool_web`/`probe_cache` errors under concurrent requests.*
+
 *v1.896 (4 Jul 2026) -* main
 
 *Restores active protocol keys and proxy config files during web/GitHub updates, so the router keeps the same selected Vless, Vmess, Trojan, and Shadowsocks keys after update; existing failover then switches only if the restored active key fails runtime checks.*

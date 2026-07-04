@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.896, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.897, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -574,10 +574,9 @@ def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, inclu
     released = []
 
     def release_module_attr(attr_name, module_names):
+        if globals().get(attr_name) is not None:
+            released.extend(module_names)
         globals()[attr_name] = None
-        for module_name in module_names:
-            if sys.modules.pop(module_name, None) is not None:
-                released.append(module_name)
 
     probe_busy = False
     try:
@@ -595,10 +594,9 @@ def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, inclu
         release_module_attr('_web_pool_form_blocks_module', ('web_pool_form_blocks',))
 
     if include_route_tools:
+        if _web_route_tools_runtime is not None:
+            released.extend(('web_route_tools_runtime', 'route_intersections', 'service_routes'))
         _web_route_tools_runtime = None
-        for module_name in ('web_route_tools_runtime', 'route_intersections', 'service_routes'):
-            if sys.modules.pop(module_name, None) is not None:
-                released.append(module_name)
 
     prefetch_busy = False
     try:

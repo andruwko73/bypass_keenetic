@@ -3147,6 +3147,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
     assert 'def _release_web_form_template_cache()' in source
     assert "sys.modules.pop(module_name, None)" in source
+    runtime_release_block = source.split('def _release_runtime_pressure_modules', 1)[1].split('\n\ndef render_web_form', 1)[0]
+    assert 'sys.modules.pop' not in runtime_release_block
+    assert "released.extend(module_names)" in runtime_release_block
+    assert "released.extend(('web_route_tools_runtime', 'route_intersections', 'service_routes'))" in runtime_release_block
     assert 'def _key_pool_store()' in source
     assert '\nimport key_pool_store\n' not in source
     assert "service_route_intersections_cache_ttl', 60.0" in source

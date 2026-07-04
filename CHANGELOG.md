@@ -1,3 +1,10 @@
+<a name="1.897"></a>
+# [1.897] - 4 Jul 2026
+
+- Stops shared runtime memory cleanup from removing lazy-loaded modules out of `sys.modules` while web requests are still active.
+- Prevents transient protocol/status errors such as `key_pool_web` or `probe_cache` during concurrent status, protocol panel, and cleanup activity.
+- Keeps the memory cleanup behavior focused on releasing bot-held module references and allocator trimming, without adding extra background work.
+
 <a name="1.896"></a>
 # [1.896] - 4 Jul 2026
 
