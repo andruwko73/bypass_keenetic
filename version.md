@@ -1,3 +1,7 @@
+*v1.908 (4 Jul 2026) -* main
+
+*Reduces idle router load by trusting healthy Telegram polling and active YouTube route traffic before starting background failover probes, applies selected pool keys before service checks finish, and keeps deferred pool panels in a retryable loading state instead of showing a false empty pool.*
+
 *v1.907 (4 Jul 2026) -* main
 
 *Runs background Telegram and YouTube failover health checks in a short-lived worker process so periodic checks do not raise the main bot RSS after startup.*

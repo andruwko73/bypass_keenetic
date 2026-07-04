@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.907, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.908, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -1336,9 +1336,29 @@ def _auto_failover_defer_switch_for_traffic_guard(**kwargs):
     return True
 
 
+def _auto_failover_has_pending_failure():
+    try:
+        failures = int(auto_failover_state.get('consecutive_failures') or 0)
+    except (TypeError, ValueError):
+        failures = 0
+    if failures > 0:
+        return True
+    try:
+        last_fail = float(auto_failover_state.get('last_fail') or 0.0)
+    except (TypeError, ValueError):
+        last_fail = 0.0
+    return bool(last_fail or str(auto_failover_state.get('last_failure_message') or '').strip())
+
+
 def _attempt_auto_failover():
     telegram_route_proto = _telegram_route_protocol()
     if not telegram_route_proto:
+        return False
+    if _app_mode_telegram_enabled() and bot_polling and not _auto_failover_has_pending_failure():
+        auto_failover_state['last_ok'] = time.time()
+        auto_failover_state['last_fail'] = 0.0
+        auto_failover_state['consecutive_failures'] = 0
+        auto_failover_state['last_failure_message'] = ''
         return False
     if proxy_mode != telegram_route_proto:
         _auto_failover_log(
@@ -1450,21 +1470,8 @@ def _schedule_youtube_cache_confirm(proto, key_value):
     def worker():
         try:
             with youtube_cache_confirm_lock:
-                proxy_url = proxy_settings.get(proto)
-                if not proxy_url:
-                    return
                 yt_metrics = {}
-                ok, _message = _controller_check_youtube_through_proxy(
-                    _check_http_through_proxy,
-                    proxy_url,
-                    urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
-                    min_ok=YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK,
-                    http_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
-                    http_retry_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
-                    retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
-                    metrics=yt_metrics,
-                    sleep=shutdown_requested.wait,
-                )
+                ok, _message = _check_youtube_protocol_for_background(proto, metrics=yt_metrics)
                 if ok:
                     _record_key_probe(proto, key_value, yt_ok=True, **yt_metrics)
                     _invalidate_key_status_cache()
@@ -1682,6 +1689,19 @@ def _attempt_youtube_failover():
         except Exception:
             cached_fail_since = 0.0
     if _recent_probe_ok(cached_active_probe, 'yt_ok', YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL):
+        state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
+        return False
+    if (
+        cached_youtube_state != 'fail' and
+        _youtube_stream_guard_active(
+            route_proto,
+            f'{_pool_proto_label(route_proto)} failover idle check',
+            log=False,
+            hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+        )
+    ):
+        state['last_ok'] = now
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
         return False
@@ -8028,7 +8048,14 @@ def _core_proxy_runtime_name():
     return 'v2ray'
 
 
-def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_states=None, key_probe_cache=None):
+def _protocol_status_for_key(
+    key_name,
+    key_value,
+    custom_checks=None,
+    route_states=None,
+    key_probe_cache=None,
+    background_checks=False,
+):
     port = PROXY_LOCAL_PORTS.get(key_name)
     endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_name, port)
     preflight = web_status_runtime.protocol_preflight_status(
@@ -8064,17 +8091,27 @@ def _protocol_status_for_key(key_name, key_value, custom_checks=None, route_stat
         )
 
     proxy_url = proxy_settings.get(key_name)
-    api_ok, api_message = _check_telegram_api_through_proxy(
-        proxy_url,
-        connect_timeout=5,
-        read_timeout=8,
-        authenticated=active_telegram_required,
-    )
+    if background_checks:
+        api_ok, api_message = _check_telegram_api_for_background(
+            proxy_url,
+            connect_timeout=5,
+            read_timeout=8,
+        )
+    else:
+        api_ok, api_message = _check_telegram_api_through_proxy(
+            proxy_url,
+            connect_timeout=5,
+            read_timeout=8,
+            authenticated=active_telegram_required,
+        )
     if active_telegram_required and not api_ok:
         _log_telegram_api_status_failure(key_name, api_message)
     api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
     yt_metrics = {}
-    yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
+    if background_checks:
+        yt_ok, yt_message = _check_youtube_protocol_for_background(key_name, metrics=yt_metrics)
+    else:
+        yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
     if (
         api_transient and
         not active_telegram_required and
@@ -9085,11 +9122,13 @@ def _pool_key_by_callback_id(proto, key_id):
     raise ValueError('Ключ не найден в пуле. Обновите пул и попробуйте снова.')
 
 
-def _apply_pool_key(proto, key_value):
-    result = _install_key_for_protocol(proto, key_value)
+def _apply_pool_key(proto, key_value, schedule_probe=True):
+    result = _install_key_for_protocol(proto, key_value, verify=False)
     _set_active_key(proto, key_value)
     _audit_key_switch('telegram_pool_apply', proto, key_value, 'manual pool apply')
-    refreshed_status = _probe_applied_pool_key_services(proto, key_value)
+    refreshed_status = _probe_applied_pool_key_services(proto, key_value) if schedule_probe else (
+        'Статусы выбранного ключа обновит продолжающаяся проверка пула.'
+    )
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     if refreshed_status:
@@ -9109,7 +9148,7 @@ def _apply_pool_key_background(chat_id, proto, key_value, index, page=0):
         should_resume_probe = False
         try:
             should_resume_probe, pause_note = _pause_pool_probe_for_apply()
-            result = _apply_pool_key(proto, key_value)
+            result = _apply_pool_key(proto, key_value, schedule_probe=not should_resume_probe)
             display_name = _pool_key_display_name(key_value)
             prefix = f'✅ Ключ #{index} «{display_name}» применён для {_pool_proto_label(proto)}.\n{result}'
             if pause_note:
@@ -9325,40 +9364,33 @@ def _probe_state_text(value, *, optional=False):
     return 'работает' if bool(value) else 'не работает'
 
 
-def _probe_applied_pool_key_services(proto, key_value):
-    proxy_url = proxy_settings.get(proto)
-    if not proxy_url or not key_value:
+def _schedule_applied_pool_key_probe(proto, key_value):
+    if not key_value:
         return ''
-    custom_checks = _load_custom_checks()
+    if pool_probe_lock.locked():
+        return 'Статусы выбранного ключа обновятся после текущей проверки пула.'
     try:
-        _check_pool_key_through_proxy(proto, key_value, custom_checks=custom_checks, proxy_url=proxy_url)
-        cache = _load_key_probe_cache()
-        probe = cache.get(_hash_key(key_value), {})
-        if not isinstance(probe, dict):
-            probe = {}
-        parts = []
-        telegram_optional = not _telegram_required_for_protocol(proto)
-        if 'tg_ok' in probe:
-            parts.append(f'Telegram: {_probe_state_text(probe.get("tg_ok"), optional=telegram_optional)}')
-        if 'yt_ok' in probe:
-            parts.append(f'YouTube: {_probe_state_text(probe.get("yt_ok"))}')
-        custom = probe.get('custom', {})
-        if not isinstance(custom, dict):
-            custom = {}
-        for check in custom_checks or []:
-            check_id = check.get('id')
-            if not check_id or check_id not in custom:
-                continue
-            label = str(check.get('label') or check_id).strip() or str(check_id)
-            parts.append(f'{label}: {_probe_state_text(custom.get(check_id))}')
-        _invalidate_web_status_cache()
-        _invalidate_key_status_cache()
-        if not parts:
-            return 'Статусы выбранного ключа будут обновлены фоновой проверкой.'
-        return 'Статусы выбранного ключа обновлены: ' + ', '.join(parts) + '.'
+        started, queued = _probe_pool_keys_background(
+            proto,
+            [key_value],
+            max_keys=1,
+            stale_only=False,
+            scope='applied',
+        )
+        if started:
+            _invalidate_web_status_cache()
+            _invalidate_key_status_cache()
+            return 'Статусы выбранного ключа обновляются фоновой проверкой.'
+        if queued:
+            return 'Фоновая проверка выбранного ключа уже выполняется.'
+        return 'Ключ применён; проверка сервисов не запускалась.'
     except Exception as exc:
-        _write_runtime_log(f'Applied pool key service probe failed for {proto}: {exc}')
-        return f'⚠️ Ключ применён, но статусы сервисов не удалось обновить: {exc}'
+        _write_runtime_log(f'Applied pool key background probe failed for {proto}: {exc}')
+        return f'⚠️ Ключ применён, но фоновую проверку сервисов не удалось запустить: {exc}'
+
+
+def _probe_applied_pool_key_services(proto, key_value):
+    return _schedule_applied_pool_key_probe(proto, key_value)
 
 
 def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
@@ -11080,7 +11112,7 @@ def _status_snapshot_signature(current_keys):
     )
 
 
-def _build_status_snapshot(current_keys, force_refresh=False):
+def _build_status_snapshot(current_keys, force_refresh=False, background_checks=False):
     signature = _status_snapshot_signature(current_keys)
     now = time.time()
     if pool_probe_lock.locked():
@@ -11102,6 +11134,7 @@ def _build_status_snapshot(current_keys, force_refresh=False):
                     custom_checks=custom_checks,
                     route_states=route_states,
                     key_probe_cache=key_probe_cache,
+                    background_checks=background_checks,
                 )
                 _store_active_mode_protocol_status(current_keys, protocols[key_name])
             else:
@@ -11123,7 +11156,7 @@ def _build_status_snapshot(current_keys, force_refresh=False):
     return _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=now)
 
 
-def _active_mode_status_snapshot(current_keys):
+def _active_mode_status_snapshot(current_keys, background_checks=False):
     pool_locked = pool_probe_lock.locked()
     cached = _cached_status_snapshot(current_keys)
     if cached is not None and isinstance(cached, dict):
@@ -11152,6 +11185,7 @@ def _active_mode_status_snapshot(current_keys):
                     current_keys.get(proxy_mode, ''),
                     custom_checks=custom_checks,
                     route_states=route_states,
+                    background_checks=background_checks,
                 )
                 _store_active_mode_protocol_status(current_keys, protocols[proxy_mode])
         except Exception as exc:
@@ -11334,10 +11368,10 @@ def _refresh_status_caches_async(current_keys, active_only=False):
         )
         try:
             if active_only:
-                snapshot = _active_mode_status_snapshot(current_keys)
+                snapshot = _active_mode_status_snapshot(current_keys, background_checks=True)
                 _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=time.time())
             else:
-                _build_status_snapshot(current_keys, force_refresh=True)
+                _build_status_snapshot(current_keys, force_refresh=True, background_checks=True)
         except Exception as exc:
             _write_runtime_log(f'Ошибка фонового обновления статусов: {exc}')
         finally:

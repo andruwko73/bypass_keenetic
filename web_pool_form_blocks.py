@@ -8,6 +8,11 @@ POOL_EMPTY_ROW_HTML = (
     'Пул пуст. Добавьте ключи или загрузите subscription'
     '</td></tr>'
 )
+POOL_LOADING_ROW_HTML = (
+    '<tr class="pool-row pool-empty-row"><td colspan="6">'
+    'Загружаю пул ключей...'
+    '</td></tr>'
+)
 
 
 def pool_empty_row_html(colspan=6):
@@ -18,6 +23,16 @@ def pool_empty_row_html(colspan=6):
     if safe_colspan == 6:
         return POOL_EMPTY_ROW_HTML
     return POOL_EMPTY_ROW_HTML.replace('colspan="6"', f'colspan="{safe_colspan}"')
+
+
+def pool_loading_row_html(colspan=6):
+    try:
+        safe_colspan = max(1, int(colspan))
+    except Exception:
+        safe_colspan = 6
+    if safe_colspan == 6:
+        return POOL_LOADING_ROW_HTML
+    return POOL_LOADING_ROW_HTML.replace('colspan="6"', f'colspan="{safe_colspan}"')
 
 
 def _display_note_text(text):
@@ -674,22 +689,25 @@ def render_protocol_tabs_and_panels(
                 for check in protocol_custom_checks
                 if enable_custom_checks and custom_states.get(check.get('id')) == 'ok'
             ])
-            pool_items_html = render_pool_items(
-                key_name=key_name,
-                title=title,
-                pool_keys=[] if defer_pool_rows else pool_keys,
-                current_key=current_keys.get(key_name, ''),
-                key_probe_cache=key_probe_cache,
-                custom_checks=protocol_custom_checks,
-                key_display_name=key_display_name,
-                hash_key=hash_key,
-                telegram_icon_html=telegram_icon_html,
-                youtube_icon_html=youtube_icon_html,
-                custom_check_badges=custom_check_badges,
-                probe_checked_at=probe_checked_at,
-                csrf_input_html=csrf_input_html,
-                service_applicability=core_applicability,
-            )
+            if defer_pool_rows:
+                pool_items_html = pool_loading_row_html(len(core_applicability.get('services') or ()) + 4)
+            else:
+                pool_items_html = render_pool_items(
+                    key_name=key_name,
+                    title=title,
+                    pool_keys=pool_keys,
+                    current_key=current_keys.get(key_name, ''),
+                    key_probe_cache=key_probe_cache,
+                    custom_checks=protocol_custom_checks,
+                    key_display_name=key_display_name,
+                    hash_key=hash_key,
+                    telegram_icon_html=telegram_icon_html,
+                    youtube_icon_html=youtube_icon_html,
+                    custom_check_badges=custom_check_badges,
+                    probe_checked_at=probe_checked_at,
+                    csrf_input_html=csrf_input_html,
+                    service_applicability=core_applicability,
+                )
         panels.append(
             render_protocol_panel(
                 key_name=key_name,

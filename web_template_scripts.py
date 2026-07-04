@@ -43,6 +43,7 @@ def render_web_scripts(
         let latestPoolProbeProgress = null;
         let poolProbePollTimer = null;
         let poolDataRefreshTimer = null;
+        let poolDataRetryCount = {{}};
         let poolViewTimers = {{}};
         let commandPollTimer = null;
         let commandTimer = null;
@@ -1267,7 +1268,7 @@ def render_web_scripts(
             }}, Math.max(0, Number(delayMs || 0)));
         }}
 
-        function protocolQuery(protocols) {{
+        function protocolList(protocols) {{
             const selected = [];
             const source = Array.isArray(protocols) ? protocols : [protocols];
             source.forEach(function(proto) {{
@@ -1276,6 +1277,11 @@ def render_web_scripts(
                     selected.push(proto);
                 }}
             }});
+            return selected;
+        }}
+
+        function protocolQuery(protocols) {{
+            const selected = protocolList(protocols);
             return selected.length ? '?protocols=' + encodeURIComponent(selected.join(',')) : '';
         }}
 
@@ -1316,6 +1322,24 @@ def render_web_scripts(
             }}
             body.removeAttribute('data-pool-deferred');
             delete body.dataset.poolDeferred;
+        }}
+
+        function poolBodyColspan(body) {{
+            const table = body ? body.closest('table') : null;
+            const headerCells = table ? table.querySelectorAll('thead th') : [];
+            return Math.max(1, headerCells.length || 6);
+        }}
+
+        function setPoolBodyMessage(proto, message, keepDeferred) {{
+            const body = document.querySelector('[data-pool-body="' + proto + '"]');
+            if (!body) {{
+                return;
+            }}
+            if (keepDeferred) {{
+                body.setAttribute('data-pool-deferred', '1');
+                body.dataset.poolDeferred = '1';
+            }}
+            body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="' + poolBodyColspan(body) + '">' + escapeHtml(message) + '</td></tr>';
         }}
 
         function applyPoolView(proto, forceSort) {{
@@ -1805,15 +1829,49 @@ def render_web_scripts(
             }}
             poolDataRefreshTimer = window.setTimeout(function() {{
                 poolDataRefreshTimer = null;
-                fetch('/api/pools' + loadedPoolProtocolQuery(protocols), {{
+                const requestedProtocols = protocolList(protocols);
+                const loadingProtocols = requestedProtocols.length ? requestedProtocols : deferredPoolProtocols();
+                loadingProtocols.forEach(function(proto) {{
+                    const body = document.querySelector('[data-pool-body="' + proto + '"]');
+                    if (body && body.hasAttribute('data-pool-deferred')) {{
+                        setPoolBodyMessage(proto, 'Загружаю пул ключей...', true);
+                    }}
+                }});
+                fetch('/api/pools' + loadedPoolProtocolQuery(requestedProtocols.length ? requestedProtocols : null), {{
                     headers: {{'Accept': 'application/json'}},
                     cache: 'no-store'
                 }})
-                    .then(function(response) {{ return response.json(); }})
+                    .then(function(response) {{
+                        return response.json().then(function(payload) {{
+                            if (!response.ok) {{
+                                throw new Error((payload && payload.error) || 'HTTP ' + response.status);
+                            }}
+                            return payload;
+                        }});
+                    }})
                     .then(function(payload) {{
+                        Object.keys(payload.pools || {{}}).forEach(function(proto) {{
+                            poolDataRetryCount[proto] = 0;
+                        }});
                         applyPoolPayload(payload);
                     }})
-                    .catch(function() {{}});
+                    .catch(function() {{
+                        const retryProtocols = loadingProtocols.length ? loadingProtocols : deferredPoolProtocols();
+                        let shouldRetry = false;
+                        retryProtocols.forEach(function(proto) {{
+                            const count = Number(poolDataRetryCount[proto] || 0) + 1;
+                            poolDataRetryCount[proto] = count;
+                            if (count < 3) {{
+                                shouldRetry = true;
+                                setPoolBodyMessage(proto, 'Не удалось загрузить пул ключей, повторяю...', true);
+                            }} else {{
+                                setPoolBodyMessage(proto, 'Не удалось загрузить пул ключей. Обновите вкладку или страницу.', true);
+                            }}
+                        }});
+                        if (shouldRetry && !document.hidden) {{
+                            refreshPoolData(3000, retryProtocols);
+                        }}
+                    }});
             }}, Math.max(0, Number(delayMs || 0)));
         }}
 

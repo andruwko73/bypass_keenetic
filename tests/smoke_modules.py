@@ -7932,6 +7932,8 @@ def test_web_pool_form_blocks_helpers():
     assert 'data-pool-deferred="1"' in deferred_panels_html
     assert 'data-protocol-check-deferred="vless"' in deferred_panels_html
     assert 'pool-empty-row' in deferred_panels_html
+    assert 'Загружаю пул ключей...' in deferred_panels_html
+    assert 'Пул пуст. Добавьте ключи или загрузите subscription' not in deferred_panels_html
     assert 'deferred-pool-key' not in deferred_panels_html
     assert 'deferred display' not in deferred_panels_html
     scoped_tabs_html, scoped_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
@@ -8651,7 +8653,9 @@ def test_web_template_scripts_helpers():
     assert 'function schedulePoolView(proto, delayMs)' in scripts
     assert 'const rowByKeyId = new Map();' in scripts
     assert 'Object.prototype.hasOwnProperty.call(stateMap, check.id)' in scripts
-    assert "fetch('/api/pools' + loadedPoolProtocolQuery(protocols)" in scripts
+    assert "fetch('/api/pools' + loadedPoolProtocolQuery(requestedProtocols.length ? requestedProtocols : null)" in scripts
+    assert "setPoolBodyMessage(proto, 'Загружаю пул ключей...', true)" in scripts
+    assert "refreshPoolData(3000, retryProtocols)" in scripts
     assert 'function webStatusIsPending(apiStatus)' in scripts
     assert 'function scheduleStatusPolling(durationMs, initialDelayMs)' in scripts
     assert 'const initialDelay = Math.max(0, Number(initialDelayMs || 0));' in scripts

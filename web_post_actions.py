@@ -464,7 +464,7 @@ def _pool_apply(ctx, data):
         if pause_pool_probe:
             should_resume_probe, pause_note = pause_pool_probe()
         key_to_apply, key_id, _ = _resolve_pool_key(ctx, proto, data)
-        result = _ctx(ctx, 'install_key_for_protocol')(proto, key_to_apply, verify=True)
+        result = _ctx(ctx, 'install_key_for_protocol')(proto, key_to_apply, verify=False)
         _ctx(ctx, 'set_active_key')(proto, key_to_apply)
         _call(ctx, 'audit_key_switch', 'web_pool_apply', proto, key_to_apply, 'manual pool apply')
         refreshed_status = _call(ctx, 'probe_applied_pool_key_services', proto, key_to_apply)

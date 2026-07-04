@@ -1,3 +1,11 @@
+<a name="1.908"></a>
+# [1.908] - 4 Jul 2026
+
+- Reduces idle router load by skipping Telegram auto-failover probes while polling is healthy, without suppressing recovery after a recorded Telegram failure.
+- Avoids active YouTube failover probes while routed YouTube/Vless traffic is already flowing and no confirmed failure is cached.
+- Applies a selected pool key immediately and moves its Telegram/YouTube/custom service recheck to a background single-key probe.
+- Keeps deferred pool panels in a loading/retry state instead of rendering a false "pool empty" message when `/api/pools` is still loading or a fetch is retried.
+
 <a name="1.907"></a>
 # [1.907] - 4 Jul 2026
 
