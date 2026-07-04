@@ -1,3 +1,10 @@
+<a name="1.894"></a>
+# [1.894] - 4 Jul 2026
+
+- Releases heavy pool, route, and YouTube prefetch UI modules immediately after heavy web responses instead of waiting for the RSS cleanup threshold.
+- Keeps expensive router-health subcaches during routine memory cleanup so status polling does not trigger avoidable `/proc`, DNS, ndmc, and proxy health work.
+- Adds smoke coverage for the memory cleanup behavior so the bot can return closer to fresh-start RSS after web and route operations without changing limits.
+
 <a name="1.893"></a>
 # [1.893] - 4 Jul 2026
 

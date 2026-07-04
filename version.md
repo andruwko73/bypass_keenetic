@@ -1,3 +1,7 @@
+*v1.894 (4 Jul 2026) -* main
+
+*Releases heavy pool/route/prefetch UI modules immediately after heavy web responses and keeps expensive router-health subcaches during routine memory cleanup, lowering baseline memory pressure and avoiding extra CPU spikes from status polling without changing limits.*
+
 *v1.893 (4 Jul 2026) -* main
 
 *Reduces router memory/CPU pressure without changing limits by unloading lazy pool/probe/route modules during memory cleanup, clearing heavier router-health caches on forced cleanup, caching the lightweight YouTube prefetch snapshot, and reusing related-process snapshots briefly while pool probe is running.*

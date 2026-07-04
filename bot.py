@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.893, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.894, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -570,7 +570,7 @@ def _clear_youtube_edge_prefetch_snapshot_cache():
 def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, include_route_tools=False):
     global _pool_probe_controller_module, _pool_probe_runner_module, _probe_cache_module
     global _key_pool_web_module, _telegram_pool_ui_module, _web_pool_form_blocks_module
-    global _web_route_tools_runtime
+    global _web_route_tools_runtime, _youtube_edge_prefetch_module
     released = []
 
     def release_module_attr(attr_name, module_names):
@@ -599,6 +599,15 @@ def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, inclu
         for module_name in ('web_route_tools_runtime', 'route_intersections', 'service_routes'):
             if sys.modules.pop(module_name, None) is not None:
                 released.append(module_name)
+
+    prefetch_busy = False
+    try:
+        prefetch_lock = globals().get('youtube_edge_prefetch_lock')
+        prefetch_busy = bool(prefetch_lock and prefetch_lock.locked())
+    except Exception:
+        prefetch_busy = False
+    if not prefetch_busy:
+        release_module_attr('_youtube_edge_prefetch_module', ('youtube_edge_prefetch', 'youtube_edge_prefetch_runner'))
 
     _clear_youtube_edge_prefetch_snapshot_cache()
     if released and reason:
@@ -4919,7 +4928,7 @@ def _clear_runtime_memory_caches(clear_status=False, *, clear_pool_summary=False
         event_history_api_cache.update({'signature': None, 'payload': None})
     _clear_youtube_edge_prefetch_snapshot_cache()
     try:
-        router_health.invalidate(include_heavy=bool(clear_status or clear_pool_summary))
+        router_health.invalidate(include_heavy=bool(clear_status))
     except Exception:
         pass
 
@@ -5206,6 +5215,18 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
     ))
     rss_before = _process_rss_kb()
     now = time.time()
+    released_modules = []
+    if heavy:
+        released_modules = _release_runtime_pressure_modules(
+            reason,
+            include_pool_ui=True,
+            include_route_tools=True,
+        )
+        if released_modules:
+            try:
+                gc.collect()
+            except Exception:
+                pass
     cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB
     if (
         cleanup_threshold > 0 and
@@ -5218,6 +5239,7 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
         'rss_before_kb': rss_before,
         'rss_after_kb': rss_before,
         'collected': 0,
+        'released_modules': len(released_modules),
         'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
     }
 

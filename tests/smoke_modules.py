@@ -3146,6 +3146,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'intersections_cache_ttl=SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL' in source
     assert "_release_web_form_template_cache()\n            _web_response_cleanup('web html render')" in source
     assert "_web_response_cleanup('web json api render')" in source
+    assert "include_pool_ui=True" in source
+    assert "include_route_tools=True" in source
+    assert "router_health.invalidate(include_heavy=bool(clear_status))" in source
     assert "memory_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "web_response_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "web_response_light_cleanup_rss_kb" in (ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
