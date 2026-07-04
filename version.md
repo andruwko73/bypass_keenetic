@@ -1,3 +1,7 @@
+*v1.892 (4 Jul 2026) -* main
+
+*Routes mixed key imports by protocol scheme so Vmess, Trojan, and Shadowsocks entries go to their own pools instead of polluting Vless 2, ignores non-key text lines without supported schemes, and repairs saved pool files on write.*
+
 *v1.891 (3 Jul 2026) -* main
 
 *Adds the remaining observed Googlevideo `.119` startup edges to the YouTube route without broadening whole Google `/24` ranges, keeping live YouTube traffic on Vless 2 while avoiding unnecessary route bleed for other Google services.*

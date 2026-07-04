@@ -3,9 +3,16 @@ import json
 import os
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 
 PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+SCHEME_PROTOCOLS = {
+    'ss': 'shadowsocks',
+    'vmess': 'vmess',
+    'trojan': 'trojan',
+}
+SUPPORTED_KEY_SCHEMES = frozenset(('vless',) + tuple(SCHEME_PROTOCOLS))
 
 
 def dedupe_key_list(keys):
@@ -27,6 +34,53 @@ def normalize_key_pools(pools):
     }
 
 
+def key_protocol_for_pool(default_proto, key_value):
+    default_proto = str(default_proto or '').strip()
+    key_value = str(key_value or '').strip()
+    try:
+        scheme = (urlsplit(key_value).scheme or '').strip().lower()
+    except Exception:
+        scheme = ''
+    if scheme == 'vless':
+        return default_proto if default_proto in ('vless', 'vless2') else 'vless'
+    return SCHEME_PROTOCOLS.get(scheme, default_proto)
+
+
+def key_has_supported_scheme(key_value):
+    try:
+        scheme = (urlsplit(str(key_value or '').strip()).scheme or '').strip().lower()
+    except Exception:
+        scheme = ''
+    return scheme in SUPPORTED_KEY_SCHEMES
+
+
+def repair_key_pool_protocols(pools):
+    pools = normalize_key_pools(pools)
+    repaired = {proto: [] for proto in PROTOCOLS}
+    seen = {proto: set() for proto in PROTOCOLS}
+    moved = {proto: {target: 0 for target in PROTOCOLS} for proto in PROTOCOLS}
+    for proto in PROTOCOLS:
+        for key_value in pools.get(proto, []) or []:
+            key_value = str(key_value or '').strip()
+            if not key_value:
+                continue
+            target = key_protocol_for_pool(proto, key_value)
+            if target not in repaired:
+                target = proto
+            if key_value in seen[target]:
+                continue
+            repaired[target].append(key_value)
+            seen[target].add(key_value)
+            if target != proto:
+                moved[proto][target] += 1
+    moved = {
+        proto: {target: count for target, count in targets.items() if count}
+        for proto, targets in moved.items()
+        if any(targets.values())
+    }
+    return repaired, moved
+
+
 def load_key_pools(path):
     try:
         with open(path, 'r', encoding='utf-8') as file:
@@ -39,7 +93,7 @@ def load_key_pools(path):
 
 
 def save_key_pools(path, pools):
-    pools = normalize_key_pools(pools)
+    pools, _ = repair_key_pool_protocols(pools)
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
@@ -100,6 +154,34 @@ def add_keys_to_pool(pools, proto, keys_text):
         existing.add(key_value)
         added_keys.append(key_value)
     return pools, added_keys
+
+
+def add_keys_to_pools_by_protocol(pools, proto, keys_text):
+    pools = normalize_key_pools(pools)
+    proto = str(proto or '').strip()
+    if proto not in pools:
+        pools[proto] = []
+    added_by_proto = {item: [] for item in PROTOCOLS}
+    existing = {item: set(pools.get(item, []) or []) for item in PROTOCOLS}
+    new_keys = [line.strip() for line in (keys_text or '').splitlines() if line.strip()]
+    for key_value in new_keys:
+        if not key_has_supported_scheme(key_value):
+            continue
+        target = key_protocol_for_pool(proto, key_value)
+        if target not in pools:
+            target = proto
+        if key_value in existing[target]:
+            continue
+        pools[target].append(key_value)
+        existing[target].add(key_value)
+        added_by_proto[target].append(key_value)
+    pools, _ = repair_key_pool_protocols(pools)
+    added_by_proto = {
+        item: values
+        for item, values in added_by_proto.items()
+        if values
+    }
+    return pools, added_by_proto
 
 
 def classify_subscription_keys(raw_text):

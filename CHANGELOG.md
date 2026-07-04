@@ -1,3 +1,10 @@
+<a name="1.892"></a>
+# [1.892] - 4 Jul 2026
+
+- Routes mixed key imports by protocol scheme so Vmess, Trojan, and Shadowsocks entries are saved into their own pools instead of Vless 2.
+- Ignores non-key text lines without a supported URI scheme during manual pool import.
+- Repairs saved pool files on write so existing cross-protocol pool pollution is cleaned without exposing key material.
+
 <a name="1.891"></a>
 # [1.891] - 3 Jul 2026
 

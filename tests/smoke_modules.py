@@ -1161,19 +1161,44 @@ def test_key_pool_web():
 
 
 def test_key_pool_subscription_helpers():
+    vless_key = 'vless://uuid@example.com:443?security=tls#sample'
+    vmess_key = 'vmess://sample'
     raw = '\n'.join([
         SS_KEY,
-        'vless://uuid@example.com:443?security=tls#sample',
+        vless_key,
         TROJAN_KEY,
     ])
     classified = key_pool_store.classify_subscription_keys(raw)
     assert classified['shadowsocks'] == [SS_KEY]
-    assert classified['vless'] == ['vless://uuid@example.com:443?security=tls#sample']
+    assert classified['vless'] == [vless_key]
     assert classified['trojan'] == [TROJAN_KEY]
 
     pools, added = key_pool_store.add_subscription_keys_to_pool({'vless2': []}, 'vless2', classified)
-    assert added == ['vless://uuid@example.com:443?security=tls#sample']
+    assert added == [vless_key]
     assert pools['vless2'] == added
+    mixed_pools, added_by_proto = key_pool_store.add_keys_to_pools_by_protocol(
+        {'vless2': []},
+        'vless2',
+        '\n'.join([vless_key, 'not-a-key-label', vmess_key, TROJAN_KEY, SS_KEY]),
+    )
+    assert added_by_proto == {
+        'shadowsocks': [SS_KEY],
+        'vmess': [vmess_key],
+        'vless2': [vless_key],
+        'trojan': [TROJAN_KEY],
+    }
+    assert mixed_pools['vless2'] == [vless_key]
+    assert mixed_pools['vmess'] == [vmess_key]
+    assert mixed_pools['trojan'] == [TROJAN_KEY]
+    assert mixed_pools['shadowsocks'] == [SS_KEY]
+    repaired, moved = key_pool_store.repair_key_pool_protocols(
+        {'vless2': [vless_key, vmess_key, TROJAN_KEY, SS_KEY]}
+    )
+    assert repaired['vless2'] == [vless_key]
+    assert repaired['vmess'] == [vmess_key]
+    assert repaired['trojan'] == [TROJAN_KEY]
+    assert repaired['shadowsocks'] == [SS_KEY]
+    assert moved == {'vless2': {'shadowsocks': 1, 'vmess': 1, 'trojan': 1}}
     ensured, changed = key_pool_store.ensure_current_keys_in_pools(
         {'vless': ['first', 'active', 'last']},
         {'vless': 'active'},

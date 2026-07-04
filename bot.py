@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.891, последнее изменение: 03.07.2026
+#  Файл: bot.py, Версия v1.892, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -10184,11 +10184,16 @@ def _probe_pool_keys_background(proto, keys, max_keys=KEY_PROBE_MAX_PER_RUN, sta
 
 def _add_keys_to_pool(proto, keys_text):
     with key_pool_lock:
-        pools, added_keys = _key_pool_store().add_keys_to_pool(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto, keys_text)
+        pools, added_by_proto = _key_pool_store().add_keys_to_pools_by_protocol(
+            _key_pool_store().load_key_pools(KEY_POOLS_PATH),
+            proto,
+            keys_text,
+        )
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
-    _probe_pool_keys_background(proto, added_keys)
+    for added_proto, added_keys in added_by_proto.items():
+        _probe_pool_keys_background(added_proto, added_keys)
     _invalidate_pool_data_cache()
-    return len(added_keys)
+    return sum(len(added_keys) for added_keys in added_by_proto.values())
 
 
 def _subscription_active_key_is_working(proto, key_value):
