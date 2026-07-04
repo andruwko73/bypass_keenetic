@@ -1,3 +1,9 @@
+<a name="1.904"></a>
+# [1.904] - 4 Jul 2026
+
+- Removes the unsafe runtime `sys.modules` unloading from 1.903 after live router testing showed concurrent web requests could hit module import races.
+- Stops auto-fetching deferred pool data for every protocol during initial page load; pool data is still loaded when the user opens the relevant protocol/pool view or after pool actions.
+
 <a name="1.903"></a>
 # [1.903] - 4 Jul 2026
 

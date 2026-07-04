@@ -2881,10 +2881,6 @@ def render_web_scripts(
             setupSegmentedTabs('.list-tab', '[data-list-panel]', 'data-list-target', 'data-list-panel', 'router-active-list');
             setupProtocolSubtabs();
             setupPoolControls();
-            const deferredProtocols = deferredPoolProtocols();
-            if (deferredProtocols.length) {{
-                refreshPoolData(0, deferredProtocols);
-            }}
             setupServiceRouteMenus();
             setupEventHistoryPanel();
             refreshDeferredServiceRouteTools();

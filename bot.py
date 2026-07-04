@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.903, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.904, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -553,24 +553,11 @@ def _release_web_form_template_cache():
     global _web_form_template_module
     with _web_form_template_lock:
         _web_form_template_module = None
-    _drop_runtime_modules(('web_form_template', 'web_template_scripts', 'web_template_styles'))
 
 
 def _clear_youtube_edge_prefetch_snapshot_cache():
     youtube_edge_prefetch_snapshot_cache['timestamp'] = 0.0
     youtube_edge_prefetch_snapshot_cache['payload'] = None
-
-
-def _drop_runtime_modules(module_names):
-    dropped = []
-    for module_name in module_names or ():
-        try:
-            if module_name in sys.modules:
-                sys.modules.pop(module_name, None)
-                dropped.append(module_name)
-        except Exception:
-            continue
-    return dropped
 
 
 def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, include_route_tools=False):
@@ -593,33 +580,16 @@ def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, inclu
         release_module_attr('_pool_probe_controller_module', ('pool_probe_controller',))
         release_module_attr('_pool_probe_runner_module', ('pool_probe_runner', 'telegram_healthcheck'))
         release_module_attr('_probe_cache_module', ('probe_cache',))
-        released.extend(_drop_runtime_modules((
-            'pool_probe_controller',
-            'pool_probe_runner',
-            'probe_cache',
-            'telegram_healthcheck',
-            'youtube_healthcheck',
-        )))
 
     if include_pool_ui:
         release_module_attr('_key_pool_web_module', ('key_pool_web',))
         release_module_attr('_telegram_pool_ui_module', ('telegram_pool_ui',))
         release_module_attr('_web_pool_form_blocks_module', ('web_pool_form_blocks',))
-        released.extend(_drop_runtime_modules((
-            'key_pool_web',
-            'telegram_pool_ui',
-            'web_pool_form_blocks',
-        )))
 
     if include_route_tools:
         if _web_route_tools_runtime is not None:
             released.extend(('web_route_tools_runtime', 'route_intersections', 'service_routes'))
         _web_route_tools_runtime = None
-        released.extend(_drop_runtime_modules((
-            'web_route_tools_runtime',
-            'route_intersections',
-            'service_routes',
-        )))
 
     prefetch_busy = False
     try:
@@ -629,10 +599,6 @@ def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, inclu
         prefetch_busy = False
     if not prefetch_busy:
         release_module_attr('_youtube_edge_prefetch_module', ('youtube_edge_prefetch', 'youtube_edge_prefetch_runner'))
-        released.extend(_drop_runtime_modules((
-            'youtube_edge_prefetch',
-            'youtube_edge_prefetch_runner',
-        )))
 
     _clear_youtube_edge_prefetch_snapshot_cache()
     if released and reason:

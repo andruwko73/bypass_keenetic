@@ -1,3 +1,7 @@
+*v1.904 (4 Jul 2026) -* main
+
+*Removes the unsafe runtime `sys.modules` unloading from 1.903 and instead reduces web UI startup pressure by not auto-fetching deferred pool data for every protocol on page load.*
+
 *v1.903 (4 Jul 2026) -* main
 
 *Drops selected lazy UI, route, probe, and prefetch modules from `sys.modules` after heavy web/status/watchdog work so Python can actually release more memory instead of only clearing local module references.*
