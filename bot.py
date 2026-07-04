@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.900, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.901, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -11790,9 +11790,9 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         current_keys = _load_current_keys()
         snapshot = _cached_status_snapshot(current_keys)
         if snapshot is None:
-            snapshot = _placeholder_status_snapshot(current_keys)
+            snapshot = _placeholder_status_snapshot(current_keys, include_pool_details=False)
             if not pool_probe_lock.locked():
-                _refresh_status_caches_async(current_keys)
+                _refresh_status_caches_async(current_keys, active_only=True)
         csrf_token = self._get_or_create_csrf_token()
         csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
         try:
@@ -11807,9 +11807,9 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         current_keys = _load_current_keys()
         snapshot = _cached_status_snapshot(current_keys)
         if snapshot is None:
-            snapshot = _placeholder_status_snapshot(current_keys)
+            snapshot = _placeholder_status_snapshot(current_keys, include_pool_details=False)
             if not pool_probe_lock.locked():
-                _refresh_status_caches_async(current_keys)
+                _refresh_status_caches_async(current_keys, active_only=True)
         csrf_token = self._get_or_create_csrf_token()
         csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
         try:

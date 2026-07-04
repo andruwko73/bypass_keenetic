@@ -1,3 +1,7 @@
+*v1.901 (4 Jul 2026) -* main
+
+*Keeps lazy protocol panel and protocol check panel rendering on the lightweight status path when the status cache is cold, avoiding an extra full probe-cache warmup from opening protocol tabs.*
+
 *v1.900 (4 Jul 2026) -* main
 
 *Keeps compact web status and the initial pool-mode page on the lightweight active-mode path so opening or polling the header does not load the full key probe cache in the main bot process.*

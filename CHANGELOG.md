@@ -1,3 +1,9 @@
+<a name="1.901"></a>
+# [1.901] - 4 Jul 2026
+
+- Keeps lazy protocol panel and protocol check panel rendering on the lightweight status path when the status cache is cold.
+- Avoids an extra full probe-cache warmup from opening protocol tabs, while preserving active-mode status refresh.
+
 <a name="1.900"></a>
 # [1.900] - 4 Jul 2026
 
