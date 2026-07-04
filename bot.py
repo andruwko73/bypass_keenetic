@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.908, последнее изменение: 04.07.2026
+#  Файл: bot.py, Версия v1.909, последнее изменение: 04.07.2026
 
 import subprocess
 import os
@@ -11165,6 +11165,24 @@ def _active_mode_status_snapshot(current_keys, background_checks=False):
         protocols = _placeholder_protocol_statuses(current_keys)
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary() if custom_checks else None
+    if not pool_locked:
+        key_probe_cache = None
+        for key_name, key_value in (current_keys or {}).items():
+            if key_name == proxy_mode:
+                continue
+            try:
+                if key_probe_cache is None:
+                    key_probe_cache = _load_key_probe_cache()
+                protocols[key_name] = _cached_protocol_status_for_key(
+                    key_name,
+                    str(key_value or ''),
+                    custom_checks=custom_checks,
+                    key_probe_cache=key_probe_cache,
+                    allow_youtube_confirm=False,
+                    route_states=route_states,
+                )
+            except Exception as exc:
+                _write_runtime_log(f'Ошибка восстановления кешированного статуса {key_name}: {exc}')
 
     if proxy_mode in current_keys:
         try:

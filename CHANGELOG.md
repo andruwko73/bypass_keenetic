@@ -1,3 +1,8 @@
+<a name="1.909"></a>
+# [1.909] - 4 Jul 2026
+
+- Fills inactive protocol statuses in the compact/active-mode snapshot from the cached pool probe result, preventing Vless 2 or another inactive protocol from staying on "Проверяется" after no pool probe is running.
+
 <a name="1.908"></a>
 # [1.908] - 4 Jul 2026
 

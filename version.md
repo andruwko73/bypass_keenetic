@@ -1,3 +1,7 @@
+*v1.909 (4 Jul 2026) -* main
+
+*Fills inactive protocol statuses in the compact/active-mode snapshot from the cached pool probe result, so a protocol such as Vless 2 does not stay stuck on “Проверяется” after no pool probe is running.*
+
 *v1.908 (4 Jul 2026) -* main
 
 *Reduces idle router load by trusting healthy Telegram polling and active YouTube route traffic before starting background failover probes, applies selected pool keys before service checks finish, and keeps deferred pool panels in a retryable loading state instead of showing a false empty pool.*
