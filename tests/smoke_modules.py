@@ -8729,6 +8729,10 @@ def test_web_template_scripts_helpers():
     assert 'function setupAsyncForms' in scripts
     assert 'function setupProtocolTabs()' in scripts
     assert "fetch('/api/protocol_panel?proto='" in scripts
+    assert 'function protocolLoadErrorMessage(error)' in scripts
+    assert "lowerMessage.indexOf('failed to fetch')" in scripts
+    assert 'function showLoadNotice(panel, message)' in scripts
+    assert 'loadPanel(protocol, panel, retryCount + 1)' in scripts
     assert 'function loadProtocolCheck(panel, retryCount)' in scripts
     assert "fetch('/api/protocol_check_panel?proto='" in scripts
     assert 'loadProtocolCheck(panel, retryCount + 1)' in scripts

@@ -719,27 +719,45 @@ def render_web_scripts(
                 return document.querySelector('[data-protocol-panel="' + protocol + '"]');
             }}
 
+            function protocolLoadErrorMessage(error) {{
+                const rawMessage = error && error.message ? String(error.message) : '';
+                const lowerMessage = rawMessage.toLowerCase();
+                if (!rawMessage || lowerMessage.indexOf('failed to fetch') !== -1 || lowerMessage.indexOf('networkerror') !== -1) {{
+                    return 'Связь с веб-интерфейсом прервалась. Нажмите повторить или откройте локальный адрес роутера.';
+                }}
+                return rawMessage;
+            }}
+
+            function showLoadNotice(panel, message) {{
+                const target = panel ? panel.querySelector('[data-protocol-loading]') : null;
+                if (!target) {{
+                    return;
+                }}
+                target.innerHTML = '<span class="eyebrow">Ключи</span><h2>Загружаю</h2><p class="section-subtitle">' + escapeHtml(message || 'Повторяю загрузку вкладки...') + '</p>';
+            }}
+
             function showLoadError(panel, error) {{
                 const target = panel ? panel.querySelector('[data-protocol-loading]') : null;
                 if (!target) {{
                     return;
                 }}
-                const message = error && error.message ? error.message : 'Не удалось загрузить вкладку';
+                const message = protocolLoadErrorMessage(error);
                 target.innerHTML = '<span class="eyebrow">Ключи</span><h2>Ошибка загрузки</h2><p class="section-subtitle">' + escapeHtml(message) + '</p><button type="button" class="secondary-button" data-protocol-retry>Повторить</button>';
                 const retry = target.querySelector('[data-protocol-retry]');
                 if (retry) {{
                     retry.addEventListener('click', function() {{
                         const protocol = panel.getAttribute('data-protocol-panel');
                         panel.dataset.protocolLoading = '0';
-                        loadPanel(protocol, panel);
+                        loadPanel(protocol, panel, 0);
                     }});
                 }}
             }}
 
-            function loadPanel(protocol, panel) {{
+            function loadPanel(protocol, panel, retryCount) {{
                 if (!ENABLE_KEY_POOL || !protocol || !panel || panel.dataset.protocolLoaded === '1' || loading[protocol]) {{
                     return;
                 }}
+                retryCount = Number(retryCount || 0);
                 loading[protocol] = true;
                 panel.dataset.protocolLoading = '1';
                 fetch('/api/protocol_panel?proto=' + encodeURIComponent(protocol), {{
@@ -771,6 +789,13 @@ def render_web_scripts(
                         refreshPoolData(0, protocol);
                     }})
                     .catch(function(error) {{
+                        if (retryCount < 2 && !document.hidden) {{
+                            showLoadNotice(panel, 'Связь с веб-интерфейсом прервалась, повторяю загрузку...');
+                            window.setTimeout(function() {{
+                                loadPanel(protocol, panel, retryCount + 1);
+                            }}, 1200 + retryCount * 1800);
+                            return;
+                        }}
                         showLoadError(panel, error);
                     }})
                     .finally(function() {{

@@ -1,3 +1,8 @@
+<a name="1.911"></a>
+# [1.911] - 4 Jul 2026
+
+- Retries lazy protocol panel loading after transient fetch failures and replaces raw browser errors with a localised message, so flaky external access does not immediately strand the Keys view on an error card.
+
 <a name="1.910"></a>
 # [1.910] - 4 Jul 2026
 
