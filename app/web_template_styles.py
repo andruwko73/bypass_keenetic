@@ -169,7 +169,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);min-width:0;}
         .pool-import-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}
         .pool-import-form .field-label,.pool-import-form .field-hint,.pool-import-form textarea,.pool-import-form .subscription-hwid-toggle{grid-column:1 / -1;}
-        .pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:vertical;overflow:auto;}
+        .pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
         .pool-import-form button{justify-self:start;min-width:160px;height:var(--control-height);min-height:var(--control-height);padding:0 12px;white-space:nowrap;}
         .pool-clear-form{margin:0;display:flex;}
         .pool-clear-btn{height:100%;}
@@ -650,15 +650,15 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .key-editor-form textarea[data-key-textarea]{height:168px;min-height:168px;max-height:168px;}
             .protocol-subview-key.active{gap:8px;overflow:visible;}
             .protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;}
-            .protocol-subview-key .key-editor-form{display:grid;grid-template-columns:minmax(0,1fr) 180px;grid-template-rows:auto 44px;gap:6px 10px;align-items:stretch;}
+            .protocol-subview-key .key-editor-form{display:grid;grid-template-columns:minmax(0,1fr) 180px;grid-template-rows:auto auto;gap:6px 10px;align-items:start;}
             .protocol-subview-key .key-editor-form .field-label{grid-column:1 / -1;margin:0;line-height:1.1;}
-            .protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:44px;min-height:44px;max-height:44px;resize:none;white-space:nowrap;overflow:auto;}
-            .protocol-subview-key .key-editor-form .form-actions{grid-column:2;grid-row:2;margin:0;display:grid;align-items:stretch;}
+            .protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:72px;min-height:72px;max-height:none;resize:none;white-space:pre-wrap;overflow:hidden;overflow-wrap:anywhere;word-break:break-all;}
+            .protocol-subview-key .key-editor-form .form-actions{grid-column:2;grid-row:2;margin:0;display:grid;align-items:start;}
             .protocol-subview-key .key-editor-form .form-actions button{width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);padding:0 10px;}
             .pool-import-form{grid-template-columns:minmax(0,1fr) 180px;}
-            .pool-import-form textarea{grid-column:1;height:70px;min-height:70px;max-height:112px;resize:vertical;}
+            .pool-import-form textarea{grid-column:1;height:112px;min-height:112px;max-height:none;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
             .pool-import-form .subscription-hwid-toggle{grid-column:1;align-self:center;}
-            .pool-import-form button{grid-column:2;grid-row:3 / span 2;justify-self:stretch;width:100%;align-self:stretch;}
+            .pool-import-form button{grid-column:2;grid-row:3;justify-self:stretch;width:100%;align-self:start;}
             .list-workspace.active{height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;}
             .list-editor-form{height:100%;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto auto;gap:8px;align-content:stretch;}
             .list-editor-form textarea{height:100%;min-height:0;resize:none;}
@@ -783,12 +783,12 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-subview-check.active > .status-card .status-note{margin:0;min-width:0;}
             .protocol-subview-check.active > .status-card .status-note{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;}
             .key-editor-form textarea[data-key-textarea]{height:clamp(118px,24vh,188px);min-height:118px;max-height:188px;resize:vertical;}
-            .protocol-subview-key .key-editor-form{display:grid;grid-template-columns:minmax(0,1fr) 180px;grid-template-rows:auto 44px;gap:6px 10px;align-items:stretch;}
+            .protocol-subview-key .key-editor-form{display:grid;grid-template-columns:minmax(0,1fr) 180px;grid-template-rows:auto auto;gap:6px 10px;align-items:start;}
             .protocol-subview-key .key-editor-form .field-label{grid-column:1 / -1;margin:0;line-height:1.1;}
-            .protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:44px;min-height:44px;max-height:44px;resize:none;white-space:nowrap;overflow:auto;}
-            .protocol-subview-key .key-editor-form .form-actions{grid-column:2;grid-row:2;margin:0;display:grid;align-items:stretch;}
+            .protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:72px;min-height:72px;max-height:none;resize:none;white-space:pre-wrap;overflow:hidden;overflow-wrap:anywhere;word-break:break-all;}
+            .protocol-subview-key .key-editor-form .form-actions{grid-column:2;grid-row:2;margin:0;display:grid;align-items:start;}
             .protocol-subview-key .key-editor-form .form-actions button{width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);padding:0 10px;}
-            .protocol-subview-key .pool-import-form textarea{height:70px;min-height:70px;max-height:112px;}
+            .protocol-subview-key .pool-import-form textarea{height:112px;min-height:112px;max-height:none;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
             .custom-check-card{min-height:auto;}
             .list-workspace .workspace-head{align-items:center;margin-bottom:6px;}
             .list-workspace h2.inline-page-title{margin-bottom:3px;}
@@ -922,10 +922,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .key-status-badge{font-size:10px;padding:4px 7px;}
             .key-status-icons .service-icon-img{width:18px!important;height:18px!important;}
             .subtabs{grid-template-columns:repeat(2,minmax(0,1fr));}
+            .subtabs .subtab:nth-child(3):last-child{grid-column:1 / -1;}
             .subtab{height:var(--control-height);min-height:var(--control-height);padding:0 6px;}
             .key-editor-form textarea[data-key-textarea]{min-height:132px;max-height:34vh;resize:vertical;font-size:12px;line-height:1.32;}
             .protocol-subview-key .key-editor-form{display:grid;grid-template-columns:1fr;grid-template-rows:auto auto auto;gap:7px;}
-            .protocol-subview-key .key-editor-form textarea[data-key-textarea]{height:96px;min-height:96px;max-height:24vh;resize:vertical;white-space:normal;overflow:auto;}
+            .protocol-subview-key .key-editor-form textarea[data-key-textarea]{height:156px;min-height:156px;max-height:none;resize:none;white-space:pre-wrap;overflow:hidden;overflow-wrap:anywhere;word-break:break-all;}
             .protocol-subview-key .key-editor-form .form-actions{display:grid;grid-template-columns:1fr;margin-bottom:0;}
             .overview-key-panel .key-editor-form{display:grid;gap:8px;}
             .overview-key-panel textarea{min-height:96px;max-height:24vh;resize:vertical;}
@@ -937,7 +938,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-subview-key.active{gap:8px;overflow:visible;}
             .protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;}
             .pool-import-form{grid-template-columns:1fr;}
-            .pool-import-form textarea{min-height:96px;max-height:30vh;resize:vertical;}
+            .pool-import-form textarea{height:132px;min-height:132px;max-height:none;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
             .pool-import-form button{grid-column:1 / -1;justify-self:stretch;width:100%;}
             .pool-toolbar{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px;}
             .pool-toolbar form:last-child{grid-column:1 / -1;}

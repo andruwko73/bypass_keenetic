@@ -1,3 +1,11 @@
+<a name="1.916"></a>
+# [1.916] - 5 Jul 2026
+
+- Keeps active-key and key/subscription import textareas fully visible without internal horizontal or vertical scrolling on desktop and mobile.
+- Stretches the mobile protocol "Проверка" subtab across the full row and adds Playwright coverage for the layout.
+- Prevents a transient zero pool-summary payload from replacing an already-known checked pool result in the web UI.
+- Cleans the README capabilities list wording and removes internal implementation details from it.
+
 <a name="1.915"></a>
 # [1.915] - 5 Jul 2026
 

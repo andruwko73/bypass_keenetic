@@ -8262,9 +8262,11 @@ def test_web_template_styles_helpers():
     assert '.protocol-subview-key.active{display:grid;gap:8px;align-content:start;overflow:visible;}' in styles
     assert '.protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);min-width:0;}' in styles
     assert '.pool-import-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}' in styles
-    assert '.pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:vertical;overflow:auto;}' in styles
-    assert '.protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:44px;min-height:44px;max-height:44px;resize:none;white-space:nowrap;overflow:auto;}' in styles
-    assert '.pool-import-form button{grid-column:2;grid-row:3 / span 2;justify-self:stretch;width:100%;align-self:stretch;}' in styles
+    assert '.pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}' in styles
+    assert '.protocol-subview-key .key-editor-form{display:grid;grid-template-columns:minmax(0,1fr) 180px;grid-template-rows:auto auto;gap:6px 10px;align-items:start;}' in styles
+    assert '.protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:72px;min-height:72px;max-height:none;resize:none;white-space:pre-wrap;overflow:hidden;overflow-wrap:anywhere;word-break:break-all;}' in styles
+    assert '.subtabs .subtab:nth-child(3):last-child{grid-column:1 / -1;}' in styles
+    assert '.pool-import-form button{grid-column:2;grid-row:3;justify-self:stretch;width:100%;align-self:start;}' in styles
     assert '.health-meter.warn span' in styles
     assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
     assert '.topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,tg-icon");}' in styles
@@ -8860,6 +8862,10 @@ def test_web_template_scripts_helpers():
     assert 'function updatePoolProbeControls(active, paused)' in scripts
     assert 'function freshPoolProbeProgress(progress)' in scripts
     assert 'startedAt === previousStartedAt && checked < previousChecked' in scripts
+    assert 'let latestPoolSummary = null;' in scripts
+    assert 'function autoResizeTextarea(textarea)' in scripts
+    assert 'function stablePoolSummary(poolSummary, running, paused)' in scripts
+    assert 'latestChecked > 0 && checked === 0 && total >= latestTotal' in scripts
     assert 'function poolProbeSummaryText(progress, fallbackNote)' in scripts
     assert 'function pollPoolProbeStatus()' in scripts
     assert "fetch('/api/pool_probe'" in scripts

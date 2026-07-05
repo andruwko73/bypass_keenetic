@@ -48,6 +48,7 @@ def render_web_scripts(
         const pendingPoolDataProtocols = new Set();
         let poolDataRetryCount = {{}};
         let poolViewTimers = {{}};
+        let latestPoolSummary = null;
         let commandPollTimer = null;
         let commandTimer = null;
         let commandTimerState = null;
@@ -662,6 +663,29 @@ def render_web_scripts(
             }});
         }}
 
+        function autoResizeTextarea(textarea) {{
+            if (!textarea || textarea.dataset.noAutoResize === '1') {{
+                return;
+            }}
+            textarea.style.height = 'auto';
+            const minHeight = parseFloat(window.getComputedStyle(textarea).minHeight || '0') || 0;
+            textarea.style.height = Math.max(minHeight, textarea.scrollHeight) + 'px';
+        }}
+
+        function setupAutoResizeTextareas(root) {{
+            const scope = root || document;
+            scope.querySelectorAll('.protocol-subview-key textarea[data-key-textarea], .protocol-subview-key textarea[name="import_payload"]').forEach(function(textarea) {{
+                autoResizeTextarea(textarea);
+                if (textarea.dataset.autoResizeBound === '1') {{
+                    return;
+                }}
+                textarea.dataset.autoResizeBound = '1';
+                textarea.addEventListener('input', function() {{
+                    autoResizeTextarea(textarea);
+                }});
+            }});
+        }}
+
         function keysViewActive() {{
             const panel = document.querySelector('[data-view="keys"]');
             return !!(panel && panel.classList.contains('active'));
@@ -808,6 +832,7 @@ def render_web_scripts(
                         loadedPanel.classList.add('active');
                         loadedPanel.dataset.protocolLoaded = '1';
                         panel.replaceWith(loadedPanel);
+                        setupAutoResizeTextareas(loadedPanel);
                         setupProtocolSubtabs(loadedPanel);
                         setupPoolControls(loadedPanel);
                         setupServiceRouteMenus(loadedPanel);
@@ -892,6 +917,7 @@ def render_web_scripts(
                     }}
                     subview.innerHTML = String(payload.html || '');
                     panel.dataset.protocolCheckLoaded = '1';
+                    setupAutoResizeTextareas(subview);
                     setupServiceRouteMenus(subview);
                     setupAsyncForms(subview);
                 }})
@@ -1761,7 +1787,51 @@ def render_web_scripts(
             return summary;
         }}
 
+        function poolSummaryCheckedCount(poolSummary) {{
+            if (!poolSummary) {{
+                return 0;
+            }}
+            const direct = Number(poolSummary.checked_pool_count || 0);
+            if (direct > 0) {{
+                return direct;
+            }}
+            const note = String(poolSummary.note || '');
+            const match = note.match(/РџСЂРѕРІРµСЂРµРЅРѕ:\s*(\d+)/);
+            return match ? Number(match[1] || 0) : 0;
+        }}
+
+        function poolSummaryTotalCount(poolSummary) {{
+            if (!poolSummary) {{
+                return 0;
+            }}
+            const direct = Number(poolSummary.pool_total_count || 0);
+            if (direct > 0) {{
+                return direct;
+            }}
+            const note = String(poolSummary.note || '');
+            const match = note.match(/Р’ РїСѓР»Р°С…:\s*(\d+)/);
+            return match ? Number(match[1] || 0) : 0;
+        }}
+
+        function stablePoolSummary(poolSummary, running, paused) {{
+            if (!poolSummary) {{
+                return null;
+            }}
+            const checked = poolSummaryCheckedCount(poolSummary);
+            const total = poolSummaryTotalCount(poolSummary);
+            const latestChecked = poolSummaryCheckedCount(latestPoolSummary);
+            const latestTotal = poolSummaryTotalCount(latestPoolSummary);
+            if (!running && !paused && latestChecked > 0 && checked === 0 && total >= latestTotal && latestTotal > 0) {{
+                return latestPoolSummary;
+            }}
+            if (checked > 0 || total !== latestTotal || !latestPoolSummary) {{
+                latestPoolSummary = poolSummary;
+            }}
+            return poolSummary;
+        }}
+
         function updatePoolSummaryBlock(poolSummary, progress, running, paused) {{
+            poolSummary = stablePoolSummary(poolSummary, running, paused);
             if (!poolSummary) {{
                 return;
             }}
@@ -2785,6 +2855,7 @@ def render_web_scripts(
         }}
 
         function setupAsyncForms(root) {{
+            setupAutoResizeTextareas(root);
             if (!ENABLE_ASYNC_FORMS) {{
                 return;
             }}
@@ -2870,6 +2941,7 @@ def render_web_scripts(
                                 const textarea = card ? card.querySelector('[data-key-textarea]') : null;
                                 if (textarea) {{
                                     textarea.value = key;
+                                    autoResizeTextarea(textarea);
                                 }}
                             }}
                             if (ok && proto && action === 'pool-apply') {{
@@ -2878,7 +2950,9 @@ def render_web_scripts(
                                 const textarea = card ? card.querySelector('[data-key-textarea]') : null;
                                 if (textarea) {{
                                     textarea.value = '';
+                                    autoResizeTextarea(textarea);
                                     textarea.placeholder = 'Ключ применён из пула; значение скрыто в ответе. Обновите страницу, чтобы открыть активный ключ.';
+                                    autoResizeTextarea(textarea);
                                 }}
                             }}
                             if (payload.route_tools_html) {{

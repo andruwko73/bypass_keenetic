@@ -317,6 +317,27 @@ async function assertUnifiedImportLayout(page, label) {
     const keyTextarea = keyForm ? keyForm.querySelector('textarea[name="key"]') : null;
     const importTextarea = importForm ? importForm.querySelector('textarea[name="import_payload"]') : null;
     const importButton = importForm ? importForm.querySelector('button[type="submit"]') : null;
+    const setTextareaValue = (node, value) => {
+      if (!node) {
+        return;
+      }
+      node.value = value;
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    setTextareaValue(
+      keyTextarea,
+      'vless://fixture-active-' + 'a'.repeat(180) + '@example.test:443?security=reality&flow=xtls-rprx-vision#fixture-active-key'
+    );
+    setTextareaValue(
+      importTextarea,
+      [
+        'vless://fixture-import-' + 'b'.repeat(180) + '@example.test:443?security=reality#fixture-import-vless',
+        'vmess://fixture-import-vmess',
+        'trojan://fixture-import-trojan',
+        'ss://fixture-import-shadowsocks',
+        'https://sub.example.com/fixture'
+      ].join('\n')
+    );
     const rect = (node) => {
       if (!node) {
         return null;
@@ -331,6 +352,17 @@ async function assertUnifiedImportLayout(page, label) {
         height: Math.round(box.height),
       };
     };
+    const overflow = (node) => {
+      if (!node) {
+        return null;
+      }
+      return {
+        x: Math.round(node.scrollWidth - node.clientWidth),
+        y: Math.round(node.scrollHeight - node.clientHeight),
+        overflowX: window.getComputedStyle(node).overflowX,
+        overflowY: window.getComputedStyle(node).overflowY,
+      };
+    };
     const intersection = (a, b) => {
       if (!a || !b) {
         return 0;
@@ -339,6 +371,9 @@ async function assertUnifiedImportLayout(page, label) {
       const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
       return width * height;
     };
+    const protocolPanel = panel ? panel.closest('[data-protocol-panel]') : null;
+    const subtabWrap = protocolPanel ? protocolPanel.querySelector('.subtabs') : null;
+    const checkSubtab = subtabWrap ? subtabWrap.querySelector('[data-subview-target="check"]') : null;
     const panelRect = rect(panel);
     const keyRect = rect(keyForm);
     const importRect = rect(importForm);
@@ -352,6 +387,10 @@ async function assertUnifiedImportLayout(page, label) {
       keyTextarea: keyTextareaRect,
       importTextarea: importTextareaRect,
       importButton: buttonRect,
+      keyTextareaOverflow: overflow(keyTextarea),
+      importTextareaOverflow: overflow(importTextarea),
+      subtabWrap: rect(subtabWrap),
+      checkSubtab: rect(checkSubtab),
       panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : null,
       formOverlap: intersection(keyRect, importRect),
       keyTextareaInside: Boolean(keyRect && keyTextareaRect && keyTextareaRect.left >= keyRect.left - 1 && keyTextareaRect.right <= keyRect.right + 1),
@@ -373,8 +412,14 @@ async function assertUnifiedImportLayout(page, label) {
   if (!layout.keyTextareaInside || !layout.importTextareaInside || !layout.buttonInsideImport) {
     throw new Error(`${label}: key/import controls leave their card ${JSON.stringify(layout)}`);
   }
-  if (layout.viewportWidth >= 1024 && layout.keyTextarea.height > 72) {
-    throw new Error(`${label}: active key textarea is too tall for desktop ${JSON.stringify(layout)}`);
+  if (layout.keyTextareaOverflow && (layout.keyTextareaOverflow.x > 2 || layout.keyTextareaOverflow.y > 2)) {
+    throw new Error(`${label}: active key textarea has internal scroll ${JSON.stringify(layout)}`);
+  }
+  if (layout.importTextareaOverflow && (layout.importTextareaOverflow.x > 2 || layout.importTextareaOverflow.y > 2)) {
+    throw new Error(`${label}: import textarea has internal scroll ${JSON.stringify(layout)}`);
+  }
+  if (layout.viewportWidth < 720 && layout.subtabWrap && layout.checkSubtab && Math.abs(layout.checkSubtab.width - layout.subtabWrap.width) > 4) {
+    throw new Error(`${label}: check subtab is not full-row on mobile ${JSON.stringify(layout)}`);
   }
   if (layout.viewportWidth >= 1024 && layout.importButton.bottom > layout.viewportHeight + 2) {
     throw new Error(`${label}: import button is below desktop viewport ${JSON.stringify(layout)}`);

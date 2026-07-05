@@ -1,3 +1,7 @@
+*v1.916 (5 Jul 2026) -* main
+
+*Keeps the unified Key and subscription textareas visible without internal scrollbars, stretches the mobile Check tab across the full row, prevents transient zero pool summaries from replacing cached checked results, and cleans the README capabilities list.*
+
 *v1.915 (5 Jul 2026) -* main
 
 *Keeps the unified Key and subscription tab compact, keeps the startup topbar status neutral while Telegram polling is still being confirmed, and checks that the import button remains visible in UI smoke.*
