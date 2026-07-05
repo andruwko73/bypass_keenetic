@@ -1,3 +1,8 @@
+<a name="1.921"></a>
+# [1.921] - 5 Jul 2026
+
+- Reduces the update timer restart padding from 15 seconds to 5 seconds.
+
 <a name="1.920"></a>
 # [1.920] - 5 Jul 2026
 

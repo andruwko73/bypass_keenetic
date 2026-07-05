@@ -2361,7 +2361,7 @@ def render_web_scripts(
             const elapsed = commandElapsedSeconds(state);
             const expected = Math.max(0, Number(state.expected_seconds || 0));
             if (expected > 0) {{
-                const expectedWithRestart = expected + 15;
+                const expectedWithRestart = expected + 5;
                 if (elapsed <= expectedWithRestart + 90) {{
                     return 'Прошло ' + formatCommandDuration(elapsed) + ' · в среднем ' + formatCommandDuration(expectedWithRestart);
                 }}

@@ -1,3 +1,7 @@
+*v1.921 (5 Jul 2026) -* main
+
+*Reduces the update timer's displayed restart padding from 15 seconds to 5 seconds so the "average" estimate is less inflated.*
+
 *v1.920 (5 Jul 2026) -* main
 
 *Fixes the initial web page pool summary so it uses the saved key probe cache instead of showing zero checked keys before the live API refresh.*
