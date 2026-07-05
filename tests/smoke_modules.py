@@ -3572,6 +3572,8 @@ def test_youtube_edge_prefetch_runner_prefers_bot_config_over_legacy_config():
     source = source_path('youtube_edge_prefetch_runner.py').read_text(encoding='utf-8')
 
     assert "('/opt/etc', '/opt/etc/bot')" in source
+    assert 'while config_dir in sys.path:' in source
+    assert 'sys.path.remove(config_dir)' in source
     assert 'sys.path.insert(0, config_dir)' in source
 
 

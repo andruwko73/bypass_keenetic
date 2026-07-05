@@ -1,3 +1,9 @@
+<a name="1.919"></a>
+# [1.919] - 5 Jul 2026
+
+- Makes the YouTube prefetch runner force `/opt/etc/bot` ahead of legacy `/opt/etc` even when the runner starts as a script from `/opt/etc/bot`.
+- Keeps the active bot config authoritative for YouTube warm-up limits and URLs.
+
 <a name="1.918"></a>
 # [1.918] - 5 Jul 2026
 

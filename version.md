@@ -1,3 +1,7 @@
+*v1.919 (5 Jul 2026) -* main
+
+*Makes the YouTube prefetch runner force `/opt/etc/bot` ahead of legacy `/opt/etc` even when the runner starts as a script from `/opt/etc/bot`, so the active bot config is always used.*
+
 *v1.918 (5 Jul 2026) -* main
 
 *Fixes the YouTube prefetch runner config precedence so `/opt/etc/bot/bot_config.py` overrides the legacy `/opt/etc/bot_config.py`; this lets the new two-page/eight-host warm-up settings actually apply after update.*

@@ -9,7 +9,9 @@ from urllib.parse import urlparse
 import youtube_edge_prefetch
 
 for config_dir in ('/opt/etc', '/opt/etc/bot'):
-    if os.path.isdir(config_dir) and config_dir not in sys.path:
+    while config_dir in sys.path:
+        sys.path.remove(config_dir)
+    if os.path.isdir(config_dir):
         sys.path.insert(0, config_dir)
 
 try:
