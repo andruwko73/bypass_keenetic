@@ -1,3 +1,9 @@
+<a name="1.920"></a>
+# [1.920] - 5 Jul 2026
+
+- Fixes the initial web page pool summary so saved key probe results are shown immediately instead of transient zero counts.
+- Keeps lazy pool row loading intact while loading the lightweight probe cache only for the summary.
+
 <a name="1.919"></a>
 # [1.919] - 5 Jul 2026
 

@@ -3295,6 +3295,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _placeholder_status_snapshot(current_keys, include_pool_details=True)' in source
     assert '_placeholder_status_snapshot(current_keys, include_pool_details=False)' in source
     assert 'if not pool_enabled:\n            status_refresh_pending = False' in source
+    pool_form_context = source.split('def _web_pool_form_context', 1)[1].split('def _web_simple_form_context', 1)[0]
+    assert 'key_probe_cache = {}' in pool_form_context
+    assert '_pool_status_summary(current_keys, key_pools, None, custom_checks, route_states)' in pool_form_context
+    assert '_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)' not in pool_form_context
     assert "'refresh_status_caches_async': refresh_status_caches" in source
     assert "event_history_html=''" in source
     assert "allow_youtube_confirm=True" in source

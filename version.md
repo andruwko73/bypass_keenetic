@@ -1,3 +1,7 @@
+*v1.920 (5 Jul 2026) -* main
+
+*Fixes the initial web page pool summary so it uses the saved key probe cache instead of showing zero checked keys before the live API refresh.*
+
 *v1.919 (5 Jul 2026) -* main
 
 *Makes the YouTube prefetch runner force `/opt/etc/bot` ahead of legacy `/opt/etc` even when the runner starts as a script from `/opt/etc/bot`, so the active bot config is always used.*

@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.919, последнее изменение: 05.07.2026
+#  Файл: bot.py, Версия v1.920, последнее изменение: 05.07.2026
 
 import subprocess
 import os
@@ -12021,7 +12021,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         defer_pool_rows=True,
         defer_check_content=True,
     )
-    pool_summary = _pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)
+    pool_summary = _pool_status_summary(current_keys, key_pools, None, custom_checks, route_states)
     return {
         'custom_checks_json': json.dumps(_key_pool_web().web_custom_checks(custom_checks), ensure_ascii=False),
         'pool_summary': pool_summary,
