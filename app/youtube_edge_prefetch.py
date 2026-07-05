@@ -34,6 +34,7 @@ DEFAULT_WATCH_EDGE_MAX_HOSTS = 4
 DEFAULT_QUALITY_TARGET_MS = 1000
 DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS = 3600
 DEFAULT_QUALITY_MAX_CANDIDATES = 12
+GOOGLEVIDEO_EDGE_PREFIX_RE = re.compile(r'^rr[0-9a-z-]*---', re.IGNORECASE)
 QUALITY_CACHE_FIELDS = (
     'quality_last_checked',
     'quality_last_ok',
@@ -113,6 +114,26 @@ def youtube_owned_host(host):
     if host in YOUTUBE_OWNED_HOSTS:
         return True
     return any(host == suffix or host.endswith('.' + suffix) for suffix in YOUTUBE_OWNED_SUFFIXES)
+
+
+def googlevideo_edge_host(host):
+    normalized = normalize_hosts((host,))
+    if not normalized:
+        return False
+    host = normalized[0]
+    return host.endswith('.googlevideo.com') and bool(GOOGLEVIDEO_EDGE_PREFIX_RE.match(host))
+
+
+def route_member_for_candidate(address, host='', source=''):
+    address = str(address or '').strip()
+    if not is_public_ipv4(address):
+        return address
+    if googlevideo_edge_host(host):
+        try:
+            return str(ipaddress.ip_network(address + '/24', strict=False))
+        except Exception:
+            return address
+    return address
 
 
 def extract_watch_edge_hosts(text, *, max_hosts=DEFAULT_WATCH_EDGE_MAX_HOSTS):
@@ -310,6 +331,14 @@ def prune_cache(cache, *, now=None, ttl_seconds=DEFAULT_CACHE_TTL_SECONDS, max_e
         cleaned_entry = {
             'host': str((entry or {}).get('host') or '')[:96],
             'source': str((entry or {}).get('source') or '')[:40],
+            'route_member': str(
+                (entry or {}).get('route_member')
+                or route_member_for_candidate(
+                    address,
+                    (entry or {}).get('host'),
+                    (entry or {}).get('source'),
+                )
+            )[:64],
             'last_seen': int(last_seen or now),
             'hits': max(1, int((entry or {}).get('hits') or 1)),
         }
@@ -359,6 +388,7 @@ def _cache_candidate(cache, address, host, source, now):
     updated = {
         'host': str(host or entry.get('host') or '')[:96],
         'source': str(source or entry.get('source') or '')[:40],
+        'route_member': route_member_for_candidate(address, host or entry.get('host'), source or entry.get('source'))[:64],
         'last_seen': int(now),
         'hits': max(1, int(entry.get('hits') or 0) + 1),
     }
@@ -367,11 +397,14 @@ def _cache_candidate(cache, address, host, source, now):
 
 
 def _add_candidate(candidates, seen, address, host, source, from_cache=False, max_candidates=DEFAULT_MAX_CANDIDATES):
-    if address in seen or len(candidates) >= max_candidates:
+    member = route_member_for_candidate(address, host, source)
+    seen_key = member or address
+    if seen_key in seen or len(candidates) >= max_candidates:
         return
-    seen.add(address)
+    seen.add(seen_key)
     candidates.append({
         'address': address,
+        'route_member': member,
         'host': str(host or ''),
         'source': str(source or ''),
         'from_cache': bool(from_cache),
@@ -453,6 +486,16 @@ def collect_prefetch_candidates(
 
 def _target_sets(route_protocol):
     return ROUTE_IPSETS.get(str(route_protocol or '').strip().lower()) or ()
+
+
+def _target_sets_for_candidate(route_protocol, candidate):
+    protocol = str(route_protocol or '').strip().lower()
+    sets = list(_target_sets(protocol))
+    if googlevideo_edge_host((candidate or {}).get('host')):
+        for set_name in ROUTE_PRIORITY_IPSETS.get(protocol, ()):
+            if set_name not in sets:
+                sets.append(set_name)
+    return tuple(sets)
 
 
 def _other_sets(route_protocol):
@@ -568,6 +611,7 @@ def cached_restore_candidates(
             continue
         candidates.append({
             'address': address,
+            'route_member': str(entry.get('route_member') or route_member_for_candidate(address, host, entry.get('source')))[:64],
             'host': host,
             'source': str(entry.get('source') or 'cache')[:40],
             'from_cache': True,
@@ -668,10 +712,20 @@ def restore_cached_ipsets(
         address = str(candidate.get('address') or '').strip()
         if not is_public_ipv4(address):
             continue
+        member = str(
+            candidate.get('route_member') or route_member_for_candidate(
+                address,
+                candidate.get('host'),
+                candidate.get('source'),
+            )
+        ).strip()
+        if not member:
+            member = address
+        candidate_target_sets = _target_sets_for_candidate(protocol, candidate)
         missing_sets = []
-        for set_name in target_sets:
+        for set_name in candidate_target_sets:
             try:
-                present = bool(ipset_contains(set_name, address))
+                present = bool(ipset_contains(set_name, member))
             except Exception:
                 present = False
             if not present:
@@ -680,7 +734,7 @@ def restore_cached_ipsets(
             if remove_from_other_sets and (ipset_delete is not None or ipset_delete_overlaps is not None):
                 status['deleted_sets'] += _delete_from_other_sets(
                     protocol,
-                    address,
+                    member,
                     ipset_delete=ipset_delete,
                     ipset_delete_overlaps=ipset_delete_overlaps,
                 )
@@ -689,7 +743,7 @@ def restore_cached_ipsets(
         if remove_from_other_sets and (ipset_delete is not None or ipset_delete_overlaps is not None):
             status['deleted_sets'] += _delete_from_other_sets(
                 protocol,
-                address,
+                member,
                 ipset_delete=ipset_delete,
                 ipset_delete_overlaps=ipset_delete_overlaps,
             )
@@ -697,7 +751,7 @@ def restore_cached_ipsets(
         added_any = False
         for set_name in missing_sets:
             try:
-                result = ipset_add(set_name, address)
+                result = ipset_add(set_name, member)
                 ok = bool(result[0] if isinstance(result, tuple) else result)
             except Exception:
                 ok = False
@@ -707,7 +761,7 @@ def restore_cached_ipsets(
             else:
                 status['failed_sets'] += 1
         if added_any:
-            touched_addresses.add(address)
+            touched_addresses.add(member)
             if delete_conntrack is not None:
                 try:
                     delete_conntrack(address)
@@ -916,16 +970,26 @@ def prefetch_once(
         address = str(candidate.get('address') or '').strip()
         if not is_public_ipv4(address):
             continue
+        member = str(
+            candidate.get('route_member') or route_member_for_candidate(
+                address,
+                candidate.get('host'),
+                candidate.get('source'),
+            )
+        ).strip()
+        if not member:
+            member = address
         if protect_shared_google and not youtube_owned_host(candidate.get('host')):
             status['shared_candidates_skipped'] += 1
             continue
         quality_reject = ''
         if quality_enabled and quality_probe_existing:
             quality_reject = score_candidate(candidate, address)
+        candidate_target_sets = _target_sets_for_candidate(protocol, candidate)
         missing_sets = []
-        for set_name in target_sets:
+        for set_name in candidate_target_sets:
             try:
-                present = bool(ipset_contains(set_name, address))
+                present = bool(ipset_contains(set_name, member))
             except Exception:
                 present = False
             if not present:
@@ -936,7 +1000,7 @@ def prefetch_once(
             ):
                 status['deleted_sets'] += _delete_from_other_sets(
                     protocol,
-                    address,
+                    member,
                     ipset_delete=ipset_delete,
                     ipset_delete_overlaps=ipset_delete_overlaps,
                 )
@@ -951,7 +1015,7 @@ def prefetch_once(
         if remove_from_other_sets and (ipset_delete is not None or ipset_delete_overlaps is not None):
             status['deleted_sets'] += _delete_from_other_sets(
                 protocol,
-                address,
+                member,
                 ipset_delete=ipset_delete,
                 ipset_delete_overlaps=ipset_delete_overlaps,
             )
@@ -959,7 +1023,7 @@ def prefetch_once(
         added_any = False
         for set_name in missing_sets:
             try:
-                result = ipset_add(set_name, address)
+                result = ipset_add(set_name, member)
                 ok = bool(result[0] if isinstance(result, tuple) else result)
             except Exception:
                 ok = False
@@ -969,7 +1033,7 @@ def prefetch_once(
             else:
                 status['failed_sets'] += 1
         if added_any:
-            touched_addresses.add(address)
+            touched_addresses.add(member)
             if delete_conntrack is not None:
                 try:
                     delete_conntrack(address)

@@ -2271,8 +2271,8 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_watch_warm_enabled = True',
         'youtube_edge_watch_warm_urls = (',
         "'https://www.youtube.com/watch?v=jfKfPfyJRdk'",
-        'youtube_edge_watch_warm_max_pages = 1',
-        'youtube_edge_watch_warm_max_hosts = 4',
+        'youtube_edge_watch_warm_max_pages = 2',
+        'youtube_edge_watch_warm_max_hosts = 8',
         'youtube_edge_watch_warm_max_bytes = 900000',
         'youtube_edge_watch_warm_connect_timeout = 4',
         'youtube_edge_watch_warm_max_time = 10',
@@ -2291,8 +2291,8 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_prefetch_cache_restore_max_addresses = 16' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_cache_restore_require_quality_ok = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_watch_warm_max_pages = 1' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_watch_warm_max_hosts = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_pages = 2' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_light_cleanup_rss_kb = 66560' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -3694,8 +3694,80 @@ def test_youtube_edge_prefetch_priority_hosts_are_tried_before_cache():
     )
 
     assert candidates[0]['address'] == '173.194.188.72'
+    assert candidates[0]['route_member'] == '173.194.188.0/24'
     assert candidates[0]['source'] == 'watch'
     assert cache['entries']['173.194.188.72']['source'] == 'watch'
+    assert cache['entries']['173.194.188.72']['route_member'] == '173.194.188.0/24'
+
+
+def test_youtube_edge_prefetch_watch_googlevideo_adds_network_priority_route():
+    address = '173.194.5.1'
+    member = '173.194.5.0/24'
+    present = {
+        ('unblockvless', address),
+        ('unblockvlessudp', member),
+        ('unblockvlesspriority', member),
+    }
+    added = []
+    deleted = []
+
+    def overlaps(member_value, target_value):
+        try:
+            member_network = youtube_edge_prefetch.ipaddress.ip_network(member_value, strict=False)
+            target_network = youtube_edge_prefetch.ipaddress.ip_network(target_value, strict=False)
+        except Exception:
+            return False
+        return member_network.version == target_network.version and member_network.overlaps(target_network)
+
+    def ipset_contains(set_name, ip):
+        return (set_name, ip) in present
+
+    def ipset_add(set_name, ip):
+        present.add((set_name, ip))
+        added.append((set_name, ip))
+        return True, ''
+
+    def ipset_delete_overlaps(set_name, ip):
+        removed = [
+            (existing_set, existing_member)
+            for existing_set, existing_member in list(present)
+            if existing_set == set_name and overlaps(existing_member, ip)
+        ]
+        for item in removed:
+            present.discard(item)
+            deleted.append(item)
+        return len(removed)
+
+    def fake_getaddrinfo(host, port, family, socktype):
+        assert host == 'rr1---sn-2oaig5-5n.googlevideo.com'
+        return [(family, socktype, 0, '', (address, port))]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        status = youtube_edge_prefetch.prefetch_once(
+            route_protocol='vless2',
+            cache_path=str(Path(tmp) / 'youtube_edge_cache.json'),
+            hosts=(),
+            priority_hosts=('rr1---sn-2oaig5-5n.googlevideo.com',),
+            dns_servers=('local',),
+            ipset_contains=ipset_contains,
+            ipset_add=ipset_add,
+            ipset_delete_overlaps=ipset_delete_overlaps,
+            delete_conntrack=lambda ip: 1,
+            now_provider=lambda: 1_800_000,
+            max_resolved_addresses=1,
+            max_addresses_per_run=1,
+            getaddrinfo=fake_getaddrinfo,
+            run_command=lambda args, timeout: '',
+        )
+
+    assert status['ok'] is True
+    assert status['added_addresses'] == 1
+    assert ('unblockvless2', member) in added
+    assert ('unblockvless2udp', member) in added
+    assert ('unblockvless2priority', member) in added
+    assert ('unblockvless', address) in deleted
+    assert ('unblockvlessudp', member) in deleted
+    assert ('unblockvlesspriority', member) in deleted
 
 
 def test_youtube_edge_prefetch_adds_active_route_and_removes_overlaps():
@@ -4080,11 +4152,12 @@ def test_youtube_edge_prefetch_restores_only_quality_approved_cache():
     assert status['ok'] is True
     assert status['candidates'] == 1
     assert status['added_addresses'] == 1
-    assert ('unblockvless2', good_address) in added
-    assert ('unblockvless2udp', good_address) in added
-    assert ('unblockvlesspriority', good_address) in deleted
-    assert all(ip == good_address for _set_name, ip in added)
-    assert all(ip == good_address for _set_name, ip in deleted)
+    assert ('unblockvless2', '142.250.150.0/24') in added
+    assert ('unblockvless2udp', '142.250.150.0/24') in added
+    assert ('unblockvless2priority', '142.250.150.0/24') in added
+    assert ('unblockvlesspriority', '142.250.150.0/24') in deleted
+    assert all(ip == '142.250.150.0/24' for _set_name, ip in added)
+    assert all(ip == '142.250.150.0/24' for _set_name, ip in deleted)
     assert status['shared_candidates_skipped'] == 1
     assert status['cache_restore_skipped_recent_bad_quality'] == 1
     assert status['cache_restore_skipped_no_quality'] == 1
@@ -4179,7 +4252,10 @@ def test_youtube_edge_prefetch_runner_extends_existing_watch_urls():
     original_config = youtube_edge_prefetch_runner.config
     try:
         youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
-            youtube_edge_watch_warm_urls=('https://www.youtube.com/watch?v=aqz-KE-bpKQ',),
+            youtube_edge_watch_warm_urls=(
+                'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+                'https://www.youtube.com/live/MFpQKwwh29E',
+            ),
         )
 
         urls = youtube_edge_prefetch_runner.watch_urls_for_run()
@@ -4187,7 +4263,46 @@ def test_youtube_edge_prefetch_runner_extends_existing_watch_urls():
         youtube_edge_prefetch_runner.config = original_config
 
     assert urls[0] == 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
+    assert 'https://www.youtube.com/live/MFpQKwwh29E' in urls
     assert 'https://www.youtube.com/watch?v=jfKfPfyJRdk' in urls
+
+
+def test_youtube_edge_prefetch_runner_warms_two_watch_pages_by_default():
+    original_config = youtube_edge_prefetch_runner.config
+    original_fetch = youtube_edge_prefetch_runner._fetch_watch_page
+    calls = []
+
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_watch_warm_enabled=True,
+            youtube_edge_watch_warm_urls=(
+                'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+                'https://www.youtube.com/live/MFpQKwwh29E',
+            ),
+            youtube_edge_watch_warm_max_hosts=8,
+            youtube_edge_watch_warm_max_bytes=200000,
+            youtube_edge_watch_warm_connect_timeout=1,
+            youtube_edge_watch_warm_max_time=2,
+            localportvless='12000',
+        )
+
+        def fake_fetch(url, socks_port, **kwargs):
+            calls.append((url, socks_port, kwargs))
+            return f'https://rr{len(calls)}---sn-4g5ednsl.googlevideo.com/videoplayback'
+
+        youtube_edge_prefetch_runner._fetch_watch_page = fake_fetch
+
+        hosts, status = youtube_edge_prefetch_runner.collect_watch_edge_hosts('vless2')
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner._fetch_watch_page = original_fetch
+
+    assert len(calls) == 2
+    assert hosts == (
+        'rr1---sn-4g5ednsl.googlevideo.com',
+        'rr2---sn-4g5ednsl.googlevideo.com',
+    )
+    assert status['fetched_pages'] == 2
 
 
 def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():

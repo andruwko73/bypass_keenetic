@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.916
+# ВЕРСИЯ СКРИПТА v1.917
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -150,8 +150,8 @@ youtube_edge_watch_warm_urls = (
     'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
     'https://www.youtube.com/watch?v=jfKfPfyJRdk',
 )
-youtube_edge_watch_warm_max_pages = 1
-youtube_edge_watch_warm_max_hosts = 4
+youtube_edge_watch_warm_max_pages = 2
+youtube_edge_watch_warm_max_hosts = 8
 youtube_edge_watch_warm_max_bytes = 900000
 youtube_edge_watch_warm_connect_timeout = 4
 youtube_edge_watch_warm_max_time = 10

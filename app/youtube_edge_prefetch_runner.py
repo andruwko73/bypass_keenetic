@@ -29,8 +29,8 @@ WATCH_WARM_URLS = (
     'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
     'https://www.youtube.com/watch?v=jfKfPfyJRdk',
 )
-WATCH_WARM_MAX_PAGES = 1
-WATCH_WARM_MAX_HOSTS = 4
+WATCH_WARM_MAX_PAGES = 2
+WATCH_WARM_MAX_HOSTS = 8
 WATCH_WARM_MAX_BYTES = 900000
 WATCH_WARM_CONNECT_TIMEOUT = 4
 WATCH_WARM_MAX_TIME = 10
@@ -151,7 +151,9 @@ def _normalize_watch_urls(urls):
             continue
         if host not in ('www.youtube.com', 'm.youtube.com', 'youtube.com', 'youtu.be'):
             continue
-        if host != 'youtu.be' and not parsed.path.startswith('/watch'):
+        if host != 'youtu.be' and not (
+            parsed.path.startswith('/watch') or parsed.path.startswith('/live/')
+        ):
             continue
         if url in seen:
             continue
@@ -630,8 +632,21 @@ def _ipset_member_contains_address(member, address):
     return address_obj.version == network.version and address_obj in network
 
 
+def _ipset_member_overlaps_target(member, target):
+    try:
+        member_net = ipaddress.ip_network(str(member or '').strip(), strict=False)
+        target_net = ipaddress.ip_network(str(target or '').strip(), strict=False)
+    except Exception:
+        return False
+    return member_net.version == target_net.version and member_net.overlaps(target_net)
+
+
 def ipset_delete_overlaps(set_name, address):
-    if not youtube_edge_prefetch.is_public_ipv4(address):
+    try:
+        target_network = ipaddress.ip_network(str(address or '').strip(), strict=False)
+    except Exception:
+        return 0
+    if target_network.version != 4:
         return 0
     try:
         result = _run_command(['ipset', 'list', str(set_name)], timeout=3)
@@ -651,7 +666,7 @@ def ipset_delete_overlaps(set_name, address):
         if not in_members:
             continue
         member = line.split()[0]
-        if member == address or _ipset_member_contains_address(member, address):
+        if member == address or _ipset_member_overlaps_target(member, address):
             if ipset_delete(set_name, member):
                 deleted += 1
     return deleted

@@ -1129,14 +1129,14 @@ PYCFG
   grep -Eq '^youtube_vless2_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_vless2_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_urls[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ', 'https://www.youtube.com/watch?v=jfKfPfyJRdk')\n" >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*2([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_watch_warm_max_pages[[:space:]]*=.*/youtube_edge_watch_warm_max_pages = 1/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*1([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_pages[[:space:]]*=.*/youtube_edge_watch_warm_max_pages = 2/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 1\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=[[:space:]]*(6|8)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_watch_warm_max_hosts[[:space:]]*=.*/youtube_edge_watch_warm_max_hosts = 4/' "$BOT_CONFIG_PATH" || true
+  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 2\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=[[:space:]]*(4|6)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_hosts[[:space:]]*=.*/youtube_edge_watch_warm_max_hosts = 8/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 4\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 8\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=[[:space:]]*1800000([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^youtube_edge_watch_warm_max_bytes[[:space:]]*=.*/youtube_edge_watch_warm_max_bytes = 900000/' "$BOT_CONFIG_PATH" || true
   fi

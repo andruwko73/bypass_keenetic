@@ -1,3 +1,7 @@
+*v1.917 (5 Jul 2026) -* main
+
+*Improves YouTube warm-up for slow-start videos: live pages now participate in edge discovery, the default warm-up checks two watch/live pages, and observed googlevideo edge hosts are routed as limited /24 networks with current-protocol priority.*
+
 *v1.916 (5 Jul 2026) -* main
 
 *Keeps the unified Key and subscription textareas visible without internal scrollbars, stretches the mobile Check tab across the full row, prevents transient zero pool summaries from replacing cached checked results, and cleans the README capabilities list.*

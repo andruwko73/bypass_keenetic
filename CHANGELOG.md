@@ -1,3 +1,10 @@
+<a name="1.917"></a>
+# [1.917] - 5 Jul 2026
+
+- Improves YouTube warm-up for slow-start videos: live pages now participate in edge discovery.
+- Routes observed `rr*---*.googlevideo.com` edge hosts as limited `/24` networks through the active YouTube protocol and its priority ipset.
+- Restores cached YouTube edge networks after startup/update so warm routes survive runner restarts.
+
 <a name="1.916"></a>
 # [1.916] - 5 Jul 2026
 
