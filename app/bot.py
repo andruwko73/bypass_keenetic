@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.913, последнее изменение: 05.07.2026
+#  Файл: bot.py, Версия v1.914, последнее изменение: 05.07.2026
 
 import subprocess
 import os
@@ -10694,6 +10694,40 @@ def _add_keys_to_pool(proto, keys_text):
     return sum(len(added_keys) for added_keys in added_by_proto.values())
 
 
+def _import_keys_to_pools(proto, keys_text):
+    lines = [
+        line.strip()
+        for line in str(keys_text or '').splitlines()
+        if line.strip()
+    ]
+    supported_lines = [
+        line
+        for line in lines
+        if _key_pool_store().key_has_supported_scheme(line)
+    ]
+    unrecognized_count = max(0, len(lines) - len(supported_lines))
+    with key_pool_lock:
+        pools, added_by_proto = _key_pool_store().add_keys_to_pools_by_protocol(
+            _key_pool_store().load_key_pools(KEY_POOLS_PATH),
+            proto,
+            '\n'.join(supported_lines),
+        )
+        _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
+    for added_proto, added_keys in added_by_proto.items():
+        _probe_pool_keys_background(added_proto, added_keys)
+    _invalidate_pool_data_cache()
+    added_counts = {item: len(values) for item, values in added_by_proto.items() if values}
+    added_total = sum(added_counts.values())
+    return {
+        'input_count': len(lines),
+        'supported_count': len(supported_lines),
+        'added_total': added_total,
+        'added_by_proto': added_counts,
+        'duplicate_count': max(0, len(supported_lines) - added_total),
+        'unrecognized_count': unrecognized_count,
+    }
+
+
 def _subscription_active_key_is_working(proto, key_value):
     key_value = str(key_value or '').strip()
     if not key_value:
@@ -10773,6 +10807,39 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
         _probe_pool_keys_background(proto, added_keys)
     _invalidate_pool_data_cache()
     return pools, added_keys, removed_keys, managed_keys, retained_keys
+
+
+def _import_subscription_keys_to_pools(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None):
+    selected_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys)
+    pools, added_keys, removed_keys, managed_keys, retained_keys = _add_subscription_keys_to_pool(
+        proto,
+        fetched_keys,
+        sync_subscription=sync_subscription,
+        previous_managed_keys=previous_managed_keys,
+    )
+    selected_source = subscription_runtime.subscription_source_protocol(proto)
+    extra_lines = []
+    for source_proto, keys in (fetched_keys or {}).items():
+        if source_proto == selected_source:
+            continue
+        extra_lines.extend(_key_pool_store().dedupe_key_list(keys or []))
+    extra_summary = _import_keys_to_pools(proto, '\n'.join(extra_lines)) if extra_lines else {
+        'input_count': 0,
+        'supported_count': 0,
+        'added_total': 0,
+        'added_by_proto': {},
+        'duplicate_count': 0,
+        'unrecognized_count': 0,
+    }
+    return {
+        'selected_total': len(selected_keys),
+        'selected_added': len(added_keys),
+        'selected_duplicate_count': max(0, len(selected_keys) - len(added_keys)),
+        'removed_count': len(removed_keys),
+        'retained_count': len(retained_keys),
+        'managed_keys': managed_keys,
+        'extra': extra_summary,
+    }
 
 
 def _refresh_subscription_once(proto, record, *, source='auto'):
@@ -11709,6 +11776,7 @@ def _web_action_context():
             cancel_pool_probe=_cancel_pool_probe,
             resume_cancelled_pool_probe=_resume_cancelled_pool_probe,
             add_keys_to_pool=_add_keys_to_pool,
+            import_keys_to_pools=_import_keys_to_pools,
             delete_pool_key=_delete_pool_key,
             load_key_pools=_load_key_pools,
             hash_key=_hash_key,
@@ -11718,6 +11786,7 @@ def _web_action_context():
             fetch_keys_from_subscription=_fetch_keys_from_subscription,
             add_subscription_keys_to_pool=_key_pool_store().add_subscription_keys_to_pool,
             add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
+            import_subscription_keys_to_pools=_import_subscription_keys_to_pools,
             subscription_keys_for_protocol=subscription_runtime.subscription_keys_for_protocol,
             subscription_record=_subscription_record,
             save_subscription_record=_update_subscription_record,

@@ -387,11 +387,10 @@ def render_protocol_panel(
     safe_details = html.escape(_display_note_text(status_info.get('details', '')))
     pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_pending else ' aria-disabled="false"'
     pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_pending else ' disabled aria-disabled="true"'
-    subtabs = [('key', 'Ключ')]
+    subtabs = [('key', 'Ключ и подписка')]
     if enable_key_pool:
         subtabs.extend([
             ('pool', 'Пул ключей'),
-            ('subscription', 'Subscription'),
         ])
     if enable_key_pool or enable_custom_checks:
         subtabs.append(('check', 'Проверка'))
@@ -403,7 +402,7 @@ def render_protocol_panel(
         )
         subtabs_html = f'<div class="subtabs">{subtab_buttons}</div>'
     pool_subview_html = ''
-    subscription_subview_html = ''
+    import_form_html = ''
     if enable_key_pool:
         subscription_settings = subscription_settings or {}
         hwid_checked = ' checked' if subscription_settings.get('hwid_enabled') else ''
@@ -459,28 +458,20 @@ def render_protocol_panel(
                 </table>
             </div>
         </div>'''
-        subscription_subview_html = f'''
-        <div class="protocol-subview protocol-subview-import" data-subview="subscription">
-            <form method="post" action="/pool_add" class="pool-add-form" data-async-action="pool-add">
+        import_form_html = f'''
+            <form method="post" action="/pool_import" class="pool-import-form" data-async-action="pool-import">
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
-                <label class="field-label">Добавить ключи в пул</label>
-                <textarea name="keys" rows="4" placeholder="Вставьте ключи, каждый с новой строки"></textarea>
-                <button type="submit" class="secondary-button">Добавить в пул</button>
-            </form>
-            <form method="post" action="/pool_subscribe" class="pool-subscribe-form" data-async-action="pool-subscribe">
-                {csrf_input_html}
-                <input type="hidden" name="type" value="{safe_key_name}">
-                <label class="field-label">Загрузить subscription</label>
+                <label class="field-label">Импорт ключей и подписки</label>
+                <p class="field-hint">Вставьте один ключ, список ключей или ссылку subscription. Vless-ключи попадут в пул {safe_title}; остальные протоколы будут разложены по своим пулам.</p>
+                <textarea name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
                 <label class="subscription-hwid-toggle">
                     <input type="checkbox" class="subscription-switch-input" name="send_router_hwid" value="1"{hwid_checked}>
                     <span class="subscription-switch-ui" aria-hidden="true"></span>
                     <span class="subscription-hwid-label">Передавать HWID роутера</span>
                 </label>
-                <input type="url" name="url" placeholder="https://sub.example.com/...">
-                <button type="submit" class="secondary-button">Загрузить subscription</button>
-            </form>
-        </div>'''
+                <button type="submit" class="secondary-button">Импортировать</button>
+            </form>'''
     custom_check_card_html = ''
     if enable_custom_checks and not defer_check_content:
         preset_grid_html = (
@@ -551,7 +542,7 @@ def render_protocol_panel(
             <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons>{active_status_icons}</span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>
         </div>
         {subtabs_html}
-        <div class="protocol-subview active" data-subview="key">
+        <div class="protocol-subview protocol-subview-key active" data-subview="key">
             <form method="post" action="/install" data-async-action="install" class="key-editor-form">
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
@@ -561,9 +552,9 @@ def render_protocol_panel(
                     <button type="submit">Сохранить {safe_title}</button>
                 </div>
             </form>
+            {import_form_html}
         </div>
         {pool_subview_html}
-        {subscription_subview_html}
         {check_subview_html}
     </section>'''
 

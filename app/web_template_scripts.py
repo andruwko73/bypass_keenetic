@@ -2000,13 +2000,21 @@ def render_web_scripts(
 
         function webStatusIsPending(apiStatus) {{
             const text = String(apiStatus || '');
-            return [
+            const pending = [
                 'Проверяется связь текущего режима',
                 'Фоновая проверка связи выполняется',
                 'Telegram API не ответил вовремя',
                 'Статус обновится без перезагрузки страницы'
             ].some(function(marker) {{
                 return text.indexOf(marker) !== -1;
+            }});
+            return pending && !webStatusIsRealFailure(text);
+        }}
+
+        function webStatusIsRealFailure(apiStatus) {{
+            const lower = String(apiStatus || '').toLowerCase();
+            return ['❌', 'не проходит', 'ошибка', 'failed', 'error', 'max retries'].some(function(marker) {{
+                return lower.indexOf(marker) !== -1;
             }});
         }}
 
@@ -2031,6 +2039,9 @@ def render_web_scripts(
             }}
             const web = snapshot.web || {{}};
             const apiStatus = String(web.api_status || '').trim();
+            if (ENABLE_TELEGRAM && webStatusIsPending(apiStatus)) {{
+                return ['info', 'Статус обновляется', 'Проверяется актуальное состояние', botReady];
+            }}
             if (ENABLE_TELEGRAM && apiStatusRequiresAttention(apiStatus)) {{
                 return ['warn', 'Telegram API требует внимания', apiStatus, botReady];
             }}
@@ -2929,7 +2940,7 @@ def render_web_scripts(
                                     window.location.reload();
                                 }}, Number(payload.reload_after_ms) || 900);
                             }}
-                            const poolMutationAction = ['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe'].indexOf(action) !== -1;
+                            const poolMutationAction = ['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe', 'pool-import'].indexOf(action) !== -1;
                             if (action === 'pool-probe-cancel') {{
                                 refreshPoolData(1200);
                                 scheduleStatusPolling(15000);

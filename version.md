@@ -1,3 +1,7 @@
+*v1.914 (5 Jul 2026) -* main
+
+*Keeps transient Telegram API key-selection states neutral while live status polling resolves them, merges Key and Subscription into one protocol tab with a unified key/subscription import form, routes mixed imports to the correct protocol pools, and removes dead CSS for the old Subscription tab.*
+
 *v1.913 (5 Jul 2026) -* main
 
 *Moves runtime source files, router scripts, route lists and static assets into `app/`, while keeping the root installer/update entry points stable for existing GitHub installs and updates.*

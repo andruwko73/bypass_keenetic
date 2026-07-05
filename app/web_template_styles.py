@@ -155,12 +155,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .pool-delete-btn{padding:2px 8px;border:none;border-radius:6px;background:rgba(168,68,47,.2);color:#ffbeb2;font-size:13px;cursor:pointer;line-height:1.4;box-shadow:none;min-width:0;}
         .pool-delete-btn:hover{background:rgba(168,68,47,.4);filter:none;transform:none;}
         .pool-empty{color:var(--muted);justify-content:center;}
-        .pool-add-form{margin-top:8px;display:grid;gap:8px;}
-        .pool-add-actions{display:flex;gap:8px;}
-        .pool-add-actions button{padding:8px 14px;font-size:13px;}
-        .pool-subscribe-row{margin-top:8px;display:flex;align-items:stretch;gap:8px;}
-        .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;flex:1;}
-        .pool-subscribe-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;}
         .subscription-hwid-toggle{grid-column:1 / -1;display:inline-flex;align-items:center;justify-self:start;gap:8px;min-width:0;max-width:100%;color:var(--muted);font-size:12px;font-weight:700;line-height:1.15;white-space:normal;cursor:pointer;}
         .subscription-switch-input{position:absolute;width:1px!important;height:1px!important;min-width:0!important;margin:0;padding:0;border:0;opacity:0;overflow:hidden;clip:rect(0 0 0 0);}
         .subscription-switch-ui{position:relative;display:inline-flex;flex:none;width:34px;height:20px;border-radius:999px;border:1px solid rgba(159,176,200,.42);background:rgba(159,176,200,.18);transition:background-color .15s ease,border-color .15s ease;}
@@ -169,7 +163,14 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .subscription-switch-input:checked + .subscription-switch-ui::after{transform:translateX(14px);background:#96f1eb;}
         .subscription-switch-input:focus-visible + .subscription-switch-ui{box-shadow:0 0 0 3px rgba(78,216,205,.18);}
         .subscription-hwid-label{min-width:0;overflow-wrap:anywhere;}
-        .pool-subscribe-form button,.pool-clear-btn{height:var(--control-height);min-height:var(--control-height);padding:0 12px;font-size:13px;line-height:1.15;white-space:nowrap;}
+        .pool-clear-btn{height:var(--control-height);min-height:var(--control-height);padding:0 12px;font-size:13px;line-height:1.15;white-space:nowrap;}
+        .field-hint{grid-column:1 / -1;margin:0;color:var(--muted);font-size:12px;line-height:1.35;overflow-wrap:anywhere;}
+        .protocol-subview-key.active{display:grid;gap:10px;align-content:start;overflow:visible;}
+        .protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:9px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);min-width:0;}
+        .pool-import-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}
+        .pool-import-form .field-label,.pool-import-form .field-hint,.pool-import-form textarea,.pool-import-form .subscription-hwid-toggle{grid-column:1 / -1;}
+        .pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:vertical;overflow:auto;}
+        .pool-import-form button{justify-self:start;min-width:160px;height:var(--control-height);min-height:var(--control-height);padding:0 12px;white-space:nowrap;}
         .pool-clear-form{margin:0;display:flex;}
         .pool-clear-btn{height:100%;}
         .secondary-button{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;box-shadow:none;}
@@ -227,7 +228,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .protocol-lazy-placeholder{display:grid;gap:8px;min-height:190px;align-content:center;text-align:center;color:var(--muted);}
         .protocol-lazy-placeholder h2{margin:0;color:var(--text);}
         .workspace-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px;}
-        .subtabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;}
+        .subtabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;}
         .subtab{border-radius:0;border-right:1px solid var(--border);background:transparent;color:var(--muted);box-shadow:none;}
         .subtab:last-child{border-right:none;}
         .subtab.active{background:rgba(31,122,106,.2);color:var(--text);}
@@ -270,7 +271,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .pool-actions-cell{width:110px;}
         .pool-actions-cell form{display:block;}
         .pool-empty-row td{text-align:center;color:var(--muted);}
-        .pool-add-form,.pool-subscribe-form,.list-editor-form{margin-top:0;}
+        .list-editor-form{margin-top:0;}
         .overview-service-grid,.service-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
         .overview-service-grid{margin-top:12px;}
         .service-panel-wide{grid-column:1 / -1;}
@@ -418,17 +419,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .field-label{color:#9fb0c8;letter-spacing:.08em;font-size:11px;}
         .form-actions button{min-width:140px;}
         .protocol-subview.active{gap:10px;}
-        .protocol-subview-import.active{grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);align-items:start;}
-        .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{padding:9px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);}
-        .protocol-subview-import .pool-add-form{grid-template-columns:minmax(0,1fr) auto;align-items:end;}
-        .protocol-subview-import .pool-add-form .field-label{grid-column:1 / -1;}
-        .protocol-subview-import .pool-add-form textarea{min-height:68px;}
-        .protocol-subview-import .pool-add-form button{justify-self:start;min-width:150px;}
-        .protocol-subview-import .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,auto);grid-template-rows:auto auto auto;gap:7px;align-items:end;}
-        .protocol-subview-import .pool-subscribe-form .field-label{grid-column:1 / -1;}
-        .protocol-subview-import .pool-subscribe-form .subscription-hwid-toggle{grid-column:1 / -1;}
-        .protocol-subview-import .pool-subscribe-form > input[type="url"]{min-width:0;}
-        .protocol-subview-import .pool-subscribe-form button{white-space:nowrap;}
         .protocol-subview-check > form{justify-self:start;}
         .protocol-subview-check > form button{min-width:180px;}
         .pool-table{font-size:11px;}
@@ -591,7 +581,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .pool-table-wrap{max-height:min(54vh,460px);overflow-y:auto;overflow-x:hidden;}
         .protocol-subview[data-subview="pool"].active{min-height:0;grid-template-rows:auto auto auto;align-content:start;}
         .protocol-subview[data-subview="pool"].active .pool-table-wrap{min-height:0;}
-        .pool-table-wrap,.protocol-subview-import.active,.list-editor-form textarea,.key-editor-form textarea,textarea{scrollbar-gutter:stable;scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin;}
+        .pool-table-wrap,.list-editor-form textarea,.key-editor-form textarea,textarea{scrollbar-gutter:stable;scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:thin;}
         .app-shell{max-width:1600px;}
         .protocol-workspace.active{padding:9px;}
         .protocol-workspace .workspace-head{align-items:center;margin-bottom:6px;}
@@ -614,17 +604,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .pool-delete-icon{display:none;}
         .pool-delete-label{display:inline;}
         .pool-checked-cell,.pool-checked-head{white-space:nowrap;}
-        .protocol-subview-import.active{grid-template-columns:minmax(0,1fr) minmax(420px,.72fr);gap:8px;align-items:stretch;grid-auto-rows:minmax(148px,auto);}
-        .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:auto;min-height:148px;padding:8px;align-self:stretch;min-width:0;overflow:hidden;}
-        .protocol-subview-import .pool-add-form{display:grid;grid-template-columns:minmax(0,1fr) 150px;grid-template-rows:auto 66px;gap:7px;align-items:stretch;align-content:start;}
-        .protocol-subview-import .pool-add-form .field-label{grid-column:1 / -1;margin:0;}
-        .protocol-subview-import .pool-add-form textarea{grid-column:1;min-width:0;width:100%;max-width:100%;min-height:66px;height:66px;max-height:66px;resize:none;overflow:auto;}
-        .protocol-subview-import .pool-add-form button{grid-column:2;align-self:end;justify-self:stretch;width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);margin-top:0;}
-        .protocol-subview-import .pool-subscribe-form{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.9fr);grid-template-rows:auto auto 44px;gap:7px;align-content:start;align-items:end;}
-        .protocol-subview-import .pool-subscribe-form .field-label{grid-column:1 / -1;margin:0;}
-        .protocol-subview-import .pool-subscribe-form .subscription-hwid-toggle{grid-column:1 / -1;margin:0;}
-        .protocol-subview-import .pool-subscribe-form > input[type="url"]{height:var(--control-height);min-height:var(--control-height);align-self:end;}
-        .protocol-subview-import .pool-subscribe-form button{height:var(--control-height);min-height:var(--control-height);width:100%;padding:0 10px;white-space:nowrap;align-self:end;}
         @media (min-width: 1024px){
             html,body{height:100%;overflow:hidden;}
             body{padding:8px;}
@@ -669,7 +648,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-subview[data-subview="pool"].active{display:grid;grid-template-rows:auto auto auto;align-content:start;overflow:visible;}
             .pool-table-wrap{max-height:min(48vh,520px);height:auto;min-height:0;}
             .key-editor-form textarea[data-key-textarea]{height:168px;min-height:168px;max-height:168px;}
-            .protocol-subview-import.active{overflow:auto;}
+            .protocol-subview-key.active{gap:8px;overflow:visible;}
+            .protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;}
+            .pool-import-form{grid-template-columns:minmax(0,1fr) 180px;}
+            .pool-import-form textarea{height:82px;min-height:82px;max-height:132px;resize:vertical;}
+            .pool-import-form button{grid-column:2;justify-self:stretch;width:100%;align-self:end;}
             .list-workspace.active{height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;}
             .list-editor-form{height:100%;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto auto;gap:8px;align-content:stretch;}
             .list-editor-form textarea{height:100%;min-height:0;resize:none;}
@@ -683,7 +666,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active),
             .protocol-workspace.active:has(.protocol-subview[data-subview="key"].active),
             .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active){align-self:start;}
-            .protocol-subview-import.active{overflow:auto;align-self:stretch;}
         }
         @media (min-width: 761px) and (max-width: 1180px){
             body{padding:8px;}
@@ -757,11 +739,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .app-caption strong{font-size:14px;}
             .app-branch{font-size:10px;}
             .status-dashboard{gap:8px;}
-            .protocol-subview-import.active{grid-template-columns:1fr;grid-auto-rows:auto;overflow:visible;}
-            .protocol-subview-import .pool-add-form{grid-template-columns:minmax(0,1fr) minmax(136px,.34fr);grid-template-rows:auto 66px;min-height:0;}
-            .protocol-subview-import .pool-add-form textarea{min-width:0;width:100%;max-width:100%;}
-            .protocol-subview-import .pool-subscribe-form{grid-template-columns:1fr;grid-template-rows:auto auto auto auto;min-height:0;}
-            .protocol-subview-import .pool-subscribe-form > input[type="url"],.protocol-subview-import .pool-subscribe-form button{grid-column:1 / -1;width:100%;}
         }
         @media (min-width: 761px){
             .topbar{z-index:520;isolation:isolate;}
@@ -800,8 +777,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .protocol-subview-check.active > .status-card .status-note{margin:0;min-width:0;}
             .protocol-subview-check.active > .status-card .status-note{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;}
             .key-editor-form textarea[data-key-textarea]{height:clamp(118px,24vh,188px);min-height:118px;max-height:188px;resize:vertical;}
-            .protocol-subview-import.active{align-self:start;overflow:visible;align-items:stretch;}
-            .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:auto;min-height:148px;align-self:stretch;}
             .custom-check-card{min-height:auto;}
             .list-workspace .workspace-head{align-items:center;margin-bottom:6px;}
             .list-workspace h2.inline-page-title{margin-bottom:3px;}
@@ -943,14 +918,11 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .overview-key-panel .form-actions button{width:100%;min-width:0;}
             .key-editor-form .form-actions{margin-bottom:20px;}
             .key-editor-form .form-actions button{width:100%;}
-            .protocol-subview-import.active{grid-template-columns:1fr;grid-auto-rows:auto;overflow:visible;}
-            .protocol-subview-import .pool-add-form{grid-template-columns:1fr;}
-            .protocol-subview-import .pool-add-form .field-label{grid-column:auto;}
-            .protocol-subview-import .pool-add-form textarea,.protocol-subview-import .pool-add-form button{grid-column:1 / -1;}
-            .protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:auto;min-height:0;align-self:stretch;}
-            .protocol-subview-import .pool-subscribe-form{grid-template-columns:1fr;grid-template-rows:auto auto auto auto;padding-bottom:10px;}
-            .protocol-subview-import .pool-subscribe-form .subscription-hwid-toggle{grid-column:1 / -1;}
-            .protocol-subview-import .pool-subscribe-form > input[type="url"],.protocol-subview-import .pool-subscribe-form button{grid-column:1 / -1;width:100%;}
+            .protocol-subview-key.active{gap:8px;overflow:visible;}
+            .protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;}
+            .pool-import-form{grid-template-columns:1fr;}
+            .pool-import-form textarea{min-height:96px;max-height:30vh;resize:vertical;}
+            .pool-import-form button{grid-column:1 / -1;justify-self:stretch;width:100%;}
             .pool-toolbar{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px;}
             .pool-toolbar form:last-child{grid-column:1 / -1;}
             .pool-toolbar button{width:100%;}
@@ -1025,11 +997,6 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                         .command-grid{grid-template-columns:1fr;}
             .status-grid{grid-template-columns:1fr;}
                         .panel{padding:12px;border-radius:10px;}
-            .pool-subscribe-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:stretch;}
-            .pool-subscribe-form{display:contents;}
-            .pool-subscribe-form input{grid-column:1 / -1;}
-            .protocol-subview-import .pool-subscribe-form{display:grid;}
-            .protocol-subview-import .pool-subscribe-form > input[type="url"]{grid-column:auto;}
             .command-grid{grid-template-columns:1fr 1fr;gap:10px;}
             .command-grid.service-command-grid{grid-template-columns:1fr;}
             .command-grid button{height:var(--control-height);min-height:var(--control-height);font-size:13px;}
@@ -1174,8 +1141,8 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         [data-theme="light"] .segmented,
         [data-theme="light"] .subtabs,
         [data-theme="light"] .pool-table-wrap,
-        [data-theme="light"] .protocol-subview-import .pool-add-form,
-        [data-theme="light"] .protocol-subview-import .pool-subscribe-form,
+        [data-theme="light"] .protocol-subview-key .key-editor-form,
+        [data-theme="light"] .protocol-subview-key .pool-import-form,
         [data-theme="light"] .custom-check-card,
         [data-theme="light"] .route-profile-panel,
         [data-theme="light"] .service-route-tools,

@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import urlsplit
 
 
 PROXY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
@@ -396,6 +397,126 @@ def _pool_add(ctx, data):
     return _result(result, success=success, extra=_pool_payload(ctx))
 
 
+def _is_subscription_input(value):
+    try:
+        parsed = urlsplit(str(value or '').strip())
+    except Exception:
+        return False
+    return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+
+
+def _format_added_counts(added_by_proto):
+    if not added_by_proto:
+        return ''
+    order = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+    parts = [
+        f'{proto}: {int(added_by_proto.get(proto) or 0)}'
+        for proto in order
+        if int(added_by_proto.get(proto) or 0) > 0
+    ]
+    return ', '.join(parts)
+
+
+def _format_key_import_result(summary):
+    summary = summary or {}
+    parts = []
+    added_text = _format_added_counts(summary.get('added_by_proto') or {})
+    if added_text:
+        parts.append(f'добавлено: {added_text}')
+    else:
+        parts.append('новых ключей не добавлено')
+    duplicate_count = int(summary.get('duplicate_count') or 0)
+    unrecognized_count = int(summary.get('unrecognized_count') or 0)
+    if duplicate_count:
+        parts.append(f'дубли/уже были: {duplicate_count}')
+    if unrecognized_count:
+        parts.append(f'не распознано: {unrecognized_count}')
+    return 'Импорт ключей: ' + '; '.join(parts)
+
+
+def _format_subscription_import_result(proto, summary):
+    summary = summary or {}
+    parts = [f'{proto}: добавлено {int(summary.get("selected_added") or 0)}']
+    selected_duplicate_count = int(summary.get('selected_duplicate_count') or 0)
+    if selected_duplicate_count:
+        parts.append(f'{proto}: дубли/уже были {selected_duplicate_count}')
+    extra = summary.get('extra') or {}
+    extra_added = _format_added_counts(extra.get('added_by_proto') or {})
+    if extra_added:
+        parts.append(f'другие протоколы: {extra_added}')
+    extra_duplicate_count = int(extra.get('duplicate_count') or 0)
+    if extra_duplicate_count:
+        parts.append(f'другие протоколы, дубли/уже были: {extra_duplicate_count}')
+    removed_count = int(summary.get('removed_count') or 0)
+    retained_count = int(summary.get('retained_count') or 0)
+    if removed_count:
+        parts.append(f'удалено устаревших: {removed_count}')
+    if retained_count:
+        parts.append(f'сохранено активных рабочих: {retained_count}')
+    return 'Subscription загружена; ' + '; '.join(parts)
+
+
+def _pool_import(ctx, data):
+    proto = form_value(data, 'type')
+    success = True
+    try:
+        if proto not in PROXY_PROTOCOLS:
+            raise ValueError('Неизвестный протокол')
+        payload = first_form_value(data, ('import_payload', 'keys', 'url')).strip()
+        if not payload:
+            raise ValueError('Вставьте ключ, список ключей или ссылку subscription')
+        non_empty_lines = [line.strip() for line in payload.splitlines() if line.strip()]
+        if len(non_empty_lines) == 1 and _is_subscription_input(non_empty_lines[0]):
+            subscription_url = non_empty_lines[0]
+            send_router_hwid = form_value(data, 'send_router_hwid').lower() in ('1', 'on', 'true', 'yes')
+            fetched, error = _ctx(ctx, 'fetch_keys_from_subscription')(
+                subscription_url,
+                use_router_hwid=send_router_hwid,
+            )
+            if error:
+                raise ValueError(error)
+            subscription_keys_for_protocol = _ctx(ctx, 'subscription_keys_for_protocol')
+            selected_keys = subscription_keys_for_protocol(proto, fetched) if subscription_keys_for_protocol else []
+            import_subscription = _ctx(ctx, 'import_subscription_keys_to_pools')
+            if not import_subscription:
+                raise ValueError('Единый импорт subscription недоступен')
+            previous_record = {}
+            subscription_record = _ctx(ctx, 'subscription_record')
+            if subscription_record:
+                previous_record = subscription_record(proto) or {}
+            summary = import_subscription(
+                proto,
+                fetched,
+                sync_subscription=bool(send_router_hwid and selected_keys),
+                previous_managed_keys=previous_record.get('managed_keys', []),
+            )
+            save_subscription_record = _ctx(ctx, 'save_subscription_record')
+            if save_subscription_record and selected_keys:
+                save_subscription_record(
+                    proto,
+                    url=subscription_url.strip(),
+                    hwid_enabled=send_router_hwid,
+                    last_attempt_at=time.time(),
+                    last_success_at=time.time(),
+                    last_error='',
+                    managed_keys=summary.get('managed_keys', []) if send_router_hwid and selected_keys else [],
+                )
+            result = _format_subscription_import_result(proto, summary)
+        else:
+            import_keys = _ctx(ctx, 'import_keys_to_pools')
+            if import_keys:
+                summary = import_keys(proto, payload)
+            else:
+                added = _ctx(ctx, 'add_keys_to_pool')(proto, payload)
+                summary = {'added_by_proto': {proto: added}, 'duplicate_count': 0, 'unrecognized_count': 0}
+            result = _format_key_import_result(summary)
+        _invalidate_status(ctx)
+    except Exception as exc:
+        success = False
+        result = f'Ошибка импорта: {exc}'
+    return _result(result, success=success, extra=_pool_payload(ctx))
+
+
 def _pool_delete(ctx, data):
     proto = form_value(data, 'type')
     success = True
@@ -611,7 +732,7 @@ def dispatch(ctx, path, data):
         '/service_profile_apply',
         '/route_intersections_resolve',
     }
-    pool_actions = {'/pool_probe', '/pool_probe_cancel', '/pool_add', '/pool_delete', '/pool_apply', '/pool_clear', '/pool_subscribe'}
+    pool_actions = {'/pool_probe', '/pool_probe_cancel', '/pool_add', '/pool_import', '/pool_delete', '/pool_apply', '/pool_clear', '/pool_subscribe'}
     if path in custom_actions and not _ctx(ctx, 'custom_checks_enabled', False):
         return None
     if path in pool_actions and not _ctx(ctx, 'pool_actions_enabled', False):
@@ -643,6 +764,7 @@ def dispatch(ctx, path, data):
         '/pool_probe': _pool_probe,
         '/pool_probe_cancel': _pool_probe_cancel,
         '/pool_add': _pool_add,
+        '/pool_import': _pool_import,
         '/pool_delete': _pool_delete,
         '/pool_apply': _pool_apply,
         '/pool_clear': _pool_clear,

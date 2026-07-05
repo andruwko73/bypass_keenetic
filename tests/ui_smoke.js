@@ -309,13 +309,14 @@ async function assertActivePoolRowPinned(page, protocol, label) {
   }
 }
 
-async function assertSubscriptionImportLayout(page, label) {
+async function assertUnifiedImportLayout(page, label) {
   const layout = await page.evaluate(() => {
-    const panel = document.querySelector('[data-protocol-panel="vless2"].active [data-subview="subscription"].active');
-    const addForm = panel ? panel.querySelector('.pool-add-form') : null;
-    const subscribeForm = panel ? panel.querySelector('.pool-subscribe-form') : null;
-    const textarea = addForm ? addForm.querySelector('textarea[name="keys"]') : null;
-    const addButton = addForm ? addForm.querySelector('button[type="submit"]') : null;
+    const panel = document.querySelector('[data-protocol-panel="vless2"].active [data-subview="key"].active');
+    const keyForm = panel ? panel.querySelector('.key-editor-form') : null;
+    const importForm = panel ? panel.querySelector('.pool-import-form') : null;
+    const keyTextarea = keyForm ? keyForm.querySelector('textarea[name="key"]') : null;
+    const importTextarea = importForm ? importForm.querySelector('textarea[name="import_payload"]') : null;
+    const importButton = importForm ? importForm.querySelector('button[type="submit"]') : null;
     const rect = (node) => {
       if (!node) {
         return null;
@@ -339,34 +340,36 @@ async function assertSubscriptionImportLayout(page, label) {
       return width * height;
     };
     const panelRect = rect(panel);
-    const addRect = rect(addForm);
-    const subscribeRect = rect(subscribeForm);
-    const textareaRect = rect(textarea);
-    const buttonRect = rect(addButton);
+    const keyRect = rect(keyForm);
+    const importRect = rect(importForm);
+    const keyTextareaRect = rect(keyTextarea);
+    const importTextareaRect = rect(importTextarea);
+    const buttonRect = rect(importButton);
     return {
       panel: panelRect,
-      addForm: addRect,
-      subscribeForm: subscribeRect,
-      textarea: textareaRect,
-      addButton: buttonRect,
+      keyForm: keyRect,
+      importForm: importRect,
+      keyTextarea: keyTextareaRect,
+      importTextarea: importTextareaRect,
+      importButton: buttonRect,
       panelOverflow: panel ? panel.scrollWidth - panel.clientWidth : null,
-      formOverlap: intersection(addRect, subscribeRect),
-      textareaSubscribeOverlap: intersection(textareaRect, subscribeRect),
-      textareaInsideAdd: Boolean(addRect && textareaRect && textareaRect.left >= addRect.left - 1 && textareaRect.right <= addRect.right + 1),
-      buttonInsideAdd: Boolean(addRect && buttonRect && buttonRect.left >= addRect.left - 1 && buttonRect.right <= addRect.right + 1),
+      formOverlap: intersection(keyRect, importRect),
+      keyTextareaInside: Boolean(keyRect && keyTextareaRect && keyTextareaRect.left >= keyRect.left - 1 && keyTextareaRect.right <= keyRect.right + 1),
+      importTextareaInside: Boolean(importRect && importTextareaRect && importTextareaRect.left >= importRect.left - 1 && importTextareaRect.right <= importRect.right + 1),
+      buttonInsideImport: Boolean(importRect && buttonRect && buttonRect.left >= importRect.left - 1 && buttonRect.right <= importRect.right + 1),
     };
   });
-  if (!layout.panel || !layout.addForm || !layout.subscribeForm || !layout.textarea || !layout.addButton) {
-    throw new Error(`${label}: subscription import layout is missing nodes ${JSON.stringify(layout)}`);
+  if (!layout.panel || !layout.keyForm || !layout.importForm || !layout.keyTextarea || !layout.importTextarea || !layout.importButton) {
+    throw new Error(`${label}: unified import layout is missing nodes ${JSON.stringify(layout)}`);
   }
   if (layout.panelOverflow > 2) {
-    throw new Error(`${label}: subscription import overflows horizontally ${JSON.stringify(layout)}`);
+    throw new Error(`${label}: unified import overflows horizontally ${JSON.stringify(layout)}`);
   }
-  if (layout.formOverlap > 2 || layout.textareaSubscribeOverlap > 2) {
-    throw new Error(`${label}: subscription import blocks overlap ${JSON.stringify(layout)}`);
+  if (layout.formOverlap > 2) {
+    throw new Error(`${label}: key and import blocks overlap ${JSON.stringify(layout)}`);
   }
-  if (!layout.textareaInsideAdd || !layout.buttonInsideAdd) {
-    throw new Error(`${label}: add-key controls leave their card ${JSON.stringify(layout)}`);
+  if (!layout.keyTextareaInside || !layout.importTextareaInside || !layout.buttonInsideImport) {
+    throw new Error(`${label}: key/import controls leave their card ${JSON.stringify(layout)}`);
   }
 }
 
@@ -566,11 +569,15 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     await assertActivePoolRowPinned(page, 'vless2', `${name} original pool order`);
     await assertPoolKeysAreMasked(page, `${name} lazy keys`);
     await assertNoBrokenImages(page, `${name} lazy keys`);
-    await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="subscription"]').click();
-    await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-subview="subscription"].active', `${name} vless2 subscription tab`);
-    await assertSubscriptionImportLayout(page, `${name} vless2 subscription import`);
+    await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="key"]').click();
+    await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-subview="key"].active', `${name} vless2 key and subscription tab`);
+    const subtabCount = await page.locator('[data-protocol-panel="vless2"].active [data-subview-target]').count();
+    if (subtabCount !== 3) {
+      throw new Error(`${name}: expected 3 protocol subtabs, got ${subtabCount}`);
+    }
+    await assertUnifiedImportLayout(page, `${name} vless2 unified import`);
   } else {
-    const poolOnlyControls = await page.locator('[data-pool-filter], .pool-toolbar, [data-subview-target="pool"], [data-subview-target="check"], .service-route-tools').count();
+    const poolOnlyControls = await page.locator('[data-pool-filter], .pool-toolbar, [data-subview-target="pool"], [data-subview-target="check"], .service-route-tools, .pool-import-form').count();
     if (poolOnlyControls) {
       throw new Error(`${name}: pool-only controls are rendered in simple mode`);
     }

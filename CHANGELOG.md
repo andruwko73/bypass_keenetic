@@ -1,3 +1,10 @@
+<a name="1.914"></a>
+# [1.914] - 5 Jul 2026
+
+- Shows transient Telegram API key-selection states as a neutral refresh status while live status polling resolves them, keeping real Telegram/API errors as warnings.
+- Merges the protocol Key and Subscription tabs into "Key and subscription" with one import form for key lists and subscription URLs; Vless imports stay in the open Vless pool and other protocols go to their own pools.
+- Removes dead CSS for the old Subscription tab and extends Python and Playwright smoke coverage for the unified import layout.
+
 <a name="1.913"></a>
 # [1.913] - 5 Jul 2026
 

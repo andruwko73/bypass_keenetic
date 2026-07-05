@@ -62,6 +62,32 @@ def _api_status_requires_attention(api_status):
     return not any(marker in lowered for marker in ok_markers)
 
 
+def _api_status_is_pending_refresh(api_status):
+    text = str(api_status or '').strip()
+    if not text:
+        return False
+    lowered = text.casefold()
+    pending_markers = (
+        'telegram api не ответил вовремя',
+        'программа подбирает рабочий ключ',
+        'статус обновится без перезагрузки страницы',
+        'проверяется связь текущего режима',
+        'фоновая проверка связи выполняется',
+    )
+    real_failure_markers = (
+        '❌',
+        'не проходит',
+        'ошибка',
+        'failed',
+        'error',
+        'max retries',
+    )
+    return (
+        any(marker in lowered for marker in pending_markers) and
+        not any(marker in lowered for marker in real_failure_markers)
+    )
+
+
 def _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram=True):
     items = []
     status = status or {}
@@ -95,6 +121,11 @@ def _topbar_status_item(status, router_health, pool_summary_note, enable_key_poo
     status = status or {}
     override_text = str(topbar_status_text or '').strip()
     api_status = str(status.get('api_status') or '').strip()
+    if enable_telegram and bot_polling and (
+        _api_status_is_pending_refresh(api_status) or
+        _api_status_is_pending_refresh(override_text)
+    ):
+        return 'info', 'Статус обновляется', 'Проверяется актуальное состояние'
     if enable_telegram and bot_ready and not bot_polling:
         pending_text = api_status if (
             _api_status_requires_attention(api_status) and
@@ -107,6 +138,8 @@ def _topbar_status_item(status, router_health, pool_summary_note, enable_key_poo
         )
         return 'warn', 'Telegram API требует внимания', pending_text
     if override_text and override_text != api_status:
+        if _api_status_is_pending_refresh(override_text):
+            return 'info', 'Статус обновляется', 'Проверяется актуальное состояние'
         tone = 'warn' if any(marker in override_text.casefold() for marker in ('ошибка', 'не работает', 'failed', 'error')) else 'info'
         return tone, 'Статус обновляется', override_text
 

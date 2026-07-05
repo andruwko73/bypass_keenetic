@@ -1283,6 +1283,14 @@ def test_key_pool_subscription_helpers():
     assert mixed_pools['vmess'] == [vmess_key]
     assert mixed_pools['trojan'] == [TROJAN_KEY]
     assert mixed_pools['shadowsocks'] == [SS_KEY]
+    vless1_pools, vless1_added_by_proto = key_pool_store.add_keys_to_pools_by_protocol(
+        {'vless': [], 'vless2': []},
+        'vless',
+        vless_key,
+    )
+    assert vless1_added_by_proto == {'vless': [vless_key]}
+    assert vless1_pools['vless'] == [vless_key]
+    assert vless1_pools['vless2'] == []
     repaired, moved = key_pool_store.repair_key_pool_protocols(
         {'vless2': [vless_key, vmess_key, TROJAN_KEY, SS_KEY]}
     )
@@ -1913,6 +1921,81 @@ def test_web_post_actions_helpers():
         invalidate_web_status_cache=lambda: None,
         invalidate_key_status_cache=lambda: None,
     )
+    import_calls = []
+    pool_ctx.update(
+        import_keys_to_pools=lambda proto, payload: import_calls.append((proto, payload)) or {
+            'added_by_proto': {'vless2': 1, 'vmess': 1},
+            'duplicate_count': 1,
+            'unrecognized_count': 1,
+        }
+    )
+    sample_vless_uri = 'vless' + '://one'
+    sample_vmess_uri = 'vmess' + '://two'
+    subscription_vless_uri = 'vless' + '://sub'
+    old_vless_uri = 'vless' + '://old'
+    subscription_trojan_uri = 'trojan' + '://sub'
+    import_result = web_post_actions.dispatch(
+        pool_ctx,
+        '/pool_import',
+        {'type': ['vless2'], 'import_payload': [f'{sample_vless_uri}\n{sample_vmess_uri}\nnot-a-key']},
+    )
+    assert import_result['success'] is True
+    assert import_calls and import_calls[0][0] == 'vless2'
+    assert 'добавлено: vless2: 1, vmess: 1' in import_result['result']
+    assert 'дубли/уже были: 1' in import_result['result']
+    assert 'не распознано: 1' in import_result['result']
+    assert sample_vless_uri not in import_result['result']
+    assert sample_vmess_uri not in import_result['result']
+    subscription_calls = []
+    subscription_saves = []
+    pool_ctx.update(
+        fetch_keys_from_subscription=lambda url, **kwargs: ({'vless': [subscription_vless_uri], 'trojan': [subscription_trojan_uri]}, ''),
+        subscription_keys_for_protocol=lambda proto, fetched: fetched.get('vless', []) if proto == 'vless2' else fetched.get(proto, []),
+        subscription_record=lambda proto: {'managed_keys': [old_vless_uri]},
+        save_subscription_record=lambda proto, **updates: subscription_saves.append((proto, updates)),
+        import_subscription_keys_to_pools=lambda proto, fetched, **kwargs: subscription_calls.append((proto, kwargs)) or {
+            'selected_added': 1,
+            'selected_duplicate_count': 0,
+            'removed_count': 0,
+            'retained_count': 0,
+            'managed_keys': [subscription_vless_uri],
+            'extra': {'added_by_proto': {'trojan': 1}, 'duplicate_count': 0, 'unrecognized_count': 0},
+        },
+    )
+    subscription_result = web_post_actions.dispatch(
+        pool_ctx,
+        '/pool_import',
+        {'type': ['vless2'], 'import_payload': ['https://subscription.example.test/path'], 'send_router_hwid': ['1']},
+    )
+    assert subscription_result['success'] is True
+    assert subscription_calls and subscription_calls[0][0] == 'vless2'
+    assert subscription_calls[0][1]['sync_subscription'] is True
+    assert subscription_calls[0][1]['previous_managed_keys'] == [old_vless_uri]
+    assert subscription_saves and subscription_saves[0][0] == 'vless2'
+    assert subscription_saves[0][1]['hwid_enabled'] is True
+    assert subscription_saves[0][1]['managed_keys'] == [subscription_vless_uri]
+    assert 'другие протоколы: trojan: 1' in subscription_result['result']
+    assert 'subscription.example.test' not in subscription_result['result']
+    subscription_saves.clear()
+    pool_ctx.update(
+        fetch_keys_from_subscription=lambda url, **kwargs: ({'trojan': [subscription_trojan_uri]}, ''),
+        import_subscription_keys_to_pools=lambda proto, fetched, **kwargs: {
+            'selected_added': 0,
+            'selected_duplicate_count': 0,
+            'removed_count': 0,
+            'retained_count': 0,
+            'managed_keys': [],
+            'extra': {'added_by_proto': {'trojan': 1}, 'duplicate_count': 0, 'unrecognized_count': 0},
+        },
+    )
+    no_selected_subscription_result = web_post_actions.dispatch(
+        pool_ctx,
+        '/pool_import',
+        {'type': ['vless2'], 'import_payload': ['https://subscription.example.test/other'], 'send_router_hwid': ['1']},
+    )
+    assert no_selected_subscription_result['success'] is True
+    assert subscription_saves == []
+    assert 'другие протоколы: trojan: 1' in no_selected_subscription_result['result']
     delete_result = web_post_actions.dispatch(pool_ctx, '/pool_delete', {'type': ['vless'], 'key_id': ['id-two-1234']})
     assert delete_result['success'] is True
     assert deleted == [('vless', 'vless://two')]
@@ -7799,6 +7882,12 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'protocol-workspace active' in panel
     assert 'vless://sample' in panel
+    assert 'Ключ и подписка' in panel
+    assert 'data-subview-target="subscription"' not in panel
+    assert 'action="/pool_import"' in panel
+    assert 'class="pool-import-form"' in panel
+    assert 'name="import_payload"' in panel
+    assert 'Импорт ключей и подписки' in panel
     assert 'pool-sort-control' in panel
     assert 'data-pool-sort-value="telegram"' in panel
     assert 'data-pool-sort-value="quality"' in panel
@@ -7891,6 +7980,7 @@ def test_web_pool_form_blocks_helpers():
         enable_custom_checks=False,
     )
     assert 'Пул ключей' not in main_panel
+    assert 'pool-import-form' not in main_panel
     assert 'custom-check-form' not in main_panel
     tabs_html, panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         [('vless', 'Vless 1', 3, 'vless://...')],
@@ -8168,9 +8258,12 @@ def test_web_template_styles_helpers():
     assert '--surface:#e7ebf0;' in styles
     assert '.pool-apply-btn{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;justify-content:flex-start;gap:6px;}' in styles
     assert '.pool-apply-btn{display:flex;width:100%;font-size:10.5px;line-height:1.18;text-align:left;justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;gap:4px;}' in styles
-    assert '.protocol-subview-import .pool-add-form,.protocol-subview-import .pool-subscribe-form{height:auto;min-height:148px;padding:8px;align-self:stretch;min-width:0;overflow:hidden;}' in styles
-    assert '.protocol-subview-import .pool-add-form textarea{grid-column:1;min-width:0;width:100%;max-width:100%;min-height:66px;height:66px;max-height:66px;resize:none;overflow:auto;}' in styles
-    assert '.protocol-subview-import .pool-add-form textarea,.protocol-subview-import .pool-add-form button{grid-column:1 / -1;}' in styles
+    assert '.subtabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));' in styles
+    assert '.protocol-subview-key.active{display:grid;gap:10px;align-content:start;overflow:visible;}' in styles
+    assert '.protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:9px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);min-width:0;}' in styles
+    assert '.pool-import-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}' in styles
+    assert '.pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:vertical;overflow:auto;}' in styles
+    assert '.pool-import-form button{grid-column:1 / -1;justify-self:stretch;width:100%;}' in styles
     assert '.health-meter.warn span' in styles
     assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
     assert '.topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,tg-icon");}' in styles
@@ -8672,6 +8765,9 @@ def test_web_template_scripts_helpers():
     assert "setPoolBodyMessage(proto, 'Загружаю пул ключей...', true)" in scripts
     assert "refreshPoolData(3000, retryProtocols)" in scripts
     assert 'function webStatusIsPending(apiStatus)' in scripts
+    assert 'function webStatusIsRealFailure(apiStatus)' in scripts
+    assert 'return pending && !webStatusIsRealFailure(text);' in scripts
+    assert "return ['info', 'Статус обновляется', 'Проверяется актуальное состояние', botReady];" in scripts
     assert 'function scheduleStatusPolling(durationMs, initialDelayMs)' in scripts
     assert 'const initialDelay = Math.max(0, Number(initialDelayMs || 0));' in scripts
     assert 'scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS)' in scripts
@@ -8768,7 +8864,7 @@ def test_web_template_scripts_helpers():
     assert "fetch('/api/pool_probe'" in scripts
     assert 'function applyPoolProbeStatusPayload(payload)' in scripts
     assert 'function refreshStatusSoon(delayMs, durationMs)' in scripts
-    assert "['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe']" in scripts
+    assert "['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe', 'pool-import']" in scripts
     assert 'schedulePoolProbePolling(1200)' in scripts
     assert "setOptionalText('pool-summary-note', progressSummary)" in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
@@ -8984,6 +9080,27 @@ def test_web_form_template_smoke():
     assert 'Telegram API требует внимания' in pending_page
     assert 'Программа подбирает рабочий ключ из пула текущего режима' in pending_page
     assert 'Telegram API отвечает' not in pending_page
+    neutral_pending = web_form_template._topbar_status_item(
+        {'api_status': '⏳ Telegram API не ответил вовремя через текущий режим. Программа подбирает рабочий ключ из пула текущего режима; статус обновится без перезагрузки страницы'},
+        {'used_percent': 58},
+        '',
+        True,
+        enable_telegram=True,
+        bot_ready=True,
+        bot_polling=True,
+    )
+    assert neutral_pending == ('info', 'Статус обновляется', 'Проверяется актуальное состояние')
+    warning_failure = web_form_template._topbar_status_item(
+        {'api_status': '❌ Доступ к Telegram API через режим vless не проходит: техническая ошибка записана в лог'},
+        {'used_percent': 58},
+        '',
+        True,
+        enable_telegram=True,
+        bot_ready=True,
+        bot_polling=True,
+    )
+    assert warning_failure[0] == 'warn'
+    assert warning_failure[1] == 'Telegram API требует внимания'
     running_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',
