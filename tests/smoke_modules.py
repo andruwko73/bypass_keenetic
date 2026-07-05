@@ -3568,6 +3568,13 @@ def test_youtube_edge_prefetch_runner_detects_current_youtube_route(tmp_path):
     assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir)) == 'vmess'
 
 
+def test_youtube_edge_prefetch_runner_prefers_bot_config_over_legacy_config():
+    source = source_path('youtube_edge_prefetch_runner.py').read_text(encoding='utf-8')
+
+    assert "('/opt/etc', '/opt/etc/bot')" in source
+    assert 'sys.path.insert(0, config_dir)' in source
+
+
 def test_youtube_edge_prefetch_cache_is_bounded_and_public_only():
     now = 1_800_000
     cache = {

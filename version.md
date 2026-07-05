@@ -1,3 +1,7 @@
+*v1.918 (5 Jul 2026) -* main
+
+*Fixes the YouTube prefetch runner config precedence so `/opt/etc/bot/bot_config.py` overrides the legacy `/opt/etc/bot_config.py`; this lets the new two-page/eight-host warm-up settings actually apply after update.*
+
 *v1.917 (5 Jul 2026) -* main
 
 *Improves YouTube warm-up for slow-start videos: live pages now participate in edge discovery, the default warm-up checks two watch/live pages, and observed googlevideo edge hosts are routed as limited /24 networks with current-protocol priority.*

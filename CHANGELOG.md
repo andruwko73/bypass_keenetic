@@ -1,3 +1,9 @@
+<a name="1.918"></a>
+# [1.918] - 5 Jul 2026
+
+- Fixes YouTube prefetch runner config precedence so `/opt/etc/bot/bot_config.py` overrides the legacy `/opt/etc/bot_config.py`.
+- Ensures the new two-page/eight-host YouTube warm-up settings are actually used after update.
+
 <a name="1.917"></a>
 # [1.917] - 5 Jul 2026
 
