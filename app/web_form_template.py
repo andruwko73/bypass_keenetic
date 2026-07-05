@@ -121,22 +121,17 @@ def _topbar_status_item(status, router_health, pool_summary_note, enable_key_poo
     status = status or {}
     override_text = str(topbar_status_text or '').strip()
     api_status = str(status.get('api_status') or '').strip()
-    if enable_telegram and bot_polling and (
+    pending_refresh = (
         _api_status_is_pending_refresh(api_status) or
         _api_status_is_pending_refresh(override_text)
-    ):
+    )
+    if enable_telegram and pending_refresh:
         return 'info', 'Статус обновляется', 'Проверяется актуальное состояние'
     if enable_telegram and bot_ready and not bot_polling:
-        pending_text = api_status if (
-            _api_status_requires_attention(api_status) and
-            'Программа подбирает рабочий ключ из пула текущего режима' in api_status
-        ) else (
-            'Telegram API не ответил вовремя через текущий режим. '
-            'Программа подбирает рабочий ключ из пула текущего режима; '
-            'если подходящих кандидатов нет, повторит проверку позже. '
-            'Статус обновится без перезагрузки страницы'
-        )
-        return 'warn', 'Telegram API требует внимания', pending_text
+        failure_text = override_text or api_status
+        if failure_text and _api_status_requires_attention(failure_text):
+            return 'warn', 'Telegram API требует внимания', failure_text
+        return 'info', 'Статус обновляется', 'Проверяется актуальное состояние'
     if override_text and override_text != api_status:
         if _api_status_is_pending_refresh(override_text):
             return 'info', 'Статус обновляется', 'Проверяется актуальное состояние'

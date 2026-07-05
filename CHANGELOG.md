@@ -1,3 +1,10 @@
+<a name="1.915"></a>
+# [1.915] - 5 Jul 2026
+
+- Makes the unified "Key and subscription" tab compact on desktop and mobile: the active key editor no longer consumes the whole panel, and the import button stays visible in the first screen of the tab.
+- Keeps the topbar on the neutral "Status is updating" state while Telegram polling is still being confirmed, instead of flashing a false Telegram warning during page load.
+- Adds Playwright smoke coverage for the compact active-key editor height and visible import button.
+
 <a name="1.914"></a>
 # [1.914] - 5 Jul 2026
 

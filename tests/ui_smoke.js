@@ -357,6 +357,8 @@ async function assertUnifiedImportLayout(page, label) {
       keyTextareaInside: Boolean(keyRect && keyTextareaRect && keyTextareaRect.left >= keyRect.left - 1 && keyTextareaRect.right <= keyRect.right + 1),
       importTextareaInside: Boolean(importRect && importTextareaRect && importTextareaRect.left >= importRect.left - 1 && importTextareaRect.right <= importRect.right + 1),
       buttonInsideImport: Boolean(importRect && buttonRect && buttonRect.left >= importRect.left - 1 && buttonRect.right <= importRect.right + 1),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
     };
   });
   if (!layout.panel || !layout.keyForm || !layout.importForm || !layout.keyTextarea || !layout.importTextarea || !layout.importButton) {
@@ -370,6 +372,12 @@ async function assertUnifiedImportLayout(page, label) {
   }
   if (!layout.keyTextareaInside || !layout.importTextareaInside || !layout.buttonInsideImport) {
     throw new Error(`${label}: key/import controls leave their card ${JSON.stringify(layout)}`);
+  }
+  if (layout.viewportWidth >= 1024 && layout.keyTextarea.height > 72) {
+    throw new Error(`${label}: active key textarea is too tall for desktop ${JSON.stringify(layout)}`);
+  }
+  if (layout.viewportWidth >= 1024 && layout.importButton.bottom > layout.viewportHeight + 2) {
+    throw new Error(`${label}: import button is below desktop viewport ${JSON.stringify(layout)}`);
   }
 }
 

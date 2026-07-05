@@ -1,3 +1,7 @@
+*v1.915 (5 Jul 2026) -* main
+
+*Keeps the unified Key and subscription tab compact, keeps the startup topbar status neutral while Telegram polling is still being confirmed, and checks that the import button remains visible in UI smoke.*
+
 *v1.914 (5 Jul 2026) -* main
 
 *Keeps transient Telegram API key-selection states neutral while live status polling resolves them, merges Key and Subscription into one protocol tab with a unified key/subscription import form, routes mixed imports to the correct protocol pools, and removes dead CSS for the old Subscription tab.*

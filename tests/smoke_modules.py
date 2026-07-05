@@ -8259,11 +8259,12 @@ def test_web_template_styles_helpers():
     assert '.pool-apply-btn{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;justify-content:flex-start;gap:6px;}' in styles
     assert '.pool-apply-btn{display:flex;width:100%;font-size:10.5px;line-height:1.18;text-align:left;justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;gap:4px;}' in styles
     assert '.subtabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));' in styles
-    assert '.protocol-subview-key.active{display:grid;gap:10px;align-content:start;overflow:visible;}' in styles
-    assert '.protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:9px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);min-width:0;}' in styles
+    assert '.protocol-subview-key.active{display:grid;gap:8px;align-content:start;overflow:visible;}' in styles
+    assert '.protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);min-width:0;}' in styles
     assert '.pool-import-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}' in styles
     assert '.pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:vertical;overflow:auto;}' in styles
-    assert '.pool-import-form button{grid-column:1 / -1;justify-self:stretch;width:100%;}' in styles
+    assert '.protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:44px;min-height:44px;max-height:44px;resize:none;white-space:nowrap;overflow:auto;}' in styles
+    assert '.pool-import-form button{grid-column:2;grid-row:3 / span 2;justify-self:stretch;width:100%;align-self:stretch;}' in styles
     assert '.health-meter.warn span' in styles
     assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
     assert '.topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,tg-icon");}' in styles
@@ -9026,8 +9027,10 @@ def test_web_form_template_smoke():
         bot_polling=False,
     )
     assert 'Telegram-бот работает' not in process_without_polling_page
-    assert 'Telegram API требует внимания' in process_without_polling_page
-    assert 'Программа подбирает рабочий ключ из пула текущего режима' in process_without_polling_page
+    assert 'Статус обновляется' in process_without_polling_page
+    assert 'Проверяется актуальное состояние' in process_without_polling_page
+    assert 'Telegram API требует внимания' not in process_without_polling_page
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' not in process_without_polling_page
     assert 'Telegram API отвечает' not in process_without_polling_page
     assert 'topbar-status-icon-telegram' not in process_without_polling_page
     assert 'data-bot-ready="true"' in process_without_polling_page
@@ -9077,8 +9080,10 @@ def test_web_form_template_smoke():
         bot_ready=True,
         bot_polling=False,
     )
-    assert 'Telegram API требует внимания' in pending_page
-    assert 'Программа подбирает рабочий ключ из пула текущего режима' in pending_page
+    assert 'Статус обновляется' in pending_page
+    assert 'Проверяется актуальное состояние' in pending_page
+    assert 'Telegram API требует внимания' not in pending_page
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' not in pending_page
     assert 'Telegram API отвечает' not in pending_page
     neutral_pending = web_form_template._topbar_status_item(
         {'api_status': '⏳ Telegram API не ответил вовремя через текущий режим. Программа подбирает рабочий ключ из пула текущего режима; статус обновится без перезагрузки страницы'},
@@ -9087,7 +9092,7 @@ def test_web_form_template_smoke():
         True,
         enable_telegram=True,
         bot_ready=True,
-        bot_polling=True,
+        bot_polling=False,
     )
     assert neutral_pending == ('info', 'Статус обновляется', 'Проверяется актуальное состояние')
     warning_failure = web_form_template._topbar_status_item(
