@@ -1,3 +1,7 @@
+*v1.923 (6 Jul 2026) -* main
+
+*Keeps the unblock scheduler alive with a lightweight cron tick instead of forcing a full ipset refresh every 15 minutes, reducing routine CPU spikes while preserving explicit refresh/update behavior.*
+
 *v1.922 (6 Jul 2026) -* main
 
 *Keeps Telegram auto-failover quiet while polling is healthy and no confirmed failure is pending, avoiding the per-minute high-RSS guard and cleanup churn while still letting confirmed Telegram failures start key recovery immediately.*

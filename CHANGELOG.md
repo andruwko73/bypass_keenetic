@@ -1,3 +1,9 @@
+<a name="1.923"></a>
+# [1.923] - 6 Jul 2026
+
+- Changes the background unblock cron job from forced `refresh` to lightweight `tick`, so the scheduler is kept alive without rebuilding all ipset sets every 15 minutes.
+- Keeps explicit `refresh` available for manual/update paths while routine background work only runs when the existing freshness checks say it is due.
+
 <a name="1.922"></a>
 # [1.922] - 6 Jul 2026
 

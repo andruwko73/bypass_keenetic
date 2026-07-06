@@ -759,10 +759,21 @@ run_scheduler_loop() {
     done
 }
 
+run_tick() {
+    cleanup_orphan_schedulers
+    if ! is_running; then
+        start_scheduler
+        return 0
+    fi
+    run_refresh_if_due
+    run_youtube_edge_prefetch_if_due
+    run_runtime_dedupe
+}
+
 start_scheduler() {
     cleanup_orphan_schedulers
     if is_running; then
-        exit 0
+        return 0
     fi
     mkdir -p "$(dirname "$PID_FILE")" 2>/dev/null || true
     "$0" scheduler &
@@ -798,6 +809,9 @@ case "$1" in
         run_youtube_edge_prefetch_if_due
         run_runtime_dedupe
         ;;
+    tick)
+        run_tick
+        ;;
     status)
         if is_running; then
             echo "bypass unblock scheduler is running."
@@ -807,7 +821,7 @@ case "$1" in
         fi
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|refresh|status}"
+        echo "Usage: $0 {start|stop|restart|refresh|tick|status}"
         exit 1
         ;;
 esac
