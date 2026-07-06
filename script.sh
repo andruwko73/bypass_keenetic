@@ -942,6 +942,7 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_bot_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^auto_failover_idle_log_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_idle_log_interval_seconds = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> "$BOT_CONFIG_PATH"
@@ -992,6 +993,7 @@ migrate_runtime_config_defaults() {
     grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
+    grep -Eq '^auto_failover_idle_log_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'auto_failover_idle_log_interval_seconds = 900\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> /opt/etc/bot_config.py

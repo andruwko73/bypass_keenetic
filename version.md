@@ -1,3 +1,7 @@
+*v1.922 (6 Jul 2026) -* main
+
+*Keeps Telegram auto-failover quiet while polling is healthy and no confirmed failure is pending, avoiding the per-minute high-RSS guard and cleanup churn while still letting confirmed Telegram failures start key recovery immediately.*
+
 *v1.921 (5 Jul 2026) -* main
 
 *Reduces the update timer's displayed restart padding from 15 seconds to 5 seconds so the "average" estimate is less inflated.*

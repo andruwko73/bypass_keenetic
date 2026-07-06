@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.921
+# ВЕРСИЯ СКРИПТА v1.922
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -198,6 +198,7 @@ reality_endpoint_repair_enabled = True  # перед сменой Reality-клю
 reality_endpoint_repair_max_candidates = 6
 reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')
 auto_failover_startup_hold_seconds = 180  # после рестарта бот не переключает Telegram-ключи, пока Xray и маршруты стабилизируются
+auto_failover_idle_log_interval_seconds = 900  # log healthy idle Telegram failover gate rarely; confirmed failures still trigger immediately
 youtube_vless2_failover_enabled = True  # YouTube остается на Vless 2: если текущий Vless2 ключ перестал отвечать, бот подберет другой из пула Vless2
 auto_failover_consecutive_failures = 3  # switch Telegram key only after repeated confirmed failures
 auto_failover_traffic_guard_bypass_failures = 3  # allow Telegram failover through traffic guard after repeated confirmed failures

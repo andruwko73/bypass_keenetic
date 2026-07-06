@@ -2154,6 +2154,9 @@ def test_codex_version_matches_commit_count():
     assert 'auto_failover_recent_success_ttl = 900' in example
     assert 'auto_failover_recent_success_ttl = 900' in installer
     assert 'auto_failover_recent_success_ttl = 900' in bootstrap
+    assert 'auto_failover_idle_log_interval_seconds = 900' in example
+    assert 'auto_failover_idle_log_interval_seconds = 900' in installer
+    assert 'auto_failover_idle_log_interval_seconds = 900' in bootstrap
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
@@ -3191,6 +3194,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_malloc_trim_enabled = True' in script_source
     assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
     assert 'background_task_max_bot_rss_kb = 66560' in script_source
+    assert 'auto_failover_idle_log_interval_seconds = 900' in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
     assert 'youtube_edge_prefetch_enabled = True' in script_source
     assert 'youtube_edge_prefetch_max_rss_kb = 66560' in script_source
@@ -3327,7 +3331,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bypassing traffic guard after' in source
     assert 'def _auto_failover_log' in source
     assert "'auto_failover_confirm_fail'" in source
-    assert "allow_high_rss=True" in source
+    assert 'def _auto_failover_should_run' in source
+    assert 'def _mark_auto_failover_polling_ok' in source
+    assert "return False, 'Telegram polling is healthy'" in source
+    assert "allow_high_rss=reason in ('pending failure', 'Telegram polling stopped')" in source
+    assert "if ran:\n                    _memory_cleanup('Telegram auto-failover cycle'" in source
+    assert "auto_failover_idle_log_interval_seconds', 900" in source
     assert 'recent_failure_backoff_seconds=AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS' in source
     assert 'skip_failed_candidates=True' in source
     assert 'def _mark_active_telegram_failure' in source

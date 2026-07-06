@@ -1,3 +1,9 @@
+<a name="1.922"></a>
+# [1.922] - 6 Jul 2026
+
+- Keeps Telegram auto-failover idle while Telegram polling is healthy and no confirmed failure is pending.
+- Runs the high-RSS guard and post-cycle cleanup only when Telegram recovery actually has work to do, reducing idle CPU/RSS churn without disabling emergency key recovery.
+
 <a name="1.921"></a>
 # [1.921] - 5 Jul 2026
 

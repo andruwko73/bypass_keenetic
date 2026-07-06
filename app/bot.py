@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.921, последнее изменение: 05.07.2026
+#  Файл: bot.py, Версия v1.922, последнее изменение: 06.07.2026
 
 import subprocess
 import os
@@ -751,6 +751,10 @@ SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1 = max(
 )
 AUTO_FAILOVER_GRACE_SECONDS = int(getattr(config, 'auto_failover_grace_seconds', 180))
 AUTO_FAILOVER_POLL_SECONDS = int(getattr(config, 'auto_failover_poll_seconds', 60))
+AUTO_FAILOVER_IDLE_LOG_INTERVAL_SECONDS = max(
+    300,
+    int(getattr(config, 'auto_failover_idle_log_interval_seconds', 900)),
+)
 AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(getattr(config, 'auto_failover_switch_cooldown_seconds', 180))
 AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT = float(getattr(config, 'auto_failover_check_connect_timeout', 2))
 AUTO_FAILOVER_CHECK_READ_TIMEOUT = float(getattr(config, 'auto_failover_check_read_timeout', 3))
@@ -790,6 +794,7 @@ auto_failover_state = {
     'last_fail': 0.0,
     'last_failure_message': '',
     'last_attempt': 0.0,
+    'last_idle_log': 0.0,
     'consecutive_failures': 0,
     'in_progress': False,
 }
@@ -1350,15 +1355,54 @@ def _auto_failover_has_pending_failure():
     return bool(last_fail or str(auto_failover_state.get('last_failure_message') or '').strip())
 
 
+def _mark_auto_failover_polling_ok(now=None):
+    if now is None:
+        now = time.time()
+    auto_failover_state['last_ok'] = now
+    auto_failover_state['last_fail'] = 0.0
+    auto_failover_state['consecutive_failures'] = 0
+    auto_failover_state['last_failure_message'] = ''
+
+
+def _auto_failover_idle_log(reason, now=None):
+    if now is None:
+        now = time.time()
+    try:
+        last_log = float(auto_failover_state.get('last_idle_log') or 0.0)
+    except (TypeError, ValueError):
+        last_log = 0.0
+    if now - last_log < AUTO_FAILOVER_IDLE_LOG_INTERVAL_SECONDS:
+        return
+    auto_failover_state['last_idle_log'] = now
+    try:
+        rss_kb = int(_process_rss_kb() or 0)
+    except Exception:
+        rss_kb = 0
+    _write_runtime_log(
+        f'Telegram auto-failover: idle ({reason}); '
+        f'no pending failure, bot RSS {rss_kb} KB.'
+    )
+
+
+def _auto_failover_should_run():
+    if not _app_mode_pool_enabled():
+        return False, 'pool disabled'
+    if _auto_failover_has_pending_failure():
+        return True, 'pending failure'
+    if not _app_mode_telegram_enabled():
+        return False, 'telegram disabled'
+    if bot_polling:
+        _mark_auto_failover_polling_ok()
+        return False, 'Telegram polling is healthy'
+    return True, 'Telegram polling stopped'
+
+
 def _attempt_auto_failover():
     telegram_route_proto = _telegram_route_protocol()
     if not telegram_route_proto:
         return False
     if _app_mode_telegram_enabled() and bot_polling and not _auto_failover_has_pending_failure():
-        auto_failover_state['last_ok'] = time.time()
-        auto_failover_state['last_fail'] = 0.0
-        auto_failover_state['consecutive_failures'] = 0
-        auto_failover_state['last_failure_message'] = ''
+        _mark_auto_failover_polling_ok()
         return False
     if proxy_mode != telegram_route_proto:
         _auto_failover_log(
@@ -1915,16 +1959,22 @@ def _attempt_youtube_vless2_failover():
 def _start_auto_failover_thread():
     def worker():
         while not shutdown_requested.is_set():
+            ran = False
             try:
-                if _app_mode_pool_enabled() and _background_task_allowed(
+                should_run, reason = _auto_failover_should_run()
+                if not should_run:
+                    _auto_failover_idle_log(reason)
+                elif _background_task_allowed(
                     'Telegram auto-failover',
-                    allow_high_rss=True,
+                    allow_high_rss=reason in ('pending failure', 'Telegram polling stopped'),
                 ):
+                    ran = True
                     _attempt_auto_failover()
             except Exception as exc:
                 _write_runtime_log(f'Auto-failover error: {exc}')
             finally:
-                _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
+                if ran:
+                    _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
             shutdown_requested.wait(AUTO_FAILOVER_POLL_SECONDS)
 
     thread = threading.Thread(target=worker, daemon=True)
