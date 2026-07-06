@@ -17,6 +17,8 @@ UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
 DNS_HOST="${DNS_HOST:-127.0.0.1}"
 DNS_PORT="${DNS_PORT:-53}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
+REFRESH_STATE_FILE="${BYPASS_UNBLOCK_REFRESH_STATE_FILE:-/tmp/bypass-unblock-refresh.state}"
+DNSMASQ_FULL_REFRESH_FORCE_INTERVAL_SECONDS="${BYPASS_UNBLOCK_DNSMASQ_FULL_REFRESH_FORCE_INTERVAL_SECONDS:-21600}"
 APP_RUNTIME_MODE_FILE="${APP_RUNTIME_MODE_FILE:-/opt/etc/bot_app_mode}"
 RUNTIME_DEDUPE_LOCK_DIR="${BYPASS_RUNTIME_DEDUPE_LOCK_DIR:-/tmp/bypass-runtime-dedupe.lock}"
 RUNTIME_DEDUPE_STATE_FILE="${BYPASS_RUNTIME_DEDUPE_STATE_FILE:-/tmp/bypass-runtime-dedupe.state}"
@@ -27,6 +29,7 @@ YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtu
 YOUTUBE_EDGE_PREFETCH_STATUS_FILE="${YOUTUBE_EDGE_PREFETCH_STATUS_FILE:-/opt/etc/bot/youtube_edge_prefetch_status.json}"
 YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-1800}"
 YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"
+YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS="${YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS:-120}"
 YOUTUBE_EDGE_PREFETCH_LOG="${YOUTUBE_EDGE_PREFETCH_LOG:-/opt/var/log/bypass-youtube-edge-prefetch.log}"
 VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
 YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com}"
@@ -82,13 +85,20 @@ cleanup_orphan_schedulers() {
 }
 
 run_refresh() {
+    force_refresh="${1:-}"
     [ -x /opt/bin/unblock_ipset.sh ] || return 0
     unblock_ipset_running && return 0
+    if [ "$force_refresh" != "force" ] && refresh_skip_allowed; then
+        mark_refresh_state "skipped"
+        mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+        printf '%s S99unblock: skipped unchanged dnsmasq full refresh\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)" >> "$LOG_FILE" 2>/dev/null || true
+        return 0
+    fi
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
     PARALLEL_JOBS="${UNBLOCK_IPSET_PARALLEL_JOBS:-4}" \
     IPV6_RESOLVE_ENABLED="${UNBLOCK_IPSET_IPV6_RESOLVE_ENABLED:-auto}" \
     UNBLOCK_IPSET_LOCK_BUSY_QUIET=1 /opt/bin/unblock_ipset.sh >> "$LOG_FILE" 2>&1 || true
-    run_youtube_edge_prefetch_if_due "ipset-refresh"
+    mark_refresh_state "refreshed"
 }
 
 unblock_ipset_lock_age_seconds() {
@@ -161,6 +171,42 @@ youtube_edge_prefetch_runtime_allowed() {
     [ "$(app_runtime_mode_value)" != "simple" ]
 }
 
+youtube_edge_prefetch_recent_refresh_busy() {
+    delay="$YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS"
+    [ "$delay" -gt 0 ] 2>/dev/null || return 1
+    [ "$(refresh_state_action)" = "refreshed" ] || return 1
+    last_at="$(refresh_state_updated_at)"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    case "$now:$last_at:$delay" in
+        *[!0-9:]*|0:*|*:0) return 1 ;;
+    esac
+    [ "$last_at" -gt 0 ] 2>/dev/null || return 1
+    [ $((now - last_at)) -lt "$delay" ] 2>/dev/null
+}
+
+process_marker_running() {
+    marker="$1"
+    [ -n "$marker" ] || return 1
+    ps w 2>/dev/null | while IFS= read -r line; do
+        case "$line" in
+            *"$marker"*)
+                case "$line" in
+                    *"grep "*|*"S99unblock "*) ;;
+                    *) printf '%s\n' 1; exit 0 ;;
+                esac
+                ;;
+        esac
+    done | grep -q 1
+}
+
+youtube_edge_prefetch_background_busy() {
+    unblock_ipset_running && return 0
+    youtube_edge_prefetch_recent_refresh_busy && return 0
+    process_marker_running "bypass_pool_probe_worker_" && return 0
+    process_marker_running "/tmp/bypass_pool_probe_" && return 0
+    return 1
+}
+
 run_youtube_edge_prefetch() {
     trigger="${1:-scheduler}"
     youtube_edge_prefetch_runtime_allowed || return 0
@@ -174,6 +220,7 @@ run_youtube_edge_prefetch() {
 
 run_youtube_edge_prefetch_if_due() {
     youtube_edge_prefetch_due || return 0
+    youtube_edge_prefetch_background_busy && return 0
     run_youtube_edge_prefetch "${1:-scheduler}"
 }
 
@@ -215,6 +262,84 @@ status_updated_at() {
     printf '%s\n' "$updated_at"
 }
 
+status_is_success() {
+    [ -r "$STATUS_FILE" ] || return 1
+    status_value="$(sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$STATUS_FILE" 2>/dev/null | head -n 1)"
+    [ "$status_value" = "success" ]
+}
+
+refresh_current_signature() {
+    signature="backend=$(detect_dns_backend);ipv6=${UNBLOCK_IPSET_IPV6_RESOLVE_ENABLED:-auto}"
+    for route_file in \
+        "$UNBLOCK_DIR/shadowsocks.txt" \
+        "$UNBLOCK_DIR/vmess.txt" \
+        "$UNBLOCK_DIR/vless.txt" \
+        "$UNBLOCK_DIR/vless-2.txt" \
+        "$UNBLOCK_DIR/trojan.txt"; do
+        signature="$signature;$(route_file_signature "$route_file")"
+    done
+    printf '%s\n' "$signature"
+}
+
+refresh_state_signature() {
+    [ -r "$REFRESH_STATE_FILE" ] || return 0
+    sed -n '1p' "$REFRESH_STATE_FILE" 2>/dev/null
+}
+
+refresh_state_updated_at() {
+    [ -r "$REFRESH_STATE_FILE" ] || {
+        printf '%s\n' 0
+        return
+    }
+    value="$(sed -n '2p' "$REFRESH_STATE_FILE" 2>/dev/null | tr -cd '0-9')"
+    [ -n "$value" ] || value=0
+    printf '%s\n' "$value"
+}
+
+refresh_state_action() {
+    [ -r "$REFRESH_STATE_FILE" ] || return 0
+    sed -n '3p' "$REFRESH_STATE_FILE" 2>/dev/null
+}
+
+refresh_effective_updated_at() {
+    status_at="$(status_updated_at)"
+    state_at="$(refresh_state_updated_at)"
+    current_signature="$(refresh_current_signature)"
+    state_signature="$(refresh_state_signature)"
+    if [ -n "$current_signature" ] && [ "$current_signature" = "$state_signature" ] && [ "$state_at" -gt "$status_at" ] 2>/dev/null; then
+        printf '%s\n' "$state_at"
+        return
+    fi
+    printf '%s\n' "$status_at"
+}
+
+refresh_skip_allowed() {
+    [ "$(detect_dns_backend)" = "dnsmasq" ] || return 1
+    status_is_success || return 1
+    current_signature="$(refresh_current_signature)"
+    state_signature="$(refresh_state_signature)"
+    [ -n "$current_signature" ] && [ "$current_signature" = "$state_signature" ] || return 1
+    last_at="$(refresh_state_updated_at)"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    case "$now:$last_at:$DNSMASQ_FULL_REFRESH_FORCE_INTERVAL_SECONDS" in
+        *[!0-9:]*|0:*|*:0) return 1 ;;
+    esac
+    [ "$last_at" -gt 0 ] 2>/dev/null || return 1
+    [ $((now - last_at)) -lt "$DNSMASQ_FULL_REFRESH_FORCE_INTERVAL_SECONDS" ] 2>/dev/null
+}
+
+mark_refresh_state() {
+    action="${1:-refreshed}"
+    now="$(date +%s 2>/dev/null || echo 0)"
+    signature="$(refresh_current_signature)"
+    mkdir -p "$(dirname "$REFRESH_STATE_FILE")" 2>/dev/null || true
+    {
+        printf '%s\n' "$signature"
+        printf '%s\n' "$now"
+        printf '%s\n' "$action"
+    } > "$REFRESH_STATE_FILE" 2>/dev/null || true
+}
+
 refresh_due() {
     last_refresh="$1"
     now="$(date +%s 2>/dev/null || echo 0)"
@@ -227,7 +352,7 @@ refresh_due() {
 }
 
 run_refresh_if_due() {
-    if refresh_due "$(status_updated_at)"; then
+    if refresh_due "$(refresh_effective_updated_at)"; then
         run_refresh
     fi
 }
@@ -805,9 +930,9 @@ case "$1" in
         ;;
     refresh)
         cleanup_orphan_schedulers
-        run_refresh
-        run_youtube_edge_prefetch_if_due
+        run_refresh force
         run_runtime_dedupe
+        run_youtube_edge_prefetch_if_due "manual-refresh"
         ;;
     tick)
         run_tick

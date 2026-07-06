@@ -667,6 +667,15 @@ def render_web_scripts(
             if (!textarea || textarea.dataset.noAutoResize === '1') {{
                 return;
             }}
+            if (textarea.offsetParent === null) {{
+                return;
+            }}
+            if (textarea.getBoundingClientRect().width < 80) {{
+                window.requestAnimationFrame(function() {{
+                    autoResizeTextarea(textarea);
+                }});
+                return;
+            }}
             textarea.style.height = 'auto';
             const minHeight = parseFloat(window.getComputedStyle(textarea).minHeight || '0') || 0;
             textarea.style.height = Math.max(minHeight, textarea.scrollHeight) + 'px';
@@ -962,6 +971,7 @@ def render_web_scripts(
                     panel.querySelectorAll('[data-subview]').forEach(function(subview) {{
                         subview.classList.toggle('active', subview.dataset.subview === selected);
                     }});
+                    setupAutoResizeTextareas(panel);
                     if (selected === 'check') {{
                         loadProtocolCheck(panel);
                     }}

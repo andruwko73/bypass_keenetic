@@ -922,6 +922,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             .key-status-badge{font-size:10px;padding:4px 7px;}
             .key-status-icons .service-icon-img{width:18px!important;height:18px!important;}
             .subtabs{grid-template-columns:repeat(2,minmax(0,1fr));}
+            .subtabs .subtab:nth-child(3){grid-column:1 / -1;}
             .subtabs .subtab:nth-child(3):last-child{grid-column:1 / -1;}
             .subtab{height:var(--control-height);min-height:var(--control-height);padding:0 6px;}
             .key-editor-form textarea[data-key-textarea]{min-height:132px;max-height:34vh;resize:vertical;font-size:12px;line-height:1.32;}

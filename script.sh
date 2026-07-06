@@ -298,7 +298,7 @@ run_youtube_edge_prefetch_retry_if_skipped() {
     sleep "$delay_seconds"
     reason="$(youtube_edge_prefetch_skipped_reason)"
     case "$reason" in
-      low_available_memory|lock_busy)
+      low_available_memory|lock_busy|unblock_running|pool_probe_running)
         run_youtube_edge_prefetch_once "$trigger"
         ;;
     esac
@@ -1128,23 +1128,27 @@ PYCFG
   grep -Eq '^youtube_edge_prefetch_scheduler_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_scheduler_max_cpu_percent = 45\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_scheduler_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_scheduler_max_load1 = 2.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cpu_sample_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_cpu_sample_ms = 250\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_skip_when_unblock_running[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_skip_when_unblock_running = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_skip_when_pool_probe_running[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_skip_when_pool_probe_running = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_unblock_lock_dir[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_unblock_lock_dir = '/tmp/bypass-unblock-ipset.lock'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_unblock_lock_stale_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_unblock_lock_stale_seconds = 600\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^active_status_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'active_status_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^auto_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_vless2_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_vless2_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_urls[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ', 'https://www.youtube.com/watch?v=jfKfPfyJRdk')\n" >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*1([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_watch_warm_max_pages[[:space:]]*=.*/youtube_edge_watch_warm_max_pages = 2/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*2([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_pages[[:space:]]*=.*/youtube_edge_watch_warm_max_pages = 1/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 2\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=[[:space:]]*(4|6)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_watch_warm_max_hosts[[:space:]]*=.*/youtube_edge_watch_warm_max_hosts = 8/' "$BOT_CONFIG_PATH" || true
+  grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_pages = 1\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=[[:space:]]*8([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_hosts[[:space:]]*=.*/youtube_edge_watch_warm_max_hosts = 6/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 8\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=[[:space:]]*1800000([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_watch_warm_max_bytes[[:space:]]*=.*/youtube_edge_watch_warm_max_bytes = 900000/' "$BOT_CONFIG_PATH" || true
+  grep -Eq '^youtube_edge_watch_warm_max_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_hosts = 6\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=[[:space:]]*(900000|1800000)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_watch_warm_max_bytes[[:space:]]*=.*/youtube_edge_watch_warm_max_bytes = 450000/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_bytes = 900000\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_watch_warm_max_bytes[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_bytes = 450000\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^youtube_edge_watch_warm_connect_timeout[[:space:]]*=[[:space:]]*6([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^youtube_edge_watch_warm_connect_timeout[[:space:]]*=.*/youtube_edge_watch_warm_connect_timeout = 4/' "$BOT_CONFIG_PATH" || true
   fi

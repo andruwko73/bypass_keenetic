@@ -1,3 +1,7 @@
+*v1.924 (6 Jul 2026) -* main
+
+*Reduces idle router load by skipping unchanged dnsmasq full ipset refreshes for six hours, keeps YouTube warm-up out of concurrent heavy jobs, preserves the last valid pool summary through light memory cleanup, and keeps the unified key/subscription UI compact with neutral startup status refresh.*
+
 *v1.923 (6 Jul 2026) -* main
 
 *Keeps the unblock scheduler alive with a lightweight cron tick instead of forcing a full ipset refresh every 15 minutes, reducing routine CPU spikes while preserving explicit refresh/update behavior.*

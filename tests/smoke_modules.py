@@ -2271,12 +2271,16 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_scheduler_max_cpu_percent = 45',
         'youtube_edge_prefetch_scheduler_max_load1 = 2.0',
         'youtube_edge_prefetch_cpu_sample_ms = 250',
+        'youtube_edge_prefetch_skip_when_unblock_running = True',
+        'youtube_edge_prefetch_skip_when_pool_probe_running = True',
+        "youtube_edge_prefetch_unblock_lock_dir = '/tmp/bypass-unblock-ipset.lock'",
+        'youtube_edge_prefetch_unblock_lock_stale_seconds = 600',
         'youtube_edge_watch_warm_enabled = True',
         'youtube_edge_watch_warm_urls = (',
         "'https://www.youtube.com/watch?v=jfKfPfyJRdk'",
-        'youtube_edge_watch_warm_max_pages = 2',
-        'youtube_edge_watch_warm_max_hosts = 8',
-        'youtube_edge_watch_warm_max_bytes = 900000',
+        'youtube_edge_watch_warm_max_pages = 1',
+        'youtube_edge_watch_warm_max_hosts = 6',
+        'youtube_edge_watch_warm_max_bytes = 450000',
         'youtube_edge_watch_warm_connect_timeout = 4',
         'youtube_edge_watch_warm_max_time = 10',
         "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')",
@@ -2294,8 +2298,11 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_prefetch_cache_restore_max_addresses = 16' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_cache_restore_require_quality_ok = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_fast_max_hosts_per_run = 4' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_watch_warm_max_pages = 2' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_edge_watch_warm_max_hosts = 8' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_skip_when_unblock_running = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_prefetch_skip_when_pool_probe_running = True' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_pages = 1' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_hosts = 6' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_edge_watch_warm_max_bytes = 450000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_light_cleanup_rss_kb = 66560' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -2501,6 +2508,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '/opt/etc/init.d/S99unblock restart' in script
     assert 'BYPASS_UNBLOCK_REFRESH_INTERVAL_SECONDS:-900' in s99unblock
     assert 'BYPASS_UNBLOCK_DNSMASQ_REFRESH_INTERVAL_SECONDS:-3600' in s99unblock
+    assert 'BYPASS_UNBLOCK_REFRESH_STATE_FILE' in s99unblock
+    assert 'BYPASS_UNBLOCK_DNSMASQ_FULL_REFRESH_FORCE_INTERVAL_SECONDS:-21600' in s99unblock
     assert 'BYPASS_UNBLOCK_REFRESH_CHECK_INTERVAL_SECONDS:-60' in s99unblock
     assert 'BYPASS_RUNTIME_DEDUPE_INTERVAL_SECONDS:-60' in s99unblock
     assert 'BYPASS_RUNTIME_DEDUPE_LOCK_STALE_SECONDS:-120' in s99unblock
@@ -2521,10 +2530,15 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'dedupe_lock_age_seconds()' in s99unblock
     assert 'youtube_edge_prefetch_skipped_reason()' in s99unblock
     assert '[ "$skipped_reason" = "low_available_memory" ]' in s99unblock
+    assert 'refresh_skip_allowed()' in s99unblock
+    assert 'refresh_effective_updated_at()' in s99unblock
+    assert 'mark_refresh_state()' in s99unblock
     assert 'run_refresh_if_due()' in s99unblock
     assert 'run_refresh_if_check_due()' in s99unblock
     assert 'run_youtube_edge_prefetch_if_due()' in s99unblock
-    assert 'run_youtube_edge_prefetch_if_due "ipset-refresh"' in s99unblock
+    assert 'youtube_edge_prefetch_background_busy()' in s99unblock
+    assert 'YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS="${YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS:-120}"' in s99unblock
+    assert 'youtube_edge_prefetch_recent_refresh_busy()' in s99unblock
     assert 'PARALLEL_JOBS="${UNBLOCK_IPSET_PARALLEL_JOBS:-4}"' in s99unblock
     assert 'IPV6_RESOLVE_ENABLED="${UNBLOCK_IPSET_IPV6_RESOLVE_ENABLED:-auto}"' in s99unblock
     assert 'youtube_edge_prefetch_runtime_allowed()' in s99unblock
@@ -2540,7 +2554,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'refresh)' in s99unblock
     refresh_case = s99unblock.split('\n    refresh)\n', 1)[1].split(';;', 1)[0]
     assert 'if is_running' not in refresh_case
-    assert 'run_refresh\n' in refresh_case
+    assert 'run_refresh force' in refresh_case
+    assert 'run_youtube_edge_prefetch_if_due "manual-refresh"' in refresh_case
     assert 'run_refresh_if_due' not in refresh_case
     assert 'tick)' in s99unblock
     assert 'run_tick()' in s99unblock
@@ -2624,7 +2639,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'run_youtube_edge_prefetch_once "Post-update"' in script
     assert 'youtube_edge_prefetch_skipped_reason()' in script
     assert 'run_youtube_edge_prefetch_retry_if_skipped()' in script
-    assert 'low_available_memory|lock_busy)' in script
+    assert 'low_available_memory|lock_busy|unblock_running|pool_probe_running)' in script
     assert 'run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90' in script
     assert 'def youtube_edge_prefetch_shell(trigger):' in installer_source
     assert 'switch_to_main_bot(run_youtube_prefetch=True)' in installer_source
@@ -2980,7 +2995,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bypass-bot-service-restart.log' in source
     assert 'app_service_restart_scheduled = False' in source
     assert 'App mode restart already scheduled' in source
-    assert 'sys.modules.pop' not in source
+    assert 'sys.modules.pop(module_name, None)' in source
     assert 'Pool probe module references released after' in source
     assert "_unload_pool_probe_modules('pool probe process monitor')" in source
     assert 'post-pool memory already at target' in source
@@ -3179,8 +3194,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "update_proxy('none', persist=False)" not in startup_restore
     readme_source = (ROOT / 'README.md').read_text(encoding='utf-8')
     assert 'https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh' in readme_source
-    assert 'Прогрев YouTube ставится сразу при чистой установке' in readme_source
-    assert 'не увеличивает постоянный RSS Telegram-бота' in readme_source
+    assert 'Прогрев YouTube выполняется отдельным коротким процессом для ускорения загрузки видео' in readme_source
+    assert 'не увеличивает постоянный RSS Telegram-бота' not in readme_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
@@ -3307,7 +3322,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
     assert 'def _placeholder_status_snapshot(current_keys, include_pool_details=True)' in source
     assert '_placeholder_status_snapshot(current_keys, include_pool_details=False)' in source
-    assert 'if not pool_enabled:\n            status_refresh_pending = False' in source
+    assert 'if not pool_enabled:\n            status_refresh_pending = False' not in source
     pool_form_context = source.split('def _web_pool_form_context', 1)[1].split('def _web_simple_form_context', 1)[0]
     assert 'key_probe_cache = {}' in pool_form_context
     assert '_pool_status_summary(current_keys, key_pools, None, custom_checks, route_states)' in pool_form_context
@@ -3390,9 +3405,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert source.find("last_event = float(state.get('last_event') or 0.0)") < source.find("_conntrack_route_diagnostic(proto)")
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
     assert 'def _release_web_form_template_cache()' in source
-    assert 'sys.modules.pop' not in source
     runtime_release_block = source.split('def _release_runtime_pressure_modules', 1)[1].split('\n\ndef render_web_form', 1)[0]
-    assert 'sys.modules.pop' not in runtime_release_block
+    assert 'sys.modules.pop(module_name, None)' in runtime_release_block
     assert "released.extend(module_names)" in runtime_release_block
     assert "released.extend(('web_route_tools_runtime', 'route_intersections', 'service_routes'))" in runtime_release_block
     assert 'def _key_pool_store()' in source
@@ -3416,8 +3430,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "rss_before < WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
     assert "_status_refresh_memory_cleanup('status refresh')" in source
     assert "MEMORY_CLEANUP_RSS_KB" in source
-    assert 'clear_pool_summary=bool(should_collect)' in source
+    assert 'clear_pool_summary=bool(clear_status)' in source
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source
+    assert 'def _pool_summary_can_keep_previous' in source
+    assert "_pool_summary_count(previous_summary, 'checked_pool_count') > 0" in source
     assert "payload.get('pools') is not None" in source
     assert 'avoid loading the full probe cache twice' in source
     assert 'event_history_api_cache[\'payload\'] = payload' not in source
@@ -4298,7 +4314,7 @@ def test_youtube_edge_prefetch_runner_extends_existing_watch_urls():
     assert 'https://www.youtube.com/watch?v=jfKfPfyJRdk' in urls
 
 
-def test_youtube_edge_prefetch_runner_warms_two_watch_pages_by_default():
+def test_youtube_edge_prefetch_runner_warms_one_watch_page_by_default():
     original_config = youtube_edge_prefetch_runner.config
     original_fetch = youtube_edge_prefetch_runner._fetch_watch_page
     calls = []
@@ -4310,7 +4326,7 @@ def test_youtube_edge_prefetch_runner_warms_two_watch_pages_by_default():
                 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
                 'https://www.youtube.com/live/MFpQKwwh29E',
             ),
-            youtube_edge_watch_warm_max_hosts=8,
+            youtube_edge_watch_warm_max_hosts=6,
             youtube_edge_watch_warm_max_bytes=200000,
             youtube_edge_watch_warm_connect_timeout=1,
             youtube_edge_watch_warm_max_time=2,
@@ -4328,12 +4344,11 @@ def test_youtube_edge_prefetch_runner_warms_two_watch_pages_by_default():
         youtube_edge_prefetch_runner.config = original_config
         youtube_edge_prefetch_runner._fetch_watch_page = original_fetch
 
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert hosts == (
         'rr1---sn-4g5ednsl.googlevideo.com',
-        'rr2---sn-4g5ednsl.googlevideo.com',
     )
-    assert status['fetched_pages'] == 2
+    assert status['fetched_pages'] == 1
 
 
 def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
@@ -4373,10 +4388,12 @@ def test_youtube_edge_prefetch_runner_skips_scheduler_full_run_on_high_cpu():
 
         assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('scheduler', False) == 88.5
         assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('ipset-refresh', False) == 88.5
+        assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('manual-refresh', False) == 88.5
         assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('Post-update', False) is None
         assert youtube_edge_prefetch_runner._scheduler_full_run_cpu_busy('scheduler', True) is None
         assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('scheduler', False) == 2.75
         assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('ipset-refresh', False) == 2.75
+        assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('manual-refresh', False) == 2.75
         assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('Post-update', False) is None
         assert youtube_edge_prefetch_runner._scheduler_full_run_load_busy('scheduler', True) is None
     finally:
@@ -8411,6 +8428,7 @@ def test_web_template_styles_helpers():
     assert '.pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}' in styles
     assert '.protocol-subview-key .key-editor-form{display:grid;grid-template-columns:minmax(0,1fr) 180px;grid-template-rows:auto auto;gap:6px 10px;align-items:start;}' in styles
     assert '.protocol-subview-key .key-editor-form textarea[data-key-textarea]{grid-column:1;grid-row:2;height:72px;min-height:72px;max-height:none;resize:none;white-space:pre-wrap;overflow:hidden;overflow-wrap:anywhere;word-break:break-all;}' in styles
+    assert '.subtabs .subtab:nth-child(3){grid-column:1 / -1;}' in styles
     assert '.subtabs .subtab:nth-child(3):last-child{grid-column:1 / -1;}' in styles
     assert '.pool-import-form button{grid-column:2;grid-row:3;justify-self:stretch;width:100%;align-self:start;}' in styles
     assert '.health-meter.warn span' in styles
@@ -9012,6 +9030,9 @@ def test_web_template_scripts_helpers():
     assert 'function autoResizeTextarea(textarea)' in scripts
     assert 'function stablePoolSummary(poolSummary, running, paused)' in scripts
     assert 'latestChecked > 0 && checked === 0 && total >= latestTotal' in scripts
+    assert 'textarea.offsetParent === null' in scripts
+    assert 'textarea.getBoundingClientRect().width < 80' in scripts
+    assert 'setupAutoResizeTextareas(panel);' in scripts
     assert 'function poolProbeSummaryText(progress, fallbackNote)' in scripts
     assert 'function pollPoolProbeStatus()' in scripts
     assert "fetch('/api/pool_probe'" in scripts

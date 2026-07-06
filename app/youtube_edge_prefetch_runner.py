@@ -31,11 +31,17 @@ WATCH_WARM_URLS = (
     'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
     'https://www.youtube.com/watch?v=jfKfPfyJRdk',
 )
-WATCH_WARM_MAX_PAGES = 2
-WATCH_WARM_MAX_HOSTS = 8
-WATCH_WARM_MAX_BYTES = 900000
+WATCH_WARM_MAX_PAGES = 1
+WATCH_WARM_MAX_HOSTS = 6
+WATCH_WARM_MAX_BYTES = 450000
 WATCH_WARM_CONNECT_TIMEOUT = 4
 WATCH_WARM_MAX_TIME = 10
+UNBLOCK_IPSET_LOCK_DIR = '/tmp/bypass-unblock-ipset.lock'
+UNBLOCK_IPSET_LOCK_STALE_SECONDS = 600
+POOL_PROBE_PROCESS_MARKERS = (
+    'bypass_pool_probe_worker_',
+    '/tmp/bypass_pool_probe_',
+)
 FAST_PREFETCH_HOSTS = (
     'www.youtube.com',
     'youtube.com',
@@ -504,9 +510,71 @@ def read_load1(loadavg_path='/proc/loadavg'):
         return None
 
 
+def _lock_dir_active(lock_dir, stale_seconds=UNBLOCK_IPSET_LOCK_STALE_SECONDS):
+    try:
+        if not os.path.isdir(lock_dir):
+            return False
+        pid = ''
+        try:
+            with open(os.path.join(lock_dir, 'pid'), 'r', encoding='utf-8') as file:
+                pid = ''.join(ch for ch in file.read(32) if ch.isdigit())
+        except Exception:
+            pid = ''
+        if pid and _pid_is_active(pid):
+            return True
+        try:
+            age = time.time() - os.stat(lock_dir).st_mtime
+        except Exception:
+            age = 0
+        return age < max(1, int(stale_seconds or UNBLOCK_IPSET_LOCK_STALE_SECONDS))
+    except Exception:
+        return False
+
+
+def _process_marker_running(markers=POOL_PROBE_PROCESS_MARKERS):
+    marker_values = tuple(str(marker or '') for marker in markers or () if str(marker or ''))
+    if not marker_values:
+        return False
+    try:
+        result = subprocess.run(
+            ['ps', 'w'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return False
+    for line in (result.stdout or '').splitlines():
+        if any(marker in line for marker in marker_values) and 'youtube_edge_prefetch_runner.py' not in line:
+            return True
+    return False
+
+
 def _scheduler_full_run_guarded_trigger(trigger):
     text = str(trigger or '').strip().lower()
-    return text in ('scheduler', 'ipset-refresh')
+    return text in ('scheduler', 'ipset-refresh', 'manual-refresh')
+
+
+def _background_busy_reason(trigger, fast_warm):
+    if fast_warm:
+        return ''
+    if not _scheduler_full_run_guarded_trigger(trigger):
+        return ''
+    if _config_bool('youtube_edge_prefetch_skip_when_unblock_running', True):
+        lock_dir = _config_str('youtube_edge_prefetch_unblock_lock_dir', UNBLOCK_IPSET_LOCK_DIR)
+        stale_seconds = _config_int(
+            'youtube_edge_prefetch_unblock_lock_stale_seconds',
+            UNBLOCK_IPSET_LOCK_STALE_SECONDS,
+            minimum=1,
+        )
+        if _lock_dir_active(lock_dir, stale_seconds=stale_seconds):
+            return 'unblock_running'
+    if _config_bool('youtube_edge_prefetch_skip_when_pool_probe_running', True):
+        if _process_marker_running():
+            return 'pool_probe_running'
+    return ''
 
 
 def _scheduler_full_run_cpu_busy(trigger, fast_warm):
@@ -784,6 +852,19 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             unblock_dir=unblock_dir or UNBLOCK_DIR,
             default=_config_str('youtube_edge_prefetch_default_route_protocol', 'vless2'),
         )
+        fast_warm = _fast_warm_enabled_for_trigger(trigger)
+        busy_reason = _background_busy_reason(trigger, fast_warm)
+        if busy_reason:
+            status = {
+                'ok': False,
+                'route_protocol': route_protocol,
+                'skipped_reason': busy_reason,
+                'available_memory_kb': available_kb,
+                'warm_mode': 'fast' if fast_warm else 'full',
+            }
+            status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
+            _write_json_file(status_path, status)
+            return status
         if min_available_kb > 0 and available_kb > 0 and available_kb < min_available_kb:
             status = {
                 'ok': False,
@@ -843,7 +924,6 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 _write_json_file(status_path, status)
                 return status
 
-        fast_warm = _fast_warm_enabled_for_trigger(trigger)
         if fast_warm:
             hosts = prefetch_hosts_for_run(fast=True)
             fast_max_hosts = _config_int(

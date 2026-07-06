@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.923, последнее изменение: 06.07.2026
+#  Файл: bot.py, Версия v1.924, последнее изменение: 06.07.2026
 
 import subprocess
 import os
@@ -606,6 +606,11 @@ def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, inclu
         release_module_attr('_youtube_edge_prefetch_module', ('youtube_edge_prefetch', 'youtube_edge_prefetch_runner'))
 
     _clear_youtube_edge_prefetch_snapshot_cache()
+    for module_name in sorted(set(released)):
+        try:
+            sys.modules.pop(module_name, None)
+        except Exception:
+            pass
     if released and reason:
         try:
             _write_runtime_log(
@@ -5273,7 +5278,7 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
         should_collect = True
     _clear_runtime_memory_caches(
         clear_status=bool(clear_status or should_collect),
-        clear_pool_summary=bool(should_collect),
+        clear_pool_summary=bool(clear_status),
     )
     released_modules = []
     if should_collect or force or clear_status:
@@ -8723,13 +8728,36 @@ def _format_pool_summary():
     return '\n'.join(lines)
 
 
+def _pool_summary_count(summary, field):
+    try:
+        return int((summary or {}).get(field) or 0)
+    except Exception:
+        return 0
+
+
+def _pool_summary_can_keep_previous(previous_signature, current_signature):
+    if not previous_signature or not current_signature:
+        return False
+    try:
+        return (
+            previous_signature[0] == current_signature[0] and
+            previous_signature[1] == current_signature[1]
+        )
+    except Exception:
+        return False
+
+
 def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None, custom_checks=None, route_states=None):
     current_keys = current_keys if current_keys is not None else _load_current_keys()
     resolved_route_states = route_states if route_states is not None else _service_route_summary()
     can_use_cache = key_pools is None and key_probe_cache is None and custom_checks is None
     signature = _pool_summary_cache_signature(current_keys, resolved_route_states) if can_use_cache else None
+    previous_signature = None
+    previous_summary = None
     if can_use_cache:
         with pool_summary_cache_lock:
+            previous_signature = pool_summary_cache.get('signature')
+            previous_summary = pool_summary_cache.get('summary')
             if pool_summary_cache.get('signature') == signature and pool_summary_cache.get('summary') is not None:
                 return pool_summary_cache['summary']
     resolved_key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
@@ -8743,6 +8771,14 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
         _hash_key,
         route_states=resolved_route_states,
     )
+    if (
+        can_use_cache and
+        _pool_summary_count(summary, 'checked_pool_count') == 0 and
+        _pool_summary_count(previous_summary, 'checked_pool_count') > 0 and
+        _pool_summary_count(summary, 'pool_total_count') == _pool_summary_count(previous_summary, 'pool_total_count') and
+        _pool_summary_can_keep_previous(previous_signature, signature)
+    ):
+        summary = previous_summary
     if can_use_cache:
         with pool_summary_cache_lock:
             pool_summary_cache['signature'] = signature
@@ -12213,8 +12249,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         status, protocol_statuses = _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime_mode)
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
-        if not pool_enabled:
-            status_refresh_pending = False
         router_health = _router_health_snapshot()
 
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])

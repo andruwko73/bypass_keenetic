@@ -48,6 +48,8 @@ installer-mobile-review-*.png
 .codex/
 .codex_tmp/
 diagnostics/
+data/
+tmp/
 .serena/
 AGENTS.md
 .github/copilot-instructions.md

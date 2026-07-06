@@ -1,3 +1,12 @@
+<a name="1.924"></a>
+# [1.924] - 6 Jul 2026
+
+- Skips unchanged dnsmasq full ipset refreshes for up to six hours, while explicit refresh/update still force a rebuild.
+- Keeps YouTube edge warm-up from starting while unblock refresh or pool probe work is already running, and lowers the default watch-page warm-up budget.
+- Releases lazy runtime modules from `sys.modules` during cleanup and keeps the last valid pool summary instead of replacing checked results with transient zero counts.
+- Keeps pending Telegram startup/failover states neutral in the topbar, and recalculates unified key/subscription textarea heights only after visible panels are laid out.
+- Updates README wording for key pools, subscription import, checks, and YouTube warm-up.
+
 <a name="1.923"></a>
 # [1.923] - 6 Jul 2026
 
