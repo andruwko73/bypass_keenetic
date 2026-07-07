@@ -377,6 +377,38 @@ async function assertProtocolServiceIconsStableAfterLiveStatus(page, protocol, m
   }
 }
 
+async function assertProtocolServiceIconsStableAfterIdleRefresh(page, protocol, minCount, label) {
+  await page.waitForFunction(({ proto, expected }) => {
+    const container = document.querySelector(`[data-protocol-card="${proto}"] [data-protocol-status-icons]`);
+    if (!container) {
+      return false;
+    }
+    return Array.from(container.children).filter((node) => {
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && box.width >= 2 && box.height >= 2;
+    }).length >= expected;
+  }, { proto: protocol, expected: minCount }, { timeout: 10000 });
+  const before = await protocolHeaderIconSnapshot(page, protocol);
+  const liveStatusResponse = page.waitForResponse((response) => (
+    response.url().includes('/api/status?compact=1&lite=1') && response.ok()
+  ), { timeout: 15000 }).catch(() => null);
+  await page.evaluate(() => {
+    if (window.__bypassTestHooks && typeof window.__bypassTestHooks.pollStatus === 'function') {
+      window.__bypassTestHooks.pollStatus();
+    }
+  });
+  const response = await liveStatusResponse;
+  if (!response) {
+    throw new Error(`${label}: idle live status poll did not run`);
+  }
+  await page.waitForTimeout(200);
+  const after = await protocolHeaderIconSnapshot(page, protocol);
+  if (after.count < minCount || after.count < before.count) {
+    throw new Error(`${label}: protocol icons degraded after idle live status ${JSON.stringify({ before, after })}`);
+  }
+}
+
 async function assertUnifiedImportLayout(page, label) {
   const layout = await page.evaluate(() => {
     const panel = document.querySelector('[data-protocol-panel="vless2"].active [data-subview="key"].active');
@@ -685,7 +717,8 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       await assertVisibleBox(page, '[data-protocol-panel].active [data-pool-body] tr:first-child .pool-delete-btn', `${name} delete button`);
     }
     await assertActivePoolRowPinned(page, 'vless', `${name} vless pool order`);
-    await assertProtocolServiceIconsStableAfterLiveStatus(page, 'vless', 3, `${name} vless status icons`);
+    await assertProtocolServiceIconsStableAfterIdleRefresh(page, 'vless', 3, `${name} vless status icons idle refresh`);
+    await assertProtocolServiceIconsStableAfterLiveStatus(page, 'vless', 3, `${name} vless status icons apply refresh`);
     await clickLazyProtocol(page, 'vless2', name);
     await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();
     await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);

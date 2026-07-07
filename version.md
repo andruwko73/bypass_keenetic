@@ -1,3 +1,7 @@
+*v1.933 (8 Jul 2026) -* main
+
+*Keeps protocol service icons stable after idle live-status refreshes, including the lazy pool-load path where the short Telegram-only status arrives after the full service icons were shown.*
+
 *v1.932 (8 Jul 2026) -* main
 
 *Makes YouTube routing event-driven instead of periodically warmed, speeds selected key apply with a safe fallback wait, keeps service icons stable after live status refreshes, and delays router CPU display until a confirmed sample after page-load prime.*

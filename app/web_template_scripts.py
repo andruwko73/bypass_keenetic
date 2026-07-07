@@ -1034,6 +1034,41 @@ def render_web_scripts(
             return html;
         }}
 
+        function visibleIconCountHtml(html) {{
+            const text = String(html || '');
+            if (!text) {{
+                return 0;
+            }}
+            const imgCount = (text.match(/<img\b/gi) || []).length;
+            const badgeCount = (text.match(/custom-service-badge/gi) || []).length;
+            return imgCount + badgeCount;
+        }}
+
+        function rememberProtocolStatusIcons(card, iconsHtml) {{
+            if (!card || !iconsHtml) {{
+                return;
+            }}
+            const newCount = visibleIconCountHtml(iconsHtml);
+            const oldCount = Number(card.dataset.protocolFullIconCount || 0);
+            if (newCount >= oldCount) {{
+                card.dataset.protocolFullIcons = iconsHtml;
+                card.dataset.protocolFullIconCount = String(newCount);
+            }}
+        }}
+
+        function stableProtocolStatusIcons(card, iconsHtml, isLiveStatus, poolOverride) {{
+            if (!card) {{
+                return iconsHtml || '';
+            }}
+            const current = String(iconsHtml || '');
+            const cached = String(card.dataset.protocolFullIcons || '');
+            if (isLiveStatus && !poolOverride && cached && visibleIconCountHtml(current) < Number(card.dataset.protocolFullIconCount || 0)) {{
+                return cached;
+            }}
+            rememberProtocolStatusIcons(card, current);
+            return current;
+        }}
+
         function serviceStateText(state, okText, failText) {{
             if (state === 'ok') {{
                 return okText;
@@ -2196,7 +2231,7 @@ def render_web_scripts(
             }}
             const icons = card.querySelector('[data-protocol-status-icons]');
             if (icons) {{
-                icons.innerHTML = status.icons || protocolIcons(status);
+                icons.innerHTML = stableProtocolStatusIcons(card, status.icons || protocolIcons(status), isLiveStatus, poolOverride);
             }}
             if (!poolOverride) {{
                 applyProtocolPoolStatusOverride(proto);
@@ -3314,6 +3349,11 @@ def render_web_scripts(
             refreshDeferredServiceRouteTools();
             setupLiquidPointer();
             setupAsyncForms();
+            if (['127.0.0.1', 'localhost', '::1'].indexOf(window.location.hostname) !== -1) {{
+                window.__bypassTestHooks = Object.assign({{}}, window.__bypassTestHooks || {{}}, {{
+                    pollStatus: pollStatus
+                }});
+            }}
             scheduleRouterHealthRefresh(10000);
             const actionBlock = document.getElementById('web-action-message');
             if (actionBlock && !actionBlock.classList.contains('hidden')) {{

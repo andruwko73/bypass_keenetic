@@ -1,3 +1,9 @@
+<a name="1.933"></a>
+# [1.933] - 8 Jul 2026
+
+- Keeps protocol service icons stable after idle live-status refreshes, including the lazy pool-load path where the short Telegram-only status arrives after the full service icons were shown.
+- Adds a UI smoke check for the no-click idle refresh path, not only for key-apply refreshes.
+
 <a name="1.932"></a>
 # [1.932] - 8 Jul 2026
 
