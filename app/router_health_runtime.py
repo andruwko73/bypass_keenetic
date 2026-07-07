@@ -893,6 +893,7 @@ class RouterHealthRuntime:
         self._related_process_cache = {'timestamp': 0, 'payload': None, 'probe_running': False}
         self._last_cpu_stat = None
         self._last_cpu_percent = None
+        self._cpu_prime_pending = False
 
     def _cached_payload(self, cache_name, ttl, now, loader):
         cache = getattr(self, cache_name)
@@ -952,6 +953,7 @@ class RouterHealthRuntime:
             if current_stat is not None:
                 self._last_cpu_stat = current_stat
                 self._last_cpu_percent = None
+                self._cpu_prime_pending = True
         if not sample:
             return self._last_cpu_percent
         current_stat = read_cpu_stat()
@@ -963,6 +965,9 @@ class RouterHealthRuntime:
             return self._last_cpu_percent
         value = cpu_percent_between(previous_stat, current_stat)
         if value is not None:
+            if self._cpu_prime_pending:
+                self._cpu_prime_pending = False
+                return self._last_cpu_percent
             if self._last_cpu_percent is None or self.cpu_smoothing_factor >= 1.0:
                 self._last_cpu_percent = value
             elif self.cpu_smoothing_factor <= 0.0:

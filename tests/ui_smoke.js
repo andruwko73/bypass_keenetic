@@ -326,6 +326,57 @@ async function assertActivePoolRowPinned(page, protocol, label) {
   }
 }
 
+async function protocolHeaderIconSnapshot(page, protocol) {
+  return page.evaluate((proto) => {
+    const container = document.querySelector(`[data-protocol-card="${proto}"] [data-protocol-status-icons]`);
+    if (!container) {
+      return { count: 0, labels: [], html: '' };
+    }
+    const visible = Array.from(container.children).filter((node) => {
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && box.width >= 2 && box.height >= 2;
+    });
+    return {
+      count: visible.length,
+      labels: visible.map((node) => (
+        node.getAttribute('alt') || node.getAttribute('title') || (node.textContent || '').trim()
+      )),
+      html: container.innerHTML,
+    };
+  }, protocol);
+}
+
+async function assertProtocolServiceIconsStableAfterLiveStatus(page, protocol, minCount, label) {
+  await page.waitForFunction(({ proto, expected }) => {
+    const container = document.querySelector(`[data-protocol-card="${proto}"] [data-protocol-status-icons]`);
+    if (!container) {
+      return false;
+    }
+    return Array.from(container.children).filter((node) => {
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && box.width >= 2 && box.height >= 2;
+    }).length >= expected;
+  }, { proto: protocol, expected: minCount }, { timeout: 10000 });
+  const before = await protocolHeaderIconSnapshot(page, protocol);
+  const applyButton = page.locator(`[data-protocol-panel="${protocol}"].active [data-pool-body="${protocol}"] .pool-apply-form button`).first();
+  await assertVisibleBox(page, `[data-protocol-panel="${protocol}"].active [data-pool-body="${protocol}"] .pool-apply-form button`, `${label} apply button`);
+  const liveStatusResponse = page.waitForResponse((response) => (
+    response.url().includes('/api/status') && response.ok()
+  ), { timeout: 15000 }).catch(() => null);
+  await applyButton.click();
+  const response = await liveStatusResponse;
+  if (!response) {
+    throw new Error(`${label}: live status poll did not run`);
+  }
+  await page.waitForTimeout(200);
+  const after = await protocolHeaderIconSnapshot(page, protocol);
+  if (after.count < minCount || after.count < before.count) {
+    throw new Error(`${label}: protocol icons degraded after live status ${JSON.stringify({ before, after })}`);
+  }
+}
+
 async function assertUnifiedImportLayout(page, label) {
   const layout = await page.evaluate(() => {
     const panel = document.querySelector('[data-protocol-panel="vless2"].active [data-subview="key"].active');
@@ -633,6 +684,8 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (await page.locator('.pool-delete-btn').count()) {
       await assertVisibleBox(page, '[data-protocol-panel].active [data-pool-body] tr:first-child .pool-delete-btn', `${name} delete button`);
     }
+    await assertActivePoolRowPinned(page, 'vless', `${name} vless pool order`);
+    await assertProtocolServiceIconsStableAfterLiveStatus(page, 'vless', 3, `${name} vless status icons`);
     await clickLazyProtocol(page, 'vless2', name);
     await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();
     await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);

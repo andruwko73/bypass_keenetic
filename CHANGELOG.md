@@ -1,3 +1,11 @@
+<a name="1.932"></a>
+# [1.932] - 8 Jul 2026
+
+- Makes YouTube routing depend on the selected service route and cached edge restore instead of periodic background warm-up.
+- Applies selected pool keys faster with a short first wait and a safe full fallback wait when Xray is slower to expose the local port.
+- Keeps protocol service icons from being overwritten by lighter live-status payloads and covers the case in UI smoke.
+- Skips the first CPU sample after router-health prime so the web UI does not display the short page-load/API spike as router load.
+
 <a name="1.931"></a>
 # [1.931] - 7 Jul 2026
 

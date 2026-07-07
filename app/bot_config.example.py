@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.931
+# ВЕРСИЯ СКРИПТА v1.932
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -116,7 +116,7 @@ telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so 
 youtube_edge_prefetch_enabled = True  # lightweight DNS/IP prefetch for the active YouTube route
 youtube_edge_prefetch_mode = 'external'  # external runner keeps this work out of the long-running bot process
 youtube_edge_prefetch_start_delay_seconds = 120
-youtube_edge_prefetch_interval_seconds = 1800
+youtube_edge_prefetch_interval_seconds = 0  # fallback only: post-install/update, key apply, or explicit repair
 youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'
 youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'
 youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'

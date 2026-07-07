@@ -39,30 +39,35 @@ def proxy_apply_settings(core_service_script, ports):
             'port': ports['shadowsocks'],
             'restart_cmds': ['/opt/etc/init.d/S22shadowsocks restart', core_restart],
             'startup_wait': 8,
+            'fast_startup_wait': 5,
         },
         'vmess': {
             'label': 'Vmess',
             'port': ports['vmess'],
             'restart_cmds': [core_restart],
             'startup_wait': 18,
+            'fast_startup_wait': 5,
         },
         'vless': {
             'label': 'Vless 1',
             'port': ports['vless'],
             'restart_cmds': [core_restart],
             'startup_wait': 18,
+            'fast_startup_wait': 5,
         },
         'vless2': {
             'label': 'Vless 2',
             'port': ports['vless2'],
             'restart_cmds': [core_restart],
             'startup_wait': 18,
+            'fast_startup_wait': 5,
         },
         'trojan': {
             'label': 'Trojan',
             'port': ports['trojan'],
             'restart_cmds': ['/opt/etc/init.d/S22trojan restart', core_restart],
             'startup_wait': 8,
+            'fast_startup_wait': 5,
         },
     }
 
@@ -97,13 +102,36 @@ def apply_installed_proxy_runtime(
 
     diagnostics = build_diagnostics(key_type, key_value)
     restart_cmd = current['restart_cmds'][-1]
-    if not ensure_service_port(
-        current['port'],
-        restart_cmd,
-        retries=2,
-        sleep_after_restart=3,
-        timeout=current['startup_wait'],
-    ):
+    startup_wait = current['startup_wait']
+    if verify:
+        port_ok = ensure_service_port(
+            current['port'],
+            restart_cmd,
+            retries=2,
+            sleep_after_restart=3,
+            timeout=startup_wait,
+        )
+    else:
+        fast_startup_wait = min(
+            int(current.get('fast_startup_wait', startup_wait) or startup_wait),
+            int(startup_wait or 0),
+        )
+        port_ok = ensure_service_port(
+            current['port'],
+            None,
+            retries=0,
+            sleep_after_restart=0,
+            timeout=fast_startup_wait,
+        )
+        if not port_ok and fast_startup_wait < startup_wait:
+            port_ok = ensure_service_port(
+                current['port'],
+                None,
+                retries=0,
+                sleep_after_restart=0,
+                timeout=startup_wait,
+            )
+    if not port_ok:
         return (f'⚠️ {current["label"]} ключ сохранён, но локальный порт 127.0.0.1:{current["port"]} '
                 f'не поднялся. Текущий {app_mode_noun} {active_label} сохранён. {diagnostics}').strip()
 

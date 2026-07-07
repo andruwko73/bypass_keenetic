@@ -1,3 +1,7 @@
+*v1.932 (8 Jul 2026) -* main
+
+*Makes YouTube routing event-driven instead of periodically warmed, speeds selected key apply with a safe fallback wait, keeps service icons stable after live status refreshes, and delays router CPU display until a confirmed sample after page-load prime.*
+
 *v1.931 (7 Jul 2026) -* main
 
 *Keeps the service route desktop popover inside the viewport by capping its height and using internal scrolling.*

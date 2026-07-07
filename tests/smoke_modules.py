@@ -887,6 +887,7 @@ def test_router_health_runtime_primes_cpu_baseline_without_page_render_sample():
     cpu_stats = iter((
         (100, 0, 0, 900, 0),
         (110, 0, 10, 980, 0),
+        (120, 0, 20, 1060, 0),
     ))
     now = [100.0]
 
@@ -916,13 +917,16 @@ def test_router_health_runtime_primes_cpu_baseline_without_page_render_sample():
         page_render = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, sample_cpu=False, prime_cpu=True)
         now[0] += 5
         first_api = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, force_refresh=True)
+        now[0] += 5
+        second_api = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, force_refresh=True)
     finally:
         for name, value in original.items():
             setattr(router_health_runtime, name, value)
 
-    assert calls['cpu'] == 2
+    assert calls['cpu'] == 3
     assert page_render['cpu_percent'] is None
-    assert first_api['cpu_percent'] == 20.0
+    assert first_api['cpu_percent'] is None
+    assert second_api['cpu_percent'] == 20.0
 
 
 def test_web_commands_runtime_dispatch():
@@ -2424,7 +2428,7 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_enabled = True',
         "youtube_edge_prefetch_mode = 'external'",
         'youtube_edge_prefetch_start_delay_seconds = 120',
-        'youtube_edge_prefetch_interval_seconds = 1800',
+        'youtube_edge_prefetch_interval_seconds = 0',
         "youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'",
         "youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'",
         "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'",
@@ -2584,16 +2588,96 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert 'touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts' in script
     assert "normalize_line()" in unblock_dnsmasq
     assert "s/\\r//g" in unblock_dnsmasq
+    assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in unblock_dnsmasq
+    assert 'DNSMASQ_OUTPUT_FILE="${DNSMASQ_OUTPUT_FILE:-/opt/etc/unblock.dnsmasq}"' in unblock_dnsmasq
+    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com' in unblock_dnsmasq
+    assert 'YOUTUBE_ROUTE_PROTOCOL="$(youtube_route_protocol)"' in unblock_dnsmasq
+    assert 'write_route_domain()' in unblock_dnsmasq
+    assert 'append_youtube_priority_domains()' in unblock_dnsmasq
+    assert 'dedupe_dnsmasq_output()' in unblock_dnsmasq
     assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
     assert 'connectivity_check_domain()' in unblock_dnsmasq
-    assert 'connectivity_check_domain "$line" && continue' in unblock_dnsmasq
+    assert 'connectivity_check_domain "$line" && return 0' in unblock_dnsmasq
     assert 'udp_quic_domain()' in unblock_dnsmasq
     assert 'call_signal_domain()' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblocksh unblockshudp bypass_call_signal_sh' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblockvless unblockvlessudp bypass_call_signal_vless' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblockvless2 unblockvless2udp bypass_call_signal_vless2' in unblock_dnsmasq
-    assert 'ipset_targets "$line" unblocktroj unblocktrojudp bypass_call_signal_troj' in unblock_dnsmasq
+    assert 'append_dnsmasq_domain "$line" "$main_set" "$udp_set" "$call_signal_set"' in unblock_dnsmasq
+    assert 'write_route_domain shadowsocks "$line" unblocksh unblockshudp bypass_call_signal_sh 1' in unblock_dnsmasq
+    assert 'write_route_domain vmess "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess 0' in unblock_dnsmasq
+    assert 'write_route_domain vless "$line" unblockvless unblockvlessudp bypass_call_signal_vless 0' in unblock_dnsmasq
+    assert 'write_route_domain vless2 "$line" unblockvless2 unblockvless2udp bypass_call_signal_vless2 0' in unblock_dnsmasq
+    assert 'write_route_domain trojan "$line" unblocktroj unblocktrojudp bypass_call_signal_troj 0' in unblock_dnsmasq
+
+
+def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
+    def shell_path(path):
+        value = str(Path(path).resolve()).replace('\\', '/')
+        if re.match(r'^[A-Za-z]:/', value):
+            return f'/mnt/{value[0].lower()}{value[2:]}'
+        return value
+
+    def shell_quote(value):
+        return "'" + str(value).replace("'", "'\"'\"'") + "'"
+
+    unblock_dir = tmp_path / 'unblock'
+    unblock_dir.mkdir()
+    for file_name in ('shadowsocks.txt', 'vmess.txt', 'trojan.txt'):
+        (unblock_dir / file_name).write_text('', encoding='utf-8')
+    (unblock_dir / 'vless.txt').write_text('youtube.com\nexample-vless.test\n', encoding='utf-8')
+    (unblock_dir / 'vless-2.txt').write_text(
+        'youtube.com\nwww.youtube.com\ngooglevideo.com\nexample-vless2.test\n',
+        encoding='utf-8',
+    )
+    udp_policy = tmp_path / 'udp.txt'
+    call_policy = tmp_path / 'call.txt'
+    output = tmp_path / 'out.dnsmasq'
+    log_file = tmp_path / 'dnsmasq.log'
+    udp_policy.write_text('', encoding='utf-8')
+    call_policy.write_text('', encoding='utf-8')
+
+    command = ' '.join((
+        f'UNBLOCK_DIR={shell_quote(shell_path(unblock_dir))}',
+        f'DNSMASQ_OUTPUT_FILE={shell_quote(shell_path(output))}',
+        f'DNSMASQ_LOG_FILE={shell_quote(shell_path(log_file))}',
+        f'UDP_QUIC_POLICY_FILE={shell_quote(shell_path(udp_policy))}',
+        f'CALL_SIGNAL_POLICY_FILE={shell_quote(shell_path(call_policy))}',
+        'bash',
+        shell_quote(shell_path(APP_ROOT / 'unblock.dnsmasq')),
+    ))
+    subprocess.run(
+        ['bash', '-lc', command],
+        check=True,
+        cwd=ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    dnsmasq_text = output.read_text(encoding='utf-8')
+    assert 'ipset=/youtube.com/unblockvless2' in dnsmasq_text
+    assert 'ipset=/www.youtube.com/unblockvless2' in dnsmasq_text
+    assert 'ipset=/m.youtube.com/unblockvless2' in dnsmasq_text
+    assert 'ipset=/googlevideo.com/unblockvless2' in dnsmasq_text
+    assert 'ipset=/youtube.com/unblockvless/' not in dnsmasq_text
+    assert 'ipset=/googlevideo.com/unblockvless/' not in dnsmasq_text
+    assert 'ipset=/example-vless.test/unblockvless' in dnsmasq_text
+    assert 'ipset=/example-vless2.test/unblockvless2' in dnsmasq_text
+    assert 'youtube_route=vless2' in log_file.read_text(encoding='utf-8')
+
+    (unblock_dir / 'vless.txt').write_text(
+        'youtube.com\nwww.youtube.com\ngooglevideo.com\nexample-vless.test\n',
+        encoding='utf-8',
+    )
+    (unblock_dir / 'vless-2.txt').write_text('youtube.com\nexample-vless2.test\n', encoding='utf-8')
+    subprocess.run(
+        ['bash', '-lc', command],
+        check=True,
+        cwd=ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    dnsmasq_text = output.read_text(encoding='utf-8')
+    assert 'ipset=/youtube.com/unblockvless\n' in dnsmasq_text
+    assert 'ipset=/googlevideo.com/unblockvless\n' in dnsmasq_text
+    assert 'ipset=/youtube.com/unblockvless2' not in dnsmasq_text
+    assert 'ipset=/googlevideo.com/unblockvless2' not in dnsmasq_text
 
 
 def test_direct_update_script_records_update_status():
@@ -2714,7 +2798,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'priority_refresh_due()' in s99unblock
     assert 'dedupe_vless_priority_overlaps()' in s99unblock
     assert 'remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2udp"' in s99unblock
-    assert 'YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-1800}"' in s99unblock
+    assert 'YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-0}"' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"' in s99unblock
     assert 'APP_RUNTIME_MODE_FILE="${APP_RUNTIME_MODE_FILE:-/opt/etc/bot_app_mode}"' in s99unblock
     assert 'dedupe_lock_pid_is_active()' in s99unblock
@@ -2727,6 +2811,11 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'run_refresh_if_due()' in s99unblock
     assert 'run_refresh_if_check_due()' in s99unblock
     assert 'run_youtube_edge_prefetch_if_due()' in s99unblock
+    assert 'base_interval="$YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS"' in s99unblock
+    assert 'case "$trigger" in' in s99unblock
+    assert "scheduler|'') youtube_edge_prefetch_due || return 0 ;;" in s99unblock
+    assert '\'\'|*[!0-9]*|0) return 1 ;;' in s99unblock
+    assert '\'\'|*[!0-9]*|0) interval="$base_interval" ;;' in s99unblock
     assert 'youtube_edge_prefetch_background_busy()' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS="${YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS:-120}"' in s99unblock
     assert 'youtube_edge_prefetch_recent_refresh_busy()' in s99unblock
@@ -2771,9 +2860,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in s99unblock
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in s99unblock
     assert 'fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com' in s99unblock
-    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-ssl.gstatic.com' in s99unblock
+    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com' in s99unblock
+    assert 'youtu.be youtube-nocookie.com youtube.googleapis.com' in s99unblock
+    assert 'googlevideo.com manifest.googlevideo.com redirector.googlevideo.com c.youtube.com' in s99unblock
+    assert 'ytimg.com i.ytimg.com s.ytimg.com ggpht.com yt3.ggpht.com gvt1.com' in s99unblock
     assert 'domain_in_list "$YOUTUBE_ROUTE_PRIORITY_DOMAINS" "$priority_domain"' in s99unblock
     assert 'force_youtube_route=1' in s99unblock
+    assert 'youtube_route="$(youtube_route_protocol)"\n    for priority_domain in $VLESS_PRIORITY_DOMAINS; do' in s99unblock
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in s99unblock
     assert 'apply_vless_priority_domain_ips' in s99unblock
     assert 'route_file_signature()' in s99unblock
@@ -2808,10 +2901,14 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com' in ipset_script
     assert 'clients2.google.com clients3.google.com clients4.google.com clients6.google.com' in ipset_script
     assert 'fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com' in ipset_script
-    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-ssl.gstatic.com' in ipset_script
+    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com' in ipset_script
+    assert 'youtu.be youtube-nocookie.com youtube.googleapis.com' in ipset_script
+    assert 'googlevideo.com manifest.googlevideo.com redirector.googlevideo.com c.youtube.com' in ipset_script
+    assert 'ytimg.com i.ytimg.com s.ytimg.com ggpht.com yt3.ggpht.com gvt1.com' in ipset_script
     assert 'domain_in_list "$YOUTUBE_ROUTE_PRIORITY_DOMAINS" "$priority_domain"' in ipset_script
     assert 'force_youtube_route=1' in ipset_script
-    assert 'youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com' in ipset_script
+    assert 'youtube_route="$(youtube_route_protocol)"\n\tfor priority_domain in $VLESS_PRIORITY_DOMAINS; do' in ipset_script
+    assert 'youtube.com www.youtube.com m.youtube.com youtu.be' in ipset_script
     assert 'rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc' in ipset_script
     assert 'apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6' in ipset_script
     last_swap_idx = ipset_script.index('swap_or_preserve_set unblocktroj6')
@@ -2822,6 +2919,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     )
     post_priority_dedupe_call_idx = ipset_script.index('dedupe_vless_final_ipsets', priority_call_idx)
     assert last_swap_idx < final_dedupe_call_idx < priority_call_idx < post_priority_dedupe_call_idx
+    route_log_call_idx = ipset_script.index('log_youtube_route_ipset_counts', post_priority_dedupe_call_idx)
+    assert 'IPSET_ROUTE_LOG_FILE="${IPSET_ROUTE_LOG_FILE:-/opt/var/log/bypass-ipset-route.log}"' in ipset_script
+    assert 'youtube_route=%s ipset_main=%s ipset_udp=%s ipset_priority=%s' in ipset_script
+    assert post_priority_dedupe_call_idx < route_log_call_idx
     assert 'run_update_ipset_refresh()' in script
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
     assert 'continuing update while refresh finishes in background' in script
@@ -2832,6 +2933,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'run_youtube_edge_prefetch_retry_if_skipped()' in script
     assert 'low_available_memory|lock_busy|unblock_running|pool_probe_running)' in script
     assert 'run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90' in script
+    assert "Key apply: protocol={proto} verify={int(bool(verify))} duration_ms={duration_ms}" in bot_source
+    key_apply_log_idx = bot_source.index('Key apply: protocol={proto}')
+    assert 'key_value' not in bot_source[key_apply_log_idx:key_apply_log_idx + 180]
     assert 'def youtube_edge_prefetch_shell(trigger):' in installer_source
     assert 'switch_to_main_bot(run_youtube_prefetch=True)' in installer_source
     assert 'YOUTUBE_EDGE_PREFETCH_RUNNER} --trigger "{safe_trigger}"' in installer_source
@@ -3003,7 +3107,6 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'YOUTUBE_VIDEO_PRELOAD' not in ipset_script
     assert 'preload_youtube_video_hosts' not in ipset_script
     assert '--socks5-hostname "127.0.0.1:$socks_port"' not in ipset_script
-    assert 'manifest.googlevideo.com' not in ipset_script
     assert 'function cidr64(ip, parts, net)' in ipset_script
     assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq
     assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
@@ -4884,6 +4987,74 @@ def test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers():
         youtube_edge_prefetch_runner.config = original_config
 
 
+def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_sufficient(tmp_path):
+    original_config = youtube_edge_prefetch_runner.config
+    original_acquire_lock = youtube_edge_prefetch_runner.acquire_lock
+    original_release_lock = youtube_edge_prefetch_runner.release_lock
+    original_read_available = youtube_edge_prefetch_runner.read_available_memory_kb
+    original_detect_route = youtube_edge_prefetch_runner.detect_youtube_route_protocol
+    original_restore = youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets
+    original_prefetch = youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once
+    restore_calls = []
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_enabled=True,
+            youtube_edge_prefetch_fast_warm_enabled=True,
+            youtube_edge_prefetch_cache_restore_enabled=True,
+            youtube_edge_prefetch_min_available_kb=0,
+            youtube_edge_prefetch_lock_dir=str(tmp_path / 'lock'),
+        )
+        youtube_edge_prefetch_runner.acquire_lock = lambda lock_dir: True
+        youtube_edge_prefetch_runner.release_lock = lambda lock_dir: None
+        youtube_edge_prefetch_runner.read_available_memory_kb = lambda: 200000
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = lambda **kwargs: 'vless2'
+
+        def fake_restore(**kwargs):
+            restore_calls.append(kwargs)
+            return {
+                'ok': True,
+                'route_protocol': 'vless2',
+                'last_run_at': 100.0,
+                'skipped_reason': '',
+                'mode': 'cache_restore',
+                'candidates': 3,
+                'cache_entries': 4,
+                'added_addresses': 1,
+                'added_sets': 2,
+                'deleted_sets': 0,
+                'cache_restore_skipped_no_quality': 0,
+                'cache_restore_skipped_failed_quality': 0,
+                'cache_restore_skipped_recent_bad_quality': 0,
+            }
+
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets = fake_restore
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = (
+            lambda **kwargs: (_ for _ in ()).throw(AssertionError('prefetch_once must not run'))
+        )
+
+        status = youtube_edge_prefetch_runner.run_prefetch(
+            trigger='Post-update',
+            status_path=str(tmp_path / 'status.json'),
+            cache_path=str(tmp_path / 'cache.json'),
+            unblock_dir=str(tmp_path / 'unblock'),
+        )
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner.acquire_lock = original_acquire_lock
+        youtube_edge_prefetch_runner.release_lock = original_release_lock
+        youtube_edge_prefetch_runner.read_available_memory_kb = original_read_available
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = original_detect_route
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets = original_restore
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = original_prefetch
+
+    assert len(restore_calls) == 1
+    assert status['ok'] is True
+    assert status['warm_mode'] == 'cache_restore'
+    assert status['prefetch_skipped_reason'] == 'cache_restore_sufficient'
+    assert status['cache_restored_addresses'] == 1
+    assert status['last_message'] == 'vless2: added 1 addresses, candidates 3, cache 4'
+
+
 def test_entware_dns_runtime_helpers():
     class _Result:
         def __init__(self, returncode):
@@ -5966,6 +6137,7 @@ def test_proxy_apply_runtime_helpers():
     commands = []
     sleeps = []
     records = []
+    ensure_calls = []
     result = proxy_apply_runtime.apply_installed_proxy_runtime(
         'vless',
         'key',
@@ -5975,7 +6147,7 @@ def test_proxy_apply_runtime_helpers():
         proxy_mode_label=lambda mode: 'Без прокси',
         proxy_url_getter=lambda proto: 'proxy-url',
         build_diagnostics=lambda proto, key: 'diag',
-        ensure_service_port=lambda port, restart_cmd, **kwargs: True,
+        ensure_service_port=lambda port, restart_cmd, **kwargs: ensure_calls.append((port, restart_cmd, kwargs)) or True,
         check_local_endpoint=lambda proto, port: (True, 'SOCKS ok.'),
         check_telegram_api=lambda proxy, **kwargs: (True, 'tg ok'),
         check_http=lambda proxy, **kwargs: (False, 'yt fail'),
@@ -5986,11 +6158,13 @@ def test_proxy_apply_runtime_helpers():
     assert result.startswith('✅ Vless 1 ключ сохранён.')
     assert commands == ['/opt/etc/init.d/S24xray restart']
     assert sleeps == []
+    assert ensure_calls[0][2]['timeout'] == 18
     assert len(records) == 1
     assert records[0][0:2] == ('vless', 'key')
     assert records[0][2]['tg_ok'] is True
     assert records[0][2]['yt_ok'] is False
     assert records[0][2]['yt_stability'] == 'fail'
+    pending_ensure_calls = []
     pending = proxy_apply_runtime.apply_installed_proxy_runtime(
         'trojan',
         'key',
@@ -6000,7 +6174,7 @@ def test_proxy_apply_runtime_helpers():
         proxy_mode_label=lambda mode: 'Trojan',
         proxy_url_getter=lambda proto: 'unused',
         build_diagnostics=lambda proto, key: '',
-        ensure_service_port=lambda port, restart_cmd, **kwargs: True,
+        ensure_service_port=lambda port, restart_cmd, **kwargs: pending_ensure_calls.append((port, restart_cmd, kwargs)) or True,
         check_local_endpoint=lambda proto, port: (True, 'SOCKS ok.'),
         check_telegram_api=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('must not verify')),
         verify=False,
@@ -6008,6 +6182,33 @@ def test_proxy_apply_runtime_helpers():
         sleep=lambda seconds: None,
     )
     assert 'в фоне' in pending
+    assert pending_ensure_calls[0][2]['timeout'] == 5
+    assert pending_ensure_calls[0][1] is None
+    assert pending_ensure_calls[0][2]['retries'] == 0
+    fallback_ensure_calls = []
+    fallback_results = iter([False, True])
+    fallback_pending = proxy_apply_runtime.apply_installed_proxy_runtime(
+        'trojan',
+        'key',
+        settings=settings,
+        app_mode_noun='режим бота',
+        load_proxy_mode=lambda: 'trojan',
+        proxy_mode_label=lambda mode: 'Trojan',
+        proxy_url_getter=lambda proto: 'unused',
+        build_diagnostics=lambda proto, key: '',
+        ensure_service_port=lambda port, restart_cmd, **kwargs: (
+            fallback_ensure_calls.append((port, restart_cmd, kwargs)) or next(fallback_results)
+        ),
+        check_local_endpoint=lambda proto, port: (True, 'SOCKS ok.'),
+        check_telegram_api=lambda proxy, **kwargs: (_ for _ in ()).throw(AssertionError('must not verify')),
+        verify=False,
+        run_command=lambda command: None,
+        sleep=lambda seconds: None,
+    )
+    assert 'в фоне' in fallback_pending
+    assert [call[2]['timeout'] for call in fallback_ensure_calls] == [5, 8]
+    assert all(call[1] is None for call in fallback_ensure_calls)
+    assert all(call[2]['retries'] == 0 for call in fallback_ensure_calls)
     vless2_records = []
     vless2_result = proxy_apply_runtime.apply_installed_proxy_runtime(
         'vless2',

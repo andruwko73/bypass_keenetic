@@ -822,6 +822,16 @@ def _cache_restore_only_for_trigger(trigger):
     return str(trigger or '').strip().lower().startswith('manual-restore')
 
 
+def _cache_restore_satisfies_prefetch(trigger, status):
+    if not _fast_warm_enabled_for_trigger(trigger):
+        return False
+    if not bool((status or {}).get('ok')):
+        return False
+    if int((status or {}).get('failed_sets') or 0) > 0:
+        return False
+    return int((status or {}).get('candidates') or 0) > 0
+
+
 def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock_dir=None):
     started_at = time.time()
     status_path = status_path or _config_str('youtube_edge_prefetch_status_path', STATUS_PATH)
@@ -912,9 +922,17 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 ),
             )
             cache_restore_status['duration_ms'] = int(max(0.0, time.time() - restore_started) * 1000)
-            if _cache_restore_only_for_trigger(trigger):
+            if _cache_restore_only_for_trigger(trigger) or _cache_restore_satisfies_prefetch(
+                trigger,
+                cache_restore_status,
+            ):
                 cache_restore_status['available_memory_kb'] = available_kb
                 cache_restore_status['warm_mode'] = 'cache_restore'
+                if not _cache_restore_only_for_trigger(trigger):
+                    cache_restore_status['prefetch_skipped_reason'] = 'cache_restore_sufficient'
+                    cache_restore_status['cache_restored_addresses'] = int(
+                        cache_restore_status.get('added_addresses') or 0
+                    )
                 status = _normalize_status(
                     cache_restore_status,
                     trigger=trigger,

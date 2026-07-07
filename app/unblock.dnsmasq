@@ -8,11 +8,15 @@
 # Файл: unblock.dnsmasq, Версия 2.1.9, последнее изменение: 03.05.2023, 22:03
 # Доработал: NetworK (https://github.com/znetworkx)
 
-cat /dev/null > /opt/etc/unblock.dnsmasq
+UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
+DNSMASQ_OUTPUT_FILE="${DNSMASQ_OUTPUT_FILE:-/opt/etc/unblock.dnsmasq}"
+DNSMASQ_LOG_FILE="${DNSMASQ_LOG_FILE:-/opt/var/log/bypass-dnsmasq-route.log}"
+cat /dev/null > "$DNSMASQ_OUTPUT_FILE"
 UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"
 UDP_QUIC_POLICY_TEMP=""
 CALL_SIGNAL_POLICY_FILE="${CALL_SIGNAL_POLICY_FILE:-/opt/etc/bot/call_signal_routes.txt}"
 CALL_SIGNAL_POLICY_TEMP=""
+YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com m.youtube.com youtu.be youtube-nocookie.com youtube.googleapis.com youtubei.googleapis.com youtubei-att.googleapis.com youtube-ui.l.google.com wide-youtube.l.google.com googlevideo.com manifest.googlevideo.com redirector.googlevideo.com c.youtube.com ytimg.com i.ytimg.com s.ytimg.com ggpht.com yt3.ggpht.com gvt1.com}"
 
 cleanup_policy_temp() {
   [ -n "$UDP_QUIC_POLICY_TEMP" ] && rm -f "$UDP_QUIC_POLICY_TEMP" 2>/dev/null || true
@@ -30,6 +34,68 @@ normalize_domain() {
     | tr '[:upper:]' '[:lower:]' \
     | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
+
+domain_in_list() {
+  domain=$(normalize_domain "$2")
+  [ -n "$domain" ] || return 1
+  for item in $1; do
+    item=$(normalize_domain "$item")
+    [ -n "$item" ] || continue
+    [ "$domain" = "$item" ] && return 0
+    case "$domain" in
+      *."$item") return 0 ;;
+    esac
+  done
+  return 1
+}
+
+youtube_domain() {
+  domain_in_list "$YOUTUBE_ROUTE_PRIORITY_DOMAINS" "$1"
+}
+
+route_marker_count() {
+  route_file="$1"
+  [ -r "$route_file" ] || {
+    printf '%s\n' 0
+    return
+  }
+  count=0
+  while read -r route_line || [ -n "$route_line" ]; do
+    route_line=$(normalize_line "$route_line")
+    [ -z "$route_line" ] && continue
+    [ "${route_line#\#}" != "$route_line" ] && continue
+    if youtube_domain "$route_line"; then
+      count=$((count + 1))
+    fi
+  done < "$route_file"
+  printf '%s\n' "$count"
+}
+
+youtube_route_protocol() {
+  best_proto=""
+  best_count=0
+  for route_spec in \
+    "shadowsocks:shadowsocks.txt" \
+    "vmess:vmess.txt" \
+    "vless:vless.txt" \
+    "vless2:vless-2.txt" \
+    "trojan:trojan.txt"
+  do
+    proto="${route_spec%%:*}"
+    file_name="${route_spec#*:}"
+    count=$(route_marker_count "$UNBLOCK_DIR/$file_name")
+    case "$count" in
+      ''|*[!0-9]*) count=0 ;;
+    esac
+    if [ "$count" -gt "$best_count" ] 2>/dev/null; then
+      best_count="$count"
+      best_proto="$proto"
+    fi
+  done
+  printf '%s\n' "$best_proto"
+}
+
+YOUTUBE_ROUTE_PROTOCOL="$(youtube_route_protocol)"
 
 connectivity_check_domain() {
   domain=$(normalize_domain "$1")
@@ -140,27 +206,69 @@ ipset_targets() {
   printf '%s\n' "$targets"
 }
 
+append_dnsmasq_domain() {
+  domain=$(normalize_domain "$1")
+  main_set="$2"
+  udp_set="$3"
+  call_signal_set="$4"
+  [ -n "$domain" ] || return 0
+  echo "ipset=/$domain/$(ipset_targets "$domain" "$main_set" "$udp_set" "$call_signal_set")" >> "$DNSMASQ_OUTPUT_FILE"
+  echo "server=/$domain/8.8.8.8" >> "$DNSMASQ_OUTPUT_FILE"
+}
+
+write_route_domain() {
+  route_proto="$1"
+  line="$2"
+  main_set="$3"
+  udp_set="$4"
+  call_signal_set="$5"
+  wildcard_mode="$6"
+  line=$(normalize_line "$line")
+  [ -z "$line" ] && return 0
+  [ "${line#\#}" != "$line" ] && return 0
+  echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && return 0
+  connectivity_check_domain "$line" && return 0
+  if [ -n "$YOUTUBE_ROUTE_PROTOCOL" ] && youtube_domain "$line" && [ "$route_proto" != "$YOUTUBE_ROUTE_PROTOCOL" ]; then
+    return 0
+  fi
+
+  if [ "$wildcard_mode" = "1" ] && echo "$line" | grep -q '\*'; then
+    host=$(echo "${line}" | sed 's/^.*\.\(.*\.\w\{2,6\}\)$/\1/')
+    host=$(echo "${host}" | sed 's/\*//;')
+    append_dnsmasq_domain "*.${host}" "$main_set" "$udp_set" "$call_signal_set"
+    append_dnsmasq_domain "$host" "$main_set" "$udp_set" "$call_signal_set"
+    return 0
+  fi
+  append_dnsmasq_domain "$line" "$main_set" "$udp_set" "$call_signal_set"
+}
+
+append_youtube_priority_domains() {
+  case "$YOUTUBE_ROUTE_PROTOCOL" in
+    shadowsocks) main_set="unblocksh"; udp_set="unblockshudp"; call_signal_set="bypass_call_signal_sh" ;;
+    vmess) main_set="unblockvmess"; udp_set="unblockvmessudp"; call_signal_set="bypass_call_signal_vmess" ;;
+    vless) main_set="unblockvless"; udp_set="unblockvlessudp"; call_signal_set="bypass_call_signal_vless" ;;
+    vless2) main_set="unblockvless2"; udp_set="unblockvless2udp"; call_signal_set="bypass_call_signal_vless2" ;;
+    trojan) main_set="unblocktroj"; udp_set="unblocktrojudp"; call_signal_set="bypass_call_signal_troj" ;;
+    *) return 0 ;;
+  esac
+  count=0
+  for youtube_domain_name in $YOUTUBE_ROUTE_PRIORITY_DOMAINS; do
+    append_dnsmasq_domain "$youtube_domain_name" "$main_set" "$udp_set" "$call_signal_set"
+    count=$((count + 1))
+  done
+  mkdir -p "$(dirname "$DNSMASQ_LOG_FILE")" 2>/dev/null || true
+  printf '%s youtube_route=%s dnsmasq_priority_domains=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown)" "$YOUTUBE_ROUTE_PROTOCOL" "$count" >> "$DNSMASQ_LOG_FILE" 2>/dev/null || true
+}
+
+dedupe_dnsmasq_output() {
+  tmp_file="${DNSMASQ_OUTPUT_FILE}.$$"
+  awk '!seen[$0]++' "$DNSMASQ_OUTPUT_FILE" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$DNSMASQ_OUTPUT_FILE" || rm -f "$tmp_file"
+}
+
 #=======================================================================================
 while read -r line || [ -n "$line" ]; do
-  line=$(normalize_line "$line")
-  [ -z "$line" ] && continue
-  [ "${line#\#}" != "$line" ] && continue
-  echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
-  connectivity_check_domain "$line" && continue
-
-  host=$(echo "${line}" | sed 's/^.*\.\(.*\.\w\{2,6\}\)$/\1/')
-  if echo "${host}" | grep -q '\*' ; then
-    host=$(echo "${host}" | sed 's/\*//;') # s/\./\\./g')
-    #echo "ipset=/:.*${host}:/unblocksh" >> /opt/etc/unblock.dnsmasq
-    echo "ipset=/*.${host}/$(ipset_targets "$host" unblocksh unblockshudp bypass_call_signal_sh)" >> /opt/etc/unblock.dnsmasq
-    echo "server=/*.${host}/8.8.8.8" >> /opt/etc/unblock.dnsmasq
-	echo "ipset=/${host}/$(ipset_targets "$host" unblocksh unblockshudp bypass_call_signal_sh)" >> /opt/etc/unblock.dnsmasq
-	echo "server=/${host}/8.8.8.8" >> /opt/etc/unblock.dnsmasq
-  else
-    echo "ipset=/$line/$(ipset_targets "$line" unblocksh unblockshudp bypass_call_signal_sh)" >> /opt/etc/unblock.dnsmasq
-    echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
-  fi
-done < /opt/etc/unblock/shadowsocks.txt
+  write_route_domain shadowsocks "$line" unblocksh unblockshudp bypass_call_signal_sh 1
+done < "$UNBLOCK_DIR/shadowsocks.txt"
 #=======================================================================================
 
 #while read line || [ -n "$line" ]; do
@@ -173,47 +281,26 @@ done < /opt/etc/unblock/shadowsocks.txt
 
 
 while read -r line || [ -n "$line" ]; do
-  line=$(normalize_line "$line")
-  [ -z "$line" ] && continue
-  [ "${line#\#}" != "$line" ] && continue
-  echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
-  connectivity_check_domain "$line" && continue
-  echo "ipset=/$line/$(ipset_targets "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess)" >> /opt/etc/unblock.dnsmasq
-  echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
-done < /opt/etc/unblock/vmess.txt
+  write_route_domain vmess "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess 0
+done < "$UNBLOCK_DIR/vmess.txt"
 
 
 while read -r line || [ -n "$line" ]; do
-  line=$(normalize_line "$line")
-  [ -z "$line" ] && continue
-  [ "${line#\#}" != "$line" ] && continue
-  echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
-  connectivity_check_domain "$line" && continue
-  echo "ipset=/$line/$(ipset_targets "$line" unblockvless unblockvlessudp bypass_call_signal_vless)" >> /opt/etc/unblock.dnsmasq
-  echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
-done < /opt/etc/unblock/vless.txt
+  write_route_domain vless "$line" unblockvless unblockvlessudp bypass_call_signal_vless 0
+done < "$UNBLOCK_DIR/vless.txt"
 
 
 while read -r line || [ -n "$line" ]; do
-  line=$(normalize_line "$line")
-  [ -z "$line" ] && continue
-  [ "${line#\#}" != "$line" ] && continue
-  echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
-  connectivity_check_domain "$line" && continue
-  echo "ipset=/$line/$(ipset_targets "$line" unblockvless2 unblockvless2udp bypass_call_signal_vless2)" >> /opt/etc/unblock.dnsmasq
-  echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
-done < /opt/etc/unblock/vless-2.txt
+  write_route_domain vless2 "$line" unblockvless2 unblockvless2udp bypass_call_signal_vless2 0
+done < "$UNBLOCK_DIR/vless-2.txt"
 
 
 while read -r line || [ -n "$line" ]; do
-  line=$(normalize_line "$line")
-  [ -z "$line" ] && continue
-  [ "${line#\#}" != "$line" ] && continue
-  echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && continue
-  connectivity_check_domain "$line" && continue
-  echo "ipset=/$line/$(ipset_targets "$line" unblocktroj unblocktrojudp bypass_call_signal_troj)" >> /opt/etc/unblock.dnsmasq
-  echo "server=/$line/8.8.8.8" >> /opt/etc/unblock.dnsmasq
-done < /opt/etc/unblock/trojan.txt
+  write_route_domain trojan "$line" unblocktroj unblocktrojudp bypass_call_signal_troj 0
+done < "$UNBLOCK_DIR/trojan.txt"
+
+append_youtube_priority_domains
+dedupe_dnsmasq_output
 
 #script0
 #script1

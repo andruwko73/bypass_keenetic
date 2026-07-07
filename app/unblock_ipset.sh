@@ -15,10 +15,11 @@ LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"
 LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"
 STATUS_FILE="${IPSET_STATUS_FILE:-/opt/tmp/bypass_ipset_status.json}"
+IPSET_ROUTE_LOG_FILE="${IPSET_ROUTE_LOG_FILE:-/opt/var/log/bypass-ipset-route.log}"
 YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
-VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
-YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net youtube.com www.youtube.com youtubei.googleapis.com youtubei-att.googleapis.com jnn-pa.googleapis.com i.ytimg.com s.ytimg.com yt3.ggpht.com}"
+YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com m.youtube.com youtu.be youtube-nocookie.com youtube.googleapis.com youtubei.googleapis.com youtubei-att.googleapis.com youtube-ui.l.google.com wide-youtube.l.google.com googlevideo.com manifest.googlevideo.com redirector.googlevideo.com c.youtube.com ytimg.com i.ytimg.com s.ytimg.com ggpht.com yt3.ggpht.com gvt1.com ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net}"
+VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com $YOUTUBE_ROUTE_PRIORITY_DOMAINS rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
 VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
 EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
@@ -216,6 +217,27 @@ ipset_count() {
 			}
 		}
 	'
+}
+
+log_youtube_route_ipset_counts() {
+	youtube_route="$(youtube_route_protocol)"
+	case "$youtube_route" in
+		shadowsocks) main_set="unblocksh"; udp_set="unblockshudp"; priority_set="" ;;
+		vmess) main_set="unblockvmess"; udp_set="unblockvmessudp"; priority_set="" ;;
+		vless) main_set="unblockvless"; udp_set="unblockvlessudp"; priority_set="unblockvlesspriority" ;;
+		vless2) main_set="unblockvless2"; udp_set="unblockvless2udp"; priority_set="unblockvless2priority" ;;
+		trojan) main_set="unblocktroj"; udp_set="unblocktrojudp"; priority_set="" ;;
+		*) return 0 ;;
+	esac
+	main_count="$(ipset_count "$main_set")"
+	udp_count="$(ipset_count "$udp_set")"
+	priority_count="0"
+	[ -n "$priority_set" ] && priority_count="$(ipset_count "$priority_set")"
+	mkdir -p "$(dirname "$IPSET_ROUTE_LOG_FILE")" 2>/dev/null || true
+	printf '%s youtube_route=%s ipset_main=%s ipset_udp=%s ipset_priority=%s\n' \
+		"$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)" \
+		"$youtube_route" "$main_count" "$udp_count" "$priority_count" \
+		>> "$IPSET_ROUTE_LOG_FILE" 2>/dev/null || true
 }
 
 status_counts_json() {
@@ -560,8 +582,8 @@ apply_vless_priority_domain_ips() {
 	ipset flush "$vless_priority6_set" >/dev/null 2>&1 || true
 	ipset flush "$vless2_priority6_set" >/dev/null 2>&1 || true
 
+	youtube_route="$(youtube_route_protocol)"
 	for priority_domain in $VLESS_PRIORITY_DOMAINS; do
-		youtube_route="$(youtube_route_protocol)"
 		force_youtube_route=0
 		case "$youtube_route" in
 			vless|vless2)
@@ -1090,6 +1112,7 @@ dedupe_vless_final_ipsets
 apply_vless_priority_domain_ips unblockvless unblockvless2 unblockvless6 unblockvless2v6
 
 dedupe_vless_final_ipsets
+log_youtube_route_ipset_counts
 
 if [ -s "$tmp_dir/skipped_sets" ] || [ -s "$tmp_dir/fallback_sets" ]; then
 	message="ipset refresh completed with preserved/fallback sets."

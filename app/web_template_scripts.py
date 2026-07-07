@@ -2198,7 +2198,7 @@ def render_web_scripts(
             if (icons) {{
                 icons.innerHTML = status.icons || protocolIcons(status);
             }}
-            if (!poolOverride && !isLiveStatus) {{
+            if (!poolOverride) {{
                 applyProtocolPoolStatusOverride(proto);
             }}
         }}

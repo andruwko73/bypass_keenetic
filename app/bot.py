@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.931, последнее изменение: 07.07.2026
+#  Файл: bot.py, Версия v1.932, последнее изменение: 08.07.2026
 
 import subprocess
 import os
@@ -1014,8 +1014,8 @@ YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS = max(
     int(getattr(config, 'youtube_edge_prefetch_start_delay_seconds', 120)),
 )
 YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS = max(
-    300,
-    int(getattr(config, 'youtube_edge_prefetch_interval_seconds', 1800)),
+    0,
+    int(getattr(config, 'youtube_edge_prefetch_interval_seconds', 0)),
 )
 YOUTUBE_EDGE_PREFETCH_CACHE_PATH = str(
     getattr(config, 'youtube_edge_prefetch_cache_path', '/opt/etc/bot/youtube_edge_cache.json') or ''
@@ -1325,22 +1325,27 @@ def _set_active_key(proto, key):
 
 
 def _install_key_for_protocol(proto, key_value, verify=True):
-    if proto == 'shadowsocks':
-        shadowsocks(key_value)
-        return _apply_installed_proxy('shadowsocks', key_value, verify=verify)
-    if proto == 'vmess':
-        vmess(key_value)
-        return _apply_installed_proxy('vmess', key_value, verify=verify)
-    if proto == 'vless':
-        vless(key_value)
-        return _apply_installed_proxy('vless', key_value, verify=verify)
-    if proto == 'vless2':
-        vless2(key_value)
-        return _apply_installed_proxy('vless2', key_value, verify=verify)
-    if proto == 'trojan':
-        trojan(key_value)
-        return _apply_installed_proxy('trojan', key_value, verify=verify)
-    raise ValueError(f'Unsupported protocol: {proto}')
+    started_at = time.time()
+    try:
+        if proto == 'shadowsocks':
+            shadowsocks(key_value)
+            return _apply_installed_proxy('shadowsocks', key_value, verify=verify)
+        if proto == 'vmess':
+            vmess(key_value)
+            return _apply_installed_proxy('vmess', key_value, verify=verify)
+        if proto == 'vless':
+            vless(key_value)
+            return _apply_installed_proxy('vless', key_value, verify=verify)
+        if proto == 'vless2':
+            vless2(key_value)
+            return _apply_installed_proxy('vless2', key_value, verify=verify)
+        if proto == 'trojan':
+            trojan(key_value)
+            return _apply_installed_proxy('trojan', key_value, verify=verify)
+        raise ValueError(f'Unsupported protocol: {proto}')
+    finally:
+        duration_ms = int(max(0.0, time.time() - started_at) * 1000)
+        _write_runtime_log(f'Key apply: protocol={proto} verify={int(bool(verify))} duration_ms={duration_ms}')
 
 
 def _auto_failover_event_details(extra=None):
@@ -4660,6 +4665,8 @@ def _start_youtube_edge_prefetch_thread():
     if YOUTUBE_EDGE_PREFETCH_MODE != 'thread':
         return
     if not _app_mode_pool_enabled():
+        return
+    if YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS <= 0:
         return
 
     def worker():

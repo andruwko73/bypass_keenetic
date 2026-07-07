@@ -216,6 +216,20 @@ def _protocol_statuses():
     }
 
 
+def _live_protocol_statuses():
+    statuses = {proto: dict(status) for proto, status in _protocol_statuses().items()}
+    statuses["vless"].update(
+        {
+            "details": "Live status only has the current Telegram endpoint result.",
+            "api_ok": True,
+            "yt_ok": False,
+            "custom": {},
+            "endpoint_ok": True,
+        }
+    )
+    return statuses
+
+
 def _router_health():
     return {
         "memory_text": "Память: доступно 256 MB, занято 256 из 512 MB",
@@ -567,10 +581,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/status":
+            params = parse_qs(parsed.query or "", keep_blank_values=True)
+            lite = (params.get("lite") or [""])[0] == "1"
             self._json(
                 {
                     "web": _status(),
-                    "protocols": _protocol_statuses(),
+                    "protocols": _live_protocol_statuses() if lite else _protocol_statuses(),
                     "router_health": _router_health(),
                     "bot_ready": True,
                     "pool_summary": _pool_summary(),
@@ -690,6 +706,27 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self._json({"status": "idle", "running": False, "progress": {}})
             return
         self._send("not found", "text/plain; charset=utf-8", status=404)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        length = int(self.headers.get("Content-Length") or "0")
+        body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
+        params = parse_qs(body, keep_blank_values=True)
+        protocol = (params.get("type") or params.get("protocol") or ["vless"])[0]
+        if path == "/pool_apply":
+            self._json(
+                {
+                    "ok": True,
+                    "result": "Fixture key applied",
+                    "key_id": (params.get("key_id") or [""])[0],
+                    "pools": _pool_snapshot([protocol]),
+                    "pool_summary": _pool_summary(),
+                    "timestamp": time.time(),
+                }
+            )
+            return
+        self._json({"ok": True, "result": "Fixture action accepted", "timestamp": time.time()})
 
 
 def main():

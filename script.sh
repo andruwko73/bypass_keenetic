@@ -1065,10 +1065,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^youtube_edge_prefetch_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_mode[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_mode = 'external'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_start_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_start_delay_seconds = 120\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^youtube_edge_prefetch_interval_seconds[[:space:]]*=[[:space:]]*900([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^youtube_edge_prefetch_interval_seconds[[:space:]]*=.*/youtube_edge_prefetch_interval_seconds = 1800/' "$BOT_CONFIG_PATH" || true
+  if grep -Eq '^youtube_edge_prefetch_interval_seconds[[:space:]]*=[[:space:]]*(900|1800)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_edge_prefetch_interval_seconds[[:space:]]*=.*/youtube_edge_prefetch_interval_seconds = 0/' "$BOT_CONFIG_PATH" || true
   fi
-  grep -Eq '^youtube_edge_prefetch_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_interval_seconds = 1800\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_prefetch_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_interval_seconds = 0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_cache_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_status_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_lock_dir[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'\n" >> "$BOT_CONFIG_PATH"
