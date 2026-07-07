@@ -1,3 +1,10 @@
+<a name="1.927"></a>
+# [1.927] - 7 Jul 2026
+
+- Uses total program RSS as the hard background-task guard so bot + Xray + temporary helpers stay under the 100 MB program target.
+- Keeps bot RSS as a soft economy signal for lighter status/pool fallbacks while preserving the 70 MB emergency bot threshold.
+- Finishes post-pool cleanup when the total program RSS is back under target and adds update/install config migration for the new thresholds.
+
 <a name="1.926"></a>
 # [1.926] - 7 Jul 2026
 

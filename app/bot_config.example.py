@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.926
+# ВЕРСИЯ СКРИПТА v1.927
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -88,6 +88,7 @@ status_refresh_pending_min_interval_seconds = 60.0  # while status is pending, r
 memory_post_pool_restart_enabled = True  # после проверки пула бот сам снизит память и перезапустится, если Python RSS остался высоким
 memory_post_pool_restart_rss_kb = 71680
 memory_post_pool_cleanup_target_rss_kb = 63488  # после проверки пула повторять gc/malloc_trim до целевой полки около 62 MB, но не перезапускать ниже restart-порога
+memory_post_pool_cleanup_target_program_rss_kb = 102400  # total program RSS target after pool check: bot + Xray + temporary helpers
 memory_post_pool_restart_delay_seconds = 20.0
 memory_post_pool_restart_retry_seconds = 30.0
 memory_post_pool_restart_max_wait_seconds = 300.0
@@ -102,6 +103,9 @@ memory_malloc_trim_cooldown_seconds = 20.0
 background_task_cpu_cache_ttl_seconds = 20.0
 background_task_max_cpu_percent = 45.0
 background_task_max_bot_rss_kb = 66560  # skip service background checks above the normal warning line while keeping distance from the restart threshold
+background_task_critical_max_bot_rss_kb = 71680  # critical lightweight checks may run up to the idle restart threshold
+background_task_max_program_rss_kb = 102400  # hard cap for background checks by total program RSS: bot + Xray + temporary helpers
+background_task_critical_max_program_rss_kb = 102400
 udp_quic_block_shadowsocks_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Shadowsocks list
 udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Vmess list
 udp_quic_block_vless_enabled = True  # smart QUIC/UDP 443 fallback for non-YouTube routes

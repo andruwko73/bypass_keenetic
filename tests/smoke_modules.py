@@ -2314,6 +2314,15 @@ def test_codex_version_matches_commit_count():
     assert 'background_task_max_bot_rss_kb = 66560' in example
     assert 'background_task_max_bot_rss_kb = 66560' in installer
     assert 'background_task_max_bot_rss_kb = 66560' in bootstrap
+    assert 'background_task_critical_max_bot_rss_kb = 71680' in example
+    assert 'background_task_critical_max_bot_rss_kb = 71680' in installer
+    assert 'background_task_critical_max_bot_rss_kb = 71680' in bootstrap
+    assert 'background_task_max_program_rss_kb = 102400' in example
+    assert 'background_task_max_program_rss_kb = 102400' in installer
+    assert 'background_task_max_program_rss_kb = 102400' in bootstrap
+    assert 'background_task_critical_max_program_rss_kb = 102400' in example
+    assert 'background_task_critical_max_program_rss_kb = 102400' in installer
+    assert 'background_task_critical_max_program_rss_kb = 102400' in bootstrap
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in example
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in installer
     assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in bootstrap
@@ -2323,6 +2332,9 @@ def test_codex_version_matches_commit_count():
     assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in example
     assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in installer
     assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in bootstrap
+    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in example
+    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in installer
+    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in bootstrap
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in example
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in installer
     assert 'memory_post_pool_restart_retry_seconds = 30.0' in bootstrap
@@ -3124,6 +3136,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
     assert "background_task_max_bot_rss_kb', 65 * 1024" in source
+    assert "background_task_critical_max_bot_rss_kb', 70 * 1024" in source
+    assert "background_task_max_program_rss_kb', 100 * 1024" in source
+    assert "background_task_critical_max_program_rss_kb', BACKGROUND_TASK_MAX_PROGRAM_RSS_KB" in source
     assert "background_task_max_cpu_percent', 45.0" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert "getattr(config, 'router_metrics_history_limit', 120)" in source
@@ -3195,7 +3210,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'conntrack_cleared': str(conntrack_deleted)" in source
     assert "if priority_findings and _udp_quic_drift_refresh_deferred_for_stream(priority_findings):" in source
     assert source.find('if priority_findings and _udp_quic_drift_refresh_deferred_for_stream(priority_findings):') < source.find('if _apply_priority_udp_quic_drift_findings(priority_findings):')
-    assert "_background_task_allowed('UDP/QUIC drift watchdog')" in source
+    assert "_background_task_allowed('UDP/QUIC drift watchdog', task_class='critical')" in source
     assert "'youtu.be'," in source
     assert "'i.ytimg.com'," in source
     assert "getattr(config, 'ipset_refresh_command_timeout_seconds', 420)" in source
@@ -3216,12 +3231,19 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'background_cpu_busy_cache' in source
     assert 'background_task_skip_reason = {}' in source
     assert "skip_reason = str(background_task_skip_reason.get(task_name) or '')" in source
-    assert "not (allow_high_rss and skip_reason == 'rss')" in source
+    assert 'can_bypass_rss_skip' in source
+    assert "task_class in ('critical', 'light')" in source
+    assert 'def _program_rss_kb' in source
+    assert 'program_rss_kb >= program_limit_kb' in source
+    assert "background_task_skip_reason[task_name] = 'program_rss'" in source
     assert "background_task_skip_reason[task_name] = 'cpu'" in source
     assert "'status refresh skipped high RSS'" in source
+    assert "_background_task_allowed('YouTube failover', task_class='critical')" in source
     assert 'ignore_status_refresh=(task_name == \'status refresh\')' in source
     assert 'status_refresh_in_progress.add(refresh_key)' in source
-    assert source.find('status_refresh_in_progress.add(refresh_key)') < source.find("if not _background_task_allowed('status refresh'):")
+    assert source.find('status_refresh_in_progress.add(refresh_key)') < source.find(
+        "if not _background_task_allowed('status refresh', task_class='light' if active_only else 'normal'):"
+    )
     assert 'def _recent_event_history_match' in source
     stream_guard_block = source.split('def _youtube_stream_guard_active', 1)[1].split('def _youtube_vless2_stream_guard_active', 1)[0]
     assert "_recent_event_history_match(\n                    'stream_guard_defer'" in stream_guard_block
@@ -3245,6 +3267,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'malloc_trim_attempted' in source
     assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
     assert "memory_post_pool_cleanup_target_rss_kb', 62 * 1024" in source
+    assert "memory_post_pool_cleanup_target_program_rss_kb', 100 * 1024" in source
+    assert 'def _post_pool_program_target_reached' in source
     assert 'POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 65 * 1024' in source
     assert "getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)" in source
     assert "getattr(config, 'pool_probe_process_worker_enabled', True)" in source
@@ -3327,6 +3351,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'router_metrics_warn_load1 = 3.0' in script_source
     assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
     assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in script_source
+    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in script_source
     assert 'pool_probe_max_process_rss_kb = 66560' in script_source
     assert 'pool_probe_process_worker_enabled = True' in script_source
     assert 'pool_probe_process_worker_poll_seconds = 0.75' in script_source
@@ -3340,6 +3365,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_malloc_trim_enabled = True' in script_source
     assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
     assert 'background_task_max_bot_rss_kb = 66560' in script_source
+    assert 'background_task_critical_max_bot_rss_kb = 71680' in script_source
+    assert 'background_task_max_program_rss_kb = 102400' in script_source
+    assert 'background_task_critical_max_program_rss_kb = 102400' in script_source
     assert 'auto_failover_idle_log_interval_seconds = 900' in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
     assert 'youtube_edge_prefetch_enabled = True' in script_source
@@ -3439,7 +3467,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_load_persisted_pool_probe_resume()' in source
     assert "_schedule_post_pool_memory_cleanup()" in source
     assert 'def _refresh_status_caches_async(current_keys, active_only=False)' in source
-    assert "if not _background_task_allowed('status refresh')" in source
+    assert "if not _background_task_allowed('status refresh', task_class='light' if active_only else 'normal')" in source
     assert "refresh_key = f'active:{signature}' if active_only else signature" in source
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
     assert 'def _placeholder_status_snapshot(current_keys, include_pool_details=True)' in source

@@ -922,6 +922,7 @@ migrate_runtime_config_defaults() {
     sed -i 's/^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=.*/memory_post_pool_cleanup_target_rss_kb = 63488/' "$BOT_CONFIG_PATH" || true
   fi
   grep -Eq '^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_post_pool_cleanup_target_rss_kb = 63488\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^memory_post_pool_cleanup_target_program_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_post_pool_cleanup_target_program_rss_kb = 102400\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=[[:space:]]*67584([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^web_response_cleanup_rss_kb[[:space:]]*=.*/web_response_cleanup_rss_kb = 61440/' "$BOT_CONFIG_PATH" || true
   fi
@@ -948,6 +949,9 @@ migrate_runtime_config_defaults() {
   fi
   grep -Eq '^background_task_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_cpu_percent = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_bot_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^background_task_critical_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_critical_max_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^background_task_max_program_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_program_rss_kb = 102400\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^background_task_critical_max_program_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_critical_max_program_rss_kb = 102400\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^auto_failover_idle_log_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_idle_log_interval_seconds = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> "$BOT_CONFIG_PATH"
@@ -999,6 +1003,7 @@ migrate_runtime_config_defaults() {
       sed -i 's/^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=.*/memory_post_pool_cleanup_target_rss_kb = 63488/' /opt/etc/bot_config.py || true
     fi
     grep -Eq '^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_post_pool_cleanup_target_rss_kb = 63488\n' >> /opt/etc/bot_config.py
+    grep -Eq '^memory_post_pool_cleanup_target_program_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_post_pool_cleanup_target_program_rss_kb = 102400\n' >> /opt/etc/bot_config.py
     grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_metrics_warn_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
     grep -Eq '^memory_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
@@ -1013,6 +1018,9 @@ migrate_runtime_config_defaults() {
     fi
     grep -Eq '^background_task_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_cpu_percent = 45.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
+    grep -Eq '^background_task_critical_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_critical_max_bot_rss_kb = 71680\n' >> /opt/etc/bot_config.py
+    grep -Eq '^background_task_max_program_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_program_rss_kb = 102400\n' >> /opt/etc/bot_config.py
+    grep -Eq '^background_task_critical_max_program_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_critical_max_program_rss_kb = 102400\n' >> /opt/etc/bot_config.py
     if grep -Eq '^status_refresh_pending_min_interval_seconds[[:space:]]*=[[:space:]]*(15\.0|15|30\.0|30)([[:space:]#]|$)' /opt/etc/bot_config.py; then
       sed -i 's/^status_refresh_pending_min_interval_seconds[[:space:]]*=.*/status_refresh_pending_min_interval_seconds = 60.0/' /opt/etc/bot_config.py || true
     fi

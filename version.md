@@ -1,3 +1,7 @@
+*v1.927 (7 Jul 2026) -* main
+
+*Uses total program RSS as the hard background-task guard, keeps bot RSS as a soft economy signal, and finishes post-pool cleanup when bot + Xray + helpers are back under the 100 MB program target.*
+
 *v1.926 (7 Jul 2026) -* main
 
 *Restores complete key-pool service status icons on mobile and desktop, keeps route-scoped status decisions separate from displayed successful checks, preserves router route notes in compact health snapshots, and records lightweight probe updates without importing heavy pool modules.*

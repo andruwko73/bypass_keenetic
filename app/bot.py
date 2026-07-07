@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.926, последнее изменение: 07.07.2026
+#  Файл: bot.py, Версия v1.927, последнее изменение: 07.07.2026
 
 import subprocess
 import os
@@ -2083,7 +2083,7 @@ def _start_youtube_vless2_failover_thread():
     def worker():
         while not shutdown_requested.is_set():
             try:
-                if _app_mode_pool_enabled() and _background_task_allowed('YouTube failover'):
+                if _app_mode_pool_enabled() and _background_task_allowed('YouTube failover', task_class='critical'):
                     _attempt_youtube_vless2_failover()
             except Exception as exc:
                 _write_runtime_log(f'YouTube Vless2 failover error: {exc}')
@@ -2219,6 +2219,15 @@ BACKGROUND_TASK_CPU_CACHE_TTL_SECONDS = max(
     float(getattr(config, 'background_task_cpu_cache_ttl_seconds', 20.0)),
 )
 BACKGROUND_TASK_MAX_BOT_RSS_KB = max(0, int(getattr(config, 'background_task_max_bot_rss_kb', 65 * 1024)))
+BACKGROUND_TASK_CRITICAL_MAX_BOT_RSS_KB = max(
+    BACKGROUND_TASK_MAX_BOT_RSS_KB,
+    int(getattr(config, 'background_task_critical_max_bot_rss_kb', 70 * 1024)),
+)
+BACKGROUND_TASK_MAX_PROGRAM_RSS_KB = max(0, int(getattr(config, 'background_task_max_program_rss_kb', 100 * 1024)))
+BACKGROUND_TASK_CRITICAL_MAX_PROGRAM_RSS_KB = max(
+    BACKGROUND_TASK_MAX_PROGRAM_RSS_KB,
+    int(getattr(config, 'background_task_critical_max_program_rss_kb', BACKGROUND_TASK_MAX_PROGRAM_RSS_KB)),
+)
 BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS = max(
     60.0,
     float(getattr(config, 'background_task_skip_log_interval_seconds', 300.0)),
@@ -2332,6 +2341,10 @@ MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB = max(
 )
 if MEMORY_POST_POOL_RESTART_RSS_KB > 0 and MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB > MEMORY_POST_POOL_RESTART_RSS_KB:
     MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB = MEMORY_POST_POOL_RESTART_RSS_KB
+MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB = max(
+    0,
+    int(getattr(config, 'memory_post_pool_cleanup_target_program_rss_kb', 100 * 1024)),
+)
 MEMORY_POST_POOL_RESTART_DELAY_SECONDS = max(
     5.0,
     float(getattr(config, 'memory_post_pool_restart_delay_seconds', 20.0)),
@@ -2694,10 +2707,12 @@ post_pool_memory_cleanup_state = {
     'scheduled': False,
     'attempts': 0,
     'rss_kb': 0,
+    'program_rss_kb': 0,
     'initial_rss_kb': 0,
     'finished_rss_kb': 0,
     'hwm_kb': 0,
     'target_rss_kb': 0,
+    'target_program_rss_kb': 0,
     'next_retry_at': 0.0,
     'deadline_at': 0.0,
     'last_message': '',
@@ -4396,7 +4411,7 @@ def _start_udp_quic_drift_watchdog_thread():
         shutdown_requested.wait(30)
         while not shutdown_requested.is_set():
             try:
-                if _background_task_allowed('UDP/QUIC drift watchdog'):
+                if _background_task_allowed('UDP/QUIC drift watchdog', task_class='critical'):
                     findings = _udp_quic_route_drift_findings()
                     if findings:
                         _refresh_ipset_for_udp_quic_drift(findings)
@@ -4768,11 +4783,73 @@ def _background_cpu_busy_percent():
     return value
 
 
-def _background_task_allowed(task_name, *, allow_high_rss=False):
+def _background_task_rss_limit(task_class='', allow_high_rss=False):
+    task_class = str(task_class or '').strip().lower()
+    if allow_high_rss or task_class in ('critical', 'light'):
+        return BACKGROUND_TASK_CRITICAL_MAX_BOT_RSS_KB
+    return BACKGROUND_TASK_MAX_BOT_RSS_KB
+
+
+def _background_task_program_rss_limit(task_class='', allow_high_rss=False):
+    task_class = str(task_class or '').strip().lower()
+    if allow_high_rss or task_class in ('critical', 'light'):
+        return BACKGROUND_TASK_CRITICAL_MAX_PROGRAM_RSS_KB
+    return BACKGROUND_TASK_MAX_PROGRAM_RSS_KB
+
+
+def _program_rss_kb(probe_running=None):
+    total = int(_process_rss_kb() or 0)
+    try:
+        if probe_running is None:
+            probe_running = bool(pool_probe_lock.locked())
+    except Exception:
+        probe_running = False
+    try:
+        related = router_health._related_process_snapshot(time.time(), bool(probe_running))
+    except Exception:
+        try:
+            related = router_health_runtime.related_program_process_snapshot(probe_running=bool(probe_running))
+        except Exception:
+            related = {}
+    if not isinstance(related, dict):
+        return total
+    for key in (
+        'xray_rss_kb',
+        'pool_worker_rss_kb',
+        'temporary_xray_rss_kb',
+        'youtube_prefetch_rss_kb',
+        'background_worker_rss_kb',
+    ):
+        try:
+            total += int(related.get(key) or 0)
+        except Exception:
+            pass
+    return total
+
+
+def _background_task_economy_mode():
+    rss_kb = int(_process_rss_kb() or 0)
+    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+        return True
+    program_rss_kb = int(_program_rss_kb() or 0)
+    return bool(
+        BACKGROUND_TASK_MAX_PROGRAM_RSS_KB > 0 and
+        program_rss_kb >= BACKGROUND_TASK_MAX_PROGRAM_RSS_KB
+    )
+
+
+def _background_task_allowed(task_name, *, allow_high_rss=False, task_class='normal'):
     now = time.time()
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
     skip_reason = str(background_task_skip_reason.get(task_name) or '')
-    if skip_until and now < skip_until and not (allow_high_rss and skip_reason == 'rss'):
+    bot_hard_limit_kb = _background_task_rss_limit('critical', allow_high_rss=True)
+    program_limit_kb = _background_task_program_rss_limit(task_class, allow_high_rss=allow_high_rss)
+    can_bypass_rss_skip = (
+        skip_reason in ('rss', 'program_rss') and
+        program_limit_kb > 0 and
+        program_limit_kb > BACKGROUND_TASK_MAX_PROGRAM_RSS_KB
+    )
+    if skip_until and now < skip_until and not can_bypass_rss_skip:
         return False
     try:
         if _memory_sensitive_operation_running(ignore_status_refresh=(task_name == 'status refresh')):
@@ -4786,11 +4863,32 @@ def _background_task_allowed(task_name, *, allow_high_rss=False):
     except Exception:
         pass
     rss_kb = int(_process_rss_kb() or 0)
-    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not allow_high_rss:
+    program_rss_kb = int(_program_rss_kb() or rss_kb)
+    if program_limit_kb > 0 and program_rss_kb >= program_limit_kb:
+        cleanup_label = (
+            'status refresh skipped high program RSS'
+            if task_name == 'status refresh' else
+            f'{task_name} skipped high program RSS'
+        )
+        cleanup = _memory_cleanup(cleanup_label, force=True, clear_status=False, log=False)
+        rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
+        program_rss_kb = int(_program_rss_kb() or rss_kb)
+        if program_rss_kb >= program_limit_kb:
+            background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+            background_task_skip_reason[task_name] = 'program_rss'
+            last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
+            if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+                background_task_skip_log_at[task_name] = now
+                _write_runtime_log(
+                    f'{task_name}: skipped background check because program RSS is high '
+                    f'({program_rss_kb} KB >= {program_limit_kb} KB; bot RSS {rss_kb} KB).'
+                )
+            return False
+    if bot_hard_limit_kb > 0 and rss_kb >= bot_hard_limit_kb:
         cleanup_label = 'status refresh skipped high RSS' if task_name == 'status refresh' else f'{task_name} skipped high RSS'
         cleanup = _memory_cleanup(cleanup_label, force=True, clear_status=False, log=False)
         rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
-        if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+        if rss_kb >= bot_hard_limit_kb:
             background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
             background_task_skip_reason[task_name] = 'rss'
             last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
@@ -4798,9 +4896,19 @@ def _background_task_allowed(task_name, *, allow_high_rss=False):
                 background_task_skip_log_at[task_name] = now
                 _write_runtime_log(
                     f'{task_name}: skipped background check because bot RSS is high '
-                    f'({rss_kb} KB >= {BACKGROUND_TASK_MAX_BOT_RSS_KB} KB).'
+                    f'({rss_kb} KB >= {bot_hard_limit_kb} KB; program RSS {program_rss_kb} KB).'
                 )
             return False
+    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
+        log_key = f'{task_name}:soft_high_rss_allowed'
+        last_log = float(background_task_skip_log_at.get(log_key) or 0.0)
+        if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+            background_task_skip_log_at[log_key] = now
+            _write_runtime_log(
+                f'{task_name}: running with bot RSS above soft guard '
+                f'({rss_kb} KB >= {BACKGROUND_TASK_MAX_BOT_RSS_KB} KB; '
+                f'program RSS {program_rss_kb} KB, limit {program_limit_kb} KB).'
+            )
     cpu_busy = _background_cpu_busy_percent()
     if cpu_busy is None or cpu_busy <= BACKGROUND_TASK_MAX_CPU_PERCENT:
         background_task_skip_until.pop(task_name, None)
@@ -5733,6 +5841,14 @@ def _record_post_pool_router_cleanup(stage, scope='', attempts=0, cleanup_rss_kb
     )
 
 
+def _post_pool_program_target_reached(program_rss_kb=0):
+    if MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB <= 0:
+        return False, int(program_rss_kb or 0)
+    if not program_rss_kb:
+        program_rss_kb = int(_program_rss_kb(probe_running=True) or 0)
+    return bool(program_rss_kb and program_rss_kb <= MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB), int(program_rss_kb or 0)
+
+
 def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_kb=0, scope=''):
     cleanup_target_kb = (
         MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
@@ -5743,16 +5859,19 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
         return
     now = time.time()
     current_rss_kb = int(_process_rss_kb() or finished_rss_kb or 0)
-    if current_rss_kb and current_rss_kb <= cleanup_target_kb:
+    program_target_reached, current_program_rss_kb = _post_pool_program_target_reached()
+    if (current_rss_kb and current_rss_kb <= cleanup_target_kb) or program_target_reached:
         _set_post_pool_memory_cleanup_state(
             scheduled=False,
             attempts=0,
             rss_kb=current_rss_kb,
+            program_rss_kb=current_program_rss_kb,
             initial_rss_kb=int(initial_rss_kb or 0),
             finished_rss_kb=int(finished_rss_kb or 0),
             hwm_kb=int(hwm_kb or 0),
             target_rss_kb=int(cleanup_target_kb or 0),
-            last_message='post-pool memory already at target',
+            target_program_rss_kb=int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
+            last_message='post-pool program memory already at target' if program_target_reached else 'post-pool memory already at target',
         )
         _record_event(
             'post_pool_memory_cleanup',
@@ -5764,8 +5883,10 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                 'initial_rss_kb': int(initial_rss_kb or 0),
                 'finished_rss_kb': int(finished_rss_kb or 0),
                 'cleanup_rss_kb': current_rss_kb,
+                'program_rss_kb': current_program_rss_kb,
                 'hwm_kb': int(hwm_kb or 0),
                 'target_rss_kb': int(cleanup_target_kb or 0),
+                'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
                 'attempts': 0,
             },
         )
@@ -5783,10 +5904,12 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
             'scheduled': True,
             'attempts': 0,
             'rss_kb': 0,
+            'program_rss_kb': current_program_rss_kb,
             'initial_rss_kb': int(initial_rss_kb or 0),
             'finished_rss_kb': int(finished_rss_kb or 0),
             'hwm_kb': int(hwm_kb or 0),
             'target_rss_kb': int(cleanup_target_kb or 0),
+            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
             'next_retry_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS,
             'deadline_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS + MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS,
             'last_message': 'post-pool memory cleanup scheduled',
@@ -5803,12 +5926,14 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                 if shutdown_requested.is_set():
                     return
                 current_rss = int(_process_rss_kb() or 0)
-                if current_rss and current_rss <= cleanup_target_kb:
+                program_target_reached, current_program_rss = _post_pool_program_target_reached()
+                if (current_rss and current_rss <= cleanup_target_kb) or program_target_reached:
                     _set_post_pool_memory_cleanup_state(
                         scheduled=False,
                         attempts=attempts,
                         rss_kb=current_rss,
-                        last_message='post-pool memory cleanup skipped; already at target',
+                        program_rss_kb=current_program_rss,
+                        last_message='post-pool memory cleanup skipped; program at target' if program_target_reached else 'post-pool memory cleanup skipped; already at target',
                     )
                     _record_event(
                         'post_pool_memory_cleanup',
@@ -5820,8 +5945,10 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                             'initial_rss_kb': int(initial_rss_kb or 0),
                             'finished_rss_kb': int(finished_rss_kb or 0),
                             'cleanup_rss_kb': current_rss,
+                            'program_rss_kb': current_program_rss,
                             'hwm_kb': int(hwm_kb or 0),
                             'target_rss_kb': int(cleanup_target_kb or 0),
+                            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
                             'attempts': attempts,
                         },
                     )
@@ -5835,12 +5962,14 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                 attempts += 1
                 cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
                 rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
-                if not rss_kb or rss_kb < cleanup_target_kb:
+                program_target_reached, program_rss_kb = _post_pool_program_target_reached()
+                if (not rss_kb or rss_kb < cleanup_target_kb) or program_target_reached:
                     _set_post_pool_memory_cleanup_state(
                         scheduled=False,
                         attempts=attempts,
                         rss_kb=int(rss_kb or 0),
-                        last_message='post-pool memory cleanup completed without restart',
+                        program_rss_kb=program_rss_kb,
+                        last_message='post-pool memory cleanup completed by program target' if program_target_reached else 'post-pool memory cleanup completed without restart',
                     )
                     _record_event(
                         'post_pool_memory_cleanup',
@@ -5852,8 +5981,10 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                             'initial_rss_kb': int(initial_rss_kb or 0),
                             'finished_rss_kb': int(finished_rss_kb or 0),
                             'cleanup_rss_kb': int(rss_kb or 0),
+                            'program_rss_kb': program_rss_kb,
                             'hwm_kb': int(hwm_kb or 0),
                             'target_rss_kb': int(cleanup_target_kb or 0),
+                            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
                             'attempts': attempts,
                         },
                     )
@@ -5878,6 +6009,7 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                             scheduled=False,
                             attempts=attempts,
                             rss_kb=int(rss_kb),
+                            program_rss_kb=program_rss_kb,
                             last_message='post-pool memory restart requested',
                         )
                         _record_event(
@@ -5891,8 +6023,10 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                                 'initial_rss_kb': int(initial_rss_kb or 0),
                                 'finished_rss_kb': int(finished_rss_kb or 0),
                                 'cleanup_rss_kb': int(rss_kb or 0),
+                                'program_rss_kb': program_rss_kb,
                                 'hwm_kb': int(hwm_kb or 0),
                                 'target_rss_kb': int(cleanup_target_kb or 0),
+                                'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
                                 'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
                                 'attempts': attempts,
                             },
@@ -5925,6 +6059,7 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                         scheduled=False,
                         attempts=attempts,
                         rss_kb=int(rss_kb),
+                        program_rss_kb=program_rss_kb,
                         last_message='post-pool memory restart retry window expired',
                     )
                     _record_event(
@@ -5938,8 +6073,10 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                             'initial_rss_kb': int(initial_rss_kb or 0),
                             'finished_rss_kb': int(finished_rss_kb or 0),
                             'cleanup_rss_kb': int(rss_kb or 0),
+                            'program_rss_kb': program_rss_kb,
                             'hwm_kb': int(hwm_kb or 0),
                             'target_rss_kb': int(cleanup_target_kb or 0),
+                            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
                             'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
                             'attempts': attempts,
                         },
@@ -5958,6 +6095,7 @@ def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_
                     scheduled=True,
                     attempts=attempts,
                     rss_kb=int(rss_kb),
+                    program_rss_kb=program_rss_kb,
                     next_retry_at=retry_at,
                     deadline_at=deadline_at,
                     last_message='post-pool memory restart pending',
@@ -8009,6 +8147,7 @@ def _router_health_snapshot(compact=False):
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
     payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
     payload['post_pool_cleanup_target_kb'] = MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
+    payload['post_pool_cleanup_target_program_kb'] = MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB
     payload['memory_timeline_enabled'] = bool(MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH)
     payload['memory_timeline_path'] = MEMORY_TIMELINE_PATH if MEMORY_TIMELINE_ENABLED else ''
     payload['memory_timeline_bytes'] = _safe_file_size(MEMORY_TIMELINE_PATH) if MEMORY_TIMELINE_ENABLED else 0
@@ -8018,6 +8157,7 @@ def _router_health_snapshot(compact=False):
     post_pool_state = _post_pool_memory_cleanup_snapshot()
     payload['post_pool_restart_pending'] = bool(post_pool_state.get('scheduled'))
     payload['post_pool_restart_rss_kb'] = int(post_pool_state.get('rss_kb') or 0)
+    payload['post_pool_restart_program_rss_kb'] = int(post_pool_state.get('program_rss_kb') or 0)
     payload['post_pool_restart_next_retry_at'] = float(post_pool_state.get('next_retry_at') or 0.0)
     threshold_mb = int(round(MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB / 1024.0)) if MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 else 0
     if idle_memory_state.get('memory_watchdog_restart_scheduled'):
@@ -11479,6 +11619,34 @@ def _web_pool_snapshot_worker_payload(protocols=None, include_summary=False, inc
     return payload if isinstance(payload, dict) and isinstance(payload.get('pools'), dict) else None
 
 
+def _web_pools_light_payload(current_keys, key_pools, protocols=None, include_summary=False, include_custom_checks=False):
+    custom_checks = _load_custom_checks() if include_custom_checks else []
+    payload = {
+        'pools': _key_pool_web().web_pool_snapshot(
+            current_keys,
+            key_pools,
+            {},
+            custom_checks,
+            include_keys=False,
+            hash_key=_hash_key,
+            display_name=_pool_key_display_name,
+            probe_state=_key_pool_web().web_probe_state,
+            probe_checked_at=_key_pool_web().web_probe_checked_at,
+            protocols=protocols,
+            route_states=None,
+        ),
+        'pool_summary': None,
+        'custom_checks': None,
+    }
+    if include_summary:
+        payload['pool_summary'] = _pool_summary_with_persisted_fallback(
+            _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
+        )
+    if include_custom_checks:
+        payload['custom_checks'] = _web_custom_checks_light(custom_checks)
+    return payload
+
+
 def _web_pools_payload(current_keys=None, protocols=None, include_summary=False, include_custom_checks=False):
     if not current_keys:
         current_keys = _load_current_keys()
@@ -11499,6 +11667,20 @@ def _web_pools_payload(current_keys=None, protocols=None, include_summary=False,
         )
         if worker_payload is not None:
             return worker_payload
+    if _background_task_economy_mode():
+        log_key = 'Web pool payload light fallback'
+        now = time.time()
+        last_log = float(background_task_skip_log_at.get(log_key) or 0.0)
+        if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+            background_task_skip_log_at[log_key] = now
+            _write_runtime_log('Web pool payload: using light fallback because bot RSS is high.')
+        return _web_pools_light_payload(
+            current_keys,
+            key_pools,
+            protocols=protocols,
+            include_summary=include_summary,
+            include_custom_checks=include_custom_checks,
+        )
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary()
     key_probe_cache = _load_key_probe_cache()
@@ -11983,6 +12165,8 @@ def _refresh_status_caches_async(current_keys, active_only=False):
             return
     except Exception:
         pass
+    if not active_only and _background_task_economy_mode():
+        active_only = True
     signature = _status_snapshot_signature(current_keys)
     refresh_key = f'active:{signature}' if active_only else signature
     now = time.time()
@@ -12009,7 +12193,7 @@ def _refresh_status_caches_async(current_keys, active_only=False):
         status_refresh_in_progress.add(refresh_key)
         status_refresh_last_started_at[refresh_key] = now
 
-    if not _background_task_allowed('status refresh'):
+    if not _background_task_allowed('status refresh', task_class='light' if active_only else 'normal'):
         with status_refresh_lock:
             status_refresh_in_progress.discard(refresh_key)
             status_refresh_last_finished_at[refresh_key] = time.time()
