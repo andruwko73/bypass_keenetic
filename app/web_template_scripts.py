@@ -2988,7 +2988,6 @@ def render_web_scripts(
             }}
             menu.classList.remove('drop-up');
             list.style.maxHeight = '';
-            list.style.overflowY = '';
             const rect = list.getBoundingClientRect();
             const viewportPadding = 12;
             if (rect.bottom > window.innerHeight - viewportPadding) {{
@@ -2996,9 +2995,10 @@ def render_web_scripts(
             }}
             const adjustedRect = list.getBoundingClientRect();
             if (adjustedRect.top < viewportPadding || adjustedRect.bottom > window.innerHeight - viewportPadding) {{
-                const available = Math.max(96, window.innerHeight - (viewportPadding * 2));
+                const availableBelow = Math.max(96, window.innerHeight - adjustedRect.top - viewportPadding);
+                const availableAbove = Math.max(96, adjustedRect.bottom - viewportPadding);
+                const available = menu.classList.contains('drop-up') ? availableAbove : availableBelow;
                 list.style.maxHeight = available + 'px';
-                list.style.overflowY = 'auto';
             }}
         }}
 

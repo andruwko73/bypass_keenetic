@@ -1,3 +1,8 @@
+<a name="1.931"></a>
+# [1.931] - 7 Jul 2026
+
+- Keeps the service route desktop popover inside the viewport by capping its height and using internal scrolling.
+
 <a name="1.930"></a>
 # [1.930] - 7 Jul 2026
 

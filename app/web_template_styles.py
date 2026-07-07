@@ -508,6 +508,7 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
                 border:1px solid rgba(78,216,205,.34);
                 background:#121922;
                 box-shadow:0 16px 34px rgba(2,6,23,.36);
+                overflow-y:auto;
             }
             .service-route-menu.drop-up .service-route-menu-list{
                 top:auto;

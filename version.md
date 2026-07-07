@@ -1,3 +1,7 @@
+*v1.931 (7 Jul 2026) -* main
+
+*Keeps the service route desktop popover inside the viewport by capping its height and using internal scrolling.*
+
 *v1.930 (7 Jul 2026) -* main
 
 *Makes web updates prefer the direct GitHub codeload archive/API for repo files, keeping local SOCKS/VPN only as the final fallback.*
