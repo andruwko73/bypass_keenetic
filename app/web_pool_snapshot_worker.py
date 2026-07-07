@@ -72,15 +72,16 @@ def _route_states(custom_checks, provided=None):
     return service_routes.service_route_summary(service_items) if service_items or custom_checks else None
 
 
-def build_payload(protocols=None, include_summary=False, include_custom_checks=False, route_states=None):
+def build_payload(protocols=None, include_summary=False, include_custom_checks=False, route_states=None, include_pools=True):
     custom_checks = custom_checks_store.load_custom_checks()
-    route_states = _route_states(custom_checks, route_states)
+    route_states = _route_states(custom_checks, route_states) if include_pools else None
     current_keys = _load_current_keys()
     key_pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
     key_pools, _changed = key_pool_store.ensure_current_keys_in_pools(key_pools, current_keys)
     cache = probe_cache.load_key_probe_cache()
-    payload = {
-        'pools': key_pool_web.web_pool_snapshot(
+    pools_payload = {}
+    if include_pools:
+        pools_payload = key_pool_web.web_pool_snapshot(
             current_keys,
             key_pools,
             cache,
@@ -92,7 +93,9 @@ def build_payload(protocols=None, include_summary=False, include_custom_checks=F
             probe_checked_at=key_pool_web.web_probe_checked_at,
             protocols=protocols,
             route_states=route_states,
-        ),
+        )
+    payload = {
+        'pools': pools_payload,
         'pool_summary': None,
         'custom_checks': None,
     }
@@ -130,6 +133,7 @@ def main():
             include_summary=bool((request or {}).get('include_summary')),
             include_custom_checks=bool((request or {}).get('include_custom_checks')),
             route_states=(request or {}).get('route_states'),
+            include_pools=bool((request or {}).get('include_pools', True)),
         )
         sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
         return 0

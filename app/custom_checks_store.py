@@ -6,14 +6,21 @@ import re
 import tempfile
 from urllib.parse import urlparse
 
-from service_catalog import CUSTOM_CHECK_PRESETS
-
-
 CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
 CUSTOM_CHECK_MAX = 12
 CUSTOM_CHECK_REMOVED_IDS = {'mistral'}
 CUSTOM_CHECK_CHATGPT_MERGED_IDS = {'chatgpt', 'codex', 'openai_api', 'openai_codex'}
 CUSTOM_CHECK_META_MERGED_IDS = {'meta_ai', 'instagram', 'facebook'}
+_CUSTOM_CHECK_PRESETS = None
+
+
+def _custom_check_presets_source():
+    global _CUSTOM_CHECK_PRESETS
+    if _CUSTOM_CHECK_PRESETS is None:
+        from service_catalog import CUSTOM_CHECK_PRESETS as presets
+
+        _CUSTOM_CHECK_PRESETS = tuple(dict(item) for item in presets)
+    return _CUSTOM_CHECK_PRESETS
 
 
 def hash_key(value):
@@ -21,7 +28,7 @@ def hash_key(value):
 
 
 def custom_check_preset(preset_id):
-    for preset in CUSTOM_CHECK_PRESETS:
+    for preset in _custom_check_presets_source():
         if preset.get('id') == preset_id:
             return preset
     return None
@@ -126,7 +133,7 @@ def sanitize_custom_check(item):
 
 def _current_preset_checks():
     result = {}
-    for preset in CUSTOM_CHECK_PRESETS:
+    for preset in _custom_check_presets_source():
         check = sanitize_custom_check(preset)
         if check:
             result[check['id']] = check
@@ -234,7 +241,7 @@ def save_custom_checks(checks):
 
 
 def custom_check_presets():
-    return [dict(item) for item in CUSTOM_CHECK_PRESETS]
+    return [dict(item) for item in _custom_check_presets_source()]
 
 
 def add_custom_check(label='', url='', preset_id=''):
@@ -243,7 +250,7 @@ def add_custom_check(label='', url='', preset_id=''):
         raise ValueError(f'Можно хранить не больше {CUSTOM_CHECK_MAX} дополнительных проверок')
     item = None
     if preset_id:
-        for preset in CUSTOM_CHECK_PRESETS:
+        for preset in _custom_check_presets_source():
             if preset['id'] == preset_id:
                 item = dict(preset)
                 break

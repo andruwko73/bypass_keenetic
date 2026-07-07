@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.924
+# ВЕРСИЯ СКРИПТА v1.925
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -26,6 +26,7 @@ subscription_auto_refresh_min_available_kb = 92160
 subscription_auto_refresh_max_cpu_percent = 80.0
 subscription_auto_refresh_max_load1 = 2.5
 pool_probe_process_worker_enabled = True  # run full pool checks in a separate Python process so main bot RSS can return to baseline
+pool_probe_inprocess_fallback_enabled = False  # keep full pool checks out of the long-running bot process on routers
 pool_probe_process_worker_poll_seconds = 0.75
 pool_failover_process_worker_enabled = True  # check auto-failover candidates in a short-lived process so main bot RSS does not keep temporary xray/probe modules
 pool_failover_process_worker_timeout_seconds = 180.0
@@ -67,11 +68,13 @@ router_metrics_warn_bot_rss_kb = 66560
 router_metrics_critical_bot_rss_kb = 87040
 router_metrics_warn_load1 = 3.0
 web_pools_api_cache_ttl = 45.0
+web_service_routes_worker_enabled = True  # render heavy service route tools in a short-lived process instead of the main bot RSS
+web_service_routes_worker_timeout_seconds = 8.0
 service_route_intersections_cache_ttl = 60.0
 memory_watchdog_enabled = True  # бот сам перезапустит свой сервис, если память Python долго держится выше безопасного порога
 memory_cleanup_rss_kb = 61440  # тихая очистка gc/malloc_trim без перезапуска, когда RSS держится около 60 MB
 web_response_cleanup_rss_kb = 61440  # веб-ответы освобождают память уже около 60 MB, не дожидаясь 70+ MB
-web_response_light_cleanup_rss_kb = 66560  # легкие status/api ответы не запускают gc на рабочей полке около 62 MB
+web_response_light_cleanup_rss_kb = 61440  # легкие status/api ответы тоже освобождают память около целевой полки 60-62 MB
 web_response_cleanup_min_interval_seconds = 60.0
 memory_watchdog_rss_soft_kb = 87040  # при достижении порога очищаются кэши статуса и запускается gc.collect()
 memory_watchdog_rss_limit_kb = 112640  # выше этого RSS бот перезапустится, если сейчас не идёт обновление или проверка пула
@@ -81,6 +84,7 @@ memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
 status_refresh_min_interval_seconds = 180.0  # minimum delay between heavy web status refreshes
+status_refresh_pending_min_interval_seconds = 60.0  # while status is pending, refresh often enough for UI but not every poll
 memory_post_pool_restart_enabled = True  # после проверки пула бот сам снизит память и перезапустится, если Python RSS остался высоким
 memory_post_pool_restart_rss_kb = 71680
 memory_post_pool_cleanup_target_rss_kb = 63488  # после проверки пула повторять gc/malloc_trim до целевой полки около 62 MB, но не перезапускать ниже restart-порога
@@ -96,7 +100,8 @@ memory_malloc_trim_enabled = True  # после тяжёлой очистки п
 memory_malloc_trim_min_rss_kb = 61440
 memory_malloc_trim_cooldown_seconds = 20.0
 background_task_cpu_cache_ttl_seconds = 20.0
-background_task_max_bot_rss_kb = 66560  # skip service background checks near 65 MB RSS so the bot does not approach the restart threshold
+background_task_max_cpu_percent = 45.0
+background_task_max_bot_rss_kb = 66560  # skip service background checks above the normal warning line while keeping distance from the restart threshold
 udp_quic_block_shadowsocks_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Shadowsocks list
 udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Vmess list
 udp_quic_block_vless_enabled = True  # smart QUIC/UDP 443 fallback for non-YouTube routes

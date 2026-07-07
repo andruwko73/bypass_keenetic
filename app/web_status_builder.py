@@ -46,15 +46,27 @@ def youtube_probe_state(entry):
     return 'unknown'
 
 
-def service_status_parts(api_ok, yt_ok, custom_states, custom_checks, *, api_transient=False, api_required=True, yt_state=''):
-    parts = [
-        f'YouTube: {_youtube_state_text(yt_ok, yt_state)}',
-    ]
+def service_status_parts(
+    api_ok,
+    yt_ok,
+    custom_states,
+    custom_checks,
+    *,
+    api_transient=False,
+    api_required=True,
+    yt_state='',
+    required_services=None,
+):
+    required_services = _normalize_required_services(required_services)
+    parts = []
     if api_required:
         telegram_state = 'работает' if api_ok else ('перепроверяется' if api_transient else 'не работает')
     else:
         telegram_state = 'работает' if api_ok else 'не требуется для текущего режима'
-    parts.insert(0, f'Telegram: {telegram_state}')
+    if required_services is None or 'telegram' in required_services:
+        parts.append(f'Telegram: {telegram_state}')
+    if required_services is None or 'youtube' in required_services:
+        parts.append(f'YouTube: {_youtube_state_text(yt_ok, yt_state)}')
     for check in custom_checks or []:
         check_id = check.get('id')
         state = custom_states.get(check_id)
@@ -139,6 +151,7 @@ def active_protocol_status(
         api_transient=api_transient,
         api_required=api_required,
         yt_state=yt_state,
+        required_services=required_services,
     )
     tone, label = tone_label(
         api_ok,

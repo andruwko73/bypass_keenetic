@@ -165,7 +165,7 @@ def _service_labels_for_entry(entry, service_index):
     return [match['label'] for match in _service_matches_for_entry(entry, service_index)]
 
 
-def _annotate_issue_services(issue, service_index, *, max_labels=6):
+def _annotate_issue_services(issue, service_index, *, max_labels=6, match_cache=None):
     candidates = []
     candidates.extend(issue.get('entries') or [])
     candidates.extend(issue.get('samples') or [])
@@ -173,7 +173,16 @@ def _annotate_issue_services(issue, service_index, *, max_labels=6):
     seen = set()
     for candidate in candidates:
         for value in str(candidate or '').split(' / '):
-            for match in _service_matches_for_entry(value.strip(), service_index):
+            value = value.strip()
+            if not value:
+                continue
+            if match_cache is not None and value in match_cache:
+                entry_matches = match_cache[value]
+            else:
+                entry_matches = _service_matches_for_entry(value, service_index)
+                if match_cache is not None:
+                    match_cache[value] = entry_matches
+            for match in entry_matches:
                 key = match.get('key')
                 if key and key not in seen:
                     seen.add(key)
@@ -501,8 +510,9 @@ def analyze_route_intersections(
         )
         issues.extend(runtime_issues)
 
+    match_cache = {}
     for issue in issues:
-        _annotate_issue_services(issue, service_index)
+        _annotate_issue_services(issue, service_index, match_cache=match_cache)
 
     return {
         'issues': issues[:max_issues],

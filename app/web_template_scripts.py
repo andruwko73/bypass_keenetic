@@ -47,6 +47,7 @@ def render_web_scripts(
         let poolDataRefreshAll = false;
         const pendingPoolDataProtocols = new Set();
         let poolDataRetryCount = {{}};
+        let poolDataRequestInFlight = false;
         let poolViewTimers = {{}};
         let latestPoolSummary = null;
         let commandPollTimer = null;
@@ -929,6 +930,7 @@ def render_web_scripts(
                     setupAutoResizeTextareas(subview);
                     setupServiceRouteMenus(subview);
                     setupAsyncForms(subview);
+                    refreshDeferredServiceRouteTools();
                 }})
                 .catch(function(error) {{
                     if (retryCount < 2) {{
@@ -1806,7 +1808,7 @@ def render_web_scripts(
                 return direct;
             }}
             const note = String(poolSummary.note || '');
-            const match = note.match(/РџСЂРѕРІРµСЂРµРЅРѕ:\s*(\d+)/);
+            const match = note.match(/РџСЂРѕРІРµСЂРµРЅРѕ:\\s*(\\d+)/);
             return match ? Number(match[1] || 0) : 0;
         }}
 
@@ -1819,7 +1821,7 @@ def render_web_scripts(
                 return direct;
             }}
             const note = String(poolSummary.note || '');
-            const match = note.match(/Р’ РїСѓР»Р°С…:\s*(\d+)/);
+            const match = note.match(/Р’ РїСѓР»Р°С…:\\s*(\\d+)/);
             return match ? Number(match[1] || 0) : 0;
         }}
 
@@ -1983,6 +1985,17 @@ def render_web_scripts(
                 const requestedProtocols = poolDataRefreshAll ? [] : Array.from(pendingPoolDataProtocols);
                 pendingPoolDataProtocols.clear();
                 poolDataRefreshAll = false;
+                if (poolDataRequestInFlight) {{
+                    if (requestedProtocols.length) {{
+                        requestedProtocols.forEach(function(proto) {{
+                            pendingPoolDataProtocols.add(proto);
+                        }});
+                    }} else {{
+                        poolDataRefreshAll = true;
+                    }}
+                    refreshPoolData(500, requestedProtocols.length ? requestedProtocols : null);
+                    return;
+                }}
                 const loadingProtocols = requestedProtocols.length ? requestedProtocols : deferredPoolProtocols();
                 loadingProtocols.forEach(function(proto) {{
                     const body = document.querySelector('[data-pool-body="' + proto + '"]');
@@ -1990,6 +2003,7 @@ def render_web_scripts(
                         setPoolBodyMessage(proto, 'Загружаю пул ключей...', true);
                     }}
                 }});
+                poolDataRequestInFlight = true;
                 fetch('/api/pools' + loadedPoolProtocolQuery(requestedProtocols.length ? requestedProtocols : null), {{
                     headers: {{'Accept': 'application/json'}},
                     cache: 'no-store'
@@ -2023,6 +2037,12 @@ def render_web_scripts(
                         }});
                         if (shouldRetry && !document.hidden) {{
                             refreshPoolData(3000, retryProtocols);
+                        }}
+                    }})
+                    .finally(function() {{
+                        poolDataRequestInFlight = false;
+                        if (!document.hidden && (poolDataRefreshAll || pendingPoolDataProtocols.size)) {{
+                            refreshPoolData(250, poolDataRefreshAll ? null : Array.from(pendingPoolDataProtocols));
                         }}
                     }});
             }}, Math.max(0, Number(delayMs || 0)));
@@ -2081,6 +2101,8 @@ def render_web_scripts(
         function webStatusIsPending(apiStatus) {{
             const text = String(apiStatus || '');
             const pending = [
+                'Статус обновляется',
+                'Проверяется актуальное состояние',
                 'Проверяется связь текущего режима',
                 'Фоновая проверка связи выполняется',
                 'Telegram API не ответил вовремя',
@@ -3032,6 +3054,9 @@ def render_web_scripts(
                                 refreshPoolData(1200);
                                 schedulePoolProbePolling(1200);
                                 scheduleStatusPolling(15000);
+                            }} else if (action === 'pool-apply') {{
+                                refreshPoolData(1200, proto ? [proto] : null);
+                                refreshStatusSoon(600, 30000);
                             }} else if (poolMutationAction) {{
                                 refreshPoolData(1200, proto ? [proto] : null);
                                 if (payload.pool_probe_running || payload.pool_probe_paused) {{

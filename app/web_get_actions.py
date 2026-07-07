@@ -74,6 +74,7 @@ def _status_payload(ctx, query=''):
     cache_ttl = float(_ctx(ctx, 'status_api_cache_ttl', 0) or 0)
     if compact and cache_ttl > 0:
         cache_ttl = min(cache_ttl, float(_ctx(ctx, 'status_api_compact_cache_ttl', 15.0) or 15.0))
+    refresh_requested = False
     pool_enabled = _ctx(ctx, 'pool_enabled', False)
     progress = _ctx(ctx, 'get_pool_probe_progress', lambda: {})() if pool_enabled else {}
     pool_probe_running = _pool_probe_running(progress)
@@ -99,18 +100,13 @@ def _status_payload(ctx, query=''):
     current_keys = _ctx(ctx, 'load_current_keys')()
     snapshot = _ctx(ctx, 'cached_status_snapshot')(current_keys)
     pool_probe_locked = _ctx(ctx, 'pool_probe_locked', lambda: False)
-    if snapshot is None and compact:
-        active_snapshot = _ctx(ctx, 'active_mode_status_snapshot')
-        if active_snapshot:
-            snapshot = active_snapshot(current_keys)
-            if snapshot is not None and not web_command_running and not pool_probe_locked():
-                _refresh_status_async(ctx, current_keys, active_only=True)
     if snapshot is None:
         stale_snapshot = _ctx(ctx, 'stale_status_snapshot')
         if stale_snapshot:
             snapshot = stale_snapshot(current_keys)
             if snapshot is not None and not web_command_running and not pool_probe_locked():
                 _refresh_status_async(ctx, current_keys, active_only=compact)
+                refresh_requested = True
     if snapshot is None:
         placeholder_snapshot = _ctx(ctx, 'placeholder_status_snapshot')
         if placeholder_snapshot:
@@ -123,18 +119,20 @@ def _status_payload(ctx, query=''):
                 snapshot = placeholder_snapshot(current_keys)
             if not web_command_running and not pool_probe_locked():
                 _refresh_status_async(ctx, current_keys, active_only=compact)
+                refresh_requested = True
         else:
             active_snapshot = _ctx(ctx, 'active_mode_status_snapshot')
             if active_snapshot:
                 snapshot = active_snapshot(current_keys)
                 if not web_command_running and not pool_probe_locked():
                     _refresh_status_async(ctx, current_keys, active_only=compact)
+                    refresh_requested = True
             else:
                 snapshot = {
                     'web': _ctx(ctx, 'placeholder_web_status_snapshot')(),
                     'protocols': _ctx(ctx, 'placeholder_protocol_statuses')(current_keys),
                 }
-    if _ctx(ctx, 'refresh_status_on_api', False) and not web_command_running:
+    if _ctx(ctx, 'refresh_status_on_api', False) and not web_command_running and not pool_probe_locked() and not refresh_requested:
         _refresh_status_async(ctx, current_keys, active_only=compact)
 
     payload = {
@@ -142,7 +140,11 @@ def _status_payload(ctx, query=''):
         'protocols': snapshot.get('protocols', {}) if isinstance(snapshot, dict) else {},
     }
     if not lite:
-        payload['router_health'] = _ctx(ctx, 'router_health_snapshot', lambda: {})()
+        router_health_snapshot = _ctx(ctx, 'router_health_snapshot', lambda *args, **kwargs: {})
+        try:
+            payload['router_health'] = router_health_snapshot(compact=compact)
+        except TypeError:
+            payload['router_health'] = router_health_snapshot()
     bot_ready = _ctx(ctx, 'bot_ready')
     if bot_ready is not None:
         payload['bot_ready'] = bool(bot_ready() if callable(bot_ready) else bot_ready)

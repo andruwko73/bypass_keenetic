@@ -1,3 +1,7 @@
+*v1.925 (7 Jul 2026) -* main
+
+*Keeps the startup header status on a light active snapshot instead of a false Telegram warning, preserves checked pool totals when worker summary falls back, moves route tools into a short-lived worker, and trims repeated service-intersection matching while keeping router idle CPU/RSS stable.*
+
 *v1.924 (6 Jul 2026) -* main
 
 *Reduces idle router load by skipping unchanged dnsmasq full ipset refreshes for six hours, keeps YouTube warm-up out of concurrent heavy jobs, preserves the last valid pool summary through light memory cleanup, and keeps the unified key/subscription UI compact with neutral startup status refresh.*

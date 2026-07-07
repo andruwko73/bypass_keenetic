@@ -14,6 +14,10 @@ def telegram_api_pending_message():
     )
 
 
+def telegram_api_refresh_message():
+    return '⏳ Статус обновляется. Проверяется актуальное состояние. Статус обновится без перезагрузки страницы'
+
+
 def telegram_api_recovery_message(proxy_mode):
     mode = str(proxy_mode or '').strip() or 'текущий'
     return (
@@ -98,7 +102,7 @@ def api_status_from_protocol(proxy_mode, protocol_status, socks_ok, is_transient
     if api_ok:
         return telegram_api_success_message()
     if protocol_status_is_pending(status):
-        return telegram_api_pending_message()
+        return telegram_api_refresh_message()
     if socks_ok and is_transient(api_message):
         return telegram_api_pending_message()
     if not has_api_result:

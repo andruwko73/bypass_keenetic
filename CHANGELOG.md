@@ -1,3 +1,11 @@
+<a name="1.925"></a>
+# [1.925] - 7 Jul 2026
+
+- Keeps the startup web header on a light active status snapshot so page load does not flash a false Telegram API warning.
+- Preserves checked key-pool totals from the probe cache when the summary worker falls back, avoiding transient `Проверено: 0` after a full pool check.
+- Defers route-tools rendering to a short-lived worker and avoids repeated service-catalog matching while annotating route intersections.
+- Keeps the first advanced page lightweight and verifies router idle CPU/RSS after local install and all-mode UI smoke.
+
 <a name="1.924"></a>
 # [1.924] - 6 Jul 2026
 

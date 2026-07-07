@@ -203,6 +203,20 @@ async function assertMobileStatusGaps(page, label) {
 }
 
 async function assertVisibleBox(page, selector, label) {
+  await page.waitForFunction((targetSelector) => {
+    const node = document.querySelector(targetSelector);
+    if (!node) {
+      return false;
+    }
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return false;
+    }
+    const box = node.getBoundingClientRect();
+    return box.width >= 2 && box.height >= 2;
+  }, selector, { timeout: 30000 }).catch((error) => {
+    throw new Error(`${label}: ${selector} did not become visibly sized: ${error.message}`);
+  });
   const box = await page.locator(selector).first().boundingBox();
   if (!box || box.width < 2 || box.height < 2) {
     throw new Error(`${label}: ${selector} is not visibly sized`);
@@ -259,6 +273,9 @@ async function assertEventHistoryScrollLocked(page, label) {
 }
 
 async function assertNoBrokenImages(page, label) {
+  await page.waitForFunction(() => (
+    Array.from(document.images).every((img) => img.complete)
+  ), null, { timeout: 5000 }).catch(() => {});
   const broken = await page.evaluate(() => (
     Array.from(document.images)
       .filter((img) => !img.complete || img.naturalWidth < 1 || img.naturalHeight < 1)
@@ -629,6 +646,15 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: expected 3 protocol subtabs, got ${subtabCount}`);
     }
     await assertUnifiedImportLayout(page, `${name} vless2 unified import`);
+
+    await page.evaluate(() => localStorage.setItem('router-active-protocol', 'vless2'));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
+    await clickLazyProtocol(page, 'vless', `${name} vless1 return`);
+    await page.locator('[data-protocol-panel="vless"].active [data-subview-target="pool"]').click();
+    await assertActivePoolRowPinned(page, 'vless', `${name} vless1 return pool order`);
+    await assertPoolKeysAreMasked(page, `${name} vless1 return keys`);
   } else {
     const poolOnlyControls = await page.locator('[data-pool-filter], .pool-toolbar, [data-subview-target="pool"], [data-subview-target="check"], .service-route-tools, .pool-import-form').count();
     if (poolOnlyControls) {

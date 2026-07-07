@@ -44,6 +44,7 @@ import web_http_common
 import web_pool_form_blocks
 import web_pool_snapshot_worker
 import web_route_tools_runtime
+import web_service_routes_worker
 import web_status_builder
 import web_template_styles
 import web_template_scripts
@@ -1209,6 +1210,12 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
                 include_summary=True,
                 include_custom_checks=True,
             )
+            summary_payload = web_pool_snapshot_worker.build_payload(
+                protocols=['vless'],
+                include_summary=True,
+                include_custom_checks=False,
+                include_pools=False,
+            )
         finally:
             for name, value in old_worker_values.items():
                 setattr(web_pool_snapshot_worker, name, value)
@@ -1227,6 +1234,10 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
     scoped_summary = payload['pool_summary']
     assert '\u0412\u0441\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b' not in scoped_summary['note']
     assert '\u0425\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d' not in scoped_summary['note']
+    assert summary_payload['pools'] == {}
+    assert summary_payload['pool_summary']['pool_total_count'] == 2
+    assert summary_payload['pool_summary']['checked_pool_count'] == 2
+    assert summary_payload['custom_checks'] is None
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
     assert key_pool_web.web_probe_quality_label({'yt_quality': 'stable', 'yt_latency_ms': 800}) == ''
     history_html = key_pool_web.web_event_history_html([
@@ -1250,6 +1261,18 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
     assert 'watchdog' in history_html
     assert 'active_connections=0' in history_html
     assert 'active_connections=49' in history_html
+
+
+def test_web_service_routes_worker_payload_contains_route_tools():
+    payload = web_service_routes_worker.build_payload()
+    html_text = payload.get('route_tools_html') or ''
+
+    assert 'service-route-tools' in html_text
+    assert 'service-route-trigger' in html_text
+    assert 'service-route-telegram-icon' in html_text
+    assert 'service-route-youtube-icon' in html_text
+    assert '/service_profile_apply' in html_text
+    assert '/route_intersections_resolve' in html_text or 'route-intersection-ok' in html_text
 
 
 def test_key_pool_subscription_helpers():
@@ -1912,7 +1935,10 @@ def test_web_post_actions_helpers():
     snapshots = []
     pool_ctx.update(
         load_current_keys=lambda: {'vless': 'vless://one'},
-        web_pool_snapshot=lambda keys, include_keys=False: snapshots.append(include_keys) or {'vless': {'rows': []}},
+        web_pool_snapshot=lambda keys, include_keys=False, protocols=None: snapshots.append({
+            'include_keys': include_keys,
+            'protocols': protocols,
+        }) or {'vless': {'rows': []}},
         load_key_pools=lambda: {'vless': ['vless://one', 'vless://two']},
         hash_key=lambda key: 'id-one-1234' if key == 'vless://one' else 'id-two-1234',
         delete_pool_key=lambda proto, key: deleted.append((proto, key)),
@@ -2000,13 +2026,14 @@ def test_web_post_actions_helpers():
     assert delete_result['success'] is True
     assert deleted == [('vless', 'vless://two')]
     assert delete_result['extra']['key_id'] == 'id-two-1234'
-    assert snapshots[-1] is False
+    assert snapshots[-1] == {'include_keys': False, 'protocols': ['vless']}
+    snapshot_count_before_apply = len(snapshots)
     apply_result = web_post_actions.dispatch(pool_ctx, '/pool_apply', {'type': ['vless'], 'key_id': ['id-one-1234']})
     assert apply_result['success'] is True
     assert active == [('vless', 'vless://one')]
     assert apply_result['extra']['key_id'] == 'id-one-1234'
     assert 'key' not in apply_result['extra']
-    assert snapshots[-1] is False
+    assert len(snapshots) == snapshot_count_before_apply
     install_result = web_post_actions.dispatch(pool_ctx, '/install', {'type': ['vless'], 'key': ['vless://one']})
     assert install_result['success'] is True
     assert 'key' not in install_result['extra']
@@ -2139,6 +2166,9 @@ def test_codex_version_matches_commit_count():
     assert 'status_refresh_min_interval_seconds = 180.0' in example
     assert 'status_refresh_min_interval_seconds = 180.0' in installer
     assert 'status_refresh_min_interval_seconds = 180.0' in bootstrap
+    assert 'status_refresh_pending_min_interval_seconds = 60.0' in example
+    assert 'status_refresh_pending_min_interval_seconds = 60.0' in installer
+    assert 'status_refresh_pending_min_interval_seconds = 60.0' in bootstrap
     assert 'router_health_cache_ttl = 30.0' in example
     assert 'router_health_cache_ttl = 30.0' in installer
     assert 'router_health_cache_ttl = 30.0' in bootstrap
@@ -2178,9 +2208,9 @@ def test_codex_version_matches_commit_count():
     assert 'web_response_cleanup_rss_kb = 61440' in example
     assert 'web_response_cleanup_rss_kb = 61440' in installer
     assert 'web_response_cleanup_rss_kb = 61440' in bootstrap
-    assert 'web_response_light_cleanup_rss_kb = 66560' in example
-    assert 'web_response_light_cleanup_rss_kb = 66560' in installer
-    assert 'web_response_light_cleanup_rss_kb = 66560' in bootstrap
+    assert 'web_response_light_cleanup_rss_kb = 61440' in example
+    assert 'web_response_light_cleanup_rss_kb = 61440' in installer
+    assert 'web_response_light_cleanup_rss_kb = 61440' in bootstrap
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in example
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in installer
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in bootstrap
@@ -2196,6 +2226,9 @@ def test_codex_version_matches_commit_count():
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in example
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in installer
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in bootstrap
+    assert 'background_task_max_cpu_percent = 45.0' in example
+    assert 'background_task_max_cpu_percent = 45.0' in installer
+    assert 'background_task_max_cpu_percent = 45.0' in bootstrap
     assert 'background_task_max_bot_rss_kb = 66560' in example
     assert 'background_task_max_bot_rss_kb = 66560' in installer
     assert 'background_task_max_bot_rss_kb = 66560' in bootstrap
@@ -2304,12 +2337,14 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_watch_warm_max_hosts = 6' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_bytes = 450000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'web_response_light_cleanup_rss_kb = 66560' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_light_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_related_process_cache_ttl = 45.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_cache_ttl = 30.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_cpu_smoothing_factor = 0.35' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'background_task_cpu_cache_ttl_seconds = 20.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'background_task_max_cpu_percent = 45.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'status_refresh_pending_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert '[ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'service_route_intersections_cache_ttl = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_prefetch_scheduler_max_cpu_percent = 45' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -3007,6 +3042,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
     assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
     assert "background_task_max_bot_rss_kb', 65 * 1024" in source
+    assert "background_task_max_cpu_percent', 45.0" in source
     assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
     assert "getattr(config, 'router_metrics_history_limit', 120)" in source
     assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 65 * 1024)" in source
@@ -3017,11 +3053,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'web_pools_payload': _web_pools_payload" in source
     assert 'web_pool_snapshot_worker.py' in source
     assert "input=json.dumps(request" in source
+    assert "'route_states': _service_route_summary()" not in source
     assert "memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl'" in source
     assert 'def _record_memory_timeline' in source
     assert 'def _start_memory_timeline_thread' in source
     assert "_start_memory_timeline_thread()" in source
     assert "getattr(config, 'status_refresh_min_interval_seconds', 180.0)" in source
+    assert "getattr(config, 'status_refresh_pending_min_interval_seconds'" in source
     assert 'status_refresh_last_finished_at' in source
     assert 'def _stale_status_snapshot' in source
     assert 'def _sync_udp_policy_config' in source
@@ -3099,7 +3137,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "not (allow_high_rss and skip_reason == 'rss')" in source
     assert "background_task_skip_reason[task_name] = 'cpu'" in source
     assert "'status refresh skipped high RSS'" in source
-    assert 'rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not active_only' in source
+    assert 'ignore_status_refresh=(task_name == \'status refresh\')' in source
+    assert 'status_refresh_in_progress.add(refresh_key)' in source
+    assert source.find('status_refresh_in_progress.add(refresh_key)') < source.find("if not _background_task_allowed('status refresh'):")
     assert 'def _recent_event_history_match' in source
     stream_guard_block = source.split('def _youtube_stream_guard_active', 1)[1].split('def _youtube_vless2_stream_guard_active', 1)[0]
     assert "_recent_event_history_match(\n                    'stream_guard_defer'" in stream_guard_block
@@ -3322,11 +3362,24 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
     assert 'def _placeholder_status_snapshot(current_keys, include_pool_details=True)' in source
     assert '_placeholder_status_snapshot(current_keys, include_pool_details=False)' in source
+    assert "_active_mode_status_snapshot_from_base(\n            current_keys,\n            {'web': _build_web_status(current_keys, protocols=protocols), 'protocols': protocols}," in source
     assert 'if not pool_enabled:\n            status_refresh_pending = False' not in source
+    assert 'def _web_light_pool_summary(current_keys, key_pools, key_probe_cache=None, custom_checks=None)' in source
+    assert 'def _light_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks=None)' in source
+    assert 'def _minimal_pool_summary' not in source
     pool_form_context = source.split('def _web_pool_form_context', 1)[1].split('def _web_simple_form_context', 1)[0]
-    assert 'key_probe_cache = {}' in pool_form_context
-    assert '_pool_status_summary(current_keys, key_pools, None, custom_checks, route_states)' in pool_form_context
+    assert 'summary_probe_cache = _load_key_probe_cache()' not in pool_form_context
+    assert 'render_light_protocol_tabs_and_panels' in pool_form_context
+    assert '_key_pool_web()' not in pool_form_context
+    assert '_web_pool_form_blocks()' not in pool_form_context
+    assert '_web_light_pool_summary(current_keys, key_pools, None, custom_checks)' in pool_form_context
+    assert '_service_route_summary()' not in pool_form_context
+    assert '_pool_status_summary(' not in pool_form_context
     assert '_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)' not in pool_form_context
+    light_summary_context = source.split('def _web_light_pool_summary', 1)[1].split('def _web_custom_checks_light', 1)[0]
+    assert '_load_key_probe_cache()' in light_summary_context
+    assert '_light_pool_status_summary(current_keys, key_pools, probe_cache_snapshot, custom_checks)' in light_summary_context
+    assert '_minimal_pool_summary' not in light_summary_context
     assert "'refresh_status_caches_async': refresh_status_caches" in source
     assert "event_history_html=''" in source
     assert "allow_youtube_confirm=True" in source
@@ -3337,7 +3390,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _probe_applied_pool_key_services' in source
     assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
-    assert "'probe_applied_pool_key_services'" in (APP_ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
+    assert "'probe_applied_pool_key_services'" not in (APP_ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
     assert 'def _telegram_route_protocol' in source
     assert "telegram_route_proto = _telegram_route_protocol()" in source
     assert 'proxy_mode=telegram_route_proto' in source
@@ -3415,6 +3468,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'intersections_cache_ttl=SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL' in source
     assert "_release_web_form_template_cache()\n            _web_response_cleanup('web html render')" in source
     assert "_web_response_cleanup('web json api render')" in source
+    assert "_web_response_cleanup('web post pool action render', heavy=True)" in source
     assert "include_pool_ui=True" in source
     assert "include_route_tools=True" in source
     assert "malloc_trim_info = _malloc_trim(reason, force=True, rss_kb=rss_before)" in source
@@ -3434,8 +3488,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source
     assert 'def _pool_summary_can_keep_previous' in source
     assert "_pool_summary_count(previous_summary, 'checked_pool_count') > 0" in source
-    assert "payload.get('pools') is not None" in source
-    assert 'avoid loading the full probe cache twice' in source
+    assert "web_pools_api_cache.setdefault('entries', {})" in source
+    assert 'WEB_POOLS_API_CACHE_MAX_ENTRIES' in source
+    assert "entries.pop(key, None)" in source
+    assert "action === 'pool-apply'" in (APP_ROOT / 'web_template_scripts.py').read_text(encoding='utf-8')
+    assert 'avoid rendering full probe details twice' in source
     assert 'event_history_api_cache[\'payload\'] = payload' not in source
     assert "last_scan_count" in source
     assert "cached_fail_since or now" in source
@@ -3556,6 +3613,220 @@ def test_simple_mode_import_skips_advanced_modules():
         temp_dir.cleanup()
 
 
+def test_advanced_initial_web_context_skips_heavy_pool_modules():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    heavy_modules = (
+        'probe_cache',
+        'key_pool_web',
+        'web_pool_form_blocks',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "bot.WEB_POOL_SNAPSHOT_WORKER_ENABLED = False\n"
+        "bot._load_key_pools = lambda: {proto: [] for proto in bot.POOL_PROTOCOL_ORDER}\n"
+        "bot._save_key_pools = lambda pools: None\n"
+        "bot._subscription_public_settings = lambda: {}\n"
+        "bot._load_custom_checks = lambda: []\n"
+        "current_keys = bot._load_current_keys()\n"
+        "bot._web_pool_form_context(\n"
+        "    current_keys,\n"
+        "    bot._placeholder_protocol_statuses(current_keys),\n"
+        "    '',\n"
+        "    bot._placeholder_web_status_snapshot(),\n"
+        "    False,\n"
+        "    {},\n"
+        ")\n"
+        f"mods = {heavy_modules!r}\n"
+        "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        loaded = json.loads(result.stdout.strip())
+        assert loaded == {name: False for name in heavy_modules}
+    finally:
+        temp_dir.cleanup()
+
+
+def test_active_status_refresh_skips_heavy_pool_modules():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    heavy_modules = (
+        'probe_cache',
+        'key_pool_web',
+        'web_pool_form_blocks',
+        'web_route_tools_runtime',
+        'route_intersections',
+        'service_routes',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "bot.proxy_mode = 'vless'\n"
+        "bot.bot_ready = True\n"
+        "bot.bot_polling = True\n"
+        "bot._load_custom_checks = lambda: [{'id': 'chat', 'label': 'Chat', 'url': 'https://example.com/'}]\n"
+        "bot._check_local_proxy_endpoint = lambda key, port: (True, 'SOCKS ok.')\n"
+        "bot._check_telegram_api_for_background = lambda *args, **kwargs: (True, 'ok')\n"
+        "bot._check_telegram_api_through_proxy = lambda *args, **kwargs: (True, 'ok')\n"
+        "bot._key_requires_xray = lambda *args, **kwargs: False\n"
+        "current_keys = {'vless': 'active-key-placeholder', 'vless2': 'other-key-placeholder'}\n"
+        "snapshot = bot._active_mode_status_snapshot(current_keys, background_checks=True)\n"
+        "assert snapshot['protocols']['vless']['api_ok'] is True\n"
+        "assert 'YouTube:' not in snapshot['protocols']['vless']['details']\n"
+        f"mods = {heavy_modules!r}\n"
+        "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        loaded = json.loads(result.stdout.strip())
+        assert loaded == {name: False for name in heavy_modules}
+    finally:
+        temp_dir.cleanup()
+
+
+def test_light_protocol_panel_skips_heavy_pool_modules():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    heavy_modules = (
+        'probe_cache',
+        'key_pool_web',
+        'web_pool_form_blocks',
+        'web_route_tools_runtime',
+        'route_intersections',
+        'service_routes',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "bot._load_key_pools = lambda: {proto: [] for proto in bot.POOL_PROTOCOL_ORDER}\n"
+        "bot._save_key_pools = lambda pools: None\n"
+        "bot._subscription_public_settings = lambda: {}\n"
+        "html = bot._web_protocol_panel_html('vless', {'vless': 'active-key-placeholder'}, {}, '<input>')\n"
+        "assert 'data-protocol-panel=\"vless\"' in html\n"
+        f"mods = {heavy_modules!r}\n"
+        "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        loaded = json.loads(result.stdout.strip())
+        assert loaded == {name: False for name in heavy_modules}
+    finally:
+        temp_dir.cleanup()
+
+
+def test_protocol_check_panel_defers_route_tools_modules():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    heavy_modules = (
+        'key_pool_web',
+        'web_route_tools_runtime',
+        'route_intersections',
+        'service_routes',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "bot._load_custom_checks = lambda: [{'id': 'chatgpt_services', 'label': 'ChatGPT', 'url': 'https://example.com/'}]\n"
+        "html = bot._web_protocol_check_html('vless', {'vless': 'active-key-placeholder'}, {}, '<input>')\n"
+        "assert 'data-route-tools-deferred=\"1\"' in html\n"
+        "assert 'service-route-trigger' not in html\n"
+        f"mods = {heavy_modules!r}\n"
+        "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        loaded = json.loads(result.stdout.strip())
+        assert loaded == {name: False for name in heavy_modules}
+    finally:
+        temp_dir.cleanup()
+
+
 def test_web_response_body_ignores_client_disconnect():
     class BrokenWriter:
         def write(self, _body):
@@ -3580,9 +3851,11 @@ def test_runtime_modules_are_installed_by_update_scripts():
     for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'router_metrics.py', 'telegram_call_learning.py', 'web_commands_runtime.py'):
         assert module in script
         assert f'repo_file_url {module}' in bootstrap or f'repo_file_url "$module"' in bootstrap
-        assert f'$BOT_DIR/{module}' in bootstrap
+    assert f'$BOT_DIR/{module}' in bootstrap
     assert 'web_pool_snapshot_worker.py' in script_modules
     assert 'web_pool_snapshot_worker.py' in bootstrap_modules
+    assert 'web_service_routes_worker.py' in script_modules
+    assert 'web_service_routes_worker.py' in bootstrap_modules
     assert 'youtube_edge_prefetch.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in bootstrap_modules
@@ -4522,8 +4795,9 @@ def test_web_status_runtime_helpers():
         is_transient=lambda text: False,
         fallback_reason='',
     )
-    assert placeholder['api_status'].startswith('⏳ Telegram API')
-    assert 'Программа подбирает рабочий ключ из пула текущего режима' in placeholder['api_status']
+    assert 'Статус обновляется' in placeholder['api_status']
+    assert 'Проверяется актуальное состояние' in placeholder['api_status']
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' not in placeholder['api_status']
     assert 'не проходит:' not in placeholder['api_status']
     unchecked = web_status_runtime.build_web_status_snapshot(
         state_label='state',
@@ -4535,8 +4809,9 @@ def test_web_status_runtime_helpers():
         is_transient=lambda text: False,
         fallback_reason='',
     )
-    assert unchecked['api_status'].startswith('⏳ Telegram API')
-    assert 'Программа подбирает рабочий ключ из пула текущего режима' in unchecked['api_status']
+    assert 'Статус обновляется' in unchecked['api_status']
+    assert 'Проверяется актуальное состояние' in unchecked['api_status']
+    assert 'Программа подбирает рабочий ключ из пула текущего режима' not in unchecked['api_status']
     assert 'не проходит:' not in unchecked['api_status']
     fallback = web_status_runtime.build_web_status_snapshot(
         state_label='state',
@@ -7649,6 +7924,20 @@ def test_web_get_actions_helpers():
     placeholder_status = web_get_actions.dispatch(placeholder_ctx, '/api/status')
     assert placeholder_status['payload']['web'] == {'state': 'placeholder'}
     assert placeholder_refreshed == [current_keys]
+    compact_placeholder_calls = []
+    compact_placeholder_refreshed = []
+    compact_placeholder_ctx = dict(placeholder_ctx)
+    compact_placeholder_ctx.update({
+        'placeholder_status_snapshot': lambda keys: compact_placeholder_calls.append(keys) or {
+            'web': {'state': 'compact-placeholder'},
+            'protocols': {'vless': {'label': 'pending'}},
+        },
+        'refresh_status_caches_async': lambda keys: compact_placeholder_refreshed.append(keys),
+    })
+    compact_placeholder_status = web_get_actions.dispatch(compact_placeholder_ctx, '/api/status', 'compact=1&lite=1')
+    assert compact_placeholder_status['payload']['web'] == {'state': 'compact-placeholder'}
+    assert compact_placeholder_calls == [current_keys]
+    assert compact_placeholder_refreshed == [current_keys]
     stale_refreshed = []
     stale_ctx = dict(ctx)
     stale_ctx.update({
@@ -10475,6 +10764,7 @@ def main():
     test_ipset_refresh_is_backend_aware_and_atomic()
     test_runtime_startup_limits_router_flash_and_overhead()
     test_simple_mode_import_skips_advanced_modules()
+    test_advanced_initial_web_context_skips_heavy_pool_modules()
     test_web_response_body_ignores_client_disconnect()
     test_youtube_edge_prefetch_cache_is_bounded_and_public_only()
     test_youtube_edge_prefetch_collects_limited_dns_candidates()

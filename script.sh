@@ -846,7 +846,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md CHANGELOG.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md CHANGELOG.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -943,6 +943,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^memory_malloc_trim_min_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_min_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^memory_malloc_trim_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_malloc_trim_cooldown_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^background_task_max_cpu_percent[[:space:]]*=[[:space:]]*(65\.0|65)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^background_task_max_cpu_percent[[:space:]]*=.*/background_task_max_cpu_percent = 45.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^background_task_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_cpu_percent = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_bot_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^auto_failover_idle_log_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_idle_log_interval_seconds = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
@@ -951,6 +955,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_bot_num_threads[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_bot_num_threads = 1\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^status_refresh_pending_min_interval_seconds[[:space:]]*=[[:space:]]*(15\.0|15|30\.0|30)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^status_refresh_pending_min_interval_seconds[[:space:]]*=.*/status_refresh_pending_min_interval_seconds = 60.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^status_refresh_pending_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_pending_min_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^router_health_cache_ttl[[:space:]]*=[[:space:]]*15\.0([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^router_health_cache_ttl[[:space:]]*=.*/router_health_cache_ttl = 30.0/' "$BOT_CONFIG_PATH" || true
   fi
@@ -968,7 +976,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^web_pools_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_pools_api_cache_ttl = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^service_route_intersections_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'service_route_intersections_cache_ttl = 60.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_light_cleanup_rss_kb = 66560\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=[[:space:]]*66560([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^web_response_light_cleanup_rss_kb[[:space:]]*=.*/web_response_light_cleanup_rss_kb = 61440/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_light_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   if [ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]; then
     if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(65536|81920)([[:space:]#]|$)' /opt/etc/bot_config.py; then
@@ -991,10 +1002,21 @@ migrate_runtime_config_defaults() {
     grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_metrics_warn_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
     grep -Eq '^memory_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
-    grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_light_cleanup_rss_kb = 66560\n' >> /opt/etc/bot_config.py
+    if grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=[[:space:]]*66560([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^web_response_light_cleanup_rss_kb[[:space:]]*=.*/web_response_light_cleanup_rss_kb = 61440/' /opt/etc/bot_config.py || true
+    fi
+    grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_light_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
     grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> /opt/etc/bot_config.py
+    if grep -Eq '^background_task_max_cpu_percent[[:space:]]*=[[:space:]]*(65\.0|65)([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^background_task_max_cpu_percent[[:space:]]*=.*/background_task_max_cpu_percent = 45.0/' /opt/etc/bot_config.py || true
+    fi
+    grep -Eq '^background_task_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_cpu_percent = 45.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_max_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
+    if grep -Eq '^status_refresh_pending_min_interval_seconds[[:space:]]*=[[:space:]]*(15\.0|15|30\.0|30)([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^status_refresh_pending_min_interval_seconds[[:space:]]*=.*/status_refresh_pending_min_interval_seconds = 60.0/' /opt/etc/bot_config.py || true
+    fi
+    grep -Eq '^status_refresh_pending_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'status_refresh_pending_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^auto_failover_idle_log_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'auto_failover_idle_log_interval_seconds = 900\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> /opt/etc/bot_config.py
@@ -1012,6 +1034,7 @@ migrate_runtime_config_defaults() {
     fi
     grep -Eq '^pool_probe_max_process_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_max_process_rss_kb = 66560\n' >> /opt/etc/bot_config.py
     grep -Eq '^pool_probe_process_worker_enabled[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_process_worker_enabled = True\n' >> /opt/etc/bot_config.py
+    grep -Eq '^pool_probe_inprocess_fallback_enabled[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_inprocess_fallback_enabled = False\n' >> /opt/etc/bot_config.py
     grep -Eq '^pool_probe_process_worker_poll_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_probe_process_worker_poll_seconds = 0.75\n' >> /opt/etc/bot_config.py
     grep -Eq '^pool_failover_process_worker_enabled[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_failover_process_worker_enabled = True\n' >> /opt/etc/bot_config.py
     grep -Eq '^pool_failover_process_worker_timeout_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'pool_failover_process_worker_timeout_seconds = 180.0\n' >> /opt/etc/bot_config.py
@@ -1026,6 +1049,7 @@ migrate_runtime_config_defaults() {
   fi
   grep -Eq '^pool_probe_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_max_cpu_percent = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_probe_process_worker_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_process_worker_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^pool_probe_inprocess_fallback_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_inprocess_fallback_enabled = False\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_probe_process_worker_poll_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_probe_process_worker_poll_seconds = 0.75\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_failover_process_worker_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_failover_process_worker_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^pool_failover_process_worker_timeout_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'pool_failover_process_worker_timeout_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"

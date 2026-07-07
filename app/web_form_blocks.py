@@ -11,6 +11,8 @@ PROTOCOL_SECTIONS = [
 ]
 
 STATUS_REFRESH_PENDING_MARKERS = (
+    'Статус обновляется',
+    'Проверяется актуальное состояние',
     'Проверяется связь текущего режима',
     'Фоновая проверка связи выполняется',
     'Telegram API не ответил вовремя',
@@ -48,6 +50,263 @@ def proxy_mode_label(proxy_mode, none_label='Без прокси'):
 
 def render_csrf_input(csrf_token):
     return f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
+
+
+def pool_probe_topbar_text(pool_probe_pending, progress, progress_label_func, fallback_text):
+    if not pool_probe_pending:
+        return fallback_text
+    progress = progress or {}
+    progress_total = int(progress.get('total') or 0)
+    progress_checked = int(progress.get('checked') or 0)
+    progress_label = progress_label_func(progress)
+    progress_note = str(progress.get('note') or '').strip()
+    progress_text = f'⏳ {progress_label}: {progress_checked}/{progress_total}'
+    return f'{progress_text} - {progress_note}' if progress_note else progress_text
+
+
+def pool_summary_note_with_progress(pool_summary_note, pool_probe_pending, progress, progress_label_func):
+    if not pool_probe_pending:
+        return pool_summary_note
+    progress = progress or {}
+    progress_note = str(progress.get('note') or '').strip()
+    note_suffix = progress_note if progress_note else pool_summary_note
+    return (
+        f"{progress_label_func(progress)}: {int(progress.get('checked') or 0)}/"
+        f"{int(progress.get('total') or 0)}. {note_suffix}"
+    )
+
+
+def _pool_loading_row_html(colspan=6):
+    try:
+        safe_colspan = max(1, int(colspan))
+    except Exception:
+        safe_colspan = 6
+    return (
+        f'<tr class="pool-row pool-empty-row"><td colspan="{safe_colspan}">'
+        'Загружаю пул ключей...'
+        '</td></tr>'
+    )
+
+
+def _protocol_tab_html(key_name, title, count, active=False):
+    active_class = ' active' if active else ''
+    return f'''<button type="button" class="seg-tab protocol-tab{active_class}" data-protocol-target="{html.escape(key_name, quote=True)}">
+                    <span>{html.escape(title)}</span>
+                    <span class="tab-count">{int(count)}</span>
+                </button>'''
+
+
+def _light_status_icons(status_info, telegram_icon_html, youtube_icon_html):
+    status_info = status_info or {}
+    icons = []
+    if status_info.get('api_ok') or status_info.get('tg_ok'):
+        icons.append(telegram_icon_html(opacity=1.0))
+    if status_info.get('yt_ok'):
+        icons.append(youtube_icon_html(opacity=1.0))
+    return ''.join(icons)
+
+
+def _light_protocol_panel_html(
+    *,
+    key_name,
+    title,
+    rows,
+    placeholder,
+    current_key_value,
+    status_info,
+    active_status_icons,
+    csrf_input_html='',
+    subscription_settings=None,
+    active=False,
+    enable_key_pool=True,
+    enable_custom_checks=True,
+    pool_probe_pending=False,
+):
+    active_class = ' active' if active else ''
+    safe_key_name = html.escape(key_name, quote=True)
+    safe_title = html.escape(title)
+    safe_value = html.escape(current_key_value or '')
+    safe_placeholder = html.escape(placeholder)
+    status_info = status_info or {}
+    safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
+    safe_label = html.escape(status_info.get('label', ''))
+    safe_details = html.escape(str(status_info.get('details', '') or '').strip().rstrip('.'))
+    pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_pending else ' aria-disabled="false"'
+    pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_pending else ' disabled aria-disabled="true"'
+    subtabs = [('key', 'Ключ и подписка')]
+    if enable_key_pool:
+        subtabs.append(('pool', 'Пул ключей'))
+    if enable_key_pool or enable_custom_checks:
+        subtabs.append(('check', 'Проверка'))
+    subtabs_html = ''
+    if len(subtabs) > 1:
+        subtab_buttons = ''.join(
+            f'<button type="button" class="subtab{" active" if index == 0 else ""}" data-subview-target="{value}">{html.escape(label)}</button>'
+            for index, (value, label) in enumerate(subtabs)
+        )
+        subtabs_html = f'<div class="subtabs">{subtab_buttons}</div>'
+    import_form_html = ''
+    pool_subview_html = ''
+    if enable_key_pool:
+        subscription_settings = subscription_settings or {}
+        hwid_checked = ' checked' if subscription_settings.get('hwid_enabled') else ''
+        import_form_html = f'''
+            <form method="post" action="/pool_import" class="pool-import-form" data-async-action="pool-import">
+                {csrf_input_html}
+                <input type="hidden" name="type" value="{safe_key_name}">
+                <label class="field-label">Импорт ключей и подписки</label>
+                <p class="field-hint">Вставьте один ключ, список ключей или ссылку subscription. Vless-ключи попадут в пул {safe_title}; остальные протоколы будут разложены по своим пулам.</p>
+                <textarea name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
+                <label class="subscription-hwid-toggle">
+                    <input type="checkbox" class="subscription-switch-input" name="send_router_hwid" value="1"{hwid_checked}>
+                    <span class="subscription-switch-ui" aria-hidden="true"></span>
+                    <span class="subscription-hwid-label">Передавать HWID роутера</span>
+                </label>
+                <button type="submit" class="secondary-button">Импортировать</button>
+            </form>'''
+        pool_subview_html = f'''
+        <div class="protocol-subview" data-subview="pool">
+            <div class="pool-toolbar">
+                <form method="post" action="/pool_probe" data-async-action="pool-probe">
+                    {csrf_input_html}
+                    <input type="hidden" name="type" value="{safe_key_name}">
+                    <button type="submit" class="secondary-button" data-pool-probe-start-button{pool_probe_start_disabled}>Проверить пул</button>
+                </form>
+                <form method="post" action="/pool_probe_cancel" data-async-action="pool-probe-cancel">
+                    {csrf_input_html}
+                    <button type="submit" class="secondary-button" data-pool-probe-cancel-button{pool_probe_cancel_disabled}>Остановить проверку</button>
+                </form>
+                <form method="post" action="/pool_clear" data-async-action="pool-clear" data-confirm-title="Очистить пул?" data-confirm-message="Очистить весь пул ключей для {safe_title}?">
+                    {csrf_input_html}
+                    <input type="hidden" name="type" value="{safe_key_name}">
+                    <button type="submit" class="danger pool-clear-btn">Очистить пул</button>
+                </form>
+            </div>
+            <div class="pool-controls" data-pool-controls="{safe_key_name}">
+                <input type="search" data-pool-filter="{safe_key_name}" placeholder="Поиск по пулу">
+                <div class="pool-sort-control" data-pool-sort-control="{safe_key_name}">
+                    <input type="hidden" data-pool-sort="{safe_key_name}" value="original">
+                    <button type="button" class="pool-sort-button" data-pool-sort-button="{safe_key_name}" aria-expanded="false">Исходный порядок</button>
+                    <div class="pool-sort-menu hidden" data-pool-sort-menu="{safe_key_name}">
+                        <button type="button" class="pool-sort-option active" data-pool-sort-value="original">Исходный порядок</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="telegram">Telegram сначала</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="youtube">YouTube сначала</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="quality">Качество сначала</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="checked">Свежие проверки</button>
+                        <span class="pool-sort-divider">Фильтр</span>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="working">Работают</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="problem">Есть проблемы</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="unknown">Не проверены</button>
+                    </div>
+                </div>
+            </div>
+            <div class="pool-table-wrap">
+                <table class="pool-table" style="--custom-col-mobile:28px">
+                    <colgroup>
+                        <col class="pool-col-key">
+                        <col class="pool-col-icon">
+                        <col class="pool-col-icon">
+                        <col class="pool-col-custom" style="width:32px">
+                        <col class="pool-col-checked">
+                        <col class="pool-col-actions">
+                    </colgroup>
+                    <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head" data-core-service-head="telegram"></th><th class="pool-icon-head" data-core-service-head="youtube"></th><th class="pool-icon-head pool-custom-head" data-custom-check-head></th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
+                    <tbody data-pool-body="{safe_key_name}" data-pool-deferred="1">{_pool_loading_row_html(6)}</tbody>
+                </table>
+            </div>
+        </div>'''
+    check_subview_html = ''
+    if enable_key_pool or enable_custom_checks:
+        check_subview_html = f'''
+        <div class="protocol-subview protocol-subview-check" data-subview="check">
+            <div class="status-card">
+                <span class="status-label">Состояние ключа</span>
+                <span class="status-value">{safe_label}</span>
+                <p class="status-note">{safe_details}</p>
+            </div>
+            <div class="protocol-check-loading" data-protocol-check-deferred="{safe_key_name}">
+                <span class="status-label">Checks</span>
+                <p class="status-note">Loading...</p>
+            </div>
+        </div>'''
+    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
+        <div class="workspace-head">
+            <div>
+                <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
+                <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
+            </div>
+            <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons>{active_status_icons}</span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>
+        </div>
+        {subtabs_html}
+        <div class="protocol-subview protocol-subview-key active" data-subview="key">
+            <form method="post" action="/install" data-async-action="install" class="key-editor-form">
+                {csrf_input_html}
+                <input type="hidden" name="type" value="{safe_key_name}">
+                <label class="field-label">Активный ключ {safe_title}</label>
+                <textarea name="key" rows="{int(rows)}" placeholder="{safe_placeholder}" required data-key-textarea>{safe_value}</textarea>
+                <div class="form-actions">
+                    <button type="submit">Сохранить {safe_title}</button>
+                </div>
+            </form>
+            {import_form_html}
+        </div>
+        {pool_subview_html}
+        {check_subview_html}
+    </section>'''
+
+
+def render_light_protocol_tabs_and_panels(
+    protocol_sections,
+    current_keys,
+    protocol_statuses,
+    csrf_input_html,
+    *,
+    key_pools=None,
+    subscription_settings=None,
+    telegram_icon_html=None,
+    youtube_icon_html=None,
+    active_protocol=None,
+    enable_key_pool=True,
+    enable_custom_checks=True,
+    pool_probe_pending=False,
+):
+    current_keys = current_keys or {}
+    protocol_statuses = protocol_statuses or {}
+    key_pools = key_pools or {}
+    subscription_settings = subscription_settings or {}
+    telegram_icon_html = telegram_icon_html or (lambda opacity=1.0: '')
+    youtube_icon_html = youtube_icon_html or (lambda opacity=1.0: '')
+    protocol_keys = [section[0] for section in protocol_sections]
+    if active_protocol not in protocol_keys:
+        active_protocol = protocol_keys[0] if protocol_keys else None
+    tabs = []
+    panels = []
+    for key_name, title, rows, placeholder in protocol_sections:
+        status_info = protocol_statuses.get(key_name, {
+            'tone': 'empty',
+            'label': 'Не сохранён',
+            'details': 'Ключ ещё не сохранён на роутере',
+        })
+        active = key_name == active_protocol
+        pool_keys = key_pools.get(key_name, []) if enable_key_pool else []
+        tab_count = len(pool_keys) if enable_key_pool else (1 if current_keys.get(key_name, '').strip() else 0)
+        tabs.append(_protocol_tab_html(key_name, title, tab_count, active=active))
+        panels.append(_light_protocol_panel_html(
+            key_name=key_name,
+            title=title,
+            rows=rows,
+            placeholder=placeholder,
+            current_key_value=current_keys.get(key_name, ''),
+            status_info=status_info,
+            active_status_icons=_light_status_icons(status_info, telegram_icon_html, youtube_icon_html),
+            csrf_input_html=csrf_input_html,
+            subscription_settings=subscription_settings.get(key_name, {}),
+            active=active,
+            enable_key_pool=enable_key_pool,
+            enable_custom_checks=enable_custom_checks,
+            pool_probe_pending=pool_probe_pending,
+        ))
+    return ''.join(tabs), ''.join(panels)
 
 
 def compact_event_value(value):

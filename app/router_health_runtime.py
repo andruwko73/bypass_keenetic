@@ -886,6 +886,7 @@ class RouterHealthRuntime:
         self.time_provider = time_provider
         self._lock = threading.Lock()
         self._cache = {'timestamp': 0, 'payload': None}
+        self._compact_cache = {'timestamp': 0, 'payload': None}
         self._core_proxy_cache = {'timestamp': 0, 'payload': None}
         self._dns_cache = {'timestamp': 0, 'payload': None}
         self._ndmc_cache = {'timestamp': 0, 'payload': None}
@@ -982,15 +983,47 @@ class RouterHealthRuntime:
         }
         return dict(payload) if isinstance(payload, dict) else payload
 
-    def snapshot(self, pool_probe_progress_getter):
+    def _compact_snapshot(self, now, probe_progress, probe_running):
+        with self._lock:
+            payload = self._compact_cache.get('payload')
+            if payload is not None and now - float(self._compact_cache.get('timestamp') or 0) < self.cache_ttl:
+                return dict(payload)
+            ndmc_cached = self._ndmc_cache.get('payload') if isinstance(self._ndmc_cache, dict) else None
+        related_processes = self._related_process_snapshot(now, probe_running)
+        payload = build_router_health_payload(
+            meminfo=read_proc_meminfo(),
+            ndmc_system=ndmc_cached if isinstance(ndmc_cached, dict) else {},
+            load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
+            cpu_percent=self._cpu_snapshot(),
+            bot_rss_kb=process_rss_kb('self'),
+            probe_progress=probe_progress,
+            temp_xray_count=related_processes.get('temporary_xray_count') or 0,
+            xray_rss_kb=related_processes.get('xray_rss_kb') or 0,
+            pool_worker_rss_kb=related_processes.get('pool_worker_rss_kb') or 0,
+            temporary_xray_rss_kb=related_processes.get('temporary_xray_rss_kb') or 0,
+            youtube_prefetch_rss_kb=related_processes.get('youtube_prefetch_rss_kb') or 0,
+            background_worker_rss_kb=related_processes.get('background_worker_rss_kb') or 0,
+            dns_health={},
+            core_proxy_health={},
+            flash_storage=read_flash_storage(),
+        )
+        payload['health_scope'] = 'compact'
+        with self._lock:
+            self._compact_cache['timestamp'] = now
+            self._compact_cache['payload'] = payload
+        return dict(payload)
+
+    def snapshot(self, pool_probe_progress_getter, compact=False):
         now = self.time_provider()
         with self._lock:
             payload = self._cache.get('payload')
-            if payload is not None and now - float(self._cache.get('timestamp') or 0) < self.cache_ttl:
+            if not compact and payload is not None and now - float(self._cache.get('timestamp') or 0) < self.cache_ttl:
                 return dict(payload)
 
         probe_progress = pool_probe_progress_getter() if pool_probe_progress_getter else {}
         probe_running = bool((probe_progress or {}).get('running')) and int((probe_progress or {}).get('total') or 0) > 0
+        if compact:
+            return self._compact_snapshot(now, probe_progress, probe_running)
         related_processes = self._related_process_snapshot(now, probe_running)
         payload = build_router_health_payload(
             meminfo=read_proc_meminfo(),
@@ -1012,11 +1045,14 @@ class RouterHealthRuntime:
         with self._lock:
             self._cache['timestamp'] = now
             self._cache['payload'] = payload
+            self._compact_cache['timestamp'] = now
+            self._compact_cache['payload'] = payload
         return dict(payload)
 
     def invalidate(self, include_heavy=True):
         with self._lock:
             self._cache = {'timestamp': 0, 'payload': None}
+            self._compact_cache = {'timestamp': 0, 'payload': None}
             if include_heavy:
                 self._core_proxy_cache = {'timestamp': 0, 'payload': None}
                 self._dns_cache = {'timestamp': 0, 'payload': None}

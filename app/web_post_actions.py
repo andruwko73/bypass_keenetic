@@ -76,12 +76,17 @@ def _load_list_content(ctx, list_name, success):
     return read_text_file(os.path.join(_ctx(ctx, 'unblock_dir', '/opt/etc/unblock'), os.path.basename(list_name))).strip()
 
 
-def _pool_payload(ctx):
+def _pool_payload(ctx, protocols=None):
     web_pool_snapshot = _ctx(ctx, 'web_pool_snapshot')
     load_current_keys = _ctx(ctx, 'load_current_keys')
     if not web_pool_snapshot or not load_current_keys:
         return {}
-    payload = {'pools': web_pool_snapshot(load_current_keys(), include_keys=False)}
+    current_keys = load_current_keys()
+    try:
+        pools = web_pool_snapshot(current_keys, include_keys=False, protocols=protocols)
+    except TypeError:
+        pools = web_pool_snapshot(current_keys, include_keys=False)
+    payload = {'pools': pools}
     get_progress = _ctx(ctx, 'get_pool_probe_progress')
     if get_progress:
         try:
@@ -120,11 +125,14 @@ def _custom_check_payload(ctx):
     return payload
 
 
-def _refresh_pool_status(ctx):
+def _refresh_pool_status(ctx, active_only=False):
     load_current_keys = _ctx(ctx, 'load_current_keys')
     current_keys = load_current_keys() if load_current_keys else None
     if current_keys is not None:
-        _call(ctx, 'refresh_status_caches_async', current_keys)
+        try:
+            _call(ctx, 'refresh_status_caches_async', current_keys, active_only=bool(active_only))
+        except TypeError:
+            _call(ctx, 'refresh_status_caches_async', current_keys)
 
 
 def _set_proxy(ctx, data):
@@ -315,7 +323,7 @@ def _custom_check_add(ctx, data):
             preset_id=form_value(data, 'preset'),
         )
         _call(ctx, 'probe_all_pool_keys_async', stale_only=False)
-        _refresh_pool_status(ctx)
+        _refresh_pool_status(ctx, active_only=True)
         if 'уже есть' not in result:
             result += ' Фоновая проверка пула запущена.'
     except Exception as exc:
@@ -529,7 +537,7 @@ def _pool_delete(ctx, data):
         success = False
         result = f'Ошибка удаления из пула: {exc}'
     extra = {'protocol': proto, 'key_id': key_id}
-    extra.update(_pool_payload(ctx))
+    extra.update(_pool_payload(ctx, protocols=[proto] if proto else None))
     return _result(result, success=success, extra=extra)
 
 
@@ -588,11 +596,9 @@ def _pool_apply(ctx, data):
         result = _ctx(ctx, 'install_key_for_protocol')(proto, key_to_apply, verify=False)
         _ctx(ctx, 'set_active_key')(proto, key_to_apply)
         _call(ctx, 'audit_key_switch', 'web_pool_apply', proto, key_to_apply, 'manual pool apply')
-        refreshed_status = _call(ctx, 'probe_applied_pool_key_services', proto, key_to_apply)
-        if refreshed_status:
-            result = f'{result}\n{refreshed_status}'
+        _call(ctx, 'schedule_youtube_key_apply_prefetch', proto)
         _invalidate_status(ctx)
-        _refresh_pool_status(ctx)
+        _refresh_pool_status(ctx, active_only=True)
         if pause_note:
             result = f'{pause_note}\n{result}'
     except Exception as exc:
@@ -603,9 +609,7 @@ def _pool_apply(ctx, data):
             lock.release()
         if should_resume_probe:
             _call(ctx, 'resume_cancelled_pool_probe')
-    extra = {'protocol': proto, 'key_id': key_id}
-    extra.update(_pool_payload(ctx))
-    return _result(result, success=success, extra=extra)
+    return _result(result, success=success, extra={'protocol': proto, 'key_id': key_id})
 
 
 def _pool_clear(ctx, data):
@@ -711,7 +715,8 @@ def _install(ctx, data):
             if _ctx(ctx, 'set_active_key'):
                 _ctx(ctx, 'set_active_key')(key_type, key_value)
                 _call(ctx, 'audit_key_switch', 'web_manual_install', key_type, key_value, 'manual install')
-                _refresh_pool_status(ctx)
+                _call(ctx, 'schedule_youtube_key_apply_prefetch', key_type)
+                _refresh_pool_status(ctx, active_only=True)
             _invalidate_status(ctx)
     finally:
         if lock:

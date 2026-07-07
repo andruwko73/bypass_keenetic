@@ -68,6 +68,8 @@ def _api_status_is_pending_refresh(api_status):
         return False
     lowered = text.casefold()
     pending_markers = (
+        'статус обновляется',
+        'проверяется актуальное состояние',
         'telegram api не ответил вовремя',
         'программа подбирает рабочий ключ',
         'статус обновится без перезагрузки страницы',

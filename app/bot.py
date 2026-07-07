@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.924, последнее изменение: 06.07.2026
+#  Файл: bot.py, Версия v1.925, последнее изменение: 07.07.2026
 
 import subprocess
 import os
@@ -160,7 +160,6 @@ from telegram_install_ui import (
 )
 from service_catalog import (
     CONNECTIVITY_CHECK_DOMAINS,
-    CUSTOM_CHECK_PRESETS,
     REALTIME_CALL_SIGNAL_ROUTE_ENTRIES,
     SERVICE_LIST_SOURCES,
     TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES,
@@ -236,6 +235,7 @@ _telegram_call_learning_module = None
 _youtube_edge_prefetch_module = None
 
 _KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
+_POOL_SUMMARY_LAST_PATH = '/opt/etc/bot/pool_summary_last.json'
 _YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
 _YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS = 1500
 _YOUTUBE_QUALITY_DEFAULT_1600P_MBPS = 25.0
@@ -330,6 +330,11 @@ def _unload_pool_probe_modules(reason=''):
     _pool_probe_controller_module = None
     _pool_probe_runner_module = None
     _probe_cache_module = None
+    for module_name in ('pool_probe_controller', 'pool_probe_runner', 'probe_cache', 'telegram_healthcheck'):
+        try:
+            sys.modules.pop(module_name, None)
+        except Exception:
+            pass
     try:
         gc.collect()
     except Exception:
@@ -556,8 +561,23 @@ def _web_form_template():
 
 def _release_web_form_template_cache():
     global _web_form_template_module
+    released = False
     with _web_form_template_lock:
+        released = _web_form_template_module is not None
         _web_form_template_module = None
+    for module_name in ('web_form_template', 'web_template_scripts', 'web_template_styles'):
+        if module_name in sys.modules:
+            released = True
+            try:
+                sys.modules.pop(module_name, None)
+            except Exception:
+                pass
+    if released:
+        try:
+            gc.collect()
+        except Exception:
+            pass
+    return released
 
 
 def _clear_youtube_edge_prefetch_snapshot_cache():
@@ -568,7 +588,7 @@ def _clear_youtube_edge_prefetch_snapshot_cache():
 def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, include_route_tools=False):
     global _pool_probe_controller_module, _pool_probe_runner_module, _probe_cache_module
     global _key_pool_web_module, _telegram_pool_ui_module, _web_pool_form_blocks_module
-    global _web_route_tools_runtime, _youtube_edge_prefetch_module
+    global _web_route_tools_runtime, _youtube_edge_prefetch_module, _web_form_template_module
     released = []
 
     def release_module_attr(attr_name, module_names):
@@ -587,6 +607,7 @@ def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, inclu
         release_module_attr('_probe_cache_module', ('probe_cache',))
 
     if include_pool_ui:
+        release_module_attr('_web_form_template_module', ('web_form_template', 'web_template_scripts', 'web_template_styles'))
         release_module_attr('_key_pool_web_module', ('key_pool_web',))
         release_module_attr('_telegram_pool_ui_module', ('telegram_pool_ui',))
         release_module_attr('_web_pool_form_blocks_module', ('web_pool_form_blocks',))
@@ -2063,18 +2084,24 @@ STATUS_REFRESH_MIN_INTERVAL_SECONDS = max(
     float(getattr(config, 'status_refresh_min_interval_seconds', 180.0)),
 )
 STATUS_REFRESH_PENDING_MIN_INTERVAL_SECONDS = max(
-    15.0,
-    min(30.0, STATUS_REFRESH_MIN_INTERVAL_SECONDS),
+    30.0,
+    float(getattr(config, 'status_refresh_pending_min_interval_seconds', min(60.0, STATUS_REFRESH_MIN_INTERVAL_SECONDS))),
 )
 ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
 ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 900)))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 30.0))
 WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 45.0))
+WEB_POOLS_API_CACHE_MAX_ENTRIES = max(2, int(getattr(config, 'web_pools_api_cache_max_entries', 8)))
 WEB_POOL_SNAPSHOT_WORKER_ENABLED = bool(getattr(config, 'web_pool_snapshot_worker_enabled', True))
 WEB_POOL_SNAPSHOT_WORKER_TIMEOUT_SECONDS = max(
     2.0,
     float(getattr(config, 'web_pool_snapshot_worker_timeout_seconds', 8.0)),
+)
+WEB_SERVICE_ROUTES_WORKER_ENABLED = bool(getattr(config, 'web_service_routes_worker_enabled', True))
+WEB_SERVICE_ROUTES_WORKER_TIMEOUT_SECONDS = max(
+    2.0,
+    float(getattr(config, 'web_service_routes_worker_timeout_seconds', 8.0)),
 )
 SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL = float(getattr(config, 'service_route_intersections_cache_ttl', 60.0))
 ROUTER_HEALTH_CACHE_TTL = float(getattr(config, 'router_health_cache_ttl', 30.0))
@@ -2116,7 +2143,7 @@ POOL_PROBE_MAX_LOAD1 = max(0.0, float(getattr(config, 'pool_probe_max_load1', 2.
 POOL_PROBE_HIGH_LOAD_DELAY_SECONDS = max(1.0, float(getattr(config, 'pool_probe_high_load_delay_seconds', 10.0)))
 POOL_PROBE_HIGH_LOAD_MAX_WAIT_SECONDS = max(0.0, float(getattr(config, 'pool_probe_high_load_max_wait_seconds', 120.0)))
 BACKGROUND_TASK_CPU_GUARD_ENABLED = bool(getattr(config, 'background_task_cpu_guard_enabled', True))
-BACKGROUND_TASK_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'background_task_max_cpu_percent', 65.0)))
+BACKGROUND_TASK_MAX_CPU_PERCENT = max(0.0, float(getattr(config, 'background_task_max_cpu_percent', 45.0)))
 BACKGROUND_TASK_CPU_SAMPLE_SECONDS = max(0.1, float(getattr(config, 'background_task_cpu_sample_seconds', 0.35)))
 BACKGROUND_TASK_CPU_CACHE_TTL_SECONDS = max(
     0.0,
@@ -2254,6 +2281,7 @@ POOL_PROBE_MAX_PROCESS_RSS_KB = max(
     int(getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)),
 )
 POOL_PROBE_PROCESS_WORKER_ENABLED = bool(getattr(config, 'pool_probe_process_worker_enabled', True))
+POOL_PROBE_INPROCESS_FALLBACK_ENABLED = bool(getattr(config, 'pool_probe_inprocess_fallback_enabled', False))
 POOL_PROBE_PROCESS_WORKER_POLL_SECONDS = max(
     0.2,
     float(getattr(config, 'pool_probe_process_worker_poll_seconds', 0.75)),
@@ -2290,8 +2318,8 @@ WEB_RESPONSE_CLEANUP_RSS_KB = max(
     int(getattr(config, 'web_response_cleanup_rss_kb', MEMORY_CLEANUP_RSS_KB or (60 * 1024))),
 )
 WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB = max(
-    WEB_RESPONSE_CLEANUP_RSS_KB,
-    int(getattr(config, 'web_response_light_cleanup_rss_kb', 65 * 1024)),
+    0,
+    int(getattr(config, 'web_response_light_cleanup_rss_kb', WEB_RESPONSE_CLEANUP_RSS_KB)),
 )
 WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS = max(
     30.0,
@@ -2508,6 +2536,7 @@ web_pools_api_cache = {
     'timestamp': 0,
     'signature': None,
     'payload': None,
+    'entries': {},
 }
 pool_summary_cache = {
     'signature': None,
@@ -4421,6 +4450,33 @@ def _youtube_edge_prefetch_skip_reason():
     return ''
 
 
+def _start_youtube_edge_prefetch_external(trigger='manual-fast-key-apply'):
+    if not YOUTUBE_EDGE_PREFETCH_ENABLED or YOUTUBE_EDGE_PREFETCH_MODE != 'external':
+        return False
+    runner_path = os.path.join(BOT_DIR, 'youtube_edge_prefetch_runner.py')
+    if not os.path.isfile(runner_path):
+        return False
+    try:
+        subprocess.Popen(
+            [sys.executable or 'python3', runner_path, f'--trigger={trigger}'],
+            cwd=BOT_DIR,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        return True
+    except Exception as exc:
+        _write_runtime_log(f'YouTube edge prefetch external start failed: {type(exc).__name__}')
+        return False
+
+
+def _schedule_youtube_key_apply_prefetch(proto):
+    if str(proto or '').strip() != _youtube_route_protocol():
+        return False
+    return _start_youtube_edge_prefetch_external('manual-fast-key-apply')
+
+
 def _run_youtube_edge_prefetch_once():
     if not youtube_edge_prefetch_lock.acquire(blocking=False):
         status = {
@@ -4649,9 +4705,21 @@ def _background_task_allowed(task_name, *, allow_high_rss=False):
     skip_reason = str(background_task_skip_reason.get(task_name) or '')
     if skip_until and now < skip_until and not (allow_high_rss and skip_reason == 'rss'):
         return False
+    try:
+        if _memory_sensitive_operation_running(ignore_status_refresh=(task_name == 'status refresh')):
+            background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
+            background_task_skip_reason[task_name] = 'busy'
+            last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
+            if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+                background_task_skip_log_at[task_name] = now
+                _write_runtime_log(f'{task_name}: skipped background check because another operation is running.')
+            return False
+    except Exception:
+        pass
     rss_kb = int(_process_rss_kb() or 0)
     if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not allow_high_rss:
-        cleanup = _memory_cleanup(f'{task_name} skipped high RSS', force=True, clear_status=False, log=False)
+        cleanup_label = 'status refresh skipped high RSS' if task_name == 'status refresh' else f'{task_name} skipped high RSS'
+        cleanup = _memory_cleanup(cleanup_label, force=True, clear_status=False, log=False)
         rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
         if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
             background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
@@ -5357,7 +5425,7 @@ def _web_response_cleanup(reason='web response', *, heavy=False):
         (heavy or now - web_response_cleanup_last_at >= WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS)
     ):
         web_response_cleanup_last_at = now
-        return _memory_cleanup(reason, clear_status=False, log=False)
+        return _memory_cleanup(reason, force=heavy, clear_status=False, log=False)
     return {
         'rss_before_kb': rss_before,
         'rss_after_kb': rss_before,
@@ -5407,14 +5475,14 @@ def _pool_probe_memory_checkpoint(reason='', force=False, clear_status=False):
     return cleanup
 
 
-def _memory_sensitive_operation_running():
+def _memory_sensitive_operation_running(ignore_status_refresh=False):
     try:
         if pool_probe_lock.locked() or pool_apply_lock.locked():
             return True
     except Exception:
         pass
     try:
-        if status_refresh_in_progress:
+        if not ignore_status_refresh and status_refresh_in_progress:
             return True
     except Exception:
         pass
@@ -6359,7 +6427,7 @@ def _unblock_route_for_key_type(key_type):
 
 def _custom_check_route_entries(custom_checks=None):
     checks = custom_checks if custom_checks is not None else _load_custom_checks()
-    preset_routes = {item.get('id'): item.get('routes') or [] for item in CUSTOM_CHECK_PRESETS}
+    preset_routes = {item.get('id'): item.get('routes') or [] for item in _custom_check_presets()}
     values = []
     for check in checks:
         check_id = check.get('id')
@@ -7491,6 +7559,22 @@ def _standalone_custom_checks(custom_checks):
     return _route_tools_runtime().standalone_custom_checks(custom_checks)
 
 
+def _standalone_custom_checks_light(custom_checks):
+    route_service_ids = {'telegram', 'youtube'}
+    try:
+        route_service_ids.update(
+            str(item.get('id') or '')
+            for item in (_custom_check_presets() or [])
+            if isinstance(item, dict) and item.get('id')
+        )
+    except Exception:
+        pass
+    return [
+        check for check in (custom_checks or [])
+        if str(check.get('id') or '') not in route_service_ids
+    ]
+
+
 def _route_intersections_snapshot():
     return _route_tools_runtime().intersections_snapshot()
 
@@ -7555,7 +7639,51 @@ def _route_tools_html(
     )
 
 
+def _deferred_route_tools_html():
+    return '''<div class="route-intersection-card" data-route-tools-deferred="1">
+                <strong>Маршруты загружаются</strong>
+                <small>Список сервисов и пересечения будут подставлены без блокировки проверки ключа.</small>
+            </div>'''
+
+
+def _web_service_routes_worker_payload():
+    if not WEB_SERVICE_ROUTES_WORKER_ENABLED:
+        return None
+    worker_path = os.path.join(BOT_DIR, 'web_service_routes_worker.py')
+    if not os.path.isfile(worker_path):
+        return None
+    try:
+        result = subprocess.run(
+            [sys.executable or 'python3', worker_path],
+            input='{}',
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=WEB_SERVICE_ROUTES_WORKER_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except Exception as exc:
+        _write_runtime_log(f'Web service routes worker unavailable: {type(exc).__name__}')
+        return None
+    if result.returncode != 0:
+        error_text = str(result.stderr or '').strip().splitlines()[:1]
+        error_label = error_text[0][:120] if error_text else f'exit {result.returncode}'
+        _write_runtime_log(f'Web service routes worker failed: {error_label}')
+        return None
+    try:
+        payload = json.loads(result.stdout or '{}')
+    except Exception as exc:
+        _write_runtime_log(f'Web service routes worker returned invalid JSON: {type(exc).__name__}')
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get('route_tools_html'), str):
+        return None
+    return payload
+
+
 def _web_service_routes_payload():
+    worker_payload = _web_service_routes_worker_payload()
+    if worker_payload is not None:
+        return worker_payload
     custom_checks = _load_custom_checks()
     return {
         'route_tools_html': _route_tools_html(
@@ -7673,6 +7801,7 @@ def _invalidate_web_pools_api_cache():
         web_pools_api_cache['timestamp'] = 0
         web_pools_api_cache['signature'] = None
         web_pools_api_cache['payload'] = None
+        web_pools_api_cache['entries'] = {}
 
 
 def _file_cache_signature(path):
@@ -7747,6 +7876,14 @@ def _get_web_pools_api_cache(current_keys, protocols, now=None):
     now = time.time() if now is None else now
     signature = _web_pools_api_cache_signature(current_keys, protocols)
     with web_pools_api_cache_lock:
+        entries = web_pools_api_cache.get('entries') or {}
+        cached = entries.get(signature)
+        if (
+            isinstance(cached, dict) and
+            cached.get('payload') is not None and
+            now - float(cached.get('timestamp') or 0.0) <= WEB_POOLS_API_CACHE_TTL
+        ):
+            return cached.get('payload')
         payload = web_pools_api_cache.get('payload')
         if (
             payload is not None and
@@ -7758,18 +7895,28 @@ def _get_web_pools_api_cache(current_keys, protocols, now=None):
 
 
 def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None):
-    if isinstance(payload, dict) and payload.get('pools') is not None:
-        with web_pools_api_cache_lock:
-            web_pools_api_cache.update({'timestamp': 0, 'signature': None, 'payload': None})
-        return
+    pools = payload.get('pools') if isinstance(payload, dict) else None
+    if isinstance(pools, dict):
+        for pool_payload in pools.values():
+            if isinstance(pool_payload, dict) and pool_payload.get('rows'):
+                with web_pools_api_cache_lock:
+                    web_pools_api_cache.update({'timestamp': 0, 'signature': None, 'payload': None, 'entries': {}})
+                return
     rss_kb = int(_process_rss_kb() or 0)
     if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
         with web_pools_api_cache_lock:
-            web_pools_api_cache.update({'timestamp': 0, 'signature': None, 'payload': None})
+            web_pools_api_cache.update({'timestamp': 0, 'signature': None, 'payload': None, 'entries': {}})
         return
     signature = _web_pools_api_cache_signature(current_keys, protocols)
+    cache_timestamp = time.time() if timestamp is None else timestamp
     with web_pools_api_cache_lock:
-        web_pools_api_cache['timestamp'] = time.time() if timestamp is None else timestamp
+        entries = web_pools_api_cache.setdefault('entries', {})
+        entries[signature] = {'timestamp': cache_timestamp, 'payload': payload}
+        if len(entries) > WEB_POOLS_API_CACHE_MAX_ENTRIES:
+            oldest = sorted(entries.items(), key=lambda item: float((item[1] or {}).get('timestamp') or 0.0))
+            for key, _value in oldest[:max(0, len(entries) - WEB_POOLS_API_CACHE_MAX_ENTRIES)]:
+                entries.pop(key, None)
+        web_pools_api_cache['timestamp'] = cache_timestamp
         web_pools_api_cache['signature'] = signature
         web_pools_api_cache['payload'] = payload
 
@@ -7788,8 +7935,8 @@ def _append_status_note(note, extra):
     return '; '.join(part for part in (clean_note, clean_extra) if part)
 
 
-def _router_health_snapshot():
-    payload = router_health.snapshot(_get_pool_probe_progress)
+def _router_health_snapshot(compact=False):
+    payload = router_health.snapshot(_get_pool_probe_progress, compact=compact)
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
     payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
     payload['post_pool_cleanup_target_kb'] = MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
@@ -8237,6 +8384,76 @@ def _cached_protocol_status_for_key(
         custom_states,
         api_required='telegram' in required_services,
         required_services=required_services,
+    )
+
+
+def _light_cached_protocol_status_for_key(key_name, key_value):
+    key_value = str(key_value or '').strip()
+    if not key_value:
+        return _status_empty_protocol_status()
+    api_required = bool(_app_mode_telegram_enabled() and key_name == proxy_mode)
+    return _status_cached_protocol_status(
+        key_value,
+        {},
+        (),
+        {},
+        api_required=api_required,
+        required_services=('telegram',) if api_required else None,
+    )
+
+
+def _light_active_protocol_status_for_key(key_name, key_value, background_checks=False):
+    key_value = str(key_value or '').strip()
+    if not key_value:
+        return _status_empty_protocol_status()
+    port = PROXY_LOCAL_PORTS.get(key_name)
+    endpoint_ok, endpoint_message = _check_local_proxy_endpoint(key_name, port)
+    preflight = web_status_runtime.protocol_preflight_status(
+        key_value,
+        endpoint_ok,
+        endpoint_message,
+        proxy_user_label=APP_PROXY_USER_LABEL,
+        xray_required=_key_requires_xray(key_name, key_value) and _core_proxy_runtime_name() != 'xray',
+    )
+    if preflight:
+        return preflight
+
+    proxy_url = proxy_settings.get(key_name)
+    api_required = bool(_app_mode_telegram_enabled() and key_name == proxy_mode)
+    if api_required:
+        if background_checks:
+            api_ok, api_message = _check_telegram_api_for_background(
+                proxy_url,
+                connect_timeout=5,
+                read_timeout=8,
+            )
+        else:
+            api_ok, api_message = _check_telegram_api_through_proxy(
+                proxy_url,
+                connect_timeout=5,
+                read_timeout=8,
+                authenticated=True,
+            )
+        if not api_ok:
+            _log_telegram_api_status_failure(key_name, api_message)
+    else:
+        api_ok = False
+        api_message = ''
+    api_transient = bool(api_required and (not api_ok) and _is_transient_telegram_api_failure(api_message))
+
+    return _status_active_protocol_status(
+        endpoint_ok=endpoint_ok,
+        endpoint_message=endpoint_message,
+        api_ok=api_ok,
+        api_message=api_message,
+        api_transient=api_transient,
+        yt_ok=False,
+        yt_message='',
+        yt_state='',
+        custom_states={},
+        custom_checks=(),
+        api_required=api_required,
+        required_services=('telegram',) if api_required else (),
     )
 
 
@@ -8735,6 +8952,116 @@ def _pool_summary_count(summary, field):
         return 0
 
 
+def _load_persisted_pool_summary():
+    payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
+    summary = payload.get('summary') if isinstance(payload, dict) else None
+    return summary if isinstance(summary, dict) else None
+
+
+def _save_persisted_pool_summary(summary):
+    if (
+        _pool_summary_count(summary, 'checked_pool_count') <= 0 or
+        _pool_summary_count(summary, 'pool_total_count') <= 0
+    ):
+        return
+    payload = {
+        'saved_at': time.time(),
+        'summary': summary,
+    }
+    try:
+        _write_json_file(_POOL_SUMMARY_LAST_PATH, payload)
+    except Exception as exc:
+        _write_runtime_log(f'Failed to persist pool summary: {type(exc).__name__}')
+
+
+def _pool_summary_with_persisted_fallback(summary):
+    if _pool_summary_count(summary, 'checked_pool_count') > 0:
+        _save_persisted_pool_summary(summary)
+        return summary
+    persisted = _load_persisted_pool_summary()
+    if (
+        _pool_summary_count(persisted, 'checked_pool_count') > 0 and
+        _pool_summary_count(persisted, 'pool_total_count') == _pool_summary_count(summary, 'pool_total_count')
+    ):
+        return persisted
+    return summary
+
+
+def _light_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks=None):
+    current_keys = current_keys or {}
+    key_pools = key_pools or {}
+    key_probe_cache = key_probe_cache or {}
+    services = [
+        {'label': 'Telegram', 'field': 'tg_ok', 'id': None, 'count': 0},
+        {'label': 'YouTube', 'field': 'yt_ok', 'id': None, 'count': 0},
+    ]
+    for check in custom_checks or []:
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get('id') or '').strip()
+        if not check_id:
+            continue
+        label = str(check.get('label') or check_id).strip() or check_id
+        if len(label) > 18:
+            label = label[:18] + '...'
+        services.append({'label': label, 'field': None, 'id': check_id, 'count': 0})
+
+    total_count = 0
+    checked_count = 0
+    all_services_count = 0
+    any_service_count = 0
+    for proto in POOL_PROTOCOL_ORDER:
+        for pool_key in key_pools.get(proto, []) or []:
+            total_count += 1
+            probe = key_probe_cache.get(_hash_key(pool_key), {})
+            if not isinstance(probe, dict):
+                probe = {}
+            custom = probe.get('custom', {})
+            if not isinstance(custom, dict):
+                custom = {}
+            results = []
+            for service in services:
+                if service['field'] == 'yt_ok':
+                    state = _youtube_probe_state(probe)
+                    if state == 'unknown':
+                        continue
+                    ok = state in ('ok', 'warn')
+                elif service['field']:
+                    if service['field'] not in probe or not isinstance(probe.get(service['field']), bool):
+                        continue
+                    ok = probe.get(service['field'])
+                else:
+                    if service['id'] not in custom or not isinstance(custom.get(service['id']), bool):
+                        continue
+                    ok = custom.get(service['id'])
+                results.append(ok)
+                if ok:
+                    service['count'] += 1
+            if results:
+                checked_count += 1
+                if any(results):
+                    any_service_count += 1
+                if all(results):
+                    all_services_count += 1
+
+    active_key_count = sum(1 for proto in POOL_PROTOCOL_ORDER if (current_keys.get(proto) or '').strip())
+    service_text = '; '.join(f"{service['label']}: {service['count']}" for service in services)
+    note_parts = [f'В пулах: {total_count}', f'Проверено: {checked_count}']
+    if service_text:
+        note_parts.append(service_text)
+    return {
+        'active_key_count': active_key_count,
+        'protocol_count': len(POOL_PROTOCOL_ORDER),
+        'active_text': f'{active_key_count} / {len(POOL_PROTOCOL_ORDER)} активных ключей',
+        'note': '; '.join(note_parts),
+        'pool_total_count': total_count,
+        'checked_pool_count': checked_count,
+        'all_services_count': all_services_count,
+        'any_service_count': any_service_count,
+        'services': [{'label': service['label'], 'count': service['count']} for service in services],
+    }
+
+
 def _pool_summary_can_keep_previous(previous_signature, current_signature):
     if not previous_signature or not current_signature:
         return False
@@ -8779,6 +9106,7 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
         _pool_summary_can_keep_previous(previous_signature, signature)
     ):
         summary = previous_summary
+    summary = _pool_summary_with_persisted_fallback(summary)
     if can_use_cache:
         with pool_summary_cache_lock:
             pool_summary_cache['signature'] = signature
@@ -9219,6 +9547,7 @@ def _apply_pool_key(proto, key_value, schedule_probe=True):
     result = _install_key_for_protocol(proto, key_value, verify=False)
     _set_active_key(proto, key_value)
     _audit_key_switch('telegram_pool_apply', proto, key_value, 'manual pool apply')
+    _schedule_youtube_key_apply_prefetch(proto)
     refreshed_status = _probe_applied_pool_key_services(proto, key_value) if schedule_probe else (
         'Статусы выбранного ключа обновит продолжающаяся проверка пула.'
     )
@@ -10500,15 +10829,19 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_
     global pool_probe_resume_after_cancel
     pool_probe_resume_after_cancel = True
     _reset_pool_probe_quality_sample_budget()
-    if POOL_PROBE_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE:
-        return _start_selected_pool_probe_process(
-            selected,
-            custom_checks,
-            scope,
-            initial_checked=initial_checked,
-            total_count=total_count,
-            started_at=started_at,
-        )
+    if not POOL_PROBE_WORKER_MODE:
+        if POOL_PROBE_PROCESS_WORKER_ENABLED:
+            return _start_selected_pool_probe_process(
+                selected,
+                custom_checks,
+                scope,
+                initial_checked=initial_checked,
+                total_count=total_count,
+                started_at=started_at,
+            )
+        if not POOL_PROBE_INPROCESS_FALLBACK_ENABLED:
+            _write_runtime_log('Pool probe process worker is disabled; in-process pool probe fallback is disabled for router memory safety.')
+            return False, len(selected or [])
     return start_pool_probe_worker(
         selected,
         custom_checks,
@@ -11014,7 +11347,7 @@ def _start_subscription_auto_refresh_thread():
 def _web_custom_checks():
     return _key_pool_web().web_custom_checks(_load_custom_checks())
 
-def _web_pool_snapshot_worker_payload(protocols=None, include_summary=False, include_custom_checks=False):
+def _web_pool_snapshot_worker_payload(protocols=None, include_summary=False, include_custom_checks=False, include_pools=True):
     if not WEB_POOL_SNAPSHOT_WORKER_ENABLED:
         return None
     worker_path = os.path.join(BOT_DIR, 'web_pool_snapshot_worker.py')
@@ -11024,7 +11357,7 @@ def _web_pool_snapshot_worker_payload(protocols=None, include_summary=False, inc
         'protocols': list(protocols or []),
         'include_summary': bool(include_summary),
         'include_custom_checks': bool(include_custom_checks),
-        'route_states': _service_route_summary(),
+        'include_pools': bool(include_pools),
     }
     try:
         result = subprocess.run(
@@ -11232,7 +11565,7 @@ def _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime
         return status, protocol_statuses
     guarded_status = dict(status or {})
     guarded_status['state_label'] = _telegram_state_label()
-    guarded_status['api_status'] = web_status_runtime.telegram_api_pending_message()
+    guarded_status['api_status'] = web_status_runtime.telegram_api_refresh_message()
 
     guarded_protocols = dict(protocol_statuses or {})
     active_status = guarded_protocols.get(proxy_mode)
@@ -11316,31 +11649,53 @@ def _build_status_snapshot(current_keys, force_refresh=False, background_checks=
     return _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=now)
 
 
-def _active_mode_status_snapshot(current_keys, background_checks=False):
+def _active_mode_status_snapshot(current_keys, background_checks=False, include_route_details=False):
+    return _active_mode_status_snapshot_from_base(
+        current_keys,
+        None,
+        background_checks=background_checks,
+        include_route_details=include_route_details,
+    )
+
+
+def _active_mode_status_snapshot_from_base(
+    current_keys,
+    base_snapshot=None,
+    *,
+    background_checks=False,
+    include_route_details=False,
+):
     pool_locked = pool_probe_lock.locked()
-    cached = _cached_status_snapshot(current_keys)
+    cached = base_snapshot if isinstance(base_snapshot, dict) else _cached_status_snapshot(current_keys)
     if cached is not None and isinstance(cached, dict):
         protocols = dict(cached.get('protocols') or {})
     else:
         protocols = _placeholder_protocol_statuses(current_keys)
-    custom_checks = _load_custom_checks()
-    route_states = _service_route_summary() if custom_checks else None
+    if include_route_details:
+        custom_checks = _load_custom_checks()
+        route_states = _service_route_summary() if custom_checks else None
+    else:
+        custom_checks = ()
+        route_states = None
     if not pool_locked:
         key_probe_cache = None
         for key_name, key_value in (current_keys or {}).items():
             if key_name == proxy_mode:
                 continue
             try:
-                if key_probe_cache is None:
-                    key_probe_cache = _load_key_probe_cache()
-                protocols[key_name] = _cached_protocol_status_for_key(
-                    key_name,
-                    str(key_value or ''),
-                    custom_checks=custom_checks,
-                    key_probe_cache=key_probe_cache,
-                    allow_youtube_confirm=False,
-                    route_states=route_states,
-                )
+                if include_route_details:
+                    if key_probe_cache is None:
+                        key_probe_cache = _load_key_probe_cache()
+                    protocols[key_name] = _cached_protocol_status_for_key(
+                        key_name,
+                        str(key_value or ''),
+                        custom_checks=custom_checks,
+                        key_probe_cache=key_probe_cache,
+                        allow_youtube_confirm=False,
+                        route_states=route_states,
+                    )
+                else:
+                    protocols[key_name] = _light_cached_protocol_status_for_key(key_name, key_value)
             except Exception as exc:
                 _write_runtime_log(f'Ошибка восстановления кешированного статуса {key_name}: {exc}')
 
@@ -11350,21 +11705,34 @@ def _active_mode_status_snapshot(current_keys, background_checks=False):
             if cached_active is not None:
                 protocols[proxy_mode] = cached_active
             elif pool_locked:
-                protocols[proxy_mode] = _cached_protocol_status_for_key(
-                    proxy_mode,
-                    current_keys.get(proxy_mode, ''),
-                    custom_checks=custom_checks,
-                    allow_youtube_confirm=False,
-                    route_states=route_states,
-                )
+                if include_route_details:
+                    protocols[proxy_mode] = _cached_protocol_status_for_key(
+                        proxy_mode,
+                        current_keys.get(proxy_mode, ''),
+                        custom_checks=custom_checks,
+                        allow_youtube_confirm=False,
+                        route_states=route_states,
+                    )
+                else:
+                    protocols[proxy_mode] = _light_cached_protocol_status_for_key(
+                        proxy_mode,
+                        current_keys.get(proxy_mode, ''),
+                    )
             else:
-                protocols[proxy_mode] = _protocol_status_for_key(
-                    proxy_mode,
-                    current_keys.get(proxy_mode, ''),
-                    custom_checks=custom_checks,
-                    route_states=route_states,
-                    background_checks=background_checks,
-                )
+                if include_route_details:
+                    protocols[proxy_mode] = _protocol_status_for_key(
+                        proxy_mode,
+                        current_keys.get(proxy_mode, ''),
+                        custom_checks=custom_checks,
+                        route_states=route_states,
+                        background_checks=background_checks,
+                    )
+                else:
+                    protocols[proxy_mode] = _light_active_protocol_status_for_key(
+                        proxy_mode,
+                        current_keys.get(proxy_mode, ''),
+                        background_checks=background_checks,
+                    )
                 _store_active_mode_protocol_status(current_keys, protocols[proxy_mode])
         except Exception as exc:
             _write_runtime_log(f'Ошибка быстрой проверки активного режима {proxy_mode}: {exc}')
@@ -11385,11 +11753,19 @@ def _web_status_snapshot(force_refresh=False):
 
 
 def _cached_status_snapshot(current_keys):
-    return _status_cached_snapshot(
+    signature = _status_snapshot_signature(current_keys)
+    cached = _status_cached_snapshot(
         status_snapshot_cache,
-        _status_snapshot_signature(current_keys),
+        signature,
         STATUS_CACHE_TTL,
     )
+    if cached is not None and _status_snapshot_has_pending_check(cached):
+        try:
+            snapshot = _active_mode_status_snapshot_from_base(current_keys, cached)
+            return _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=time.time())
+        except Exception as exc:
+            _write_runtime_log(f'Unable to replace pending status cache with light snapshot: {exc}')
+    return cached
 
 
 def _stale_status_snapshot(current_keys):
@@ -11443,7 +11819,7 @@ def _placeholder_web_status_snapshot():
     return {
         'state_label': _telegram_state_label(),
         'proxy_mode': proxy_mode,
-        'api_status': '⏳ Проверяется связь текущего режима. Статус обновится без перезагрузки страницы',
+        'api_status': web_status_runtime.telegram_api_refresh_message(),
         'socks_details': '',
         'fallback_reason': _last_proxy_disable_reason(),
     }
@@ -11452,10 +11828,10 @@ def _placeholder_web_status_snapshot():
 def _placeholder_status_snapshot(current_keys, include_pool_details=True):
     protocols = _placeholder_protocol_statuses(current_keys)
     if not include_pool_details:
-        return {
-            'web': _build_web_status(current_keys, protocols=protocols),
-            'protocols': protocols,
-        }
+        return _active_mode_status_snapshot_from_base(
+            current_keys,
+            {'web': _build_web_status(current_keys, protocols=protocols), 'protocols': protocols},
+        )
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary() if custom_checks else None
@@ -11495,8 +11871,6 @@ def _placeholder_status_snapshot(current_keys, include_pool_details=True):
 def _refresh_status_caches_async(current_keys, active_only=False):
     if pool_probe_lock.locked():
         return
-    if not _background_task_allowed('status refresh'):
-        return
     try:
         if _read_web_command_state_file().get('running') or _shared_command_job_running(source='web'):
             return
@@ -11505,15 +11879,6 @@ def _refresh_status_caches_async(current_keys, active_only=False):
     signature = _status_snapshot_signature(current_keys)
     refresh_key = f'active:{signature}' if active_only else signature
     now = time.time()
-    rss_kb = int(_process_rss_kb() or 0)
-    if BACKGROUND_TASK_MAX_BOT_RSS_KB > 0 and rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB:
-        cleanup = _memory_cleanup('status refresh skipped high RSS', force=True, clear_status=False, log=False)
-        rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
-        if rss_kb >= BACKGROUND_TASK_MAX_BOT_RSS_KB and not active_only:
-            with status_refresh_lock:
-                status_refresh_last_started_at[refresh_key] = now
-                status_refresh_last_finished_at[refresh_key] = now
-            return
     with status_refresh_lock:
         if refresh_key in status_refresh_in_progress:
             return
@@ -11536,6 +11901,12 @@ def _refresh_status_caches_async(current_keys, active_only=False):
             return
         status_refresh_in_progress.add(refresh_key)
         status_refresh_last_started_at[refresh_key] = now
+
+    if not _background_task_allowed('status refresh'):
+        with status_refresh_lock:
+            status_refresh_in_progress.discard(refresh_key)
+            status_refresh_last_finished_at[refresh_key] = time.time()
+        return
 
     def worker():
         _record_memory_timeline(
@@ -11868,6 +12239,7 @@ def _web_action_context():
             hash_key=_hash_key,
             set_active_key=_set_active_key,
             audit_key_switch=_audit_key_switch,
+            schedule_youtube_key_apply_prefetch=_schedule_youtube_key_apply_prefetch,
             clear_pool=_clear_pool,
             fetch_keys_from_subscription=_fetch_keys_from_subscription,
             add_subscription_keys_to_pool=_key_pool_store().add_subscription_keys_to_pool,
@@ -11951,59 +12323,19 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
         raise ValueError('Неизвестный протокол')
     key_pools = _ensure_current_keys_in_pools(current_keys)
     subscription_settings = _subscription_public_settings()
-    key_probe_cache = _load_key_probe_cache()
-    custom_checks = _load_custom_checks()
-    custom_checks_html = ''
-    route_states = _service_route_summary()
-    custom_presets_html = ''
-    route_tools_html = ''
-    pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
-        _web_pool_form_blocks().pool_table_layout(custom_checks)
-    )
-    custom_checks_for_protocol = lambda protocol, checks: _key_pool_web().protocol_custom_checks(
-        checks,
-        route_states,
-        protocol,
-    )
-    custom_header_icons_for_protocol = lambda protocol, checks: _key_pool_web().custom_check_header_icons(
-        checks,
-        _service_icon_html,
-    )
-    core_service_applicability_for_protocol = lambda protocol: _key_pool_web().core_service_applicability(
-        route_states,
-        protocol,
-    )
-    _tabs_html, panel_html = _web_pool_form_blocks().render_protocol_tabs_and_panels(
+    _tabs_html, panel_html = web_form_blocks.render_light_protocol_tabs_and_panels(
         protocol_sections,
         current_keys,
         protocol_statuses,
         csrf_input_html,
         key_pools=key_pools,
-        key_probe_cache=key_probe_cache,
-        custom_checks=custom_checks,
-        key_display_name=_pool_key_display_name,
-        hash_key=_hash_key,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
-        custom_check_badges=lambda probe, checks: _key_pool_web().web_custom_check_badges(probe, checks, _service_icon_html),
-        probe_checked_at=_key_pool_web().web_probe_checked_at,
-        custom_probe_states=_key_pool_web().web_custom_probe_states,
-        service_icon_html=_service_icon_html,
-        pool_table_class=pool_table_class,
-        pool_custom_col_width=pool_custom_col_width,
-        pool_mobile_custom_col_width=pool_mobile_custom_col_width,
-        custom_header_icons=_key_pool_web().custom_check_header_icons(custom_checks, _service_icon_html),
         subscription_settings=subscription_settings,
-        custom_checks_for_protocol=custom_checks_for_protocol,
-        custom_header_icons_for_protocol=custom_header_icons_for_protocol,
-        core_service_applicability_for_protocol=core_service_applicability_for_protocol,
-        custom_presets_html=custom_presets_html,
-        custom_checks_html=custom_checks_html,
-        route_tools_html=route_tools_html,
         active_protocol=protocol,
+        enable_key_pool=True,
+        enable_custom_checks=True,
         pool_probe_pending=bool(_get_pool_probe_progress().get('running')),
-        defer_pool_rows=True,
-        defer_check_content=True,
     )
     return panel_html
 
@@ -12014,33 +12346,22 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
         raise ValueError('Неизвестный протокол')
     _key_name, title, _rows, _placeholder = protocol_sections[0]
     custom_checks = _load_custom_checks()
-    custom_checks_html = _key_pool_web().web_custom_checks_html(
-        _standalone_custom_checks(custom_checks),
-        _service_icon_html,
-        csrf_input_html=csrf_input_html,
-        empty_message='',
-    )
-    route_states = _service_route_summary()
-    custom_presets_html = _key_pool_web().web_custom_presets_html(
-        custom_checks,
-        _custom_check_presets(),
-        _service_icon_html,
-        csrf_input_html=csrf_input_html,
-        route_states=route_states,
-    )
-    route_tools_html = _route_tools_html(
-        csrf_input_html,
-        custom_checks,
-        include_intersections=True,
-        include_runtime_intersections=False,
-    )
+    standalone_checks = _standalone_custom_checks_light(custom_checks)
+    custom_checks_html = ''
+    if standalone_checks:
+        custom_checks_html = _key_pool_web().web_custom_checks_html(
+            standalone_checks,
+            _service_icon_html,
+            csrf_input_html=csrf_input_html,
+            empty_message='',
+        )
     return _web_pool_form_blocks().render_protocol_check_content(
         key_name=protocol,
         title=title,
         status_info=(protocol_statuses or {}).get(protocol) or _status_empty_protocol_status(),
-        custom_presets_html=custom_presets_html,
+        custom_presets_html='',
         custom_checks_html=custom_checks_html,
-        route_tools_html=route_tools_html,
+        route_tools_html=_deferred_route_tools_html(),
         csrf_input_html=csrf_input_html,
         enable_key_pool=True,
         enable_custom_checks=True,
@@ -12048,70 +12369,78 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
     )
 
 
+def _web_light_pool_summary(current_keys, key_pools, key_probe_cache=None, custom_checks=None):
+    if key_probe_cache is None:
+        worker_payload = _web_pool_snapshot_worker_payload(
+            protocols=None,
+            include_summary=True,
+            include_custom_checks=False,
+            include_pools=False,
+        )
+        if isinstance(worker_payload, dict) and isinstance(worker_payload.get('pool_summary'), dict):
+            return _pool_summary_with_persisted_fallback(worker_payload['pool_summary'])
+        if not WEB_POOL_SNAPSHOT_WORKER_ENABLED:
+            return _pool_summary_with_persisted_fallback(
+                _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
+            )
+        try:
+            probe_cache_snapshot = _load_key_probe_cache()
+        except Exception as exc:
+            _write_runtime_log(f'Failed to load light pool summary cache: {type(exc).__name__}')
+            probe_cache_snapshot = {}
+        return _pool_summary_with_persisted_fallback(
+            _light_pool_status_summary(current_keys, key_pools, probe_cache_snapshot, custom_checks)
+        )
+    return _pool_summary_with_persisted_fallback(_key_pool_web().pool_status_summary(
+        current_keys,
+        key_pools,
+        key_probe_cache or {},
+        custom_checks or [],
+        _hash_key,
+        route_states=None,
+    ))
+
+
+def _web_custom_checks_light(custom_checks):
+    return [
+        {
+            'id': check.get('id', ''),
+            'label': check.get('label', ''),
+            'url': check.get('url', ''),
+            'urls': check.get('urls') or [check.get('url', '')],
+            'routes': check.get('routes') or [],
+            'badge': check.get('badge', 'WEB'),
+            'icon': check.get('icon', ''),
+        }
+        for check in (custom_checks or [])
+        if isinstance(check, dict)
+    ]
+
+
 def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
     key_pools = _ensure_current_keys_in_pools(current_keys)
     subscription_settings = _subscription_public_settings()
-    # Initial HTML is hydrated by /api/pools; avoid loading the full probe cache twice.
-    key_probe_cache = {}
+    # Initial pool rows are hydrated by /api/pools; avoid rendering full probe details twice.
     custom_checks = _load_custom_checks()
-    custom_checks_html = ''
-    route_states = _service_route_summary()
-    custom_presets_html = ''
-    route_tools_html = ''
-    pool_table_class, pool_custom_col_width, pool_mobile_custom_col_width = (
-        _web_pool_form_blocks().pool_table_layout(custom_checks)
-    )
-    custom_checks_for_protocol = lambda protocol, checks: _key_pool_web().protocol_custom_checks(
-        checks,
-        route_states,
-        protocol,
-    )
-    custom_header_icons_for_protocol = lambda protocol, checks: _key_pool_web().custom_check_header_icons(
-        checks,
-        _service_icon_html,
-    )
-    core_service_applicability_for_protocol = lambda protocol: _key_pool_web().core_service_applicability(
-        route_states,
-        protocol,
-    )
-    protocol_tabs_html, protocol_panels_html = _web_pool_form_blocks().render_protocol_tabs_and_panels(
+    protocol_tabs_html, protocol_panels_html = web_form_blocks.render_light_protocol_tabs_and_panels(
         web_form_blocks.PROTOCOL_SECTIONS,
         current_keys,
         protocol_statuses,
         csrf_input_html,
         key_pools=key_pools,
-        key_probe_cache=key_probe_cache,
-        custom_checks=custom_checks,
-        key_display_name=_pool_key_display_name,
-        hash_key=_hash_key,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
-        custom_check_badges=lambda probe, checks: _key_pool_web().web_custom_check_badges(probe, checks, _service_icon_html),
-        probe_checked_at=_key_pool_web().web_probe_checked_at,
-        custom_probe_states=_key_pool_web().web_custom_probe_states,
-        service_icon_html=_service_icon_html,
-        pool_table_class=pool_table_class,
-        pool_custom_col_width=pool_custom_col_width,
-        pool_mobile_custom_col_width=pool_mobile_custom_col_width,
-        custom_header_icons=_key_pool_web().custom_check_header_icons(custom_checks, _service_icon_html),
         subscription_settings=subscription_settings,
-        custom_checks_for_protocol=custom_checks_for_protocol,
-        custom_header_icons_for_protocol=custom_header_icons_for_protocol,
-        core_service_applicability_for_protocol=core_service_applicability_for_protocol,
-        custom_presets_html=custom_presets_html,
-        custom_checks_html=custom_checks_html,
-        route_tools_html=route_tools_html,
         active_protocol=_default_web_protocol(),
-        lazy_protocol_panels=True,
+        enable_key_pool=True,
+        enable_custom_checks=True,
         pool_probe_pending=pool_probe_pending,
-        defer_pool_rows=True,
-        defer_check_content=True,
     )
-    pool_summary = _pool_status_summary(current_keys, key_pools, None, custom_checks, route_states)
+    pool_summary = _web_light_pool_summary(current_keys, key_pools, None, custom_checks)
     return {
-        'custom_checks_json': json.dumps(_key_pool_web().web_custom_checks(custom_checks), ensure_ascii=False),
+        'custom_checks_json': json.dumps(_web_custom_checks_light(custom_checks), ensure_ascii=False),
         'pool_summary': pool_summary,
-        'pool_summary_note': _web_pool_form_blocks().pool_summary_note_with_progress(
+        'pool_summary_note': web_form_blocks.pool_summary_note_with_progress(
             pool_summary['note'],
             pool_probe_pending,
             progress,
@@ -12119,7 +12448,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         ),
         'protocol_panels_html': protocol_panels_html,
         'protocol_tabs_html': protocol_tabs_html,
-        'topbar_status_text': _web_pool_form_blocks().pool_probe_topbar_text(
+        'topbar_status_text': web_form_blocks.pool_probe_topbar_text(
             pool_probe_pending,
             progress,
             _pool_probe_progress_label,
@@ -12249,7 +12578,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         status, protocol_statuses = _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime_mode)
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
-        router_health = _router_health_snapshot()
+        router_health = _router_health_snapshot(compact=True)
 
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
         form_basics = web_form_blocks.render_form_basics(message, command_state, status, current_keys, current_mode_label, live=True)
@@ -12421,6 +12750,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 payload = None
                 if heavy_api:
                     _web_response_cleanup('web json api render', heavy=True)
+                elif path == '/api/status':
+                    _web_response_cleanup('web status api render')
                 else:
                     _web_response_cleanup('web json api render')
         elif kind == 'html':
@@ -12462,11 +12793,20 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if action is None:
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
-        self._send_action_result(
-            action.get('result', ''),
-            success=action.get('success', True),
-            extra=action.get('extra') or None,
-        )
+        extra = action.get('extra') or None
+        try:
+            self._send_action_result(
+                action.get('result', ''),
+                success=action.get('success', True),
+                extra=extra,
+            )
+        finally:
+            action['extra'] = None
+            action['result'] = ''
+            if isinstance(extra, dict) and extra.get('pools') is not None:
+                _web_response_cleanup('web post pool action render', heavy=True)
+            else:
+                _web_response_cleanup('web post action render')
 
 def start_http_server():
     global web_httpd

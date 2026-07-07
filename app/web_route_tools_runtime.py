@@ -1,7 +1,5 @@
-import key_pool_web
+import importlib
 import os
-import route_intersections
-import service_routes
 import threading
 import time
 
@@ -12,6 +10,33 @@ AUTO_RESOLVE_BUSY_MARKERS = (
     '/opt/bin/unblock_ipset.sh',
     '/opt/bin/unblock_dnsmasq.sh',
 )
+
+
+class _LazyModule:
+    def __init__(self, module_name):
+        object.__setattr__(self, '_module_name', module_name)
+        object.__setattr__(self, '_module', None)
+
+    def _load(self):
+        module = object.__getattribute__(self, '_module')
+        if module is None:
+            module = importlib.import_module(object.__getattribute__(self, '_module_name'))
+            object.__setattr__(self, '_module', module)
+        return module
+
+    def __getattr__(self, name):
+        return getattr(self._load(), name)
+
+    def __setattr__(self, name, value):
+        if name.startswith('_'):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._load(), name, value)
+
+
+key_pool_web = _LazyModule('key_pool_web')
+route_intersections = _LazyModule('route_intersections')
+service_routes = _LazyModule('service_routes')
 
 
 def _noop():
