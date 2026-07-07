@@ -543,54 +543,31 @@ download_update_file() {
   description="$4"
 
   rm -f "$target" "$target".tmp.*
-  if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ]; then
-    echo "Using GitHub archive/API fallback for ${description}."
-    if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
-      validate_update_file "$target" "$marker" "$description" || return 1
-      return 0
-    fi
-    echo "Error: failed to download ${description}"
-    return 1
-  fi
-
-  if [ "${RAW_GITHUB_USE_SOCKS:-0}" = "1" ]; then
-    if download_raw_file_via_socks "$url" "$target"; then
-      validate_update_file "$target" "$marker" "$description" || return 1
-      return 0
-    fi
-    rm -f "$target"
-    RAW_GITHUB_BYPASS=1
-    export RAW_GITHUB_BYPASS
-    echo "raw.githubusercontent.com unavailable; using GitHub archive fallback."
-    if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
-      validate_update_file "$target" "$marker" "$description" || return 1
-      return 0
-    fi
-    echo "Error: failed to download ${description}"
-    return 1
-  fi
-
-  if curl -fsSL --connect-timeout 5 --max-time 8 -o "$target" "$url" >/dev/null 2>&1; then
-    validate_update_file "$target" "$marker" "$description" || return 1
-    return 0
-  fi
-
-  rm -f "$target"
-  RAW_GITHUB_USE_SOCKS=1
-  export RAW_GITHUB_USE_SOCKS
-  echo "raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS."
-  if download_raw_file_via_socks "$url" "$target"; then
-    validate_update_file "$target" "$marker" "$description" || return 1
-    return 0
-  fi
-
-  rm -f "$target"
-  RAW_GITHUB_BYPASS=1
-  export RAW_GITHUB_BYPASS
-  echo "raw.githubusercontent.com unavailable; using GitHub archive fallback."
   if download_repo_file_from_archive "$url" "$target" || download_repo_file_via_api "$url" "$target"; then
     validate_update_file "$target" "$marker" "$description" || return 1
     return 0
+  fi
+  rm -f "$target"
+
+  if [ "${RAW_GITHUB_BYPASS:-0}" != "1" ]; then
+    if [ "${RAW_GITHUB_USE_SOCKS:-0}" = "1" ]; then
+      if download_raw_file_via_socks "$url" "$target"; then
+        validate_update_file "$target" "$marker" "$description" || return 1
+        return 0
+      fi
+    elif curl -fsSL --connect-timeout 5 --max-time 8 -o "$target" "$url" >/dev/null 2>&1; then
+      validate_update_file "$target" "$marker" "$description" || return 1
+      return 0
+    else
+      rm -f "$target"
+      RAW_GITHUB_USE_SOCKS=1
+      export RAW_GITHUB_USE_SOCKS
+      echo "Direct GitHub archive/API and raw download failed for ${description}; trying local SOCKS."
+      if download_raw_file_via_socks "$url" "$target"; then
+        validate_update_file "$target" "$marker" "$description" || return 1
+        return 0
+      fi
+    fi
   fi
 
   echo "Error: failed to download ${description}"

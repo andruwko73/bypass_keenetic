@@ -2621,6 +2621,13 @@ def test_direct_update_script_records_update_status():
 
 def test_update_static_assets_use_archive_fallback():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    update_body = re.search(r'download_update_file\(\) \{(?P<body>.*?)\nruntime_module_url\(\)', script, re.S).group('body')
+    update_archive_index = update_body.index('download_repo_file_from_archive "$url" "$target"')
+    update_api_index = update_body.index('download_repo_file_via_api "$url" "$target"')
+    update_raw_index = update_body.index('curl -fsSL --connect-timeout 5 --max-time 8')
+    update_socks_notice_index = update_body.index('Direct GitHub archive/API and raw download failed')
+    assert update_archive_index < update_api_index < update_raw_index < update_socks_notice_index
+    assert 'raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS.' not in update_body
     function_body = re.search(r'download_static_asset\(\) \{(?P<body>.*?)\n\}', script, re.S).group('body')
     archive_index = function_body.index('download_repo_file_from_archive "$url" "$target"')
     api_index = function_body.index('download_repo_file_via_api "$url" "$target"')

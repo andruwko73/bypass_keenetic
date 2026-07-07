@@ -1,3 +1,7 @@
+*v1.930 (7 Jul 2026) -* main
+
+*Makes web updates prefer the direct GitHub codeload archive/API for repo files, keeping local SOCKS/VPN only as the final fallback.*
+
 *v1.929 (7 Jul 2026) -* main
 
 *Keeps the router CPU value in the web UI from counting the page render itself by using the last stable CPU sample on initial HTML and refreshing router health through a lightweight API after load.*

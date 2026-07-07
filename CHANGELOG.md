@@ -1,3 +1,9 @@
+<a name="1.930"></a>
+# [1.930] - 7 Jul 2026
+
+- Makes the web update download repo files from the direct GitHub codeload archive/API before trying raw.githubusercontent.com.
+- Keeps local SOCKS/VPN download as the final fallback only when direct GitHub archive/API and raw downloads fail.
+
 <a name="1.929"></a>
 # [1.929] - 7 Jul 2026
 
