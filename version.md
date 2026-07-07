@@ -1,3 +1,7 @@
+*v1.928 (7 Jul 2026) -* main
+
+*Adds a clean-install GitHub archive fallback so the first bootstrap can continue when raw.githubusercontent.com is unavailable before any local proxy/key exists.*
+
 *v1.927 (7 Jul 2026) -* main
 
 *Uses total program RSS as the hard background-task guard, keeps bot RSS as a soft economy signal, and finishes post-pool cleanup when bot + Xray + helpers are back under the 100 MB program target.*

@@ -3340,8 +3340,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "update_proxy('none', persist=False)" not in startup_restore
     readme_source = (ROOT / 'README.md').read_text(encoding='utf-8')
     assert 'https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh' in readme_source
+    assert 'https://codeload.github.com/andruwko73/bypass_keenetic/tar.gz/refs/heads/main' in readme_source
+    assert 'tmp/bypass-bootstrap-install' in readme_source
     assert 'Прогрев YouTube выполняется отдельным коротким процессом для ускорения загрузки видео' in readme_source
     assert 'не увеличивает постоянный RSS Telegram-бота' not in readme_source
+    bootstrap_source = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    assert 'prepare_repo_archive()' in bootstrap_source
+    assert 'download_file_from_archive()' in bootstrap_source
+    assert 'https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/${archive_ref}' in bootstrap_source
+    assert 'raw.githubusercontent.com unavailable for $(basename "$target"); using GitHub archive fallback.' in bootstrap_source
+    assert 'download_optional_file "$(repo_file_url static/telegram.png)"' in bootstrap_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source

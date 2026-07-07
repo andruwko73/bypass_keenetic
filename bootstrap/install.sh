@@ -6,6 +6,8 @@ REPO_NAME="${BYPASS_REPO_NAME:-bypass_keenetic}"
 REPO_BRANCH="${BYPASS_REPO_BRANCH:-main}"
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
 REPO_APP_DIR="${BYPASS_REPO_APP_DIR:-app}"
+REPO_ARCHIVE_ROOT=""
+REPO_ARCHIVE_FAILED=0
 
 BOT_DIR="/opt/etc/bot"
 STATIC_DIR="$BOT_DIR/static"
@@ -54,14 +56,100 @@ need_var() {
     [ -n "$value" ] || fail "Не задана переменная $1"
 }
 
+repo_path_from_raw_url() {
+    url="$1"
+    raw_prefix="${RAW_BASE}/"
+
+    case "$url" in
+        "$raw_prefix"*) printf '%s' "${url#"$raw_prefix"}" ;;
+        *) return 1 ;;
+    esac
+}
+
+prepare_repo_archive() {
+    [ -n "${REPO_ARCHIVE_ROOT:-}" ] && [ -d "$REPO_ARCHIVE_ROOT" ] && return 0
+    [ "${REPO_ARCHIVE_FAILED:-0}" = "1" ] && return 1
+
+    archive_work="$TMP_DIR/repo-archive"
+    archive_file="$archive_work/repo.tar.gz"
+    mkdir -p "$archive_work" || return 1
+
+    archive_refs="$REPO_BRANCH"
+    case "$REPO_BRANCH" in
+        refs/*) ;;
+        *) archive_refs="$REPO_BRANCH refs/heads/$REPO_BRANCH refs/tags/$REPO_BRANCH" ;;
+    esac
+
+    archive_ready=0
+    for archive_ref in $archive_refs; do
+        archive_url="https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/${archive_ref}"
+        rm -f "$archive_file"
+        if curl -fsSL --connect-timeout 8 --max-time 90 -o "$archive_file" "$archive_url" >/dev/null 2>&1; then
+            if tar -xzf "$archive_file" -C "$archive_work" >/dev/null 2>&1; then
+                archive_ready=1
+                break
+            fi
+        fi
+    done
+    if [ "$archive_ready" != "1" ]; then
+        REPO_ARCHIVE_FAILED=1
+        export REPO_ARCHIVE_FAILED
+        return 1
+    fi
+
+    REPO_ARCHIVE_ROOT=$(find "$archive_work" -mindepth 1 -maxdepth 1 -type d | head -n1)
+    [ -n "$REPO_ARCHIVE_ROOT" ] && [ -d "$REPO_ARCHIVE_ROOT" ] || return 1
+    export REPO_ARCHIVE_ROOT
+    echo "GitHub archive fallback is ready."
+    return 0
+}
+
+download_file_from_archive() {
+    url="$1"
+    target="$2"
+    repo_path=$(repo_path_from_raw_url "$url") || return 1
+
+    prepare_repo_archive || return 1
+    src="$REPO_ARCHIVE_ROOT/$repo_path"
+    [ -f "$src" ] || return 1
+    cp "$src" "$target"
+}
+
+validate_downloaded_file() {
+    target="$1"
+    marker="$2"
+    url="$3"
+
+    if [ ! -s "$target" ]; then
+        echo "Error: empty downloaded file: $url" >&2
+        return 1
+    fi
+    if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
+        echo "Error: downloaded file failed content validation: $url" >&2
+        return 1
+    fi
+    return 0
+}
+
 download_file() {
     url="$1"
     target="$2"
     marker="$3"
 
-    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$target" "$url" || fail "Не удалось скачать $url"
-    [ -s "$target" ] || fail "Скачан пустой файл: $url"
-    [ -z "$marker" ] || grep -q "$marker" "$target" || fail "Файл $url не прошёл проверку содержимого"
+    rm -f "$target"
+    if curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1 \
+        && validate_downloaded_file "$target" "$marker" "$url"; then
+        return 0
+    fi
+
+    rm -f "$target"
+    echo "raw.githubusercontent.com unavailable for $(basename "$target"); using GitHub archive fallback."
+    if download_file_from_archive "$url" "$target" \
+        && validate_downloaded_file "$target" "$marker" "$url"; then
+        return 0
+    fi
+
+    fail "Не удалось скачать $url"
 }
 
 repo_file_url() {
@@ -76,13 +164,26 @@ repo_file_url() {
     esac
 }
 
+download_optional_file() {
+    url="$1"
+    target="$2"
+
+    rm -f "$target"
+    if curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1 && [ -s "$target" ]; then
+        return 0
+    fi
+    rm -f "$target"
+    download_file_from_archive "$url" "$target" >/dev/null 2>&1 || true
+    [ -s "$target" ] || rm -f "$target"
+}
+
 download_static_assets() {
     icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
     mkdir -p "$STATIC_DIR/service-icons"
-    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/telegram.png" "$(repo_file_url static/telegram.png)" || true
-    curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/youtube.png" "$(repo_file_url static/youtube.png)" || true
+    download_optional_file "$(repo_file_url static/telegram.png)" "$STATIC_DIR/telegram.png"
+    download_optional_file "$(repo_file_url static/youtube.png)" "$STATIC_DIR/youtube.png"
     for icon in $icons; do
-        curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$STATIC_DIR/service-icons/${icon}.png" "$(repo_file_url "static/service-icons/${icon}.png")" || true
+        download_optional_file "$(repo_file_url "static/service-icons/${icon}.png")" "$STATIC_DIR/service-icons/${icon}.png"
     done
     find "$STATIC_DIR" -type d -exec chmod 755 {} \; 2>/dev/null || true
     find "$STATIC_DIR" -type f -exec chmod 644 {} \; 2>/dev/null || true

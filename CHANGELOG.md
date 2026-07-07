@@ -1,3 +1,10 @@
+<a name="1.928"></a>
+# [1.928] - 7 Jul 2026
+
+- Adds a clean-install GitHub archive fallback so the first bootstrap can continue when `raw.githubusercontent.com` is unavailable before any local proxy/key exists.
+- Makes bootstrap download required runtime files and optional static assets from the archive fallback when raw GitHub downloads fail.
+- Updates the README clean-install command to fetch `bootstrap/install.sh` from raw first, then from the GitHub archive.
+
 <a name="1.927"></a>
 # [1.927] - 7 Jul 2026
 

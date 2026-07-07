@@ -30,10 +30,12 @@
 После Entware подключитесь к роутеру по SSH и выполните:
 
 ```sh
-sh -c 'export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; "$CURL_BIN" -fsSL https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh | sh'
+sh -c 'set -eu; export PATH=/opt/bin:/opt/sbin:$PATH; OPKG="$(command -v opkg || echo /opt/bin/opkg)"; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; if [ ! -x "$CURL_BIN" ]; then "$OPKG" update && "$OPKG" install curl ca-bundle || exit 1; CURL_BIN="$(command -v curl || echo /opt/bin/curl)"; fi; TMP="/tmp/bypass-bootstrap-install.$$"; rm -rf "$TMP"; mkdir -p "$TMP"; trap "rm -rf \"$TMP\"" EXIT INT TERM; if ! "$CURL_BIN" -fsSL --connect-timeout 12 --max-time 45 -o "$TMP/install.sh" https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh; then "$CURL_BIN" -fsSL --connect-timeout 12 --max-time 90 -o "$TMP/repo.tar.gz" https://codeload.github.com/andruwko73/bypass_keenetic/tar.gz/refs/heads/main && tar -xzf "$TMP/repo.tar.gz" -C "$TMP" && cp "$TMP"/*/bootstrap/install.sh "$TMP/install.sh"; fi; [ -s "$TMP/install.sh" ] || exit 1; sh "$TMP/install.sh"'
 ```
 
 Команда выше является актуальной командой чистой установки из GitHub `main`. Она ставит минимальный `curl`, скачивает `bootstrap/install.sh`, затем bootstrap скачивает основной `script.sh`, веб-установщик, Telegram-бота и все runtime-модули.
+
+Команда сначала пробует `raw.githubusercontent.com`, затем GitHub archive через `codeload.github.com`. Это важно для чистой установки: fallback не требует уже установленного ключа или локального SOCKS. Если с чистого роутера недоступны и raw, и codeload, нужен временный прямой доступ к GitHub или ручная загрузка `bootstrap/install.sh`.
 
 ## Структура репозитория
 
