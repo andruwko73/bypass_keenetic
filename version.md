@@ -1,3 +1,7 @@
+*v1.929 (7 Jul 2026) -* main
+
+*Keeps the router CPU value in the web UI from counting the page render itself by using the last stable CPU sample on initial HTML and refreshing router health through a lightweight API after load.*
+
 *v1.928 (7 Jul 2026) -* main
 
 *Adds a clean-install GitHub archive fallback so the first bootstrap can continue when raw.githubusercontent.com is unavailable before any local proxy/key exists.*

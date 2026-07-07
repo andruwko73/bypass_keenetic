@@ -870,6 +870,61 @@ def test_router_health_runtime_smooths_short_cpu_spikes():
     assert 60.0 < third['cpu_percent'] < 70.0
 
 
+def test_router_health_runtime_primes_cpu_baseline_without_page_render_sample():
+    original = {
+        'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
+        'read_proc_text': router_health_runtime.read_proc_text,
+        'read_cpu_stat': router_health_runtime.read_cpu_stat,
+        'read_flash_storage': router_health_runtime.read_flash_storage,
+        'process_rss_kb': router_health_runtime.process_rss_kb,
+        'related_program_process_snapshot': router_health_runtime.related_program_process_snapshot,
+        'read_ndmc_system_snapshot': router_health_runtime.read_ndmc_system_snapshot,
+        'read_dns_health': router_health_runtime.read_dns_health,
+        'telegram_call_proxy_health': router_health_runtime.telegram_call_proxy_health,
+        'xray_compat_runtime': router_health_runtime.xray_compat_runtime,
+    }
+    calls = {'cpu': 0}
+    cpu_stats = iter((
+        (100, 0, 0, 900, 0),
+        (110, 0, 10, 980, 0),
+    ))
+    now = [100.0]
+
+    def fake_cpu_stat(stat_path='/proc/stat'):
+        calls['cpu'] += 1
+        return next(cpu_stats)
+
+    try:
+        router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
+        router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
+        router_health_runtime.read_cpu_stat = fake_cpu_stat
+        router_health_runtime.read_flash_storage = lambda: {}
+        router_health_runtime.process_rss_kb = lambda pid='self': 64000
+        router_health_runtime.related_program_process_snapshot = lambda probe_running=False: {}
+        router_health_runtime.read_ndmc_system_snapshot = lambda: {}
+        router_health_runtime.read_dns_health = lambda **kwargs: {}
+        router_health_runtime.telegram_call_proxy_health = lambda: {}
+        router_health_runtime.xray_compat_runtime = None
+        runtime = router_health_runtime.RouterHealthRuntime(
+            cache_ttl=30,
+            time_provider=lambda: now[0],
+            core_proxy_cache_ttl=60,
+            dns_cache_ttl=60,
+            ndmc_cache_ttl=60,
+            cpu_smoothing_factor=1.0,
+        )
+        page_render = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, sample_cpu=False, prime_cpu=True)
+        now[0] += 5
+        first_api = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, force_refresh=True)
+    finally:
+        for name, value in original.items():
+            setattr(router_health_runtime, name, value)
+
+    assert calls['cpu'] == 2
+    assert page_render['cpu_percent'] is None
+    assert first_api['cpu_percent'] == 20.0
+
+
 def test_web_commands_runtime_dispatch():
     calls = []
 
@@ -3147,6 +3202,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'router_metrics_compact_cache' in source
     assert 'router_metrics.RouterMetricsRuntime' in source
     assert "'router_metrics_snapshot': _router_metrics_snapshot" in source
+    assert 'def _router_health_snapshot(compact=False, sample_cpu=True, force_refresh=False, prime_cpu=False)' in source
+    assert '_router_health_snapshot(compact=True, sample_cpu=False)' in source
     assert "'web_pools_payload': _web_pools_payload" in source
     assert 'web_pool_snapshot_worker.py' in source
     assert "input=json.dumps(request" in source
@@ -8009,6 +8066,7 @@ def test_web_get_actions_helpers():
     def pool_snapshot(keys, include_keys=False, protocols=None):
         pool_snapshot_calls.append((keys, include_keys, protocols))
         return {proto: {'rows': []} for proto in (protocols or ['vless'])}
+    router_health_calls = []
     ctx = {
         'build_form': lambda message: 'form:' + message,
         'build_protocol_panel': lambda proto: 'panel:' + proto,
@@ -8028,6 +8086,7 @@ def test_web_get_actions_helpers():
         'web_custom_checks': lambda: [{'id': 'custom'}],
         'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
         'telegram_call_learning_snapshot': lambda: {'watching': True, 'seen_clients': ['192.168.1.23']},
+        'router_health_snapshot': lambda **kwargs: router_health_calls.append(kwargs) or {'cpu_percent': 2.0},
         'router_metrics_snapshot': lambda: {'load': {'load1': 0.1}, 'summary': {'samples': 1}},
         'time_provider': lambda: 123.0,
         'static_dir': '/tmp/static',
@@ -8200,6 +8259,12 @@ def test_web_get_actions_helpers():
     assert learning['payload']['telegram_call_learning']['seen_clients'] == ['192.168.1.23']
     metrics = web_get_actions.dispatch(ctx, '/api/router_metrics')
     assert metrics['payload']['summary']['samples'] == 1
+    health = web_get_actions.dispatch(ctx, '/api/router_health', 'compact=1&force=1')
+    assert health['payload']['cpu_percent'] == 2.0
+    assert router_health_calls[-1] == {'compact': True, 'sample_cpu': True, 'force_refresh': True, 'prime_cpu': False}
+    primed_health = web_get_actions.dispatch(ctx, '/api/router_health', 'compact=1&skip_cpu=1&prime=1')
+    assert primed_health['payload']['cpu_percent'] == 2.0
+    assert router_health_calls[-1] == {'compact': True, 'sample_cpu': False, 'force_refresh': False, 'prime_cpu': True}
     assert metrics['status'] == 200
     paused_ctx = dict(ctx)
     paused_ctx.update({
@@ -9337,6 +9402,9 @@ def test_web_template_scripts_helpers():
     assert "const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));" in scripts
     assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
     assert "fetch('/api/status?compact=1&lite=1'" in scripts
+    assert "fetch('/api/router_health?compact=1' + forceQuery" in scripts
+    assert "fetch('/api/router_health?compact=1&skip_cpu=1&prime=1'" in scripts
+    assert 'scheduleRouterHealthRefresh(10000)' in scripts
     assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
     assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS);" in scripts
     assert 'const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;' in scripts
@@ -10874,6 +10942,8 @@ def main():
     test_router_health_runtime_related_process_snapshot()
     test_router_metrics_runtime_snapshot()
     test_router_health_runtime_slow_snapshot_caches_heavy_checks()
+    test_router_health_runtime_smooths_short_cpu_spikes()
+    test_router_health_runtime_primes_cpu_baseline_without_page_render_sample()
     test_proxy_config_builder()
     test_proxy_status_runtime_helpers()
     test_unblock_list_helpers()

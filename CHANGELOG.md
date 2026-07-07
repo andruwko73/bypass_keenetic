@@ -1,3 +1,10 @@
+<a name="1.929"></a>
+# [1.929] - 7 Jul 2026
+
+- Keeps the router CPU value in the web UI from counting the page render itself by using the last stable CPU sample on initial HTML.
+- Adds a lightweight `/api/router_health` refresh after page load so the router block updates without rebuilding statuses, pools, or the whole page.
+- Covers the no-sample page render path and router-health endpoint with smoke tests.
+
 <a name="1.928"></a>
 # [1.928] - 7 Jul 2026
 

@@ -299,6 +299,32 @@ def _router_metrics_payload(ctx, query):
         return snapshot()
 
 
+def _truthy_query(params, *names):
+    for name in names:
+        value = (params.get(name) or [''])[0]
+        if str(value or '').strip().lower() in ('1', 'true', 'yes', 'on'):
+            return True
+    return False
+
+
+def _router_health_payload(ctx, query):
+    params = parse_qs(query or '', keep_blank_values=True)
+    compact = not _truthy_query(params, 'full')
+    sample_cpu = not _truthy_query(params, 'skip_cpu', 'no_cpu')
+    force_refresh = _truthy_query(params, 'force', 'force_refresh')
+    prime_cpu = _truthy_query(params, 'prime', 'prime_cpu')
+    snapshot = _ctx(ctx, 'router_health_snapshot')
+    if not snapshot:
+        return {}
+    try:
+        return snapshot(compact=compact, sample_cpu=sample_cpu, force_refresh=force_refresh, prime_cpu=prime_cpu)
+    except TypeError:
+        try:
+            return snapshot(compact=compact)
+        except TypeError:
+            return snapshot()
+
+
 def dispatch(ctx, path, query=''):
     if path in PAGE_ROUTES:
         build_form = _ctx(ctx, 'build_form')
@@ -326,6 +352,8 @@ def dispatch(ctx, path, query=''):
         return {'kind': 'json', 'payload': _ctx(ctx, 'get_web_command_state')(), 'status': 200}
     if path == '/api/update_status':
         return {'kind': 'json', 'payload': _ctx(ctx, 'update_status_snapshot', lambda: {})(), 'status': 200}
+    if path == '/api/router_health':
+        return {'kind': 'json', 'payload': _router_health_payload(ctx, query), 'status': 200}
     if path == '/api/event_history':
         event_history_payload = _ctx(ctx, 'event_history_payload')
         if event_history_payload:

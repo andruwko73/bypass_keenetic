@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.928, последнее изменение: 07.07.2026
+#  Файл: bot.py, Версия v1.929, последнее изменение: 07.07.2026
 
 import subprocess
 import os
@@ -8142,8 +8142,14 @@ def _append_status_note(note, extra):
     return '; '.join(part for part in (clean_note, clean_extra) if part)
 
 
-def _router_health_snapshot(compact=False):
-    payload = router_health.snapshot(_get_pool_probe_progress, compact=compact)
+def _router_health_snapshot(compact=False, sample_cpu=True, force_refresh=False, prime_cpu=False):
+    payload = router_health.snapshot(
+        _get_pool_probe_progress,
+        compact=compact,
+        sample_cpu=sample_cpu,
+        force_refresh=force_refresh,
+        prime_cpu=prime_cpu,
+    )
     payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
     payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
     payload['post_pool_cleanup_target_kb'] = MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
@@ -12869,7 +12875,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         status, protocol_statuses = _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime_mode)
         unblock_lists = _load_unblock_lists()
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
-        router_health = _router_health_snapshot(compact=True)
+        router_health = _router_health_snapshot(compact=True, sample_cpu=False)
 
         current_mode_label = web_form_blocks.proxy_mode_label(status['proxy_mode'])
         form_basics = web_form_blocks.render_form_basics(message, command_state, status, current_keys, current_mode_label, live=True)

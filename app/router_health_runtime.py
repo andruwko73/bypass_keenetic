@@ -946,7 +946,14 @@ class RouterHealthRuntime:
             read_ndmc_system_snapshot,
         )
 
-    def _cpu_snapshot(self):
+    def _cpu_snapshot(self, sample=True, prime=False):
+        if not sample and prime:
+            current_stat = read_cpu_stat()
+            if current_stat is not None:
+                self._last_cpu_stat = current_stat
+                self._last_cpu_percent = None
+        if not sample:
+            return self._last_cpu_percent
         current_stat = read_cpu_stat()
         if current_stat is None:
             return self._last_cpu_percent
@@ -983,10 +990,14 @@ class RouterHealthRuntime:
         }
         return dict(payload) if isinstance(payload, dict) else payload
 
-    def _compact_snapshot(self, now, probe_progress, probe_running):
+    def _compact_snapshot(self, now, probe_progress, probe_running, sample_cpu=True, force_refresh=False, prime_cpu=False):
         with self._lock:
             payload = self._compact_cache.get('payload')
-            if payload is not None and now - float(self._compact_cache.get('timestamp') or 0) < self.cache_ttl:
+            if (
+                not force_refresh and
+                payload is not None and
+                now - float(self._compact_cache.get('timestamp') or 0) < self.cache_ttl
+            ):
                 return dict(payload)
             ndmc_cached = self._ndmc_cache.get('payload') if isinstance(self._ndmc_cache, dict) else None
         related_processes = self._related_process_snapshot(now, probe_running)
@@ -996,7 +1007,7 @@ class RouterHealthRuntime:
             meminfo=read_proc_meminfo(),
             ndmc_system=ndmc_cached if isinstance(ndmc_cached, dict) else {},
             load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
-            cpu_percent=self._cpu_snapshot(),
+            cpu_percent=self._cpu_snapshot(sample=sample_cpu, prime=prime_cpu),
             bot_rss_kb=process_rss_kb('self'),
             probe_progress=probe_progress,
             temp_xray_count=related_processes.get('temporary_xray_count') or 0,
@@ -1010,28 +1021,41 @@ class RouterHealthRuntime:
             flash_storage=read_flash_storage(),
         )
         payload['health_scope'] = 'compact'
-        with self._lock:
-            self._compact_cache['timestamp'] = now
-            self._compact_cache['payload'] = payload
+        if sample_cpu:
+            with self._lock:
+                self._compact_cache['timestamp'] = now
+                self._compact_cache['payload'] = payload
         return dict(payload)
 
-    def snapshot(self, pool_probe_progress_getter, compact=False):
+    def snapshot(self, pool_probe_progress_getter, compact=False, sample_cpu=True, force_refresh=False, prime_cpu=False):
         now = self.time_provider()
         with self._lock:
             payload = self._cache.get('payload')
-            if not compact and payload is not None and now - float(self._cache.get('timestamp') or 0) < self.cache_ttl:
+            if (
+                not force_refresh and
+                not compact and
+                payload is not None and
+                now - float(self._cache.get('timestamp') or 0) < self.cache_ttl
+            ):
                 return dict(payload)
 
         probe_progress = pool_probe_progress_getter() if pool_probe_progress_getter else {}
         probe_running = bool((probe_progress or {}).get('running')) and int((probe_progress or {}).get('total') or 0) > 0
         if compact:
-            return self._compact_snapshot(now, probe_progress, probe_running)
+            return self._compact_snapshot(
+                now,
+                probe_progress,
+                probe_running,
+                sample_cpu=sample_cpu,
+                force_refresh=force_refresh,
+                prime_cpu=prime_cpu,
+            )
         related_processes = self._related_process_snapshot(now, probe_running)
         payload = build_router_health_payload(
             meminfo=read_proc_meminfo(),
             ndmc_system=self._ndmc_snapshot(now),
             load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
-            cpu_percent=self._cpu_snapshot(),
+            cpu_percent=self._cpu_snapshot(sample=sample_cpu, prime=prime_cpu),
             bot_rss_kb=process_rss_kb('self'),
             probe_progress=probe_progress,
             temp_xray_count=related_processes.get('temporary_xray_count') or 0,
@@ -1044,11 +1068,12 @@ class RouterHealthRuntime:
             core_proxy_health=self._core_proxy_snapshot(now),
             flash_storage=read_flash_storage(),
         )
-        with self._lock:
-            self._cache['timestamp'] = now
-            self._cache['payload'] = payload
-            self._compact_cache['timestamp'] = now
-            self._compact_cache['payload'] = payload
+        if sample_cpu:
+            with self._lock:
+                self._cache['timestamp'] = now
+                self._cache['payload'] = payload
+                self._compact_cache['timestamp'] = now
+                self._compact_cache['payload'] = payload
         return dict(payload)
 
     def invalidate(self, include_heavy=True):

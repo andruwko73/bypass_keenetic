@@ -2355,6 +2355,47 @@ def render_web_scripts(
             }}
         }}
 
+        function refreshRouterHealth(forceCpu, attempt) {{
+            if (!ENABLE_LIVE_STATUS || document.hidden) {{
+                return;
+            }}
+            const forceQuery = forceCpu ? '&force=1' : '';
+            fetch('/api/router_health?compact=1' + forceQuery, {{
+                headers: {{'Accept': 'application/json'}},
+                cache: 'no-store'
+            }})
+                .then(function(response) {{ return response.json(); }})
+                .then(function(health) {{
+                    updateRouterHealth(health);
+                    if ((health.cpu_percent === null || typeof health.cpu_percent === 'undefined') && Number(attempt || 0) < 2) {{
+                        window.setTimeout(function() {{
+                            refreshRouterHealth(true, Number(attempt || 0) + 1);
+                        }}, 4000);
+                    }}
+                }})
+                .catch(function() {{}});
+        }}
+
+        function scheduleRouterHealthRefresh(delayMs) {{
+            if (!ENABLE_LIVE_STATUS) {{
+                return;
+            }}
+            window.setTimeout(function() {{
+                fetch('/api/router_health?compact=1&skip_cpu=1&prime=1', {{
+                    headers: {{'Accept': 'application/json'}},
+                    cache: 'no-store'
+                }})
+                    .then(function(response) {{ return response.json(); }})
+                    .then(function(health) {{
+                        updateRouterHealth(health);
+                    }})
+                    .catch(function() {{}});
+                window.setTimeout(function() {{
+                    refreshRouterHealth(true, 0);
+                }}, 5000);
+            }}, Math.max(0, Number(delayMs || 0)));
+        }}
+
         function updateWebStatus(snapshot) {{
             if (!snapshot || !snapshot.web) {{
                 return false;
@@ -3273,6 +3314,7 @@ def render_web_scripts(
             refreshDeferredServiceRouteTools();
             setupLiquidPointer();
             setupAsyncForms();
+            scheduleRouterHealthRefresh(10000);
             const actionBlock = document.getElementById('web-action-message');
             if (actionBlock && !actionBlock.classList.contains('hidden')) {{
                 scheduleActionMessageHide(9000);
