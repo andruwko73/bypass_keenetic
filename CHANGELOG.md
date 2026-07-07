@@ -1,3 +1,9 @@
+<a name="1.934"></a>
+# [1.934] - 8 Jul 2026
+
+- Prevents temporary pool-probe cleanup from matching the separate full pool-probe worker, so a full pool check no longer exits with `code -15` when health or failover cleanup runs nearby.
+- Keeps the post-check memory path intact: after the 120-key router probe finishes, temporary Xray/worker processes are gone and program RSS returns to the normal bot plus Xray baseline.
+
 <a name="1.933"></a>
 # [1.933] - 8 Jul 2026
 

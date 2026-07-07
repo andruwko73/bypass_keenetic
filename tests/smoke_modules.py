@@ -3501,6 +3501,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "run_memory_cleanup('pool probe key checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    assert 'def _pool_probe_runtime_cmdline_matches' in source
+    assert "if b'bypass_pool_probe_worker_' in cmdline:" in source
+    assert 'def _pool_probe_runtime_file_matches' in source
+    assert "if name.startswith('bypass_pool_probe_worker_'):" in source
+    assert 'not _pool_probe_runtime_cmdline_matches(cmdline)' in source
+    assert 'not _pool_probe_runtime_file_matches(name)' in source
     assert "_cleanup_pool_probe_runtime_light(kill_processes=True)" in source
     assert 'if pid == os.getpid()' in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]

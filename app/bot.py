@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.933, последнее изменение: 08.07.2026
+#  Файл: bot.py, Версия v1.934, последнее изменение: 08.07.2026
 
 import subprocess
 import os
@@ -6186,6 +6186,20 @@ def _start_memory_watchdog_thread():
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _pool_probe_runtime_cmdline_matches(cmdline):
+    cmdline = bytes(cmdline or b'')
+    if b'bypass_pool_probe_worker_' in cmdline:
+        return False
+    return b'bypass_pool_probe_' in cmdline
+
+
+def _pool_probe_runtime_file_matches(name):
+    name = str(name or '')
+    if name.startswith('bypass_pool_probe_worker_'):
+        return False
+    return name.startswith('bypass_pool_probe_')
+
+
 def _cleanup_pool_probe_runtime_light(kill_processes=False):
     if kill_processes and os.path.isdir('/proc'):
         for name in os.listdir('/proc'):
@@ -6199,7 +6213,7 @@ def _cleanup_pool_probe_runtime_light(kill_processes=False):
                     cmdline = file.read().replace(b'\x00', b' ')
             except Exception:
                 continue
-            if b'bypass_pool_probe_' not in cmdline:
+            if not _pool_probe_runtime_cmdline_matches(cmdline):
                 continue
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -6210,7 +6224,7 @@ def _cleanup_pool_probe_runtime_light(kill_processes=False):
             if not os.path.isdir(directory):
                 continue
             for name in os.listdir(directory):
-                if not name.startswith('bypass_pool_probe_'):
+                if not _pool_probe_runtime_file_matches(name):
                     continue
                 path = os.path.join(directory, name)
                 try:

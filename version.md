@@ -1,3 +1,7 @@
+*v1.934 (8 Jul 2026) -* main
+
+*Keeps the separate full pool-probe worker alive when neighboring health or failover cleanup tasks remove temporary pool-probe runtime files, so full pool checks can finish and release temporary Xray/process RSS afterward.*
+
 *v1.933 (8 Jul 2026) -* main
 
 *Keeps protocol service icons stable after idle live-status refreshes, including the lazy pool-load path where the short Telegram-only status arrives after the full service icons were shown.*
