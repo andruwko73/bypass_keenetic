@@ -1034,6 +1034,113 @@ def render_web_scripts(
             return html;
         }}
 
+        function serviceStateText(state, okText, failText) {{
+            if (state === 'ok') {{
+                return okText;
+            }}
+            if (state === 'warn') {{
+                return 'нестабильно, перепроверяется';
+            }}
+            if (state === 'fail') {{
+                return failText;
+            }}
+            return '';
+        }}
+
+        function protocolPanelCoreServices(proto) {{
+            const panel = document.querySelector('[data-protocol-panel="' + proto + '"]');
+            if (panel && panel.dataset.coreServicesLoaded === '1') {{
+                return String(panel.dataset.coreServices || '').split(',').map(function(item) {{
+                    return item.trim();
+                }}).filter(Boolean);
+            }}
+            return null;
+        }}
+
+        function protocolStatusFromActivePoolRow(proto) {{
+            if (!ENABLE_KEY_POOL) {{
+                return null;
+            }}
+            const card = document.querySelector('[data-protocol-card="' + proto + '"]');
+            const row = document.querySelector('[data-pool-row][data-protocol="' + proto + '"][data-active="1"]');
+            if (!row) {{
+                return null;
+            }}
+            const coreServices = protocolPanelCoreServices(proto);
+            if (!coreServices) {{
+                return null;
+            }}
+            const includeTelegram = coreServices.indexOf('telegram') !== -1;
+            const includeYoutube = coreServices.indexOf('youtube') !== -1;
+            const tgState = row.dataset.tgState || 'unknown';
+            const ytState = row.dataset.ytState || 'unknown';
+            const customOk = Array.from(row.querySelectorAll('[data-pool-custom] .custom-service-ok'));
+            const customFail = Array.from(row.querySelectorAll('[data-pool-custom] .custom-service-fail'));
+            const hasCoreState = (includeTelegram && ['ok', 'warn', 'fail'].indexOf(tgState) !== -1) ||
+                (includeYoutube && ['ok', 'warn', 'fail'].indexOf(ytState) !== -1);
+            if (!hasCoreState && !customOk.length && !customFail.length) {{
+                return null;
+            }}
+            const parts = [];
+            const states = [];
+            let icons = '';
+            const tgText = serviceStateText(tgState, 'работает', 'не работает');
+            if (includeTelegram && tgText) {{
+                parts.push('Telegram: ' + tgText);
+                states.push(tgState === 'ok' || tgState === 'warn');
+            }}
+            const ytText = serviceStateText(ytState, 'работает', 'не работает');
+            if (includeYoutube && ytText) {{
+                parts.push('YouTube: ' + ytText);
+                states.push(ytState === 'ok' || ytState === 'warn');
+            }}
+            if (tgState === 'ok' || tgState === 'warn') {{
+                icons += serviceIcon(TELEGRAM_ICON_SRC, 'Telegram');
+            }}
+            if (ytState === 'ok' || ytState === 'warn') {{
+                icons += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');
+            }}
+            customOk.forEach(function(item) {{
+                icons += item.innerHTML;
+            }});
+            const anyOk = states.some(Boolean) || customOk.length > 0;
+            const anyFail = states.some(function(value) {{ return !value; }}) || customFail.length > 0;
+            const tone = anyOk ? (anyFail ? 'warn' : 'ok') : 'fail';
+            const label = anyOk ? (anyFail ? 'Частично работает' : 'Работает') : 'Не работает';
+            const checked = (row.querySelector('[data-pool-checked]') || {{ textContent: '' }}).textContent.trim();
+            let details = 'Показан последний результат проверки пула';
+            if (parts.length) {{
+                details += '; ' + parts.join(', ');
+            }}
+            if (checked) {{
+                details += '; проверено ' + checked;
+            }}
+            return {{
+                tone: tone,
+                label: label,
+                details: details,
+                icons: icons
+            }};
+        }}
+
+        function applyProtocolPoolStatusOverride(proto, force) {{
+            const card = document.querySelector('[data-protocol-card="' + proto + '"]');
+            const status = protocolStatusFromActivePoolRow(proto);
+            if (!status) {{
+                return false;
+            }}
+            if (!force && card && card.dataset.protocolLiveStatus === '1') {{
+                const icons = card.querySelector('[data-protocol-status-icons]');
+                if (icons && status.icons) {{
+                    icons.innerHTML = status.icons;
+                    return true;
+                }}
+                return false;
+            }}
+            updateProtocolStatus(proto, status, true);
+            return true;
+        }}
+
         function probeBadge(state, service) {{
             if (state === 'na') {{
                 return '<span class="service-probe-mark service-probe-na">-</span>';
@@ -1055,6 +1162,17 @@ def render_web_scripts(
         }}
 
         function poolCoreServices(pool) {{
+            if (pool && Array.isArray(pool.core_services)) {{
+                return pool.core_services.map(function(service) {{
+                    return String(service || '').trim();
+                }}).filter(function(service) {{
+                    return service === 'telegram' || service === 'youtube';
+                }});
+            }}
+            return ['telegram', 'youtube'];
+        }}
+
+        function poolTableCoreServices() {{
             return ['telegram', 'youtube'];
         }}
 
@@ -1075,7 +1193,13 @@ def render_web_scripts(
         }}
 
         function poolPanelCoreServices(proto) {{
-            return ['telegram', 'youtube'];
+            const panel = document.querySelector('[data-protocol-panel="' + proto + '"]');
+            if (panel && panel.dataset.coreServicesLoaded === '1') {{
+                return String(panel.dataset.coreServices || '').split(',').map(function(item) {{
+                    return item.trim();
+                }}).filter(Boolean);
+            }}
+            return null;
         }}
 
         function updatePoolSortOptions(proto) {{
@@ -1607,11 +1731,13 @@ def render_web_scripts(
                 return;
             }}
             const rows = pool.rows || [];
-            const coreServices = poolCoreServices(pool);
+            const statusCoreServices = poolCoreServices(pool);
+            const coreServices = poolTableCoreServices();
             const checks = poolCustomChecks(pool);
             const panel = body.closest('[data-protocol-panel]');
             if (panel) {{
-                panel.dataset.coreServices = coreServices.join(',');
+                panel.dataset.coreServices = statusCoreServices.join(',');
+                panel.dataset.coreServicesLoaded = '1';
             }}
             syncPoolCustomCheckColumns(proto, checks);
             updatePoolSortOptions(proto);
@@ -1669,11 +1795,13 @@ def render_web_scripts(
                 return;
             }}
             const rows = pool.rows || [];
-            const coreServices = poolCoreServices(pool);
+            const statusCoreServices = poolCoreServices(pool);
+            const coreServices = poolTableCoreServices();
             const checks = poolCustomChecks(pool);
             const panel = body.closest('[data-protocol-panel]');
             if (panel) {{
-                panel.dataset.coreServices = coreServices.join(',');
+                panel.dataset.coreServices = statusCoreServices.join(',');
+                panel.dataset.coreServicesLoaded = '1';
             }}
             syncPoolCustomCheckColumns(proto, checks);
             updatePoolSortOptions(proto);
@@ -1739,6 +1867,7 @@ def render_web_scripts(
                 }}
             }});
             applyPoolView(proto, true);
+            applyProtocolPoolStatusOverride(proto);
         }}
 
         function updatePoolStatus(pools) {{
@@ -1761,6 +1890,7 @@ def render_web_scripts(
                 }} else {{
                     updatePoolRows(proto, pools[proto]);
                 }}
+                applyProtocolPoolStatusOverride(proto);
             }});
         }}
 
@@ -2048,12 +2178,14 @@ def render_web_scripts(
             }}, Math.max(0, Number(delayMs || 0)));
         }}
 
-        function updateProtocolStatus(proto, status) {{
+        function updateProtocolStatus(proto, status, poolOverride) {{
             const card = document.querySelector('[data-protocol-card="' + proto + '"]');
             if (!card || !status) {{
                 return;
             }}
             const badge = card.querySelector('[data-protocol-status-label]');
+            const isLiveStatus = status.endpoint_ok !== undefined && status.endpoint_ok !== null;
+            card.dataset.protocolLiveStatus = isLiveStatus ? '1' : '0';
             if (badge) {{
                 badge.className = 'key-status-badge key-status-' + (status.tone || 'warn');
                 badge.innerHTML = status.label || 'Проверяется';
@@ -2064,7 +2196,10 @@ def render_web_scripts(
             }}
             const icons = card.querySelector('[data-protocol-status-icons]');
             if (icons) {{
-                icons.innerHTML = protocolIcons(status);
+                icons.innerHTML = status.icons || protocolIcons(status);
+            }}
+            if (!poolOverride && !isLiveStatus) {{
+                applyProtocolPoolStatusOverride(proto);
             }}
         }}
 
@@ -2578,6 +2713,7 @@ def render_web_scripts(
                 }}
             }});
             applyPoolView(proto, true);
+            applyProtocolPoolStatusOverride(proto, true);
         }}
 
         function setButtonBusy(button, busy) {{

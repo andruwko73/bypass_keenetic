@@ -1,3 +1,11 @@
+<a name="1.926"></a>
+# [1.926] - 7 Jul 2026
+
+- Restores Telegram, YouTube, and custom-service icons in the active key-pool status without letting optional service failures change the route-scoped protocol status.
+- Renders Telegram and YouTube headers in the lightweight pool table before lazy pool data loads, keeping mobile rows aligned across all protocols.
+- Keeps live protocol status text intact while merging the latest active-pool service icons after the pool is loaded.
+- Keeps compact router health notes cached for DNS, proxy ports, and TPROXY calls, and records lightweight Telegram probe results without importing heavy pool modules.
+
 <a name="1.925"></a>
 # [1.925] - 7 Jul 2026
 

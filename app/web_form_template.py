@@ -4,7 +4,7 @@ from web_template_styles import render_web_styles
 from web_template_scripts import render_web_scripts
 
 
-ASSET_CACHE_REVISION = 'protocol-check-async-1866-1'
+ASSET_CACHE_REVISION = 'route-core-services-1925-4'
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):

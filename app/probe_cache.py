@@ -591,7 +591,7 @@ def record_key_probe(
 ):
     with _cache_lock:
         cache = load_key_probe_cache()
-        if update_key_probe_cache_entry(
+        changed = update_key_probe_cache_entry(
             cache,
             proto,
             key_value,
@@ -604,8 +604,10 @@ def record_key_probe(
             timeout_reason=timeout_reason,
             allow_recent_success_downgrade=allow_recent_success_downgrade,
             **quality_kwargs,
-        ):
+        )
+        if changed:
             save_key_probe_cache(cache)
+        return changed
 
 
 def key_probe_is_fresh(entry, now=None, custom_checks=None):

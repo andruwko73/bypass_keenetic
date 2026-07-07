@@ -990,6 +990,8 @@ class RouterHealthRuntime:
                 return dict(payload)
             ndmc_cached = self._ndmc_cache.get('payload') if isinstance(self._ndmc_cache, dict) else None
         related_processes = self._related_process_snapshot(now, probe_running)
+        dns_health = self._dns_snapshot(now)
+        core_proxy_health = self._core_proxy_snapshot(now)
         payload = build_router_health_payload(
             meminfo=read_proc_meminfo(),
             ndmc_system=ndmc_cached if isinstance(ndmc_cached, dict) else {},
@@ -1003,8 +1005,8 @@ class RouterHealthRuntime:
             temporary_xray_rss_kb=related_processes.get('temporary_xray_rss_kb') or 0,
             youtube_prefetch_rss_kb=related_processes.get('youtube_prefetch_rss_kb') or 0,
             background_worker_rss_kb=related_processes.get('background_worker_rss_kb') or 0,
-            dns_health={},
-            core_proxy_health={},
+            dns_health=dns_health,
+            core_proxy_health=core_proxy_health,
             flash_storage=read_flash_storage(),
         )
         payload['health_scope'] = 'compact'

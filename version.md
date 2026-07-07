@@ -1,3 +1,7 @@
+*v1.926 (7 Jul 2026) -* main
+
+*Restores complete key-pool service status icons on mobile and desktop, keeps route-scoped status decisions separate from displayed successful checks, preserves router route notes in compact health snapshots, and records lightweight probe updates without importing heavy pool modules.*
+
 *v1.925 (7 Jul 2026) -* main
 
 *Keeps the startup header status on a light active snapshot instead of a false Telegram warning, preserves checked pool totals when worker summary falls back, moves route tools into a short-lived worker, and trims repeated service-intersection matching while keeping router idle CPU/RSS stable.*

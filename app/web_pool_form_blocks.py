@@ -1,5 +1,7 @@
 import html
 
+from web_status_builder import cached_protocol_status as _cached_protocol_status
+
 from probe_cache import youtube_probe_state
 
 
@@ -376,6 +378,7 @@ def render_protocol_panel(
     pool_probe_pending=False,
     defer_pool_rows=False,
     defer_check_content=False,
+    core_services=None,
 ):
     active_class = ' active' if active else ''
     safe_key_name = html.escape(key_name, quote=True)
@@ -385,6 +388,13 @@ def render_protocol_panel(
     safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
     safe_label = html.escape(status_info.get('label', ''))
     safe_details = html.escape(_display_note_text(status_info.get('details', '')))
+    live_status = '1' if status_info.get('endpoint_ok') is not None else '0'
+    if core_services is None:
+        safe_core_services = ''
+        core_services_loaded = '0'
+    else:
+        safe_core_services = html.escape(','.join(str(item or '').strip() for item in core_services if str(item or '').strip()), quote=True)
+        core_services_loaded = '1'
     pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_pending else ' aria-disabled="false"'
     pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_pending else ' disabled aria-disabled="true"'
     subtabs = [('key', 'Ключ и подписка')]
@@ -533,7 +543,7 @@ def render_protocol_panel(
             {custom_check_card_html}
             {check_probe_form_html}
         </div>'''
-    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
+    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}" data-protocol-live-status="{live_status}" data-core-services="{safe_core_services}" data-core-services-loaded="{core_services_loaded}">
         <div class="workspace-head">
             <div>
                 <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
@@ -652,6 +662,7 @@ def render_protocol_tabs_and_panels(
         tab_count = len(pool_keys) if enable_key_pool else (1 if current_keys.get(key_name, '').strip() else 0)
         active_status_icons = ''
         pool_items_html = ''
+        protocol_core_services = None
         tabs.append(
             render_protocol_tab(
                 key_name,
@@ -668,10 +679,30 @@ def render_protocol_tabs_and_panels(
             current_probe = key_probe_cache.get(hash_key(current_keys.get(key_name, '')), {})
             if not isinstance(current_probe, dict):
                 current_probe = {}
-            api_ok = status_info.get('api_ok', False)
-            current_tg_ok = api_ok or bool(current_probe.get('tg_ok'))
-            current_yt_ok = bool(status_info.get('yt_ok', current_probe.get('yt_ok', False)))
             custom_states = status_info.get('custom') or custom_probe_states(current_probe, protocol_custom_checks)
+            required_services = tuple(
+                service_id for service_id in ('telegram', 'youtube')
+                if core_applicability.get(service_id, True)
+            )
+            protocol_core_services = required_services
+            has_probe_result = (
+                'tg_ok' in current_probe or
+                'yt_ok' in current_probe or
+                any(state in ('ok', 'fail') for state in custom_states.values())
+            )
+            status_has_live_result = status_info.get('endpoint_ok') is not None
+            if has_probe_result and not status_has_live_result:
+                status_info = _cached_protocol_status(
+                    current_keys.get(key_name, ''),
+                    current_probe,
+                    protocol_custom_checks,
+                    custom_states,
+                    api_required='telegram' in required_services,
+                    required_services=required_services,
+                )
+            current_tg_ok = bool(status_info.get('api_ok', False))
+            current_yt_ok = bool(status_info.get('yt_ok', False)) or status_info.get('yt_state') == 'warn'
+            custom_states = status_info.get('custom') or custom_states
             active_status_icons = ''.join([
                 telegram_icon_html(opacity=1.0) if current_tg_ok else '',
                 youtube_icon_html(opacity=1.0) if current_yt_ok else '',
@@ -726,6 +757,7 @@ def render_protocol_tabs_and_panels(
                 pool_probe_pending=pool_probe_pending,
                 defer_pool_rows=defer_pool_rows,
                 defer_check_content=defer_check_content,
+                core_services=protocol_core_services,
             )
         )
     return ''.join(tabs), ''.join(panels)

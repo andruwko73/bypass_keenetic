@@ -117,6 +117,8 @@ def _light_protocol_panel_html(
     active_status_icons,
     csrf_input_html='',
     subscription_settings=None,
+    telegram_icon_html=None,
+    youtube_icon_html=None,
     active=False,
     enable_key_pool=True,
     enable_custom_checks=True,
@@ -131,6 +133,9 @@ def _light_protocol_panel_html(
     safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
     safe_label = html.escape(status_info.get('label', ''))
     safe_details = html.escape(str(status_info.get('details', '') or '').strip().rstrip('.'))
+    telegram_icon_html = telegram_icon_html or (lambda opacity=1.0: '')
+    youtube_icon_html = youtube_icon_html or (lambda opacity=1.0: '')
+    live_status = '1' if status_info.get('endpoint_ok') is not None else '0'
     pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_pending else ' aria-disabled="false"'
     pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_pending else ' disabled aria-disabled="true"'
     subtabs = [('key', 'Ключ и подписка')]
@@ -210,7 +215,7 @@ def _light_protocol_panel_html(
                         <col class="pool-col-checked">
                         <col class="pool-col-actions">
                     </colgroup>
-                    <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head" data-core-service-head="telegram"></th><th class="pool-icon-head" data-core-service-head="youtube"></th><th class="pool-icon-head pool-custom-head" data-custom-check-head></th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
+                    <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head" data-core-service-head="telegram">{telegram_icon_html(opacity=1.0)}</th><th class="pool-icon-head" data-core-service-head="youtube">{youtube_icon_html(opacity=1.0)}</th><th class="pool-icon-head pool-custom-head" data-custom-check-head></th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
                     <tbody data-pool-body="{safe_key_name}" data-pool-deferred="1">{_pool_loading_row_html(6)}</tbody>
                 </table>
             </div>
@@ -229,7 +234,7 @@ def _light_protocol_panel_html(
                 <p class="status-note">Loading...</p>
             </div>
         </div>'''
-    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}">
+    return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}" data-protocol-live-status="{live_status}" data-core-services="" data-core-services-loaded="0">
         <div class="workspace-head">
             <div>
                 <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
@@ -301,6 +306,8 @@ def render_light_protocol_tabs_and_panels(
             active_status_icons=_light_status_icons(status_info, telegram_icon_html, youtube_icon_html),
             csrf_input_html=csrf_input_html,
             subscription_settings=subscription_settings.get(key_name, {}),
+            telegram_icon_html=telegram_icon_html,
+            youtube_icon_html=youtube_icon_html,
             active=active,
             enable_key_pool=enable_key_pool,
             enable_custom_checks=enable_custom_checks,

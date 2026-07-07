@@ -5,7 +5,7 @@
 #  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
 #  Демо-бот: https://t.me/keenetic_dns_bot
 #
-#  Файл: bot.py, Версия v1.925, последнее изменение: 07.07.2026
+#  Файл: bot.py, Версия v1.926, последнее изменение: 07.07.2026
 
 import subprocess
 import os
@@ -235,6 +235,8 @@ _telegram_call_learning_module = None
 _youtube_edge_prefetch_module = None
 
 _KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
+_KEY_PROBE_CACHE_SCHEMA_VERSION = 8
+_KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 _POOL_SUMMARY_LAST_PATH = '/opt/etc/bot/pool_summary_last.json'
 _YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
 _YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS = 1500
@@ -476,7 +478,74 @@ def _load_key_probe_cache(*args, **kwargs):
 
 
 def _record_key_probe(*args, **kwargs):
-    return _probe_cache().record_key_probe(*args, **kwargs)
+    changed = _probe_cache().record_key_probe(*args, **kwargs)
+    if changed:
+        try:
+            _invalidate_pool_data_cache()
+        except NameError:
+            pass
+    return changed
+
+
+def _record_light_telegram_probe(key_name, key_value, tg_ok, *, now=None):
+    key_value = str(key_value or '').strip()
+    if tg_ok is None or not key_value:
+        return False
+    cache = _read_json_file(_KEY_PROBE_CACHE_PATH, {}) or {}
+    if not isinstance(cache, dict):
+        cache = {}
+    key_id = _hash_key(key_value)
+    entry = cache.get(key_id, {})
+    if not isinstance(entry, dict):
+        entry = {}
+    else:
+        entry = dict(entry)
+    now = time.time() if now is None else float(now)
+    try:
+        previous_ts = float(entry.get('ts') or 0)
+    except (TypeError, ValueError):
+        previous_ts = 0.0
+    value = bool(tg_ok)
+    if (
+        value is False and
+        previous_ts and
+        now - previous_ts < _KEY_PROBE_SUCCESS_DOWNGRADE_GRACE and
+        entry.get('tg_ok') is True
+    ):
+        return False
+
+    changed = False
+    if entry.get('schema') != _KEY_PROBE_CACHE_SCHEMA_VERSION:
+        entry['schema'] = _KEY_PROBE_CACHE_SCHEMA_VERSION
+        changed = True
+    if entry.get('proto') != key_name:
+        entry['proto'] = key_name
+        changed = True
+    if entry.get('tg_ok') is not value:
+        entry['tg_ok'] = value
+        changed = True
+    if value is not True and 'tg_latency_ms' in entry:
+        entry.pop('tg_latency_ms', None)
+        changed = True
+    if not changed:
+        return False
+
+    entry['ts'] = now
+    cache[key_id] = entry
+    _write_json_file(_KEY_PROBE_CACHE_PATH, cache)
+    _invalidate_pool_data_cache()
+    return True
+
+
+def _load_light_key_probe_cache():
+    cache = _read_json_file(_KEY_PROBE_CACHE_PATH, {}) or {}
+    if not isinstance(cache, dict):
+        return {}
+    return {
+        key_id: dict(entry)
+        for key_id, entry in cache.items()
+        if isinstance(entry, dict) and entry.get('schema') in (6, 7, _KEY_PROBE_CACHE_SCHEMA_VERSION)
+    }
 
 
 def _youtube_probe_state(entry):
@@ -8387,18 +8456,38 @@ def _cached_protocol_status_for_key(
     )
 
 
-def _light_cached_protocol_status_for_key(key_name, key_value):
+def _light_youtube_route_protocol():
+    try:
+        return _youtube_route_protocol()
+    except Exception:
+        return 'vless2'
+
+
+def _light_required_services_for_protocol(key_name, *, youtube_proto=None):
+    services = []
+    if _app_mode_telegram_enabled() and key_name == proxy_mode:
+        services.append('telegram')
+    if youtube_proto is None:
+        youtube_proto = _light_youtube_route_protocol()
+    if key_name == youtube_proto:
+        services.append('youtube')
+    return tuple(services)
+
+
+def _light_cached_protocol_status_for_key(key_name, key_value, key_probe_cache=None, *, youtube_proto=None):
     key_value = str(key_value or '').strip()
     if not key_value:
         return _status_empty_protocol_status()
-    api_required = bool(_app_mode_telegram_enabled() and key_name == proxy_mode)
+    required_services = _light_required_services_for_protocol(key_name, youtube_proto=youtube_proto)
+    api_required = 'telegram' in required_services
+    probe = (key_probe_cache or {}).get(_hash_key(key_value), {})
     return _status_cached_protocol_status(
         key_value,
-        {},
+        probe if isinstance(probe, dict) else {},
         (),
         {},
         api_required=api_required,
-        required_services=('telegram',) if api_required else None,
+        required_services=required_services,
     )
 
 
@@ -8440,6 +8529,11 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
         api_ok = False
         api_message = ''
     api_transient = bool(api_required and (not api_ok) and _is_transient_telegram_api_failure(api_message))
+    if api_required and not api_transient:
+        try:
+            _record_light_telegram_probe(key_name, key_value, api_ok)
+        except Exception as exc:
+            _write_runtime_log(f'Ошибка обновления лёгкого кэша Telegram для {key_name}: {exc}')
 
     return _status_active_protocol_status(
         endpoint_ok=endpoint_ok,
@@ -11679,6 +11773,8 @@ def _active_mode_status_snapshot_from_base(
         route_states = None
     if not pool_locked:
         key_probe_cache = None
+        light_key_probe_cache = None
+        light_youtube_proto = None
         for key_name, key_value in (current_keys or {}).items():
             if key_name == proxy_mode:
                 continue
@@ -11695,7 +11791,16 @@ def _active_mode_status_snapshot_from_base(
                         route_states=route_states,
                     )
                 else:
-                    protocols[key_name] = _light_cached_protocol_status_for_key(key_name, key_value)
+                    if light_key_probe_cache is None:
+                        light_key_probe_cache = _load_light_key_probe_cache()
+                    if light_youtube_proto is None:
+                        light_youtube_proto = _light_youtube_route_protocol()
+                    protocols[key_name] = _light_cached_protocol_status_for_key(
+                        key_name,
+                        key_value,
+                        key_probe_cache=light_key_probe_cache,
+                        youtube_proto=light_youtube_proto,
+                    )
             except Exception as exc:
                 _write_runtime_log(f'Ошибка восстановления кешированного статуса {key_name}: {exc}')
 
@@ -11717,6 +11822,8 @@ def _active_mode_status_snapshot_from_base(
                     protocols[proxy_mode] = _light_cached_protocol_status_for_key(
                         proxy_mode,
                         current_keys.get(proxy_mode, ''),
+                        key_probe_cache=_load_light_key_probe_cache(),
+                        youtube_proto=_light_youtube_route_protocol(),
                     )
             else:
                 if include_route_details:

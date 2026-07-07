@@ -736,6 +736,88 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     assert runtime._related_process_cache['payload'] is None
 
 
+def test_router_health_runtime_compact_snapshot_keeps_route_notes_cached():
+    calls = {'dns': 0, 'core': 0, 'call': 0}
+    original = {
+        'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
+        'read_proc_text': router_health_runtime.read_proc_text,
+        'read_cpu_stat': router_health_runtime.read_cpu_stat,
+        'read_flash_storage': router_health_runtime.read_flash_storage,
+        'process_rss_kb': router_health_runtime.process_rss_kb,
+        'related_program_process_snapshot': router_health_runtime.related_program_process_snapshot,
+        'read_dns_health': router_health_runtime.read_dns_health,
+        'telegram_call_proxy_health': router_health_runtime.telegram_call_proxy_health,
+        'xray_compat_runtime': router_health_runtime.xray_compat_runtime,
+    }
+
+    def fake_dns(**kwargs):
+        calls['dns'] += 1
+        return {
+            'backend': 'ndnproxy',
+            'listener_backend': 'ndnproxy',
+            'dnsmasq_state': 'dead',
+            'ipset_counts': {'unblockvless': 12, 'unblockvless2': 34},
+            'ipset_updated_at': 1000,
+            'ipset_refresh_age_seconds': 90,
+            'ipset_refresh_status': 'success',
+        }
+
+    def fake_core_health():
+        calls['core'] += 1
+        return {'ok': True, 'xray_state': 'alive', 'ports': {10811: True, 10812: True}}
+
+    def fake_call_health():
+        calls['call'] += 1
+        return {
+            'ok': True,
+            'enabled': True,
+            'tproxy_enabled': True,
+            'chain_ok': True,
+            'services': ['Telegram', 'WhatsApp', 'Discord'],
+            'protocols': ['vless'],
+            'ports': {'vless': 11812},
+            'port_states': {'11812': True},
+        }
+
+    now = [100.0]
+    try:
+        router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512000, 'MemAvailable': 256000, 'MemFree': 128000}
+        router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
+        router_health_runtime.read_cpu_stat = lambda stat_path='/proc/stat': None
+        router_health_runtime.read_flash_storage = lambda: {}
+        router_health_runtime.process_rss_kb = lambda pid='self': 64000
+        router_health_runtime.related_program_process_snapshot = lambda probe_running=False: {'xray_rss_kb': 20 * 1024}
+        router_health_runtime.read_dns_health = fake_dns
+        router_health_runtime.telegram_call_proxy_health = fake_call_health
+        router_health_runtime.xray_compat_runtime = py_types.SimpleNamespace(
+            core_proxy_health=fake_core_health,
+            core_proxy_note=lambda health: 'Прокси: Xray работает на портах: 10811, 10812',
+        )
+        runtime = router_health_runtime.RouterHealthRuntime(
+            cache_ttl=0,
+            time_provider=lambda: now[0],
+            core_proxy_cache_ttl=60,
+            dns_cache_ttl=60,
+            related_process_cache_ttl=45,
+        )
+        first = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True)
+        now[0] += 10
+        second = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True)
+    finally:
+        for name, value in original.items():
+            setattr(router_health_runtime, name, value)
+
+    assert 'DNS: ndnproxy' in first['dns_note']
+    assert 'VLESS=12' in first['dns_note']
+    assert 'VLESS2=34' in first['dns_note']
+    assert first['core_proxy_note'] == 'Прокси: Xray работает на портах: 10811, 10812'
+    assert first['telegram_call_note'] == 'Звонки через TPROXY работают для Telegram/WhatsApp/Discord на порте: Vless 11812'
+    assert second['dns_note'] == first['dns_note']
+    assert second['core_proxy_note'] == first['core_proxy_note']
+    assert second['telegram_call_note'] == first['telegram_call_note']
+    assert calls == {'dns': 1, 'core': 1, 'call': 1}
+
+
 def test_router_health_runtime_smooths_short_cpu_spikes():
     original = {
         'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
@@ -3703,10 +3785,20 @@ def test_active_status_refresh_skips_heavy_pool_modules():
         "bot._check_telegram_api_for_background = lambda *args, **kwargs: (True, 'ok')\n"
         "bot._check_telegram_api_through_proxy = lambda *args, **kwargs: (True, 'ok')\n"
         "bot._key_requires_xray = lambda *args, **kwargs: False\n"
+        f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
         "current_keys = {'vless': 'active-key-placeholder', 'vless2': 'other-key-placeholder'}\n"
+        "with open(bot._KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as file:\n"
+        "    json.dump({bot._hash_key(current_keys['vless2']): {'schema': 8, 'proto': 'vless2', 'tg_ok': False, 'yt_ok': True, 'yt_stability': 'stable', 'ts': 123}}, file)\n"
         "snapshot = bot._active_mode_status_snapshot(current_keys, background_checks=True)\n"
         "assert snapshot['protocols']['vless']['api_ok'] is True\n"
         "assert 'YouTube:' not in snapshot['protocols']['vless']['details']\n"
+        "assert snapshot['protocols']['vless2']['tone'] == 'ok'\n"
+        "assert snapshot['protocols']['vless2']['yt_ok'] is True\n"
+        "assert snapshot['protocols']['vless2']['api_ok'] is False\n"
+        "cache = json.load(open(bot._KEY_PROBE_CACHE_PATH, encoding='utf-8'))\n"
+        "active_entry = cache[bot._hash_key(current_keys['vless'])]\n"
+        "assert active_entry['proto'] == 'vless'\n"
+        "assert active_entry['tg_ok'] is True\n"
         f"mods = {heavy_modules!r}\n"
         "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))\n"
     )
@@ -8178,6 +8270,18 @@ def test_web_form_blocks_helpers():
     assert 'restart_services' in command_buttons
     assert 'csrf_token' in command_buttons
     router_buttons = web_form_blocks.render_router_command_buttons('<input name="csrf_token">', dns_override_active=True)
+    light_tabs, light_panels = web_form_blocks.render_light_protocol_tabs_and_panels(
+        [('vless', 'Vless 1', 3, 'vless://...')],
+        {'vless': 'vless://sample'},
+        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details', 'endpoint_ok': True}},
+        '<input name="csrf_token" value="token">',
+        key_pools={'vless': ['vless://sample']},
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+    )
+    assert 'data-protocol-target="vless"' in light_tabs
+    assert 'data-core-service-head="telegram">TG</th>' in light_panels
+    assert 'data-core-service-head="youtube">YT</th>' in light_panels
     assert 'DNS Override ВКЛ' in router_buttons and 'success-button' in router_buttons
     assert router_buttons.index('value="update"') < router_buttons.index('value="rollback_update"')
     tabs, panels = web_form_blocks.render_unblock_lists(
@@ -8446,6 +8550,8 @@ def test_web_pool_form_blocks_helpers():
     )
     assert 'protocol-tab active' in tabs_html
     assert 'protocol-workspace active' in panels_html
+    assert 'data-core-services-loaded="0"' in panels_html
+    assert 'data-protocol-live-status="0"' in panels_html
     assert 'vless://sample' in panels_html
     assert 'csrf_token' in panels_html
     lazy_tabs_html, lazy_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
@@ -8518,7 +8624,7 @@ def test_web_pool_form_blocks_helpers():
     status_tabs_html, status_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
         [('vless', 'Vless 1', 3, 'vless://...')],
         {'vless': 'vless://sample'},
-        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details', 'api_ok': True, 'yt_ok': True}},
+        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details', 'endpoint_ok': True, 'api_ok': True, 'yt_ok': False}},
         '<input name="csrf_token" value="token">',
         key_pools={'vless': ['vless://sample']},
         key_probe_cache={'vless://sample': {'tg_ok': False, 'yt_ok': True}},
@@ -8527,7 +8633,26 @@ def test_web_pool_form_blocks_helpers():
         youtube_icon_html=lambda opacity=1.0: 'YT',
     )
     assert 'protocol-tab active' in status_tabs_html
-    assert '<span class="key-status-icons" data-protocol-status-icons>TGYT</span>' in status_panels_html
+    assert 'data-protocol-live-status="1"' in status_panels_html
+    assert '<span class="key-status-icons" data-protocol-status-icons>TG</span>' in status_panels_html
+    assert 'key-status-ok' in status_panels_html
+    vless2_status_tabs_html, vless2_status_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+        [('vless2', 'Vless 2', 3, 'vless://...')],
+        {'vless2': 'checked-key-value'},
+        {'vless2': {'tone': 'empty', 'label': 'Not checked', 'details': 'empty', 'api_ok': False, 'yt_ok': False}},
+        '<input name="csrf_token" value="token">',
+        key_pools={'vless2': ['checked-key-value']},
+        key_probe_cache={'checked-key-value': {'tg_ok': False, 'yt_ok': True}},
+        core_service_applicability_for_protocol=lambda protocol: {'telegram': False, 'youtube': True},
+        telegram_icon_html=lambda opacity=1.0: 'TG',
+        youtube_icon_html=lambda opacity=1.0: 'YT',
+    )
+    assert 'protocol-tab active' in vless2_status_tabs_html
+    assert 'data-core-services="youtube"' in vless2_status_panels_html
+    assert 'data-core-services-loaded="1"' in vless2_status_panels_html
+    assert 'key-status-ok' in vless2_status_panels_html
+    assert 'key-status-empty' not in vless2_status_panels_html
+    assert '<span class="key-status-icons" data-protocol-status-icons>YT</span>' in vless2_status_panels_html
 
 
 def test_web_status_builder_helpers():
@@ -9277,6 +9402,16 @@ def test_web_template_scripts_helpers():
     assert "state === 'warn'" in scripts
     assert 'service-probe-warn' in scripts
     assert 'service-probe-icon-warn' in scripts
+    assert 'function poolCoreServices(pool)' in scripts
+    assert 'Array.isArray(pool.core_services)' in scripts
+    assert 'function poolTableCoreServices()' in scripts
+    assert "const statusCoreServices = poolCoreServices(pool);" in scripts
+    assert "const coreServices = poolTableCoreServices();" in scripts
+    assert "if (tgState === 'ok' || tgState === 'warn') {" in scripts
+    assert "icons += serviceIcon(TELEGRAM_ICON_SRC, 'Telegram');" in scripts
+    assert "icons += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');" in scripts
+    assert "card.dataset.protocolLiveStatus === '1'" in scripts
+    assert "icons.innerHTML = status.icons;" in scripts
     assert 'function poolCustomChecks(pool)' in scripts
     assert 'pool && Array.isArray(pool.custom_checks)' in scripts
     assert 'renderCustomBadges(row.custom, checks)' in scripts
