@@ -1,5 +1,4 @@
-def render_web_styles(TELEGRAM_SVG_B64=''):
-    return '''        :root{
+        :root{
             --bg:#12161d;
             --bg-accent:#1a2330;
             --surface:#171e28;
@@ -341,12 +340,12 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
         .topbar-status-copy strong{min-width:0;color:#edf5fb;font-size:12px;font-weight:800;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
         .topbar-status-copy span{display:-webkit-box;min-width:0;color:#b9c6d3;font-size:11px;font-weight:700;line-height:1.22;max-height:calc(1.22em * 2);white-space:normal;overflow:hidden;text-overflow:ellipsis;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;word-break:normal;}
         .topbar-status-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;border-radius:7px;background-color:rgba(48,191,181,.14);background-repeat:no-repeat;background-position:center;background-size:16px 16px;border:1px solid rgba(78,216,205,.28);}
-        .topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,{TELEGRAM_SVG_B64}");}
+        .topbar-status-icon-telegram{background-image:url("/static/telegram.svg");}
         .topbar-status-ok{border-color:rgba(78,216,205,.36);background:rgba(31,122,106,.12);}
         .topbar-status-info{border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);}
         .topbar-status-warn{border-color:rgba(211,165,87,.42);background:rgba(78,52,25,.32);}
         .topbar-status-danger{border-color:rgba(212,107,95,.46);background:rgba(84,35,39,.34);}
-        .attention-telegram-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:6px;background-color:rgba(48,191,181,.14);background-image:url("data:image/svg+xml;base64,{TELEGRAM_SVG_B64}");background-repeat:no-repeat;background-position:center;background-size:13px 13px;vertical-align:-4px;flex:none;}
+        .attention-telegram-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:6px;background-color:rgba(48,191,181,.14);background-image:url("/static/telegram.svg");background-repeat:no-repeat;background-position:center;background-size:13px 13px;vertical-align:-4px;flex:none;}
         .workspace-layout{grid-template-columns:138px minmax(0,1fr);gap:12px;}
         .side-nav{top:86px;padding:9px;gap:7px;}
         .nav-item{height:var(--control-height);min-height:var(--control-height);padding:0 10px;color:#c7d2df;}
@@ -1618,4 +1617,3 @@ def render_web_styles(TELEGRAM_SVG_B64=''):
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }
-'''.replace('{TELEGRAM_SVG_B64}', str(TELEGRAM_SVG_B64 or ''))

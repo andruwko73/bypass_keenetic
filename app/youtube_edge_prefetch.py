@@ -257,6 +257,11 @@ def resolve_host_addresses(
                     add(item[4][0])
                 except Exception:
                     continue
+            # The router DNS has already applied the active dnsmasq/ipset
+            # policy. External resolvers are fallback only, not a parallel
+            # source that can race it with a different CDN answer.
+            if addresses:
+                return addresses
             continue
 
         server_added = 0
@@ -277,6 +282,8 @@ def resolve_host_addresses(
             server_added += len(addresses) - before
             if server_added:
                 break
+        if server_added:
+            return addresses
     return addresses
 
 

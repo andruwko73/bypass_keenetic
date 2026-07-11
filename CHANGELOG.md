@@ -1,3 +1,11 @@
+<a name="1.935"></a>
+# [1.935] - 11 Jul 2026
+
+- Moves transient health, failover and full pool-probe work into bounded runners, preserves the active key during checks, and prevents temporary-worker cleanup from affecting resident services.
+- Serves ready JavaScript and CSS assets instead of compiling interface templates for requests; pool/status responses retain the last trustworthy service results during lightweight refreshes.
+- Consolidates YouTube route ownership and priority ipset handling for every supported protocol, making route application event-driven rather than permanently warmed.
+- Reduces repeated DNS/ipset, router-health and call-learning work while retaining simple, advanced and web-only mode behavior, TPROXY calls, subscriptions and clean-install compatibility.
+
 <a name="1.934"></a>
 # [1.934] - 8 Jul 2026
 

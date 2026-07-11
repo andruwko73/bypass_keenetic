@@ -273,9 +273,12 @@ async function assertEventHistoryScrollLocked(page, label) {
 }
 
 async function assertNoBrokenImages(page, label) {
-  await page.waitForFunction(() => (
-    Array.from(document.images).every((img) => img.complete)
-  ), null, { timeout: 5000 }).catch(() => {});
+  const imagesReady = () => Array.from(document.images).every((img) => (
+    img.complete && img.naturalWidth > 0 && img.naturalHeight > 0
+  ));
+  await page.waitForFunction(imagesReady, null, { timeout: 15000 });
+  await page.waitForTimeout(300);
+  await page.waitForFunction(imagesReady, null, { timeout: 15000 });
   const broken = await page.evaluate(() => (
     Array.from(document.images)
       .filter((img) => !img.complete || img.naturalWidth < 1 || img.naturalHeight < 1)
@@ -404,8 +407,37 @@ async function assertProtocolServiceIconsStableAfterIdleRefresh(page, protocol, 
   }
   await page.waitForTimeout(200);
   const after = await protocolHeaderIconSnapshot(page, protocol);
+    if (after.count < minCount || after.count < before.count) {
+        throw new Error(`${label}: protocol icons degraded after idle live status ${JSON.stringify({ before, after })}`);
+    }
+}
+
+async function assertProtocolServiceIconsStableAfterPoolRefresh(page, protocol, minCount, label) {
+  await page.waitForFunction(({ proto, expected }) => {
+    const container = document.querySelector(`[data-protocol-card="${proto}"] [data-protocol-status-icons]`);
+    return container && Array.from(container.children).filter((node) => {
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && box.width >= 2 && box.height >= 2;
+    }).length >= expected;
+  }, { proto: protocol, expected: minCount }, { timeout: 10000 });
+  const before = await protocolHeaderIconSnapshot(page, protocol);
+  const poolResponse = page.waitForResponse((response) => (
+    response.url().includes('/api/pools') && response.ok()
+  ), { timeout: 15000 }).catch(() => null);
+  await page.evaluate((proto) => {
+    if (window.__bypassTestHooks && typeof window.__bypassTestHooks.refreshPoolData === 'function') {
+      window.__bypassTestHooks.refreshPoolData(0, [proto]);
+    }
+  }, protocol);
+  const response = await poolResponse;
+  if (!response) {
+    throw new Error(`${label}: pool refresh did not run`);
+  }
+  await page.waitForTimeout(200);
+  const after = await protocolHeaderIconSnapshot(page, protocol);
   if (after.count < minCount || after.count < before.count) {
-    throw new Error(`${label}: protocol icons degraded after idle live status ${JSON.stringify({ before, after })}`);
+    throw new Error(`${label}: protocol icons degraded after pool refresh ${JSON.stringify({ before, after })}`);
   }
 }
 
@@ -718,6 +750,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     await assertActivePoolRowPinned(page, 'vless', `${name} vless pool order`);
     await assertProtocolServiceIconsStableAfterIdleRefresh(page, 'vless', 3, `${name} vless status icons idle refresh`);
+    await assertProtocolServiceIconsStableAfterPoolRefresh(page, 'vless', 3, `${name} vless status icons pool refresh`);
     await assertProtocolServiceIconsStableAfterLiveStatus(page, 'vless', 3, `${name} vless status icons apply refresh`);
     await clickLazyProtocol(page, 'vless2', name);
     await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();

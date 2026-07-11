@@ -161,8 +161,11 @@ install_static_assets() {
   static_dir="${BOT_RUNTIME_DIR}/static"
   icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
   mkdir -p "$static_dir/service-icons"
-  download_static_asset "static/telegram.png" "$static_dir/telegram.png"
-  download_static_asset "static/youtube.png" "$static_dir/youtube.png"
+  download_static_asset "static/app.css" "$static_dir/app.css" || return 1
+  download_static_asset "static/app.js" "$static_dir/app.js" || return 1
+  download_static_asset "static/telegram.svg" "$static_dir/telegram.svg"
+  download_static_asset "static/youtube.svg" "$static_dir/youtube.svg"
+  rm -f "$static_dir/telegram.png" "$static_dir/youtube.png"
   for icon in $icons; do
     download_static_asset "static/service-icons/${icon}.png" "$static_dir/service-icons/${icon}.png"
   done
@@ -823,7 +826,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md CHANGELOG.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md CHANGELOG.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -888,24 +891,6 @@ PY
 
 migrate_runtime_config_defaults() {
   [ -f "$BOT_CONFIG_PATH" ] || return 0
-  if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(65536|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^memory_watchdog_idle_restart_rss_kb[[:space:]]*=.*/memory_watchdog_idle_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
-  fi
-  grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_watchdog_idle_restart_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^memory_post_pool_restart_rss_kb[[:space:]]*=[[:space:]]*(61440|81920)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^memory_post_pool_restart_rss_kb[[:space:]]*=.*/memory_post_pool_restart_rss_kb = 71680/' "$BOT_CONFIG_PATH" || true
-  fi
-  if grep -Eq '^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=[[:space:]]*66560([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=.*/memory_post_pool_cleanup_target_rss_kb = 63488/' "$BOT_CONFIG_PATH" || true
-  fi
-  grep -Eq '^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_post_pool_cleanup_target_rss_kb = 63488\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^memory_post_pool_cleanup_target_program_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'memory_post_pool_cleanup_target_program_rss_kb = 102400\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=[[:space:]]*67584([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^web_response_cleanup_rss_kb[[:space:]]*=.*/web_response_cleanup_rss_kb = 61440/' "$BOT_CONFIG_PATH" || true
-  fi
-  if grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=[[:space:]]*300\.0([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^web_response_cleanup_min_interval_seconds[[:space:]]*=.*/web_response_cleanup_min_interval_seconds = 60.0/' "$BOT_CONFIG_PATH" || true
-  fi
   if grep -Eq '^memory_timeline_enabled[[:space:]]*=[[:space:]]*True([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^memory_timeline_enabled[[:space:]]*=.*/memory_timeline_enabled = False/' "$BOT_CONFIG_PATH" || true
   fi
@@ -956,39 +941,11 @@ migrate_runtime_config_defaults() {
   grep -Eq '^router_metrics_warn_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'router_metrics_warn_load1 = 3.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^web_pools_api_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_pools_api_cache_ttl = 45.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^service_route_intersections_cache_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'service_route_intersections_cache_ttl = 60.0\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
-  if grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=[[:space:]]*66560([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
-    sed -i 's/^web_response_light_cleanup_rss_kb[[:space:]]*=.*/web_response_light_cleanup_rss_kb = 61440/' "$BOT_CONFIG_PATH" || true
-  fi
-  grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_light_cleanup_rss_kb = 61440\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> "$BOT_CONFIG_PATH"
   if [ "$BOT_CONFIG_PATH" != "/opt/etc/bot_config.py" ] && [ -f "/opt/etc/bot_config.py" ]; then
-    if grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=[[:space:]]*(65536|81920)([[:space:]#]|$)' /opt/etc/bot_config.py; then
-      sed -i 's/^memory_watchdog_idle_restart_rss_kb[[:space:]]*=.*/memory_watchdog_idle_restart_rss_kb = 71680/' /opt/etc/bot_config.py || true
-    fi
     if grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=[[:space:]]*(65536|71680)([[:space:]#]|$)' /opt/etc/bot_config.py; then
       sed -i 's/^router_metrics_warn_bot_rss_kb[[:space:]]*=.*/router_metrics_warn_bot_rss_kb = 66560/' /opt/etc/bot_config.py || true
     fi
-    if grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=[[:space:]]*67584([[:space:]#]|$)' /opt/etc/bot_config.py; then
-      sed -i 's/^web_response_cleanup_rss_kb[[:space:]]*=.*/web_response_cleanup_rss_kb = 61440/' /opt/etc/bot_config.py || true
-    fi
-    if grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=[[:space:]]*300\.0([[:space:]#]|$)' /opt/etc/bot_config.py; then
-      sed -i 's/^web_response_cleanup_min_interval_seconds[[:space:]]*=.*/web_response_cleanup_min_interval_seconds = 60.0/' /opt/etc/bot_config.py || true
-    fi
-    grep -Eq '^memory_watchdog_idle_restart_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_watchdog_idle_restart_rss_kb = 71680\n' >> /opt/etc/bot_config.py
-    if grep -Eq '^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=[[:space:]]*66560([[:space:]#]|$)' /opt/etc/bot_config.py; then
-      sed -i 's/^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=.*/memory_post_pool_cleanup_target_rss_kb = 63488/' /opt/etc/bot_config.py || true
-    fi
-    grep -Eq '^memory_post_pool_cleanup_target_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_post_pool_cleanup_target_rss_kb = 63488\n' >> /opt/etc/bot_config.py
-    grep -Eq '^memory_post_pool_cleanup_target_program_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_post_pool_cleanup_target_program_rss_kb = 102400\n' >> /opt/etc/bot_config.py
     grep -Eq '^router_metrics_warn_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'router_metrics_warn_bot_rss_kb = 66560\n' >> /opt/etc/bot_config.py
-    grep -Eq '^memory_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'memory_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
-    grep -Eq '^web_response_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
-    if grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=[[:space:]]*66560([[:space:]#]|$)' /opt/etc/bot_config.py; then
-      sed -i 's/^web_response_light_cleanup_rss_kb[[:space:]]*=.*/web_response_light_cleanup_rss_kb = 61440/' /opt/etc/bot_config.py || true
-    fi
-    grep -Eq '^web_response_light_cleanup_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_light_cleanup_rss_kb = 61440\n' >> /opt/etc/bot_config.py
-    grep -Eq '^web_response_cleanup_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'web_response_cleanup_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^background_task_cpu_cache_ttl_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'background_task_cpu_cache_ttl_seconds = 20.0\n' >> /opt/etc/bot_config.py
     if grep -Eq '^background_task_max_cpu_percent[[:space:]]*=[[:space:]]*(65\.0|65)([[:space:]#]|$)' /opt/etc/bot_config.py; then
       sed -i 's/^background_task_max_cpu_percent[[:space:]]*=.*/background_task_max_cpu_percent = 45.0/' /opt/etc/bot_config.py || true
@@ -1642,7 +1599,8 @@ PY
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
     mkdir -p "$BOT_RUNTIME_DIR"
     install_runtime_modules $BOT_RUNTIME_MODULES
-    install_static_assets
+    install_static_assets || exit 1
+    rm -f "$BOT_RUNTIME_DIR/web_asset_builder.py" "$BOT_RUNTIME_DIR/web_template_styles.py" "$BOT_RUNTIME_DIR/web_template_scripts.py"
     ensure_runtime_legacy_paths
     generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
@@ -1721,8 +1679,6 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module custom_checks_store.py add_custom_check || exit 1
     stage_runtime_module service_catalog.py CUSTOM_CHECK_PRESETS || exit 1
     stage_runtime_module web_form_template.py render_web_form || exit 1
-    stage_runtime_module web_template_styles.py render_web_styles || exit 1
-    stage_runtime_module web_template_scripts.py render_web_scripts || exit 1
     stage_runtime_module web_form_blocks.py render_message_block || exit 1
     stage_runtime_module web_pool_form_blocks.py render_protocol_panel || exit 1
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
@@ -1841,7 +1797,8 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"
-    install_static_assets
+    install_static_assets || exit 1
+    rm -f "$BOT_RUNTIME_DIR/web_asset_builder.py" "$BOT_RUNTIME_DIR/web_template_styles.py" "$BOT_RUNTIME_DIR/web_template_scripts.py"
     mv "$stage_dir/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
     mv "$stage_dir/S99telegram_bot" "$BOT_SERVICE_PATH"
     chmod 755 "$INSTALLER_SERVICE_PATH" "$BOT_SERVICE_PATH"

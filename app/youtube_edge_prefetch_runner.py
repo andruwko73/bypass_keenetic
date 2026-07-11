@@ -7,6 +7,7 @@ import time
 from urllib.parse import urlparse
 
 import youtube_edge_prefetch
+import youtube_route_owner
 
 for config_dir in ('/opt/etc', '/opt/etc/bot'):
     while config_dir in sys.path:
@@ -57,34 +58,12 @@ FAST_PREFETCH_TRIGGERS = (
     'post-update',
     'first-run',
     'startup',
+    'route-change',
     'manual-fast',
 )
 CACHE_RESTORE_TRIGGERS = FAST_PREFETCH_TRIGGERS + (
     'manual-restore',
 )
-
-PROTOCOL_ROUTE_FILES = (
-    ('shadowsocks', 'shadowsocks.txt'),
-    ('vmess', 'vmess.txt'),
-    ('vless', 'vless.txt'),
-    ('vless2', 'vless-2.txt'),
-    ('trojan', 'trojan.txt'),
-)
-
-YOUTUBE_ROUTE_MARKERS = (
-    'youtube.com',
-    'youtube-nocookie.com',
-    'youtubeeducation.com',
-    'youtubei.googleapis.com',
-    'youtube.googleapis.com',
-    'youtubeembeddedplayer.googleapis.com',
-    'googlevideo.com',
-    'ytimg.com',
-    'yt3.ggpht.com',
-    'ggpht.com',
-    'youtu.be',
-)
-
 
 def _config_value(name, default):
     if config is None:
@@ -410,34 +389,68 @@ def _write_json_file(path, payload):
         return False
 
 
-def _entry_matches_youtube(entry):
-    value = str(entry or '').split('#', 1)[0].strip().lower()
-    if not value:
-        return False
-    for prefix in ('full:', 'domain:', '+.', '*.'):
-        if value.startswith(prefix):
-            value = value[len(prefix):]
-    value = value.strip('.')
-    return any(value == marker or value.endswith('.' + marker) for marker in YOUTUBE_ROUTE_MARKERS)
+def detect_youtube_route_protocol(unblock_dir=UNBLOCK_DIR, default='', state_path=youtube_route_owner.STATE_PATH):
+    owner = youtube_route_owner.youtube_route_owner(
+        unblock_dir=unblock_dir,
+        default=default,
+        state_path=state_path,
+    )
+    return str(owner or default or '').strip().lower()
 
 
-def detect_youtube_route_protocol(unblock_dir=UNBLOCK_DIR, default='vless2'):
-    best_protocol = ''
-    best_count = 0
-    for protocol, file_name in PROTOCOL_ROUTE_FILES:
-        path = os.path.join(unblock_dir, file_name)
-        count = 0
-        try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as file:
-                for line in file:
-                    if _entry_matches_youtube(line):
-                        count += 1
-        except Exception:
-            count = 0
-        if count > best_count:
-            best_count = count
-            best_protocol = protocol
-    return best_protocol or str(default or 'vless2').strip().lower() or 'vless2'
+def _self_test_required_for_trigger(trigger):
+    text = str(trigger or '').strip().lower()
+    return any(text.startswith(prefix) for prefix in FAST_PREFETCH_TRIGGERS)
+
+
+def _manual_prefetch_requested(trigger):
+    return str(trigger or '').strip().lower() in ('manual', 'manual-prefetch', 'manual-restore')
+
+
+def youtube_route_self_test(route_protocol):
+    """Check the selected route before doing an expensive edge warm-up."""
+    socks_port = _route_socks_port(route_protocol)
+    if socks_port <= 0:
+        return {'ok': False, 'reason': 'no_socks_port', 'http_code': '000', 'duration_ms': 0}
+    timeout_seconds = _config_int('youtube_route_self_test_timeout_seconds', 5, minimum=2)
+    started_at = time.monotonic()
+    command = [
+        'curl',
+        '-L',
+        '-sS',
+        '--socks5-hostname',
+        f'127.0.0.1:{int(socks_port)}',
+        '--connect-timeout',
+        str(min(3, timeout_seconds)),
+        '--max-time',
+        str(timeout_seconds),
+        '-o',
+        '/dev/null',
+        '-w',
+        '%{http_code}',
+        'https://www.youtube.com/generate_204',
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout_seconds + 2,
+            check=False,
+        )
+        http_code = str(result.stdout or '').strip()[:3] or '000'
+        ok = result.returncode == 0 and http_code.isdigit() and 200 <= int(http_code) < 500
+        return {
+            'ok': ok,
+            'reason': 'ok' if ok else 'request_failed',
+            'http_code': http_code,
+            'duration_ms': int((time.monotonic() - started_at) * 1000),
+        }
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'reason': 'timeout', 'http_code': '000', 'duration_ms': int((time.monotonic() - started_at) * 1000)}
+    except Exception:
+        return {'ok': False, 'reason': 'request_failed', 'http_code': '000', 'duration_ms': int((time.monotonic() - started_at) * 1000)}
 
 
 def read_available_memory_kb(meminfo_path='/proc/meminfo'):
@@ -860,8 +873,17 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
         available_kb = read_available_memory_kb()
         route_protocol = detect_youtube_route_protocol(
             unblock_dir=unblock_dir or UNBLOCK_DIR,
-            default=_config_str('youtube_edge_prefetch_default_route_protocol', 'vless2'),
         )
+        if not route_protocol:
+            status = {
+                'ok': False,
+                'route_protocol': '',
+                'skipped_reason': 'route_owner_unavailable',
+                'available_memory_kb': available_kb,
+            }
+            status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
+            _write_json_file(status_path, status)
+            return status
         fast_warm = _fast_warm_enabled_for_trigger(trigger)
         busy_reason = _background_busy_reason(trigger, fast_warm)
         if busy_reason:
@@ -885,6 +907,45 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
             _write_json_file(status_path, status)
             return status
+
+        self_test = None
+        if not _self_test_required_for_trigger(trigger) and not _manual_prefetch_requested(trigger):
+            status = {
+                'ok': True,
+                'route_protocol': route_protocol,
+                'skipped_reason': 'not_requested',
+                'available_memory_kb': available_kb,
+                'warm_mode': 'not_needed',
+                'candidates': 0,
+                'cache_entries': 0,
+                'added_addresses': 0,
+                'added_sets': 0,
+                'deleted_sets': 0,
+                'failed_sets': 0,
+            }
+            status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
+            _write_json_file(status_path, status)
+            return status
+        if _self_test_required_for_trigger(trigger):
+            self_test = youtube_route_self_test(route_protocol)
+            if self_test.get('ok'):
+                status = {
+                    'ok': True,
+                    'route_protocol': route_protocol,
+                    'skipped_reason': 'self_test_ok',
+                    'available_memory_kb': available_kb,
+                    'warm_mode': 'not_needed',
+                    'self_test': self_test,
+                    'candidates': 0,
+                    'cache_entries': 0,
+                    'added_addresses': 0,
+                    'added_sets': 0,
+                    'deleted_sets': 0,
+                    'failed_sets': 0,
+                }
+                status = _normalize_status(status, trigger=trigger, started_at=started_at, next_host_index=next_host_index)
+                _write_json_file(status_path, status)
+                return status
 
         cache_restore_status = None
         if _cache_restore_enabled_for_trigger(trigger):
@@ -1064,6 +1125,8 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
         status['watch_edge_hosts'] = len(watch_edge_hosts)
         status['watch_edge'] = watch_edge_status
         status['warm_mode'] = 'fast' if fast_warm else 'full'
+        if self_test is not None:
+            status['self_test'] = self_test
         if cache_restore_status is not None:
             status['cache_restore'] = {
                 'ok': bool(cache_restore_status.get('ok')),

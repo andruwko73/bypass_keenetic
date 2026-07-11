@@ -26,7 +26,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_checks_store.py entware_dns_runtime.py event_history.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py web_template_scripts.py web_template_styles.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py version.md README.md CHANGELOG.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md CHANGELOG.md"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -180,8 +180,11 @@ download_optional_file() {
 download_static_assets() {
     icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
     mkdir -p "$STATIC_DIR/service-icons"
-    download_optional_file "$(repo_file_url static/telegram.png)" "$STATIC_DIR/telegram.png"
-    download_optional_file "$(repo_file_url static/youtube.png)" "$STATIC_DIR/youtube.png"
+    download_file "$(repo_file_url static/app.css)" "$STATIC_DIR/app.css" ':root{'
+    download_file "$(repo_file_url static/app.js)" "$STATIC_DIR/app.js" 'const APP_CONFIG'
+    download_optional_file "$(repo_file_url static/telegram.svg)" "$STATIC_DIR/telegram.svg"
+    download_optional_file "$(repo_file_url static/youtube.svg)" "$STATIC_DIR/youtube.svg"
+    rm -f "$STATIC_DIR/telegram.png" "$STATIC_DIR/youtube.png"
     for icon in $icons; do
         download_optional_file "$(repo_file_url "static/service-icons/${icon}.png")" "$STATIC_DIR/service-icons/${icon}.png"
     done
@@ -659,8 +662,6 @@ download_file "$(repo_file_url service_catalog.py)" "$TMP_DIR/service_catalog.py
 download_file "$(repo_file_url probe_cache.py)" "$TMP_DIR/probe_cache.py" 'record_key_probe'
 download_file "$(repo_file_url custom_checks_store.py)" "$TMP_DIR/custom_checks_store.py" 'add_custom_check'
 download_file "$(repo_file_url web_form_template.py)" "$TMP_DIR/web_form_template.py" 'render_web_form'
-download_file "$(repo_file_url web_template_styles.py)" "$TMP_DIR/web_template_styles.py" 'render_web_styles'
-download_file "$(repo_file_url web_template_scripts.py)" "$TMP_DIR/web_template_scripts.py" 'render_web_scripts'
 download_file "$(repo_file_url web_form_blocks.py)" "$TMP_DIR/web_form_blocks.py" 'render_message_block'
 download_file "$(repo_file_url web_pool_form_blocks.py)" "$TMP_DIR/web_pool_form_blocks.py" 'render_protocol_panel'
 download_file "$(repo_file_url web_http_common.py)" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
@@ -697,8 +698,6 @@ cp "$TMP_DIR/service_catalog.py" "$BOT_DIR/service_catalog.py"
 cp "$TMP_DIR/probe_cache.py" "$BOT_DIR/probe_cache.py"
 cp "$TMP_DIR/custom_checks_store.py" "$BOT_DIR/custom_checks_store.py"
 cp "$TMP_DIR/web_form_template.py" "$BOT_DIR/web_form_template.py"
-cp "$TMP_DIR/web_template_styles.py" "$BOT_DIR/web_template_styles.py"
-cp "$TMP_DIR/web_template_scripts.py" "$BOT_DIR/web_template_scripts.py"
 cp "$TMP_DIR/web_form_blocks.py" "$BOT_DIR/web_form_blocks.py"
 cp "$TMP_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py"
 cp "$TMP_DIR/web_http_common.py" "$BOT_DIR/web_http_common.py"
@@ -718,9 +717,10 @@ done
 cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
 cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 download_static_assets
+rm -f "$BOT_DIR/web_asset_builder.py" "$BOT_DIR/web_template_styles.py" "$BOT_DIR/web_template_scripts.py"
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
-chmod 644 "$BOT_DIR/app_version.py" "$BOT_DIR/app_runtime_mode.py" "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/router_health_runtime.py" "$BOT_DIR/router_metrics.py" "$BOT_DIR/telegram_call_learning.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_template_styles.py" "$BOT_DIR/web_template_scripts.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/web_commands_runtime.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
+chmod 644 "$BOT_DIR/app_version.py" "$BOT_DIR/app_runtime_mode.py" "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/router_health_runtime.py" "$BOT_DIR/router_metrics.py" "$BOT_DIR/telegram_call_learning.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/web_commands_runtime.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"
 for module in $BOT_RUNTIME_MODULES; do
     chmod 644 "$BOT_DIR/$module"
 done
@@ -798,8 +798,6 @@ pool_probe_quality_4k_min_mbps = 45.0
 memory_watchdog_enabled = True
 memory_watchdog_rss_soft_kb = 87040
 memory_watchdog_rss_limit_kb = 112640
-memory_watchdog_idle_restart_rss_kb = 71680
-memory_watchdog_idle_restart_hold_seconds = 120.0
 memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
@@ -815,16 +813,6 @@ router_metrics_critical_bot_rss_kb = 87040
 router_metrics_warn_load1 = 3.0
 web_pools_api_cache_ttl = 45.0
 service_route_intersections_cache_ttl = 60.0
-web_response_cleanup_rss_kb = 61440
-web_response_light_cleanup_rss_kb = 61440
-web_response_cleanup_min_interval_seconds = 60.0
-memory_post_pool_restart_enabled = True
-memory_post_pool_restart_rss_kb = 71680
-memory_post_pool_cleanup_target_rss_kb = 63488
-memory_post_pool_cleanup_target_program_rss_kb = 102400
-memory_post_pool_restart_delay_seconds = 20.0
-memory_post_pool_restart_retry_seconds = 30.0
-memory_post_pool_restart_max_wait_seconds = 300.0
 memory_timeline_enabled = False
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0

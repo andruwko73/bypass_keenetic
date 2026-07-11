@@ -232,7 +232,7 @@ def _live_protocol_statuses():
 
 def _router_health():
     return {
-        "memory_text": "Память: доступно 256 MB, занято 256 из 512 MB",
+        "memory_text": "Память: доступно 256 MB из 512 MB.",
         "note": "Занято по данным роутера: 256 MB (50%); Нагрузка CPU: 2%\nПрограмма использует 42 MB RAM; Flash-носитель: занято 384 из 1024 MB (38%)",
         "dns_note": "DNS: ndnproxy; S56dnsmasq не используется; ipset обновлён: 1 мин назад; записи ipset: VLESS=488, VLESSUDP=187, VLESS2=340, VLESS2UDP=328, VMESS=0, VMESSUDP=0, Trojan=0, TrojanUDP=0, ShadowSocks=0, ShadowSocksUDP=0",
         "core_proxy_note": "Прокси: Xray работает на портах: 10811, 10812, 10813, 10814",
@@ -540,6 +540,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         else:
             payload = body
         self.send_response(status)
+        self.send_header("X-Bypass-UI-Fixture", "1")
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
@@ -557,28 +558,20 @@ class FixtureHandler(BaseHTTPRequestHandler):
             mode = (params.get("mode") or ["advanced"])[0]
             self._send(_page_html(mode), "text/html; charset=utf-8")
             return
+        if path in ("/static/telegram.svg", "/static/youtube.svg"):
+            asset_path = APP_ROOT / "static" / path.rsplit("/", 1)[-1]
+            try:
+                body = asset_path.read_bytes()
+                content_type = "image/svg+xml" if body.lstrip().startswith(b"<svg") else "image/png"
+                self._send(body, content_type)
+            except OSError:
+                self._send("not found", "text/plain; charset=utf-8", status=404)
+            return
         if path == "/static/app.css":
-            self._send(
-                web_form_template.render_web_style_asset(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64),
-                "text/css; charset=utf-8",
-            )
+            self._send((APP_ROOT / "static" / "app.css").read_text(encoding="utf-8"), "text/css; charset=utf-8")
             return
         if path == "/static/app.js":
-            self._send(
-                web_form_template.render_web_script_asset(
-                    TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
-                    YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
-                    csrf_token="",
-                    custom_checks_json="[]",
-                    initial_command_running="false",
-                    initial_status_pending="false",
-                    enable_async_forms=True,
-                    enable_custom_checks=True,
-                    enable_key_pool=True,
-                    enable_live_status=True,
-                ),
-                "application/javascript; charset=utf-8",
-            )
+            self._send((APP_ROOT / "static" / "app.js").read_text(encoding="utf-8"), "application/javascript; charset=utf-8")
             return
         if path == "/api/status":
             params = parse_qs(parsed.query or "", keep_blank_values=True)

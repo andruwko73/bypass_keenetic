@@ -1,18 +1,50 @@
 import html
 import json
-from web_template_styles import render_web_styles
-from web_template_scripts import render_web_scripts
+import os
+import threading
 
 
-ASSET_CACHE_REVISION = 'route-core-services-1925-4'
+ASSET_CACHE_REVISION = 'static-assets-1'
+_asset_cache_lock = threading.Lock()
+_static_asset_cache = {}
+
+
+def _bundled_static_asset(name):
+    return load_static_asset(
+        os.path.join(os.path.dirname(__file__), 'static', name),
+        lambda: '',
+    )
 
 
 def render_web_style_asset(TELEGRAM_SVG_B64=''):
-    return render_web_styles(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
+    del TELEGRAM_SVG_B64
+    return _bundled_static_asset('app.css')
 
 
 def render_web_script_asset(**kwargs):
-    return render_web_scripts(**kwargs)
+    del kwargs
+    return _bundled_static_asset('app.js')
+
+
+def load_static_asset(path, fallback):
+    """Read a shipped static asset once, retaining a small migration fallback."""
+    try:
+        stamp = (str(path), int(os.stat(path).st_mtime_ns))
+    except OSError:
+        return fallback()
+    with _asset_cache_lock:
+        cached = _static_asset_cache.get(stamp)
+        if cached is not None:
+            return cached
+    try:
+        with open(path, 'r', encoding='utf-8') as file:
+            content = file.read()
+    except OSError:
+        return fallback()
+    with _asset_cache_lock:
+        _static_asset_cache.clear()
+        _static_asset_cache[stamp] = content
+    return content
 
 
 def _script_json(data):

@@ -4,6 +4,7 @@ import ipaddress
 import json
 import re
 import secrets
+import threading
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs
 
@@ -48,6 +49,7 @@ class WebRequestMixin:
     local_client_checker = staticmethod(lambda address: False)
     web_auth_token_getter = staticmethod(lambda: '')
     web_auth_user_getter = staticmethod(lambda: 'admin')
+    allow_authenticated_external = False
     flash_message_setter = staticmethod(lambda message: None)
     quiet_log_prefixes = ()
     gzip_min_bytes = 1024
@@ -56,6 +58,8 @@ class WebRequestMixin:
         'application/javascript',
         'text/',
     )
+    static_asset_body_cache = {}
+    static_asset_body_cache_lock = threading.Lock()
 
     def log_message(self, format, *args):
         path = getattr(self, 'path', '') or ''
@@ -69,8 +73,10 @@ class WebRequestMixin:
 
     def _ensure_request_allowed(self):
         if not self._request_is_allowed():
-            self._send_html('<h1>403 Forbidden</h1><p>Web UI is available only from the local network.</p>', status=403)
-            return False
+            expected_token = str(self.web_auth_token_getter() or '')
+            if not self.allow_authenticated_external or not expected_token:
+                self._send_html('<h1>403 Forbidden</h1><p>Web UI is available only from the local network.</p>', status=403)
+                return False
         return self._ensure_web_auth()
 
     def _send_unauthorized(self, message=None):
@@ -270,8 +276,20 @@ class WebRequestMixin:
         self._write_response_body(body)
         self.close_connection = True
 
-    def _send_text_asset(self, text, content_type='text/plain; charset=utf-8', cache_seconds=0):
-        body, extra_headers = self._prepare_response_body((text or '').encode('utf-8'), content_type)
+    def _send_text_asset(self, text, content_type='text/plain; charset=utf-8', cache_seconds=0, asset_cache_key=''):
+        cache_key = ''
+        if asset_cache_key:
+            cache_key = (str(asset_cache_key), bool(self._client_accepts_gzip()))
+            with self.static_asset_body_cache_lock:
+                cached = self.static_asset_body_cache.get(cache_key)
+            if cached is not None:
+                body, extra_headers = cached
+            else:
+                body, extra_headers = self._prepare_response_body((text or '').encode('utf-8'), content_type)
+                with self.static_asset_body_cache_lock:
+                    self.static_asset_body_cache[cache_key] = (body, extra_headers)
+        else:
+            body, extra_headers = self._prepare_response_body((text or '').encode('utf-8'), content_type)
         self.send_response(200)
         self.send_header('Content-type', content_type)
         for name, value in extra_headers:

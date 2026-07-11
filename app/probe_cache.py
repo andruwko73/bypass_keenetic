@@ -241,6 +241,7 @@ def update_key_probe_cache_entry(
     cache,
     proto,
     key_value,
+    key_id=None,
     tg_ok=None,
     yt_ok=None,
     custom=None,
@@ -274,7 +275,7 @@ def update_key_probe_cache_entry(
     allow_recent_success_downgrade=False,
 ):
     cache = cache if isinstance(cache, dict) else {}
-    key_id = hash_key(key_value)
+    key_id = str(key_id or hash_key(key_value))
     entry = cache.get(key_id, {})
     if not isinstance(entry, dict):
         entry = {}

@@ -97,8 +97,6 @@ pool_probe_quality_4k_min_mbps = 45.0
 memory_watchdog_enabled = True
 memory_watchdog_rss_soft_kb = 87040
 memory_watchdog_rss_limit_kb = 112640
-memory_watchdog_idle_restart_rss_kb = 71680
-memory_watchdog_idle_restart_hold_seconds = 120.0
 memory_watchdog_check_interval = 60.0
 memory_watchdog_min_uptime_seconds = 300.0
 memory_watchdog_restart_cooldown_seconds = 1800.0
@@ -114,16 +112,6 @@ router_metrics_critical_bot_rss_kb = 87040
 router_metrics_warn_load1 = 3.0
 web_pools_api_cache_ttl = 45.0
 service_route_intersections_cache_ttl = 60.0
-web_response_cleanup_rss_kb = 61440
-web_response_light_cleanup_rss_kb = 61440
-web_response_cleanup_min_interval_seconds = 60.0
-memory_post_pool_restart_enabled = True
-memory_post_pool_restart_rss_kb = 71680
-memory_post_pool_cleanup_target_rss_kb = 63488
-memory_post_pool_cleanup_target_program_rss_kb = 102400
-memory_post_pool_restart_delay_seconds = 20.0
-memory_post_pool_restart_retry_seconds = 30.0
-memory_post_pool_restart_max_wait_seconds = 300.0
 memory_timeline_enabled = False
 memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'
 memory_timeline_interval_seconds = 60.0
@@ -431,6 +419,8 @@ class InstallerHandler(BaseHTTPRequestHandler):
         try:
             with open(file_path, 'rb') as f:
                 data = f.read()
+            if data.lstrip().startswith(b'<svg'):
+                content_type = 'image/svg+xml'
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(data)))
@@ -502,11 +492,11 @@ class InstallerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._ensure_request_allowed():
             return
-        if self.path.startswith('/static/telegram.png'):
-            self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'telegram.png'))
+        if self.path.startswith('/static/telegram.svg'):
+            self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'telegram.svg'))
             return
-        if self.path.startswith('/static/youtube.png'):
-            self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'youtube.png'))
+        if self.path.startswith('/static/youtube.svg'):
+            self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'youtube.svg'))
             return
         self._send_html(page_html(csrf_token=self._get_or_create_csrf_token()))
 

@@ -1,3 +1,7 @@
+*v1.935 (11 Jul 2026) -* main
+
+*Separates short-lived health, failover and pool-probe runners from the resident process, serves the web interface from static assets, keeps route ownership and service statuses consistent across protocols, and reduces repeated background DNS/ipset and router-health work without changing the clean-install command.*
+
 *v1.934 (8 Jul 2026) -* main
 
 *Keeps the separate full pool-probe worker alive when neighboring health or failover cleanup tasks remove temporary pool-probe runtime files, so full pool checks can finish and release temporary Xray/process RSS afterward.*

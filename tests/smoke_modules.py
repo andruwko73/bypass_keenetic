@@ -46,8 +46,6 @@ import web_pool_snapshot_worker
 import web_route_tools_runtime
 import web_service_routes_worker
 import web_status_builder
-import web_template_styles
-import web_template_scripts
 import web_post_actions
 import web_status_runtime
 import telegram_confirm
@@ -60,6 +58,8 @@ import telegram_info_runtime
 import telegram_call_learning
 import telegram_healthcheck
 import pool_probe_controller
+import pool_probe_curl
+import pool_probe_process_runner
 import pool_probe_runner
 import probe_cache
 import auto_failover_runtime
@@ -69,18 +69,44 @@ import proxy_protocols
 import unblock_lists
 import service_catalog
 import custom_checks_store
+import custom_check_policy
 import installer_common
 import installer
 import repo_update
 import entware_dns_runtime
 import event_history
+import failover_candidate_runner
+import health_check_runner
 import route_intersections
 import service_routes
 import update_status
 import youtube_healthcheck
 import youtube_edge_prefetch
 import youtube_edge_prefetch_runner
+import youtube_route_owner
 from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
+
+
+def test_pool_probe_runner_defers_failover_healthcheck_imports():
+    script = (
+        "import json, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        "import pool_probe_runner\n"
+        "names = ('telegram_healthcheck', 'youtube_healthcheck')\n"
+        "print(json.dumps({name: name in sys.modules for name in names}, sort_keys=True))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, '-c', script],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    assert json.loads(result.stdout) == {
+        'telegram_healthcheck': False,
+        'youtube_healthcheck': False,
+    }
 
 
 SS_KEY = 'ss://YWVzLTEyOC1nY206cGFzc3dvcmQ@example.com:8388#sample'
@@ -275,7 +301,7 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
         flash_storage={'path': '/opt', 'total_kb': 2048 * 1024, 'used_kb': 768 * 1024, 'free_kb': 1280 * 1024},
     )
     assert payload['memory_source'] == 'keenetic'
-    assert payload['memory_text'] == 'Память: доступно 201 MB, занято 281 из 512 MB'
+    assert payload['memory_text'] == 'Память: доступно 201 MB из 512 MB.'
     assert payload['used_percent'] == 55
     assert payload['cpu_percent'] == 0.84
     assert payload['pool_probe_text'] == 'Не запущена'
@@ -1878,6 +1904,22 @@ def test_telegram_call_learning_helpers():
     assert telegram_call_learning.parse_udp_flow(line, device_ip='192.168.1.24') is None
     assert telegram_call_learning.parse_udp_flow(line.replace('dport=3478', 'dport=53'), device_ip='192.168.1.23') is None
     assert telegram_call_learning.parse_udp_flow(line.replace('149.154.167.91', '192.168.1.200'), device_ip='192.168.1.23') is None
+    grep_calls = []
+    original_conntrack_runner = telegram_call_learning.subprocess.run
+
+    def grep_runner(args, **kwargs):
+        grep_calls.append((args, kwargs))
+        return py_types.SimpleNamespace(returncode=0, stdout=line + '\n')
+
+    try:
+        telegram_call_learning.subprocess.run = grep_runner
+        filtered_lines = list(
+            telegram_call_learning._iter_conntrack_lines('/proc/net/nf_conntrack', source_tokens=('src=192.168.1.23',))
+        )
+    finally:
+        telegram_call_learning.subprocess.run = original_conntrack_runner
+    assert filtered_lines == [line + '\n']
+    assert grep_calls[0][0] == ['grep', '-F', '-e', 'src=192.168.1.23', '/proc/net/nf_conntrack']
     signal_line = (
         'ipv4 2 tcp 6 1199 ESTABLISHED src=192.168.1.23 dst=149.154.167.41 '
         'sport=56440 dport=443 packets=30 bytes=6000 src=192.168.1.1 dst=192.168.1.23 '
@@ -1916,6 +1958,19 @@ def test_telegram_call_learning_helpers():
         tmp_path = tmp.name
     try:
         lan_flows = telegram_call_learning.read_lan_conntrack_flows(router_ip='192.168.1.1', conntrack_path=tmp_path)
+        device_flows = telegram_call_learning.read_conntrack_flows('192.168.1.23', conntrack_path=tmp_path)
+        parsed_signature_lines = []
+        original_parse_udp_flow = telegram_call_learning.parse_udp_flow
+
+        def tracked_parse_udp_flow(value, *args, **kwargs):
+            parsed_signature_lines.append(value)
+            return original_parse_udp_flow(value, *args, **kwargs)
+
+        telegram_call_learning.parse_udp_flow = tracked_parse_udp_flow
+        try:
+            udp_signature = telegram_call_learning.udp_source_activity_signature(['192.168.1.23'], conntrack_path=tmp_path)
+        finally:
+            telegram_call_learning.parse_udp_flow = original_parse_udp_flow
     finally:
         os.remove(tmp_path)
     assert list(lan_flows.values())[0]['src'] == '192.168.1.23'
@@ -1925,6 +1980,12 @@ def test_telegram_call_learning_helpers():
     assert all(item['cluster_flow_count'] == 3 for item in cluster_flows)
     assert all(item['cluster_telegram_flow_count'] == 1 for item in cluster_flows)
     assert not any(item.get('sport') == '45000' for item in lan_flows.values())
+    assert any(item['dst'] == '149.154.167.91' for item in device_flows.values())
+    assert udp_signature == (flow['identity'],)
+    assert parsed_signature_lines == [
+        line + '\n',
+        line.replace('149.154.167.91', '8.8.8.8').replace('sport=53122', 'sport=53123', 1) + '\n',
+    ]
     active_media_line = (
         'ipv4 2 udp 17 141 src=192.168.1.23 dst=80.234.76.169 sport=43490 dport=1624 '
         'packets=70 bytes=9000 src=80.234.76.169 dst=10.107.102.48 sport=1624 dport=43490 '
@@ -2230,12 +2291,7 @@ def test_service_route_apply_can_add_check():
 
 def _expected_codex_version_counter():
     count = int(subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'], cwd=ROOT, text=True).strip())
-    dirty = subprocess.check_output(
-        ['git', 'status', '--short', '--untracked-files=no'],
-        cwd=ROOT,
-        text=True,
-    ).strip()
-    return f'1.{count + (1 if dirty else 0)}'
+    return f'1.{count}'
 
 
 def test_codex_version_matches_commit_count():
@@ -2298,9 +2354,9 @@ def test_codex_version_matches_commit_count():
     assert "pool_probe_youtube_profile = 'quick'" in example
     assert "pool_probe_youtube_profile = 'quick'" in installer
     assert "pool_probe_youtube_profile = 'quick'" in bootstrap
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in example
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in installer
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in bootstrap
+    assert 'memory_watchdog_idle_restart_rss_kb' not in example
+    assert 'memory_watchdog_idle_restart_rss_kb' not in installer
+    assert 'memory_watchdog_idle_restart_rss_kb' not in bootstrap
     assert 'memory_timeline_enabled = False' in example
     assert 'memory_timeline_enabled = False' in installer
     assert 'memory_timeline_enabled = False' in bootstrap
@@ -2346,15 +2402,15 @@ def test_codex_version_matches_commit_count():
     assert 'service_route_intersections_cache_ttl = 60.0' in example
     assert 'service_route_intersections_cache_ttl = 60.0' in installer
     assert 'service_route_intersections_cache_ttl = 60.0' in bootstrap
-    assert 'web_response_cleanup_rss_kb = 61440' in example
-    assert 'web_response_cleanup_rss_kb = 61440' in installer
-    assert 'web_response_cleanup_rss_kb = 61440' in bootstrap
-    assert 'web_response_light_cleanup_rss_kb = 61440' in example
-    assert 'web_response_light_cleanup_rss_kb = 61440' in installer
-    assert 'web_response_light_cleanup_rss_kb = 61440' in bootstrap
-    assert 'web_response_cleanup_min_interval_seconds = 60.0' in example
-    assert 'web_response_cleanup_min_interval_seconds = 60.0' in installer
-    assert 'web_response_cleanup_min_interval_seconds = 60.0' in bootstrap
+    assert 'web_response_cleanup_rss_kb' not in example
+    assert 'web_response_cleanup_rss_kb' not in installer
+    assert 'web_response_cleanup_rss_kb' not in bootstrap
+    assert 'web_response_light_cleanup_rss_kb' not in example
+    assert 'web_response_light_cleanup_rss_kb' not in installer
+    assert 'web_response_light_cleanup_rss_kb' not in bootstrap
+    assert 'web_response_cleanup_min_interval_seconds' not in example
+    assert 'web_response_cleanup_min_interval_seconds' not in installer
+    assert 'web_response_cleanup_min_interval_seconds' not in bootstrap
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in example
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in installer
     assert "memory_timeline_path = '/opt/tmp/bypass_memory_timeline.jsonl'" in bootstrap
@@ -2382,24 +2438,21 @@ def test_codex_version_matches_commit_count():
     assert 'background_task_critical_max_program_rss_kb = 102400' in example
     assert 'background_task_critical_max_program_rss_kb = 102400' in installer
     assert 'background_task_critical_max_program_rss_kb = 102400' in bootstrap
-    assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in example
-    assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in installer
-    assert 'memory_watchdog_idle_restart_hold_seconds = 120.0' in bootstrap
-    assert 'memory_post_pool_restart_rss_kb = 71680' in example
-    assert 'memory_post_pool_restart_rss_kb = 71680' in installer
-    assert 'memory_post_pool_restart_rss_kb = 71680' in bootstrap
-    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in example
-    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in installer
-    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in bootstrap
-    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in example
-    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in installer
-    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in bootstrap
-    assert 'memory_post_pool_restart_retry_seconds = 30.0' in example
-    assert 'memory_post_pool_restart_retry_seconds = 30.0' in installer
-    assert 'memory_post_pool_restart_retry_seconds = 30.0' in bootstrap
-    assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in example
-    assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in installer
-    assert 'memory_post_pool_restart_max_wait_seconds = 300.0' in bootstrap
+    assert 'memory_watchdog_idle_restart_hold_seconds' not in example
+    assert 'memory_watchdog_idle_restart_hold_seconds' not in installer
+    assert 'memory_watchdog_idle_restart_hold_seconds' not in bootstrap
+    assert 'memory_post_pool_restart_rss_kb' not in example
+    assert 'memory_post_pool_restart_rss_kb' not in installer
+    assert 'memory_post_pool_restart_rss_kb' not in bootstrap
+    assert 'memory_post_pool_cleanup_target_rss_kb' not in example
+    assert 'memory_post_pool_cleanup_target_rss_kb' not in installer
+    assert 'memory_post_pool_cleanup_target_rss_kb' not in bootstrap
+    assert 'memory_post_pool_restart_retry_seconds' not in example
+    assert 'memory_post_pool_restart_retry_seconds' not in installer
+    assert 'memory_post_pool_restart_retry_seconds' not in bootstrap
+    assert 'memory_post_pool_restart_max_wait_seconds' not in example
+    assert 'memory_post_pool_restart_max_wait_seconds' not in installer
+    assert 'memory_post_pool_restart_max_wait_seconds' not in bootstrap
     assert 'ipset_refresh_command_timeout_seconds = 420' in example
     assert 'ipset_refresh_command_timeout_seconds = 420' in installer
     assert 'ipset_refresh_command_timeout_seconds = 420' in bootstrap
@@ -2489,9 +2542,9 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_watch_warm_max_pages = 1' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_hosts = 6' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_edge_watch_warm_max_bytes = 450000' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'web_response_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'web_response_light_cleanup_rss_kb = 61440' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'web_response_cleanup_min_interval_seconds = 60.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_cleanup_rss_kb' not in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_light_cleanup_rss_kb' not in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'web_response_cleanup_min_interval_seconds' not in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_related_process_cache_ttl = 45.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_cache_ttl = 30.0' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'router_health_cpu_smoothing_factor = 0.35' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -2571,8 +2624,8 @@ def test_ui_smoke_package_scripts_are_declared():
     scripts = package.get('scripts') or {}
     dev_dependencies = package.get('devDependencies') or {}
     assert package.get('private') is True
-    assert scripts.get('ui:check') == 'node --check tests/ui_smoke.js'
-    assert scripts.get('ui:smoke') == 'node tests/ui_smoke.js'
+    assert scripts.get('ui:check') == 'node --check tests/ui_smoke.js && node --check tests/run_ui_smoke_fixture.js'
+    assert scripts.get('ui:smoke') == 'node tests/run_ui_smoke_fixture.js'
     assert scripts.get('ui:install-browsers') == 'playwright install --with-deps chromium'
     assert dev_dependencies.get('playwright') == '1.60.0'
 
@@ -2589,7 +2642,9 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert "normalize_line()" in unblock_dnsmasq
     assert "s/\\r//g" in unblock_dnsmasq
     assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in unblock_dnsmasq
-    assert 'DNSMASQ_OUTPUT_FILE="${DNSMASQ_OUTPUT_FILE:-/opt/etc/unblock.dnsmasq}"' in unblock_dnsmasq
+    assert 'DNSMASQ_OUTPUT_TARGET="${DNSMASQ_OUTPUT_FILE:-/opt/etc/unblock.dnsmasq}"' in unblock_dnsmasq
+    assert 'DNSMASQ_OUTPUT_FILE="${DNSMASQ_OUTPUT_TARGET}.tmp.$$"' in unblock_dnsmasq
+    assert 'mv -f "$DNSMASQ_OUTPUT_FILE" "$DNSMASQ_OUTPUT_TARGET"' in unblock_dnsmasq
     assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com' in unblock_dnsmasq
     assert 'YOUTUBE_ROUTE_PROTOCOL="$(youtube_route_protocol)"' in unblock_dnsmasq
     assert 'write_route_domain()' in unblock_dnsmasq
@@ -2640,6 +2695,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
         f'DNSMASQ_LOG_FILE={shell_quote(shell_path(log_file))}',
         f'UDP_QUIC_POLICY_FILE={shell_quote(shell_path(udp_policy))}',
         f'CALL_SIGNAL_POLICY_FILE={shell_quote(shell_path(call_policy))}',
+        f'BOT_DIR={shell_quote(shell_path(APP_ROOT))}',
         'bash',
         shell_quote(shell_path(APP_ROOT / 'unblock.dnsmasq')),
     ))
@@ -2652,6 +2708,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
     )
     dnsmasq_text = output.read_text(encoding='utf-8')
     assert 'ipset=/youtube.com/unblockvless2' in dnsmasq_text
+
     assert 'ipset=/www.youtube.com/unblockvless2' in dnsmasq_text
     assert 'ipset=/m.youtube.com/unblockvless2' in dnsmasq_text
     assert 'ipset=/googlevideo.com/unblockvless2' in dnsmasq_text
@@ -2678,6 +2735,49 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
     assert 'ipset=/googlevideo.com/unblockvless\n' in dnsmasq_text
     assert 'ipset=/youtube.com/unblockvless2' not in dnsmasq_text
     assert 'ipset=/googlevideo.com/unblockvless2' not in dnsmasq_text
+
+
+def test_shell_youtube_route_owner_uses_shared_resolver():
+    for script_name in ('unblock.dnsmasq', 'unblock_ipset.sh', 'S99unblock'):
+        source = (APP_ROOT / script_name).read_text(encoding='utf-8')
+        assert 'from youtube_route_owner import youtube_route_owner' in source
+        assert 'YOUTUBE_ROUTE_PROTOCOL_CACHE' in source
+        assert 'YOUTUBE_ROUTE_OWNER_STATE_FILE' in source
+        assert 'state_path=sys.argv[2]' in source
+        assert 'default=\'vless2\'' not in source
+        assert 'route_file_marker_count()' not in source
+
+
+def test_youtube_route_owner_supports_every_protocol_without_forced_fallback(tmp_path):
+    unblock_dir = tmp_path / 'unblock'
+    unblock_dir.mkdir()
+    state_path = tmp_path / 'owner.json'
+    for protocol, file_name in youtube_route_owner.ROUTE_FILES:
+        for _other_protocol, other_file_name in youtube_route_owner.ROUTE_FILES:
+            (unblock_dir / other_file_name).write_text('example.com\n', encoding='utf-8')
+        (unblock_dir / file_name).write_text('youtube.com\n', encoding='utf-8')
+        resolution = youtube_route_owner.resolve_youtube_route_owner(
+            unblock_dir=str(unblock_dir),
+            state_path=str(state_path),
+        )
+        assert resolution == {'protocol': protocol, 'source': 'partial'}
+
+    for _protocol, file_name in youtube_route_owner.ROUTE_FILES:
+        (unblock_dir / file_name).write_text('youtube.com\n', encoding='utf-8')
+    assert youtube_route_owner.resolve_youtube_route_owner(
+        unblock_dir=str(unblock_dir),
+        state_path=str(state_path),
+    ) == {'protocol': 'trojan', 'source': 'last_confirmed'}
+
+    fresh_state_path = tmp_path / 'fresh-owner.json'
+    assert youtube_route_owner.resolve_youtube_route_owner(
+        unblock_dir=str(unblock_dir),
+        state_path=str(fresh_state_path),
+    ) == {'protocol': '', 'source': 'ambiguous'}
+    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(
+        str(unblock_dir),
+        state_path=str(fresh_state_path),
+    ) == ''
 
 
 def test_direct_update_script_records_update_status():
@@ -2878,8 +2978,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'ipset save 2>/dev/null | awk' in s99unblock
     assert 'sha256sum 2>/dev/null | awk' in s99unblock
     assert 'wc -c < "$route_file"' in s99unblock
-    assert 'route_file_marker_count()' in s99unblock
-    assert '"vmess:$UNBLOCK_DIR/vmess.txt"' in s99unblock
+    assert 'from youtube_route_owner import youtube_route_owner' in s99unblock
+    assert 'YOUTUBE_ROUTE_PROTOCOL_CACHE' in s99unblock
     assert 'RUNTIME_DEDUPE_STATE_FILE="${BYPASS_RUNTIME_DEDUPE_STATE_FILE:-/tmp/bypass-runtime-dedupe.state}"' in s99unblock
     assert 'DEDUP_FORCE_INTERVAL_SECONDS="${BYPASS_RUNTIME_DEDUPE_FORCE_INTERVAL_SECONDS:-900}"' in s99unblock
     assert '"$UNBLOCK_DIR/shadowsocks.txt"' in s99unblock
@@ -2889,8 +2989,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'acquire_runtime_dedupe_lock || return 0' in s99unblock
     assert '*unblock_ipset.sh*) continue ;;' in s99unblock
     assert 'dedupe_vless_final_ipsets()' in ipset_script
-    assert 'route_file_marker_count()' in ipset_script
-    assert '"trojan:$UNBLOCK_DIR/trojan.txt"' in ipset_script
+    assert 'from youtube_route_owner import youtube_route_owner' in ipset_script
+    assert 'YOUTUBE_ROUTE_PROTOCOL_CACHE' in ipset_script
     assert 'LOCK_BUSY_QUIET="${UNBLOCK_IPSET_LOCK_BUSY_QUIET:-0}"' in ipset_script
     assert 'lock_busy_exit()' in ipset_script
     assert 'remove_runtime_overlap_from_set "unblockvless" "unblockvless2"' in ipset_script
@@ -3289,23 +3389,22 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bypass-bot-service-restart.log' in source
     assert 'app_service_restart_scheduled = False' in source
     assert 'App mode restart already scheduled' in source
-    assert 'sys.modules.pop(module_name, None)' in source
-    assert 'Pool probe module references released after' in source
-    assert "_unload_pool_probe_modules('pool probe process monitor')" in source
-    assert 'post-pool memory already at target' in source
-    assert 'cleanup skipped; already at target' in source
+    assert 'sys.modules.pop(module_name, None)' not in source
+    assert 'def _unload_pool_probe_modules' not in source
+    assert "'Pool probe completed: '" in source
+    assert 'post-pool memory restart requested' not in source
     assert "pool_probe_min_available_kb', 160000" in source
     assert "pool_probe_pause_available_kb', min(125000, POOL_PROBE_MIN_AVAILABLE_KB)" in source
     assert 'slow_available_kb=POOL_PROBE_SLOW_AVAILABLE_KB' in source
     assert 'pool_probe_quality_max_samples_per_run' in source
     assert "memory_watchdog_rss_limit_kb', 110 * 1024" in source
-    assert "memory_watchdog_idle_restart_rss_kb', 70 * 1024" in source
+    assert 'MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = 0' in source
     assert "background_task_max_bot_rss_kb', 65 * 1024" in source
     assert "background_task_critical_max_bot_rss_kb', 70 * 1024" in source
     assert "background_task_max_program_rss_kb', 100 * 1024" in source
     assert "background_task_critical_max_program_rss_kb', BACKGROUND_TASK_MAX_PROGRAM_RSS_KB" in source
     assert "background_task_max_cpu_percent', 45.0" in source
-    assert "memory_watchdog_idle_restart_hold_seconds', 120.0" in source
+    assert 'MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = 0.0' in source
     assert "getattr(config, 'router_metrics_history_limit', 120)" in source
     assert "getattr(config, 'router_metrics_warn_bot_rss_kb', 65 * 1024)" in source
     assert "getattr(config, 'router_metrics_compact_cache_ttl', 8.0)" in source
@@ -3320,8 +3419,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'route_states': _service_route_summary()" not in source
     assert "memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl'" in source
     assert 'def _record_memory_timeline' in source
-    assert 'def _start_memory_timeline_thread' in source
-    assert "_start_memory_timeline_thread()" in source
+    assert 'def _start_memory_timeline_thread' not in source
+    assert "_start_background_maintenance_thread()" in source
     assert "getattr(config, 'status_refresh_min_interval_seconds', 180.0)" in source
     assert "getattr(config, 'status_refresh_pending_min_interval_seconds'" in source
     assert 'status_refresh_last_finished_at' in source
@@ -3346,7 +3445,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "proto not in ('vless', 'vless2')" in source
     assert 'active_telegram_required = bool(_app_mode_telegram_enabled() and _telegram_required_for_protocol(key_name))' in source
     assert 'authenticated=active_telegram_required' in source
-    assert 'def _start_udp_quic_drift_watchdog_thread' in source
+    assert 'def _start_udp_quic_drift_watchdog_thread' not in source
     assert 'UDP_QUIC_DRIFT_SENTINEL_DOMAINS' in source
     assert 'UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS' in source
     assert 'UDP_QUIC_DRIFT_PRIORITY_DOMAINS' in source
@@ -3391,7 +3490,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_watchdog_idle_restart_in_seconds' in source
     assert 'автоперезапуск уже запрошен' in source
     assert 'Автоперезапуск бота в простое: порог' not in source
-    assert 'def _start_memory_watchdog_thread' in source
+    assert 'def _start_memory_watchdog_thread' not in source
     assert 'def _memory_cleanup' in source
     assert "f'{task_name} skipped high RSS'" in source
     assert 'background_task_cpu_cache_ttl_seconds' in source
@@ -3406,6 +3505,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "background_task_skip_reason[task_name] = 'cpu'" in source
     assert "'status refresh skipped high RSS'" in source
     assert "_background_task_allowed('YouTube failover', task_class='critical')" in source
+    assert 'background_task_coordinator_lock = threading.Lock()' in source
+    assert 'def _run_coordinated_background_task(task_name, callback):' in source
+    assert "_run_coordinated_background_task(\n                'Telegram auto-failover'" in source
+    assert "_run_coordinated_background_task(\n                'YouTube failover'" in source
+    assert "_run_coordinated_background_task('UDP/QUIC drift watchdog', refresh_udp_quic_drift)" in source
     assert 'ignore_status_refresh=(task_name == \'status refresh\')' in source
     assert 'status_refresh_in_progress.add(refresh_key)' in source
     assert source.find('status_refresh_in_progress.add(refresh_key)') < source.find(
@@ -3416,14 +3520,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_recent_event_history_match(\n                    'stream_guard_defer'" in stream_guard_block
     assert "_memory_cleanup('telegram polling error', force=True, clear_status=False)" in source
     assert 'def _malloc_trim' in source
-    assert 'def _pool_probe_memory_checkpoint' in source
+    assert 'def _pool_probe_memory_checkpoint' not in source
     assert "'payloads': {}" in source
     assert "def _get_web_status_api_cache(cache_key='full')" in source
     assert "def _store_web_status_api_cache(payload, timestamp=None, cache_key='full')" in source
-    assert 'def _record_post_pool_router_cleanup' in source
-    assert "'post_pool_router_cleanup'" in source
-    assert "count_proc_cmdline('/tmp/bypass_pool_probe_')" in source
-    assert "count_proc_cmdline('bypass_pool_probe_worker_')" in source
+    assert 'def _record_pool_probe_completion' in source
+    assert "float(getattr(config, 'pool_probe_process_worker_poll_seconds', 2.0))" in source
+    assert "signature = (int(stat_result.st_mtime_ns), int(stat_result.st_size))" in source
+    assert "pool_probe_process_state.get('progress_signature') == signature" in source
+    assert "'Pool probe completed: '" in source
+    assert 'def _record_post_pool_router_cleanup' not in source
     assert "MAIN_INSTANCE_LOCK_DIR = '/tmp/bypass_telegram_bot_main.lock'" in source
     assert 'def _acquire_main_instance_lock()' in source
     assert 'if COMMAND_WORKER_MODE or POOL_PROBE_WORKER_MODE:' in source
@@ -3432,24 +3538,24 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_release_main_instance_lock()' in source
     assert "getattr(config, 'memory_malloc_trim_enabled', True)" in source
     assert 'malloc_trim_attempted' in source
-    assert "memory_post_pool_restart_rss_kb', 70 * 1024" in source
-    assert "memory_post_pool_cleanup_target_rss_kb', 62 * 1024" in source
-    assert "memory_post_pool_cleanup_target_program_rss_kb', 100 * 1024" in source
-    assert 'def _post_pool_program_target_reached' in source
+    assert 'MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = 0' in source
+    assert 'worker_rss_before=' in source
+    assert 'memory_post_pool_cleanup_target_rss_kb' not in source
+    assert 'def _post_pool_program_target_reached' not in source
     assert 'POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 65 * 1024' in source
     assert "getattr(config, 'pool_probe_max_process_rss_kb', POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB)" in source
     assert "getattr(config, 'pool_probe_process_worker_enabled', True)" in source
     assert "BYPASS_KEENETIC_POOL_PROBE_WORKER" in source
     assert "def _run_pool_probe_process_worker" in source
     assert "def _start_selected_pool_probe_process" in source
-    available_memory_block = source.split('def _available_memory_kb', 1)[1].split('def _controller_check_pool_key_through_proxy', 1)[0]
+    available_memory_block = source.split('def _available_memory_kb', 1)[1].split('def _probe_cache', 1)[0]
     assert '_mem_available_kb_light' in available_memory_block
     assert '_pool_probe_controller().available_memory_kb' not in available_memory_block
     progress_label_block = source.split('def _pool_probe_progress_label', 1)[1].split('def _pool_probe_timeout_budget', 1)[0]
-    assert '_controller_pool_probe_progress_label' not in progress_label_block
+    assert '_pool_probe_controller().pool_probe_progress_label' not in progress_label_block
     assert "\\u041f\\u043e\\u043b\\u043d\\u0430\\u044f" in progress_label_block
     process_monitor_block = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
-    assert "_schedule_post_pool_memory_cleanup(" in process_monitor_block
+    assert "_record_pool_probe_completion(" in process_monitor_block
     assert 'def _forget_unreferenced_key_probes' in source
     delete_pool_block = source.split('def _delete_pool_key', 1)[1].split('def _clear_pool', 1)[0]
     clear_pool_block = source.split('def _clear_pool', 1)[1].split('def _proxy_config_snapshot_paths', 1)[0]
@@ -3466,7 +3572,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_invalidate_pool_data_cache()' in subscription_add_block
     assert '_invalidate_pool_data_cache()' in probe_invalidate_block
     assert '_invalidate_key_status_cache()' not in probe_invalidate_block
-    assert "def _pool_probe_cancel_allows_resume" in source
+    assert 'import pool_probe_process_runner as runner' in source
     assert "_request_pool_probe_process_cancel(resume=False)" in source
     assert "'no-resume'" in source
     assert "_write_json_file_private(paths['input_path'], payload)" in source
@@ -3474,7 +3580,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "payload['tasks'] = []" in source
     assert 'process_rss_kb=_process_rss_kb' in source
     assert 'max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB' in source
-    assert 'memory_cleanup=_pool_probe_memory_checkpoint' in source
+    assert 'memory_cleanup=None' in source
     assert 'max_rss_cleanup_attempts=3' in source
     assert "getattr(config, 'pool_failover_process_worker_enabled', True)" in source
     assert 'def _find_pool_failover_candidate_inline' in source
@@ -3488,8 +3594,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE' in source
     assert 'check_telegram_api=_check_telegram_api_for_background' in source
     assert '_check_youtube_protocol_for_background(route_proto, metrics=yt_metrics)' in source
-    assert 'failover candidate process finished' in source
-    assert 'health check process finished' in source
+    candidate_parent_block = source.split('def _find_pool_failover_candidate_in_process', 1)[1].split(
+        'def _find_pool_failover_candidate', 1
+    )[0]
+    assert 'worker_timed_out' in candidate_parent_block
+    assert "_memory_cleanup('failover candidate process finished'" not in candidate_parent_block
+    assert 'health check process finished' not in source
+    assert 'health check worker finished' not in source
     assert 'memory_timeline_trim_min_interval_seconds' in source
     assert 'def _maybe_trim_memory_timeline_file' in source
     assert '_maybe_trim_memory_timeline_file(MEMORY_TIMELINE_PATH, now=now)' in source
@@ -3498,9 +3609,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     proxy_status_source = (APP_ROOT / 'proxy_status.py').read_text(encoding='utf-8')
     assert '\nimport requests\n' not in proxy_status_source
     assert 'def _requests_module' in proxy_status_source
-    assert "run_memory_cleanup('pool probe key checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
-    assert "run_memory_cleanup('pool probe batch checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
-    assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" in (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    pool_runner_text = (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    assert "run_memory_cleanup('pool probe key checkpoint', force=True" not in pool_runner_text
+    assert "run_memory_cleanup('pool probe batch checkpoint', force=True" not in pool_runner_text
+    assert "run_memory_cleanup('pool probe worker final checkpoint', force=True" not in pool_runner_text
     assert 'def _pool_probe_runtime_cmdline_matches' in source
     assert "if b'bypass_pool_probe_worker_' in cmdline:" in source
     assert 'def _pool_probe_runtime_file_matches' in source
@@ -3511,6 +3623,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'if pid == os.getpid()' in source
     startup_restore = source.split('def _restore_startup_proxy_mode():', 1)[1].split('def _run_telegram_polling_loop():', 1)[0]
     assert "update_proxy('none', persist=False)" not in startup_restore
+    polling_loop = source.split('def _run_telegram_polling_loop():', 1)[1].split('def main():', 1)[0]
+    assert 'Keep the last healthy state until a preflight or polling error says otherwise.' in polling_loop
+    assert 'bot_polling = False\n            if shutdown_requested.is_set()' not in polling_loop
+    assert 'shutdown_requested.wait(2)' in polling_loop
     readme_source = (ROOT / 'README.md').read_text(encoding='utf-8')
     assert 'https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh' in readme_source
     assert 'https://codeload.github.com/andruwko73/bypass_keenetic/tar.gz/refs/heads/main' in readme_source
@@ -3522,17 +3638,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'download_file_from_archive()' in bootstrap_source
     assert 'https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/${archive_ref}' in bootstrap_source
     assert 'raw.githubusercontent.com unavailable for $(basename "$target"); using GitHub archive fallback.' in bootstrap_source
-    assert 'download_optional_file "$(repo_file_url static/telegram.png)"' in bootstrap_source
+    assert 'download_optional_file "$(repo_file_url static/telegram.svg)"' in bootstrap_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
-    assert 'memory_watchdog_idle_restart_rss_kb = 71680' in script_source
+    assert 'memory_watchdog_idle_restart_rss_kb' not in script_source
     assert 'router_metrics_history_limit = 120' in script_source
     assert 'router_metrics_warn_bot_rss_kb = 66560' in script_source
     assert 'router_metrics_critical_bot_rss_kb = 87040' in script_source
     assert 'router_metrics_warn_load1 = 3.0' in script_source
-    assert 'memory_post_pool_restart_rss_kb = 71680' in script_source
-    assert 'memory_post_pool_cleanup_target_rss_kb = 63488' in script_source
-    assert 'memory_post_pool_cleanup_target_program_rss_kb = 102400' in script_source
+    assert 'memory_post_pool_restart_rss_kb' not in script_source
+    assert 'memory_post_pool_cleanup_target_rss_kb' not in script_source
     assert 'pool_probe_max_process_rss_kb = 66560' in script_source
     assert 'pool_probe_process_worker_enabled = True' in script_source
     assert 'pool_probe_process_worker_poll_seconds = 0.75' in script_source
@@ -3637,23 +3752,24 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'for key_name, key_value in (current_keys or {}).items()' in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source
     assert 'allow_youtube_confirm=False' in source
-    assert "_status_refresh_memory_cleanup('status refresh')" in source
     assert 'def _pool_probe_cpu_busy_percent' in source
-    assert 'def _schedule_post_pool_memory_cleanup' in source
+    assert 'def _record_pool_probe_completion' in source
     assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
     assert 'def _persist_pool_probe_resume_payload' in source
     assert "serializable['task_ref'] = 'key_hash'" in source
     assert 'def _resolve_pool_probe_resume_tasks' in source
     assert 'def _load_persisted_pool_probe_resume' in source
     assert '_load_persisted_pool_probe_resume()' in source
-    assert "_schedule_post_pool_memory_cleanup()" in source
+    assert "_record_pool_probe_completion()" in source
     assert 'def _refresh_status_caches_async(current_keys, active_only=False)' in source
     assert "if not _background_task_allowed('status refresh', task_class='light' if active_only else 'normal')" in source
     assert "refresh_key = f'active:{signature}' if active_only else signature" in source
     assert "_refresh_status_caches_async(current_keys, active_only=True)" in source
     assert 'def _placeholder_status_snapshot(current_keys, include_pool_details=True)' in source
     assert '_placeholder_status_snapshot(current_keys, include_pool_details=False)' in source
-    assert "_active_mode_status_snapshot_from_base(\n            current_keys,\n            {'web': _build_web_status(current_keys, protocols=protocols), 'protocols': protocols}," in source
+    assert 'def _status_snapshot_has_custom_services(snapshot):' in source
+    assert 'if cached is not None and not _status_snapshot_has_custom_services(cached):' in source
+    assert "_active_mode_status_snapshot_from_base(\n            current_keys,\n            _placeholder_status_snapshot(current_keys, include_pool_details=True)," in source
     assert 'if not pool_enabled:\n            status_refresh_pending = False' not in source
     assert 'def _web_light_pool_summary(current_keys, key_pools, key_probe_cache=None, custom_checks=None)' in source
     assert 'def _light_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks=None)' in source
@@ -3677,7 +3793,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "allow_youtube_confirm=False" in source
     assert "elif pool_locked:" in source
     assert 'def _attempt_youtube_vless2_failover' in source
-    assert '_start_youtube_vless2_failover_thread()' in source
+    assert '_start_youtube_vless2_failover_thread()' not in source
     assert 'def _probe_applied_pool_key_services' in source
     assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
@@ -3703,7 +3819,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _mark_auto_failover_polling_ok' in source
     assert "return False, 'Telegram polling is healthy'" in source
     assert "allow_high_rss=reason in ('pending failure', 'Telegram polling stopped')" in source
-    assert "if ran:\n                    _memory_cleanup('Telegram auto-failover cycle'" in source
+    assert "if ran:\n            _memory_cleanup('Telegram auto-failover cycle'" in source
+    assert "if ran:\n            _memory_cleanup('YouTube failover cycle'" in source
     assert "auto_failover_idle_log_interval_seconds', 900" in source
     assert 'recent_failure_backoff_seconds=AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS' in source
     assert 'skip_failed_candidates=True' in source
@@ -3726,7 +3843,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "'stream_guard_defer'" in source
     assert "youtube_vless2_failover_recent_success_ttl', 900" in source
     assert 'def _youtube_route_protocol' in source
-    assert 'def _youtube_route_marker_count' in source
+    assert 'def _youtube_route_owner' in source
+    assert 'youtube_route_owner(default=\'vless2\')' not in source
+    assert "return owner if owner in YOUTUBE_ROUTE_PROTOCOLS else ''" in source
+    assert "'route_owner_unavailable'" in source
+    assert 'def _youtube_route_marker_count' not in source
     assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
     assert "YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')" in source
     assert "if proxy_mode not in YOUTUBE_STREAM_GUARD_PROTOCOLS" in source
@@ -3748,32 +3869,24 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "state['last_event'] = now" in source
     assert source.find("last_event = float(state.get('last_event') or 0.0)") < source.find("_conntrack_route_diagnostic(proto)")
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
-    assert 'def _release_web_form_template_cache()' in source
     runtime_release_block = source.split('def _release_runtime_pressure_modules', 1)[1].split('\n\ndef render_web_form', 1)[0]
-    assert 'sys.modules.pop(module_name, None)' in runtime_release_block
-    assert "released.extend(module_names)" in runtime_release_block
-    assert "released.extend(('web_route_tools_runtime', 'route_intersections', 'service_routes'))" in runtime_release_block
+    assert 'sys.modules.pop(module_name, None)' not in runtime_release_block
+    assert 'Runtime modules contain executable code, not bounded request data' in runtime_release_block
+    assert 'return []' in runtime_release_block
     assert 'def _key_pool_store()' in source
     assert '\nimport key_pool_store\n' not in source
     assert "service_route_intersections_cache_ttl', 60.0" in source
     assert 'intersections_cache_ttl=SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL' in source
-    assert "_release_web_form_template_cache()\n            _web_response_cleanup('web html render')" in source
-    assert "_web_response_cleanup('web json api render')" in source
-    assert "_web_response_cleanup('web post pool action render', heavy=True)" in source
-    assert "include_pool_ui=True" in source
-    assert "include_route_tools=True" in source
-    assert "malloc_trim_info = _malloc_trim(reason, force=True, rss_kb=rss_before)" in source
+    assert '_web_response_cleanup' not in source
+    assert "elif kind == 'json_text':" in source
+    assert "include_pool_ui=True" not in source
+    assert "include_route_tools=True" not in source
+    assert "malloc_trim_info = _malloc_trim(reason, force=True, rss_kb=rss_before)" not in source
     assert "router_health.invalidate(include_heavy=bool(clear_status))" in source
     assert "if not POOL_PROBE_WORKER_MODE:" in source
-    assert "memory_cleanup_rss_kb" in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
-    assert "web_response_cleanup_rss_kb" in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
-    assert "web_response_light_cleanup_rss_kb" in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
-    assert "WEB_RESPONSE_CLEANUP_RSS_KB" in source
-    assert "WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
-    assert "cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
-    assert "def _status_refresh_memory_cleanup" in source
-    assert "rss_before < WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB" in source
-    assert "_status_refresh_memory_cleanup('status refresh')" in source
+    assert "memory_cleanup_rss_kb" not in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "web_response_cleanup_rss_kb" not in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
+    assert "web_response_light_cleanup_rss_kb" not in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "MEMORY_CLEANUP_RSS_KB" in source
     assert 'clear_pool_summary=bool(clear_status)' in source
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source
@@ -3782,7 +3895,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "web_pools_api_cache.setdefault('entries', {})" in source
     assert 'WEB_POOLS_API_CACHE_MAX_ENTRIES' in source
     assert "entries.pop(key, None)" in source
-    assert "action === 'pool-apply'" in (APP_ROOT / 'web_template_scripts.py').read_text(encoding='utf-8')
+    assert 'serialized_payload = json.dumps(payload' in source
+    assert 'return cached_payload if isinstance(cached_payload, str) else None' in source
+    assert 'asset_cache_key=path if path in' in source
+    assert "action === 'pool-apply'" in (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert 'avoid rendering full probe details twice' in source
     assert 'event_history_api_cache[\'payload\'] = payload' not in source
     assert "last_scan_count" in source
@@ -3832,10 +3948,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _install_telegram_send_retry_wrapper' in source
     assert "_reset_telegram_http_session('send_message retry')" in source
     assert 'redact_text=_redact_sensitive_text' in source
-    assert "_memory_cleanup('pool probe finished'" in source
+    assert "_memory_cleanup('pool probe finished'" not in source
     assert "_memory_cleanup('web command finished'" in source
-    assert "_web_response_cleanup('protocol panel render')" in source
-    assert "_web_response_cleanup('protocol check render')" in source
     assert 'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"' in source
     assert 'from pool_probe_runner import' not in source
     assert 'from repo_update import' not in source
@@ -3864,6 +3978,7 @@ def test_simple_mode_import_skips_advanced_modules():
         encoding='utf-8',
     )
     advanced_modules = (
+        'custom_checks_store',
         'pool_probe_controller',
         'probe_cache',
         'key_pool_web',
@@ -3872,6 +3987,7 @@ def test_simple_mode_import_skips_advanced_modules():
         'auto_failover_runtime',
         'telegram_call_learning',
         'youtube_edge_prefetch',
+        'subscription_runtime',
     )
     script = (
         "import json, os, sys\n"
@@ -3900,6 +4016,110 @@ def test_simple_mode_import_skips_advanced_modules():
         )
         loaded = json.loads(result.stdout.strip())
         assert loaded == {name: False for name in advanced_modules}
+    finally:
+        temp_dir.cleanup()
+
+
+def test_web_only_import_skips_telegram_only_modules():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('web_only\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    telegram_only_modules = (
+        'telebot',
+        'telegram_key_ui',
+        'telegram_info_runtime',
+        'telegram_jobs',
+        'telegram_message_flow',
+        'telegram_confirm',
+        'telegram_install_ui',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        f"mods = {telegram_only_modules!r}\n"
+        "print(json.dumps({name: name in sys.modules for name in mods}, sort_keys=True))\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        loaded = json.loads(result.stdout.strip())
+        assert loaded == {name: False for name in telegram_only_modules}
+    finally:
+        temp_dir.cleanup()
+
+
+def test_http_api_handles_parallel_status_pool_and_asset_requests():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    script = (
+        "import concurrent.futures, json, socket, sys, tempfile, time, urllib.request\n"
+        "from collections import Counter\n"
+        "from pathlib import Path\n"
+        f"root = Path({str(ROOT)!r})\n"
+        "app = root / 'app'\n"
+        "with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:\n"
+        "    sock.bind(('127.0.0.1', 0))\n"
+        "    port = sock.getsockname()[1]\n"
+        f"temp = Path({str(temp_path)!r})\n"
+        "config_text = (app / 'bot_config.example.py').read_text(encoding='utf-8')\n"
+        "config_text += f\"\\nrouterip = '127.0.0.1'\\nbrowser_port = '{port}'\\nweb_auth_disabled = True\\napp_runtime_mode = 'advanced'\\n\"\n"
+        "(temp / 'bot_config.py').write_text(config_text, encoding='utf-8')\n"
+        "(temp / 'bot_app_mode').write_text('advanced\\n', encoding='utf-8')\n"
+        "sys.path[:0] = [str(temp), str(app), str(root)]\n"
+        "import app_runtime_mode\n"
+        "app_runtime_mode.APP_RUNTIME_MODE_FILE = str(temp / 'bot_app_mode')\n"
+        "import bot\n"
+        "bot.start_http_server()\n"
+        "time.sleep(0.2)\n"
+        "paths = ('/api/status?compact=1&lite=1', '/api/pools?protocol=vless', '/static/app.js', '/static/app.css')\n"
+        "def fetch(index):\n"
+        "    request = urllib.request.Request(f'http://127.0.0.1:{port}{paths[index % len(paths)]}')\n"
+        "    with urllib.request.urlopen(request, timeout=15) as response:\n"
+        "        response.read()\n"
+        "        return response.status\n"
+        "try:\n"
+        "    with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:\n"
+        "        results = list(executor.map(fetch, range(50)))\n"
+        "    print(json.dumps({'responses': dict(Counter(results)), 'requests': len(results)}, sort_keys=True))\n"
+        "finally:\n"
+        "    if bot.web_httpd:\n"
+        "        bot.web_httpd.shutdown()\n"
+        "        bot.web_httpd.server_close()\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+            check=True,
+        )
+        payload = json.loads(result.stdout.strip())
+        assert payload == {'requests': 50, 'responses': {'200': 50}}
     finally:
         temp_dir.cleanup()
 
@@ -4001,8 +4221,8 @@ def test_active_status_refresh_skips_heavy_pool_modules():
         "snapshot = bot._active_mode_status_snapshot(current_keys, background_checks=True)\n"
         "assert snapshot['protocols']['vless']['api_ok'] is True\n"
         "assert 'YouTube:' not in snapshot['protocols']['vless']['details']\n"
-        "assert snapshot['protocols']['vless2']['tone'] == 'ok'\n"
-        "assert snapshot['protocols']['vless2']['yt_ok'] is True\n"
+        "assert snapshot['protocols']['vless2']['tone'] == 'empty'\n"
+        "assert snapshot['protocols']['vless2']['yt_ok'] is False\n"
         "assert snapshot['protocols']['vless2']['api_ok'] is False\n"
         "cache = json.load(open(bot._KEY_PROBE_CACHE_PATH, encoding='utf-8'))\n"
         "active_entry = cache[bot._hash_key(current_keys['vless'])]\n"
@@ -4165,19 +4385,20 @@ def test_runtime_modules_are_installed_by_update_scripts():
 def test_youtube_edge_prefetch_runner_detects_current_youtube_route(tmp_path):
     unblock_dir = tmp_path / 'unblock'
     unblock_dir.mkdir()
-    for _, file_name in youtube_edge_prefetch_runner.PROTOCOL_ROUTE_FILES:
+    state_path = tmp_path / 'owner.json'
+    for _, file_name in youtube_route_owner.ROUTE_FILES:
         (unblock_dir / file_name).write_text('example.com\n', encoding='utf-8')
 
     (unblock_dir / 'vless.txt').write_text('www.youtube.com\ni.ytimg.com\n', encoding='utf-8')
-    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir)) == 'vless'
+    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir), state_path=str(state_path)) == 'vless'
 
     (unblock_dir / 'vless.txt').write_text('example.com\n', encoding='utf-8')
     (unblock_dir / 'vless-2.txt').write_text('youtube.com\ngooglevideo.com\nyt3.ggpht.com\n', encoding='utf-8')
-    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir)) == 'vless2'
+    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir), state_path=str(state_path)) == 'vless2'
 
     (unblock_dir / 'vless-2.txt').write_text('example.com\n', encoding='utf-8')
     (unblock_dir / 'vmess.txt').write_text('domain:youtubei.googleapis.com\n', encoding='utf-8')
-    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir)) == 'vmess'
+    assert youtube_edge_prefetch_runner.detect_youtube_route_protocol(str(unblock_dir), state_path=str(state_path)) == 'vmess'
 
 
 def test_youtube_edge_prefetch_runner_prefers_bot_config_over_legacy_config():
@@ -4187,6 +4408,34 @@ def test_youtube_edge_prefetch_runner_prefers_bot_config_over_legacy_config():
     assert 'while config_dir in sys.path:' in source
     assert 'sys.path.remove(config_dir)' in source
     assert 'sys.path.insert(0, config_dir)' in source
+
+
+def test_background_maintenance_scheduler_combines_periodic_tasks():
+    source = source_path('bot.py').read_text(encoding='utf-8')
+
+    assert 'def _background_maintenance_tasks()' in source
+    assert 'def _start_background_maintenance_thread()' in source
+    assert "name='background-maintenance'" in source
+    assert '    _start_background_maintenance_thread()\n    if telegram_enabled:' in source
+    assert 'BACKGROUND_TASK_SLOW_LOG_SECONDS' in source
+    assert "scheduler duration: {duration_seconds:.2f}s" in source
+    assert 'def _ipset_ipv4_snapshot(set_name):' in source
+    assert 'def _ipset_snapshot_contains(networks, address):' in source
+    assert "['ipset', 'save', str(set_name or '')]" in source
+    assert 'UDP_QUIC_DRIFT_DNS_CACHE_TTL_SECONDS' in source
+    assert 'def _udp_quic_drift_domains_by_protocol(route_sets):' in source
+    assert 'def _udp_quic_drift_domain_addresses(domain):' in source
+    assert 'def _udp_quic_drift_route_sets():' in source
+    assert 'for proto in UDP_QUIC_POLICY_PROTOCOLS' in source
+    assert 'if domains_by_protocol.get(proto)' in source
+    for callback in (
+        '_run_auto_failover_cycle',
+        '_run_youtube_failover_cycle',
+        '_run_udp_quic_drift_watchdog_cycle',
+        '_run_subscription_auto_refresh_cycle',
+        '_run_memory_watchdog_cycle',
+    ):
+        assert f'def {callback}' in source
 
 
 def test_youtube_edge_prefetch_cache_is_bounded_and_public_only():
@@ -4221,9 +4470,7 @@ def test_youtube_edge_prefetch_collects_limited_dns_candidates():
         return [(family, socktype, 0, '', ('142.250.150.119', port))]
 
     def fake_run_command(args, timeout):
-        assert timeout == 3
-        assert args[0] in ('dig', 'nslookup')
-        return Result()
+        raise AssertionError(f'external DNS must remain fallback-only: {args!r}')
 
     candidates, cache = youtube_edge_prefetch.collect_prefetch_candidates(
         hosts=('www.youtube.com', 'i.ytimg.com'),
@@ -4237,7 +4484,7 @@ def test_youtube_edge_prefetch_collects_limited_dns_candidates():
     )
 
     addresses = [item['address'] for item in candidates]
-    assert addresses == ['142.250.150.119', '142.251.38.106']
+    assert addresses == ['142.250.150.119']
     assert set(cache['entries']) == set(addresses)
 
 
@@ -4999,6 +5246,7 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
     original_release_lock = youtube_edge_prefetch_runner.release_lock
     original_read_available = youtube_edge_prefetch_runner.read_available_memory_kb
     original_detect_route = youtube_edge_prefetch_runner.detect_youtube_route_protocol
+    original_self_test = youtube_edge_prefetch_runner.youtube_route_self_test
     original_restore = youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets
     original_prefetch = youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once
     restore_calls = []
@@ -5014,6 +5262,12 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
         youtube_edge_prefetch_runner.release_lock = lambda lock_dir: None
         youtube_edge_prefetch_runner.read_available_memory_kb = lambda: 200000
         youtube_edge_prefetch_runner.detect_youtube_route_protocol = lambda **kwargs: 'vless2'
+        youtube_edge_prefetch_runner.youtube_route_self_test = lambda protocol: {
+            'ok': False,
+            'reason': 'request_failed',
+            'http_code': '000',
+            'duration_ms': 1,
+        }
 
         def fake_restore(**kwargs):
             restore_calls.append(kwargs)
@@ -5050,6 +5304,7 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
         youtube_edge_prefetch_runner.release_lock = original_release_lock
         youtube_edge_prefetch_runner.read_available_memory_kb = original_read_available
         youtube_edge_prefetch_runner.detect_youtube_route_protocol = original_detect_route
+        youtube_edge_prefetch_runner.youtube_route_self_test = original_self_test
         youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets = original_restore
         youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = original_prefetch
 
@@ -5059,6 +5314,56 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
     assert status['prefetch_skipped_reason'] == 'cache_restore_sufficient'
     assert status['cache_restored_addresses'] == 1
     assert status['last_message'] == 'vless2: added 1 addresses, candidates 3, cache 4'
+
+
+def test_youtube_edge_prefetch_runner_skips_warmup_after_successful_self_test(tmp_path):
+    original_config = youtube_edge_prefetch_runner.config
+    original_acquire_lock = youtube_edge_prefetch_runner.acquire_lock
+    original_release_lock = youtube_edge_prefetch_runner.release_lock
+    original_read_available = youtube_edge_prefetch_runner.read_available_memory_kb
+    original_detect_route = youtube_edge_prefetch_runner.detect_youtube_route_protocol
+    original_self_test = youtube_edge_prefetch_runner.youtube_route_self_test
+    original_restore = youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets
+    original_prefetch = youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_enabled=True,
+            youtube_edge_prefetch_fast_warm_enabled=True,
+            youtube_edge_prefetch_cache_restore_enabled=True,
+            youtube_edge_prefetch_min_available_kb=0,
+            youtube_edge_prefetch_lock_dir=str(tmp_path / 'lock'),
+        )
+        youtube_edge_prefetch_runner.acquire_lock = lambda lock_dir: True
+        youtube_edge_prefetch_runner.release_lock = lambda lock_dir: None
+        youtube_edge_prefetch_runner.read_available_memory_kb = lambda: 200000
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = lambda **kwargs: 'trojan'
+        youtube_edge_prefetch_runner.youtube_route_self_test = lambda protocol: {'ok': True, 'protocol': protocol}
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets = (
+            lambda **kwargs: (_ for _ in ()).throw(AssertionError('cache restore must not run'))
+        )
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = (
+            lambda **kwargs: (_ for _ in ()).throw(AssertionError('prefetch must not run'))
+        )
+
+        status = youtube_edge_prefetch_runner.run_prefetch(
+            trigger='route-change',
+            status_path=str(tmp_path / 'status.json'),
+            cache_path=str(tmp_path / 'cache.json'),
+            unblock_dir=str(tmp_path / 'unblock'),
+        )
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner.acquire_lock = original_acquire_lock
+        youtube_edge_prefetch_runner.release_lock = original_release_lock
+        youtube_edge_prefetch_runner.read_available_memory_kb = original_read_available
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = original_detect_route
+        youtube_edge_prefetch_runner.youtube_route_self_test = original_self_test
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.restore_cached_ipsets = original_restore
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = original_prefetch
+
+    assert status['ok'] is True
+    assert status['skipped_reason'] == 'self_test_ok'
+    assert status['warm_mode'] == 'not_needed'
 
 
 def test_entware_dns_runtime_helpers():
@@ -5240,10 +5545,29 @@ def test_telegram_call_learning_idle_backoff_source():
     assert 'TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS' in source
     assert 'TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
     assert 'idle_no_client_scans' in source
-    assert '_telegram_call_learning_ipset_members(set_name, include_timeouts=True)' in source
-    assert 'active_clients_changed = active_clients_key != previous_active_clients_key' in source
+    assert 'needs_initial_scan = not was_watching' in source
+    assert 'udp_source_activity_signature(active_clients)' in source
+    assert 'follow_up_scan_pending = False' in source
+    assert 'scan_is_follow_up = follow_up_scan_pending' in source
+    assert 'if not needs_initial_scan and not udp_activity_changed and not scan_is_follow_up:' in source
+    assert 'if not scan_is_follow_up and saw_relevant_flows:' in source
+    assert 'if was_watching and idle_no_client_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT:' in source
+    call_learning_source = (APP_ROOT / 'telegram_call_learning.py').read_text(encoding='utf-8')
+    assert "command = ['grep', '-F']" in call_learning_source
+    assert 'source_tokens=allowed_source_tokens' in call_learning_source
+    assert 'def udp_source_activity_signature' in call_learning_source
     assert 'idle_no_client_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
-    assert 'idle_active_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' in source
+    assert 'idle_active_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT' not in source
+    route_signature = source.split('def _telegram_call_learning_route_signature', 1)[1].split(
+        'def _telegram_call_learning_route_protocols', 1
+    )[0]
+    route_cache = source.split('def _telegram_call_learning_route_protocols', 1)[1].split(
+        'def _select_telegram_call_learning_protocol', 1
+    )[0]
+    assert 'stat.st_mtime_ns' in route_signature
+    assert 'time.time()' not in route_cache
+    assert "telegram_call_learning_route_cache.get('signature') == signature" in route_cache
+    assert "'timestamp':" not in route_cache
     assert "if not candidate.get('udp_call_cluster'):" in auto_scan
     assert "not candidate.get('udp_call_active_media')" not in auto_scan
     assert 'telegram_call_learning_idle_backoff_seconds = 60.0' in config_source
@@ -5285,6 +5609,303 @@ def test_active_protocol_status_description_has_no_trailing_period():
     )
     assert status['details'].endswith('YouTube: работает')
     assert not status['details'].endswith('.')
+
+
+def test_active_protocol_status_keeps_confirmed_services_while_refresh_is_pending():
+    status = web_status_builder.active_protocol_status(
+        endpoint_ok=True,
+        endpoint_message='SOCKS ok.',
+        api_ok=True,
+        api_message='cached Telegram result',
+        api_transient=False,
+        api_pending=True,
+        yt_ok=True,
+        yt_message='cached YouTube result',
+        yt_pending=True,
+        custom_states={'discord': 'ok'},
+        custom_checks=[{'id': 'discord', 'label': 'Discord'}],
+        required_services=('telegram', 'youtube'),
+    )
+    assert status['label'] == 'Статус обновляется'
+    assert status['api_ok'] is True
+    assert status['yt_ok'] is True
+    assert status['api_pending'] is True
+    assert status['yt_pending'] is True
+    assert web_status_runtime.protocol_status_is_pending(status)
+    assert 'Последний подтверждённый результат сохранён' in status['details']
+
+
+def test_light_status_keeps_confirmed_custom_services():
+    light_status = {
+        'tone': 'ok',
+        'label': 'ok',
+        'details': 'Telegram: ok',
+        'endpoint_ok': True,
+        'endpoint_message': 'SOCKS ok',
+        'api_ok': True,
+        'api_message': 'ok',
+        'api_pending': False,
+        'yt_ok': False,
+        'yt_message': '',
+        'yt_pending': False,
+        'yt_state': 'unused',
+        'custom': {},
+    }
+    previous_status = {
+        'custom': {'discord': 'ok', 'claude': 'fail'},
+        'yt_ok': False,
+        'yt_message': '',
+        'yt_pending': False,
+        'yt_state': 'unused',
+    }
+    status = web_status_builder.merge_light_status_with_cached_services(
+        light_status,
+        previous_status,
+        [
+            {'id': 'discord', 'label': 'Discord'},
+            {'id': 'claude', 'label': 'Claude'},
+        ],
+        required_services=('telegram',),
+    )
+    assert status['custom'] == previous_status['custom']
+    assert status['tone'] == 'warn'
+    assert 'Discord' in status['details']
+    assert 'Claude' in status['details']
+
+
+def test_auto_failover_defers_when_health_worker_result_is_unknown():
+    state = {
+        'in_progress': False,
+        'last_attempt': 0.0,
+        'last_fail': 0.0,
+        'last_ok': 0.0,
+        'consecutive_failures': 0,
+        'last_failure_message': '',
+    }
+    logs = []
+    switched = auto_failover_runtime.attempt_auto_failover(
+        state=state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='socks5://127.0.0.1:10811',
+        check_telegram_api=lambda *_args, **_kwargs: (None, 'worker unavailable'),
+        load_current_keys=lambda: {'vless': 'active'},
+        load_key_pools=lambda: {'vless': ['candidate']},
+        failover_candidates=lambda *_args, **_kwargs: [('vless', 'candidate')],
+        find_pool_failover_candidate=lambda *_args, **_kwargs: ('vless', 'candidate', True, True),
+        install_key_for_protocol=lambda *_args, **_kwargs: 'installed',
+        update_proxy=lambda *_args, **_kwargs: (True, ''),
+        set_active_key=lambda *_args, **_kwargs: None,
+        record_key_probe=lambda *_args, **_kwargs: None,
+        log=logs.append,
+        grace_seconds=0,
+        switch_cooldown_seconds=0,
+        startup_hold_seconds=0,
+        min_consecutive_failures=1,
+    )
+    assert switched is False
+    assert state['last_fail'] == 0.0
+    assert state['consecutive_failures'] == 0
+    assert any('did not return a result' in message for message in logs)
+
+
+def test_health_check_runner_writes_sanitized_unsupported_result():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        input_path = root / 'input.json'
+        result_path = root / 'result.json'
+        input_path.write_text(json.dumps({'kind': 'unsupported'}), encoding='utf-8')
+        assert health_check_runner.run_health_check_worker(str(input_path), str(result_path)) == 1
+        result = json.loads(result_path.read_text(encoding='utf-8'))
+        assert result['ok'] is False
+        assert result['error'] == 'unsupported health check kind: unsupported'
+        assert result['rss_before_kb'] >= 0
+        assert result['hwm_kb'] >= 0
+
+
+def test_health_check_worker_command_uses_narrow_runner():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    worker_block = source.split('def _health_check_process_worker_code', 1)[1].split(
+        'def _run_health_check_process_worker', 1
+    )[0]
+    assert 'import health_check_runner as runner' in worker_block
+    assert 'import main as bot_module' not in worker_block
+    assert 'health_check_runner.py' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'health_check_runner.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+
+
+def test_failover_candidate_worker_command_uses_narrow_runner():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    worker_block = source.split('def _failover_candidate_process_worker_code', 1)[1].split(
+        'def _health_check_process_worker_code', 1
+    )[0]
+    assert 'import failover_candidate_runner as runner' in worker_block
+    assert 'import main as bot_module' not in worker_block
+    assert 'failover_candidate_runner.py' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'failover_candidate_runner.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        input_path = root / 'input.json'
+        result_path = root / 'result.json'
+        input_path.write_text(json.dumps({'service': 'telegram', 'candidates': []}), encoding='utf-8')
+        assert failover_candidate_runner.run_failover_candidate_worker(str(input_path), str(result_path)) == 2
+        result = json.loads(result_path.read_text(encoding='utf-8'))
+        assert result['ok'] is False
+        assert result['candidate'] is None
+        assert result['hwm_kb'] >= 0
+
+
+def test_pool_probe_worker_command_uses_narrow_runner():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    worker_block = source.split('def _pool_probe_process_worker_code', 1)[1].split(
+        'def _run_pool_probe_process_worker', 1
+    )[0]
+    assert 'import pool_probe_process_runner as runner' in worker_block
+    assert 'import main as bot_module' not in worker_block
+    assert 'pool_probe_process_runner.py' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'pool_probe_process_runner.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        input_path = root / 'input.json'
+        progress_path = root / 'progress.json'
+        result_path = root / 'result.json'
+        cancel_path = root / 'cancel'
+        input_path.write_text(json.dumps({'tasks': [], 'checks': []}), encoding='utf-8')
+        assert pool_probe_process_runner.run_pool_probe_process_worker(
+            str(input_path), str(progress_path), str(result_path), str(cancel_path)
+        ) == 0
+        result = json.loads(result_path.read_text(encoding='utf-8'))
+        assert result['ok'] is True
+        assert result['checked'] == 0
+        assert result['hwm_kb'] >= 0
+
+
+def test_pool_probe_curl_helpers_do_not_import_requests():
+    class Result:
+        returncode = 0
+        stderr = b''
+        stdout = b'\n__BK_HTTP_CODE__204\n__BK_URL__https://example.com/final'
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        Path(args[args.index('--output') + 1]).write_bytes(b'ok')
+        return Result()
+
+    status_code, final_url, body, error = pool_probe_curl._run_curl(
+        'socks5://127.0.0.1:10811',
+        'https://example.com/',
+        2,
+        3,
+        command_runner=fake_run,
+    )
+    assert (status_code, final_url, body, error) == (204, 'https://example.com/final', b'ok', '')
+    assert '--proxy' in calls[0][0]
+    assert 'socks5h://127.0.0.1:10811' in calls[0][0]
+    assert '--config' in calls[0][0]
+    assert '--output' in calls[0][0]
+    assert 'https://example.com/' not in calls[0][0]
+    assert b'https://example.com/' in calls[0][1]['input']
+    assert not Path(calls[0][0][calls[0][0].index('--output') + 1]).exists()
+    original_run_curl = pool_probe_curl._run_curl
+    try:
+        pool_probe_curl._run_curl = lambda *args, **kwargs: (0, '', b'', '')
+        assert pool_probe_curl.check_http_through_proxy('socks5://127.0.0.1:10811', 'https://example.com/')[0] is False
+        assert pool_probe_curl.check_custom_target_through_proxy(
+            lambda value: 'https://example.com/',
+            'socks5://127.0.0.1:10811',
+            'example.com',
+        )[0] is False
+        assert pool_probe_curl.check_telegram_api(False, 'socks5://127.0.0.1:10811')[0] is False
+    finally:
+        pool_probe_curl._run_curl = original_run_curl
+    assert 'import requests' not in (APP_ROOT / 'pool_probe_curl.py').read_text(encoding='utf-8')
+    assert proxy_status.CUSTOM_TARGET_DENY_MARKERS == custom_check_policy.CUSTOM_TARGET_DENY_MARKERS
+    runner_source = (APP_ROOT / 'pool_probe_process_runner.py').read_text(encoding='utf-8')
+    assert 'curl_check_telegram' in runner_source
+    assert 'check_http=curl_check_http' in runner_source
+    assert 'pool_probe_curl.py' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'pool_probe_curl.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    assert 'custom_check_policy.py' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'custom_check_policy.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+
+
+def test_pool_probe_worker_streams_hashed_records_without_cache_import():
+    with tempfile.TemporaryDirectory() as directory:
+        records_path = Path(directory) / 'records.jsonl'
+        recorder = pool_probe_process_runner._WorkerProbeRecorder(
+            {('vless', 'key'): 'hash-id'},
+            str(records_path),
+        )
+        recorder.record('vless', 'key', tg_ok=True, yt_ok=True, allow_recent_success_downgrade=True)
+        recorder.record('vless', 'key', custom={'service': True}, custom_checks=[{'id': 'service'}])
+        assert recorder.close() == str(records_path)
+        records = [json.loads(line) for line in records_path.read_text(encoding='utf-8').splitlines()]
+    assert records == [{
+        'key_id': 'hash-id',
+        'proto': 'vless',
+        'values': {'tg_ok': True, 'yt_ok': True, 'allow_recent_success_downgrade': True},
+    }, {
+        'key_id': 'hash-id',
+        'proto': 'vless',
+        'values': {'custom': {'service': True}, 'custom_checks': [{'id': 'service'}]},
+    }]
+    source = (APP_ROOT / 'pool_probe_process_runner.py').read_text(encoding='utf-8')
+    worker_source = source.split('def apply_pool_probe_records_file', 1)[0]
+    assert 'from probe_cache import' not in worker_source
+    assert "result['probe_records_path'] = recorder.close()" in source
+    assert 'threading.stack_size(128 * 1024)' in source
+
+
+def test_pool_probe_records_apply_in_disposable_worker(tmp_path, monkeypatch):
+    records_path = tmp_path / 'records.jsonl'
+    result_path = tmp_path / 'apply.json'
+    records_path.write_text(
+        '\n'.join((
+            json.dumps({'key_id': 'hash-one', 'proto': 'vless', 'values': {'tg_ok': True}}),
+            json.dumps({'key_id': 'hash-two', 'proto': 'vless2', 'values': {'yt_ok': True, 'custom': {'chat': True}}}),
+            '{invalid json}',
+        )),
+        encoding='utf-8',
+    )
+    cache = {}
+    saved = []
+
+    def update_entry(current, proto, _key_value, *, key_id, **updates):
+        current[(proto, key_id)] = dict(updates)
+        return True
+
+    monkeypatch.setattr(probe_cache, 'load_key_probe_cache', lambda: cache)
+    monkeypatch.setattr(probe_cache, 'save_key_probe_cache', lambda current: saved.append(dict(current)))
+    monkeypatch.setattr(probe_cache, 'update_key_probe_cache_entry', update_entry)
+    assert pool_probe_process_runner.run_pool_probe_records_apply_worker(
+        str(records_path), str(result_path)
+    ) == 0
+    result = json.loads(result_path.read_text(encoding='utf-8'))
+    assert result == {'ok': True, 'applied': 2, 'error': ''}
+    assert cache[('vless', 'hash-one')]['tg_ok'] is True
+    assert cache[('vless2', 'hash-two')]['custom'] == {'chat': True}
+    assert len(saved) == 1
+
+
+def test_pool_probe_completion_log_separates_bot_and_worker_hwm():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "f'bot_hwm={int(bot_hwm_kb or 0)} KB'" in source
+    assert "f'worker_hwm={int(worker_hwm_kb or 0)} KB'" in source
+    assert 'def _apply_pool_probe_records_in_worker(records_path):' in source
+    assert 'def _apply_pool_probe_records(records):' not in source
+    process_monitor = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
+    assert '_apply_pool_probe_records_in_worker(records_path)' in process_monitor
+    assert "worker_hwm_kb=int(result.get('hwm_kb') or 0)" in process_monitor
+    assert "bot_hwm_kb=int(_process_hwm_kb() or 0)" in process_monitor
+
+
+def test_web_assets_are_cached_once_without_request_icons():
+    styles = web_form_template.render_web_style_asset('ignored')
+    scripts = web_form_template.render_web_script_asset(csrf_token='ignored')
+    assert styles == (APP_ROOT / 'static' / 'app.css').read_text(encoding='utf-8')
+    assert scripts == (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
 
 
 def test_telegram_confirm_state_source():
@@ -7080,8 +7701,8 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (1, 1)
     assert rss_processed == [('vless2', 'rss-recovers')]
     assert any(call.get('reason') == 'pool probe rss guard' and call.get('force') is True for call in rss_cleanup_calls)
-    assert any(call.get('reason') == 'pool probe key checkpoint' and call.get('force') is True for call in rss_cleanup_calls)
-    assert any(call.get('reason') == 'pool probe batch checkpoint' and call.get('force') is True for call in rss_cleanup_calls)
+    assert not any(call.get('reason') == 'pool probe key checkpoint' for call in rss_cleanup_calls)
+    assert not any(call.get('reason') == 'pool probe batch checkpoint' for call in rss_cleanup_calls)
 
     slow_notes = []
     slow_sleeps = []
@@ -8080,6 +8701,26 @@ def test_web_http_basic_auth_accepts_and_rejects_credentials():
     assert external_no_auth.status_code == 401
     assert b'external web access' in external_no_auth.wfile.getvalue()
 
+    class _ExternalRequest(_Request):
+        allow_authenticated_external = True
+        local_client_checker = staticmethod(lambda address: False)
+
+        def __init__(self, header='', token='secret'):
+            super().__init__(header)
+            self.client_address = ('203.0.113.10', 12345)
+            self.web_auth_token_getter = staticmethod(lambda: token)
+
+    external_missing_token = _ExternalRequest(token='')
+    assert external_missing_token._ensure_request_allowed() is False
+    assert external_missing_token.status_code == 403
+
+    external_missing_auth = _ExternalRequest()
+    assert external_missing_auth._ensure_request_allowed() is False
+    assert external_missing_auth.status_code == 401
+
+    external_authenticated = _ExternalRequest('Basic ' + good)
+    assert external_authenticated._ensure_request_allowed() is True
+
 
 def test_web_http_gzip_and_head_responses():
     class _Request(web_http_common.WebRequestMixin):
@@ -8127,6 +8768,13 @@ def test_web_http_gzip_and_head_responses():
     assert int(head_headers['Content-Length']) > 0
     assert head_request.wfile.getvalue() == b''
     assert head_request.close_connection is True
+
+    asset_one = _Request({'Accept-Encoding': 'gzip'})
+    asset_one._send_text_asset(html, 'text/css; charset=utf-8', asset_cache_key='test.css')
+    asset_two = _Request({'Accept-Encoding': 'gzip'})
+    asset_two._send_text_asset(html, 'text/css; charset=utf-8', asset_cache_key='test.css')
+    assert asset_two.wfile.getvalue() == asset_one.wfile.getvalue()
+    assert ('test.css', True) in web_http_common.WebRequestMixin.static_asset_body_cache
 
 
 def test_installer_common_helpers():
@@ -8456,6 +9104,11 @@ def test_web_get_actions_helpers():
     })
     cached_pools = web_get_actions.dispatch(cached_pool_ctx, '/api/pools', 'protocols=vless')
     assert cached_pools['payload'] == cached_pool_payload
+    raw_cached_pool_ctx = dict(cached_pool_ctx)
+    raw_cached_pool_ctx['get_pools_api_cache'] = lambda keys, protocols, now=None: json.dumps(cached_pool_payload)
+    raw_cached_pools = web_get_actions.dispatch(raw_cached_pool_ctx, '/api/pools', 'protocols=vless')
+    assert raw_cached_pools['kind'] == 'json_text'
+    assert json.loads(raw_cached_pools['text']) == cached_pool_payload
     stored_pool_payloads = []
     stored_pool_ctx = dict(ctx)
     stored_pool_ctx.update({
@@ -8467,6 +9120,24 @@ def test_web_get_actions_helpers():
     stored_pools = web_get_actions.dispatch(stored_pool_ctx, '/api/pools', 'protocols=vless')
     assert stored_pools['payload']['pool_probe_running'] is False
     assert stored_pool_payloads and stored_pool_payloads[0][0] == ['vless']
+    cached_rows = {}
+    cached_rows_builds = []
+    cached_rows_ctx = dict(builder_ctx)
+    cached_rows_ctx.update({
+        'pools_api_cache_ttl': 10,
+        'pools_api_build_lock': threading.Lock(),
+        'get_pools_api_cache': lambda keys, protocols, now=None: cached_rows.get(tuple(protocols or ())),
+        'store_pools_api_cache': lambda keys, protocols, payload, timestamp=None: cached_rows.setdefault(
+            tuple(protocols or ()), payload
+        ),
+        'web_pools_payload': lambda keys, protocols=None, include_summary=False, include_custom_checks=False: cached_rows_builds.append(
+            tuple(protocols or ())
+        ) or {'pools': {'vless': {'rows': [{'key_id': 'cached-row'}]}}, 'pool_summary': None, 'custom_checks': None},
+    })
+    first_cached_rows = web_get_actions.dispatch(cached_rows_ctx, '/api/pools', 'protocols=vless')
+    second_cached_rows = web_get_actions.dispatch(cached_rows_ctx, '/api/pools', 'protocols=vless')
+    assert first_cached_rows['payload'] == second_cached_rows['payload']
+    assert cached_rows_builds == [('vless',)]
     probe = web_get_actions.dispatch(ctx, '/api/pool_probe')
     assert probe['payload']['status'] == 'running'
     learning = web_get_actions.dispatch(ctx, '/api/telegram_call_learning')
@@ -8500,7 +9171,9 @@ def test_web_get_actions_helpers():
     check_panel = web_get_actions.dispatch(ctx, '/api/protocol_check_panel', 'proto=vless')
     assert check_panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'check:vless'}
     script_asset = web_get_actions.dispatch({'build_script_asset': lambda: 'js'}, '/static/app.js')
-    assert script_asset['cache_seconds'] == 86400
+    assert script_asset['cache_seconds'] == 0
+    style_asset = web_get_actions.dispatch({'build_style_asset': lambda: 'css'}, '/static/app.css')
+    assert style_asset['cache_seconds'] == 0
     static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
     assert static['path'].replace('\\', '/').endswith('/service-icons/test.png')
 
@@ -9063,10 +9736,11 @@ def test_web_status_builder_helpers():
 
 
 def test_web_template_styles_helpers():
-    styles = web_template_styles.render_web_styles(TELEGRAM_SVG_B64='tg-icon')
+    styles = (APP_ROOT / 'static' / 'app.css').read_text(encoding='utf-8')
     assert ':root{' in styles
     assert '.app-shell' in styles
-    assert 'tg-icon' in styles
+    assert 'url("/static/telegram.svg")' in styles
+    assert 'tg-icon' not in styles
     assert '[data-theme="glass"]' in styles
     assert '--glass-blur' in styles
     assert '@supports not ((backdrop-filter:blur(1px))' in styles
@@ -9162,7 +9836,7 @@ def test_web_template_styles_helpers():
     assert '.pool-import-form button{grid-column:2;grid-row:3;justify-self:stretch;width:100%;align-self:start;}' in styles
     assert '.health-meter.warn span' in styles
     assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
-    assert '.topbar-status-icon-telegram{background-image:url("data:image/svg+xml;base64,tg-icon");}' in styles
+    assert '.topbar-status-icon-telegram{background-image:url("/static/telegram.svg");}' in styles
     assert '.version-badge{grid-column:2;grid-row:1;justify-self:end;align-self:start;width:auto;min-width:48px;' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
@@ -9598,16 +10272,7 @@ def test_pool_probe_config_does_not_pin_telegram_api_ip():
 
 
 def test_web_template_scripts_helpers():
-    scripts = web_template_scripts.render_web_scripts(
-        TELEGRAM_SVG_B64='tg',
-        YOUTUBE_SVG_B64='yt',
-        csrf_token='token',
-        custom_checks_json='[{"id":"x"}]',
-        initial_command_running='false',
-        initial_status_pending='false',
-        enable_key_pool=False,
-        enable_custom_checks=False,
-    )
+    scripts = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert 'const APP_CONFIG = window.BK_APP_CONFIG || {};' in scripts
     assert 'const INITIAL_STATUS_PENDING = !!APP_CONFIG.initialStatusPending;' in scripts
     assert 'const STATUS_ACTIVE_POLL_MS = 8000;' in scripts
@@ -9666,6 +10331,11 @@ def test_web_template_scripts_helpers():
     assert 'function webStatusIsPending(apiStatus)' in scripts
     assert 'function webStatusIsRealFailure(apiStatus)' in scripts
     assert 'return pending && !webStatusIsRealFailure(text);' in scripts
+    pending_start = scripts.index('function markProtocolPending(proto, text)')
+    pending_end = scripts.index('function markPoolKeyActive(proto, keyId)', pending_start)
+    pending_body = scripts[pending_start:pending_end]
+    assert "badge.textContent = 'Статус обновляется';" in pending_body
+    assert "icons.innerHTML = '';" not in pending_body
     assert "return ['info', 'Статус обновляется', 'Проверяется актуальное состояние', botReady];" in scripts
     assert 'function scheduleStatusPolling(durationMs, initialDelayMs)' in scripts
     assert 'const initialDelay = Math.max(0, Number(initialDelayMs || 0));' in scripts
@@ -9729,7 +10399,9 @@ def test_web_template_scripts_helpers():
     assert "icons += serviceIcon(TELEGRAM_ICON_SRC, 'Telegram');" in scripts
     assert "icons += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');" in scripts
     assert "card.dataset.protocolLiveStatus === '1'" in scripts
-    assert "icons.innerHTML = status.icons;" in scripts
+    assert 'function seedProtocolStatusIcons(card)' in scripts
+    assert "icons.innerHTML = stableProtocolStatusIcons(card, status.icons, true, false);" in scripts
+    assert 'refreshPoolData: refreshPoolData' in scripts
     assert 'function poolCustomChecks(pool)' in scripts
     assert 'pool && Array.isArray(pool.custom_checks)' in scripts
     assert 'renderCustomBadges(row.custom, checks)' in scripts
@@ -10142,7 +10814,7 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     assert "def _schedule_youtube_cache_confirm" in source
     assert "def _schedule_vless2_youtube_cache_confirm" in source
     assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
-    assert "_controller_check_youtube_through_proxy" in source
+    assert "_youtube_healthcheck().check_youtube_through_proxy" in source
     assert "service='youtube'" in source
     assert 'Reality endpoint repair restored current' in source
     assert "_record_key_probe(proto, key_value, yt_ok=True, **yt_metrics)" in source

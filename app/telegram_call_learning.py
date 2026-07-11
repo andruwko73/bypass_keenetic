@@ -27,6 +27,7 @@ TELEGRAM_CALL_PORTS = {
     '3497',
 }
 TELEGRAM_SIGNAL_PORTS = TELEGRAM_CALL_PORTS | {'80', '88', '443', '5222'}
+TELEGRAM_SIGNAL_PORT_TOKENS = tuple(f'dport={port}' for port in TELEGRAM_SIGNAL_PORTS)
 TELEGRAM_NETWORKS = tuple(
     ipaddress.ip_network(network)
     for network in (
@@ -265,13 +266,61 @@ def _telegram_signal_clients_from_line(text, allowed_sources=None, excluded_sour
     return clients
 
 
-def _iter_conntrack_lines(conntrack_path):
+def _iter_conntrack_lines(conntrack_path, source_tokens=()):
+    source_tokens = tuple(str(token or '').strip() for token in (source_tokens or ()) if str(token or '').strip())
+    if source_tokens and str(conntrack_path) == '/proc/net/nf_conntrack':
+        command = ['grep', '-F']
+        for token in source_tokens:
+            command.extend(('-e', token))
+        command.append(str(conntrack_path))
+        try:
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except Exception:
+            result = None
+        if result is not None and result.returncode in (0, 1):
+            for line in (result.stdout or '').splitlines(True):
+                yield line
+            return
     try:
         with open(conntrack_path, 'r', encoding='utf-8', errors='ignore') as file:
             for line in file:
                 yield line
     except Exception:
         return
+
+
+def udp_source_activity_signature(allowed_sources, conntrack_path='/proc/net/nf_conntrack', limit=64):
+    allowed_sources = {str(item or '').strip() for item in (allowed_sources or []) if str(item or '').strip()}
+    if not allowed_sources:
+        return ()
+    source_tokens = tuple(f'src={item}' for item in allowed_sources)
+    identities = set()
+    for line in _iter_conntrack_lines(conntrack_path, source_tokens=source_tokens):
+        if ' udp ' not in line and not line.startswith('udp '):
+            continue
+        if not any(token in line for token in TELEGRAM_SIGNAL_PORT_TOKENS):
+            continue
+        flow = parse_udp_flow(line)
+        if not flow or str(flow.get('src') or '') not in allowed_sources:
+            continue
+        # Only a Telegram signalling flow starts a new learning pass. Generic
+        # UDP traffic from an active client is too volatile and caused scans
+        # even while no call was in progress.
+        if not flow_matches_telegram_call(flow):
+            continue
+        identity = str(flow.get('identity') or '')
+        if identity:
+            identities.add(identity)
+        if len(identities) >= max(1, int(limit or 1)):
+            break
+    return tuple(sorted(identities))
 
 
 def _udp_cluster_key(flow):
@@ -359,7 +408,9 @@ def flow_matches_active_udp_media(flow, telegram_clients):
 def read_conntrack_flows(device_ip, conntrack_path='/proc/net/nf_conntrack', now=None):
     timestamp = time.time() if now is None else float(now)
     flows = {}
-    for line in _iter_conntrack_lines(conntrack_path):
+    device_ip = str(device_ip or '').strip()
+    source_tokens = (f'src={device_ip}',) if device_ip else ()
+    for line in _iter_conntrack_lines(conntrack_path, source_tokens=source_tokens):
         flow = parse_udp_flow(line, device_ip=device_ip)
         if not flow:
             continue
@@ -381,9 +432,13 @@ def read_lan_conntrack_flows(
     all_flows = []
     allowed_source_tokens = tuple(f'src={item}' for item in allowed_sources)
     telegram_clients = set()
-    for line in _iter_conntrack_lines(conntrack_path):
+    for line in _iter_conntrack_lines(conntrack_path, source_tokens=allowed_source_tokens):
         text = str(line or '')
         if allowed_source_tokens and not any(token in text for token in allowed_source_tokens):
+            continue
+        if ' udp ' not in text and not text.startswith('udp '):
+            continue
+        if '[ASSURED]' not in text and not any(token in text for token in TELEGRAM_SIGNAL_PORT_TOKENS):
             continue
         telegram_clients.update(_telegram_signal_clients_from_line(text, allowed_sources, excluded_sources))
         flow = parse_udp_flow(text)

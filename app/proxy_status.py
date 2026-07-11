@@ -4,6 +4,8 @@ import subprocess
 import time
 from urllib.parse import urlparse
 
+from custom_check_policy import CUSTOM_TARGET_DENY_MARKERS
+
 
 TRANSIENT_STATUS_MARKERS = (
     'ssleoferror',
@@ -242,17 +244,6 @@ def check_http_through_proxy(proxy_url, url=YOUTUBE_HEALTHCHECK_URL, connect_tim
         return False, f'Веб-проверка через ключ завершилась ошибкой: {exc}'
     finally:
         session.close()
-
-
-CUSTOM_TARGET_DENY_MARKERS = (
-    'unsupported_country_region_territory',
-    'country, region, or territory not supported',
-    'app-unavailable-in-region',
-    'unavailable in region',
-    'unavailable-in-region',
-    'not available in your region',
-    'request not allowed',
-)
 
 
 def _custom_target_denied(response):

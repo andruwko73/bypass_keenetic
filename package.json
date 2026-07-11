@@ -2,8 +2,8 @@
   "name": "bypass-keenetic-ui-smoke",
   "private": true,
   "scripts": {
-    "ui:check": "node --check tests/ui_smoke.js",
-    "ui:smoke": "node tests/ui_smoke.js",
+    "ui:check": "node --check tests/ui_smoke.js && node --check tests/run_ui_smoke_fixture.js",
+    "ui:smoke": "node tests/run_ui_smoke_fixture.js",
     "ui:install-browsers": "playwright install --with-deps chromium"
   },
   "devDependencies": {

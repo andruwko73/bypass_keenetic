@@ -145,6 +145,9 @@ def attempt_auto_failover(
         failure_message = str(state.get('last_failure_message') or 'Previous Telegram API check failed.')
     else:
         ok, failure_message = check_telegram_api(proxy_url, connect_timeout=connect_timeout, read_timeout=read_timeout)
+        if ok is None:
+            log('Auto-failover: Telegram health worker did not return a result; key switch deferred.')
+            return False
         if ok:
             state['last_ok'] = now
             state['last_fail'] = 0.0
@@ -240,6 +243,9 @@ def attempt_auto_failover(
         connect_timeout=confirm_connect_timeout,
         read_timeout=confirm_read_timeout,
     )
+    if confirm_ok is None:
+        log('Auto-failover: repeated Telegram health check did not return a result; key switch deferred.')
+        return False
     if confirm_ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0
@@ -294,6 +300,9 @@ def attempt_auto_failover(
                     connect_timeout=max(float(connect_timeout or 0), 5.0),
                     read_timeout=max(float(read_timeout or 0), 8.0),
                 )
+                if repair_ok is None:
+                    log('Auto-failover: Telegram health worker did not return a result after endpoint repair; key switch deferred.')
+                    return False
                 if repair_ok:
                     state['last_ok'] = time_provider()
                     state['last_fail'] = 0.0

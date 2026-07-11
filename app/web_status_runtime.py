@@ -51,10 +51,10 @@ def api_status_from_runtime_check(proxy_mode, api_status, socks_ok, is_transient
 
 def protocol_status_is_pending(protocol_status):
     status = protocol_status or {}
+    if status.get('api_pending') or status.get('yt_pending'):
+        return True
     if status.get('api_ok') is True:
         return False
-    if status.get('api_pending'):
-        return True
     if (
         status.get('tone') == 'warn' and
         status.get('api_ok') is not True and

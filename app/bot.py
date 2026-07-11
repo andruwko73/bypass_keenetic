@@ -107,57 +107,58 @@ from unblock_lists import (
     unblock_list_path as _unblock_list_path,
     write_unblock_list_entries as _write_unblock_list_entries,
 )
-from custom_checks_store import (
-    CUSTOM_CHECKS_PATH as _CUSTOM_CHECKS_PATH,
-    add_custom_check as _store_add_custom_check,
-    custom_check_presets as _custom_check_presets,
-    delete_custom_check as _store_delete_custom_check,
-    load_custom_checks as _load_custom_checks,
-    normalize_check_url as _normalize_check_url,
-    route_entries_from_values as _route_entries_from_values,
-)
-import subscription_runtime
-import telegram_key_ui
+_CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
+if _IMPORT_POOL_ENABLED:
+    import subscription_runtime
+else:
+    subscription_runtime = None
 import entware_dns_runtime
-import telegram_info_runtime
 import router_health_runtime
 import router_metrics
+from telegram_auth_state import build_authorized_identities as _build_authorized_identities
 try:
     import xray_compat_runtime
 except Exception:
     xray_compat_runtime = None
-from telegram_auth_state import (
-    MENU_STATE_UNSET,
-    authorize_message as _telegram_authorize_message,
-    build_authorized_identities as _build_authorized_identities,
-    callback_as_message as _telegram_callback_as_message,
-    get_chat_menu_state as _get_chat_menu_state_impl,
-    set_chat_menu_state as _set_chat_menu_state_impl,
-    unauthorized_message_text as _telegram_unauthorized_text,
-)
-from telegram_jobs import (
-    command_result_payload as _telegram_command_result_payload,
-    final_message as _telegram_final_command_message,
-    start_background_command as _telegram_start_background_command,
-    start_result_retry_worker as _telegram_start_result_retry_worker,
-)
-from telegram_message_flow import (
-    is_private_message as _telegram_is_private_message,
-    private_menu_session as _telegram_private_menu_session,
-    recover_private_message_error as _telegram_recover_private_message_error,
-    run_handlers as _telegram_run_handlers,
-)
-from telegram_confirm import (
-    TELEGRAM_CONFIRM_LEVEL,
-    telegram_confirm_prompt as _telegram_confirm_prompt,
-    telegram_is_cancel as _telegram_is_cancel_confirmation,
-    telegram_is_confirm as _telegram_is_confirm_confirmation,
-)
-from telegram_install_ui import (
-    INSTALL_MENU_TEXT,
-    install_action_for_text as _telegram_install_action,
-    install_menu_rows as _telegram_install_menu_rows,
-)
+if _IMPORT_TELEGRAM_ENABLED:
+    import telegram_key_ui
+    import telegram_info_runtime
+    from telegram_auth_state import (
+        MENU_STATE_UNSET,
+        authorize_message as _telegram_authorize_message,
+        callback_as_message as _telegram_callback_as_message,
+        get_chat_menu_state as _get_chat_menu_state_impl,
+        set_chat_menu_state as _set_chat_menu_state_impl,
+        unauthorized_message_text as _telegram_unauthorized_text,
+    )
+    from telegram_jobs import (
+        command_result_payload as _telegram_command_result_payload,
+        final_message as _telegram_final_command_message,
+        start_background_command as _telegram_start_background_command,
+        start_result_retry_worker as _telegram_start_result_retry_worker,
+    )
+    from telegram_message_flow import (
+        is_private_message as _telegram_is_private_message,
+        private_menu_session as _telegram_private_menu_session,
+        recover_private_message_error as _telegram_recover_private_message_error,
+        run_handlers as _telegram_run_handlers,
+    )
+    from telegram_confirm import (
+        TELEGRAM_CONFIRM_LEVEL,
+        telegram_confirm_prompt as _telegram_confirm_prompt,
+        telegram_is_cancel as _telegram_is_cancel_confirmation,
+        telegram_is_confirm as _telegram_is_confirm_confirmation,
+    )
+    from telegram_install_ui import (
+        INSTALL_MENU_TEXT,
+        install_action_for_text as _telegram_install_action,
+        install_menu_rows as _telegram_install_menu_rows,
+    )
+else:
+    # Web-only registers inert handler declarations but never executes Telegram flows.
+    MENU_STATE_UNSET = object()
+    TELEGRAM_CONFIRM_LEVEL = None
+    INSTALL_MENU_TEXT = ''
 from service_catalog import (
     CONNECTIVITY_CHECK_DOMAINS,
     REALTIME_CALL_SIGNAL_ROUTE_ENTRIES,
@@ -196,6 +197,7 @@ from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
     empty_protocol_status as _status_empty_protocol_status,
+    merge_light_status_with_cached_services as _status_merge_light_status_with_cached_services,
 )
 
 import shutil
@@ -219,6 +221,51 @@ def _requests_module():
     return requests
 
 
+def _custom_checks_store():
+    global _custom_checks_store_module
+    if _custom_checks_store_module is None:
+        import custom_checks_store as module
+
+        _custom_checks_store_module = module
+    return _custom_checks_store_module
+
+
+def _load_custom_checks():
+    if not _IMPORT_POOL_ENABLED:
+        return []
+    return _custom_checks_store().load_custom_checks()
+
+
+def _custom_check_presets():
+    if not _IMPORT_POOL_ENABLED:
+        return []
+    return _custom_checks_store().custom_check_presets()
+
+
+def _store_add_custom_check(*args, **kwargs):
+    if not _IMPORT_POOL_ENABLED:
+        raise ValueError('Дополнительные проверки недоступны в простом режиме.')
+    return _custom_checks_store().add_custom_check(*args, **kwargs)
+
+
+def _store_delete_custom_check(*args, **kwargs):
+    if not _IMPORT_POOL_ENABLED:
+        raise ValueError('Дополнительные проверки недоступны в простом режиме.')
+    return _custom_checks_store().delete_custom_check(*args, **kwargs)
+
+
+def _normalize_check_url(*args, **kwargs):
+    if not _IMPORT_POOL_ENABLED:
+        raise ValueError('Дополнительные проверки недоступны в простом режиме.')
+    return _custom_checks_store().normalize_check_url(*args, **kwargs)
+
+
+def _route_entries_from_values(values):
+    if not _IMPORT_POOL_ENABLED:
+        return []
+    return _custom_checks_store().route_entries_from_values(values)
+
+
 _pool_probe_runner_module = None
 _pool_probe_controller_module = None
 _probe_cache_module = None
@@ -233,6 +280,10 @@ _web_pool_form_blocks_module = None
 _auto_failover_runtime_module = None
 _telegram_call_learning_module = None
 _youtube_edge_prefetch_module = None
+_youtube_healthcheck_module = None
+_subscription_runtime_module = subscription_runtime
+_youtube_route_owner_module = None
+_custom_checks_store_module = None
 
 _KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 _KEY_PROBE_CACHE_SCHEMA_VERSION = 8
@@ -327,27 +378,6 @@ def _pool_probe_controller():
     return _pool_probe_controller_module
 
 
-def _unload_pool_probe_modules(reason=''):
-    global _pool_probe_controller_module, _pool_probe_runner_module, _probe_cache_module
-    _pool_probe_controller_module = None
-    _pool_probe_runner_module = None
-    _probe_cache_module = None
-    for module_name in ('pool_probe_controller', 'pool_probe_runner', 'probe_cache', 'telegram_healthcheck'):
-        try:
-            sys.modules.pop(module_name, None)
-        except Exception:
-            pass
-    try:
-        gc.collect()
-    except Exception:
-        pass
-    if reason:
-        try:
-            _write_runtime_log(f'Pool probe module references released after {reason}.')
-        except Exception:
-            pass
-
-
 def _probe_cache():
     global _probe_cache_module
     if _probe_cache_module is None:
@@ -420,41 +450,18 @@ def _youtube_edge_prefetch():
     return _youtube_edge_prefetch_module
 
 
+def _youtube_healthcheck():
+    global _youtube_healthcheck_module
+    if _youtube_healthcheck_module is None:
+        import youtube_healthcheck as module
+
+        _youtube_healthcheck_module = module
+    return _youtube_healthcheck_module
+
+
 def _available_memory_kb(*args, **kwargs):
     value = _mem_available_kb_light(*args, **kwargs)
     return value if value > 0 else None
-
-
-def _controller_check_pool_key_through_proxy(*args, **kwargs):
-    return _pool_probe_controller().check_pool_key_through_proxy(*args, **kwargs)
-
-
-def _controller_check_youtube_through_proxy(*args, **kwargs):
-    return _pool_probe_controller().check_youtube_through_proxy(*args, **kwargs)
-
-
-def _failed_custom_probe_results(*args, **kwargs):
-    return _pool_probe_controller().failed_custom_probe_results(*args, **kwargs)
-
-
-def _controller_filter_active_probe_tasks(*args, **kwargs):
-    return _pool_probe_controller().filter_active_probe_tasks(*args, **kwargs)
-
-
-def _controller_pool_probe_progress_label(*args, **kwargs):
-    return _pool_probe_controller().pool_probe_progress_label(*args, **kwargs)
-
-
-def _controller_pool_probe_timeout_budget(*args, **kwargs):
-    return _pool_probe_controller().pool_probe_timeout_budget(*args, **kwargs)
-
-
-def _controller_select_pool_probe_tasks(*args, **kwargs):
-    return _pool_probe_controller().select_pool_probe_tasks(*args, **kwargs)
-
-
-def start_pool_probe_worker(*args, **kwargs):
-    return _pool_probe_controller().start_pool_probe_worker(*args, **kwargs)
 
 
 def _KeyProbeBatchRecorder(*args, **kwargs):
@@ -561,34 +568,6 @@ def _youtube_probe_state(entry):
     return 'unknown'
 
 
-def _runner_build_pool_probe_core_config_batch(*args, **kwargs):
-    return _pool_probe_runner().build_pool_probe_core_config_batch(*args, **kwargs)
-
-
-def _runner_cleanup_pool_probe_runtime(*args, **kwargs):
-    return _pool_probe_runner().cleanup_pool_probe_runtime(*args, **kwargs)
-
-
-def _runner_find_pool_failover_candidate(*args, **kwargs):
-    return _pool_probe_runner().find_pool_failover_candidate(*args, **kwargs)
-
-
-def _runner_pool_probe_outbound(*args, **kwargs):
-    return _pool_probe_runner().pool_probe_outbound(*args, **kwargs)
-
-
-def run_pool_probe_worker(*args, **kwargs):
-    return _pool_probe_runner().run_pool_probe_worker(*args, **kwargs)
-
-
-def _runner_start_pool_probe_xray(*args, **kwargs):
-    return _pool_probe_runner().start_pool_probe_xray(*args, **kwargs)
-
-
-def _runner_stop_pool_probe_xray(*args, **kwargs):
-    return _pool_probe_runner().stop_pool_probe_xray(*args, **kwargs)
-
-
 def _repo_update():
     global _repo_update_module
     if _repo_update_module is None:
@@ -596,6 +575,24 @@ def _repo_update():
 
         _repo_update_module = module
     return _repo_update_module
+
+
+def _subscription_runtime():
+    global _subscription_runtime_module
+    if _subscription_runtime_module is None:
+        import subscription_runtime as module
+
+        _subscription_runtime_module = module
+    return _subscription_runtime_module
+
+
+def _youtube_route_owner():
+    global _youtube_route_owner_module
+    if _youtube_route_owner_module is None:
+        import youtube_route_owner as module
+
+        _youtube_route_owner_module = module
+    return _youtube_route_owner_module
 
 
 def _repo_direct_fetch_env(*args, **kwargs):
@@ -628,87 +625,16 @@ def _web_form_template():
         return _web_form_template_module
 
 
-def _release_web_form_template_cache():
-    global _web_form_template_module
-    released = False
-    with _web_form_template_lock:
-        released = _web_form_template_module is not None
-        _web_form_template_module = None
-    for module_name in ('web_form_template', 'web_template_scripts', 'web_template_styles'):
-        if module_name in sys.modules:
-            released = True
-            try:
-                sys.modules.pop(module_name, None)
-            except Exception:
-                pass
-    if released:
-        try:
-            gc.collect()
-        except Exception:
-            pass
-    return released
-
-
 def _clear_youtube_edge_prefetch_snapshot_cache():
     youtube_edge_prefetch_snapshot_cache['timestamp'] = 0.0
     youtube_edge_prefetch_snapshot_cache['payload'] = None
 
 
 def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, include_route_tools=False):
-    global _pool_probe_controller_module, _pool_probe_runner_module, _probe_cache_module
-    global _key_pool_web_module, _telegram_pool_ui_module, _web_pool_form_blocks_module
-    global _web_route_tools_runtime, _youtube_edge_prefetch_module, _web_form_template_module
-    released = []
-
-    def release_module_attr(attr_name, module_names):
-        if globals().get(attr_name) is not None:
-            released.extend(module_names)
-        globals()[attr_name] = None
-
-    probe_busy = False
-    try:
-        probe_busy = bool(globals().get('pool_probe_lock') and pool_probe_lock.locked())
-    except Exception:
-        probe_busy = False
-    if not probe_busy:
-        release_module_attr('_pool_probe_controller_module', ('pool_probe_controller',))
-        release_module_attr('_pool_probe_runner_module', ('pool_probe_runner', 'telegram_healthcheck'))
-        release_module_attr('_probe_cache_module', ('probe_cache',))
-
-    if include_pool_ui:
-        release_module_attr('_web_form_template_module', ('web_form_template', 'web_template_scripts', 'web_template_styles'))
-        release_module_attr('_key_pool_web_module', ('key_pool_web',))
-        release_module_attr('_telegram_pool_ui_module', ('telegram_pool_ui',))
-        release_module_attr('_web_pool_form_blocks_module', ('web_pool_form_blocks',))
-
-    if include_route_tools:
-        if _web_route_tools_runtime is not None:
-            released.extend(('web_route_tools_runtime', 'route_intersections', 'service_routes'))
-        _web_route_tools_runtime = None
-
-    prefetch_busy = False
-    try:
-        prefetch_lock = globals().get('youtube_edge_prefetch_lock')
-        prefetch_busy = bool(prefetch_lock and prefetch_lock.locked())
-    except Exception:
-        prefetch_busy = False
-    if not prefetch_busy:
-        release_module_attr('_youtube_edge_prefetch_module', ('youtube_edge_prefetch', 'youtube_edge_prefetch_runner'))
-
+    # Runtime modules contain executable code, not bounded request data.
+    # Evicting them races concurrent imports and causes incomplete responses.
     _clear_youtube_edge_prefetch_snapshot_cache()
-    for module_name in sorted(set(released)):
-        try:
-            sys.modules.pop(module_name, None)
-        except Exception:
-            pass
-    if released and reason:
-        try:
-            _write_runtime_log(
-                f'Memory pressure released runtime modules after {reason}: {", ".join(sorted(set(released)))}'
-            )
-        except Exception:
-            pass
-    return released
+    return []
 
 
 def render_web_form(*args, **kwargs):
@@ -802,13 +728,22 @@ SUBSCRIPTION_MAX_BYTES = int(getattr(config, 'subscription_max_bytes', 2 * 1024 
 SUBSCRIPTION_ALLOW_PRIVATE_URLS = bool(getattr(config, 'subscription_allow_private_urls', False))
 SUBSCRIPTION_HWID_VALUE = str(getattr(config, 'subscription_router_hwid', '') or '').strip()
 SUBSCRIPTION_HWID_QUERY_PARAM = str(getattr(config, 'subscription_hwid_query_param', 'hwid') or 'hwid').strip()
+_subscription_defaults = _subscription_runtime_module
 SUBSCRIPTION_HWID_HEADER_NAMES = tuple(
     str(item).strip()
-    for item in getattr(config, 'subscription_hwid_header_names', subscription_runtime.DEFAULT_HWID_HEADER_NAMES)
+    for item in getattr(
+        config,
+        'subscription_hwid_header_names',
+        getattr(_subscription_defaults, 'DEFAULT_HWID_HEADER_NAMES', ('X-HWID', 'X-Router-HWID', 'X-Device-ID')),
+    )
     if str(item or '').strip()
 )
 SUBSCRIPTION_USER_AGENT = str(
-    getattr(config, 'subscription_user_agent', subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT) or ''
+    getattr(
+        config,
+        'subscription_user_agent',
+        getattr(_subscription_defaults, 'DEFAULT_SUBSCRIPTION_USER_AGENT', 'v2rayN/6.45'),
+    ) or ''
 ).strip()
 SUBSCRIPTION_ACCEPT_HEADER = str(getattr(config, 'subscription_accept_header', 'text/plain, */*') or '').strip()
 SUBSCRIPTION_AUTO_REFRESH_ENABLED = bool(getattr(config, 'subscription_auto_refresh_enabled', True))
@@ -1095,10 +1030,16 @@ udp_quic_drift_state = {
     'last_log': 0.0,
     'last_fast_add_signature': (),
     'last_fast_add_event': 0.0,
+    'route_signature': (),
+    'domains_by_protocol': {},
+    'dns_cache': {},
 }
 background_task_skip_log_at = {}
 background_task_skip_until = {}
 background_task_skip_reason = {}
+background_task_coordinator_lock = threading.Lock()
+background_task_coordinator_state = {'name': '', 'started_at': 0.0}
+background_maintenance_thread = None
 youtube_edge_prefetch_state = {
     'enabled': YOUTUBE_EDGE_PREFETCH_ENABLED,
     'route_protocol': '',
@@ -1251,7 +1192,7 @@ def _detect_router_hwid():
         text = _read_router_hwid_command(command)
         if text:
             texts.append(text)
-    return subscription_runtime.extract_router_hwid('\n'.join(texts))
+    return _subscription_runtime().extract_router_hwid('\n'.join(texts))
 
 
 def _router_hwid():
@@ -1275,7 +1216,7 @@ def _subscription_request_url_headers(url, use_router_hwid=False):
     hwid = _router_hwid()
     if not hwid:
         raise ValueError('HWID роутера не определён')
-    return subscription_runtime.apply_hwid_to_subscription_request(
+    return _subscription_runtime().apply_hwid_to_subscription_request(
         url,
         hwid,
         query_param=SUBSCRIPTION_HWID_QUERY_PARAM,
@@ -1549,32 +1490,12 @@ def _attempt_auto_failover():
     )
 
 
-def _youtube_route_entry_matches(entry):
-    value = str(entry or '').strip().lower()
-    value = value.removeprefix('full:').removeprefix('domain:').lstrip('*.')
-    if not value:
-        return False
-    return any(value == marker or value.endswith('.' + marker) for marker in YOUTUBE_ROUTE_MARKERS)
-
-
-def _youtube_route_marker_count(proto):
-    try:
-        route_name = _unblock_route_for_key_type(proto)
-        entries = _read_unblock_list_entries(route_name)
-    except Exception:
-        entries = []
-    return sum(1 for entry in entries if _youtube_route_entry_matches(entry))
-
-
 def _youtube_route_protocol():
-    best_proto = ''
-    best_count = 0
-    for proto in YOUTUBE_ROUTE_PROTOCOLS:
-        count = _youtube_route_marker_count(proto)
-        if count > best_count:
-            best_count = count
-            best_proto = proto
-    return best_proto or 'vless2'
+    try:
+        owner = _youtube_route_owner().youtube_route_owner()
+        return owner if owner in YOUTUBE_ROUTE_PROTOCOLS else ''
+    except Exception:
+        return ''
 
 
 def _youtube_failover_state(proto):
@@ -1590,7 +1511,9 @@ def _youtube_failover_state(proto):
 
 def _check_youtube_protocol_once(proto=None, metrics=None):
     proto = proto or _youtube_route_protocol()
-    return _controller_check_youtube_through_proxy(
+    if proto not in YOUTUBE_ROUTE_PROTOCOLS:
+        return None, 'YouTube route owner is not determined'
+    return _youtube_healthcheck().check_youtube_through_proxy(
         _check_http_through_proxy,
         proxy_settings.get(proto),
         urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
@@ -1633,6 +1556,8 @@ def _confirm_youtube_key(proto):
     last_message = ''
     for attempt in range(YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES):
         ok, message = _check_youtube_protocol_for_background(proto)
+        if ok is None:
+            return None, message
         if ok:
             return True, message
         last_message = message
@@ -1804,6 +1729,8 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
 
 def _attempt_youtube_failover():
     route_proto = _youtube_route_protocol()
+    if route_proto not in YOUTUBE_ROUTE_PROTOCOLS:
+        return False
     state = _youtube_failover_state(route_proto)
     now = time.time()
     if not YOUTUBE_VLESS2_FAILOVER_ENABLED:
@@ -1852,6 +1779,11 @@ def _attempt_youtube_failover():
 
     yt_metrics = {}
     ok, message = _check_youtube_protocol_for_background(route_proto, metrics=yt_metrics)
+    if ok is None:
+        _write_runtime_log(
+            f'YouTube failover: {_pool_proto_label(route_proto)} health worker did not return a result; key switch deferred.'
+        )
+        return False
     if ok:
         state['last_ok'] = now
         state['last_fail'] = 0.0
@@ -1868,6 +1800,11 @@ def _attempt_youtube_failover():
         return False
 
     confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
+    if confirm_ok is None:
+        _write_runtime_log(
+            f'YouTube failover: {_pool_proto_label(route_proto)} confirmation is unavailable; key switch deferred.'
+        )
+        return False
     if confirm_ok:
         state['last_ok'] = time.time()
         state['last_fail'] = 0.0
@@ -1889,6 +1826,12 @@ def _attempt_youtube_failover():
             _write_runtime_log(f'YouTube failover: active endpoint repair failed: {exc}')
         if repaired:
             confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
+            if confirm_ok is None:
+                _write_runtime_log(
+                    f'YouTube failover: {_pool_proto_label(route_proto)} confirmation is unavailable after endpoint repair; '
+                    'key switch deferred.'
+                )
+                return False
             if confirm_ok:
                 state['last_ok'] = time.time()
                 state['last_fail'] = 0.0
@@ -2007,6 +1950,13 @@ def _attempt_youtube_failover():
                 continue
 
             confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
+            if confirm_ok is None:
+                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                _write_runtime_log(
+                    f'YouTube failover: candidate {key_hash} was not confirmed because the health worker is unavailable; '
+                    'original key restored.'
+                )
+                return False
             if not confirm_ok:
                 _record_key_probe(route_proto, key_value, tg_ok=tg_ok, yt_ok=False)
                 _write_runtime_log(
@@ -2021,6 +1971,13 @@ def _attempt_youtube_failover():
                     connect_timeout=AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT,
                     read_timeout=AUTO_FAILOVER_CHECK_READ_TIMEOUT,
                 )
+                if tg_ok is None:
+                    _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                    _write_runtime_log(
+                        f'YouTube failover: candidate {key_hash} was not confirmed because Telegram health worker is unavailable; '
+                        'original key restored.'
+                    )
+                    return False
                 if not tg_ok:
                     _record_key_probe(route_proto, key_value, tg_ok=False, yt_ok=True)
                     _write_runtime_log(
@@ -2056,47 +2013,43 @@ def _attempt_youtube_vless2_failover():
     return _attempt_youtube_failover()
 
 
-def _start_auto_failover_thread():
-    def worker():
-        while not shutdown_requested.is_set():
-            ran = False
-            try:
-                should_run, reason = _auto_failover_should_run()
-                if not should_run:
-                    _auto_failover_idle_log(reason)
-                elif _background_task_allowed(
-                    'Telegram auto-failover',
-                    allow_high_rss=reason in ('pending failure', 'Telegram polling stopped'),
-                ):
-                    ran = True
-                    _attempt_auto_failover()
-            except Exception as exc:
-                _write_runtime_log(f'Auto-failover error: {exc}')
-            finally:
-                if ran:
-                    _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
-            shutdown_requested.wait(AUTO_FAILOVER_POLL_SECONDS)
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
+def _run_auto_failover_cycle():
+    ran = False
+    try:
+        should_run, reason = _auto_failover_should_run()
+        if not should_run:
+            _auto_failover_idle_log(reason)
+        elif _background_task_allowed(
+            'Telegram auto-failover',
+            allow_high_rss=reason in ('pending failure', 'Telegram polling stopped'),
+        ):
+            ran, _result = _run_coordinated_background_task(
+                'Telegram auto-failover',
+                _attempt_auto_failover,
+            )
+    except Exception as exc:
+        _write_runtime_log(f'Auto-failover error: {exc}')
+    finally:
+        if ran:
+            _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
 
 
-def _start_youtube_vless2_failover_thread():
-    if not YOUTUBE_VLESS2_FAILOVER_ENABLED:
+def _run_youtube_failover_cycle():
+    if not YOUTUBE_VLESS2_FAILOVER_ENABLED or not _app_mode_pool_enabled():
         return
+    ran = False
+    try:
+        if _background_task_allowed('YouTube failover', task_class='critical'):
+            ran, _result = _run_coordinated_background_task(
+                'YouTube failover',
+                _attempt_youtube_vless2_failover,
+            )
+    except Exception as exc:
+        _write_runtime_log(f'YouTube failover error: {exc}')
+    finally:
+        if ran:
+            _memory_cleanup('YouTube failover cycle', clear_status=False, log=False)
 
-    def worker():
-        while not shutdown_requested.is_set():
-            try:
-                if _app_mode_pool_enabled() and _background_task_allowed('YouTube failover', task_class='critical'):
-                    _attempt_youtube_vless2_failover()
-            except Exception as exc:
-                _write_runtime_log(f'YouTube Vless2 failover error: {exc}')
-            finally:
-                _memory_cleanup('YouTube failover cycle', clear_status=False, log=False)
-            shutdown_requested.wait(YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS)
-
-    threading.Thread(target=worker, daemon=True).start()
 
 token = getattr(config, 'token', '') or '0:WEBONLY_DISABLED'
 TELEGRAM_BOT_NUM_THREADS = max(1, int(getattr(config, 'telegram_bot_num_threads', 1)))
@@ -2166,7 +2119,7 @@ TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cac
 ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 900)))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 30.0))
 WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 45.0))
-WEB_POOLS_API_CACHE_MAX_ENTRIES = max(2, int(getattr(config, 'web_pools_api_cache_max_entries', 8)))
+WEB_POOLS_API_CACHE_MAX_ENTRIES = max(1, min(3, int(getattr(config, 'web_pools_api_cache_max_entries', 3))))
 WEB_POOL_SNAPSHOT_WORKER_ENABLED = bool(getattr(config, 'web_pool_snapshot_worker_enabled', True))
 WEB_POOL_SNAPSHOT_WORKER_TIMEOUT_SECONDS = max(
     2.0,
@@ -2240,6 +2193,10 @@ BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS = max(
 BACKGROUND_TASK_BUSY_BACKOFF_SECONDS = max(
     30.0,
     float(getattr(config, 'background_task_busy_backoff_seconds', 180.0)),
+)
+BACKGROUND_TASK_SLOW_LOG_SECONDS = max(
+    0.1,
+    float(getattr(config, 'background_task_slow_log_seconds', 1.0)),
 )
 POOL_PROBE_LOW_MEMORY_DELAY_SECONDS = float(getattr(config, 'pool_probe_low_memory_delay_seconds', 12.0))
 POOL_PROBE_LOW_MEMORY_MAX_WAIT_SECONDS = float(getattr(config, 'pool_probe_low_memory_max_wait_seconds', 180.0))
@@ -2329,39 +2286,10 @@ MEMORY_WATCHDOG_RESTART_COOLDOWN_SECONDS = max(
     300.0,
     float(getattr(config, 'memory_watchdog_restart_cooldown_seconds', 1800.0)),
 )
-MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = max(
-    0,
-    int(getattr(config, 'memory_watchdog_idle_restart_rss_kb', 70 * 1024)),
-)
-MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = max(
-    60.0,
-    float(getattr(config, 'memory_watchdog_idle_restart_hold_seconds', 120.0)),
-)
-MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = min(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS, 120.0)
-MEMORY_POST_POOL_RESTART_ENABLED = bool(getattr(config, 'memory_post_pool_restart_enabled', True))
-MEMORY_POST_POOL_RESTART_RSS_KB = max(0, int(getattr(config, 'memory_post_pool_restart_rss_kb', 70 * 1024)))
-MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB = max(
-    0,
-    int(getattr(config, 'memory_post_pool_cleanup_target_rss_kb', 62 * 1024)),
-)
-if MEMORY_POST_POOL_RESTART_RSS_KB > 0 and MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB > MEMORY_POST_POOL_RESTART_RSS_KB:
-    MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB = MEMORY_POST_POOL_RESTART_RSS_KB
-MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB = max(
-    0,
-    int(getattr(config, 'memory_post_pool_cleanup_target_program_rss_kb', 100 * 1024)),
-)
-MEMORY_POST_POOL_RESTART_DELAY_SECONDS = max(
-    5.0,
-    float(getattr(config, 'memory_post_pool_restart_delay_seconds', 20.0)),
-)
-MEMORY_POST_POOL_RESTART_RETRY_SECONDS = max(
-    10.0,
-    float(getattr(config, 'memory_post_pool_restart_retry_seconds', 30.0)),
-)
-MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS = max(
-    MEMORY_POST_POOL_RESTART_RETRY_SECONDS,
-    float(getattr(config, 'memory_post_pool_restart_max_wait_seconds', 300.0)),
-)
+# Проверка пула работает в отдельном процессе. Штатный рестарт основного
+# бота ради RSS не нужен и опасен при активном трафике.
+MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB = 0
+MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS = 0.0
 POOL_PROBE_DEFAULT_MAX_PROCESS_RSS_KB = 65 * 1024
 POOL_PROBE_MAX_PROCESS_RSS_KB = max(
     0,
@@ -2370,8 +2298,12 @@ POOL_PROBE_MAX_PROCESS_RSS_KB = max(
 POOL_PROBE_PROCESS_WORKER_ENABLED = bool(getattr(config, 'pool_probe_process_worker_enabled', True))
 POOL_PROBE_INPROCESS_FALLBACK_ENABLED = bool(getattr(config, 'pool_probe_inprocess_fallback_enabled', False))
 POOL_PROBE_PROCESS_WORKER_POLL_SECONDS = max(
-    0.2,
-    float(getattr(config, 'pool_probe_process_worker_poll_seconds', 0.75)),
+    1.0,
+    float(getattr(config, 'pool_probe_process_worker_poll_seconds', 2.0)),
+)
+POOL_PROBE_CACHE_APPLY_TIMEOUT_SECONDS = max(
+    5.0,
+    float(getattr(config, 'pool_probe_cache_apply_timeout_seconds', 30.0)),
 )
 MEMORY_TIMELINE_ENABLED = bool(getattr(config, 'memory_timeline_enabled', False))
 MEMORY_TIMELINE_PATH = str(getattr(config, 'memory_timeline_path', '/opt/tmp/bypass_memory_timeline.jsonl') or '').strip()
@@ -2389,29 +2321,10 @@ MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS = max(
     5.0,
     float(getattr(config, 'memory_malloc_trim_cooldown_seconds', 20.0)),
 )
-MEMORY_MALLOC_TRIM_MIN_RSS_KB = max(
-    0,
-    int(getattr(config, 'memory_malloc_trim_min_rss_kb', 60 * 1024)),
-)
-_DEFAULT_MEMORY_CLEANUP_RSS_KB = MEMORY_MALLOC_TRIM_MIN_RSS_KB or (60 * 1024)
-if MEMORY_WATCHDOG_RSS_SOFT_KB > 0:
-    _DEFAULT_MEMORY_CLEANUP_RSS_KB = min(_DEFAULT_MEMORY_CLEANUP_RSS_KB, MEMORY_WATCHDOG_RSS_SOFT_KB)
-MEMORY_CLEANUP_RSS_KB = max(
-    0,
-    int(getattr(config, 'memory_cleanup_rss_kb', _DEFAULT_MEMORY_CLEANUP_RSS_KB)),
-)
-WEB_RESPONSE_CLEANUP_RSS_KB = max(
-    0,
-    int(getattr(config, 'web_response_cleanup_rss_kb', MEMORY_CLEANUP_RSS_KB or (60 * 1024))),
-)
-WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB = max(
-    0,
-    int(getattr(config, 'web_response_light_cleanup_rss_kb', WEB_RESPONSE_CLEANUP_RSS_KB)),
-)
-WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS = max(
-    30.0,
-    float(getattr(config, 'web_response_cleanup_min_interval_seconds', 60.0)),
-)
+MEMORY_MALLOC_TRIM_MIN_RSS_KB = MEMORY_WATCHDOG_RSS_SOFT_KB
+# Не выполняем тяжёлый GC на обычных API-запросах около целевой полки.
+# Очистка допускается только при soft-пороге watchdog.
+MEMORY_CLEANUP_RSS_KB = MEMORY_WATCHDOG_RSS_SOFT_KB
 APP_BRANCH_LABEL = 'main'
 APP_BRANCH_DESCRIPTION = 'единая версия'
 APP_MODE_LABEL = 'Режим бота'
@@ -2471,6 +2384,10 @@ UDP_QUIC_DRIFT_PRIORITY_REFRESH_COOLDOWN_SECONDS = min(
     UDP_QUIC_DRIFT_REFRESH_COOLDOWN_SECONDS,
     max(60, int(getattr(config, 'udp_quic_drift_priority_refresh_cooldown_seconds', 120))),
 )
+UDP_QUIC_DRIFT_DNS_CACHE_TTL_SECONDS = max(
+    60.0,
+    float(getattr(config, 'udp_quic_drift_dns_cache_ttl_seconds', 600.0)),
+)
 IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS = max(
     240,
     int(getattr(config, 'ipset_refresh_command_timeout_seconds', 420)),
@@ -2510,17 +2427,6 @@ VLESS2_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless2.key')
 KEY_SWITCH_AUDIT_LOG = '/opt/etc/bot/key_switch_audit.log'
 YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
 YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')
-YOUTUBE_ROUTE_MARKERS = (
-    'youtube.com',
-    'youtube-nocookie.com',
-    'youtubeeducation.com',
-    'youtubei.googleapis.com',
-    'youtube.googleapis.com',
-    'youtubeembeddedplayer.googleapis.com',
-    'googlevideo.com',
-    'ytimg.com',
-    'ggpht.com',
-)
 UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
 TELEGRAM_CALL_LEARNING_ENABLED = bool(getattr(config, 'telegram_call_learning_enabled', False))
 TELEGRAM_CALL_LEARNING_DEFAULT_STATE_PATH = '/tmp/bypass_telegram_call_learning.json'
@@ -2576,10 +2482,6 @@ TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enable
 TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
 TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(_TELEGRAM_CALL_LEARNING_CLIENT_IPSETS)
 TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
-TELEGRAM_CALL_LEARNING_ROUTE_CACHE_TTL_SECONDS = max(
-    5.0,
-    float(getattr(config, 'telegram_call_learning_route_cache_ttl_seconds', 30.0)),
-)
 
 bot_ready = False
 bot_polling = False
@@ -2658,6 +2560,7 @@ active_mode_status_cache = {
 active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
 web_pools_api_cache_lock = threading.Lock()
+web_pools_api_build_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
 event_history_api_cache_lock = threading.Lock()
 router_metrics_compact_cache_lock = threading.Lock()
@@ -2687,6 +2590,7 @@ pool_probe_process_state = {
     'progress_path': '',
     'result_path': '',
     'cancel_path': '',
+    'progress_signature': None,
 }
 pool_probe_quality_sample_lock = threading.Lock()
 pool_probe_quality_sample_count = 0
@@ -2706,22 +2610,6 @@ memory_malloc_trim_lock = threading.Lock()
 memory_malloc_trim_last_at = 0.0
 memory_malloc_trim_libc = None
 memory_malloc_trim_available = None
-web_response_cleanup_last_at = 0.0
-post_pool_memory_cleanup_lock = threading.Lock()
-post_pool_memory_cleanup_state = {
-    'scheduled': False,
-    'attempts': 0,
-    'rss_kb': 0,
-    'program_rss_kb': 0,
-    'initial_rss_kb': 0,
-    'finished_rss_kb': 0,
-    'hwm_kb': 0,
-    'target_rss_kb': 0,
-    'target_program_rss_kb': 0,
-    'next_retry_at': 0.0,
-    'deadline_at': 0.0,
-    'last_message': '',
-}
 youtube_edge_prefetch_lock = threading.Lock()
 telegram_call_learning_lock = threading.Lock()
 telegram_call_learning_cancel_event = threading.Event()
@@ -2753,7 +2641,6 @@ telegram_call_learning_state = {
 telegram_call_learning_route_cache = {
     'signature': None,
     'protocols': [],
-    'timestamp': 0.0,
 }
 WEB_UPDATE_COMMANDS = web_commands_runtime.WEB_UPDATE_COMMANDS
 web_command_lock = threading.Lock()
@@ -3155,21 +3042,21 @@ def _write_json_file_private(path, payload):
 
 def _load_subscription_state():
     if not SUBSCRIPTION_STATE_PATH:
-        return subscription_runtime.normalize_subscription_state({})
+        return _subscription_runtime().normalize_subscription_state({})
     with subscription_state_lock:
-        return subscription_runtime.normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
+        return _subscription_runtime().normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
 
 
 def _save_subscription_state(state):
     if not SUBSCRIPTION_STATE_PATH:
         return
-    payload = subscription_runtime.serialize_subscription_state(state)
+    payload = _subscription_runtime().serialize_subscription_state(state)
     with subscription_state_lock:
         _write_json_file(SUBSCRIPTION_STATE_PATH, payload)
 
 
 def _subscription_public_settings():
-    return subscription_runtime.subscription_public_settings(_load_subscription_state())
+    return _subscription_runtime().subscription_public_settings(_load_subscription_state())
 
 
 def _subscription_record(proto):
@@ -3180,11 +3067,11 @@ def _update_subscription_record(proto, **updates):
     if not SUBSCRIPTION_STATE_PATH:
         return dict(updates)
     with subscription_state_lock:
-        state = subscription_runtime.normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
+        state = _subscription_runtime().normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
         record = dict(state.get(proto, {}) or {})
         record.update(updates)
         state[proto] = record
-        _write_json_file(SUBSCRIPTION_STATE_PATH, subscription_runtime.serialize_subscription_state(state))
+        _write_json_file(SUBSCRIPTION_STATE_PATH, _subscription_runtime().serialize_subscription_state(state))
         return record
 
 
@@ -3276,21 +3163,15 @@ def _telegram_call_learning_route_signature():
             route_name = _unblock_route_for_key_type(proto)
             path = _unblock_list_path(route_name)
             stat = os.stat(path)
-            signature.append((proto, int(stat.st_mtime), int(stat.st_size)))
+            signature.append((proto, int(stat.st_mtime_ns), int(stat.st_size)))
         except Exception:
             signature.append((proto, 0, 0))
     return tuple(signature)
 
 
 def _telegram_call_learning_route_protocols():
-    now = time.time()
     signature = _telegram_call_learning_route_signature()
-    cached_signature = telegram_call_learning_route_cache.get('signature')
-    cached_at = float(telegram_call_learning_route_cache.get('timestamp') or 0.0)
-    if (
-        cached_signature == signature and
-        now - cached_at < TELEGRAM_CALL_LEARNING_ROUTE_CACHE_TTL_SECONDS
-    ):
+    if telegram_call_learning_route_cache.get('signature') == signature:
         return list(telegram_call_learning_route_cache.get('protocols') or [])
     protocols = []
     for proto in TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER:
@@ -3302,7 +3183,6 @@ def _telegram_call_learning_route_protocols():
     telegram_call_learning_route_cache.update({
         'signature': signature,
         'protocols': list(protocols),
-        'timestamp': now,
     })
     return protocols
 
@@ -3644,9 +3524,9 @@ def _telegram_call_learning_auto_worker():
     candidates_payload = []
     added_payload = []
     was_watching = False
-    idle_active_scans = 0
     idle_no_client_scans = 0
-    previous_active_clients_key = ()
+    previous_udp_activity_by_protocol = {}
+    follow_up_scan_pending = False
     while not shutdown_requested.is_set():
         try:
             route_protocols = _telegram_call_learning_route_protocols()
@@ -3659,8 +3539,7 @@ def _telegram_call_learning_auto_worker():
                 set_name = TELEGRAM_CALL_LEARNING_CLIENT_IPSETS.get(proto, '')
                 if not set_name:
                     continue
-                client_timeouts = _telegram_call_learning_ipset_members(set_name, include_timeouts=True)
-                clients = sorted(client_timeouts)
+                clients = _telegram_call_learning_ipset_members(set_name)
                 if clients:
                     active_clients_by_protocol[proto] = clients
             if active_clients_by_protocol:
@@ -3671,19 +3550,13 @@ def _telegram_call_learning_auto_worker():
                 fallback_protocols, _fallback_routes = _telegram_call_learning_target_protocols()
                 for proto in fallback_protocols:
                     active_clients_by_protocol.setdefault(proto, legacy_clients)
-            active_clients_key = tuple(
-                (proto, tuple(active_clients_by_protocol.get(proto) or ()))
-                for proto in sorted(active_clients_by_protocol)
-            )
-            active_clients_changed = active_clients_key != previous_active_clients_key
-            previous_active_clients_key = active_clients_key
             if not active_clients_by_protocol:
-                if was_watching:
+                idle_no_client_scans += 1
+                if was_watching and idle_no_client_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT:
                     previous_flows_by_protocol = {}
                     seen_addresses_by_protocol = {}
                     candidates_payload = []
                     added_payload = []
-                    previous_active_clients_key = ()
                     snapshot = _set_telegram_call_learning_state(
                         watching=False,
                         running=False,
@@ -3695,16 +3568,29 @@ def _telegram_call_learning_auto_worker():
                     )
                     _set_telegram_call_learning_state(message=_telegram_call_learning_status_message(snapshot))
                     was_watching = False
-                    idle_active_scans = 0
-                idle_no_client_scans += 1
+                    previous_udp_activity_by_protocol = {}
+                    follow_up_scan_pending = False
                 wait_seconds = TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS
                 if idle_no_client_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT:
                     wait_seconds = max(wait_seconds, TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS)
                 shutdown_requested.wait(wait_seconds)
                 continue
+            needs_initial_scan = not was_watching
             was_watching = True
             idle_no_client_scans = 0
+            current_udp_activity_by_protocol = {
+                proto: _telegram_call_learning().udp_source_activity_signature(active_clients)
+                for proto, active_clients in active_clients_by_protocol.items()
+            }
+            udp_activity_changed = current_udp_activity_by_protocol != previous_udp_activity_by_protocol
+            previous_udp_activity_by_protocol = current_udp_activity_by_protocol
+            scan_is_follow_up = follow_up_scan_pending
+            if not needs_initial_scan and not udp_activity_changed and not scan_is_follow_up:
+                shutdown_requested.wait(TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS)
+                continue
+            follow_up_scan_pending = False
             changed_any = False
+            saw_relevant_flows = False
             combined_clients = []
             for proto, active_clients in active_clients_by_protocol.items():
                 combined_clients.extend(active_clients)
@@ -3720,11 +3606,13 @@ def _telegram_call_learning_auto_worker():
                 previous_flows_by_protocol[proto] = previous_flows
                 seen_addresses_by_protocol[proto] = seen_addresses
                 changed_any = changed_any or changed
+                saw_relevant_flows = saw_relevant_flows or bool(previous_flows)
             _set_telegram_call_learning_state(seen_clients=sorted(set(combined_clients)))
-            if changed_any or active_clients_changed:
-                idle_active_scans = 0
-            else:
-                idle_active_scans += 1
+            # A complete conntrack pass is expensive on the router. A first
+            # relevant signal gets one confirmation pass; without flows we
+            # keep only the lightweight signature poll until a new signal.
+            if not scan_is_follow_up and saw_relevant_flows:
+                follow_up_scan_pending = True
         except Exception as exc:
             _write_runtime_log(f'Telegram call adaptive learning error: {exc}')
             _set_telegram_call_learning_state(
@@ -3738,8 +3626,6 @@ def _telegram_call_learning_auto_worker():
         wait_seconds = TELEGRAM_CALL_LEARNING_SCAN_INTERVAL_SECONDS
         if added_payload:
             wait_seconds = max(wait_seconds, 30.0)
-        elif idle_active_scans >= TELEGRAM_CALL_LEARNING_FAST_SCAN_LIMIT:
-            wait_seconds = max(wait_seconds, TELEGRAM_CALL_LEARNING_IDLE_BACKOFF_SECONDS)
         shutdown_requested.wait(wait_seconds)
 
 
@@ -4110,6 +3996,46 @@ def _ipset_contains(set_name, address):
         return False
 
 
+def _ipset_ipv4_snapshot(set_name):
+    try:
+        result = subprocess.run(
+            ['ipset', 'save', str(set_name or '')],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    networks = []
+    for raw_line in (result.stdout or '').splitlines():
+        parts = raw_line.split()
+        if len(parts) < 3 or parts[0] != 'add' or parts[1] != set_name:
+            continue
+        try:
+            network = ipaddress.ip_network(parts[2], strict=False)
+        except ValueError:
+            continue
+        if network.version == 4:
+            networks.append(network)
+    return tuple(networks)
+
+
+def _ipset_snapshot_contains(networks, address):
+    if networks is None:
+        return None
+    try:
+        address_obj = ipaddress.ip_address(str(address or '').strip())
+    except ValueError:
+        return False
+    if address_obj.version != 4:
+        return False
+    return any(address_obj in network for network in networks)
+
+
 def _ipset_add_address(set_name, address):
     try:
         result = subprocess.run(
@@ -4204,30 +4130,101 @@ def _delete_conntrack_for_address(address):
     return deleted
 
 
+def _udp_quic_drift_domains_by_protocol(route_sets):
+    route_sources = []
+    route_names = {}
+    for proto in route_sets:
+        route_name = _unblock_route_for_key_type(proto)
+        route_names[proto] = route_name
+        try:
+            stat = os.stat(_unblock_list_path(route_name))
+            route_sources.append((proto, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            route_sources.append((proto, None, None))
+    route_signature = tuple(route_sources)
+    cached = udp_quic_drift_state.get('domains_by_protocol') or {}
+    if udp_quic_drift_state.get('route_signature') == route_signature and cached:
+        return cached
+
+    domains_by_protocol = {}
+    sentinels = tuple(
+        domain
+        for item in UDP_QUIC_DRIFT_SENTINEL_DOMAINS
+        for domain in (_normalize_route_domain_entry(item),)
+        if domain and _udp_quic_policy_matches(domain)
+    )
+    for proto, route_name in route_names.items():
+        try:
+            entries = tuple(
+                entry
+                for item in _read_unblock_list_entries(route_name)
+                for entry in (_normalize_route_domain_entry(item),)
+                if entry
+            )
+        except Exception:
+            entries = ()
+        domains_by_protocol[proto] = tuple(
+            domain for domain in sentinels
+            if any(_route_domain_matches(entry, domain) for entry in entries)
+        )
+
+    udp_quic_drift_state['route_signature'] = route_signature
+    udp_quic_drift_state['domains_by_protocol'] = domains_by_protocol
+    udp_quic_drift_state['dns_cache'] = {}
+    return domains_by_protocol
+
+
+def _udp_quic_drift_domain_addresses(domain):
+    now = time.monotonic()
+    cache = udp_quic_drift_state.setdefault('dns_cache', {})
+    cached = cache.get(domain)
+    if cached and now < cached['expires_at']:
+        return cached['addresses']
+
+    addresses = tuple(_resolve_domain_ipv4_addresses(domain, external_dns=False))
+    cache[domain] = {
+        'addresses': addresses,
+        'expires_at': now + (
+            UDP_QUIC_DRIFT_DNS_CACHE_TTL_SECONDS if addresses else min(60.0, UDP_QUIC_DRIFT_DNS_CACHE_TTL_SECONDS)
+        ),
+    }
+    return addresses
+
+
+def _udp_quic_drift_route_sets():
+    return {
+        proto: ipsets
+        for proto in UDP_QUIC_POLICY_PROTOCOLS
+        for ipsets in (_TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS.get(proto),)
+        if isinstance(ipsets, tuple) and len(ipsets) == 2
+    }
+
+
 def _udp_quic_route_drift_findings():
     findings = []
+    route_sets = _udp_quic_drift_route_sets()
+    domains_by_protocol = _udp_quic_drift_domains_by_protocol(route_sets)
     route_sets = {
-        'vless': ('unblockvless', 'unblockvlessudp'),
-        'vless2': ('unblockvless2', 'unblockvless2udp'),
+        proto: ipsets
+        for proto, ipsets in route_sets.items()
+        if domains_by_protocol.get(proto)
+    }
+    if not route_sets:
+        return findings
+    ipset_snapshots = {
+        set_name: _ipset_ipv4_snapshot(set_name)
+        for set_pair in route_sets.values()
+        for set_name in set_pair
     }
     for proto, (main_set, udp_set) in route_sets.items():
-        route_name = _unblock_route_for_key_type(proto)
-        try:
-            entries = [_normalize_route_domain_entry(item) for item in _read_unblock_list_entries(route_name)]
-        except Exception:
-            entries = []
-        entries = [item for item in entries if item]
-        if not entries:
-            continue
-        for domain in UDP_QUIC_DRIFT_SENTINEL_DOMAINS:
-            domain = _normalize_route_domain_entry(domain)
-            if not domain or not _udp_quic_policy_matches(domain):
-                continue
-            if not any(_route_domain_matches(entry, domain) for entry in entries):
-                continue
-            for address in _resolve_domain_ipv4_addresses(domain, external_dns=False):
-                in_main = _ipset_contains(main_set, address)
-                in_udp = _ipset_contains(udp_set, address)
+        for domain in domains_by_protocol.get(proto, ()):
+            for address in _udp_quic_drift_domain_addresses(domain):
+                in_main = _ipset_snapshot_contains(ipset_snapshots.get(main_set), address)
+                in_udp = _ipset_snapshot_contains(ipset_snapshots.get(udp_set), address)
+                if in_main is None:
+                    in_main = _ipset_contains(main_set, address)
+                if in_udp is None:
+                    in_udp = _ipset_contains(udp_set, address)
                 if not in_main or not in_udp:
                     findings.append({
                         'proto': proto,
@@ -4408,23 +4405,18 @@ def _refresh_ipset_for_udp_quic_drift(findings):
         _write_runtime_log(f'UDP/QUIC drift refresh failed: {exc}')
 
 
-def _start_udp_quic_drift_watchdog_thread():
+def _run_udp_quic_drift_watchdog_cycle():
     if not UDP_QUIC_DRIFT_CHECK_ENABLED:
         return
-
-    def worker():
-        shutdown_requested.wait(30)
-        while not shutdown_requested.is_set():
-            try:
-                if _background_task_allowed('UDP/QUIC drift watchdog', task_class='critical'):
-                    findings = _udp_quic_route_drift_findings()
-                    if findings:
-                        _refresh_ipset_for_udp_quic_drift(findings)
-            except Exception as exc:
-                _write_runtime_log(f'UDP/QUIC drift check failed: {exc}')
-            shutdown_requested.wait(UDP_QUIC_DRIFT_CHECK_INTERVAL_SECONDS)
-
-    threading.Thread(target=worker, daemon=True).start()
+    try:
+        if _background_task_allowed('UDP/QUIC drift watchdog', task_class='critical'):
+            def refresh_udp_quic_drift():
+                findings = _udp_quic_route_drift_findings()
+                if findings:
+                    _refresh_ipset_for_udp_quic_drift(findings)
+            _run_coordinated_background_task('UDP/QUIC drift watchdog', refresh_udp_quic_drift)
+    except Exception as exc:
+        _write_runtime_log(f'UDP/QUIC drift check failed: {exc}')
 
 
 def _youtube_edge_prefetch_hosts_for_run():
@@ -4561,7 +4553,8 @@ def _start_youtube_edge_prefetch_external(trigger='manual-fast-key-apply'):
 
 
 def _schedule_youtube_key_apply_prefetch(proto):
-    if str(proto or '').strip() != _youtube_route_protocol():
+    route_proto = _youtube_route_protocol()
+    if route_proto not in YOUTUBE_ROUTE_PROTOCOLS or str(proto or '').strip() != route_proto:
         return False
     return _start_youtube_edge_prefetch_external('manual-fast-key-apply')
 
@@ -4576,12 +4569,26 @@ def _run_youtube_edge_prefetch_once():
         _store_youtube_edge_prefetch_status(status)
         return status
     try:
+        route_proto = _youtube_route_protocol()
         skip_reason = _youtube_edge_prefetch_skip_reason()
-        if skip_reason:
+        if route_proto not in YOUTUBE_ROUTE_PROTOCOLS:
             status = {
                 'ok': False,
                 'last_run_at': time.time(),
-                'route_protocol': _youtube_route_protocol() if skip_reason != 'disabled' else '',
+                'route_protocol': '',
+                'skipped_reason': 'route_owner_unavailable',
+                'candidates': 0,
+                'cache_entries': int(youtube_edge_prefetch_state.get('cache_entries') or 0),
+                'added_addresses': 0,
+                'added_sets': 0,
+                'deleted_sets': 0,
+                'failed_sets': 0,
+            }
+        elif skip_reason:
+            status = {
+                'ok': False,
+                'last_run_at': time.time(),
+                'route_protocol': route_proto if skip_reason != 'disabled' else '',
                 'skipped_reason': skip_reason,
                 'candidates': 0,
                 'cache_entries': int(youtube_edge_prefetch_state.get('cache_entries') or 0),
@@ -4594,7 +4601,7 @@ def _run_youtube_edge_prefetch_once():
                 _memory_cleanup('youtube edge prefetch skipped high RSS', force=True, clear_status=False, log=False)
         else:
             status = _youtube_edge_prefetch().prefetch_once(
-                route_protocol=_youtube_route_protocol(),
+                route_protocol=route_proto,
                 cache_path=YOUTUBE_EDGE_PREFETCH_CACHE_PATH,
                 hosts=_youtube_edge_prefetch_hosts_for_run(),
                 dns_servers=YOUTUBE_EDGE_PREFETCH_DNS_SERVERS,
@@ -4933,6 +4940,24 @@ def _background_task_allowed(task_name, *, allow_high_rss=False, task_class='nor
     return False
 
 
+def _run_coordinated_background_task(task_name, callback):
+    """Run one costly background operation at a time without dropping it."""
+    if not background_task_coordinator_lock.acquire(blocking=False):
+        now = time.time()
+        last_log = float(background_task_skip_log_at.get(f'{task_name}:coordinator') or 0.0)
+        if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
+            background_task_skip_log_at[f'{task_name}:coordinator'] = now
+            active = str(background_task_coordinator_state.get('name') or 'another task')
+            _write_runtime_log(f'{task_name}: deferred because {active} is already running.')
+        return False, None
+    background_task_coordinator_state.update({'name': str(task_name or ''), 'started_at': time.time()})
+    try:
+        return True, callback()
+    finally:
+        background_task_coordinator_state.update({'name': '', 'started_at': 0.0})
+        background_task_coordinator_lock.release()
+
+
 def _log_subscription_auto_refresh_skip(reason, detail):
     key = str(reason or 'unknown')
     now = time.time()
@@ -4948,6 +4973,9 @@ def _subscription_auto_refresh_allowed(proto):
     now = time.time()
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
     if skip_until and now < skip_until:
+        return False
+    if not _background_task_allowed(task_name, task_class='critical'):
+        _log_subscription_auto_refresh_skip('shared_guard', f'{proto}: shared background guard is busy')
         return False
     if globals().get('pool_probe_lock') and pool_probe_lock.locked():
         background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
@@ -5441,19 +5469,9 @@ def _record_memory_timeline(reason='', marker='', extra=None, force=False):
     return False
 
 
-def _start_memory_timeline_thread():
-    if not MEMORY_TIMELINE_ENABLED or not MEMORY_TIMELINE_PATH:
-        return
-
-    def worker():
-        _record_memory_timeline('startup', marker='startup', force=True)
-        while not shutdown_requested.is_set():
-            shutdown_requested.wait(MEMORY_TIMELINE_INTERVAL_SECONDS)
-            if shutdown_requested.is_set():
-                break
-            _record_memory_timeline('periodic sample')
-
-    threading.Thread(target=worker, daemon=True).start()
+def _run_memory_timeline_cycle():
+    if MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH:
+        _record_memory_timeline('periodic sample')
 
 
 def _load_malloc_trim():
@@ -5528,23 +5546,20 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
         should_collect = True
     if not should_collect and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB:
         should_collect = True
+    if not should_collect:
+        return {
+            'rss_before_kb': rss_before,
+            'rss_after_kb': rss_before,
+            'collected': 0,
+            'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
+        }
     _clear_runtime_memory_caches(
-        clear_status=bool(clear_status or should_collect),
+        clear_status=bool(clear_status),
         clear_pool_summary=bool(clear_status),
     )
-    released_modules = []
-    if should_collect or force or clear_status:
-        released_modules = _release_runtime_pressure_modules(
-            reason or 'memory cleanup',
-            include_pool_ui=bool(clear_status or should_collect),
-            include_route_tools=bool(clear_status or should_collect),
-        )
-    collected = gc.collect() if should_collect else 0
+    collected = gc.collect()
     malloc_trim_info = {'attempted': False, 'ok': False, 'result': None, 'available': None}
-    trim_requested = bool(force or clear_status or should_collect)
-    if not trim_requested and MEMORY_MALLOC_TRIM_MIN_RSS_KB > 0 and rss_before and rss_before >= MEMORY_MALLOC_TRIM_MIN_RSS_KB:
-        trim_requested = True
-    if trim_requested:
+    if MEMORY_MALLOC_TRIM_MIN_RSS_KB <= 0 or rss_before >= MEMORY_MALLOC_TRIM_MIN_RSS_KB:
         malloc_trim_info = _malloc_trim(
             reason or 'memory cleanup',
             force=bool(force or clear_status),
@@ -5559,7 +5574,7 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
                 'rss_before_kb': int(rss_before or 0),
                 'rss_after_kb': int(rss_after or 0),
                 'gc_collected': int(collected or 0),
-                'released_modules': len(released_modules),
+                'released_modules': 0,
                 'malloc_trim_attempted': bool(malloc_trim_info.get('attempted')),
                 'malloc_trim_ok': bool(malloc_trim_info.get('ok')),
                 'malloc_trim_result': malloc_trim_info.get('result'),
@@ -5577,86 +5592,6 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
         'collected': collected,
         'malloc_trim': malloc_trim_info,
     }
-
-
-def _web_response_cleanup(reason='web response', *, heavy=False):
-    global web_response_cleanup_last_at
-    heavy = bool(heavy or reason in (
-        'web html render',
-        'protocol panel render',
-        'protocol check render',
-    ))
-    rss_before = _process_rss_kb()
-    now = time.time()
-    released_modules = []
-    malloc_trim_info = {'attempted': False, 'ok': False, 'result': None, 'available': None}
-    if heavy:
-        released_modules = _release_runtime_pressure_modules(
-            reason,
-            include_pool_ui=True,
-            include_route_tools=True,
-        )
-        if released_modules:
-            try:
-                gc.collect()
-            except Exception:
-                pass
-            malloc_trim_info = _malloc_trim(reason, force=True, rss_kb=rss_before)
-    cleanup_threshold = WEB_RESPONSE_CLEANUP_RSS_KB if heavy else WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB
-    if (
-        cleanup_threshold > 0 and
-        rss_before >= cleanup_threshold and
-        (heavy or now - web_response_cleanup_last_at >= WEB_RESPONSE_CLEANUP_MIN_INTERVAL_SECONDS)
-    ):
-        web_response_cleanup_last_at = now
-        return _memory_cleanup(reason, force=heavy, clear_status=False, log=False)
-    return {
-        'rss_before_kb': rss_before,
-        'rss_after_kb': rss_before,
-        'collected': 0,
-        'released_modules': len(released_modules),
-        'malloc_trim': malloc_trim_info,
-    }
-
-
-def _status_refresh_memory_cleanup(reason='status refresh'):
-    rss_before = int(_process_rss_kb() or 0)
-    if WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB <= 0 or rss_before < WEB_RESPONSE_LIGHT_CLEANUP_RSS_KB:
-        return {
-            'rss_before_kb': rss_before,
-            'rss_after_kb': rss_before,
-            'collected': 0,
-            'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
-        }
-    return _memory_cleanup(reason, clear_status=False, log=False)
-
-
-def _pool_probe_memory_checkpoint(reason='', force=False, clear_status=False):
-    cleanup = _memory_cleanup(
-        reason or 'pool probe memory checkpoint',
-        force=force,
-        clear_status=clear_status,
-        log=bool(force),
-    )
-    rss_after = int(cleanup.get('rss_after_kb') or _process_rss_kb() or 0)
-    if (
-        not force and
-        MEMORY_POST_POOL_RESTART_RSS_KB > 0 and
-        rss_after >= MEMORY_POST_POOL_RESTART_RSS_KB
-    ):
-        _record_memory_timeline(
-            reason or 'pool probe memory checkpoint',
-            marker='pool_probe_memory_checkpoint',
-            extra={
-                'rss_before_kb': int(cleanup.get('rss_before_kb') or 0),
-                'rss_after_kb': rss_after,
-                'gc_collected': int(cleanup.get('collected') or 0),
-                'malloc_trim_attempted': bool((cleanup.get('malloc_trim') or {}).get('attempted')),
-                'malloc_trim_ok': bool((cleanup.get('malloc_trim') or {}).get('ok')),
-            },
-            force=True,
-        )
-    return cleanup
 
 
 def _memory_sensitive_operation_running(ignore_status_refresh=False):
@@ -5759,431 +5694,43 @@ def _memory_watchdog_idle_snapshot(payload=None):
     }
 
 
-def _set_post_pool_memory_cleanup_state(**updates):
-    with post_pool_memory_cleanup_lock:
-        post_pool_memory_cleanup_state.update(updates)
-        if updates.get('scheduled') is False:
-            post_pool_memory_cleanup_state['next_retry_at'] = 0.0
-            post_pool_memory_cleanup_state['deadline_at'] = 0.0
+def _record_pool_probe_completion(
+    bot_rss_before_kb=0,
+    finished_rss_kb=0,
+    bot_hwm_kb=0,
+    scope='',
+    worker_rss_before_kb=0,
+    worker_hwm_kb=0,
+):
+    bot_rss_kb = int(_process_rss_kb() or finished_rss_kb or 0)
+    details = [
+        f'scope={scope or "manual"}',
+        f'bot_rss={bot_rss_kb} KB',
+        f'bot_hwm={int(bot_hwm_kb or 0)} KB',
+        f'program_rss={int(_program_rss_kb() or 0)} KB',
+        f'available={int(_mem_available_kb_light() or 0)} KB',
+    ]
+    if bot_rss_before_kb:
+        details.append(f'bot_rss_before={int(bot_rss_before_kb)} KB')
+    if worker_rss_before_kb or worker_hwm_kb:
+        details.append(f'worker_rss_before={int(worker_rss_before_kb or 0)} KB')
+        details.append(f'worker_hwm={int(worker_hwm_kb or 0)} KB')
+    _write_runtime_log('Pool probe completed: ' + ', '.join(details) + '.')
 
-
-def _post_pool_memory_cleanup_snapshot():
-    with post_pool_memory_cleanup_lock:
-        return dict(post_pool_memory_cleanup_state)
-
-
-def _post_pool_router_cleanup_snapshot():
-    temp_xray_count = 0
-    pool_worker_count = 0
-    try:
-        temp_xray_count = int(router_health_runtime.count_proc_cmdline('/tmp/bypass_pool_probe_') or 0)
-    except Exception:
-        temp_xray_count = 0
-    try:
-        pool_worker_count = int(router_health_runtime.count_proc_cmdline('bypass_pool_probe_worker_') or 0)
-    except Exception:
-        pool_worker_count = 0
-    try:
-        payload = router_health_runtime.build_router_health_payload(
-            meminfo=router_health_runtime.read_proc_meminfo(),
-            ndmc_system=router_health_runtime.read_ndmc_system_snapshot(),
-            load_text=' / '.join((_read_text_file('/proc/loadavg').split()[:3] or [])),
-            cpu_percent=None,
-            bot_rss_kb=_process_rss_kb(),
-            probe_progress=_get_pool_probe_progress(),
-            temp_xray_count=temp_xray_count,
-            dns_health={},
-            core_proxy_health={},
-            flash_storage={},
-        )
-    except Exception:
-        payload = {}
-    return {
-        'used_percent': int(payload.get('used_percent') or 0),
-        'available_kb': int(payload.get('available_kb') or 0),
-        'bot_rss_kb': int(payload.get('bot_rss_kb') or _process_rss_kb() or 0),
-        'load_text': str(payload.get('load_text') or '').strip(),
-        'temp_xray_count': temp_xray_count,
-        'pool_worker_count': pool_worker_count,
-    }
-
-
-def _record_post_pool_router_cleanup(stage, scope='', attempts=0, cleanup_rss_kb=0, level='info'):
-    snapshot = _post_pool_router_cleanup_snapshot()
-    used_percent = int(snapshot.get('used_percent') or 0)
-    available_mb = int(round((snapshot.get('available_kb') or 0) / 1024.0))
-    bot_rss_mb = int(round((snapshot.get('bot_rss_kb') or 0) / 1024.0))
-    temp_xray_count = int(snapshot.get('temp_xray_count') or 0)
-    pool_worker_count = int(snapshot.get('pool_worker_count') or 0)
-    if temp_xray_count > 0 or pool_worker_count > 0 or used_percent >= 65:
-        level = 'warn'
-    message = (
-        f'Очистка после проверки пула: память роутера занята {used_percent}%, '
-        f'доступно {available_mb} MB; бот RSS {bot_rss_mb} MB; '
-        f'временных Xray {temp_xray_count}; pool worker {pool_worker_count}.'
-    )
-    _write_runtime_log(
-        f'Post-pool cleanup ({stage}): router used={used_percent}%, '
-        f'available={available_mb} MB, bot_rss={bot_rss_mb} MB, '
-        f'temp_xray={temp_xray_count}, pool_workers={pool_worker_count}.'
-    )
-    _record_event(
-        'post_pool_router_cleanup',
-        message,
-        level=level,
-        source='memory',
-        protocol='system',
-        details={
-            'stage': str(stage or ''),
-            'scope': str(scope or ''),
-            'attempts': int(attempts or 0),
-            'cleanup_rss_kb': int(cleanup_rss_kb or 0),
-            'used_percent': used_percent,
-            'available_kb': int(snapshot.get('available_kb') or 0),
-            'bot_rss_kb': int(snapshot.get('bot_rss_kb') or 0),
-            'temp_xray_count': temp_xray_count,
-            'pool_worker_count': pool_worker_count,
-            'load_text': str(snapshot.get('load_text') or ''),
-        },
-    )
-
-
-def _post_pool_program_target_reached(program_rss_kb=0):
-    if MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB <= 0:
-        return False, int(program_rss_kb or 0)
-    if not program_rss_kb:
-        program_rss_kb = int(_program_rss_kb(probe_running=True) or 0)
-    return bool(program_rss_kb and program_rss_kb <= MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB), int(program_rss_kb or 0)
-
-
-def _schedule_post_pool_memory_cleanup(initial_rss_kb=0, finished_rss_kb=0, hwm_kb=0, scope=''):
-    cleanup_target_kb = (
-        MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
-        if MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB > 0 else
-        MEMORY_POST_POOL_RESTART_RSS_KB
-    )
-    if not MEMORY_POST_POOL_RESTART_ENABLED or cleanup_target_kb <= 0:
-        return
-    now = time.time()
-    current_rss_kb = int(_process_rss_kb() or finished_rss_kb or 0)
-    program_target_reached, current_program_rss_kb = _post_pool_program_target_reached()
-    if (current_rss_kb and current_rss_kb <= cleanup_target_kb) or program_target_reached:
-        _set_post_pool_memory_cleanup_state(
-            scheduled=False,
-            attempts=0,
-            rss_kb=current_rss_kb,
-            program_rss_kb=current_program_rss_kb,
-            initial_rss_kb=int(initial_rss_kb or 0),
-            finished_rss_kb=int(finished_rss_kb or 0),
-            hwm_kb=int(hwm_kb or 0),
-            target_rss_kb=int(cleanup_target_kb or 0),
-            target_program_rss_kb=int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
-            last_message='post-pool program memory already at target' if program_target_reached else 'post-pool memory already at target',
-        )
-        _record_event(
-            'post_pool_memory_cleanup',
-            'Память после проверки пула уже на целевой полке; дополнительная очистка не требуется.',
-            source='memory',
-            protocol='system',
-            details={
-                'scope': scope,
-                'initial_rss_kb': int(initial_rss_kb or 0),
-                'finished_rss_kb': int(finished_rss_kb or 0),
-                'cleanup_rss_kb': current_rss_kb,
-                'program_rss_kb': current_program_rss_kb,
-                'hwm_kb': int(hwm_kb or 0),
-                'target_rss_kb': int(cleanup_target_kb or 0),
-                'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
-                'attempts': 0,
-            },
-        )
-        _record_post_pool_router_cleanup(
-            'already_at_target',
-            scope=scope,
-            attempts=0,
-            cleanup_rss_kb=current_rss_kb,
-        )
-        return
-    with post_pool_memory_cleanup_lock:
-        if post_pool_memory_cleanup_state.get('scheduled'):
-            return
-        post_pool_memory_cleanup_state.update({
-            'scheduled': True,
-            'attempts': 0,
-            'rss_kb': 0,
-            'program_rss_kb': current_program_rss_kb,
-            'initial_rss_kb': int(initial_rss_kb or 0),
-            'finished_rss_kb': int(finished_rss_kb or 0),
-            'hwm_kb': int(hwm_kb or 0),
-            'target_rss_kb': int(cleanup_target_kb or 0),
-            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
-            'next_retry_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS,
-            'deadline_at': now + MEMORY_POST_POOL_RESTART_DELAY_SECONDS + MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS,
-            'last_message': 'post-pool memory cleanup scheduled',
-        })
-    _record_memory_timeline('post-pool memory cleanup scheduled', marker='post_pool_cleanup_scheduled', force=True)
-
-    def worker():
-        next_wait = MEMORY_POST_POOL_RESTART_DELAY_SECONDS
-        deadline_at = time.time() + next_wait + MEMORY_POST_POOL_RESTART_MAX_WAIT_SECONDS
-        attempts = 0
-        try:
-            while not shutdown_requested.is_set():
-                shutdown_requested.wait(max(0.0, next_wait))
-                if shutdown_requested.is_set():
-                    return
-                current_rss = int(_process_rss_kb() or 0)
-                program_target_reached, current_program_rss = _post_pool_program_target_reached()
-                if (current_rss and current_rss <= cleanup_target_kb) or program_target_reached:
-                    _set_post_pool_memory_cleanup_state(
-                        scheduled=False,
-                        attempts=attempts,
-                        rss_kb=current_rss,
-                        program_rss_kb=current_program_rss,
-                        last_message='post-pool memory cleanup skipped; program at target' if program_target_reached else 'post-pool memory cleanup skipped; already at target',
-                    )
-                    _record_event(
-                        'post_pool_memory_cleanup',
-                        'Память после проверки пула вернулась к целевой полке без дополнительной очистки.',
-                        source='memory',
-                        protocol='system',
-                        details={
-                            'scope': scope,
-                            'initial_rss_kb': int(initial_rss_kb or 0),
-                            'finished_rss_kb': int(finished_rss_kb or 0),
-                            'cleanup_rss_kb': current_rss,
-                            'program_rss_kb': current_program_rss,
-                            'hwm_kb': int(hwm_kb or 0),
-                            'target_rss_kb': int(cleanup_target_kb or 0),
-                            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
-                            'attempts': attempts,
-                        },
-                    )
-                    _record_post_pool_router_cleanup(
-                        'skipped_at_target',
-                        scope=scope,
-                        attempts=attempts,
-                        cleanup_rss_kb=current_rss,
-                    )
-                    return
-                attempts += 1
-                cleanup = _memory_cleanup('post-pool automatic cleanup', force=True, clear_status=True)
-                rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
-                program_target_reached, program_rss_kb = _post_pool_program_target_reached()
-                if (not rss_kb or rss_kb < cleanup_target_kb) or program_target_reached:
-                    _set_post_pool_memory_cleanup_state(
-                        scheduled=False,
-                        attempts=attempts,
-                        rss_kb=int(rss_kb or 0),
-                        program_rss_kb=program_rss_kb,
-                        last_message='post-pool memory cleanup completed by program target' if program_target_reached else 'post-pool memory cleanup completed without restart',
-                    )
-                    _record_event(
-                        'post_pool_memory_cleanup',
-                        'Память после проверки пула вернулась к целевой полке.',
-                        source='memory',
-                        protocol='system',
-                        details={
-                            'scope': scope,
-                            'initial_rss_kb': int(initial_rss_kb or 0),
-                            'finished_rss_kb': int(finished_rss_kb or 0),
-                            'cleanup_rss_kb': int(rss_kb or 0),
-                            'program_rss_kb': program_rss_kb,
-                            'hwm_kb': int(hwm_kb or 0),
-                            'target_rss_kb': int(cleanup_target_kb or 0),
-                            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
-                            'attempts': attempts,
-                        },
-                    )
-                    _record_post_pool_router_cleanup(
-                        'cleanup_completed',
-                        scope=scope,
-                        attempts=attempts,
-                        cleanup_rss_kb=int(rss_kb or 0),
-                    )
-                    return
-                restart_needed = (
-                    MEMORY_POST_POOL_RESTART_RSS_KB > 0 and
-                    rss_kb >= MEMORY_POST_POOL_RESTART_RSS_KB
-                )
-                if restart_needed and _memory_restart_is_safe():
-                    _write_runtime_log(
-                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
-                        f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, requesting bot service restart'
-                    )
-                    if _schedule_memory_watchdog_restart(rss_kb):
-                        _set_post_pool_memory_cleanup_state(
-                            scheduled=False,
-                            attempts=attempts,
-                            rss_kb=int(rss_kb),
-                            program_rss_kb=program_rss_kb,
-                            last_message='post-pool memory restart requested',
-                        )
-                        _record_event(
-                            'post_pool_memory_cleanup',
-                            'Память после проверки пула осталась выше restart-порога; запрошен мягкий перезапуск бота.',
-                            level='warn',
-                            source='memory',
-                            protocol='system',
-                            details={
-                                'scope': scope,
-                                'initial_rss_kb': int(initial_rss_kb or 0),
-                                'finished_rss_kb': int(finished_rss_kb or 0),
-                                'cleanup_rss_kb': int(rss_kb or 0),
-                                'program_rss_kb': program_rss_kb,
-                                'hwm_kb': int(hwm_kb or 0),
-                                'target_rss_kb': int(cleanup_target_kb or 0),
-                                'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
-                                'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
-                                'attempts': attempts,
-                            },
-                        )
-                        _record_post_pool_router_cleanup(
-                            'restart_requested',
-                            scope=scope,
-                            attempts=attempts,
-                            cleanup_rss_kb=int(rss_kb or 0),
-                            level='warn',
-                        )
-                        return
-                    _write_runtime_log(
-                        f'Post-pool memory cleanup: restart request for RSS {rss_kb} KB was deferred, retrying'
-                    )
-                now_inner = time.time()
-                remaining = deadline_at - now_inner
-                if remaining <= 0:
-                    if restart_needed:
-                        _write_runtime_log(
-                            f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
-                            f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB after retry window; idle watchdog will continue monitoring'
-                        )
-                    else:
-                        _write_runtime_log(
-                            f'Post-pool memory cleanup: RSS {rss_kb} KB remains above cleanup target '
-                            f'{cleanup_target_kb} KB after retry window; background guards will continue limiting work'
-                        )
-                    _set_post_pool_memory_cleanup_state(
-                        scheduled=False,
-                        attempts=attempts,
-                        rss_kb=int(rss_kb),
-                        program_rss_kb=program_rss_kb,
-                        last_message='post-pool memory restart retry window expired',
-                    )
-                    _record_event(
-                        'post_pool_memory_cleanup',
-                        'Память после проверки пула не вернулась к целевой полке за окно повторных очисток.',
-                        level='warn',
-                        source='memory',
-                        protocol='system',
-                        details={
-                            'scope': scope,
-                            'initial_rss_kb': int(initial_rss_kb or 0),
-                            'finished_rss_kb': int(finished_rss_kb or 0),
-                            'cleanup_rss_kb': int(rss_kb or 0),
-                            'program_rss_kb': program_rss_kb,
-                            'hwm_kb': int(hwm_kb or 0),
-                            'target_rss_kb': int(cleanup_target_kb or 0),
-                            'target_program_rss_kb': int(MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB or 0),
-                            'restart_threshold_kb': int(MEMORY_POST_POOL_RESTART_RSS_KB or 0),
-                            'attempts': attempts,
-                        },
-                    )
-                    _record_post_pool_router_cleanup(
-                        'retry_window_expired',
-                        scope=scope,
-                        attempts=attempts,
-                        cleanup_rss_kb=int(rss_kb or 0),
-                        level='warn',
-                    )
-                    return
-                next_wait = min(MEMORY_POST_POOL_RESTART_RETRY_SECONDS, remaining)
-                retry_at = now_inner + next_wait
-                _set_post_pool_memory_cleanup_state(
-                    scheduled=True,
-                    attempts=attempts,
-                    rss_kb=int(rss_kb),
-                    program_rss_kb=program_rss_kb,
-                    next_retry_at=retry_at,
-                    deadline_at=deadline_at,
-                    last_message='post-pool memory restart pending',
-                )
-                if restart_needed:
-                    _write_runtime_log(
-                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above '
-                        f'{MEMORY_POST_POOL_RESTART_RSS_KB} KB, restart postponed; retry in {int(round(next_wait))} seconds'
-                    )
-                else:
-                    _write_runtime_log(
-                        f'Post-pool memory cleanup: RSS {rss_kb} KB remains above cleanup target '
-                        f'{cleanup_target_kb} KB, retry in {int(round(next_wait))} seconds'
-                    )
-        finally:
-            if shutdown_requested.is_set():
-                _set_post_pool_memory_cleanup_state(scheduled=False, last_message='shutdown requested')
-
-    threading.Thread(target=worker, daemon=True).start()
-
-
-def _start_memory_watchdog_thread():
+def _run_memory_watchdog_cycle():
     if not MEMORY_WATCHDOG_ENABLED or MEMORY_WATCHDOG_RSS_LIMIT_KB <= 0:
         return
-
-    def worker():
-        global memory_watchdog_high_rss_since
-        shutdown_requested.wait(min(MEMORY_WATCHDOG_CHECK_INTERVAL, MEMORY_WATCHDOG_MIN_UPTIME_SECONDS))
-        while not shutdown_requested.is_set():
-            try:
-                rss_kb = _process_rss_kb()
-                if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
-                    _memory_cleanup('watchdog-cleanup', clear_status=False)
-                    rss_kb = _process_rss_kb() or rss_kb
-                if rss_kb and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_kb >= MEMORY_WATCHDOG_RSS_SOFT_KB:
-                    _memory_cleanup('watchdog-soft', clear_status=True)
-                    rss_kb = _process_rss_kb() or rss_kb
-                if rss_kb and MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 and rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
-                    now = time.time()
-                    if not memory_watchdog_high_rss_since:
-                        memory_watchdog_high_rss_since = now
-                        try:
-                            router_health.invalidate(include_heavy=False)
-                        except Exception:
-                            pass
-                    elif (
-                        now - memory_watchdog_high_rss_since >= MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS and
-                        _memory_restart_is_safe()
-                    ):
-                        _memory_cleanup('watchdog-idle-restart', force=True, clear_status=True)
-                        rss_kb = _process_rss_kb() or rss_kb
-                        if rss_kb >= MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB:
-                            _write_runtime_log(
-                                f'Memory watchdog: RSS {rss_kb} KB stayed above '
-                                f'{MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB} KB for '
-                                f'{int(MEMORY_WATCHDOG_IDLE_RESTART_HOLD_SECONDS)}s, restarting bot service'
-                            )
-                            if _schedule_memory_watchdog_restart(rss_kb):
-                                return
-                        memory_watchdog_high_rss_since = 0.0
-                        try:
-                            router_health.invalidate(include_heavy=False)
-                        except Exception:
-                            pass
-                else:
-                    if memory_watchdog_high_rss_since:
-                        memory_watchdog_high_rss_since = 0.0
-                        try:
-                            router_health.invalidate(include_heavy=False)
-                        except Exception:
-                            pass
-                if rss_kb and rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _memory_restart_is_safe():
-                    _memory_cleanup('watchdog-restart', force=True, clear_status=True)
-                    rss_kb = _process_rss_kb() or rss_kb
-                    if rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _schedule_memory_watchdog_restart(rss_kb):
-                        return
-            except Exception as exc:
-                _write_runtime_log(f'Memory watchdog error: {exc}')
-            shutdown_requested.wait(MEMORY_WATCHDOG_CHECK_INTERVAL)
-
-    threading.Thread(target=worker, daemon=True).start()
+    try:
+        rss_kb = _process_rss_kb()
+        if rss_kb and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_kb >= MEMORY_WATCHDOG_RSS_SOFT_KB:
+            _memory_cleanup('watchdog-soft', clear_status=True)
+            rss_kb = _process_rss_kb() or rss_kb
+        if rss_kb and rss_kb >= MEMORY_WATCHDOG_RSS_LIMIT_KB and _memory_restart_is_safe():
+            _memory_cleanup('watchdog-restart', force=True, clear_status=True)
+            rss_kb = _process_rss_kb() or rss_kb
+            _schedule_memory_watchdog_restart(rss_kb)
+    except Exception as exc:
+        _write_runtime_log(f'Memory watchdog error: {exc}')
 
 
 def _pool_probe_runtime_cmdline_matches(cmdline):
@@ -8103,6 +7650,7 @@ def _web_pools_api_cache_signature(current_keys, protocols):
 def _get_web_pools_api_cache(current_keys, protocols, now=None):
     now = time.time() if now is None else now
     signature = _web_pools_api_cache_signature(current_keys, protocols)
+    cached_payload = None
     with web_pools_api_cache_lock:
         entries = web_pools_api_cache.get('entries') or {}
         cached = entries.get(signature)
@@ -8111,25 +7659,22 @@ def _get_web_pools_api_cache(current_keys, protocols, now=None):
             cached.get('payload') is not None and
             now - float(cached.get('timestamp') or 0.0) <= WEB_POOLS_API_CACHE_TTL
         ):
-            return cached.get('payload')
+            cached_payload = cached.get('payload')
         payload = web_pools_api_cache.get('payload')
-        if (
+        if not cached_payload and (
             payload is not None and
             web_pools_api_cache.get('signature') == signature and
             now - float(web_pools_api_cache.get('timestamp') or 0.0) <= WEB_POOLS_API_CACHE_TTL
         ):
-            return payload
-    return None
+            cached_payload = payload
+    return cached_payload if isinstance(cached_payload, str) else None
 
 
 def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None):
-    pools = payload.get('pools') if isinstance(payload, dict) else None
-    if isinstance(pools, dict):
-        for pool_payload in pools.values():
-            if isinstance(pool_payload, dict) and pool_payload.get('rows'):
-                with web_pools_api_cache_lock:
-                    web_pools_api_cache.update({'timestamp': 0, 'signature': None, 'payload': None, 'entries': {}})
-                return
+    try:
+        serialized_payload = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    except (TypeError, ValueError):
+        return
     rss_kb = int(_process_rss_kb() or 0)
     if rss_kb and MEMORY_CLEANUP_RSS_KB > 0 and rss_kb >= MEMORY_CLEANUP_RSS_KB:
         with web_pools_api_cache_lock:
@@ -8139,14 +7684,14 @@ def _store_web_pools_api_cache(current_keys, protocols, payload, timestamp=None)
     cache_timestamp = time.time() if timestamp is None else timestamp
     with web_pools_api_cache_lock:
         entries = web_pools_api_cache.setdefault('entries', {})
-        entries[signature] = {'timestamp': cache_timestamp, 'payload': payload}
+        entries[signature] = {'timestamp': cache_timestamp, 'payload': serialized_payload}
         if len(entries) > WEB_POOLS_API_CACHE_MAX_ENTRIES:
             oldest = sorted(entries.items(), key=lambda item: float((item[1] or {}).get('timestamp') or 0.0))
             for key, _value in oldest[:max(0, len(entries) - WEB_POOLS_API_CACHE_MAX_ENTRIES)]:
                 entries.pop(key, None)
         web_pools_api_cache['timestamp'] = cache_timestamp
         web_pools_api_cache['signature'] = signature
-        web_pools_api_cache['payload'] = payload
+        web_pools_api_cache['payload'] = serialized_payload
 
 
 def _append_status_note(note, extra):
@@ -8171,21 +7716,12 @@ def _router_health_snapshot(compact=False, sample_cpu=True, force_refresh=False,
         force_refresh=force_refresh,
         prime_cpu=prime_cpu,
     )
-    payload['bot_rss_restart_threshold_kb'] = MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB
-    payload['post_pool_restart_threshold_kb'] = MEMORY_POST_POOL_RESTART_RSS_KB
-    payload['post_pool_cleanup_target_kb'] = MEMORY_POST_POOL_CLEANUP_TARGET_RSS_KB
-    payload['post_pool_cleanup_target_program_kb'] = MEMORY_POST_POOL_CLEANUP_TARGET_PROGRAM_RSS_KB
     payload['memory_timeline_enabled'] = bool(MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH)
     payload['memory_timeline_path'] = MEMORY_TIMELINE_PATH if MEMORY_TIMELINE_ENABLED else ''
     payload['memory_timeline_bytes'] = _safe_file_size(MEMORY_TIMELINE_PATH) if MEMORY_TIMELINE_ENABLED else 0
     payload['youtube_edge_prefetch'] = _youtube_edge_prefetch_snapshot()
     idle_memory_state = _memory_watchdog_idle_snapshot(payload)
     payload.update(idle_memory_state)
-    post_pool_state = _post_pool_memory_cleanup_snapshot()
-    payload['post_pool_restart_pending'] = bool(post_pool_state.get('scheduled'))
-    payload['post_pool_restart_rss_kb'] = int(post_pool_state.get('rss_kb') or 0)
-    payload['post_pool_restart_program_rss_kb'] = int(post_pool_state.get('program_rss_kb') or 0)
-    payload['post_pool_restart_next_retry_at'] = float(post_pool_state.get('next_retry_at') or 0.0)
     threshold_mb = int(round(MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB / 1024.0)) if MEMORY_WATCHDOG_IDLE_RESTART_RSS_KB > 0 else 0
     if idle_memory_state.get('memory_watchdog_restart_scheduled'):
         note = str(payload.get('note') or '').strip()
@@ -8200,12 +7736,6 @@ def _router_health_snapshot(compact=False, sample_cpu=True, force_refresh=False,
             idle_note = f'RSS бота выше порога {threshold_mb} MB; watchdog выполнит очистку и перезапуск на ближайшем цикле'
         note = str(payload.get('note') or '').strip()
         payload['note'] = _append_status_note(note, idle_note)
-    if post_pool_state.get('scheduled'):
-        rss_mb = int(round((post_pool_state.get('rss_kb') or 0) / 1024.0))
-        retry_in = max(0, int(round((post_pool_state.get('next_retry_at') or 0.0) - time.time())))
-        note = str(payload.get('note') or '').strip()
-        retry_note = f'После проверки пула ожидается повторная очистка памяти: RSS бота {rss_mb} MB, попытка через {retry_in} с'
-        payload['note'] = _append_status_note(note, retry_note)
     return payload
 
 
@@ -8334,7 +7864,7 @@ def _measure_quality_download_through_proxy(proxy_url, url='', bytes_limit=0, co
 
 
 def _check_youtube_health_through_proxy(proxy_url, metrics=None):
-    return _controller_check_youtube_through_proxy(
+    return _youtube_healthcheck().check_youtube_through_proxy(
         _check_http_through_proxy,
         proxy_url,
         urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
@@ -8549,14 +8079,23 @@ def _protocol_status_for_key(
             read_timeout=8,
             authenticated=active_telegram_required,
         )
-    if active_telegram_required and not api_ok:
+    api_unknown = api_ok is None
+    if api_unknown:
+        api_ok = bool(cached_probe.get('tg_ok')) if 'tg_ok' in cached_probe else False
+        api_message = 'Фоновая проверка Telegram не вернула результат; сохранён последний подтверждённый статус.'
+    if active_telegram_required and api_ok is False:
         _log_telegram_api_status_failure(key_name, api_message)
-    api_transient = (not api_ok) and _is_transient_telegram_api_failure(api_message)
+    api_transient = (not api_unknown) and (not api_ok) and _is_transient_telegram_api_failure(api_message)
     yt_metrics = {}
     if background_checks:
         yt_ok, yt_message = _check_youtube_protocol_for_background(key_name, metrics=yt_metrics)
     else:
         yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
+    yt_unknown = yt_ok is None
+    cached_yt_state = _youtube_probe_state(cached_probe)
+    if yt_unknown:
+        yt_ok = cached_yt_state in ('ok', 'warn')
+        yt_message = 'Фоновая проверка YouTube не вернула результат; сохранён последний подтверждённый статус.'
     if (
         api_transient and
         not active_telegram_required and
@@ -8565,22 +8104,28 @@ def _protocol_status_for_key(
         api_ok = True
         api_transient = False
         api_message = f'Последняя успешная проверка Telegram сохранена; свежая проверка временно не ответила: {api_message}'
-    if api_transient:
-        _record_key_probe(key_name, key_value, yt_ok=yt_ok, **yt_metrics)
-    else:
-        _record_key_probe(key_name, key_value, tg_ok=api_ok, yt_ok=yt_ok, **yt_metrics)
-    yt_state = 'warn' if yt_ok and (
+    probe_updates = {}
+    if not api_unknown and not api_transient:
+        probe_updates['tg_ok'] = api_ok
+    if not yt_unknown:
+        probe_updates['yt_ok'] = yt_ok
+        probe_updates.update(yt_metrics)
+    if probe_updates:
+        _record_key_probe(key_name, key_value, **probe_updates)
+    yt_state = 'pending' if yt_unknown else ('warn' if yt_ok and (
         str(yt_metrics.get('yt_stability') or '').lower() == 'unstable' or
         'unstable' in str(yt_message or '').lower()
-    ) else ('ok' if yt_ok else 'fail')
+    ) else ('ok' if yt_ok else 'fail'))
     return _status_active_protocol_status(
         endpoint_ok=endpoint_ok,
         endpoint_message=endpoint_message,
         api_ok=api_ok,
         api_message=api_message,
         api_transient=api_transient,
+        api_pending=api_unknown,
         yt_ok=yt_ok,
         yt_message=yt_message,
+        yt_pending=yt_unknown,
         yt_state=yt_state,
         custom_states=custom_states,
         custom_checks=protocol_custom_checks,
@@ -8627,7 +8172,7 @@ def _light_youtube_route_protocol():
     try:
         return _youtube_route_protocol()
     except Exception:
-        return 'vless2'
+        return ''
 
 
 def _light_required_services_for_protocol(key_name, *, youtube_proto=None):
@@ -8690,13 +8235,20 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
                 read_timeout=8,
                 authenticated=True,
             )
-        if not api_ok:
+        api_unknown = api_ok is None
+        if api_unknown:
+            api_ok = False
+            api_message = 'Фоновая проверка Telegram не вернула результат; статус обновляется.'
+        if api_ok is False:
             _log_telegram_api_status_failure(key_name, api_message)
     else:
         api_ok = False
         api_message = ''
-    api_transient = bool(api_required and (not api_ok) and _is_transient_telegram_api_failure(api_message))
-    if api_required and not api_transient:
+        api_unknown = False
+    api_transient = bool(
+        api_required and not api_unknown and (not api_ok) and _is_transient_telegram_api_failure(api_message)
+    )
+    if api_required and not api_transient and not api_unknown:
         try:
             _record_light_telegram_probe(key_name, key_value, api_ok)
         except Exception as exc:
@@ -8708,8 +8260,10 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
         api_ok=api_ok,
         api_message=api_message,
         api_transient=api_transient,
+        api_pending=api_unknown,
         yt_ok=False,
         yt_message='',
+        yt_pending=False,
         yt_state='',
         custom_states={},
         custom_checks=(),
@@ -10011,7 +9565,7 @@ def _pool_probe_progress_label(progress=None):
 
 
 def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
-    return _controller_pool_probe_timeout_budget(
+    return _pool_probe_controller().pool_probe_timeout_budget(
         custom_checks,
         task_count,
         workers,
@@ -10021,7 +9575,7 @@ def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
 
 
 def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None, record_key_probe=None):
-    return _controller_check_pool_key_through_proxy(
+    return _pool_probe_controller().check_pool_key_through_proxy(
         proto,
         key_value,
         custom_checks,
@@ -10087,7 +9641,7 @@ def _find_pool_failover_candidate_inline(candidates, service='telegram'):
         if service == 'youtube'
         else (POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT)
     )
-    return _runner_find_pool_failover_candidate(
+    return _pool_probe_runner().find_pool_failover_candidate(
         candidates,
         service=service,
         batch_size=POOL_PROBE_BATCH_SIZE,
@@ -10115,91 +9669,53 @@ def _cleanup_health_check_process_files(paths=None):
 
 
 def _failover_candidate_process_worker_code(input_path, result_path):
-    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
     module_dir = os.path.dirname(BOT_SOURCE_PATH)
     return (
         'import os, sys; '
         'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
         'os.environ["BYPASS_KEENETIC_POOL_PROBE_WORKER"] = "1"; '
         f"sys.path.insert(0, {module_dir!r}); "
-        f'import {module_name} as bot_module; '
-        'sys.exit(bot_module._run_failover_candidate_process_worker('
+        'import failover_candidate_runner as runner; '
+        'sys.exit(runner.run_failover_candidate_worker('
         f'{input_path!r}, {result_path!r}))'
     )
 
 
 def _health_check_process_worker_code(input_path, result_path):
-    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
     module_dir = os.path.dirname(BOT_SOURCE_PATH)
     return (
         'import os, sys; '
         'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
         'os.environ["BYPASS_KEENETIC_HEALTH_WORKER"] = "1"; '
         f"sys.path.insert(0, {module_dir!r}); "
-        f'import {module_name} as bot_module; '
-        'sys.exit(bot_module._run_health_check_process_worker('
+        'import health_check_runner as runner; '
+        'sys.exit(runner.run_health_check_worker('
         f'{input_path!r}, {result_path!r}))'
     )
 
 
 def _run_health_check_process_worker(input_path, result_path):
-    payload = _read_json_file(input_path, {}) or {}
-    _remove_file(input_path)
-    if not isinstance(payload, dict):
-        payload = {}
-    kind = str(payload.get('kind') or '').strip().lower()
-    result = {
-        'ok': False,
-        'message': '',
-        'metrics': {},
-        'error': '',
-        'rss_before_kb': int(_process_rss_kb() or 0),
-        'rss_after_kb': 0,
-        'hwm_kb': 0,
-    }
-    exit_code = 0
-    try:
-        if kind == 'telegram':
-            ok, message = _check_telegram_api_through_proxy(
-                str(payload.get('proxy_url') or '').strip() or None,
-                connect_timeout=float(payload.get('connect_timeout') or AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT),
-                read_timeout=float(payload.get('read_timeout') or AUTO_FAILOVER_CHECK_READ_TIMEOUT),
-            )
-            result['ok'] = bool(ok)
-            result['message'] = _redact_sensitive_text(message)
-        elif kind == 'youtube':
-            metrics = {}
-            ok, message = _check_youtube_protocol_once(
-                str(payload.get('proto') or '').strip() or None,
-                metrics=metrics,
-            )
-            result['ok'] = bool(ok)
-            result['message'] = _redact_sensitive_text(message)
-            result['metrics'] = {
-                str(key): value
-                for key, value in metrics.items()
-                if isinstance(value, (bool, int, float, str)) or value is None
-            }
-        else:
-            result['error'] = f'unsupported health check kind: {kind}'
-            exit_code = 1
-    except Exception as exc:
-        result['error'] = f'{type(exc).__name__}: {_redact_sensitive_text(exc)}'
-        exit_code = 1
-    finally:
-        _cleanup_pool_probe_runtime_light(kill_processes=True)
-        _memory_cleanup('health check worker finished', force=True, clear_status=True, log=False)
-        result['rss_after_kb'] = int(_process_rss_kb() or 0)
-        result['hwm_kb'] = int(_process_hwm_kb() or 0)
-        try:
-            _write_json_file_private(result_path, result)
-        except Exception:
-            pass
-    return exit_code
+    import health_check_runner
+
+    return health_check_runner.run_health_check_worker(input_path, result_path)
 
 
 def _health_check_in_process(payload):
     payload = dict(payload or {})
+    kind = str(payload.get('kind') or '').strip().lower()
+    if kind == 'telegram':
+        payload.setdefault('authenticated', bool(_app_mode_telegram_enabled()))
+    elif kind == 'youtube':
+        proto = str(payload.get('proto') or '').strip() or _youtube_route_protocol()
+        payload.update({
+            'proto': proto,
+            'proxy_url': proxy_settings.get(proto) or '',
+            'urls': list(YOUTUBE_VLESS2_HEALTHCHECK_URLS),
+            'min_ok': YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK,
+            'connect_timeout': YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+            'read_timeout': YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+            'retry_delay_seconds': POOL_PROBE_RETRY_DELAY_SECONDS,
+        })
     paths = _health_check_process_paths()
     try:
         _write_json_file_private(paths['input_path'], payload)
@@ -10238,7 +9754,6 @@ def _health_check_in_process(payload):
         return None
     finally:
         _cleanup_health_check_process_files(paths)
-        _memory_cleanup('health check process finished', force=True, clear_status=False, log=False)
 
 
 def _check_telegram_api_for_background(proxy_url=None, connect_timeout=6, read_timeout=10):
@@ -10250,7 +9765,7 @@ def _check_telegram_api_for_background(proxy_url=None, connect_timeout=6, read_t
             'read_timeout': float(read_timeout or 0),
         })
         if payload is None:
-            return True, 'Telegram API check skipped: health worker unavailable.'
+            return None, 'Telegram API check is unavailable; the last verified result is kept.'
         return bool(payload.get('ok')), str(payload.get('message') or '')
     return _check_telegram_api_through_proxy(
         proxy_url,
@@ -10266,7 +9781,7 @@ def _check_youtube_protocol_for_background(proto=None, metrics=None):
             'proto': str(proto or ''),
         })
         if payload is None:
-            return True, 'YouTube check skipped: health worker unavailable.'
+            return None, 'YouTube check is unavailable; the last verified result is kept.'
         worker_metrics = payload.get('metrics') or {}
         if isinstance(metrics, dict) and isinstance(worker_metrics, dict):
             metrics.update(worker_metrics)
@@ -10275,51 +9790,9 @@ def _check_youtube_protocol_for_background(proto=None, metrics=None):
 
 
 def _run_failover_candidate_process_worker(input_path, result_path):
-    payload = _read_json_file(input_path, {}) or {}
-    _remove_file(input_path)
-    if not isinstance(payload, dict):
-        payload = {}
-    candidates = [
-        (str(item[0] or ''), str(item[1] or ''))
-        for item in (payload.get('candidates') or [])
-        if isinstance(item, (list, tuple)) and len(item) >= 2 and str(item[0] or '') in POOL_PROTOCOL_ORDER and str(item[1] or '').strip()
-    ]
-    service = str(payload.get('service') or 'telegram').strip().lower()
-    if service not in ('telegram', 'youtube'):
-        service = 'telegram'
-    result = {
-        'ok': False,
-        'candidate': None,
-        'error': '',
-        'rss_before_kb': int(_process_rss_kb() or 0),
-        'rss_after_kb': 0,
-        'hwm_kb': 0,
-    }
-    exit_code = 1
-    try:
-        candidate = _find_pool_failover_candidate_inline(candidates, service=service)
-        if candidate:
-            proto, key_value, tg_ok, yt_ok = candidate
-            result.update({
-                'ok': True,
-                'candidate': [proto, key_value, tg_ok, yt_ok],
-            })
-            exit_code = 0
-        else:
-            exit_code = 2
-    except Exception as exc:
-        result['error'] = f'{type(exc).__name__}: {_redact_sensitive_text(exc)}'
-        exit_code = 1
-    finally:
-        _cleanup_pool_probe_runtime_light(kill_processes=True)
-        _memory_cleanup('failover candidate worker finished', force=True, clear_status=True, log=False)
-        result['rss_after_kb'] = int(_process_rss_kb() or 0)
-        result['hwm_kb'] = int(_process_hwm_kb() or 0)
-        try:
-            _write_json_file_private(result_path, result)
-        except Exception:
-            pass
-    return exit_code
+    import failover_candidate_runner
+
+    return failover_candidate_runner.run_failover_candidate_worker(input_path, result_path)
 
 
 def _find_pool_failover_candidate_in_process(candidates, service='telegram'):
@@ -10334,7 +9807,16 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram'):
     payload = {
         'service': str(service or 'telegram'),
         'candidates': candidates,
+        'batch_size': POOL_PROBE_BATCH_SIZE,
+        'test_port': POOL_FAILOVER_TEST_PORT,
+        'telegram_timeouts': [POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT],
+        'http_timeouts': [
+            YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT if service == 'youtube' else POOL_PROBE_HTTP_CONNECT_TIMEOUT,
+            YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT if service == 'youtube' else POOL_PROBE_HTTP_READ_TIMEOUT,
+        ],
+        'telegram_authenticated': bool(_app_mode_telegram_enabled()),
     }
+    worker_timed_out = False
     try:
         _write_json_file_private(paths['input_path'], payload)
         env = dict(os.environ)
@@ -10373,6 +9855,7 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram'):
             return None
         return proto, key_value, tg_ok, yt_ok
     except subprocess.TimeoutExpired:
+        worker_timed_out = True
         _write_runtime_log('Auto-failover: worker timed out while checking candidates.')
         return None
     except Exception as exc:
@@ -10385,8 +9868,10 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram'):
             payload['candidates'] = []
         except Exception:
             pass
-        _cleanup_pool_probe_runtime_light(kill_processes=True)
-        _memory_cleanup('failover candidate process finished', force=True, clear_status=False, log=False)
+        if worker_timed_out:
+            # A normal child owns and reaps its temporary Xray.  Scan only
+            # after a timeout, when the interpreter could not reach cleanup.
+            _cleanup_pool_probe_runtime_light(kill_processes=True)
 
 
 def _find_pool_failover_candidate(candidates, service='telegram'):
@@ -10397,7 +9882,7 @@ def _find_pool_failover_candidate(candidates, service='telegram'):
 
 def _select_pool_probe_tasks(tasks, max_keys=None, stale_only=False):
     custom_checks = _load_custom_checks()
-    return _controller_select_pool_probe_tasks(
+    return _pool_probe_controller().select_pool_probe_tasks(
         tasks,
         protocol_order=POOL_PROTOCOL_ORDER,
         custom_checks=custom_checks,
@@ -10638,17 +10123,17 @@ def _schedule_low_memory_pool_probe_resume():
                 available_kb = _available_memory_kb()
                 rss_kb = _process_rss_kb()
                 rss_ready = (
-                    MEMORY_POST_POOL_RESTART_RSS_KB <= 0 or
+                    MEMORY_WATCHDOG_RSS_SOFT_KB <= 0 or
                     not rss_kb or
-                    rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB
+                    rss_kb < MEMORY_WATCHDOG_RSS_SOFT_KB
                 )
                 if not rss_ready:
                     cleanup = _memory_cleanup('pool probe resume wait', force=True, clear_status=True)
                     rss_kb = cleanup.get('rss_after_kb') or _process_rss_kb()
                     rss_ready = (
-                        MEMORY_POST_POOL_RESTART_RSS_KB <= 0 or
+                        MEMORY_WATCHDOG_RSS_SOFT_KB <= 0 or
                         not rss_kb or
-                        rss_kb < MEMORY_POST_POOL_RESTART_RSS_KB
+                        rss_kb < MEMORY_WATCHDOG_RSS_SOFT_KB
                     )
                 if (available_kb is None or available_kb >= POOL_PROBE_PAUSE_AVAILABLE_KB) and rss_ready:
                     started, queued = _resume_cancelled_pool_probe('ожидания свободной памяти')
@@ -10657,7 +10142,7 @@ def _schedule_low_memory_pool_probe_resume():
                 if not rss_ready:
                     note = (
                         f'Проверка пула приостановлена до освобождения памяти бота: RSS {int(rss_kb or 0)} KB, '
-                        f'порог {MEMORY_POST_POOL_RESTART_RSS_KB} KB.'
+                        f'порог {MEMORY_WATCHDOG_RSS_SOFT_KB} KB.'
                     )
                 elif available_kb is None:
                     note = 'Проверка пула приостановлена до освобождения памяти.'
@@ -10754,6 +10239,18 @@ def _pool_probe_write_progress(progress_path, **updates):
 
 
 def _pool_probe_sync_process_progress(progress_path):
+    try:
+        stat_result = os.stat(progress_path)
+        signature = (int(stat_result.st_mtime_ns), int(stat_result.st_size))
+    except OSError:
+        signature = None
+    with pool_probe_resume_lock:
+        if (
+            pool_probe_process_state.get('progress_path') == progress_path and
+            signature is not None and
+            pool_probe_process_state.get('progress_signature') == signature
+        ):
+            return {}
     progress = _read_json_file(progress_path, {}) or {}
     if not isinstance(progress, dict):
         return {}
@@ -10763,140 +10260,80 @@ def _pool_probe_sync_process_progress(progress_path):
             updates[key] = progress[key]
     if updates:
         _set_pool_probe_progress(**updates)
+    if signature is not None:
+        with pool_probe_resume_lock:
+            if pool_probe_process_state.get('progress_path') == progress_path:
+                pool_probe_process_state['progress_signature'] = signature
     return progress
 
 
-class _PoolProbeFileCancelEvent:
-    def __init__(self, cancel_path):
-        self.cancel_path = cancel_path
-
-    def is_set(self):
-        if shutdown_requested.is_set():
-            return True
-        return bool(self.cancel_path and os.path.exists(self.cancel_path))
-
-
-def _pool_probe_cancel_allows_resume(cancel_path):
-    if not cancel_path:
-        return True
-    try:
-        with open(cancel_path, 'r', encoding='utf-8', errors='ignore') as file:
-            text = file.read(128)
-        return 'no-resume' not in text
-    except Exception:
-        return True
-
-
 def _pool_probe_process_worker_code(input_path, progress_path, result_path, cancel_path):
-    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
     module_dir = os.path.dirname(BOT_SOURCE_PATH)
     return (
         'import os, sys; '
         'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
         'os.environ["BYPASS_KEENETIC_POOL_PROBE_WORKER"] = "1"; '
         f"sys.path.insert(0, {module_dir!r}); "
-        f'import {module_name} as bot_module; '
-        'sys.exit(bot_module._run_pool_probe_process_worker('
+        'import pool_probe_process_runner as runner; '
+        'sys.exit(runner.run_pool_probe_process_worker('
         f'{input_path!r}, {progress_path!r}, {result_path!r}, {cancel_path!r}))'
     )
 
 
-def _run_pool_probe_process_worker(input_path, progress_path, result_path, cancel_path):
-    payload = _read_json_file(input_path, {}) or {}
-    _remove_file(input_path)
-    if not isinstance(payload, dict):
-        payload = {}
-    tasks = [
-        (str(item[0] or ''), str(item[1] or ''))
-        for item in (payload.get('tasks') or [])
-        if isinstance(item, (list, tuple)) and len(item) >= 2 and str(item[0] or '') in POOL_PROTOCOL_ORDER and str(item[1] or '').strip()
-    ]
-    checks = [dict(item) for item in (payload.get('checks') or []) if isinstance(item, dict)]
-    scope = str(payload.get('scope') or 'manual')
-    initial_checked = max(0, int(payload.get('initial_checked') or 0))
-    total_count = max(initial_checked + len(tasks), int(payload.get('total_count') or 0), len(tasks))
-    started_at = float(payload.get('started_at') or time.time())
-    cancel_event = _PoolProbeFileCancelEvent(cancel_path)
-
-    def write_progress(**updates):
-        _set_pool_probe_progress(**updates)
-        snapshot = _get_pool_probe_progress()
-        snapshot.update(updates)
-        return _pool_probe_write_progress(progress_path, **snapshot)
-
-    write_progress(
-        running=True,
-        checked=initial_checked,
-        total=total_count,
-        scope=scope,
-        note='',
-        started_at=started_at,
-        finished_at=0,
+def _pool_probe_records_apply_worker_code(records_path, result_path):
+    module_dir = os.path.dirname(BOT_SOURCE_PATH)
+    return (
+        'import os, sys; '
+        'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
+        'os.environ["BYPASS_KEENETIC_POOL_PROBE_WORKER"] = "1"; '
+        f"sys.path.insert(0, {module_dir!r}); "
+        'import pool_probe_process_runner as runner; '
+        'sys.exit(runner.run_pool_probe_records_apply_worker('
+        f'{records_path!r}, {result_path!r}))'
     )
-    result = {
-        'ok': False,
-        'checked': 0,
-        'absolute_checked': initial_checked,
-        'total': total_count,
-        'scope': scope,
-        'started_at': started_at,
-        'finished_at': 0,
-        'rss_before_kb': int(_process_rss_kb() or 0),
-        'rss_after_kb': 0,
-        'hwm_kb': 0,
-        'cancelled': False,
-        'error': '',
-    }
-    exit_code = 1
+
+
+def _run_pool_probe_process_worker(input_path, progress_path, result_path, cancel_path):
+    """Compatibility entry point for manual worker invocation."""
+    import pool_probe_process_runner
+
+    return pool_probe_process_runner.run_pool_probe_process_worker(
+        input_path,
+        progress_path,
+        result_path,
+        cancel_path,
+    )
+
+
+def _apply_pool_probe_records_in_worker(records_path):
+    records_path = str(records_path or '')
+    if not records_path:
+        return 0
+    result_path = f'{records_path}.apply.json'
+    _remove_file(result_path)
+    env = dict(os.environ)
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    env['BYPASS_KEENETIC_POOL_PROBE_WORKER'] = '1'
+    process = subprocess.Popen(
+        [sys.executable, '-c', _pool_probe_records_apply_worker_code(records_path, result_path)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        env=env,
+    )
     try:
-        checked, total = _run_selected_pool_probe(
-            tasks,
-            checks,
-            lambda value: write_progress(checked=initial_checked + int(value or 0)),
-            _invalidate_probe_status_caches,
-            scope=scope,
-            cancel_event=cancel_event,
-            set_note=lambda note: write_progress(note=note),
-            store_cancelled_probe=lambda remaining: (
-                _store_cancelled_pool_probe(remaining, checks, scope)
-                if _pool_probe_cancel_allows_resume(cancel_path) else None
-            ),
-        )
-        result.update({
-            'ok': True,
-            'checked': int(checked or 0),
-            'absolute_checked': initial_checked + int(checked or 0),
-            'total': max(total_count, int(total or 0)),
-            'cancelled': bool(cancel_event.is_set()),
-        })
-        exit_code = 0
-    except BaseException as exc:
-        result['error'] = f'{type(exc).__name__}: {str(exc).splitlines()[0][:180]}'
-        _write_runtime_log(f'Pool probe process worker failed: {result["error"]}')
+        process.wait(timeout=POOL_PROBE_CACHE_APPLY_TIMEOUT_SECONDS)
+        result = _read_json_file(result_path, {}) or {}
+        if process.returncode != 0 or not result.get('ok'):
+            raise RuntimeError(str(result.get('error') or 'cache apply worker failed'))
+        return max(0, int(result.get('applied') or 0))
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=3)
+        raise RuntimeError('cache apply worker timed out')
     finally:
-        finished_at = time.time()
-        result.update({
-            'finished_at': finished_at,
-            'rss_after_kb': int(_process_rss_kb() or 0),
-            'hwm_kb': int(_process_hwm_kb() or 0),
-        })
-        write_progress(
-            running=False,
-            checked=int(result.get('absolute_checked') or initial_checked),
-            total=total_count,
-            scope=scope,
-            note=result.get('error') or '',
-            finished_at=finished_at,
-        )
-        _write_json_file(result_path, result)
-        try:
-            tasks.clear()
-            checks.clear()
-        except Exception:
-            pass
-        _remove_file(cancel_path)
-        _memory_cleanup('pool probe process worker finished', force=True, clear_status=True, log=False)
-    return exit_code
+        _remove_file(result_path)
 
 
 def _cleanup_pool_probe_process_files(state=None):
@@ -10905,6 +10342,9 @@ def _cleanup_pool_probe_process_files(state=None):
         path = state.get(key) if isinstance(state, dict) else ''
         if path:
             _remove_file(path)
+            if key == 'result_path':
+                _remove_file(f'{path}.records')
+                _remove_file(f'{path}.records.apply.json')
 
 
 def _request_pool_probe_process_cancel(resume=True):
@@ -10958,13 +10398,21 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
     total_count = len(selected) if total_count is None else max(initial_checked, int(total_count or 0))
     started_at = time.time() if started_at is None else float(started_at or time.time())
     paths = _pool_probe_process_paths()
+    task_key_ids = [
+        _probe_cache().hash_key(str(item[1] or ''))
+        if isinstance(item, (list, tuple)) and len(item) >= 2 else ''
+        for item in selected
+    ]
     payload = {
         'tasks': selected,
+        'task_key_ids': task_key_ids,
         'checks': list(custom_checks or []),
         'scope': scope,
         'initial_checked': initial_checked,
         'total_count': total_count,
         'started_at': started_at,
+        'telegram_authenticated': bool(_app_mode_telegram_enabled()),
+        'telegram_required_protocol': _telegram_route_protocol(),
     }
     try:
         _write_json_file_private(paths['input_path'], payload)
@@ -11008,6 +10456,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
     with pool_probe_resume_lock:
         pool_probe_process_state.update(paths)
         pool_probe_process_state['process'] = process
+        pool_probe_process_state['progress_signature'] = None
     _set_pool_probe_progress(
         running=True,
         checked=initial_checked,
@@ -11019,6 +10468,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
     )
 
     def monitor():
+        result = {}
         try:
             while process.poll() is None:
                 if pool_probe_cancel_event.is_set():
@@ -11029,6 +10479,16 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             result = _read_json_file(paths['result_path'], {}) or {}
             if not isinstance(result, dict):
                 result = {}
+            try:
+                expected_records_path = f"{paths['result_path']}.records"
+                records_path = str(result.get('probe_records_path') or '')
+                if records_path == expected_records_path:
+                    _apply_pool_probe_records_in_worker(records_path)
+            except Exception as exc:
+                _write_runtime_log(f'Pool probe cache apply failed: {type(exc).__name__}')
+            remaining = result.get('remaining') or []
+            if remaining and bool(result.get('resume_allowed', True)):
+                _store_cancelled_pool_probe(remaining, custom_checks, scope)
             checked = int(result.get('absolute_checked') or progress.get('checked') or initial_checked)
             note = ''
             if process.returncode != 0:
@@ -11058,6 +10518,10 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             )
         finally:
             _invalidate_probe_status_caches()
+            # The child normally reaps its own temporary Xray.  A last, scoped
+            # sweep protects the router if that child is killed before its
+            # finally block runs; it only matches bypass_pool_probe_* runtime.
+            _cleanup_pool_probe_runtime_light(kill_processes=True)
             _cleanup_pool_probe_process_files(paths)
             with pool_probe_resume_lock:
                 if pool_probe_process_state.get('process') is process:
@@ -11067,18 +10531,18 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
                         'progress_path': '',
                         'result_path': '',
                         'cancel_path': '',
+                        'progress_signature': None,
                     })
             try:
                 pool_probe_lock.release()
             except RuntimeError:
                 pass
-            _unload_pool_probe_modules('pool probe process monitor')
-            _memory_cleanup('pool probe process monitor finished', force=True, clear_status=True, log=False)
             finished_rss_kb = int(_process_rss_kb() or 0)
-            _schedule_post_pool_memory_cleanup(
-                initial_rss_kb=int(result.get('rss_before_kb') or 0),
+            _record_pool_probe_completion(
+                worker_rss_before_kb=int(result.get('rss_before_kb') or 0),
+                worker_hwm_kb=int(result.get('hwm_kb') or 0),
                 finished_rss_kb=finished_rss_kb,
-                hwm_kb=int(_process_hwm_kb() or 0),
+                bot_hwm_kb=int(_process_hwm_kb() or 0),
                 scope=scope,
             )
 
@@ -11103,7 +10567,7 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_
         if not POOL_PROBE_INPROCESS_FALLBACK_ENABLED:
             _write_runtime_log('Pool probe process worker is disabled; in-process pool probe fallback is disabled for router memory safety.')
             return False, len(selected or [])
-    return start_pool_probe_worker(
+    return _pool_probe_controller().start_pool_probe_worker(
         selected,
         custom_checks,
         scope=scope,
@@ -11250,7 +10714,7 @@ def _run_selected_pool_probe(
         force=True,
     )
     try:
-        return run_pool_probe_worker(
+        return _pool_probe_runner().run_pool_probe_worker(
             probe_tasks,
             checks,
             batch_size=batch_size,
@@ -11263,22 +10727,22 @@ def _run_selected_pool_probe(
             proto_label=_pool_proto_label,
             hash_key=_hash_key,
             set_checked=set_checked,
-            validate_outbound=lambda proto, key_value: _runner_pool_probe_outbound(
+            validate_outbound=lambda proto, key_value: _pool_probe_runner().pool_probe_outbound(
                 proto,
                 key_value,
                 'proxy-pool-probe-validate',
                 _proxy_outbound_from_key,
             ),
-            failed_custom_results=_failed_custom_probe_results,
+            failed_custom_results=_pool_probe_controller().failed_custom_probe_results,
             record_key_probe=probe_recorder.record,
-            start_xray_for_batch=lambda valid_batch: _runner_start_pool_probe_xray(
-                _runner_build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
+            start_xray_for_batch=lambda valid_batch: _pool_probe_runner().start_pool_probe_xray(
+                _pool_probe_runner().build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
             ),
             wait_for_socks5=_wait_for_socks5_handshake,
             check_pool_key=_check_pool_key_through_proxy,
             timeout_budget=_pool_probe_timeout_budget,
-            stop_xray=_runner_stop_pool_probe_xray,
-            cleanup_runtime=_runner_cleanup_pool_probe_runtime,
+            stop_xray=_pool_probe_runner().stop_pool_probe_xray,
+            cleanup_runtime=_pool_probe_runner().cleanup_pool_probe_runtime,
             invalidate_caches=invalidate_caches,
             cancel_event=cancel_event,
             on_cancelled_remaining=store_cancelled_probe or (
@@ -11299,37 +10763,35 @@ def _run_selected_pool_probe(
             slow_memory_delay_seconds=POOL_PROBE_SLOW_MEMORY_DELAY_SECONDS,
             process_rss_kb=_process_rss_kb,
             max_process_rss_kb=POOL_PROBE_MAX_PROCESS_RSS_KB,
-            memory_cleanup=_pool_probe_memory_checkpoint,
+            memory_cleanup=None,
             rss_cleanup_delay_seconds=min(3.0, max(0.0, POOL_PROBE_LOW_MEMORY_DELAY_SECONDS)),
             max_rss_cleanup_attempts=3,
         )
     finally:
         probe_recorder.flush()
-        _runner_cleanup_pool_probe_runtime(kill_processes=True)
+        _pool_probe_runner().cleanup_pool_probe_runtime(kill_processes=True)
         _cleanup_pool_probe_runtime_light(kill_processes=True)
-        _unload_pool_probe_modules('pool probe worker')
-        _memory_cleanup('pool probe finished', force=True, clear_status=True)
-        finished_rss_kb = int(_process_rss_kb() or 0)
-        hwm_kb = int(_process_hwm_kb() or 0)
-        _record_memory_timeline(
-            'pool probe finished',
-            marker='pool_probe_finish',
-            extra={
-                'pool_probe_scope': str(scope or ''),
-                'rss_before_kb': start_rss_kb,
-                'rss_after_kb': finished_rss_kb,
-                'hwm_kb': hwm_kb,
-            },
-            force=True,
-        )
         if not POOL_PROBE_WORKER_MODE:
+            finished_rss_kb = int(_process_rss_kb() or 0)
+            hwm_kb = int(_process_hwm_kb() or 0)
+            _record_memory_timeline(
+                'pool probe finished',
+                marker='pool_probe_finish',
+                extra={
+                    'pool_probe_scope': str(scope or ''),
+                    'rss_before_kb': start_rss_kb,
+                    'rss_after_kb': finished_rss_kb,
+                    'hwm_kb': hwm_kb,
+                },
+                force=True,
+            )
             if start_rss_kb <= 0 and finished_rss_kb <= 0 and hwm_kb <= 0 and not scope:
-                _schedule_post_pool_memory_cleanup()
+                _record_pool_probe_completion()
             else:
-                _schedule_post_pool_memory_cleanup(
-                    initial_rss_kb=start_rss_kb,
+                _record_pool_probe_completion(
+                    bot_rss_before_kb=start_rss_kb,
                     finished_rss_kb=finished_rss_kb,
-                    hwm_kb=hwm_kb,
+                    bot_hwm_kb=hwm_kb,
                     scope=scope,
                 )
 
@@ -11341,7 +10803,7 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'
         stale_only=stale_only,
     )
     if POOL_PROBE_ACTIVE_ONLY:
-        selected = _controller_filter_active_probe_tasks(selected, _load_current_keys())
+        selected = _pool_probe_controller().filter_active_probe_tasks(selected, _load_current_keys())
     return _start_selected_pool_probe_tasks(selected, custom_checks, scope)
 
 
@@ -11450,7 +10912,7 @@ def _subscription_preserve_active_keys(proto, fetched_keys, previous_managed_key
     previous_set = set(_key_pool_store().dedupe_key_list(previous_managed_keys or []))
     if not previous_set:
         return []
-    fetched_set = set(subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys))
+    fetched_set = set(_subscription_runtime().subscription_keys_for_protocol(proto, fetched_keys))
     current_key = str((_load_current_keys().get(proto) or '')).strip()
     if not current_key or current_key not in previous_set or current_key in fetched_set:
         return []
@@ -11465,7 +10927,7 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
         retained_keys = _subscription_preserve_active_keys(proto, fetched_keys, previous_managed_keys)
     with key_pool_lock:
         if sync_subscription:
-            pools, added_keys, removed_keys, managed_keys = subscription_runtime.sync_subscription_keys_to_pool(
+            pools, added_keys, removed_keys, managed_keys = _subscription_runtime().sync_subscription_keys_to_pool(
                 _key_pool_store().load_key_pools(KEY_POOLS_PATH),
                 proto,
                 fetched_keys,
@@ -11479,7 +10941,7 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
                 fetched_keys,
             )
             removed_keys = []
-            managed_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys)
+            managed_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched_keys)
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
     if removed_keys:
         _forget_unreferenced_key_probes(removed_keys, pools)
@@ -11490,14 +10952,14 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
 
 
 def _import_subscription_keys_to_pools(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None):
-    selected_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched_keys)
+    selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched_keys)
     pools, added_keys, removed_keys, managed_keys, retained_keys = _add_subscription_keys_to_pool(
         proto,
         fetched_keys,
         sync_subscription=sync_subscription,
         previous_managed_keys=previous_managed_keys,
     )
-    selected_source = subscription_runtime.subscription_source_protocol(proto)
+    selected_source = _subscription_runtime().subscription_source_protocol(proto)
     extra_lines = []
     for source_proto, keys in (fetched_keys or {}).items():
         if source_proto == selected_source:
@@ -11534,7 +10996,7 @@ def _refresh_subscription_once(proto, record, *, source='auto'):
         fetched, error = _fetch_keys_from_subscription(url, use_router_hwid=True)
         if error:
             raise ValueError(error)
-        selected_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched)
+        selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched)
         if not selected_keys:
             raise ValueError('subscription did not return keys for the selected protocol')
         pools, added_keys, removed_keys, _managed_keys, retained_keys = _add_subscription_keys_to_pool(
@@ -11581,28 +11043,96 @@ def _subscription_refresh_due(record, now):
     return True
 
 
-def _start_subscription_auto_refresh_thread():
+def _run_subscription_auto_refresh_cycle():
     if not SUBSCRIPTION_AUTO_REFRESH_ENABLED or not SUBSCRIPTION_STATE_PATH:
         return
+    refreshed = False
+    try:
+        state = _load_subscription_state()
+        now = time.time()
+        for proto, record in state.items():
+            if shutdown_requested.is_set():
+                break
+            if _subscription_refresh_due(record, now):
+                started, _result = _run_coordinated_background_task(
+                    'Subscription auto refresh',
+                    lambda: _refresh_subscription_once(proto, record, source='auto'),
+                )
+                refreshed = refreshed or started
+    except Exception as exc:
+        _write_runtime_log(f'Subscription auto refresh error: {exc}')
+    finally:
+        if refreshed:
+            _memory_cleanup('Subscription auto refresh cycle', clear_status=False, log=False)
+
+
+def _background_maintenance_tasks():
+    tasks = []
+    if MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH:
+        _record_memory_timeline('startup', marker='startup', force=True)
+        tasks.append(('memory timeline', MEMORY_TIMELINE_INTERVAL_SECONDS, MEMORY_TIMELINE_INTERVAL_SECONDS, _run_memory_timeline_cycle))
+    if MEMORY_WATCHDOG_ENABLED and MEMORY_WATCHDOG_RSS_LIMIT_KB > 0:
+        tasks.append((
+            'memory watchdog',
+            MEMORY_WATCHDOG_CHECK_INTERVAL,
+            min(MEMORY_WATCHDOG_CHECK_INTERVAL, MEMORY_WATCHDOG_MIN_UPTIME_SECONDS),
+            _run_memory_watchdog_cycle,
+        ))
+    if not _app_mode_pool_enabled():
+        return tasks
+    if UDP_QUIC_DRIFT_CHECK_ENABLED:
+        tasks.append(('UDP/QUIC drift watchdog', UDP_QUIC_DRIFT_CHECK_INTERVAL_SECONDS, 30.0, _run_udp_quic_drift_watchdog_cycle))
+    if SUBSCRIPTION_AUTO_REFRESH_ENABLED and SUBSCRIPTION_STATE_PATH:
+        tasks.append((
+            'subscription auto refresh',
+            SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS,
+            SUBSCRIPTION_AUTO_REFRESH_START_DELAY_SECONDS,
+            _run_subscription_auto_refresh_cycle,
+        ))
+    tasks.append(('Telegram auto-failover', AUTO_FAILOVER_POLL_SECONDS, 0.0, _run_auto_failover_cycle))
+    if YOUTUBE_VLESS2_FAILOVER_ENABLED:
+        tasks.append(('YouTube failover', YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS, 0.0, _run_youtube_failover_cycle))
+    return tasks
+
+
+def _start_background_maintenance_thread():
+    global background_maintenance_thread
+    if background_maintenance_thread and background_maintenance_thread.is_alive():
+        return
+    tasks = _background_maintenance_tasks()
+    if not tasks:
+        return
+    due_at = {
+        name: time.monotonic() + max(0.0, float(initial_delay or 0.0))
+        for name, _interval, initial_delay, _callback in tasks
+    }
 
     def worker():
-        shutdown_requested.wait(SUBSCRIPTION_AUTO_REFRESH_START_DELAY_SECONDS)
         while not shutdown_requested.is_set():
-            try:
-                state = _load_subscription_state()
-                now = time.time()
-                for proto, record in state.items():
-                    if shutdown_requested.is_set():
-                        break
-                    if _subscription_refresh_due(record, now):
-                        _refresh_subscription_once(proto, record, source='auto')
-            except Exception as exc:
-                _write_runtime_log(f'Subscription auto refresh error: {exc}')
-            finally:
-                _memory_cleanup('Subscription auto refresh cycle', clear_status=False, log=False)
-            shutdown_requested.wait(SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS)
+            now = time.monotonic()
+            next_due_at = now + 60.0
+            for name, interval, _initial_delay, callback in tasks:
+                scheduled_at = float(due_at.get(name) or now)
+                if now >= scheduled_at:
+                    started_at = time.monotonic()
+                    try:
+                        callback()
+                    except Exception as exc:
+                        _write_runtime_log(f'{name} scheduler error: {exc}')
+                    duration_seconds = time.monotonic() - started_at
+                    if duration_seconds >= BACKGROUND_TASK_SLOW_LOG_SECONDS:
+                        _write_runtime_log(f'{name} scheduler duration: {duration_seconds:.2f}s')
+                    scheduled_at = time.monotonic() + max(1.0, float(interval or 1.0))
+                    due_at[name] = scheduled_at
+                next_due_at = min(next_due_at, scheduled_at)
+            shutdown_requested.wait(max(0.5, min(60.0, next_due_at - time.monotonic())))
 
-    threading.Thread(target=worker, daemon=True).start()
+    background_maintenance_thread = threading.Thread(
+        target=worker,
+        name='background-maintenance',
+        daemon=True,
+    )
+    background_maintenance_thread.start()
 
 
 def _web_custom_checks():
@@ -11980,7 +11510,7 @@ def _active_mode_status_snapshot_from_base(
     else:
         custom_checks = ()
         route_states = None
-    if not pool_locked:
+    if not pool_locked and (include_route_details or cached is None):
         key_probe_cache = None
         light_key_probe_cache = None
         light_youtube_proto = None
@@ -12017,10 +11547,20 @@ def _active_mode_status_snapshot_from_base(
         try:
             cached_active = _cached_active_mode_protocol_status(current_keys) if pool_locked else None
             if cached_active is not None:
-                protocols[proxy_mode] = cached_active
+                active_status = cached_active
+                if not include_route_details:
+                    active_status = _status_merge_light_status_with_cached_services(
+                        active_status,
+                        protocols.get(proxy_mode),
+                        _load_custom_checks(),
+                        required_services=_light_required_services_for_protocol(
+                            proxy_mode,
+                            youtube_proto=_light_youtube_route_protocol(),
+                        ),
+                    )
             elif pool_locked:
                 if include_route_details:
-                    protocols[proxy_mode] = _cached_protocol_status_for_key(
+                    active_status = _cached_protocol_status_for_key(
                         proxy_mode,
                         current_keys.get(proxy_mode, ''),
                         custom_checks=custom_checks,
@@ -12028,7 +11568,7 @@ def _active_mode_status_snapshot_from_base(
                         route_states=route_states,
                     )
                 else:
-                    protocols[proxy_mode] = _light_cached_protocol_status_for_key(
+                    active_status = _light_cached_protocol_status_for_key(
                         proxy_mode,
                         current_keys.get(proxy_mode, ''),
                         key_probe_cache=_load_light_key_probe_cache(),
@@ -12036,7 +11576,7 @@ def _active_mode_status_snapshot_from_base(
                     )
             else:
                 if include_route_details:
-                    protocols[proxy_mode] = _protocol_status_for_key(
+                    active_status = _protocol_status_for_key(
                         proxy_mode,
                         current_keys.get(proxy_mode, ''),
                         custom_checks=custom_checks,
@@ -12044,12 +11584,25 @@ def _active_mode_status_snapshot_from_base(
                         background_checks=background_checks,
                     )
                 else:
-                    protocols[proxy_mode] = _light_active_protocol_status_for_key(
+                    active_status = _light_active_protocol_status_for_key(
                         proxy_mode,
                         current_keys.get(proxy_mode, ''),
                         background_checks=background_checks,
                     )
-                _store_active_mode_protocol_status(current_keys, protocols[proxy_mode])
+                if not include_route_details:
+                    previous_status = protocols.get(proxy_mode)
+                    if isinstance(previous_status, dict) and previous_status.get('custom'):
+                        active_status = _status_merge_light_status_with_cached_services(
+                            active_status,
+                            previous_status,
+                            _load_custom_checks(),
+                            required_services=_light_required_services_for_protocol(
+                                proxy_mode,
+                                youtube_proto=_light_youtube_route_protocol(),
+                            ),
+                        )
+                _store_active_mode_protocol_status(current_keys, active_status)
+            protocols[proxy_mode] = active_status
         except Exception as exc:
             _write_runtime_log(f'Ошибка быстрой проверки активного режима {proxy_mode}: {exc}')
             protocols[proxy_mode] = {
@@ -12075,6 +11628,13 @@ def _cached_status_snapshot(current_keys):
         signature,
         STATUS_CACHE_TTL,
     )
+    if cached is not None and not _status_snapshot_has_custom_services(cached):
+        try:
+            if _load_custom_checks():
+                snapshot = _placeholder_status_snapshot(current_keys, include_pool_details=True)
+                return _status_store_snapshot(status_snapshot_cache, signature, snapshot, now=time.time())
+        except Exception as exc:
+            _write_runtime_log(f'Unable to restore cached custom service statuses: {exc}')
     if cached is not None and _status_snapshot_has_pending_check(cached):
         try:
             snapshot = _active_mode_status_snapshot_from_base(current_keys, cached)
@@ -12103,6 +11663,14 @@ def _status_snapshot_has_pending_check(snapshot):
         )
     except Exception:
         return False
+
+
+def _status_snapshot_has_custom_services(snapshot):
+    protocols = (snapshot or {}).get('protocols') if isinstance(snapshot, dict) else {}
+    return any(
+        isinstance(status, dict) and bool(status.get('custom'))
+        for status in (protocols or {}).values()
+    )
 
 
 def _active_mode_status_signature(current_keys):
@@ -12142,12 +11710,12 @@ def _placeholder_web_status_snapshot():
 
 
 def _placeholder_status_snapshot(current_keys, include_pool_details=True):
-    protocols = _placeholder_protocol_statuses(current_keys)
     if not include_pool_details:
         return _active_mode_status_snapshot_from_base(
             current_keys,
-            {'web': _build_web_status(current_keys, protocols=protocols), 'protocols': protocols},
+            _placeholder_status_snapshot(current_keys, include_pool_details=True),
         )
+    protocols = _placeholder_protocol_statuses(current_keys)
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary() if custom_checks else None
@@ -12166,7 +11734,15 @@ def _placeholder_status_snapshot(current_keys, include_pool_details=True):
     if active_key:
         cached_active = _cached_active_mode_protocol_status(current_keys)
         if cached_active is not None:
-            protocols[proxy_mode] = cached_active
+            protocols[proxy_mode] = _status_merge_light_status_with_cached_services(
+                cached_active,
+                protocols.get(proxy_mode),
+                custom_checks,
+                required_services=_light_required_services_for_protocol(
+                    proxy_mode,
+                    youtube_proto=_light_youtube_route_protocol(),
+                ),
+            )
         else:
             probe = _load_key_probe_cache().get(_hash_key(active_key), {})
             if isinstance(probe, dict) and ('tg_ok' in probe or 'yt_ok' in probe):
@@ -12249,7 +11825,6 @@ def _refresh_status_caches_async(current_keys, active_only=False):
                     for old_signature in list(cache):
                         if old_signature != refresh_key:
                             cache.pop(old_signature, None)
-            _status_refresh_memory_cleanup('status refresh')
             _record_memory_timeline(
                 'status refresh finished',
                 marker='status_refresh_finish',
@@ -12563,7 +12138,7 @@ def _web_action_context():
             add_subscription_keys_to_pool=_key_pool_store().add_subscription_keys_to_pool,
             add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
             import_subscription_keys_to_pools=_import_subscription_keys_to_pools,
-            subscription_keys_for_protocol=subscription_runtime.subscription_keys_for_protocol,
+            subscription_keys_for_protocol=_subscription_runtime().subscription_keys_for_protocol,
             subscription_record=_subscription_record,
             save_subscription_record=_update_subscription_record,
             save_key_pools=_save_key_pools,
@@ -12605,6 +12180,7 @@ def _web_get_context(handler):
         'get_pools_api_cache': _get_web_pools_api_cache,
         'store_pools_api_cache': _store_web_pools_api_cache,
         'pools_api_cache_ttl': WEB_POOLS_API_CACHE_TTL,
+        'pools_api_build_lock': web_pools_api_build_lock,
         'get_web_command_state': _get_web_command_state,
         'update_status_snapshot': _update_status_snapshot,
         'event_history_snapshot': _event_history_snapshot,
@@ -12828,6 +12404,7 @@ def _web_simple_form_context(current_keys, protocol_statuses, csrf_input_html, s
 
 class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     csrf_error_as_json = True
+    allow_authenticated_external = True
     quiet_log_prefixes = (
         '/api/status',
         '/api/pool_probe',
@@ -12846,23 +12423,22 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
     flash_message_setter = staticmethod(_set_web_flash_message)
 
     def _build_style_asset(self):
-        return render_web_style_asset(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64)
+        return _web_form_template().load_static_asset(
+            os.path.join(STATIC_DIR, 'app.css'),
+            lambda: render_web_style_asset(TELEGRAM_SVG_B64=TELEGRAM_SVG_B64),
+        )
 
     def _build_script_asset(self):
-        app_runtime_mode = _load_app_runtime_mode()
-        pool_enabled = _app_mode_pool_enabled(app_runtime_mode)
-        return render_web_script_asset(
-            TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
-            YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
-            csrf_token='',
-            custom_checks_json='[]',
-            initial_command_running='false',
-            initial_status_pending='false',
-            enable_async_forms=True,
-            enable_custom_checks=pool_enabled,
-            enable_key_pool=pool_enabled,
-            enable_live_status=True,
-            enable_telegram=_app_mode_telegram_enabled(app_runtime_mode),
+        return _web_form_template().load_static_asset(
+            os.path.join(STATIC_DIR, 'app.js'),
+            lambda: render_web_script_asset(
+                TELEGRAM_SVG_B64=TELEGRAM_SVG_B64,
+                YOUTUBE_SVG_B64=YOUTUBE_SVG_B64,
+                csrf_token='',
+                custom_checks_json='[]',
+                initial_command_running='false',
+                initial_status_pending='false',
+            ),
         )
 
     def _build_form(self, message=''):
@@ -13009,10 +12585,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 _refresh_status_caches_async(current_keys, active_only=True)
         csrf_token = self._get_or_create_csrf_token()
         csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
-        try:
-            return _web_protocol_panel_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
-        finally:
-            _web_response_cleanup('protocol panel render')
+        return _web_protocol_panel_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
 
     def _build_protocol_check_panel(self, protocol):
         app_runtime_mode = _load_app_runtime_mode()
@@ -13026,10 +12599,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 _refresh_status_caches_async(current_keys, active_only=True)
         csrf_token = self._get_or_create_csrf_token()
         csrf_input_html = web_form_blocks.render_csrf_input(csrf_token)
-        try:
-            return _web_protocol_check_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
-        finally:
-            _web_response_cleanup('protocol check render')
+        return _web_protocol_check_html(protocol, current_keys, snapshot.get('protocols', {}), csrf_input_html)
 
     def do_GET(self):
         if not self._ensure_request_allowed():
@@ -13051,43 +12621,21 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if kind == 'json':
             payload = action.get('payload', {})
             self._send_json(payload, status=action.get('status', 200))
-            heavy_api = path in (
-                '/api/pools',
-                '/api/event_history',
-                '/api/protocol_panel',
-                '/api/protocol_check_panel',
-                '/api/service_routes',
-                '/api/route_intersections',
+        elif kind == 'json_text':
+            self._send_text_asset(
+                action.get('text', '{}'),
+                content_type='application/json; charset=utf-8',
+                cache_seconds=0,
             )
-            cleanup_api = heavy_api or path in (
-                '/api/status',
-                '/api/router_metrics',
-            )
-            if cleanup_api:
-                action['payload'] = None
-                payload = None
-                if heavy_api:
-                    _web_response_cleanup('web json api render', heavy=True)
-                elif path == '/api/status':
-                    _web_response_cleanup('web status api render')
-                else:
-                    _web_response_cleanup('web json api render')
         elif kind == 'html':
             self._send_html(action.get('html', ''))
-            _release_web_form_template_cache()
-            _web_response_cleanup('web html render')
         elif kind == 'text':
-            try:
-                self._send_text_asset(
-                    action.get('text', ''),
-                    content_type=action.get('content_type', 'text/plain; charset=utf-8'),
-                    cache_seconds=action.get('cache_seconds', 0),
-                )
-            finally:
-                if path in ('/static/app.css', '/static/app.js'):
-                    action['text'] = ''
-                    _release_web_form_template_cache()
-                    _web_response_cleanup('web static asset render')
+            self._send_text_asset(
+                action.get('text', ''),
+                content_type=action.get('content_type', 'text/plain; charset=utf-8'),
+                cache_seconds=action.get('cache_seconds', 0),
+                asset_cache_key=path if path in ('/static/app.css', '/static/app.js') else '',
+            )
         elif kind == 'png':
             self._send_png(action.get('path', ''))
         else:
@@ -13111,20 +12659,11 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if action is None:
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
-        extra = action.get('extra') or None
-        try:
-            self._send_action_result(
-                action.get('result', ''),
-                success=action.get('success', True),
-                extra=extra,
-            )
-        finally:
-            action['extra'] = None
-            action['result'] = ''
-            if isinstance(extra, dict) and extra.get('pools') is not None:
-                _web_response_cleanup('web post pool action render', heavy=True)
-            else:
-                _web_response_cleanup('web post action render')
+        self._send_action_result(
+            action.get('result', ''),
+            success=action.get('success', True),
+            extra=action.get('extra') or None,
+        )
 
 def start_http_server():
     global web_httpd
@@ -13132,6 +12671,9 @@ def start_http_server():
         bind_host = _web_resolve_bind_host(routerip)
         class ReusableThreadingHTTPServer(ThreadingHTTPServer):
             allow_reuse_address = True
+            # Several panels are loaded together; keep the kernel accept queue from
+            # dropping an otherwise valid burst of browser requests.
+            request_queue_size = 128
 
         server_address = (bind_host, int(browser_port))
         httpd = ReusableThreadingHTTPServer(server_address, KeyInstallHTTPRequestHandler)
@@ -13349,7 +12891,7 @@ def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service='telegr
         time.sleep(2)
         proxy_url = f'socks5h://127.0.0.1:{port}'
         if str(service or '').strip().lower() == 'youtube':
-            ok, _message = _controller_check_youtube_through_proxy(
+            ok, _message = _youtube_healthcheck().check_youtube_through_proxy(
                 _check_http_through_proxy,
                 proxy_url,
                 urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS,
@@ -13634,10 +13176,11 @@ def _run_telegram_polling_loop():
             else:
                 time.sleep(5)
         else:
-            bot_polling = False
             if shutdown_requested.is_set():
                 break
-            time.sleep(2)
+            # A clean return can be the boundary between long-poll requests.
+            # Keep the last healthy state until a preflight or polling error says otherwise.
+            shutdown_requested.wait(2)
 
 
 def main():
@@ -13653,21 +13196,16 @@ def main():
     _cleanup_pool_probe_runtime_light(kill_processes=True)
     _sync_udp_policy_config()
     if pool_enabled:
-        _start_udp_quic_drift_watchdog_thread()
         _start_youtube_edge_prefetch_thread()
         _start_telegram_call_learning_auto_thread()
-    _start_memory_timeline_thread()
-    _start_memory_watchdog_thread()
     start_http_server()
     _restart_core_proxy_at_startup()
     _mark_bot_ready_from_autostart()
     _restore_startup_proxy_mode()
     if pool_enabled:
-        _start_subscription_auto_refresh_thread()
-        _start_auto_failover_thread()
-        _start_youtube_vless2_failover_thread()
         _ensure_current_keys_in_pools()
         _load_persisted_pool_probe_resume()
+    _start_background_maintenance_thread()
     if telegram_enabled:
         _deliver_pending_telegram_command_result()
         _start_telegram_result_retry_worker()

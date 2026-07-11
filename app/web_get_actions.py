@@ -174,7 +174,7 @@ def _status_payload(ctx, query=''):
     return payload
 
 
-def _pools_payload(ctx, query=''):
+def _pools_payload(ctx, query='', _build_lock_held=False):
     if not _ctx(ctx, 'pool_enabled', False):
         return {
             'pools': {},
@@ -194,10 +194,15 @@ def _pools_payload(ctx, query=''):
     now = _ctx(ctx, 'time_provider', time.time)()
     cache_ttl = float(_ctx(ctx, 'pools_api_cache_ttl', 0) or 0)
     cache_getter = _ctx(ctx, 'get_pools_api_cache')
-    if cache_ttl > 0 and not pool_probe_running and not pool_probe_paused and cache_getter:
+    cache_enabled = bool(cache_ttl > 0 and not pool_probe_running and not pool_probe_paused and cache_getter)
+    if cache_enabled:
         cached = cache_getter(current_keys, protocols, now=now)
         if cached is not None:
             return cached
+        build_lock = _ctx(ctx, 'pools_api_build_lock')
+        if build_lock and not _build_lock_held:
+            with build_lock:
+                return _pools_payload(ctx, query, _build_lock_held=True)
     include_summary = not protocols
     include_custom_checks = not protocols
     payload_builder = _ctx(ctx, 'web_pools_payload')
@@ -224,7 +229,7 @@ def _pools_payload(ctx, query=''):
         'timestamp': now,
     }
     cache_store = _ctx(ctx, 'store_pools_api_cache')
-    if cache_ttl > 0 and cache_store and not pool_probe_running and not pool_probe_paused:
+    if cache_enabled and cache_store:
         cache_store(current_keys, protocols, payload, timestamp=now)
     return payload
 
@@ -250,10 +255,10 @@ def _static_file(ctx, path):
     static_dir = _ctx(ctx, 'static_dir')
     if not static_dir:
         return None
-    if path == '/static/telegram.png':
-        return os.path.join(static_dir, 'telegram.png')
-    if path == '/static/youtube.png':
-        return os.path.join(static_dir, 'youtube.png')
+    if path == '/static/telegram.svg':
+        return os.path.join(static_dir, 'telegram.svg')
+    if path == '/static/youtube.svg':
+        return os.path.join(static_dir, 'youtube.svg')
     if _ctx(ctx, 'service_icons_enabled', False) and path.startswith('/static/service-icons/'):
         icon_name = posixpath.basename(path)
         return os.path.join(static_dir, 'service-icons', icon_name)
@@ -335,19 +340,22 @@ def dispatch(ctx, path, query=''):
             'kind': 'text',
             'text': _call(ctx, 'build_style_asset') or '',
             'content_type': 'text/css; charset=utf-8',
-            'cache_seconds': 86400,
+            'cache_seconds': 0,
         }
     if path == '/static/app.js':
         return {
             'kind': 'text',
             'text': _call(ctx, 'build_script_asset') or '',
             'content_type': 'application/javascript; charset=utf-8',
-            'cache_seconds': 86400,
+            'cache_seconds': 0,
         }
     if path == '/api/status':
         return {'kind': 'json', 'payload': _status_payload(ctx, query), 'status': 200}
     if path == '/api/pools' and _ctx(ctx, 'pool_enabled', False):
-        return {'kind': 'json', 'payload': _pools_payload(ctx, query), 'status': 200}
+        payload = _pools_payload(ctx, query)
+        if isinstance(payload, str):
+            return {'kind': 'json_text', 'text': payload, 'status': 200}
+        return {'kind': 'json', 'payload': payload, 'status': 200}
     if path == '/api/command_state':
         return {'kind': 'json', 'payload': _ctx(ctx, 'get_web_command_state')(), 'status': 200}
     if path == '/api/update_status':

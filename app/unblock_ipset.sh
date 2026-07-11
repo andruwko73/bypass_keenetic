@@ -10,6 +10,7 @@ PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
 IPV6_RESOLVE_ENABLED="${IPV6_RESOLVE_ENABLED:-auto}"
 IPV6_ACTIVE_CONNTRACK_TEST_LIMIT="${IPV6_ACTIVE_CONNTRACK_TEST_LIMIT:-128}"
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
+BOT_DIR="${BOT_DIR:-/opt/etc/bot}"
 TAG="${TAG:-unblock_ipset}"
 LOCK_DIR="${LOCK_DIR:-/tmp/bypass-unblock-ipset.lock}"
 LOCK_STALE_SECONDS="${LOCK_STALE_SECONDS:-900}"
@@ -19,6 +20,7 @@ IPSET_ROUTE_LOG_FILE="${IPSET_ROUTE_LOG_FILE:-/opt/var/log/bypass-ipset-route.lo
 YOUTUBE_DNS_SAMPLE_SERVERS="${YOUTUBE_DNS_SAMPLE_SERVERS:-8.8.8.8 8.8.4.4 1.1.1.1 9.9.9.9}"
 RUNTIME_IPSET_DEDUPE_ENABLED="${RUNTIME_IPSET_DEDUPE_ENABLED:-1}"
 YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com m.youtube.com youtu.be youtube-nocookie.com youtube.googleapis.com youtubei.googleapis.com youtubei-att.googleapis.com youtube-ui.l.google.com wide-youtube.l.google.com googlevideo.com manifest.googlevideo.com redirector.googlevideo.com c.youtube.com ytimg.com i.ytimg.com s.ytimg.com ggpht.com yt3.ggpht.com gvt1.com ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net}"
+YOUTUBE_ROUTE_OWNER_STATE_FILE="${YOUTUBE_ROUTE_OWNER_STATE_FILE:-/opt/tmp/bypass-youtube-route-owner.json}"
 VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com $YOUTUBE_ROUTE_PRIORITY_DOMAINS rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
 VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
 SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
@@ -450,64 +452,28 @@ route_file_has_markers() {
 	return 1
 }
 
-route_file_marker_count() {
-	route_file="$1"
-	shift
-	[ -s "$route_file" ] || {
-		printf '%s\n' 0
+youtube_route_protocol() {
+	[ -n "${YOUTUBE_ROUTE_PROTOCOL_CACHE:-}" ] && {
+		printf '%s\n' "$YOUTUBE_ROUTE_PROTOCOL_CACHE"
 		return
 	}
-	awk '
-		BEGIN {
-			file_arg = ARGC - 1
-			for (idx = 1; idx < file_arg; idx++) {
-				markers[ARGV[idx]] = 1
-				ARGV[idx] = ""
-			}
-		}
-		{
-			value = $0
-			sub(/#.*/, "", value)
-			gsub(/\r/, "", value)
-			gsub(/^[ \t]+|[ \t]+$/, "", value)
-			if (value == "") next
-			sub(/^full:/, "", value)
-			sub(/^domain:/, "", value)
-			sub(/^\+\./, "", value)
-			sub(/^\*\./, "", value)
-			sub(/^\./, "", value)
-			for (marker in markers) {
-				suffix = "." marker
-				if (value == marker || (length(value) > length(suffix) && substr(value, length(value) - length(suffix) + 1) == suffix)) {
-					count++
-					break
-				}
-			}
-		}
-		END { print count + 0 }
-	' "$@" "$route_file"
-}
-
-youtube_route_protocol() {
-	youtube_markers="youtube.com www.youtube.com googlevideo.com ytimg.com youtubei.googleapis.com yt3.ggpht.com"
-	best_protocol=""
-	best_count=0
-	for route_spec in \
-		"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt" \
-		"vmess:$UNBLOCK_DIR/vmess.txt" \
-		"vless:$UNBLOCK_DIR/vless.txt" \
-		"vless2:$UNBLOCK_DIR/vless-2.txt" \
-		"trojan:$UNBLOCK_DIR/trojan.txt"; do
-		protocol="${route_spec%%:*}"
-		route_file="${route_spec#*:}"
-		count="$(route_file_marker_count "$route_file" $youtube_markers)"
-		case "$count" in ''|*[!0-9]*) count=0 ;; esac
-		if [ "$count" -gt "$best_count" ] 2>/dev/null; then
-			best_count="$count"
-			best_protocol="$protocol"
-		fi
-	done
-	printf '%s\n' "${best_protocol:-vless}"
+	python_bin="/opt/bin/python3"
+	[ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+	route_protocol=""
+	if [ -n "$python_bin" ] && [ -f "$BOT_DIR/youtube_route_owner.py" ]; then
+		route_protocol="$(PYTHONPATH="$BOT_DIR${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" - "$UNBLOCK_DIR" "$YOUTUBE_ROUTE_OWNER_STATE_FILE" <<'PY'
+import sys
+from youtube_route_owner import youtube_route_owner
+print(youtube_route_owner(unblock_dir=sys.argv[1], state_path=sys.argv[2]))
+PY
+)"
+	fi
+	case "$route_protocol" in
+		shadowsocks|vmess|vless|vless2|trojan) ;;
+		*) route_protocol="" ;;
+	esac
+	YOUTUBE_ROUTE_PROTOCOL_CACHE="$route_protocol"
+	printf '%s\n' "$route_protocol"
 }
 
 route_file_has_domain() {

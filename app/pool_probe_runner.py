@@ -1,5 +1,4 @@
 import concurrent.futures
-import gc
 import json
 import os
 import shutil
@@ -8,20 +7,6 @@ import subprocess
 import threading
 import time
 from collections import deque
-
-from youtube_healthcheck import (
-    YOUTUBE_HEALTHCHECK_MIN_OK,
-    YOUTUBE_HEALTHCHECK_REQUIRED_URLS,
-    YOUTUBE_HEALTHCHECK_URLS,
-    YOUTUBE_PRIMARY_URL as YOUTUBE_HEALTHCHECK_URL,
-    check_youtube_through_proxy,
-)
-from telegram_healthcheck import (
-    TELEGRAM_HEALTHCHECK_MIN_OK,
-    TELEGRAM_HEALTHCHECK_URLS,
-    check_telegram_service_through_proxy,
-)
-
 
 def pool_probe_socks_inbound(port, tag):
     return {
@@ -226,8 +211,13 @@ def find_pool_failover_candidate(
     start_xray=start_pool_probe_xray,
     stop_xray=stop_pool_probe_xray,
     cleanup_runtime=cleanup_pool_probe_runtime,
-    collect_garbage=gc.collect,
+    collect_garbage=None,
 ):
+    # The full-pool worker receives its own HTTP check callbacks.  Loading
+    # these modules only for failover keeps that short-lived worker smaller.
+    from telegram_healthcheck import check_telegram_service_through_proxy
+    from youtube_healthcheck import check_youtube_through_proxy
+
     probe_tasks = deque(
         (proto, (key_value or '').strip())
         for proto, key_value in candidates
@@ -295,7 +285,8 @@ def find_pool_failover_candidate(
         finally:
             stop_xray(process, config_path)
             cleanup_runtime(kill_processes=True)
-            collect_garbage()
+            if collect_garbage:
+                collect_garbage()
     return None
 
 
@@ -368,7 +359,6 @@ def run_pool_probe_worker(
         marked_tasks.add(checked_task_id)
         checked += 1
         set_checked(checked)
-        run_memory_cleanup('pool probe key checkpoint', force=True, clear_status=False)
 
     def ignore_late_result(proto, key_value):
         with ignored_result_lock:
@@ -417,6 +407,8 @@ def run_pool_probe_worker(
     high_load_since = None
     paused_remaining = False
     rss_cleanup_attempts = 0
+    executor = None
+    executor_workers = max(1, int(concurrency or 1))
 
     def update_note(text):
         if set_note:
@@ -659,11 +651,16 @@ def run_pool_probe_worker(
                 if not ready_batch:
                     continue
 
-                max_workers = min(concurrency, len(ready_batch))
-                executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+                max_workers = min(executor_workers, len(ready_batch))
+                if executor is None:
+                    # A single executor owns all probe threads for this pass.
+                    # Creating a new one after every timed-out batch left old
+                    # workers alive alongside the next temporary Xray process.
+                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=executor_workers)
                 future_map = {}
                 done = set()
                 pending = set()
+                unfinished = set()
                 try:
                     batch_timeout = timeout_budget(
                         checks,
@@ -739,11 +736,8 @@ def run_pool_probe_worker(
                         )
                         ignore_late_result(proto, key_value)
                         mark_checked(proto, key_value)
+                    unfinished = set(pending)
                 finally:
-                    try:
-                        executor.shutdown(wait=False, cancel_futures=True)
-                    except TypeError:
-                        executor.shutdown(wait=False)
                     try:
                         future_map.clear()
                         done.clear()
@@ -753,7 +747,6 @@ def run_pool_probe_worker(
                     del future_map
                     del done
                     del pending
-                    del executor
             except Exception as exc:
                 log(f'Ошибка проверки пачки ключей из пула: {exc}')
                 for proto, key_value in valid_batch:
@@ -769,21 +762,33 @@ def run_pool_probe_worker(
                 invalidate_caches()
                 del raw_batch
                 del valid_batch
-                gc.collect()
-                run_memory_cleanup('pool probe batch checkpoint', force=True, clear_status=False)
+
+            if unfinished:
+                # A request that passed the batch deadline can still be
+                # unwinding. Keep the next Xray batch from reusing its port.
+                _finished, still_running = concurrent.futures.wait(unfinished, timeout=2.0)
+                if still_running:
+                    paused_remaining = True
+                    note = 'Pool probe is waiting for the previous batch to finish; remaining keys were saved to resume.'
+                    log(note)
+                    update_note(note)
+                    break
 
             if checked < total and pending_tasks:
                 sleep(delay_seconds)
     except Exception as exc:
         log(f'Ошибка фоновой проверки пула ключей: {exc}')
     finally:
+        if executor is not None:
+            try:
+                executor.shutdown(wait=True, cancel_futures=True)
+            except TypeError:
+                executor.shutdown(wait=True)
         if (cancel_requested() or paused_remaining) and pending_tasks and on_cancelled_remaining:
             try:
                 on_cancelled_remaining(list(pending_tasks))
             except Exception as exc:
                 log(f'Не удалось сохранить очередь продолжения проверки пула: {exc}')
         invalidate_caches()
-        gc.collect()
-        run_memory_cleanup('pool probe worker final checkpoint', force=True, clear_status=False)
 
     return checked, total

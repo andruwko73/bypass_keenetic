@@ -9,18 +9,23 @@
 # Доработал: NetworK (https://github.com/znetworkx)
 
 UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"
-DNSMASQ_OUTPUT_FILE="${DNSMASQ_OUTPUT_FILE:-/opt/etc/unblock.dnsmasq}"
+BOT_DIR="${BOT_DIR:-/opt/etc/bot}"
+DNSMASQ_OUTPUT_TARGET="${DNSMASQ_OUTPUT_FILE:-/opt/etc/unblock.dnsmasq}"
+DNSMASQ_OUTPUT_FILE="${DNSMASQ_OUTPUT_TARGET}.tmp.$$"
 DNSMASQ_LOG_FILE="${DNSMASQ_LOG_FILE:-/opt/var/log/bypass-dnsmasq-route.log}"
+mkdir -p "$(dirname "$DNSMASQ_OUTPUT_TARGET")" 2>/dev/null || true
 cat /dev/null > "$DNSMASQ_OUTPUT_FILE"
 UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"
 UDP_QUIC_POLICY_TEMP=""
 CALL_SIGNAL_POLICY_FILE="${CALL_SIGNAL_POLICY_FILE:-/opt/etc/bot/call_signal_routes.txt}"
 CALL_SIGNAL_POLICY_TEMP=""
 YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com m.youtube.com youtu.be youtube-nocookie.com youtube.googleapis.com youtubei.googleapis.com youtubei-att.googleapis.com youtube-ui.l.google.com wide-youtube.l.google.com googlevideo.com manifest.googlevideo.com redirector.googlevideo.com c.youtube.com ytimg.com i.ytimg.com s.ytimg.com ggpht.com yt3.ggpht.com gvt1.com}"
+YOUTUBE_ROUTE_OWNER_STATE_FILE="${YOUTUBE_ROUTE_OWNER_STATE_FILE:-/opt/tmp/bypass-youtube-route-owner.json}"
 
 cleanup_policy_temp() {
   [ -n "$UDP_QUIC_POLICY_TEMP" ] && rm -f "$UDP_QUIC_POLICY_TEMP" 2>/dev/null || true
   [ -n "$CALL_SIGNAL_POLICY_TEMP" ] && rm -f "$CALL_SIGNAL_POLICY_TEMP" 2>/dev/null || true
+  rm -f "$DNSMASQ_OUTPUT_FILE" 2>/dev/null || true
 }
 trap cleanup_policy_temp EXIT INT TERM
 
@@ -53,46 +58,28 @@ youtube_domain() {
   domain_in_list "$YOUTUBE_ROUTE_PRIORITY_DOMAINS" "$1"
 }
 
-route_marker_count() {
-  route_file="$1"
-  [ -r "$route_file" ] || {
-    printf '%s\n' 0
+youtube_route_protocol() {
+  [ -n "${YOUTUBE_ROUTE_PROTOCOL_CACHE:-}" ] && {
+    printf '%s\n' "$YOUTUBE_ROUTE_PROTOCOL_CACHE"
     return
   }
-  count=0
-  while read -r route_line || [ -n "$route_line" ]; do
-    route_line=$(normalize_line "$route_line")
-    [ -z "$route_line" ] && continue
-    [ "${route_line#\#}" != "$route_line" ] && continue
-    if youtube_domain "$route_line"; then
-      count=$((count + 1))
-    fi
-  done < "$route_file"
-  printf '%s\n' "$count"
-}
-
-youtube_route_protocol() {
-  best_proto=""
-  best_count=0
-  for route_spec in \
-    "shadowsocks:shadowsocks.txt" \
-    "vmess:vmess.txt" \
-    "vless:vless.txt" \
-    "vless2:vless-2.txt" \
-    "trojan:trojan.txt"
-  do
-    proto="${route_spec%%:*}"
-    file_name="${route_spec#*:}"
-    count=$(route_marker_count "$UNBLOCK_DIR/$file_name")
-    case "$count" in
-      ''|*[!0-9]*) count=0 ;;
-    esac
-    if [ "$count" -gt "$best_count" ] 2>/dev/null; then
-      best_count="$count"
-      best_proto="$proto"
-    fi
-  done
-  printf '%s\n' "$best_proto"
+  python_bin="/opt/bin/python3"
+  [ -x "$python_bin" ] || python_bin="$(command -v python3 2>/dev/null || true)"
+  route_protocol=""
+  if [ -n "$python_bin" ] && [ -f "$BOT_DIR/youtube_route_owner.py" ]; then
+    route_protocol="$(PYTHONPATH="$BOT_DIR${PYTHONPATH:+:$PYTHONPATH}" "$python_bin" - "$UNBLOCK_DIR" "$YOUTUBE_ROUTE_OWNER_STATE_FILE" <<'PY'
+import sys
+from youtube_route_owner import youtube_route_owner
+print(youtube_route_owner(unblock_dir=sys.argv[1], state_path=sys.argv[2]))
+PY
+)"
+  fi
+  case "$route_protocol" in
+    shadowsocks|vmess|vless|vless2|trojan) ;;
+    *) route_protocol="" ;;
+  esac
+  YOUTUBE_ROUTE_PROTOCOL_CACHE="$route_protocol"
+  printf '%s\n' "$route_protocol"
 }
 
 YOUTUBE_ROUTE_PROTOCOL="$(youtube_route_protocol)"
@@ -228,7 +215,7 @@ write_route_domain() {
   [ "${line#\#}" != "$line" ] && return 0
   echo "$line" | grep -Eq '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && return 0
   connectivity_check_domain "$line" && return 0
-  if [ -n "$YOUTUBE_ROUTE_PROTOCOL" ] && youtube_domain "$line" && [ "$route_proto" != "$YOUTUBE_ROUTE_PROTOCOL" ]; then
+  if youtube_domain "$line" && { [ -z "$YOUTUBE_ROUTE_PROTOCOL" ] || [ "$route_proto" != "$YOUTUBE_ROUTE_PROTOCOL" ]; }; then
     return 0
   fi
 
@@ -301,6 +288,7 @@ done < "$UNBLOCK_DIR/trojan.txt"
 
 append_youtube_priority_domains
 dedupe_dnsmasq_output
+mv -f "$DNSMASQ_OUTPUT_FILE" "$DNSMASQ_OUTPUT_TARGET"
 
 #script0
 #script1
