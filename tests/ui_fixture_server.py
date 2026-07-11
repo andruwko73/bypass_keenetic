@@ -528,6 +528,11 @@ def _page_html(mode="advanced"):
     )
 
 
+class FixtureHTTPServer(ThreadingHTTPServer):
+    request_queue_size = 128
+    daemon_threads = True
+
+
 class FixtureHandler(BaseHTTPRequestHandler):
     server_version = "BypassKeeneticUiFixture/1.0"
 
@@ -727,7 +732,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8765, type=int)
     args = parser.parse_args()
-    httpd = ThreadingHTTPServer((args.host, args.port), FixtureHandler)
+    httpd = FixtureHTTPServer((args.host, args.port), FixtureHandler)
     print(f"Serving UI fixture on http://{args.host}:{args.port}/", flush=True)
     httpd.serve_forever()
 

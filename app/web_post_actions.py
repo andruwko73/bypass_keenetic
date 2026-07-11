@@ -658,15 +658,13 @@ def _pool_subscribe(ctx, data):
                 previous_managed_keys=previous_record.get('managed_keys', []),
             )
             if len(saved_result) >= 5:
-                pools, added_keys, removed_keys, managed_keys, retained_keys = saved_result[:5]
+                pools, added_keys, removed_keys, managed_keys, _ = saved_result[:5]
             else:
                 pools, added_keys, removed_keys, managed_keys = saved_result
-                retained_keys = []
         else:
             pools, added_keys = _ctx(ctx, 'add_subscription_keys_to_pool')(_ctx(ctx, 'load_key_pools')(), proto, fetched)
             removed_keys = []
             managed_keys = added_keys
-            retained_keys = []
             _ctx(ctx, 'save_key_pools')(pools)
             if added_keys:
                 _ctx(ctx, 'probe_pool_keys_background')(proto, added_keys)

@@ -1,3 +1,11 @@
+<a name="1.937"></a>
+# [1.937] - 11 Jul 2026
+
+- Runs one bounded allocator cleanup only after the entire process-isolated pool check finishes, without restarting the bot or clearing the visible status.
+- Honors the configured `memory_malloc_trim_min_rss_kb` threshold instead of silently waiting for the watchdog soft threshold.
+- Verifies dnsmasq YouTube ownership and priority ipset output for Vless 1, Vless 2, Vmess, Trojan and Shadowsocks.
+- Removes stale source headers and safe unused helpers while preserving public compatibility imports.
+
 <a name="1.936"></a>
 # [1.936] - 11 Jul 2026
 

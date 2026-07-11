@@ -7,12 +7,12 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app_version import APP_VERSION_COUNTER
+from web_http_common import is_local_web_client
 from installer_common import (
     detect_router_ip,
     escape_python,
     installer_page_parts,
     installer_target_url,
-    is_local_web_client,
     normalize_web_auth_form,
     parse_urlencoded_request,
     resolve_bind_host,

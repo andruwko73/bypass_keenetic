@@ -1,12 +1,5 @@
 #!/usr/bin/python3
 
-#  2023. Keenetic DNS bot /  Проект: bypass_keenetic / Автор: tas_unn
-#  GitHub: https://github.com/tas-unn/bypass_keenetic
-#  Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
-#  Демо-бот: https://t.me/keenetic_dns_bot
-#
-#  Файл: bot.py, Версия v1.936, последнее изменение: 11.07.2026
-
 import subprocess
 import os
 import re
@@ -26,7 +19,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
 
-from app_version import APP_VERSION_COUNTER, APP_VERSION_LABEL
+from app_version import APP_VERSION_LABEL
 import app_runtime_mode
 import bot_config as config
 
@@ -164,7 +157,6 @@ from service_catalog import (
     REALTIME_CALL_SIGNAL_ROUTE_ENTRIES,
     SERVICE_LIST_SOURCES,
     TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES,
-    TELEGRAM_UNBLOCK_ENTRIES,
     UDP_QUIC_ROUTE_ENTRIES,
     YOUTUBE_UNBLOCK_ENTRIES,
     service_route_entries,
@@ -201,7 +193,6 @@ from web_status_builder import (
 )
 
 import shutil
-# import datetime
 import json
 import html
 
@@ -2321,7 +2312,10 @@ MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS = max(
     5.0,
     float(getattr(config, 'memory_malloc_trim_cooldown_seconds', 20.0)),
 )
-MEMORY_MALLOC_TRIM_MIN_RSS_KB = MEMORY_WATCHDOG_RSS_SOFT_KB
+MEMORY_MALLOC_TRIM_MIN_RSS_KB = max(
+    0,
+    int(getattr(config, 'memory_malloc_trim_min_rss_kb', MEMORY_WATCHDOG_RSS_SOFT_KB)),
+)
 # Не выполняем тяжёлый GC на обычных API-запросах около целевой полки.
 # Очистка допускается только при soft-пороге watchdog.
 MEMORY_CLEANUP_RSS_KB = MEMORY_WATCHDOG_RSS_SOFT_KB
@@ -10537,7 +10531,8 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
                 pool_probe_lock.release()
             except RuntimeError:
                 pass
-            finished_rss_kb = int(_process_rss_kb() or 0)
+            cleanup = _memory_cleanup('pool probe process finished', force=True, clear_status=False, log=False)
+            finished_rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or 0)
             _record_pool_probe_completion(
                 worker_rss_before_kb=int(result.get('rss_before_kb') or 0),
                 worker_hwm_kb=int(result.get('hwm_kb') or 0),

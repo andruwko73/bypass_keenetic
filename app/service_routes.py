@@ -105,7 +105,6 @@ def route_service_items(*, include_core=True, presets=None):
 
 
 def _service_entries(service_key):
-    source = SERVICE_LIST_SOURCES.get(service_key) or {}
     entries = []
     seen = set()
     for value in service_route_entries(service_key):

@@ -1,3 +1,7 @@
+*v1.937 (11 Jul 2026) -* main
+
+*Returns allocator cleanup to the single full pool-probe completion boundary without restarting the bot, honors the configured trim threshold, and verifies YouTube route ownership for every supported protocol.*
+
 *v1.936 (11 Jul 2026) -* main
 
 *Synchronizes the release marker embedded in the bot source with the generated version counter, so the clean GitHub smoke validates the published release correctly.*

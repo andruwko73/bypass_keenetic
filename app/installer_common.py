@@ -6,9 +6,6 @@ import shutil
 import subprocess
 from urllib.parse import parse_qs
 
-from web_http_common import is_local_web_client
-
-
 def detect_router_ip():
     try:
         output = subprocess.check_output(

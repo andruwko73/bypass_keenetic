@@ -1,15 +1,5 @@
 #!/bin/sh
 
-# 2023. Keenetic DNS bot /  Проект: bypass_keenetic / Автор: tas_unn
-# GitHub: https://github.com/tas-unn/bypass_keenetic
-# Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
-# Демо-бот: https://t.me/keenetic_dns_bot
-#
-# Файл: script.sh, Версия 2.2.1, последнее изменение: 19.04.2026, 15:10
-# Доработал: NetworK (https://github.com/znetworkx)
-
-# оригинальный репозиторий (tas-unn), пользовательский форк
-
 repo="andruwko73"
 REPO_REF="${REPO_REF:-main}"
 REPO_APP_DIR="${BYPASS_REPO_APP_DIR:-app}"

@@ -41,30 +41,6 @@ def _display_note_text(text):
     return str(text or '').strip().rstrip('.')
 
 
-def pool_probe_topbar_text(pool_probe_pending, progress, progress_label_func, fallback_text):
-    if not pool_probe_pending:
-        return fallback_text
-    progress = progress or {}
-    progress_total = int(progress.get('total') or 0)
-    progress_checked = int(progress.get('checked') or 0)
-    progress_label = progress_label_func(progress)
-    progress_note = str(progress.get('note') or '').strip()
-    progress_text = f'⏳ {progress_label}: {progress_checked}/{progress_total}'
-    return f'{progress_text} - {progress_note}' if progress_note else progress_text
-
-
-def pool_summary_note_with_progress(pool_summary_note, pool_probe_pending, progress, progress_label_func):
-    if not pool_probe_pending:
-        return pool_summary_note
-    progress = progress or {}
-    progress_note = str(progress.get('note') or '').strip()
-    note_suffix = progress_note if progress_note else pool_summary_note
-    return (
-        f"{progress_label_func(progress)}: {int(progress.get('checked') or 0)}/"
-        f"{int(progress.get('total') or 0)}. {note_suffix}"
-    )
-
-
 def pool_table_layout(custom_checks):
     custom_check_count = len(custom_checks or [])
     return (

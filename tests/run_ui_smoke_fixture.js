@@ -66,6 +66,35 @@ function runSmoke(port) {
   });
 }
 
+function fixtureRequest(port, route) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(`http://127.0.0.1:${port}${route}`, (response) => {
+      let size = 0;
+      response.on('data', (chunk) => { size += chunk.length; });
+      response.once('error', reject);
+      response.once('end', () => {
+        if (response.statusCode === 200 && size > 0) {
+          resolve();
+        } else {
+          reject(new Error(`Fixture request failed: ${route} (${response.statusCode}, ${size}).`));
+        }
+      });
+    });
+    request.once('error', reject);
+    request.setTimeout(5000, () => request.destroy(new Error(`Fixture request timed out: ${route}`)));
+  });
+}
+
+async function runConcurrencySmoke(port) {
+  const protocols = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks'];
+  const routes = [
+    '/', '/static/app.css', '/static/app.js', '/api/status', '/api/status?compact=1', '/api/status?lite=1',
+    '/api/pools', '/api/pool_probe', '/api/command_state', '/api/router_metrics', '/api/event_history', '/api/service_routes',
+    ...protocols.flatMap((proto) => [`/api/protocol_panel?proto=${proto}`, `/api/protocol_check_panel?proto=${proto}`]),
+  ];
+  await Promise.all(Array.from({ length: 100 }, (_, index) => fixtureRequest(port, routes[index % routes.length])));
+}
+
 async function main() {
   const port = await selectPort();
   const pythonArgs = process.platform === 'win32'
@@ -74,6 +103,7 @@ async function main() {
   const fixture = spawn(python, pythonArgs, { cwd: root, stdio: 'ignore' });
   try {
     await waitForFixture(port, Date.now() + 15000);
+    await runConcurrencySmoke(port);
     await runSmoke(port);
   } finally {
     fixture.kill('SIGTERM');

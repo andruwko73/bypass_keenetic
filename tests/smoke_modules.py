@@ -2296,17 +2296,15 @@ def _expected_codex_version_counter():
 
 def test_codex_version_matches_commit_count():
     expected = _expected_codex_version_counter()
-    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     version_md = (ROOT / 'version.md').read_text(encoding='utf-8')
     changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
     installer = (APP_ROOT / 'installer.py').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     example = (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert app_version.APP_VERSION_COUNTER == expected
-    assert re.search(rf'Версия\s+v{re.escape(expected)}\b', source)
     assert version_md.startswith(f'*v{expected} ')
     assert changelog.startswith(f'<a name="{expected}"></a>\n# [{expected}] - ')
-    assert f'v{{APP_VERSION_COUNTER}}' in installer
+    assert 'v{APP_VERSION_COUNTER}' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in bootstrap
     assert 'memory_watchdog_rss_limit_kb = 112640' in example
@@ -2686,6 +2684,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
     call_policy = tmp_path / 'call.txt'
     output = tmp_path / 'out.dnsmasq'
     log_file = tmp_path / 'dnsmasq.log'
+    owner_state = tmp_path / 'youtube-owner.json'
     udp_policy.write_text('', encoding='utf-8')
     call_policy.write_text('', encoding='utf-8')
 
@@ -2695,6 +2694,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
         f'DNSMASQ_LOG_FILE={shell_quote(shell_path(log_file))}',
         f'UDP_QUIC_POLICY_FILE={shell_quote(shell_path(udp_policy))}',
         f'CALL_SIGNAL_POLICY_FILE={shell_quote(shell_path(call_policy))}',
+        f'YOUTUBE_ROUTE_OWNER_STATE_FILE={shell_quote(shell_path(owner_state))}',
         f'BOT_DIR={shell_quote(shell_path(APP_ROOT))}',
         'bash',
         shell_quote(shell_path(APP_ROOT / 'unblock.dnsmasq')),
@@ -2735,6 +2735,36 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
     assert 'ipset=/googlevideo.com/unblockvless\n' in dnsmasq_text
     assert 'ipset=/youtube.com/unblockvless2' not in dnsmasq_text
     assert 'ipset=/googlevideo.com/unblockvless2' not in dnsmasq_text
+
+    route_sets = {
+        'shadowsocks': ('shadowsocks.txt', 'unblocksh'),
+        'vmess': ('vmess.txt', 'unblockvmess'),
+        'vless': ('vless.txt', 'unblockvless'),
+        'vless2': ('vless-2.txt', 'unblockvless2'),
+        'trojan': ('trojan.txt', 'unblocktroj'),
+    }
+    for protocol, (file_name, ipset_name) in route_sets.items():
+        for other_file_name, _other_set in route_sets.values():
+            (unblock_dir / other_file_name).write_text('example.com\n', encoding='utf-8')
+        (unblock_dir / file_name).write_text(
+            'youtube.com\nwww.youtube.com\ngooglevideo.com\n',
+            encoding='utf-8',
+        )
+        owner_state.unlink(missing_ok=True)
+        subprocess.run(
+            ['bash', '-lc', command],
+            check=True,
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        dnsmasq_text = output.read_text(encoding='utf-8')
+        assert f'ipset=/youtube.com/{ipset_name}\n' in dnsmasq_text
+        assert f'ipset=/googlevideo.com/{ipset_name}\n' in dnsmasq_text
+        for other_protocol, (_other_file_name, other_set) in route_sets.items():
+            if other_protocol != protocol:
+                assert f'ipset=/youtube.com/{other_set}\n' not in dnsmasq_text
+        assert f'youtube_route={protocol}' in log_file.read_text(encoding='utf-8')
 
 
 def test_shell_youtube_route_owner_uses_shared_resolver():
@@ -3427,7 +3457,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _stale_status_snapshot' in source
     assert 'def _sync_udp_policy_config' in source
     assert 'YOUTUBE_UNBLOCK_ENTRIES' in source
-    assert 'TELEGRAM_UNBLOCK_ENTRIES' in source
+    assert 'SERVICE_LIST_SOURCES' in source
     assert 'TELEGRAM_UDP_POLICY' in source
     assert "UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
     assert 'def _route_list_contains_telegram' in source
@@ -3556,6 +3586,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "\\u041f\\u043e\\u043b\\u043d\\u0430\\u044f" in progress_label_block
     process_monitor_block = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
     assert "_record_pool_probe_completion(" in process_monitor_block
+    assert "_memory_cleanup('pool probe process finished', force=True, clear_status=False, log=False)" in process_monitor_block
     assert 'def _forget_unreferenced_key_probes' in source
     delete_pool_block = source.split('def _delete_pool_key', 1)[1].split('def _clear_pool', 1)[0]
     clear_pool_block = source.split('def _clear_pool', 1)[1].split('def _proxy_config_snapshot_paths', 1)[0]
@@ -3660,6 +3691,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'memory_timeline_trim_min_interval_seconds = 300.0' in script_source
     assert 'memory_malloc_trim_enabled = True' in script_source
     assert 'memory_malloc_trim_min_rss_kb = 61440' in script_source
+    assert "getattr(config, 'memory_malloc_trim_min_rss_kb', MEMORY_WATCHDOG_RSS_SOFT_KB)" in source
     assert 'background_task_max_bot_rss_kb = 66560' in script_source
     assert 'background_task_critical_max_bot_rss_kb = 71680' in script_source
     assert 'background_task_max_program_rss_kb = 102400' in script_source
@@ -4371,7 +4403,7 @@ def test_runtime_modules_are_installed_by_update_scripts():
         assert source_path(module).exists()
     for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'router_metrics.py', 'telegram_call_learning.py', 'web_commands_runtime.py'):
         assert module in script
-        assert f'repo_file_url {module}' in bootstrap or f'repo_file_url "$module"' in bootstrap
+        assert f'repo_file_url {module}' in bootstrap or 'repo_file_url "$module"' in bootstrap
     assert f'$BOT_DIR/{module}' in bootstrap
     assert 'web_pool_snapshot_worker.py' in script_modules
     assert 'web_pool_snapshot_worker.py' in bootstrap_modules
@@ -6110,6 +6142,39 @@ def test_proxy_diagnostics_redact_credential_ids():
         assert vmess_id not in vmess_diag
         assert 'id=' not in vmess_diag
         assert 'key_hash=sha256:' in vmess_diag
+
+        original = {
+            'rss': bot_module._process_rss_kb,
+            'clear': bot_module._clear_runtime_memory_caches,
+            'collect': bot_module.gc.collect,
+            'trim': bot_module._malloc_trim,
+            'timeline': bot_module._record_memory_timeline,
+            'trim_min': bot_module.MEMORY_MALLOC_TRIM_MIN_RSS_KB,
+        }
+        trim_calls = []
+        try:
+            bot_module.MEMORY_MALLOC_TRIM_MIN_RSS_KB = 61440
+            bot_module._process_rss_kb = lambda: 65000
+            bot_module._clear_runtime_memory_caches = lambda **_kwargs: None
+            bot_module.gc.collect = lambda: 0
+            bot_module._record_memory_timeline = lambda *_args, **_kwargs: None
+            bot_module._malloc_trim = lambda *_args, **kwargs: trim_calls.append(kwargs) or {
+                'attempted': True,
+                'ok': True,
+                'result': 1,
+                'available': True,
+            }
+            result = bot_module._memory_cleanup('test threshold', force=True, clear_status=False, log=False)
+            assert len(trim_calls) == 1
+            assert trim_calls[0]['rss_kb'] == 65000
+            assert result['malloc_trim']['attempted'] is True
+        finally:
+            bot_module._process_rss_kb = original['rss']
+            bot_module._clear_runtime_memory_caches = original['clear']
+            bot_module.gc.collect = original['collect']
+            bot_module._malloc_trim = original['trim']
+            bot_module._record_memory_timeline = original['timeline']
+            bot_module.MEMORY_MALLOC_TRIM_MIN_RSS_KB = original['trim_min']
     finally:
         sys.modules.pop('bot', None)
         if old_bot_module is not None:
@@ -8340,7 +8405,6 @@ def test_ai_assistant_custom_routes_are_synced():
     presets = {item['id']: item for item in service_catalog.CUSTOM_CHECK_PRESETS}
 
     assert set(service_catalog.CLAUDE_ROUTE_ENTRIES) <= entries
-    gemini_source = service_catalog.SERVICE_LIST_SOURCES['gemini']
     gemini_state_entries = set(service_catalog.service_route_entries('gemini'))
     assert gemini_state_entries <= entries
     assert presets['claude']['routes'] == service_catalog.CLAUDE_ROUTE_ENTRIES
@@ -9288,7 +9352,7 @@ def test_web_pool_form_blocks_helpers():
     assert table_class == 'pool-table has-custom-checks'
     assert custom_width == 32
     assert mobile_width == 28
-    progress = web_pool_form_blocks.pool_probe_topbar_text(
+    progress = web_form_blocks.pool_probe_topbar_text(
         True,
         {'checked': 1, 'total': 2},
         lambda data: 'Проверка',
@@ -9296,7 +9360,7 @@ def test_web_pool_form_blocks_helpers():
     )
     assert '1/2' in progress
     assert progress != 'ok'
-    assert web_pool_form_blocks.pool_summary_note_with_progress(
+    assert web_form_blocks.pool_summary_note_with_progress(
         'note',
         True,
         {'checked': 1, 'total': 2},

@@ -714,32 +714,25 @@ def build_router_health_payload(
     if display_total_kb and int(ndmc_system.get('memory_used') or 0):
         used_kb = int(ndmc_system.get('memory_used') or 0)
         display_cache_kb = ndmc_cache_total_kb
-        display_free_kb = ndmc_free_kb
         memory_source = 'keenetic'
     elif display_total_kb and ndmc_free_kb:
         used_kb = max(0, display_total_kb - ndmc_free_kb - ndmc_cache_total_kb)
         display_cache_kb = ndmc_cache_total_kb
-        display_free_kb = ndmc_free_kb
         memory_source = 'keenetic'
     else:
         display_total_kb = total_kb
         used_kb = max(0, total_kb - free_kb - buffers_kb - cached_kb) if total_kb else 0
         display_cache_kb = max(0, buffers_kb + cached_kb)
-        display_free_kb = free_kb
         memory_source = 'proc'
     used_mb = int(round(used_kb / 1024.0)) if used_kb else 0
     total_mb = int(round(display_total_kb / 1024.0)) if display_total_kb else 0
     available_mb = int(round(available_kb / 1024.0)) if available_kb else 0
-    free_mb = int(round(display_free_kb / 1024.0)) if display_free_kb else 0
-    cache_mb = int(round(display_cache_kb / 1024.0)) if display_cache_kb else 0
     used_percent = int(round((used_kb / float(display_total_kb)) * 100)) if display_total_kb else 0
-    available_percent = int(round((available_kb / float(display_total_kb)) * 100)) if display_total_kb else 0
     bot_rss_mb = int(round(bot_rss_kb / 1024.0)) if bot_rss_kb else 0
     probe_progress = probe_progress or {}
     probe_running = bool(probe_progress.get('running')) and int(probe_progress.get('total') or 0) > 0
     probe_checked = int(probe_progress.get('checked') or 0)
     probe_total = int(probe_progress.get('total') or 0)
-    probe_note = str(probe_progress.get('note') or '').strip()
     flash_total_kb = int(flash_storage.get('total_kb') or 0)
     flash_used_kb = int(flash_storage.get('used_kb') or 0)
     flash_free_kb = int(flash_storage.get('free_kb') or 0)

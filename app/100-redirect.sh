@@ -1,15 +1,5 @@
 #!/bin/sh
 
-# 2023. Keenetic DNS bot /  Проект: bypass_keenetic / Автор: tas_unn
-# GitHub: https://github.com/tas-unn/bypass_keenetic
-# Данный бот предназначен для управления обхода блокировок на роутерах Keenetic
-# Демо-бот: https://t.me/keenetic_dns_bot
-#
-# Файл: 100-redirect.sh, Версия 2.1.9, последнее изменение: 03.05.2023, 21:10
-# Доработал: NetworK (https://github.com/znetworkx)
-
-#!/bin/sh
-
 ip4t() {
 	if ! iptables -C "$@" &>/dev/null; then
 		 iptables -A "$@" || exit 0
