@@ -1,3 +1,8 @@
+<a name="1.936"></a>
+# [1.936] - 11 Jul 2026
+
+- Synchronizes the embedded bot release marker with the generated release counter, restoring the GitHub clean-smoke version invariant.
+
 <a name="1.935"></a>
 # [1.935] - 11 Jul 2026
 

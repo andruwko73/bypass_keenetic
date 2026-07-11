@@ -1,3 +1,7 @@
+*v1.936 (11 Jul 2026) -* main
+
+*Synchronizes the release marker embedded in the bot source with the generated version counter, so the clean GitHub smoke validates the published release correctly.*
+
 *v1.935 (11 Jul 2026) -* main
 
 *Separates short-lived health, failover and pool-probe runners from the resident process, serves the web interface from static assets, keeps route ownership and service statuses consistent across protocols, and reduces repeated background DNS/ipset and router-health work without changing the clean-install command.*
