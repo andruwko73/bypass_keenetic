@@ -1,3 +1,3 @@
-*v1.940 (12 Jul 2026) -* main
+*v1.941 (13 Jul 2026) -* main
 
-*Keeps saved pool-check counters accurate when keys are added or removed without loading heavy pool modules into the resident bot.*
+*Keeps Telegram mobile notifications responsive by preserving long-lived push connections outside transparent proxy redirects.*

@@ -1,3 +1,10 @@
+<a name="1.941"></a>
+# [1.941] - 13 Jul 2026
+
+- Keeps Telegram MTProto TCP 5222 on the selected Telegram route while allowing APNs 5223 and FCM 5228-5230 to connect directly.
+- Raises too-small established conntrack timeouts to at least 3600 seconds so idle mobile push channels survive longer than the vendor-required 30-minute NAT window.
+- Removes stale push redirects during refresh and adds regression coverage for rule ordering, direct push ports and conntrack persistence.
+
 <a name="1.940"></a>
 # [1.940] - 12 Jul 2026
 

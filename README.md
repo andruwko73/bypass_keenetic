@@ -88,6 +88,8 @@ Bootstrap перед заменой файлов создает backup и rollba
 
 UDP/443 обрабатывается по содержимому списков обхода: YouTube/QUIC-наборы создаются для того протокола, где сейчас находится YouTube, а Telegram остаётся на своём маршруте даже при совместном списке. Базовую политику можно поменять в `bot_config.py` через `udp_quic_block_*_enabled`, `youtube_quic_policy` и `telegram_udp_policy`.
 
+Для мобильных уведомлений Telegram TCP/5222 следует за тем протоколом, в списке которого находится Telegram: Shadowsocks, VMess, VLESS1, VLESS2 или Trojan. Системные каналы push для iOS APNs (TCP/5223) и Android FCM (TCP/5228-5230) проходят напрямую, а слишком короткий таймаут установленных conntrack-соединений автоматически поднимается до 3600 секунд.
+
 Realtime-звонки Telegram, WhatsApp и Discord работают без отдельной кнопки: программа определяет активных клиентов, временно запоминает связанные UDP-медиа-адреса и отправляет их через TPROXY-порт текущего протокола сервиса. Таймауты можно поменять параметрами `telegram_call_learning_client_timeout_seconds` и `telegram_call_learning_address_timeout_seconds` в `bot_config.py`.
 
 **Ключи**

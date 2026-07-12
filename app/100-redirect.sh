@@ -52,6 +52,7 @@ BYPASS_TELEGRAM_CALL_TPROXY_TABLE="${BYPASS_TELEGRAM_CALL_TPROXY_TABLE:-100}"
 BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY="${BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY:-100}"
 BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED="${BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED:-0}"
 BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED:-0}"
+BYPASS_MOBILE_PUSH_CONNTRACK_MIN_TIMEOUT="${BYPASS_MOBILE_PUSH_CONNTRACK_MIN_TIMEOUT:-3600}"
 BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED:-1}"
 BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS="${BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS:-0}"
 BYPASS_TELEGRAM_CALL_ROUTE_VMESS="${BYPASS_TELEGRAM_CALL_ROUTE_VMESS:-0}"
@@ -316,6 +317,48 @@ EOF
 
 telegram_call_signal_tcp_ports() {
 	printf '%s\n' 80 88 443 5222 5223 5228 5229 5230
+}
+
+mobile_push_direct_ports() {
+	# APNs and FCM rely on persistent connections and should bypass the
+	# transparent Vless redirect. Telegram MTProto 5222 remains proxied.
+	printf '%s\n' 5223 5228 5229 5230
+}
+
+mobile_push_legacy_priority_ports() {
+	printf '%s\n' 5222 5223 5228 5229 5230
+}
+
+mobile_push_route_sets() {
+	printf '%s\n' unblocksh unblockvmess unblockvless unblockvless2 unblocktroj
+}
+
+mobile_push_proxy_target_ports() {
+	printf '%s\n' 1082 10815 10812 10814 10829
+}
+
+mobile_push_port_is_direct() {
+	case "$1" in
+		5223|5228|5229|5230) return 0 ;;
+	esac
+	return 1
+}
+
+ensure_mobile_push_conntrack_timeout() {
+	timeout_path=/proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established
+	desired_timeout="$BYPASS_MOBILE_PUSH_CONNTRACK_MIN_TIMEOUT"
+	case "$desired_timeout" in
+		''|*[!0-9]*) desired_timeout=3600 ;;
+	esac
+	[ "$desired_timeout" -ge 1800 ] 2>/dev/null || desired_timeout=1800
+	[ -r "$timeout_path" ] && [ -w "$timeout_path" ] || return 0
+	current_timeout="$(cat "$timeout_path" 2>/dev/null || echo 0)"
+	case "$current_timeout" in
+		''|*[!0-9]*) current_timeout=0 ;;
+	esac
+	[ "$current_timeout" -ge "$desired_timeout" ] 2>/dev/null \
+		|| printf '%s\n' "$desired_timeout" > "$timeout_path" 2>/dev/null \
+		|| true
 }
 
 telegram_call_client_udp_ports() {
@@ -729,8 +772,12 @@ refresh_telegram_call_learning_rules() {
 		fi
 		if [ "$BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED" != "0" ]; then
 			for signal_port in $(telegram_call_signal_tcp_ports); do
-				iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p tcp -m tcp -m set --match-set "$signal_set" dst --dport "$signal_port" \
-					-j REDIRECT --to-ports "$target_port"
+				if mobile_push_port_is_direct "$signal_port"; then
+					iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p tcp -m tcp -m set --match-set "$signal_set" dst --dport "$signal_port" -j RETURN
+				else
+					iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p tcp -m tcp -m set --match-set "$signal_set" dst --dport "$signal_port" \
+						-j REDIRECT --to-ports "$target_port"
+				fi
 			done
 			if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
 				iptables -t nat -A "$TELEGRAM_CALL_ROUTE_CHAIN" -p udp -m udp -m set --match-set "$signal_set" dst --dport 1024:65535 \
@@ -977,14 +1024,27 @@ route_file_marker_count() {
 }
 
 telegram_route_protocol() {
-	telegram_markers="api.telegram.org 149.154.160.0/20 mtalk.google.com 17.249.0.0/16"
-	for marker in $telegram_markers; do
-		if grep -Fxs "$marker" "$UNBLOCK_DIR/vless-2.txt" >/dev/null 2>&1; then
-			printf '%s\n' "vless2"
-			return
+	# Use Telegram-only markers here: mtalk/APNs belong to the mobile OS push
+	# transport and must not change which configured proxy owns Telegram.
+	telegram_markers="telegram.org api.telegram.org 91.108.0.0/16 149.154.160.0/20"
+	best_protocol=""
+	best_count=0
+	for route_spec in \
+		"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt" \
+		"vmess:$UNBLOCK_DIR/vmess.txt" \
+		"vless:$UNBLOCK_DIR/vless.txt" \
+		"vless2:$UNBLOCK_DIR/vless-2.txt" \
+		"trojan:$UNBLOCK_DIR/trojan.txt"; do
+		protocol="${route_spec%%:*}"
+		route_file="${route_spec#*:}"
+		count="$(route_file_marker_count "$route_file" $telegram_markers)"
+		case "$count" in ''|*[!0-9]*) count=0 ;; esac
+		if [ "$count" -gt "$best_count" ] 2>/dev/null; then
+			best_count="$count"
+			best_protocol="$protocol"
 		fi
 	done
-	printf '%s\n' "vless"
+	printf '%s\n' "${best_protocol:-vless}"
 }
 
 youtube_route_protocol() {
@@ -1013,27 +1073,32 @@ refresh_vless_tcp_priority
 refresh_vless_priority_redirects
 
 refresh_mobile_push_priority() {
-	# Telegram mobile can use MTProto TCP 5222; Android FCM/mtalk uses TCP
-	# 5228-5230; iOS APNs keeps a persistent TCP 5223 connection and can fall
-	# back to 443. YouTube's broad Google IP ranges can capture shared push IPs
-	# in the other Vless list, so pin mobile signaling
-	# ports to whichever Vless list currently carries Telegram routes.
+	# Keep Telegram MTProto 5222 on the Telegram route. Android FCM 5228-5230
+	# and iOS APNs 5223 use persistent push connections; let them leave directly
+	# so an overlapping Google/Apple ipset or a proxy tunnel cannot stall push.
+	ensure_mobile_push_conntrack_timeout
 	telegram_route="$(telegram_route_protocol)"
-	target_port=10812
-	[ "$telegram_route" = "vless2" ] && [ -n "$vless2_key_path" ] && target_port=10814
-	for push_port in 5222 5223 5228 5229 5230; do
-		for push_set in unblockvless unblockvless2; do
-			for stale_port in 10812 10814; do
+	target_port="$(telegram_call_target_port "$telegram_route")"
+	[ -n "$target_port" ] || target_port=10812
+	for push_port in $(mobile_push_legacy_priority_ports); do
+		for push_set in $(mobile_push_route_sets); do
+			for stale_port in $(mobile_push_proxy_target_ports); do
 				while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set "$push_set" dst --dport "$push_port" -j REDIRECT --to-ports "$stale_port" 2>/dev/null; do
 					iptables -t nat -D PREROUTING -w -p tcp -m set --match-set "$push_set" dst --dport "$push_port" -j REDIRECT --to-ports "$stale_port"
 				done
 			done
-			iptables -I PREROUTING -w -t nat -p tcp -m set --match-set "$push_set" dst --dport "$push_port" -j REDIRECT --to-ports "$target_port"
 		done
 	done
+	for direct_port in $(mobile_push_direct_ports); do
+		while iptables -t nat -C PREROUTING -w -p tcp -m tcp --dport "$direct_port" -j RETURN 2>/dev/null; do
+			iptables -t nat -D PREROUTING -w -p tcp -m tcp --dport "$direct_port" -j RETURN
+		done
+		iptables -I PREROUTING -w -t nat -p tcp -m tcp --dport "$direct_port" -j RETURN
+	done
+	for push_set in $(mobile_push_route_sets); do
+		iptables -I PREROUTING -w -t nat -p tcp -m set --match-set "$push_set" dst --dport 5222 -j REDIRECT --to-ports "$target_port"
+	done
 }
-
-refresh_mobile_push_priority
 
 remove_vless_tcp_forward_guard() {
 	for guard_set in unblockvless unblockvless2; do
@@ -1062,5 +1127,9 @@ fi
 refresh_udp_quic_block_rules
 
 refresh_telegram_call_learning_rules
+
+# Install these last: direct APNs/FCM returns and Telegram 5222 ownership
+# rules must stay above every generic protocol redirect and call-chain jump.
+refresh_mobile_push_priority
 
 exit 0

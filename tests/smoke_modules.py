@@ -3355,7 +3355,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '*/15 * * * * root /opt/etc/init.d/S99unblock tick >/dev/null 2>&1' in crontab
 
 
-def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
+def test_vless_tcp_redirect_keeps_mobile_push_connections_reliable():
     redirect_script = (APP_ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     assert 'refresh_vless_tcp_priority()' in redirect_script
     assert 'telegram_route_protocol()' in redirect_script
@@ -3364,7 +3364,10 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     assert 'refresh_vless_priority_redirects()' in redirect_script
     assert 'iptables -I FORWARD -w -p tcp -m set --match-set "$guard_set" dst -j REJECT --reject-with tcp-reset' not in redirect_script
     assert 'Shared Google IPs must follow the YouTube route for video streams.' in redirect_script
-    assert 'ports to whichever Vless list currently carries Telegram routes.' in redirect_script
+    assert 'BYPASS_MOBILE_PUSH_CONNTRACK_MIN_TIMEOUT="${BYPASS_MOBILE_PUSH_CONNTRACK_MIN_TIMEOUT:-3600}"' in redirect_script
+    assert 'ensure_mobile_push_conntrack_timeout()' in redirect_script
+    assert 'nf_conntrack_tcp_timeout_established' in redirect_script
+    assert '[ "$current_timeout" -ge "$desired_timeout" ]' in redirect_script
     vless2_insert = (
         'iptables -I PREROUTING -w -t nat -p tcp -m set --match-set '
         'unblockvless2 dst -j REDIRECT --to-ports 10814'
@@ -3390,11 +3393,44 @@ def test_vless_tcp_redirect_prioritizes_vless1_for_overlapping_google_ips():
     assert '"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt"' in redirect_script
     assert '"trojan:$UNBLOCK_DIR/trojan.txt"' in redirect_script
     push_block = redirect_script.split('refresh_mobile_push_priority() {', 1)[1].split('\n}', 1)[0]
-    assert 'for push_port in 5222 5223 5228 5229 5230' in push_block
+    assert 'ensure_mobile_push_conntrack_timeout' in push_block
+    assert 'for push_port in $(mobile_push_legacy_priority_ports)' in push_block
     assert 'telegram_route="$(telegram_route_protocol)"' in push_block
-    assert '[ "$telegram_route" = "vless2" ] && [ -n "$vless2_key_path" ] && target_port=10814' in push_block
-    assert 'for push_set in unblockvless unblockvless2' in push_block
-    assert '--dport "$push_port" -j REDIRECT --to-ports "$target_port"' in push_block
+    assert 'target_port="$(telegram_call_target_port "$telegram_route")"' in push_block
+    assert 'for push_set in $(mobile_push_route_sets)' in push_block
+    assert 'for stale_port in $(mobile_push_proxy_target_ports)' in push_block
+    assert '--dport "$push_port" -j REDIRECT --to-ports "$stale_port"' in push_block
+    assert 'for direct_port in $(mobile_push_direct_ports)' in push_block
+    assert '--dport "$direct_port" -j RETURN' in push_block
+    assert '--dport 5222 -j REDIRECT --to-ports "$target_port"' in push_block
+    mobile_priority_call = redirect_script.index('\nrefresh_mobile_push_priority\n')
+    call_routes_refresh = redirect_script.index('\nrefresh_telegram_call_learning_rules\n')
+    assert call_routes_refresh < mobile_priority_call
+    assert mobile_priority_call < redirect_script.index('\nexit 0\n')
+    direct_ports = redirect_script.split('mobile_push_direct_ports() {', 1)[1].split('\n}', 1)[0]
+    assert "printf '%s\\n' 5223 5228 5229 5230" in direct_ports
+    signal_route_refresh = redirect_script.split('refresh_telegram_call_learning_rules() {', 1)[1]
+    signal_route_block = signal_route_refresh.split(
+        'if [ "$BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED" != "0" ]; then', 1
+    )[1].split('\n\t\tfi', 1)[0]
+    assert 'if mobile_push_port_is_direct "$signal_port"; then' in signal_route_block
+    assert '--dport "$signal_port" -j RETURN' in signal_route_block
+    telegram_owner_block = redirect_script.split('telegram_route_protocol() {', 1)[1].split('\n}', 1)[0]
+    for route_spec in (
+        'shadowsocks:$UNBLOCK_DIR/shadowsocks.txt',
+        'vmess:$UNBLOCK_DIR/vmess.txt',
+        'vless:$UNBLOCK_DIR/vless.txt',
+        'vless2:$UNBLOCK_DIR/vless-2.txt',
+        'trojan:$UNBLOCK_DIR/trojan.txt',
+    ):
+        assert f'"{route_spec}"' in telegram_owner_block
+    assert 'route_file_marker_count "$route_file" $telegram_markers' in telegram_owner_block
+    assert 'mtalk.google.com' not in telegram_owner_block
+    assert '17.249.0.0/16' not in telegram_owner_block
+    route_sets = redirect_script.split('mobile_push_route_sets() {', 1)[1].split('\n}', 1)[0]
+    assert "printf '%s\\n' unblocksh unblockvmess unblockvless unblockvless2 unblocktroj" in route_sets
+    target_ports = redirect_script.split('mobile_push_proxy_target_ports() {', 1)[1].split('\n}', 1)[0]
+    assert "printf '%s\\n' 1082 10815 10812 10814 10829" in target_ports
 
 
 def test_runtime_startup_limits_router_flash_and_overhead():
