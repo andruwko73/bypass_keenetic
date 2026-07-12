@@ -826,6 +826,44 @@
             activate(localStorage.getItem(storageKey));
         }
 
+        function parseJsonPayload(response) {
+            return response.text().then(function(text) {
+                let payload = null;
+                if (text) {
+                    try {
+                        payload = JSON.parse(text);
+                    } catch (error) {
+                        payload = null;
+                    }
+                }
+                if (!response.ok) {
+                    const message = payload && payload.error ? payload.error : 'HTTP ' + response.status;
+                    const httpError = new Error(message);
+                    httpError.status = response.status;
+                    throw httpError;
+                }
+                if (!payload || typeof payload !== 'object') {
+                    throw new Error('Сервер временно вернул некорректный ответ');
+                }
+                return payload;
+            });
+        }
+
+        function protocolPanelErrorMessage(error) {
+            const rawMessage = error && error.message ? String(error.message) : '';
+            const lowerMessage = rawMessage.toLowerCase();
+            if (
+                !rawMessage ||
+                lowerMessage.indexOf('failed to fetch') !== -1 ||
+                lowerMessage.indexOf('networkerror') !== -1 ||
+                lowerMessage.indexOf('http 404') !== -1 ||
+                lowerMessage.indexOf('некорректный ответ') !== -1
+            ) {
+                return 'Связь с веб-интерфейсом временно прервалась. Повторите загрузку после завершения переключения режима.';
+            }
+            return rawMessage;
+        }
+
         function setupProtocolTabs() {
             const buttons = document.querySelectorAll('.protocol-tab');
             const storageKey = 'router-active-protocol';
@@ -836,12 +874,7 @@
             }
 
             function protocolLoadErrorMessage(error) {
-                const rawMessage = error && error.message ? String(error.message) : '';
-                const lowerMessage = rawMessage.toLowerCase();
-                if (!rawMessage || lowerMessage.indexOf('failed to fetch') !== -1 || lowerMessage.indexOf('networkerror') !== -1) {
-                    return 'Связь с веб-интерфейсом прервалась. Нажмите повторить или откройте локальный адрес роутера.';
-                }
-                return rawMessage;
+                return protocolPanelErrorMessage(error);
             }
 
             function showLoadNotice(panel, message) {
@@ -881,9 +914,9 @@
                     cache: 'no-store'
                 })
                     .then(function(response) {
-                        return response.json().then(function(payload) {
-                            if (!response.ok || !payload.ok) {
-                                throw new Error((payload && payload.error) || 'HTTP ' + response.status);
+                        return parseJsonPayload(response).then(function(payload) {
+                            if (!payload.ok) {
+                                throw new Error(payload.error || 'Loading failed');
                             }
                             return payload;
                         });
@@ -969,9 +1002,9 @@
                 cache: 'no-store'
             })
                 .then(function(response) {
-                    return response.json().then(function(payload) {
-                        if (!response.ok || !payload.ok) {
-                            throw new Error((payload && payload.error) || 'HTTP ' + response.status);
+                    return parseJsonPayload(response).then(function(payload) {
+                        if (!payload.ok) {
+                            throw new Error(payload.error || 'Loading failed');
                         }
                         return payload;
                     });
@@ -989,15 +1022,22 @@
                     refreshDeferredServiceRouteTools();
                 })
                 .catch(function(error) {
-                    if (retryCount < 2) {
+                    if (retryCount < 6 && !document.hidden) {
                         panel.dataset.protocolCheckLoading = '0';
                         window.setTimeout(function() {
                             loadProtocolCheck(panel, retryCount + 1);
-                        }, 1200 + retryCount * 1800);
+                        }, 1200 + Math.min(retryCount, 3) * 1800);
                         return;
                     }
-                    const message = error && error.message ? error.message : 'Loading failed';
-                    target.innerHTML = '<span class="status-label">Checks</span><p class="status-note">' + escapeHtml(message) + '</p>';
+                    const message = protocolPanelErrorMessage(error);
+                    target.innerHTML = '<span class="status-label">Проверки</span><p class="status-note">' + escapeHtml(message) + '</p><button type="button" class="secondary-button" data-protocol-check-retry>Повторить</button>';
+                    const retry = target.querySelector('[data-protocol-check-retry]');
+                    if (retry) {
+                        retry.addEventListener('click', function() {
+                            panel.dataset.protocolCheckLoading = '0';
+                            loadProtocolCheck(panel, 0);
+                        });
+                    }
                 })
                 .finally(function() {
                     panel.dataset.protocolCheckLoading = '0';

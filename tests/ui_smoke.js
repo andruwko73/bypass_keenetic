@@ -681,8 +681,33 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   await assertPoolKeysAreMasked(page, `${name} initial keys`);
   await assertNoBrokenImages(page, `${name} initial keys`);
   if (modeConfig.expectPool) {
+    let injectedCheck404 = false;
+    if (modeConfig.mode === 'advanced' && !isMobile) {
+      injectedCheck404 = true;
+      await page.route('**/api/protocol_check_panel?proto=*', async (route) => {
+        await route.fulfill({
+          status: 404,
+          contentType: 'text/html; charset=utf-8',
+          body: '<h1>404 Not Found</h1>',
+        });
+      }, { times: 1 });
+    }
     await page.locator('[data-protocol-panel].active [data-subview-target="check"]').click();
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
+    if (injectedCheck404) {
+      for (let index = failures.length - 1; index >= 0; index -= 1) {
+        if (
+          failures[index].includes('/api/protocol_check_panel?proto=') ||
+          failures[index].includes('Failed to load resource: the server responded with a status of 404')
+        ) {
+          failures.splice(index, 1);
+        }
+      }
+    }
+    const technicalCheckErrors = await page.getByText(/Unexpected token|not valid JSON/i).count();
+    if (technicalCheckErrors) {
+      throw new Error(`${name}: protocol check exposed a raw JSON parse error`);
+    }
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-telegram-icon', `${name} Telegram route icon`);
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-youtube-icon', `${name} YouTube route icon`);
     const firstRouteTrigger = page.locator('[data-protocol-panel].active .service-route-trigger').first();

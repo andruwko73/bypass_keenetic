@@ -1,3 +1,3 @@
-*v1.938 (12 Jul 2026) -* main
+*v1.939 (12 Jul 2026) -* main
 
-*Reduces resident memory and repeated router work, keeps heavy web data lazy, and makes status, route and pool-probe behavior deterministic across all runtime modes.*
+*Recovers lazy protocol checks across runtime-mode restarts without exposing raw HTML/JSON parse errors in the web interface.*

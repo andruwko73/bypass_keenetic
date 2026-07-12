@@ -10541,6 +10541,9 @@ def test_web_template_scripts_helpers():
     assert "localStorage.setItem('router-theme', nextTheme);" in scripts
     assert 'function setupAsyncForms' in scripts
     assert 'function setupProtocolTabs()' in scripts
+    assert 'function parseJsonPayload(response)' in scripts
+    assert "return response.text().then(function(text)" in scripts
+    assert "lowerMessage.indexOf('http 404')" in scripts
     assert "fetch('/api/protocol_panel?proto='" in scripts
     assert 'function protocolLoadErrorMessage(error)' in scripts
     assert "lowerMessage.indexOf('failed to fetch')" in scripts
@@ -10548,6 +10551,8 @@ def test_web_template_scripts_helpers():
     assert 'loadPanel(protocol, panel, retryCount + 1)' in scripts
     assert 'function loadProtocolCheck(panel, retryCount)' in scripts
     assert "fetch('/api/protocol_check_panel?proto='" in scripts
+    assert 'if (retryCount < 6 && !document.hidden)' in scripts
+    assert 'data-protocol-check-retry' in scripts
     assert 'loadProtocolCheck(panel, retryCount + 1)' in scripts
     assert 'data-protocol-check-deferred' in scripts
     assert 'setupServiceRouteMenus(subview)' in scripts

@@ -1,3 +1,10 @@
+<a name="1.939"></a>
+# [1.939] - 12 Jul 2026
+
+- Parses lazy protocol-panel responses defensively, so a temporary HTML error during a mode restart cannot appear as a raw JSON exception.
+- Retries the check panel through the restart window and leaves a clear manual retry action if the router remains unavailable.
+- Covers the regression with a UI smoke that injects one HTML 404 before the successful check-panel response.
+
 <a name="1.938"></a>
 # [1.938] - 12 Jul 2026
 
