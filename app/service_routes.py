@@ -683,19 +683,21 @@ def _runtime_cleanup_pairs_for_issue(issue, target_protocol):
 
 
 def _delete_runtime_pair_overlaps(pair, *, run_command=subprocess.run):
+    import route_intersections
+
     loser_set = pair.get('loser_set') or ''
     winner_set = pair.get('winner_set') or ''
-    loser_members = _read_runtime_ipset_members(loser_set, run_command=run_command)
-    winner_members = _read_runtime_ipset_members(winner_set, run_command=run_command)
     kind = pair.get('kind') or ''
-    loser_priority = _read_runtime_ipset_members(
-        _runtime_priority_set(pair.get('loser_route'), kind),
+    loser_priority_set = _runtime_priority_set(pair.get('loser_route'), kind)
+    winner_priority_set = _runtime_priority_set(pair.get('winner_route'), kind)
+    members = route_intersections.read_runtime_ipset_members_map(
+        (loser_set, winner_set, loser_priority_set, winner_priority_set),
         run_command=run_command,
     )
-    winner_priority = _read_runtime_ipset_members(
-        _runtime_priority_set(pair.get('winner_route'), kind),
-        run_command=run_command,
-    )
+    loser_members = members.get(loser_set, set())
+    winner_members = members.get(winner_set, set())
+    loser_priority = members.get(loser_priority_set, set())
+    winner_priority = members.get(winner_priority_set, set())
     delete_members = _runtime_overlapping_loser_members(
         loser_members,
         winner_members,

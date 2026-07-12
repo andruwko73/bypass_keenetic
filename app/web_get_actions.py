@@ -340,17 +340,27 @@ def dispatch(ctx, path, query=''):
             'kind': 'text',
             'text': _call(ctx, 'build_style_asset') or '',
             'content_type': 'text/css; charset=utf-8',
-            'cache_seconds': 0,
+            'cache_seconds': 31536000,
         }
     if path == '/static/app.js':
         return {
             'kind': 'text',
             'text': _call(ctx, 'build_script_asset') or '',
             'content_type': 'application/javascript; charset=utf-8',
-            'cache_seconds': 0,
+            'cache_seconds': 31536000,
         }
     if path == '/api/status':
         return {'kind': 'json', 'payload': _status_payload(ctx, query), 'status': 200}
+    if path == '/api/unblock_list':
+        params = parse_qs(query or '', keep_blank_values=True)
+        list_name = str((params.get('name') or [''])[0] or '').strip()
+        if not list_name:
+            return {'kind': 'json', 'payload': {'ok': False, 'error': 'List name is required'}, 'status': 400}
+        try:
+            payload = _ctx(ctx, 'unblock_list_payload')(list_name)
+        except Exception as exc:
+            return {'kind': 'json', 'payload': {'ok': False, 'error': str(exc)}, 'status': 400}
+        return {'kind': 'json', 'payload': payload, 'status': 200}
     if path == '/api/pools' and _ctx(ctx, 'pool_enabled', False):
         payload = _pools_payload(ctx, query)
         if isinstance(payload, str):

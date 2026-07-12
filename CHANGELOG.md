@@ -1,3 +1,12 @@
+<a name="1.938"></a>
+# [1.938] - 12 Jul 2026
+
+- Keeps static assets, pool rows, route tools and unblock-list contents lazy and cached instead of rebuilding them during ordinary page requests.
+- Samples router CPU in the background and reads ipset state in one snapshot, avoiding the web-request spike and repeated process calls.
+- Coordinates allocator cleanup, removes stale runtime helpers and defers optional modules so simple, advanced and web-only modes retain lower steady RSS.
+- Preserves trustworthy service results during incomplete checks, keeps YouTube ownership protocol-independent and removes duplicate health probes.
+- Trims installed release artifacts while retaining full rollback coverage and the complete changelog in Git.
+
 <a name="1.937"></a>
 # [1.937] - 11 Jul 2026
 

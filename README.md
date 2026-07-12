@@ -157,22 +157,16 @@ Telegram-бот использует нижнюю клавиатуру и раб
   <img src="docs/screenshots/web-ui-status-mobile.png" alt="Статус и сервис для телефона" width="320">
 </a>
 
-Активный ключ:
+Ключ и подписка:
 
-<a href="docs/screenshots/web-ui-key.png">
-  <img src="docs/screenshots/web-ui-key.png" alt="Активный ключ" width="520">
+<a href="docs/screenshots/web-ui-key-subscription.png">
+  <img src="docs/screenshots/web-ui-key-subscription.png" alt="Ключ и подписка" width="720">
 </a>
 
 Пул ключей:
 
 <a href="docs/screenshots/web-ui-pool.png">
   <img src="docs/screenshots/web-ui-pool.png" alt="Пул ключей" width="520">
-</a>
-
-Subscription:
-
-<a href="docs/screenshots/web-ui-subscription.png">
-  <img src="docs/screenshots/web-ui-subscription.png" alt="Subscription" width="520">
 </a>
 
 Проверки доступности:

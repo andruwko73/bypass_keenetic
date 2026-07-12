@@ -622,6 +622,7 @@ def run_pool_probe_worker(
 
             process = None
             config_path = None
+            unfinished = set()
             try:
                 process, config_path = start_xray_for_batch(valid_batch)
                 low_memory_kb = memory_below_limit(min_available_kb)
@@ -660,7 +661,6 @@ def run_pool_probe_worker(
                 future_map = {}
                 done = set()
                 pending = set()
-                unfinished = set()
                 try:
                     batch_timeout = timeout_budget(
                         checks,

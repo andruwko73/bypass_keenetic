@@ -15,6 +15,16 @@ from telegram_healthcheck import (
     check_telegram_service_through_proxy,
 )
 
+__all__ = (
+    'YOUTUBE_HEALTHCHECK_MIN_OK',
+    'YOUTUBE_HEALTHCHECK_REQUIRED_URLS',
+    'YOUTUBE_HEALTHCHECK_URLS',
+    'TELEGRAM_HEALTHCHECK_MIN_OK',
+    'TELEGRAM_HEALTHCHECK_URLS',
+    'initial_pool_probe_progress',
+    'start_pool_probe_worker',
+)
+
 
 def initial_pool_probe_progress():
     return {

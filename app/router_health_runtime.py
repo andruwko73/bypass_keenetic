@@ -878,6 +878,7 @@ class RouterHealthRuntime:
         self.cpu_smoothing_factor = min(1.0, max(0.0, float(cpu_smoothing_factor or 0.0)))
         self.time_provider = time_provider
         self._lock = threading.Lock()
+        self._cpu_lock = threading.Lock()
         self._cache = {'timestamp': 0, 'payload': None}
         self._compact_cache = {'timestamp': 0, 'payload': None}
         self._core_proxy_cache = {'timestamp': 0, 'payload': None}
@@ -940,35 +941,37 @@ class RouterHealthRuntime:
             read_ndmc_system_snapshot,
         )
 
-    def _cpu_snapshot(self, sample=True, prime=False):
-        if not sample and prime:
+    def sample_cpu(self, prime=False):
+        with self._cpu_lock:
             current_stat = read_cpu_stat()
             if current_stat is not None:
+                previous_stat = self._last_cpu_stat
                 self._last_cpu_stat = current_stat
-                self._last_cpu_percent = None
-                self._cpu_prime_pending = True
-        if not sample:
-            return self._last_cpu_percent
-        current_stat = read_cpu_stat()
-        if current_stat is None:
-            return self._last_cpu_percent
-        previous_stat = self._last_cpu_stat
-        self._last_cpu_stat = current_stat
-        if previous_stat is None:
-            return self._last_cpu_percent
-        value = cpu_percent_between(previous_stat, current_stat)
-        if value is not None:
-            if self._cpu_prime_pending:
-                self._cpu_prime_pending = False
+                if prime:
+                    self._last_cpu_percent = None
+                    self._cpu_prime_pending = True
+                    return self._last_cpu_percent
+                if previous_stat is None:
+                    return self._last_cpu_percent
+                value = cpu_percent_between(previous_stat, current_stat)
+                if value is None:
+                    return self._last_cpu_percent
+                if self._cpu_prime_pending:
+                    self._cpu_prime_pending = False
+                    return self._last_cpu_percent
+                if self._last_cpu_percent is None or self.cpu_smoothing_factor >= 1.0:
+                    self._last_cpu_percent = value
+                elif self.cpu_smoothing_factor > 0.0:
+                    alpha = self.cpu_smoothing_factor
+                    self._last_cpu_percent = (alpha * value) + ((1.0 - alpha) * self._last_cpu_percent)
                 return self._last_cpu_percent
-            if self._last_cpu_percent is None or self.cpu_smoothing_factor >= 1.0:
-                self._last_cpu_percent = value
-            elif self.cpu_smoothing_factor <= 0.0:
-                pass
-            else:
-                alpha = self.cpu_smoothing_factor
-                self._last_cpu_percent = (alpha * value) + ((1.0 - alpha) * self._last_cpu_percent)
-        return self._last_cpu_percent
+            return self._last_cpu_percent
+
+    def _cpu_snapshot(self, sample=True, prime=False):
+        if sample:
+            return self.sample_cpu(prime=prime)
+        with self._cpu_lock:
+            return self._last_cpu_percent
 
     def _related_process_snapshot(self, now, probe_running):
         cache_ttl = min(5.0, self.related_process_cache_ttl) if probe_running else self.related_process_cache_ttl

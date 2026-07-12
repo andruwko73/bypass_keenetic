@@ -1064,12 +1064,13 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
         quality_timeout_seconds = _config_int('youtube_edge_prefetch_quality_timeout_seconds', 5, minimum=2)
         quality_probe = None
         if quality_enabled:
-            quality_probe = lambda candidate: probe_candidate_quality(
-                candidate,
-                route_protocol,
-                target_ms=quality_target_ms,
-                timeout_seconds=quality_timeout_seconds,
-            )
+            def quality_probe(candidate):
+                return probe_candidate_quality(
+                    candidate,
+                    route_protocol,
+                    target_ms=quality_target_ms,
+                    timeout_seconds=quality_timeout_seconds,
+                )
         status = youtube_edge_prefetch.prefetch_once(
             route_protocol=route_protocol,
             cache_path=cache_path,

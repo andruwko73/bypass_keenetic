@@ -688,6 +688,70 @@
             return !!(panel && panel.classList.contains('active'));
         }
 
+        function listsViewActive() {
+            const panel = document.querySelector('[data-view="lists"]');
+            return !!(panel && panel.classList.contains('active'));
+        }
+
+        function loadUnblockListPanel(listName) {
+            const panel = document.querySelector('[data-list-panel="' + String(listName || '') + '"]');
+            if (!panel || panel.dataset.listLoaded === '1' || panel.dataset.listLoading === '1') {
+                return;
+            }
+            const textarea = panel.querySelector('textarea[name="content"]');
+            const state = panel.querySelector('[data-list-load-state]');
+            panel.dataset.listLoading = '1';
+            if (state) {
+                state.textContent = 'Загрузка списка...';
+                state.classList.remove('hidden');
+            }
+            fetch('/api/unblock_list?name=' + encodeURIComponent(String(listName || '')), {
+                headers: {'Accept': 'application/json'},
+                cache: 'no-store'
+            }).then(function(response) {
+                return response.json().then(function(payload) {
+                    if (!response.ok || !payload.ok) {
+                        throw new Error((payload && payload.error) || 'HTTP ' + response.status);
+                    }
+                    return payload;
+                });
+            }).then(function(payload) {
+                if (textarea) {
+                    textarea.value = String(payload.content || '');
+                    textarea.disabled = false;
+                }
+                const count = panel.querySelector('[data-list-line-count]');
+                if (count) {
+                    count.textContent = String(Number(payload.line_count || 0));
+                }
+                const saveButton = panel.querySelector('[data-list-save]');
+                if (saveButton) {
+                    saveButton.disabled = false;
+                }
+                panel.dataset.listLoaded = '1';
+                setupAutoResizeTextareas(panel);
+                if (state) {
+                    state.classList.add('hidden');
+                }
+            }).catch(function(error) {
+                if (state) {
+                    state.textContent = error && error.message ? error.message : 'Не удалось загрузить список';
+                }
+            }).finally(function() {
+                panel.dataset.listLoading = '0';
+            });
+        }
+
+        function refreshActiveUnblockList() {
+            if (!listsViewActive()) {
+                return;
+            }
+            const panel = document.querySelector('[data-list-panel].active');
+            if (panel) {
+                loadUnblockListPanel(panel.getAttribute('data-list-panel'));
+            }
+        }
+
         function refreshDeferredPoolForProtocol(protocol) {
             if (!ENABLE_KEY_POOL || !keysViewActive()) {
                 return;
@@ -721,6 +785,8 @@
                     window.setTimeout(function() {
                         refreshDeferredPoolForProtocol();
                     }, 0);
+                } else if (selected === 'lists') {
+                    window.setTimeout(refreshActiveUnblockList, 0);
                 }
             }
             targets.forEach(function(button) {
@@ -747,6 +813,9 @@
                 });
                 if (selected) {
                     localStorage.setItem(storageKey, selected);
+                }
+                if (panelSelector === '[data-list-panel]' && listsViewActive()) {
+                    loadUnblockListPanel(selected);
                 }
             }
             buttons.forEach(function(button) {
@@ -2414,18 +2483,7 @@
                 return;
             }
             window.setTimeout(function() {
-                fetch('/api/router_health?compact=1&skip_cpu=1&prime=1', {
-                    headers: {'Accept': 'application/json'},
-                    cache: 'no-store'
-                })
-                    .then(function(response) { return response.json(); })
-                    .then(function(health) {
-                        updateRouterHealth(health);
-                    })
-                    .catch(function() {});
-                window.setTimeout(function() {
-                    refreshRouterHealth(true, 0);
-                }, 5000);
+                refreshRouterHealth(false, 0);
             }, Math.max(0, Number(delayMs || 0)));
         }
 
@@ -3340,7 +3398,6 @@
             setupPoolControls();
             setupServiceRouteMenus();
             setupEventHistoryPanel();
-            refreshDeferredServiceRouteTools();
             setupLiquidPointer();
             setupAsyncForms();
             if (['127.0.0.1', 'localhost', '::1'].indexOf(window.location.hostname) !== -1) {

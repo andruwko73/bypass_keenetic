@@ -226,6 +226,28 @@ def _read_ipset_members(set_name, *, run_command=subprocess.run):
     return members
 
 
+def read_runtime_ipset_members_map(set_names, *, run_command=subprocess.run):
+    wanted = {str(name or '').strip() for name in set_names or [] if str(name or '').strip()}
+    members_by_set = {name: set() for name in wanted}
+    if not wanted:
+        return members_by_set
+    text = _command_text(['ipset', 'save'], run_command=run_command)
+    if text:
+        snapshot_format = False
+        for raw_line in text.splitlines():
+            parts = raw_line.strip().split()
+            if len(parts) >= 2 and parts[0] in ('create', 'add'):
+                snapshot_format = True
+            if len(parts) >= 3 and parts[0] == 'add' and parts[1] in wanted:
+                members_by_set[parts[1]].add(parts[2])
+        if snapshot_format:
+            return members_by_set
+    return {
+        name: _read_ipset_members(name, run_command=run_command)
+        for name in wanted
+    }
+
+
 def _priority_networks(members):
     networks = {4: [], 6: []}
     for value in members or []:
@@ -413,14 +435,21 @@ def _file_network_overlap_issues(entries_by_route, max_issues):
 
 
 def _runtime_ipset_intersections(*, max_issues=MAX_ISSUES, run_command=subprocess.run):
-    members_by_set = {}
-    for sets in ROUTE_IPSET_SETS.values():
-        for set_name, _kind in sets:
-            members_by_set[set_name] = _read_ipset_members(set_name, run_command=run_command)
+    set_names = {
+        set_name
+        for sets in ROUTE_IPSET_SETS.values()
+        for set_name, _kind in sets
+    }
+    set_names.update(
+        set_name
+        for sets_by_kind in ROUTE_PRIORITY_IPSET_SETS.values()
+        for set_name in sets_by_kind.values()
+    )
+    members_by_set = read_runtime_ipset_members_map(set_names, run_command=run_command)
     priority_members = {}
     for route, sets_by_kind in ROUTE_PRIORITY_IPSET_SETS.items():
         for kind, set_name in sets_by_kind.items():
-            priority_members[(route, kind)] = _read_ipset_members(set_name, run_command=run_command)
+            priority_members[(route, kind)] = members_by_set.get(set_name, set())
 
     issues = []
     routes = list(ROUTE_IPSET_SETS)

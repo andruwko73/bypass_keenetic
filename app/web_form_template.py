@@ -42,7 +42,11 @@ def load_static_asset(path, fallback):
     except OSError:
         return fallback()
     with _asset_cache_lock:
-        _static_asset_cache.clear()
+        for cached_stamp in list(_static_asset_cache):
+            if cached_stamp[0] == stamp[0] and cached_stamp != stamp:
+                _static_asset_cache.pop(cached_stamp, None)
+        while len(_static_asset_cache) >= 4:
+            _static_asset_cache.pop(next(iter(_static_asset_cache)))
         _static_asset_cache[stamp] = content
     return content
 

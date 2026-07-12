@@ -8,12 +8,10 @@ import time
 import hashlib
 import threading
 import signal
-import shlex
 import ipaddress
 import socket
 import tempfile
 import gc
-import ctypes
 import atexit
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,9 +48,7 @@ from proxy_key_store import (
     proxy_config_snapshot_paths as _store_proxy_config_snapshot_paths,
     read_v2ray_key as _store_read_v2ray_key,
     remove_file_if_exists as _store_remove_file_if_exists,
-    restore_proxy_config_files as _store_restore_proxy_config_files,
     save_v2ray_key as _store_save_v2ray_key,
-    snapshot_proxy_config_files as _store_snapshot_proxy_config_files,
     v2ray_key_file_candidates as _store_v2ray_key_file_candidates,
 )
 from proxy_protocols import (
@@ -108,12 +104,12 @@ else:
 import entware_dns_runtime
 import router_health_runtime
 import router_metrics
-from telegram_auth_state import build_authorized_identities as _build_authorized_identities
 try:
     import xray_compat_runtime
 except Exception:
     xray_compat_runtime = None
 if _IMPORT_TELEGRAM_ENABLED:
+    from telegram_auth_state import build_authorized_identities as _build_authorized_identities
     import telegram_key_ui
     import telegram_info_runtime
     from telegram_auth_state import (
@@ -149,18 +145,12 @@ if _IMPORT_TELEGRAM_ENABLED:
     )
 else:
     # Web-only registers inert handler declarations but never executes Telegram flows.
+    def _build_authorized_identities(_raw_values):
+        return set(), set()
+
     MENU_STATE_UNSET = object()
     TELEGRAM_CONFIRM_LEVEL = None
     INSTALL_MENU_TEXT = ''
-from service_catalog import (
-    CONNECTIVITY_CHECK_DOMAINS,
-    REALTIME_CALL_SIGNAL_ROUTE_ENTRIES,
-    SERVICE_LIST_SOURCES,
-    TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES,
-    UDP_QUIC_ROUTE_ENTRIES,
-    YOUTUBE_UNBLOCK_ENTRIES,
-    service_route_entries,
-)
 from web_command_state import (
     command_state_snapshot as _command_state_snapshot,
     consume_command_state_for_render as _consume_command_state_for_render_impl,
@@ -169,7 +159,6 @@ from web_command_state import (
     finish_command as _finish_command_state,
     set_command_progress as _set_command_progress_state,
     set_flash_message as _set_flash_message_impl,
-    start_command as _start_command_state,
 )
 from web_http_common import (
     WebRequestMixin,
@@ -210,6 +199,15 @@ def _config_sequence(name, default=()):
 def _requests_module():
     import requests
     return requests
+
+
+def _service_catalog():
+    global _service_catalog_module
+    if _service_catalog_module is None:
+        import service_catalog as module
+
+        _service_catalog_module = module
+    return _service_catalog_module
 
 
 def _custom_checks_store():
@@ -275,6 +273,7 @@ _youtube_healthcheck_module = None
 _subscription_runtime_module = subscription_runtime
 _youtube_route_owner_module = None
 _custom_checks_store_module = None
+_service_catalog_module = None
 
 _KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 _KEY_PROBE_CACHE_SCHEMA_VERSION = 8
@@ -294,9 +293,8 @@ _POOL_YOUTUBE_HEALTHCHECK_URLS = (
     'https://i.ytimg.com/generate_204',
     'https://www.gstatic.com/generate_204',
     'https://redirector.googlevideo.com/generate_204',
-    'https://redirector.googlevideo.com/generate_204',
 )
-_POOL_YOUTUBE_HEALTHCHECK_MIN_OK = 9
+_POOL_YOUTUBE_HEALTHCHECK_MIN_OK = 8
 _YOUTUBE_EDGE_PREFETCH_DEFAULT_HOSTS = (
     'www.youtube.com',
     'youtube.com',
@@ -619,13 +617,6 @@ def _web_form_template():
 def _clear_youtube_edge_prefetch_snapshot_cache():
     youtube_edge_prefetch_snapshot_cache['timestamp'] = 0.0
     youtube_edge_prefetch_snapshot_cache['payload'] = None
-
-
-def _release_runtime_pressure_modules(reason='', *, include_pool_ui=False, include_route_tools=False):
-    # Runtime modules contain executable code, not bounded request data.
-    # Evicting them races concurrent imports and causes incomplete responses.
-    _clear_youtube_edge_prefetch_snapshot_cache()
-    return []
 
 
 def render_web_form(*args, **kwargs):
@@ -1517,10 +1508,6 @@ def _check_youtube_protocol_once(proto=None, metrics=None):
     )
 
 
-def _check_youtube_vless2_once():
-    return _check_youtube_protocol_once('vless2')
-
-
 def _schedule_youtube_cache_confirm(proto, key_value):
     if proto not in YOUTUBE_ROUTE_PROTOCOLS or not key_value or youtube_cache_confirm_lock.locked():
         return
@@ -1539,10 +1526,6 @@ def _schedule_youtube_cache_confirm(proto, key_value):
     threading.Thread(target=worker, daemon=True).start()
 
 
-def _schedule_vless2_youtube_cache_confirm(key_value):
-    _schedule_youtube_cache_confirm('vless2', key_value)
-
-
 def _confirm_youtube_key(proto):
     last_message = ''
     for attempt in range(YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES):
@@ -1559,10 +1542,6 @@ def _confirm_youtube_key(proto):
     return False, last_message
 
 
-def _confirm_youtube_vless2_key():
-    return _confirm_youtube_key('vless2')
-
-
 def _restore_youtube_key_after_failed_failover(proto, original_key):
     current_key = (_load_current_keys().get(proto) or '').strip()
     if not original_key or current_key == original_key:
@@ -1574,10 +1553,6 @@ def _restore_youtube_key_after_failed_failover(proto, original_key):
         _write_runtime_log(f'YouTube failover: restored previous {_pool_proto_label(proto)} key after failed candidates.')
     except Exception as exc:
         _write_runtime_log(f'YouTube failover: failed to restore previous {_pool_proto_label(proto)} key: {exc}')
-
-
-def _restore_vless2_key_after_failed_youtube_failover(original_key):
-    _restore_youtube_key_after_failed_failover('vless2', original_key)
 
 
 def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_message=''):
@@ -2521,6 +2496,12 @@ web_pools_api_cache = {
     'payload': None,
     'entries': {},
 }
+web_service_routes_cache = {
+    'timestamp': 0.0,
+    'signature': None,
+    'payload': None,
+}
+WEB_SERVICE_ROUTES_CACHE_TTL_SECONDS = 20.0
 pool_summary_cache = {
     'signature': None,
     'summary': None,
@@ -2555,6 +2536,8 @@ active_mode_status_cache_lock = threading.Lock()
 web_status_api_cache_lock = threading.Lock()
 web_pools_api_cache_lock = threading.Lock()
 web_pools_api_build_lock = threading.Lock()
+web_service_routes_cache_lock = threading.Lock()
+web_service_routes_build_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
 event_history_api_cache_lock = threading.Lock()
 router_metrics_compact_cache_lock = threading.Lock()
@@ -2604,6 +2587,8 @@ memory_malloc_trim_lock = threading.Lock()
 memory_malloc_trim_last_at = 0.0
 memory_malloc_trim_libc = None
 memory_malloc_trim_available = None
+memory_cleanup_lock = threading.Lock()
+memory_cleanup_last_at = 0.0
 youtube_edge_prefetch_lock = threading.Lock()
 telegram_call_learning_lock = threading.Lock()
 telegram_call_learning_cancel_event = threading.Event()
@@ -2680,10 +2665,6 @@ _, EXTRA_NUMERIC_USER_IDS = _build_authorized_identities(EXTRA_AUTHORIZED_USER_I
 AUTHORIZED_USER_IDS.update(EXTRA_NUMERIC_USER_IDS)
 
 
-def _normalize_app_runtime_mode(mode):
-    return app_runtime_mode.normalize_app_runtime_mode(mode)
-
-
 def _load_app_runtime_mode():
     return app_runtime_mode.load_app_runtime_mode(
         APP_RUNTIME_MODE_FILE,
@@ -2713,6 +2694,8 @@ def _app_mode_telegram_enabled(mode=None):
 
 
 def _schedule_app_service_restart():
+    import shlex
+
     global app_service_restart_scheduled
     with app_service_restart_lock:
         if app_service_restart_scheduled:
@@ -2793,7 +2776,7 @@ SOCIALNET_EXCLUDED_ENTRIES = set()
 
 def _service_list_alias_map():
     aliases = {}
-    for key, source in SERVICE_LIST_SOURCES.items():
+    for key, source in _service_catalog().SERVICE_LIST_SOURCES.items():
         aliases[key] = key
         aliases[source.get('label', key).lower()] = key
         for alias in source.get('aliases', []):
@@ -3041,14 +3024,6 @@ def _load_subscription_state():
         return _subscription_runtime().normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
 
 
-def _save_subscription_state(state):
-    if not SUBSCRIPTION_STATE_PATH:
-        return
-    payload = _subscription_runtime().serialize_subscription_state(state)
-    with subscription_state_lock:
-        _write_json_file(SUBSCRIPTION_STATE_PATH, payload)
-
-
 def _subscription_public_settings():
     return _subscription_runtime().subscription_public_settings(_load_subscription_state())
 
@@ -3139,15 +3114,15 @@ def _route_list_contains_catalog(proto, catalog_entries):
 
 
 def _route_list_contains_youtube(proto):
-    return _route_list_contains_catalog(proto, YOUTUBE_UNBLOCK_ENTRIES)
+    return _route_list_contains_catalog(proto, _service_catalog().YOUTUBE_UNBLOCK_ENTRIES)
 
 
 def _route_list_contains_telegram(proto):
-    return _route_list_contains_catalog(proto, TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES)
+    return _route_list_contains_catalog(proto, _service_catalog().TELEGRAM_CALL_SIGNAL_ROUTE_ENTRIES)
 
 
 def _route_list_contains_realtime_call(proto):
-    return _route_list_contains_catalog(proto, REALTIME_CALL_SIGNAL_ROUTE_ENTRIES)
+    return _route_list_contains_catalog(proto, _service_catalog().REALTIME_CALL_SIGNAL_ROUTE_ENTRIES)
 
 
 def _telegram_call_learning_route_signature():
@@ -3846,7 +3821,7 @@ def _sync_udp_policy_config():
         'trojan': _route_list_contains_realtime_call('trojan'),
     }
     call_signal_routes_payload = ''.join(
-        f'{entry}\n' for entry in REALTIME_CALL_SIGNAL_ROUTE_ENTRIES
+        f'{entry}\n' for entry in _service_catalog().REALTIME_CALL_SIGNAL_ROUTE_ENTRIES
     )
     payload = (
         '# Generated by bypass_keenetic. Edit bot_config.py values instead.\n'
@@ -3912,7 +3887,7 @@ def _route_domain_matches(domain, candidate):
 
 
 def _udp_quic_policy_matches(domain):
-    return any(_route_domain_matches(domain, policy) for policy in UDP_QUIC_ROUTE_ENTRIES)
+    return any(_route_domain_matches(domain, policy) for policy in _service_catalog().UDP_QUIC_ROUTE_ENTRIES)
 
 
 def _resolve_domain_ipv4_addresses(domain, external_dns=True):
@@ -5055,10 +5030,6 @@ def _youtube_protocol_conntrack_ports(proto):
     return ports
 
 
-def _youtube_vless2_conntrack_ports():
-    return _youtube_protocol_conntrack_ports('vless2')
-
-
 def _conntrack_packets_bytes(line):
     packets = 0
     bytes_count = 0
@@ -5202,10 +5173,6 @@ def _youtube_active_connection_count(proto):
     return active
 
 
-def _youtube_vless2_active_connection_count():
-    return _youtube_active_connection_count('vless2')
-
-
 def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None):
     if not YOUTUBE_STREAM_GUARD_ENABLED:
         return False
@@ -5267,10 +5234,6 @@ def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None)
                         },
                     )
     return guarded
-
-
-def _youtube_vless2_stream_guard_active(reason='', log=False, hold_seconds=None):
-    return _youtube_stream_guard_active('vless2', reason=reason, log=log, hold_seconds=hold_seconds)
 
 
 def _vless_traffic_guard_active(reason='', log=False, hold_seconds=None, exclude_proto=None):
@@ -5474,6 +5437,8 @@ def _load_malloc_trim():
         return memory_malloc_trim_libc
     memory_malloc_trim_available = False
     memory_malloc_trim_libc = None
+    import ctypes
+
     for libc_name in (None, 'libc.so.6', 'libc.so'):
         try:
             libc = ctypes.CDLL(libc_name) if libc_name else ctypes.CDLL(None)
@@ -5534,32 +5499,42 @@ def _malloc_trim(reason='', force=False, rss_kb=None):
 
 
 def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
-    rss_before = _process_rss_kb()
-    should_collect = bool(force or clear_status)
-    if not should_collect and MEMORY_CLEANUP_RSS_KB > 0 and rss_before >= MEMORY_CLEANUP_RSS_KB:
-        should_collect = True
-    if not should_collect and MEMORY_WATCHDOG_RSS_SOFT_KB > 0 and rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB:
-        should_collect = True
+    global memory_cleanup_last_at
+    rss_before = int(_process_rss_kb() or 0)
+    if clear_status:
+        _clear_runtime_memory_caches(clear_status=True, clear_pool_summary=True)
+    thresholds = [
+        value for value in (
+            int(MEMORY_CLEANUP_RSS_KB or 0),
+            int(MEMORY_WATCHDOG_RSS_SOFT_KB or 0),
+            int(MEMORY_MALLOC_TRIM_MIN_RSS_KB or 0),
+        )
+        if value > 0
+    ]
+    cleanup_threshold = min(thresholds) if thresholds else 0
+    should_collect = cleanup_threshold <= 0 or rss_before >= cleanup_threshold
+    no_cleanup = {
+        'rss_before_kb': rss_before,
+        'rss_after_kb': rss_before,
+        'collected': 0,
+        'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
+    }
     if not should_collect:
-        return {
-            'rss_before_kb': rss_before,
-            'rss_after_kb': rss_before,
-            'collected': 0,
-            'malloc_trim': {'attempted': False, 'ok': False, 'result': None, 'available': None},
-        }
-    _clear_runtime_memory_caches(
-        clear_status=bool(clear_status),
-        clear_pool_summary=bool(clear_status),
-    )
-    collected = gc.collect()
-    malloc_trim_info = {'attempted': False, 'ok': False, 'result': None, 'available': None}
-    if MEMORY_MALLOC_TRIM_MIN_RSS_KB <= 0 or rss_before >= MEMORY_MALLOC_TRIM_MIN_RSS_KB:
+        return no_cleanup
+    now = time.time()
+    with memory_cleanup_lock:
+        if memory_cleanup_last_at and now - memory_cleanup_last_at < MEMORY_MALLOC_TRIM_COOLDOWN_SECONDS:
+            return no_cleanup
+        memory_cleanup_last_at = now
+        if not clear_status:
+            _clear_runtime_memory_caches(clear_status=False, clear_pool_summary=False)
+        collected = gc.collect()
         malloc_trim_info = _malloc_trim(
             reason or 'memory cleanup',
-            force=bool(force or clear_status),
+            force=False,
             rss_kb=rss_before,
         )
-    rss_after = _process_rss_kb()
+        rss_after = int(_process_rss_kb() or 0)
     if should_collect or force or clear_status:
         _record_memory_timeline(
             reason or 'memory cleanup',
@@ -5575,7 +5550,7 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
             },
             force=True,
         )
-    if log and reason and should_collect and (force or rss_before >= MEMORY_WATCHDOG_RSS_SOFT_KB):
+    if log and reason and should_collect:
         _write_runtime_log(
             f'Memory cleanup ({reason}): rss {rss_before} -> {rss_after} KB, '
             f'gc={collected}, malloc_trim={malloc_trim_info.get("result")}'
@@ -6101,15 +6076,15 @@ def _resolve_socialnet_service(value):
 def _socialnet_service_label(service_key):
     if service_key == SOCIALNET_ALL_KEY:
         return 'Все сервисы'
-    return SERVICE_LIST_SOURCES.get(service_key, {}).get('label', service_key)
+    return _service_catalog().SERVICE_LIST_SOURCES.get(service_key, {}).get('label', service_key)
 
 
 def _load_service_entries(service_key):
-    source = SERVICE_LIST_SOURCES.get(service_key)
+    source = _service_catalog().SERVICE_LIST_SOURCES.get(service_key)
     if not source:
         raise ValueError('Неизвестный сервис')
     if source.get('entries'):
-        return _socialnet_entries_from_text('\n'.join(service_route_entries(service_key)))
+        return _socialnet_entries_from_text('\n'.join(_service_catalog().service_route_entries(service_key)))
     raw_text = _fetch_remote_text(source['url'], timeout=25)
     entries = _parse_service_domains(raw_text)
     if not entries:
@@ -6200,9 +6175,9 @@ def _custom_check_route_entries(custom_checks=None):
     values = []
     for check in checks:
         check_id = check.get('id')
-        source = SERVICE_LIST_SOURCES.get(check_id) or {}
+        source = _service_catalog().SERVICE_LIST_SOURCES.get(check_id) or {}
         if source.get('entries'):
-            values.extend(service_route_entries(check_id))
+            values.extend(_service_catalog().service_route_entries(check_id))
         else:
             values.extend(preset_routes.get(check_id, []))
             values.extend(check.get('routes') or [])
@@ -6355,7 +6330,7 @@ def _handle_unblock_list_state(message, level, bypass, set_menu_state, reply_mar
 
 
 def _service_list_markup():
-    labels = [source['label'] for source in SERVICE_LIST_SOURCES.values()]
+    labels = [source['label'] for source in _service_catalog().SERVICE_LIST_SOURCES.values()]
     rows = [tuple(labels[index:index + 2]) for index in range(0, len(labels), 2)]
     return _reply_keyboard(*rows, ("🔙 Назад",))
 
@@ -6401,7 +6376,7 @@ def _append_entries_to_unblock_list(list_name, entries):
 def _handle_getlist_request(message, service_name, route_name=None, reply_markup=None):
     service_key = _resolve_service_list_name(service_name)
     if not service_key:
-        names = ', '.join(source['label'] for source in SERVICE_LIST_SOURCES.values())
+        names = ', '.join(source['label'] for source in _service_catalog().SERVICE_LIST_SOURCES.values())
         bot.send_message(message.chat.id, f'⚠️ Не знаю такой сервис. Доступно: {names}', reply_markup=reply_markup)
         return
 
@@ -6419,11 +6394,11 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
         bot.send_message(message.chat.id, '⚠️ Некорректное имя маршрута.', reply_markup=reply_markup)
         return
 
-    source = SERVICE_LIST_SOURCES[service_key]
+    source = _service_catalog().SERVICE_LIST_SOURCES[service_key]
     requests = _requests_module()
     try:
         if source.get('entries'):
-            entries = service_route_entries(service_key)
+            entries = _service_catalog().service_route_entries(service_key)
         else:
             raw_text = _fetch_remote_text(source['url'], timeout=25)
             entries = _parse_service_domains(raw_text)
@@ -6485,7 +6460,7 @@ def _handle_private_stateless_command(message, main, service):
     if command == '/getlist':
         parts = message.text.split()
         if len(parts) < 2:
-            names = ', '.join(source['label'] for source in SERVICE_LIST_SOURCES.values())
+            names = ', '.join(source['label'] for source in _service_catalog().SERVICE_LIST_SOURCES.values())
             bot.send_message(message.chat.id, f'Использование: /getlist название [маршрут]\nДоступно: {names}', reply_markup=main)
             return True
         route_name = parts[2] if len(parts) > 2 else None
@@ -7279,17 +7254,7 @@ def _read_text_file(file_path):
 
 
 def _current_bot_version():
-    source_text = _read_text_file(BOT_SOURCE_PATH)
-    match = re.search(r'^#\s*ВЕРСИЯ СКРИПТА\s+(.+?)\s*$', source_text, flags=re.MULTILINE)
-    if match:
-        return match.group(1).strip()
-    match = re.search(r'Версия\s+(v?[0-9][0-9.]*)', source_text)
-    if match:
-        return match.group(1).strip()
-    for line in source_text.splitlines():
-        if line.startswith('# ВЕРСИЯ СКРИПТА'):
-            return line.replace('# ВЕРСИЯ СКРИПТА', '').strip()
-    return 'неизвестна'
+    return APP_VERSION_LABEL
 
 
 def _save_unblock_list(list_name, text):
@@ -7316,16 +7281,8 @@ def _route_tools_runtime():
     return _web_route_tools_runtime
 
 
-def _service_route_items():
-    return _route_tools_runtime().service_items()
-
-
 def _service_route_summary():
     return _route_tools_runtime().summary()
-
-
-def _standalone_custom_checks(custom_checks):
-    return _route_tools_runtime().standalone_custom_checks(custom_checks)
 
 
 def _standalone_custom_checks_light(custom_checks):
@@ -7449,7 +7406,7 @@ def _web_service_routes_worker_payload():
     return payload
 
 
-def _web_service_routes_payload():
+def _build_web_service_routes_payload():
     worker_payload = _web_service_routes_worker_payload()
     if worker_payload is not None:
         return worker_payload
@@ -7462,6 +7419,35 @@ def _web_service_routes_payload():
             include_runtime_intersections=False,
         ),
     }
+
+
+def _web_service_routes_payload():
+    signature = _web_service_routes_cache_signature()
+    now = time.monotonic()
+    with web_service_routes_cache_lock:
+        cached_payload = web_service_routes_cache.get('payload')
+        if (
+            cached_payload is not None and
+            web_service_routes_cache.get('signature') == signature and
+            now - float(web_service_routes_cache.get('timestamp') or 0.0) < WEB_SERVICE_ROUTES_CACHE_TTL_SECONDS
+        ):
+            return dict(cached_payload)
+    with web_service_routes_build_lock:
+        now = time.monotonic()
+        with web_service_routes_cache_lock:
+            cached_payload = web_service_routes_cache.get('payload')
+            if (
+                cached_payload is not None and
+                web_service_routes_cache.get('signature') == signature and
+                now - float(web_service_routes_cache.get('timestamp') or 0.0) < WEB_SERVICE_ROUTES_CACHE_TTL_SECONDS
+            ):
+                return dict(cached_payload)
+        payload = _build_web_service_routes_payload()
+        with web_service_routes_cache_lock:
+            web_service_routes_cache['timestamp'] = now
+            web_service_routes_cache['signature'] = signature
+            web_service_routes_cache['payload'] = dict(payload)
+        return payload
 
 
 def _append_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
@@ -7482,6 +7468,22 @@ def _load_unblock_lists(with_content=True):
         read_text_file=_read_text_file,
         include_vpn=False,
     )
+
+
+def _web_unblock_list_payload(list_name):
+    safe_base = _normalize_unblock_route_name(list_name)
+    safe_name = f'{safe_base}.txt'
+    visible = {entry.get('name'): entry for entry in _load_unblock_lists(with_content=False)}
+    if safe_name not in visible:
+        raise ValueError('Список недоступен для редактирования')
+    content = _read_text_file(_unblock_list_path(safe_base)).strip()
+    return {
+        'ok': True,
+        'name': safe_name,
+        'label': visible[safe_name].get('label', safe_name),
+        'content': content,
+        'line_count': len([line for line in content.splitlines() if line.strip()]),
+    }
 
 
 def _telegram_unblock_list_options():
@@ -7579,6 +7581,14 @@ def _file_cache_signature(path):
         return (stat_info.st_mtime_ns, stat_info.st_size)
     except Exception:
         return None
+
+
+def _web_service_routes_cache_signature():
+    route_names = ('vless', 'vless-2', 'vmess', 'trojan', 'shadowsocks')
+    return (
+        tuple((name, _file_cache_signature(_unblock_list_path(name))) for name in route_names),
+        _file_cache_signature(_CUSTOM_CHECKS_PATH),
+    )
 
 
 def _pool_summary_cache_signature(current_keys, route_states=None):
@@ -7706,9 +7716,9 @@ def _router_health_snapshot(compact=False, sample_cpu=True, force_refresh=False,
     payload = router_health.snapshot(
         _get_pool_probe_progress,
         compact=compact,
-        sample_cpu=sample_cpu,
+        sample_cpu=False,
         force_refresh=force_refresh,
-        prime_cpu=prime_cpu,
+        prime_cpu=False,
     )
     payload['memory_timeline_enabled'] = bool(MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH)
     payload['memory_timeline_path'] = MEMORY_TIMELINE_PATH if MEMORY_TIMELINE_ENABLED else ''
@@ -7906,17 +7916,6 @@ def _check_custom_target_through_proxy(proxy_url, url, connect_timeout=2, read_t
         url,
         connect_timeout=connect_timeout,
         read_timeout=read_timeout,
-    )
-
-
-def _probe_custom_targets(proxy_url, custom_checks=None, connect_timeout=2, read_timeout=3):
-    return _status_probe_custom_targets(
-        proxy_url,
-        custom_checks if custom_checks is not None else _load_custom_checks(),
-        _check_custom_target_through_proxy,
-        connect_timeout=connect_timeout,
-        read_timeout=read_timeout,
-        max_targets=2,
     )
 
 
@@ -8455,24 +8454,6 @@ def _run_web_command_worker(command):
             extra={'command': str(command or '')},
             force=True,
         )
-
-
-def _start_web_command_legacy(command):
-    return _start_command_state(
-        web_command_lock,
-        web_command_state,
-        command,
-        _web_command_label,
-        _execute_web_command,
-        update_commands=WEB_UPDATE_COMMANDS,
-        initial_progress_label='Подготовка запуска обновления',
-        already_running_message=lambda current_label: (
-            f'⏳ Уже выполняется команда: {current_label}. Дождитесь завершения текущего запуска.'
-        ),
-        started_message=lambda label: (
-            f'⏳ Команда "{label}" запущена. Статус обновится без перезагрузки страницы'
-        ),
-    )
 
 
 def _start_web_command(command):
@@ -9517,14 +9498,6 @@ def _proxy_config_snapshot_paths():
     return _store_proxy_config_snapshot_paths(CORE_PROXY_CONFIG_PATH, VMESS_KEY_PATH, VLESS_KEY_PATH, VLESS2_KEY_PATH)
 
 
-def _snapshot_proxy_config_files():
-    return _store_snapshot_proxy_config_files(_proxy_config_snapshot_paths(), logger=_write_runtime_log)
-
-
-def _restore_proxy_config_files(snapshot):
-    _store_restore_proxy_config_files(snapshot, logger=_write_runtime_log)
-
-
 def _restart_proxy_services_for_protocols(protocols):
     commands = []
     if 'shadowsocks' in protocols:
@@ -9587,12 +9560,6 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         measure_download=_measure_limited_pool_probe_quality_download if POOL_PROBE_QUALITY_ENABLED else None,
         quality_settings=_pool_probe_quality_settings(),
     )
-
-
-def _probe_state_text(value, *, optional=False):
-    if value is None:
-        return 'не требуется' if optional else 'не определён'
-    return 'работает' if bool(value) else 'не работает'
 
 
 def _schedule_applied_pool_key_probe(proto, key_value):
@@ -11062,7 +11029,7 @@ def _run_subscription_auto_refresh_cycle():
 
 
 def _background_maintenance_tasks():
-    tasks = []
+    tasks = [('router CPU sample', 5.0, 0.0, router_health.sample_cpu)]
     if MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH:
         _record_memory_timeline('startup', marker='startup', force=True)
         tasks.append(('memory timeline', MEMORY_TIMELINE_INTERVAL_SECONDS, MEMORY_TIMELINE_INTERVAL_SECONDS, _run_memory_timeline_cycle))
@@ -11609,11 +11576,6 @@ def _active_mode_status_snapshot_from_base(
         'web': _build_web_status(current_keys, protocols=protocols),
         'protocols': protocols,
     }
-
-
-def _web_status_snapshot(force_refresh=False):
-    current_keys = _load_current_keys()
-    return _build_status_snapshot(current_keys, force_refresh=force_refresh)['web']
 
 
 def _cached_status_snapshot(current_keys):
@@ -12183,6 +12145,7 @@ def _web_get_context(handler):
         'router_metrics_snapshot': _router_metrics_snapshot,
         'route_intersections_snapshot': _route_intersections_snapshot,
         'service_routes_payload': _web_service_routes_payload,
+        'unblock_list_payload': _web_unblock_list_payload,
         'telegram_call_learning_snapshot': _telegram_call_learning_snapshot,
         'router_health_snapshot': _router_health_snapshot,
         'bot_ready': lambda: bool(bot_ready),
@@ -12258,38 +12221,6 @@ def _web_protocol_check_html(protocol, current_keys, protocol_statuses, csrf_inp
     )
 
 
-def _web_light_pool_summary(current_keys, key_pools, key_probe_cache=None, custom_checks=None):
-    if key_probe_cache is None:
-        worker_payload = _web_pool_snapshot_worker_payload(
-            protocols=None,
-            include_summary=True,
-            include_custom_checks=False,
-            include_pools=False,
-        )
-        if isinstance(worker_payload, dict) and isinstance(worker_payload.get('pool_summary'), dict):
-            return _pool_summary_with_persisted_fallback(worker_payload['pool_summary'])
-        if not WEB_POOL_SNAPSHOT_WORKER_ENABLED:
-            return _pool_summary_with_persisted_fallback(
-                _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
-            )
-        try:
-            probe_cache_snapshot = _load_key_probe_cache()
-        except Exception as exc:
-            _write_runtime_log(f'Failed to load light pool summary cache: {type(exc).__name__}')
-            probe_cache_snapshot = {}
-        return _pool_summary_with_persisted_fallback(
-            _light_pool_status_summary(current_keys, key_pools, probe_cache_snapshot, custom_checks)
-        )
-    return _pool_summary_with_persisted_fallback(_key_pool_web().pool_status_summary(
-        current_keys,
-        key_pools,
-        key_probe_cache or {},
-        custom_checks or [],
-        _hash_key,
-        route_states=None,
-    ))
-
-
 def _web_custom_checks_light(custom_checks):
     return [
         {
@@ -12308,6 +12239,7 @@ def _web_custom_checks_light(custom_checks):
 
 def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
     key_pools = _ensure_current_keys_in_pools(current_keys)
+    pool_counts = {proto: [None] * len(key_pools.get(proto, []) or []) for proto in POOL_PROTOCOL_ORDER}
     subscription_settings = _subscription_public_settings()
     # Initial pool rows are hydrated by /api/pools; avoid rendering full probe details twice.
     custom_checks = _load_custom_checks()
@@ -12316,7 +12248,7 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         current_keys,
         protocol_statuses,
         csrf_input_html,
-        key_pools=key_pools,
+        key_pools=pool_counts,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
         subscription_settings=subscription_settings,
@@ -12325,7 +12257,9 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         enable_custom_checks=True,
         pool_probe_pending=pool_probe_pending,
     )
-    pool_summary = _web_light_pool_summary(current_keys, key_pools, None, custom_checks)
+    pool_summary = _pool_summary_with_persisted_fallback(
+        _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
+    )
     return {
         'custom_checks_json': json.dumps(_web_custom_checks_light(custom_checks), ensure_ascii=False),
         'pool_summary': pool_summary,
@@ -12465,7 +12399,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             current_pool_probe_progress = {}
             pool_probe_pending = False
         status, protocol_statuses = _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime_mode)
-        unblock_lists = _load_unblock_lists()
+        unblock_lists = _load_unblock_lists(with_content=False)
         status_refresh_pending = web_form_blocks.status_refresh_pending(status, protocol_statuses, pool_probe_pending)
         router_health = _router_health_snapshot(compact=True, sample_cpu=False)
 
@@ -12843,7 +12777,7 @@ def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service='telegr
         error_log_path=temp_log_path,
         access_log_path='/dev/null',
         loglevel='warning',
-        connectivity_check_domains=CONNECTIVITY_CHECK_DOMAINS,
+        connectivity_check_domains=_service_catalog().CONNECTIVITY_CHECK_DOMAINS,
         include_vmess_transparent=True,
         include_tproxy_inbounds=False,
     )
@@ -13016,7 +12950,7 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
         error_log_path=CORE_PROXY_ERROR_LOG,
         access_log_path='/dev/null',
         loglevel='warning',
-        connectivity_check_domains=CONNECTIVITY_CHECK_DOMAINS,
+        connectivity_check_domains=_service_catalog().CONNECTIVITY_CHECK_DOMAINS,
         include_vmess_transparent=True,
     )
 
@@ -13189,7 +13123,8 @@ def main():
     telegram_enabled = _app_mode_telegram_enabled(runtime_mode)
     _write_runtime_log(f'app runtime mode: {runtime_mode}')
     _cleanup_pool_probe_runtime_light(kill_processes=True)
-    _sync_udp_policy_config()
+    if not (os.path.isfile(UDP_POLICY_CONFIG_PATH) and os.path.isfile(CALL_SIGNAL_ROUTES_PATH)):
+        _sync_udp_policy_config()
     if pool_enabled:
         _start_youtube_edge_prefetch_thread()
         _start_telegram_call_learning_auto_thread()

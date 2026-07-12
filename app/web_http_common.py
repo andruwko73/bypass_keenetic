@@ -296,7 +296,10 @@ class WebRequestMixin:
             self.send_header(name, value)
         self.send_header('Content-Length', str(len(body)))
         if cache_seconds:
-            self.send_header('Cache-Control', f'public, max-age={int(cache_seconds)}')
+            cache_control = f'public, max-age={int(cache_seconds)}'
+            if int(cache_seconds) >= 31536000:
+                cache_control += ', immutable'
+            self.send_header('Cache-Control', cache_control)
         else:
             self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
             self.send_header('Pragma', 'no-cache')

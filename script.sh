@@ -689,7 +689,7 @@ BOT_RUNTIME_DIR="$BOT_RUNTIME_DIR"
 BOT_SERVICE_PATH="$BOT_SERVICE_PATH"
 INSTALLER_MAIN_PATH="$INSTALLER_MAIN_PATH"
 INSTALLER_SERVICE_PATH="$INSTALLER_SERVICE_PATH"
-ROLLBACK_MODULES="$BOT_RUNTIME_MODULES"
+ROLLBACK_MODULES="$BOT_RUNTIME_MODULES CHANGELOG.md"
 
 restore_file() {
   source_path="\$BACKUP_DIR/\$1"
@@ -816,7 +816,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md CHANGELOG.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -1589,6 +1589,7 @@ PY
     echo "Установлено добавление задачи в cron для периодического обновления содержимого множества"
     mkdir -p "$BOT_RUNTIME_DIR"
     install_runtime_modules $BOT_RUNTIME_MODULES
+    rm -f "$BOT_RUNTIME_DIR/CHANGELOG.md" 2>/dev/null || true
     install_static_assets || exit 1
     rm -f "$BOT_RUNTIME_DIR/web_asset_builder.py" "$BOT_RUNTIME_DIR/web_template_styles.py" "$BOT_RUNTIME_DIR/web_template_scripts.py"
     ensure_runtime_legacy_paths
@@ -1779,6 +1780,7 @@ if [ "$1" = "-update" ]; then
     mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"
     chmod 755 "$BOT_MAIN_PATH"
     activate_runtime_modules $BOT_RUNTIME_MODULES
+    rm -f "$BOT_RUNTIME_DIR/CHANGELOG.md" 2>/dev/null || true
     restore_runtime_state_files_after_update
     ensure_runtime_legacy_paths
     migrate_runtime_config_defaults

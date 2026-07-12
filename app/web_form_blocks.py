@@ -346,7 +346,8 @@ def render_event_history_html(events, *, time_formatter=None):
         </section>'''
     if time_formatter is None:
         import time
-        time_formatter = lambda ts: time.strftime('%d.%m %H:%M', time.localtime(float(ts or 0)))
+        def time_formatter(ts):
+            return time.strftime('%d.%m %H:%M', time.localtime(float(ts or 0)))
     rows = []
     for event in events[:50]:
         try:
@@ -632,10 +633,13 @@ def render_unblock_lists(
         name = entry.get('name', '')
         label = entry.get('label', '')
         content = entry.get('content', '')
+        content_loaded = 'content' in entry
         safe_name = html.escape(name)
         safe_label = html.escape(label)
         safe_content = html.escape(content)
         active_class = ' active' if list_index == 0 else ''
+        loaded_attr = '1' if content_loaded else '0'
+        disabled_attr = '' if content_loaded else ' disabled'
         social_service_buttons = ''.join(
             service_button(
                 key,
@@ -649,26 +653,27 @@ def render_unblock_lists(
         )
         tabs.append(f'''<button type="button" class="seg-tab list-tab{active_class}" data-list-target="{safe_name}">{safe_label}</button>''')
         if show_line_count:
-            line_count = len([line for line in content.splitlines() if line.strip()])
+            line_count = len([line for line in content.splitlines() if line.strip()]) if content_loaded else '—'
             header_html = f'''<div>
                 <h2 class="inline-page-title"><span class="title-kicker">Список обхода</span><span>{safe_label}</span></h2>
-                <p class="section-subtitle">Записей: {line_count}; файл: <span class="file-chip">{safe_name}</span></p>
+                <p class="section-subtitle">Записей: <span data-list-line-count>{line_count}</span>; файл: <span class="file-chip">{safe_name}</span></p>
             </div>'''
         else:
             header_html = f'''<div>
                 <h2 class="inline-page-title"><span class="title-kicker">Список обхода</span><span>{safe_label}</span></h2>
             </div>
             <span class="file-chip">{safe_name}</span>'''
-        panels.append(f'''<section class="list-workspace{active_class}" data-list-panel="{safe_name}">
+        panels.append(f'''<section class="list-workspace{active_class}" data-list-panel="{safe_name}" data-list-loaded="{loaded_attr}">
         <div class="workspace-head">
             {header_html}
         </div>
         <form method="post" action="/save_unblock_list"{form_async_attr} class="list-editor-form">
             {csrf_input_html}
             <input type="hidden" name="list_name" value="{safe_name}">
-            <textarea name="content" rows="{int(textarea_rows)}" placeholder="example.org&#10;api.telegram.org">{safe_content}</textarea>
+            <textarea name="content" rows="{int(textarea_rows)}" placeholder="example.org&#10;api.telegram.org"{disabled_attr}>{safe_content}</textarea>
+            <p class="status-note{' hidden' if content_loaded else ''}" data-list-load-state>Загрузка списка...</p>
             <div class="form-actions">
-                <button type="submit">Сохранить список</button>
+                <button type="submit" data-list-save{disabled_attr}>Сохранить список</button>
             </div>
             <div class="social-list-actions">
                 <span class="social-list-title">{social_title}</span>

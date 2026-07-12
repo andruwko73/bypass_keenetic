@@ -26,7 +26,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md CHANGELOG.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -624,6 +624,7 @@ backup_path "$BOT_DIR/installer_common.py"
 for module in $BOT_RUNTIME_MODULES; do
     backup_path "$BOT_DIR/$module"
 done
+backup_path "$BOT_DIR/CHANGELOG.md"
 backup_path "/opt/etc/web_bot.py"
 backup_path "$LEGACY_MAIN_PATH"
 backup_path "$SERVICE_PATH"
@@ -718,6 +719,7 @@ cp "$TMP_DIR/S99telegram_bot" "$SERVICE_PATH"
 cp "$TMP_DIR/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
 download_static_assets
 rm -f "$BOT_DIR/web_asset_builder.py" "$BOT_DIR/web_template_styles.py" "$BOT_DIR/web_template_scripts.py"
+rm -f "$BOT_DIR/CHANGELOG.md"
 
 chmod 755 "$TMP_DIR/script.sh" "$BOT_MAIN_PATH" "$INSTALLER_PATH" "$SERVICE_PATH" "$INSTALLER_SERVICE_PATH"
 chmod 644 "$BOT_DIR/app_version.py" "$BOT_DIR/app_runtime_mode.py" "$BOT_DIR/key_pool_store.py" "$BOT_DIR/key_pool_web.py" "$BOT_DIR/router_health_runtime.py" "$BOT_DIR/router_metrics.py" "$BOT_DIR/telegram_call_learning.py" "$BOT_DIR/telegram_pool_ui.py" "$BOT_DIR/pool_probe_runner.py" "$BOT_DIR/service_catalog.py" "$BOT_DIR/probe_cache.py" "$BOT_DIR/custom_checks_store.py" "$BOT_DIR/web_form_template.py" "$BOT_DIR/web_form_blocks.py" "$BOT_DIR/web_pool_form_blocks.py" "$BOT_DIR/web_http_common.py" "$BOT_DIR/web_get_actions.py" "$BOT_DIR/web_post_actions.py" "$BOT_DIR/web_command_state.py" "$BOT_DIR/web_commands_runtime.py" "$BOT_DIR/unblock_lists.py" "$BOT_DIR/proxy_key_store.py" "$BOT_DIR/proxy_protocols.py" "$BOT_DIR/proxy_config_builder.py" "$BOT_DIR/proxy_status.py" "$BOT_DIR/installer_common.py"

@@ -9,6 +9,16 @@ from youtube_healthcheck import (
     check_youtube_through_proxy,
 )
 
+__all__ = (
+    'YOUTUBE_HEALTHCHECK_MIN_OK',
+    'YOUTUBE_HEALTHCHECK_REQUIRED_URLS',
+    'YOUTUBE_HEALTHCHECK_URLS',
+    'YOUTUBE_SHORT_URL',
+    'check_youtube_health',
+    'apply_installed_proxy_runtime',
+    'proxy_apply_settings',
+)
+
 
 def check_youtube_health(
     check_http,

@@ -941,15 +941,17 @@ def test_router_health_runtime_primes_cpu_baseline_without_page_render_sample():
             cpu_smoothing_factor=1.0,
         )
         page_render = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, sample_cpu=False, prime_cpu=True)
+        runtime.sample_cpu()
         now[0] += 5
-        first_api = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, force_refresh=True)
+        first_api = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, sample_cpu=False, force_refresh=True)
+        runtime.sample_cpu()
         now[0] += 5
-        second_api = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, force_refresh=True)
+        second_api = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, sample_cpu=False, force_refresh=True)
     finally:
         for name, value in original.items():
             setattr(router_health_runtime, name, value)
 
-    assert calls['cpu'] == 3
+    assert calls['cpu'] == 2
     assert page_render['cpu_percent'] is None
     assert first_api['cpu_percent'] is None
     assert second_api['cpu_percent'] == 20.0
@@ -1857,7 +1859,7 @@ def test_youtube_healthcheck_tolerates_multiple_transient_bootstrap_failures():
     assert metrics['yt_error_rate'] >= 0.3
 
 
-def test_youtube_healthcheck_warns_on_partial_googlevideo_success():
+def test_youtube_healthcheck_rejects_failed_googlevideo_media_endpoint():
     calls_by_url = {}
 
     def check_http(_proxy_url, *, url, connect_timeout, read_timeout):
@@ -1874,10 +1876,10 @@ def test_youtube_healthcheck_warns_on_partial_googlevideo_success():
         metrics=metrics,
     )
 
-    assert ok is True
-    assert 'soft diagnostic issue' in message
-    assert metrics['googlevideo_ok'] is True
-    assert metrics['yt_stability'] == 'stable'
+    assert ok is False
+    assert 'redirector.googlevideo.com' in message
+    assert metrics['googlevideo_ok'] is False
+    assert metrics['yt_stability'] == 'fail'
     assert metrics['yt_error_rate'] > 0
 
 
@@ -2303,6 +2305,7 @@ def test_codex_version_matches_commit_count():
     example = (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert app_version.APP_VERSION_COUNTER == expected
     assert version_md.startswith(f'*v{expected} ')
+    assert version_md.count('*v') == 1
     assert changelog.startswith(f'<a name="{expected}"></a>\n# [{expected}] - ')
     assert 'v{APP_VERSION_COUNTER}' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in installer
@@ -3546,7 +3549,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
         "if not _background_task_allowed('status refresh', task_class='light' if active_only else 'normal'):"
     )
     assert 'def _recent_event_history_match' in source
-    stream_guard_block = source.split('def _youtube_stream_guard_active', 1)[1].split('def _youtube_vless2_stream_guard_active', 1)[0]
+    stream_guard_block = source.split('def _youtube_stream_guard_active', 1)[1].split('def _vless_traffic_guard_active', 1)[0]
     assert "_recent_event_history_match(\n                    'stream_guard_defer'" in stream_guard_block
     assert "_memory_cleanup('telegram polling error', force=True, clear_status=False)" in source
     assert 'def _malloc_trim' in source
@@ -3803,7 +3806,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'if cached is not None and not _status_snapshot_has_custom_services(cached):' in source
     assert "_active_mode_status_snapshot_from_base(\n            current_keys,\n            _placeholder_status_snapshot(current_keys, include_pool_details=True)," in source
     assert 'if not pool_enabled:\n            status_refresh_pending = False' not in source
-    assert 'def _web_light_pool_summary(current_keys, key_pools, key_probe_cache=None, custom_checks=None)' in source
+    assert 'def _web_light_pool_summary' not in source
     assert 'def _light_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks=None)' in source
     assert 'def _minimal_pool_summary' not in source
     pool_form_context = source.split('def _web_pool_form_context', 1)[1].split('def _web_simple_form_context', 1)[0]
@@ -3811,14 +3814,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'render_light_protocol_tabs_and_panels' in pool_form_context
     assert '_key_pool_web()' not in pool_form_context
     assert '_web_pool_form_blocks()' not in pool_form_context
-    assert '_web_light_pool_summary(current_keys, key_pools, None, custom_checks)' in pool_form_context
+    assert '_light_pool_status_summary(current_keys, key_pools, {}, custom_checks)' in pool_form_context
     assert '_service_route_summary()' not in pool_form_context
-    assert '_pool_status_summary(' not in pool_form_context
     assert '_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)' not in pool_form_context
-    light_summary_context = source.split('def _web_light_pool_summary', 1)[1].split('def _web_custom_checks_light', 1)[0]
-    assert '_load_key_probe_cache()' in light_summary_context
-    assert '_light_pool_status_summary(current_keys, key_pools, probe_cache_snapshot, custom_checks)' in light_summary_context
-    assert '_minimal_pool_summary' not in light_summary_context
     assert "'refresh_status_caches_async': refresh_status_caches" in source
     assert "event_history_html=''" in source
     assert "allow_youtube_confirm=True" in source
@@ -3901,10 +3899,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "state['last_event'] = now" in source
     assert source.find("last_event = float(state.get('last_event') or 0.0)") < source.find("_conntrack_route_diagnostic(proto)")
     assert "YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS" in source
-    runtime_release_block = source.split('def _release_runtime_pressure_modules', 1)[1].split('\n\ndef render_web_form', 1)[0]
-    assert 'sys.modules.pop(module_name, None)' not in runtime_release_block
-    assert 'Runtime modules contain executable code, not bounded request data' in runtime_release_block
-    assert 'return []' in runtime_release_block
+    assert 'def _release_runtime_pressure_modules' not in source
     assert 'def _key_pool_store()' in source
     assert '\nimport key_pool_store\n' not in source
     assert "service_route_intersections_cache_ttl', 60.0" in source
@@ -3920,7 +3915,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "web_response_cleanup_rss_kb" not in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "web_response_light_cleanup_rss_kb" not in (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8')
     assert "MEMORY_CLEANUP_RSS_KB" in source
-    assert 'clear_pool_summary=bool(clear_status)' in source
+    assert '_clear_runtime_memory_caches(clear_status=True, clear_pool_summary=True)' in source
+    assert 'with memory_cleanup_lock:' in source
     assert "pool_summary_cache.update({'signature': None, 'summary': None})" in source
     assert 'def _pool_summary_can_keep_previous' in source
     assert "_pool_summary_count(previous_summary, 'checked_pool_count') > 0" in source
@@ -3956,7 +3952,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'YOUTUBE_SHORT_URL' in youtube_source
     assert 'https://youtu.be/' in youtube_source
     assert 'YOUTUBE_WATCH_URL' in youtube_source
-    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 9' in youtube_source
+    assert 'YOUTUBE_HEALTHCHECK_MIN_OK = 8' in youtube_source
+    assert len(youtube_healthcheck.YOUTUBE_HEALTHCHECK_URLS) == len(set(youtube_healthcheck.YOUTUBE_HEALTHCHECK_URLS))
     assert 'YOUTUBE_HEALTHCHECK_REQUIRED_URLS' in youtube_source
     assert "host.endswith('.c.youtube.com')" in youtube_source
     assert "host == 'youtu.be'" in youtube_source
@@ -4020,6 +4017,7 @@ def test_simple_mode_import_skips_advanced_modules():
         'telegram_call_learning',
         'youtube_edge_prefetch',
         'subscription_runtime',
+        'service_catalog',
     )
     script = (
         "import json, os, sys\n"
@@ -4069,6 +4067,7 @@ def test_web_only_import_skips_telegram_only_modules():
         'telegram_message_flow',
         'telegram_confirm',
         'telegram_install_ui',
+        'telegram_auth_state',
     )
     script = (
         "import json, os, sys\n"
@@ -4409,6 +4408,9 @@ def test_runtime_modules_are_installed_by_update_scripts():
     assert 'web_pool_snapshot_worker.py' in bootstrap_modules
     assert 'web_service_routes_worker.py' in script_modules
     assert 'web_service_routes_worker.py' in bootstrap_modules
+    assert 'CHANGELOG.md' not in script_modules
+    assert 'ROLLBACK_MODULES="$BOT_RUNTIME_MODULES CHANGELOG.md"' in script
+    assert 'rm -f "$BOT_DIR/CHANGELOG.md"' in bootstrap
     assert 'youtube_edge_prefetch.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in bootstrap_modules
@@ -7563,6 +7565,34 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (0, 1)
     assert remaining == [('vless', 'left')]
 
+    startup_errors = []
+    checked, total = pool_probe_runner.run_pool_probe_worker(
+        [('vless', 'broken-start')],
+        [],
+        batch_size=1,
+        concurrency=1,
+        delay_seconds=0,
+        min_available_kb=0,
+        test_port='1200',
+        available_memory_kb=lambda: 999999,
+        log=startup_errors.append,
+        proto_label=lambda proto: proto,
+        hash_key=_hash_key,
+        set_checked=lambda value: None,
+        validate_outbound=lambda proto, key: None,
+        failed_custom_results=lambda checks: {},
+        record_key_probe=lambda proto, key, **kwargs: None,
+        start_xray_for_batch=lambda batch: (_ for _ in ()).throw(RuntimeError('xray start failed')),
+        wait_for_socks5=lambda port, timeout=6: True,
+        check_pool_key=lambda proto, key, checks, proxy_url: None,
+        timeout_budget=lambda checks, task_count, workers: 1,
+        stop_xray=lambda process, config_path: None,
+        cleanup_runtime=lambda kill_processes=False: None,
+        invalidate_caches=lambda: None,
+    )
+    assert (checked, total) == (1, 1)
+    assert any('xray start failed' in message for message in startup_errors)
+
     high_load_notes = []
     high_load_logs = []
     high_load_remaining = []
@@ -8839,6 +8869,18 @@ def test_web_http_gzip_and_head_responses():
     asset_two._send_text_asset(html, 'text/css; charset=utf-8', asset_cache_key='test.css')
     assert asset_two.wfile.getvalue() == asset_one.wfile.getvalue()
     assert ('test.css', True) in web_http_common.WebRequestMixin.static_asset_body_cache
+    immutable_asset = _Request({'Accept-Encoding': 'gzip'})
+    immutable_asset._send_text_asset(html, 'text/css; charset=utf-8', cache_seconds=31536000, asset_cache_key='immutable.css')
+    assert dict(immutable_asset.sent_headers)['Cache-Control'] == 'public, max-age=31536000, immutable'
+    with tempfile.TemporaryDirectory() as tmp:
+        first_path = Path(tmp) / 'first.css'
+        second_path = Path(tmp) / 'second.js'
+        first_path.write_text('first', encoding='utf-8')
+        second_path.write_text('second', encoding='utf-8')
+        web_form_template._static_asset_cache.clear()
+        assert web_form_template.load_static_asset(str(first_path), lambda: '') == 'first'
+        assert web_form_template.load_static_asset(str(second_path), lambda: '') == 'second'
+        assert len(web_form_template._static_asset_cache) == 2
 
 
 def test_installer_common_helpers():
@@ -9011,6 +9053,7 @@ def test_web_get_actions_helpers():
         'pool_status_summary': lambda keys: pool_summary_calls.append(keys) or {'active_text': '1 / 5'},
         'web_custom_checks': lambda: [{'id': 'custom'}],
         'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
+        'unblock_list_payload': lambda name: {'ok': True, 'name': name, 'content': 'example.org', 'line_count': 1},
         'telegram_call_learning_snapshot': lambda: {'watching': True, 'seen_clients': ['192.168.1.23']},
         'router_health_snapshot': lambda **kwargs: router_health_calls.append(kwargs) or {'cpu_percent': 2.0},
         'router_metrics_snapshot': lambda: {'load': {'load1': 0.1}, 'summary': {'samples': 1}},
@@ -9019,6 +9062,8 @@ def test_web_get_actions_helpers():
         'service_icons_enabled': True,
     }
     assert web_get_actions.dispatch(ctx, '/') == {'kind': 'html', 'html': 'form:saved'}
+    unblock_payload = web_get_actions.dispatch(ctx, '/api/unblock_list', 'name=vless.txt')
+    assert unblock_payload['payload']['content'] == 'example.org'
     status = web_get_actions.dispatch(ctx, '/api/status')
     assert status['payload']['pool_probe_running'] is True
     assert status['payload']['bot_ready'] is True
@@ -9235,9 +9280,9 @@ def test_web_get_actions_helpers():
     check_panel = web_get_actions.dispatch(ctx, '/api/protocol_check_panel', 'proto=vless')
     assert check_panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'check:vless'}
     script_asset = web_get_actions.dispatch({'build_script_asset': lambda: 'js'}, '/static/app.js')
-    assert script_asset['cache_seconds'] == 0
+    assert script_asset['cache_seconds'] == 31536000
     style_asset = web_get_actions.dispatch({'build_style_asset': lambda: 'css'}, '/static/app.css')
-    assert style_asset['cache_seconds'] == 0
+    assert style_asset['cache_seconds'] == 31536000
     static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
     assert static['path'].replace('\\', '/').endswith('/service-icons/test.png')
 
@@ -9344,8 +9389,17 @@ def test_web_form_blocks_helpers():
         lambda key: 'All' if key == 'all' else key.upper(),
     )
     assert 'data-list-target="custom"' in tabs
-    assert 'Записей: 2' in panels
+    assert 'data-list-line-count>2</span>' in panels
     assert 'csrf_token' in panels
+    _tabs, lazy_panels = web_form_blocks.render_unblock_lists(
+        [{'name': 'custom', 'label': 'Custom'}],
+        '<input name="csrf_token">',
+        (),
+        'all',
+        lambda key: key,
+    )
+    assert 'data-list-loaded="0"' in lazy_panels
+    assert 'textarea name="content"' in lazy_panels and ' disabled>' in lazy_panels
 
 def test_web_pool_form_blocks_helpers():
     table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout([{'id': 'chat'}])
@@ -10346,8 +10400,14 @@ def test_web_template_scripts_helpers():
     assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
     assert "fetch('/api/status?compact=1&lite=1'" in scripts
     assert "fetch('/api/router_health?compact=1' + forceQuery" in scripts
-    assert "fetch('/api/router_health?compact=1&skip_cpu=1&prime=1'" in scripts
+    assert "fetch('/api/router_health?compact=1&skip_cpu=1&prime=1'" not in scripts
+    assert "refreshRouterHealth(false, 0);" in scripts
     assert 'scheduleRouterHealthRefresh(10000)' in scripts
+    startup_setup = scripts.split('setupViewNavigation();', 1)[1].split('setupLiquidPointer();', 1)[0]
+    assert 'refreshDeferredServiceRouteTools();' not in startup_setup
+    check_loader = scripts.split('function loadProtocolCheck', 1)[1].split('function setupProtocolSubtabs', 1)[0]
+    assert 'refreshDeferredServiceRouteTools();' in check_loader
+    assert "fetch('/api/unblock_list?name='" in scripts
     assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
     assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS);" in scripts
     assert 'const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;' in scripts
@@ -10876,7 +10936,7 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     assert 'key_name == _youtube_route_protocol()' in source
     assert "_youtube_probe_state(probe) in ('fail', 'unknown')" in source
     assert "def _schedule_youtube_cache_confirm" in source
-    assert "def _schedule_vless2_youtube_cache_confirm" in source
+    assert "def _schedule_vless2_youtube_cache_confirm" not in source
     assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
     assert "_youtube_healthcheck().check_youtube_through_proxy" in source
     assert "service='youtube'" in source
@@ -11438,8 +11498,16 @@ def test_route_intersections_detect_runtime_ipset_overlap():
             'unblockvless2': ['8.8.8.8', '9.9.9.9', '142.251.156.0/24'],
             'unblockvless2udp': ['8.8.4.4', '9.9.9.9', '64.233.163.0/24'],
         }
+        ipset_calls = []
 
         def fake_run(args, stdout=None, stderr=None, text=None, timeout=None, check=None):
+            ipset_calls.append(tuple(args))
+            if args == ['ipset', 'save']:
+                output = []
+                for set_name, members in ipsets.items():
+                    output.append(f'create {set_name} hash:net')
+                    output.extend(f'add {set_name} {member}' for member in members)
+                return py_types.SimpleNamespace(stdout='\n'.join(output), returncode=0)
             set_name = args[-1]
             members = ipsets.get(set_name, [])
             output = 'Name: {0}\nMembers:\n{1}\n'.format(set_name, '\n'.join(members))
@@ -11452,6 +11520,8 @@ def test_route_intersections_detect_runtime_ipset_overlap():
         assert report['file_count'] == 0
         assert report['runtime_count'] == 2
         assert report['runtime_match_count'] == 4
+        assert ipset_calls.count(('ipset', 'save')) == 1
+        assert not any(call[:2] == ('ipset', 'list') for call in ipset_calls)
         assert {issue['kind'] for issue in report['issues']} == {'runtime_ipset_overlap'}
         assert any('142.251.156.119 / 142.251.156.0/24' in issue.get('samples', []) for issue in report['issues'])
         assert any('youtube' in issue.get('service_keys', []) for issue in report['issues'])
@@ -11928,7 +11998,7 @@ def main():
     test_youtube_healthcheck_tolerates_single_quick_googlevideo_timeout()
     test_youtube_healthcheck_tolerates_single_transient_bootstrap_failure()
     test_youtube_healthcheck_tolerates_multiple_transient_bootstrap_failures()
-    test_youtube_healthcheck_warns_on_partial_googlevideo_success()
+    test_youtube_healthcheck_rejects_failed_googlevideo_media_endpoint()
     test_key_pool_subscription_helpers()
     test_subscription_hwid_request_helpers()
     test_subscription_pool_sync_preserves_manual_keys()
