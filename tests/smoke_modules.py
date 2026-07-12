@@ -3814,7 +3814,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'render_light_protocol_tabs_and_panels' in pool_form_context
     assert '_key_pool_web()' not in pool_form_context
     assert '_web_pool_form_blocks()' not in pool_form_context
-    assert '_light_pool_status_summary(current_keys, key_pools, {}, custom_checks)' in pool_form_context
+    assert '_light_pool_summary_with_cache_fallback(' in pool_form_context
     assert '_service_route_summary()' not in pool_form_context
     assert '_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, route_states)' not in pool_form_context
     assert "'refresh_status_caches_async': refresh_status_caches" in source
@@ -4208,6 +4208,55 @@ def test_advanced_initial_web_context_skips_heavy_pool_modules():
         )
         loaded = json.loads(result.stdout.strip())
         assert loaded == {name: False for name in heavy_modules}
+    finally:
+        temp_dir.cleanup()
+
+
+def test_light_pool_summary_rebuilds_when_pool_size_changes():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import json, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
+        f"bot._POOL_SUMMARY_LAST_PATH = {str(temp_path / 'pool_summary_last.json')!r}\n"
+        "keys = ['vless://one', 'vless://two']\n"
+        "cache = {bot._hash_key(key): {'schema': 8, 'tg_ok': True, 'yt_ok': True} for key in keys}\n"
+        "with open(bot._KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as handle: json.dump(cache, handle)\n"
+        "with open(bot._POOL_SUMMARY_LAST_PATH, 'w', encoding='utf-8') as handle: json.dump({'summary': {'pool_total_count': 1, 'checked_pool_count': 1}}, handle)\n"
+        "pools = {proto: [] for proto in bot.POOL_PROTOCOL_ORDER}\n"
+        "pools['vless'] = keys\n"
+        "summary = bot._light_pool_summary_with_cache_fallback({'vless': keys[0]}, pools, [])\n"
+        "print(json.dumps(summary, sort_keys=True))\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        summary = json.loads(result.stdout.strip())
+        assert summary['pool_total_count'] == 2
+        assert summary['checked_pool_count'] == 2
+        assert summary['services'][0] == {'count': 2, 'label': 'Telegram'}
+        assert summary['services'][1] == {'count': 2, 'label': 'YouTube'}
     finally:
         temp_dir.cleanup()
 

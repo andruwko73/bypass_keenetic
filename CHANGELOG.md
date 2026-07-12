@@ -1,3 +1,10 @@
+<a name="1.940"></a>
+# [1.940] - 12 Jul 2026
+
+- Rebuilds the lightweight pool summary from the compact probe cache when the saved pool size no longer matches the current pools.
+- Preserves lazy startup and avoids importing heavy pool modules while keeping checked-key and service counters accurate.
+- Covers pool-size changes with a regression test and retains the persisted fast path after the one-time rebuild.
+
 <a name="1.939"></a>
 # [1.939] - 12 Jul 2026
 

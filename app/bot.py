@@ -8777,6 +8777,22 @@ def _pool_summary_with_persisted_fallback(summary):
     return summary
 
 
+def _light_pool_summary_with_cache_fallback(current_keys, key_pools, custom_checks=None):
+    empty_summary = _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
+    persisted = _load_persisted_pool_summary()
+    if (
+        _pool_summary_count(persisted, 'checked_pool_count') > 0 and
+        _pool_summary_count(persisted, 'pool_total_count') == _pool_summary_count(empty_summary, 'pool_total_count')
+    ):
+        return persisted
+    light_cache = _load_light_key_probe_cache()
+    if not light_cache:
+        return empty_summary
+    return _pool_summary_with_persisted_fallback(
+        _light_pool_status_summary(current_keys, key_pools, light_cache, custom_checks)
+    )
+
+
 def _light_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks=None):
     current_keys = current_keys or {}
     key_pools = key_pools or {}
@@ -11158,8 +11174,10 @@ def _web_pools_light_payload(current_keys, key_pools, protocols=None, include_su
         'custom_checks': None,
     }
     if include_summary:
-        payload['pool_summary'] = _pool_summary_with_persisted_fallback(
-            _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
+        payload['pool_summary'] = _light_pool_summary_with_cache_fallback(
+            current_keys,
+            key_pools,
+            custom_checks,
         )
     if include_custom_checks:
         payload['custom_checks'] = _web_custom_checks_light(custom_checks)
@@ -12257,8 +12275,10 @@ def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, sta
         enable_custom_checks=True,
         pool_probe_pending=pool_probe_pending,
     )
-    pool_summary = _pool_summary_with_persisted_fallback(
-        _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
+    pool_summary = _light_pool_summary_with_cache_fallback(
+        current_keys,
+        key_pools,
+        custom_checks,
     )
     return {
         'custom_checks_json': json.dumps(_web_custom_checks_light(custom_checks), ensure_ascii=False),
