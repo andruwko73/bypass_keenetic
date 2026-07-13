@@ -905,6 +905,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^background_task_max_program_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_max_program_rss_kb = 102400\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^background_task_critical_max_program_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'background_task_critical_max_program_rss_kb = 102400\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^auto_failover_idle_log_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_idle_log_interval_seconds = 900\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^subscription_auto_refresh_interval_seconds[[:space:]]*=[[:space:]]*86400([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^subscription_auto_refresh_interval_seconds[[:space:]]*=.*/subscription_auto_refresh_interval_seconds = 21600/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^subscription_auto_refresh_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_interval_seconds = 21600\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> "$BOT_CONFIG_PATH"
@@ -950,6 +954,10 @@ migrate_runtime_config_defaults() {
     fi
     grep -Eq '^status_refresh_pending_min_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'status_refresh_pending_min_interval_seconds = 60.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^auto_failover_idle_log_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'auto_failover_idle_log_interval_seconds = 900\n' >> /opt/etc/bot_config.py
+    if grep -Eq '^subscription_auto_refresh_interval_seconds[[:space:]]*=[[:space:]]*86400([[:space:]#]|$)' /opt/etc/bot_config.py; then
+      sed -i 's/^subscription_auto_refresh_interval_seconds[[:space:]]*=.*/subscription_auto_refresh_interval_seconds = 21600/' /opt/etc/bot_config.py || true
+    fi
+    grep -Eq '^subscription_auto_refresh_interval_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_interval_seconds = 21600\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_bot_rss_kb = 71680\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> /opt/etc/bot_config.py

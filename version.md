@@ -1,3 +1,3 @@
-*v1.941 (13 Jul 2026) -* main
+*v1.942 (13 Jul 2026) -* main
 
-*Keeps Telegram mobile notifications responsive by preserving long-lived push connections outside transparent proxy redirects.*
+*Feeds internal Telegram polling failures into key auto-failover and refreshes subscriptions every six hours.*

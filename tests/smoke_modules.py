@@ -2385,6 +2385,9 @@ def test_codex_version_matches_commit_count():
     assert 'auto_failover_idle_log_interval_seconds = 900' in example
     assert 'auto_failover_idle_log_interval_seconds = 900' in installer
     assert 'auto_failover_idle_log_interval_seconds = 900' in bootstrap
+    assert 'subscription_auto_refresh_interval_seconds = 21600' in example
+    assert 'subscription_auto_refresh_interval_seconds = 21600' in installer
+    assert 'subscription_auto_refresh_interval_seconds = 21600' in bootstrap
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
@@ -3736,6 +3739,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'background_task_max_program_rss_kb = 102400' in script_source
     assert 'background_task_critical_max_program_rss_kb = 102400' in script_source
     assert 'auto_failover_idle_log_interval_seconds = 900' in script_source
+    assert 'subscription_auto_refresh_interval_seconds = 21600' in script_source
+    assert "subscription_auto_refresh_interval_seconds[[:space:]]*=[[:space:]]*86400" in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
     assert 'youtube_edge_prefetch_enabled = True' in script_source
     assert 'youtube_edge_prefetch_max_rss_kb = 66560' in script_source
@@ -3891,6 +3896,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'recent_failure_backoff_seconds=AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS' in source
     assert 'skip_failed_candidates=True' in source
     assert 'def _mark_active_telegram_failure' in source
+    assert "auto_failover_state['last_ok'] = 0.0" in source
+    assert 'telegram_route_proto = _telegram_route_protocol() or proxy_mode' in source
     assert 'def _log_telegram_api_status_failure' in source
     assert 'Telegram API status check through' in source
     assert 'allow_recent_success_downgrade=True' in source
@@ -3901,6 +3908,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'authenticated=True' in source
     assert 'if _is_telegram_connectivity_error(err):' in source
     assert '_mark_active_telegram_failure(err)' in source
+    assert 'class _TelegramPollingExceptionHandler' in source
+    assert 'exception_handler=_telegram_polling_exception_handler' in source
+    assert "_reset_telegram_http_session('internal polling error')" in source
+    assert 'def _restore_telegram_polling_after_verified_recovery' in source
+    assert '_restore_telegram_polling_after_verified_recovery()' in source
     assert 'not (active_telegram_required and not bot_polling)' in source
     assert 'def _web_render_status_with_polling_guard' in source
     assert "active_status['api_transient'] = True" in source
@@ -5792,6 +5804,67 @@ def test_light_status_keeps_confirmed_custom_services():
     assert 'Claude' in status['details']
 
 
+def test_internal_telegram_polling_exception_marks_failover_state():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        (root / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import json, sys\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            f"sys.path.insert(0, {str(root)!r})\n"
+            "import bot\n"
+            "bot.auto_failover_state.update(last_ok=123.0, last_fail=0.0, "
+            "last_failure_message='', consecutive_failures=0)\n"
+            "bot._prime_auto_failover_after_telegram_failure('forced failure')\n"
+            "primed_last_ok = bot.auto_failover_state['last_ok']\n"
+            "events = []\n"
+            "bot._mark_active_telegram_failure = lambda _error: events.append('mark')\n"
+            "bot._reset_telegram_http_session = lambda reason='': events.append('reset:' + reason)\n"
+            "handler = bot._TelegramPollingExceptionHandler()\n"
+            "bot.bot_polling = True\n"
+            "first = handler.handle(ConnectionError('connection reset'))\n"
+            "bot.bot_polling = True\n"
+            "second = handler.handle(ConnectionError('connection reset'))\n"
+            "polling_after_exception = bot.bot_polling\n"
+            "bot._invalidate_web_status_api_cache = lambda: events.append('invalidate-api')\n"
+            "bot._invalidate_web_status_cache = lambda: events.append('invalidate-status')\n"
+            "bot.auto_failover_state.update(last_ok=456.0, last_fail=0.0, "
+            "last_failure_message='', consecutive_failures=0)\n"
+            "restored = bot._restore_telegram_polling_after_verified_recovery()\n"
+            "print(json.dumps({'first': first, 'second': second, 'polling_after_exception': polling_after_exception, "
+            "'polling_after_recovery': bot.bot_polling, 'restored': restored, "
+            "'events': events, 'primed_last_ok': primed_last_ok}, sort_keys=True))\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        assert json.loads(result.stdout) == {
+            'events': [
+                'mark',
+                'reset:internal polling error',
+                'invalidate-api',
+                'invalidate-status',
+            ],
+            'first': False,
+            'polling_after_exception': False,
+            'polling_after_recovery': True,
+            'primed_last_ok': 0.0,
+            'restored': True,
+            'second': False,
+        }
+
+
 def test_auto_failover_defers_when_health_worker_result_is_unknown():
     state = {
         'in_progress': False,
@@ -6460,6 +6533,7 @@ def test_auto_failover_runtime_helpers():
     )
     assert switched is True
     assert state['last_ok'] == 21.0
+    assert state['last_failure_message'] == ''
     assert state['last_fail'] == 0.0
     assert ('update', 'vless') in calls
     assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': None} for call in calls)
@@ -6527,6 +6601,7 @@ def test_auto_failover_runtime_helpers():
         time_provider=lambda: 20.0,
     ) is False
     assert last_ok_state['last_fail'] == 0.0
+    assert last_ok_state['last_failure_message'] == ''
     assert not any(call[0] == 'install' for call in last_ok_calls)
     recent_probe_calls = []
     recent_probe_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
@@ -6707,7 +6782,13 @@ def test_auto_failover_runtime_helpers():
     assert 'check' not in startup_hold_calls
     assert not any(isinstance(call, tuple) and call[0] == 'install' for call in startup_hold_calls)
     repair_calls = []
-    repair_state = {'last_ok': 0.0, 'last_fail': 1.0, 'last_attempt': 0.0, 'in_progress': False}
+    repair_state = {
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_failure_message': 'previous failure',
+        'last_attempt': 0.0,
+        'in_progress': False,
+    }
     repair_checks = iter([(False, 'confirm fail'), (True, 'after repair')])
     assert auto_failover_runtime.attempt_auto_failover(
         state=repair_state,
@@ -6730,6 +6811,7 @@ def test_auto_failover_runtime_helpers():
         time_provider=lambda: 20.0,
     ) is False
     assert repair_state['last_fail'] == 0.0
+    assert repair_state['last_failure_message'] == ''
     assert any(call[0] == 'repair' for call in repair_calls)
     assert not any(call[0] == 'install' for call in repair_calls)
     assert any(call[0] == 'log' and 'endpoint repair restored' in call[1] for call in repair_calls)

@@ -1,3 +1,10 @@
+<a name="1.942"></a>
+# [1.942] - 13 Jul 2026
+
+- Feeds network exceptions caught inside TeleBot polling into Telegram key auto-failover instead of leaving a dead active key selected.
+- Clears stale success and failure state around verified recovery, and marks the key owned by the actual Telegram route protocol.
+- Refreshes HWID-enabled subscriptions every six hours by default and migrates the previous 24-hour default during updates.
+
 <a name="1.941"></a>
 # [1.941] - 13 Jul 2026
 

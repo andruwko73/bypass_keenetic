@@ -731,7 +731,7 @@ SUBSCRIPTION_ACCEPT_HEADER = str(getattr(config, 'subscription_accept_header', '
 SUBSCRIPTION_AUTO_REFRESH_ENABLED = bool(getattr(config, 'subscription_auto_refresh_enabled', True))
 SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS = max(
     3600,
-    int(getattr(config, 'subscription_auto_refresh_interval_seconds', 24 * 3600)),
+    int(getattr(config, 'subscription_auto_refresh_interval_seconds', 6 * 3600)),
 )
 SUBSCRIPTION_AUTO_REFRESH_RETRY_SECONDS = max(
     600,
@@ -822,6 +822,7 @@ def _prime_auto_failover_after_telegram_failure(message):
         started_at,
         now - max(0, AUTO_FAILOVER_STARTUP_HOLD_SECONDS),
     )
+    auto_failover_state['last_ok'] = 0.0
     auto_failover_state['last_fail'] = now - max(0, AUTO_FAILOVER_GRACE_SECONDS)
     auto_failover_state['last_failure_message'] = str(message or 'Telegram API failure')[:500]
     try:
@@ -854,10 +855,14 @@ def _is_telegram_connectivity_error(error):
 
 def _mark_active_telegram_failure(message):
     now = time.time()
-    active_key = (_load_current_keys().get(proxy_mode, '') if proxy_mode in POOL_PROTOCOL_ORDER else '').strip()
+    telegram_route_proto = _telegram_route_protocol() or proxy_mode
+    active_key = (
+        _load_current_keys().get(telegram_route_proto, '')
+        if telegram_route_proto in POOL_PROTOCOL_ORDER else ''
+    ).strip()
     if active_key:
         _record_key_probe(
-            proxy_mode,
+            telegram_route_proto,
             active_key,
             tg_ok=False,
             allow_recent_success_downgrade=True,
@@ -870,7 +875,8 @@ def _mark_active_telegram_failure(message):
     if now - last_log >= 60.0:
         background_task_skip_log_at['Telegram polling failure'] = now
         _write_runtime_log(
-            f'Auto-failover: Telegram polling failed through {proxy_mode}; active key marked failed and recovery scheduled.'
+            f'Auto-failover: Telegram polling failed through {telegram_route_proto}; '
+            'active key marked failed and recovery scheduled.'
         )
 
 
@@ -1387,6 +1393,21 @@ def _mark_auto_failover_polling_ok(now=None):
     auto_failover_state['last_failure_message'] = ''
 
 
+def _restore_telegram_polling_after_verified_recovery():
+    if _auto_failover_has_pending_failure():
+        return False
+    try:
+        last_ok = float(auto_failover_state.get('last_ok') or 0.0)
+    except (TypeError, ValueError):
+        last_ok = 0.0
+    if last_ok <= 0.0:
+        return False
+    globals()['bot_polling'] = True
+    _invalidate_web_status_api_cache()
+    _invalidate_web_status_cache()
+    return True
+
+
 def _auto_failover_idle_log(reason, now=None):
     if now is None:
         now = time.time()
@@ -1438,7 +1459,7 @@ def _attempt_auto_failover():
                 f'Auto-failover: cannot restore Telegram route protocol {telegram_route_proto}: {error}'
             )
             return False
-    return _auto_failover_runtime().attempt_auto_failover(
+    switched = _auto_failover_runtime().attempt_auto_failover(
         state=auto_failover_state,
         pool_probe_locked=lambda: bool(globals().get('pool_probe_lock') and pool_probe_lock.locked()),
         proxy_mode=telegram_route_proto,
@@ -1470,6 +1491,8 @@ def _attempt_auto_failover():
         protocols=(telegram_route_proto,),
         defer_switch=_auto_failover_defer_switch_for_traffic_guard,
     )
+    _restore_telegram_polling_after_verified_recovery()
+    return switched
 
 
 def _youtube_route_protocol():
@@ -2051,11 +2074,51 @@ class _CommandWorkerTeleBot:
         return lambda func: func
 
 
+class _TelegramPollingExceptionHandler:
+    _MARK_INTERVAL_SECONDS = 10.0
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_marked_at = None
+
+    def handle(self, exception):
+        if not _is_telegram_connectivity_error(exception):
+            return False
+        globals()['bot_polling'] = False
+        now = time.monotonic()
+        with self._lock:
+            if (
+                self._last_marked_at is not None and
+                now - self._last_marked_at < self._MARK_INTERVAL_SECONDS
+            ):
+                return False
+            self._last_marked_at = now
+        try:
+            _mark_active_telegram_failure(exception)
+            _reset_telegram_http_session('internal polling error')
+        except Exception as handler_error:
+            _write_runtime_log(f'Telegram polling exception handler failed: {handler_error}')
+        return False
+
+
+_telegram_polling_exception_handler = _TelegramPollingExceptionHandler()
+
+
 def _create_telebot(token_value):
     try:
-        return telebot.TeleBot(token_value, num_threads=TELEGRAM_BOT_NUM_THREADS)
+        return telebot.TeleBot(
+            token_value,
+            num_threads=TELEGRAM_BOT_NUM_THREADS,
+            exception_handler=_telegram_polling_exception_handler,
+        )
     except TypeError:
-        return telebot.TeleBot(token_value)
+        try:
+            return telebot.TeleBot(
+                token_value,
+                exception_handler=_telegram_polling_exception_handler,
+            )
+        except TypeError:
+            return telebot.TeleBot(token_value)
 
 
 bot = _CommandWorkerTeleBot() if COMMAND_WORKER_MODE else _create_telebot(token)

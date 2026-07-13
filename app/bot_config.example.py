@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.941
+# ВЕРСИЯ СКРИПТА v1.942
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -19,7 +19,7 @@ subscription_hwid_header_names = ('X-HWID', 'X-Router-HWID', 'X-Device-ID')
 subscription_user_agent = 'v2rayN/6.45'
 subscription_accept_header = 'text/plain, */*'
 subscription_auto_refresh_enabled = True
-subscription_auto_refresh_interval_seconds = 86400  # раз в день для подписок с включенным HWID
+subscription_auto_refresh_interval_seconds = 21600  # четыре раза в день для подписок с включенным HWID
 subscription_auto_refresh_retry_seconds = 3600
 subscription_auto_refresh_max_bot_rss_kb = 71680  # lightweight subscription refresh may run above the general background RSS guard, but not at the restart threshold
 subscription_auto_refresh_min_available_kb = 92160

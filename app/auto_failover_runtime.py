@@ -116,6 +116,7 @@ def attempt_auto_failover(
     ):
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
+        state['last_failure_message'] = ''
         return False
 
     startup_hold = float(startup_hold_seconds or 0)
@@ -181,6 +182,7 @@ def attempt_auto_failover(
         if last_ok and now - last_ok <= recent_ttl:
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
             log('Auto-failover: active Telegram key had a recent successful check; switch skipped after a temporary failure.')
             return False
         current_keys = load_current_keys()
@@ -198,6 +200,7 @@ def attempt_auto_failover(
         ):
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
             log('Auto-failover: active Telegram key is recently marked working in the pool cache; switch skipped.')
             return False
 
@@ -210,6 +213,7 @@ def attempt_auto_failover(
         if last_ok and now - last_ok <= ttl:
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
             log('Auto-failover: временный сбой Telegram API после недавнего успешного ответа; переключение пропущено.')
             return False
         current_keys = current_keys if current_keys is not None else load_current_keys()
@@ -227,6 +231,7 @@ def attempt_auto_failover(
         ):
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
             log('Auto-failover: временный сбой Telegram API, активный ключ недавно проверялся успешно; переключение пропущено.')
             return False
 
@@ -307,6 +312,7 @@ def attempt_auto_failover(
                     state['last_ok'] = time_provider()
                     state['last_fail'] = 0.0
                     state['consecutive_failures'] = 0
+                    state['last_failure_message'] = ''
                     log('Auto-failover: active proxy endpoint repair restored Telegram API; key switch skipped.')
                     return False
                 failure_message = repair_message or failure_message
@@ -364,6 +370,7 @@ def attempt_auto_failover(
         state['last_ok'] = time_provider()
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
+        state['last_failure_message'] = ''
         log(f'Auto-failover: переключено на {proto}; Telegram API доступен. {result}')
         return True
     finally:
