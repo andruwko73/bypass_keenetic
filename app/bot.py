@@ -743,7 +743,7 @@ SUBSCRIPTION_AUTO_REFRESH_START_DELAY_SECONDS = max(
 )
 SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS = max(
     300,
-    int(getattr(config, 'subscription_auto_refresh_check_seconds', 3600)),
+    int(getattr(config, 'subscription_auto_refresh_check_seconds', 300)),
 )
 SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB = max(
     0,

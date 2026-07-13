@@ -1,3 +1,10 @@
+<a name="1.943"></a>
+# [1.943] - 13 Jul 2026
+
+- Rechecks overdue subscriptions every five minutes, so a protocol deferred by the shared resource guard does not wait another hour.
+- Keeps the actual subscription network refresh interval at six hours; the shorter scheduler tick only evaluates whether work is due.
+- Migrates the former one-hour scheduler check while preserving non-default custom intervals.
+
 <a name="1.942"></a>
 # [1.942] - 13 Jul 2026
 

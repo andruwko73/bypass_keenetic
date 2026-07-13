@@ -1,3 +1,3 @@
-*v1.942 (13 Jul 2026) -* main
+*v1.943 (13 Jul 2026) -* main
 
-*Feeds internal Telegram polling failures into key auto-failover and refreshes subscriptions every six hours.*
+*Retries guard-deferred subscription refreshes within five minutes while keeping the six-hour network cadence.*

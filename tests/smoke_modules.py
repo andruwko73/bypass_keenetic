@@ -2388,6 +2388,9 @@ def test_codex_version_matches_commit_count():
     assert 'subscription_auto_refresh_interval_seconds = 21600' in example
     assert 'subscription_auto_refresh_interval_seconds = 21600' in installer
     assert 'subscription_auto_refresh_interval_seconds = 21600' in bootstrap
+    assert 'subscription_auto_refresh_check_seconds = 300' in example
+    assert 'subscription_auto_refresh_check_seconds = 300' in installer
+    assert 'subscription_auto_refresh_check_seconds = 300' in bootstrap
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
@@ -3741,6 +3744,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'auto_failover_idle_log_interval_seconds = 900' in script_source
     assert 'subscription_auto_refresh_interval_seconds = 21600' in script_source
     assert "subscription_auto_refresh_interval_seconds[[:space:]]*=[[:space:]]*86400" in script_source
+    assert 'subscription_auto_refresh_check_seconds = 300' in script_source
+    assert "subscription_auto_refresh_check_seconds[[:space:]]*=[[:space:]]*3600" in script_source
+    assert "getattr(config, 'subscription_auto_refresh_check_seconds', 300)" in source
     assert "telegram_udp_policy = 'auto'" in script_source
     assert 'youtube_edge_prefetch_enabled = True' in script_source
     assert 'youtube_edge_prefetch_max_rss_kb = 66560' in script_source
