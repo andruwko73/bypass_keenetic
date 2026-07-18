@@ -292,25 +292,40 @@ async function assertNoBrokenImages(page, label) {
   }
 }
 
-async function assertDesktopListEditorIsCompact(page, label) {
+async function assertDesktopListEditorSizing(page, label) {
   const layout = await page.evaluate(() => {
     const textarea = document.querySelector('[data-view="lists"].active .list-editor-form textarea');
     const workspace = document.querySelector('[data-view="lists"].active .list-workspace.active');
     const actions = document.querySelector('[data-view="lists"].active .list-editor-form .form-actions');
+    const shell = document.querySelector('.app-shell');
     const rect = (node) => node ? node.getBoundingClientRect() : null;
     return {
+      viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
       textarea: rect(textarea),
       workspace: rect(workspace),
       actions: rect(actions),
+      shell: rect(shell),
     };
   });
   if (layout.viewportHeight < 900) return;
-  if (!layout.textarea || !layout.workspace || !layout.actions) {
+  if (!layout.textarea || !layout.workspace || !layout.actions || !layout.shell) {
     throw new Error(`${label}: list editor layout is missing nodes`);
   }
+  if (layout.viewportWidth >= 3000) {
+    if (layout.shell.width < layout.viewportWidth * 0.75 || layout.textarea.height < 516 || layout.textarea.height > 764) {
+      throw new Error(`${label}: 4K layout does not use the available workspace ${JSON.stringify(layout)}`);
+    }
+    return;
+  }
+  if (layout.viewportWidth >= 1921) {
+    if (layout.shell.width < layout.viewportWidth * 0.84 || layout.textarea.height < 356 || layout.textarea.height > 524) {
+      throw new Error(`${label}: 2K layout does not use the available workspace ${JSON.stringify(layout)}`);
+    }
+    return;
+  }
   if (layout.textarea.height > 324 || layout.workspace.height > 500) {
-    throw new Error(`${label}: list editor is needlessly stretched ${JSON.stringify(layout)}`);
+    throw new Error(`${label}: Full HD list editor is needlessly stretched ${JSON.stringify(layout)}`);
   }
 }
 
@@ -834,7 +849,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   await assertNoBrokenImages(page, `${name} lists`);
   await assertNoHorizontalOverflow(page, `${name} lists`);
   if (!isMobile) {
-    await assertDesktopListEditorIsCompact(page, `${name} lists`);
+    await assertDesktopListEditorSizing(page, `${name} lists`);
   }
   assertNoPageFailures(failures);
 
@@ -850,6 +865,11 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     for (const modeConfig of appModes) {
       await runViewport(browser, modeConfig, 'desktop', { width: 1365, height: 768 });
       await runViewport(browser, modeConfig, 'full HD desktop', { width: 1920, height: 1080 });
+      await runViewport(browser, modeConfig, 'full HD 16:10 desktop', { width: 1920, height: 1200 });
+      await runViewport(browser, modeConfig, '2K 16:9 desktop', { width: 2560, height: 1440 });
+      await runViewport(browser, modeConfig, '2K 16:10 desktop', { width: 2560, height: 1600 });
+      await runViewport(browser, modeConfig, '4K 16:9 desktop', { width: 3840, height: 2160 });
+      await runViewport(browser, modeConfig, '4K 16:10 desktop', { width: 3840, height: 2400 });
       await runViewport(browser, modeConfig, 'compact desktop', { width: 915, height: 640 });
       await runViewport(browser, modeConfig, 'mobile', devices['Pixel 5'].viewport, true);
     }

@@ -1,3 +1,3 @@
-*v1.950 (18 Jul 2026) -* main
+*v1.951 (18 Jul 2026) -* main
 
-*Hardens pool-probe cleanup and keeps every worker process visible in router resource metrics.*
+*Adapts the local web panel for 2K/4K displays and avoids unnecessary process-status reads during router health snapshots.*

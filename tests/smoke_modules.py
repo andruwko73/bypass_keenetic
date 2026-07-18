@@ -618,6 +618,37 @@ def test_router_health_runtime_related_process_snapshot():
     temp_dir.cleanup()
 
 
+def test_router_health_runtime_related_process_snapshot_skips_unrelated_status_reads():
+    temp_dir = tempfile.TemporaryDirectory()
+    proc_root = Path(temp_dir.name) / 'proc'
+    proc_root.mkdir()
+
+    for pid in range(100, 200):
+        proc_dir = proc_root / str(pid)
+        proc_dir.mkdir()
+        cmdline = 'xray\x00run\x00-c\x00/opt/etc/xray/config.json\x00' if pid == 100 else f'kernel-worker-{pid}\x00'
+        (proc_dir / 'cmdline').write_text(cmdline, encoding='utf-8')
+        (proc_dir / 'status').write_text('Name:\tproc\nVmRSS:\t  24000 kB\n', encoding='utf-8')
+
+    reads = {'cmdline': 0, 'status': 0}
+
+    def fake_read(path, max_bytes=16384):
+        if str(path).endswith('/cmdline'):
+            reads['cmdline'] += 1
+        elif str(path).endswith('/status'):
+            reads['status'] += 1
+        return Path(path).read_text(encoding='utf-8')
+
+    snapshot = router_health_runtime.related_program_process_snapshot(
+        proc_root=str(proc_root),
+        read_text=fake_read,
+    )
+    assert snapshot['xray_count'] == 1
+    assert snapshot['xray_rss_kb'] == 24000
+    assert reads == {'cmdline': 100, 'status': 1}
+    temp_dir.cleanup()
+
+
 def test_router_health_runtime_cpu_percent_parser():
     stat_text = 'cpu  100 0 0 900 0 0 0 0 0 0\ncpu0 50 0 0 450 0 0 0 0 0 0\n'
     assert router_health_runtime.parse_cpu_stat(stat_text) == (100, 0, 0, 900, 0, 0, 0, 0, 0, 0)

@@ -293,29 +293,24 @@ def related_program_process_snapshot(
         if not cmdline:
             continue
         normalized = cmdline.replace('\x00', ' ')
-        rss_kb = parse_process_rss_kb(read_text(os.path.join(proc_root, name, 'status'))) or 0
+        snapshot_key = ''
         if 'xray' in normalized and '/opt/etc/xray/config.json' in normalized:
-            result['xray_count'] += 1
-            result['xray_rss_kb'] += rss_kb
-            continue
-        if 'xray' in normalized and '/tmp/bypass_pool_probe_' in normalized:
-            result['temporary_xray_count'] += 1
-            result['temporary_xray_rss_kb'] += rss_kb
-            continue
-        if 'youtube_edge_prefetch_runner.py' in normalized:
-            result['youtube_prefetch_count'] += 1
-            result['youtube_prefetch_rss_kb'] += rss_kb
-            continue
-        if (
+            snapshot_key = 'xray'
+        elif 'xray' in normalized and '/tmp/bypass_pool_probe_' in normalized:
+            snapshot_key = 'temporary_xray'
+        elif 'youtube_edge_prefetch_runner.py' in normalized:
+            snapshot_key = 'youtube_prefetch'
+        elif (
             'BYPASS_KEENETIC_POOL_PROBE_WORKER' in normalized or
             '_run_pool_probe_process_worker' in normalized
         ):
-            result['pool_worker_count'] += 1
-            result['pool_worker_rss_kb'] += rss_kb
-            continue
-        if 'BYPASS_KEENETIC_COMMAND_WORKER' in normalized:
-            result['background_worker_count'] += 1
-            result['background_worker_rss_kb'] += rss_kb
+            snapshot_key = 'pool_worker'
+        elif 'BYPASS_KEENETIC_COMMAND_WORKER' in normalized:
+            snapshot_key = 'background_worker'
+        if snapshot_key:
+            rss_kb = parse_process_rss_kb(read_text(os.path.join(proc_root, name, 'status'))) or 0
+            result[f'{snapshot_key}_count'] += 1
+            result[f'{snapshot_key}_rss_kb'] += rss_kb
     return result
 
 

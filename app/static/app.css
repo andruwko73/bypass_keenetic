@@ -852,6 +852,46 @@
             .list-editor-form{height:auto;grid-template-rows:auto auto auto;align-content:start;overflow:visible;}
             .list-editor-form textarea{height:clamp(180px,32vh,320px);min-height:180px;max-height:320px;overflow:auto;resize:vertical;}
         }
+        /* Preserve the compact Full HD layout.  At 2K and 4K the previous 1600px
+           cap made the interface unnecessarily narrow and left the editor tiny. */
+        @media (min-width: 1921px){
+            :root{--control-height:40px;}
+            .app-shell{max-width:min(92vw,2400px);}
+            .workspace-layout{grid-template-columns:144px minmax(0,1fr);gap:16px;}
+            .topbar{padding:10px 14px;}
+            .app-caption strong{font-size:16px;}
+            .app-branch{font-size:12px;}
+            .side-nav{padding:11px;}
+            .nav-item{min-height:50px;font-size:15px;}
+            .view-head{padding:12px 15px;}
+            .status-overview-head h2{font-size:18px;}
+            .status-overview-head .section-subtitle,.key-status-note{font-size:13px;}
+            .status-card,.service-panel,.overview-key-panel{padding:12px;}
+            .protocol-workspace .workspace-head h2{font-size:20px;}
+            .key-editor-form textarea[data-key-textarea]{height:86px;min-height:86px;}
+            .protocol-subview-key .pool-import-form textarea{height:136px;min-height:136px;}
+            .pool-table-wrap{max-height:min(64vh,640px);}
+            .list-editor-form textarea{height:clamp(360px,38vh,520px);min-height:360px;max-height:520px;}
+        }
+        @media (min-width: 3000px){
+            :root{--control-height:44px;}
+            .app-shell{max-width:min(86vw,3200px);}
+            .workspace-layout{grid-template-columns:160px minmax(0,1fr);gap:18px;}
+            .topbar{padding:12px 16px;}
+            .app-caption strong{font-size:18px;}
+            .app-branch{font-size:13px;}
+            .side-nav{padding:12px;}
+            .nav-item{min-height:54px;font-size:16px;}
+            .view-head{padding:14px 18px;}
+            .status-overview-head h2{font-size:20px;}
+            .status-overview-head .section-subtitle,.key-status-note{font-size:14px;}
+            .status-card,.service-panel,.overview-key-panel{padding:14px;}
+            .protocol-workspace .workspace-head h2{font-size:22px;}
+            .key-editor-form textarea[data-key-textarea]{height:98px;min-height:98px;}
+            .protocol-subview-key .pool-import-form textarea{height:164px;min-height:164px;}
+            .pool-table-wrap{max-height:min(66vh,760px);}
+            .list-editor-form textarea{height:clamp(520px,44vh,760px);min-height:520px;max-height:760px;}
+        }
         @media (max-width: 760px){
             :root{--control-height:38px;}
             :root{--mobile-status-gap:8px;}
