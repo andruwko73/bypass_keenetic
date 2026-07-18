@@ -6627,6 +6627,9 @@ def test_telegram_bot_menu_button_smoke():
             ['Vmess', 'Trojan'],
             ['Shadowsocks'],
         ]
+        service_labels = [label for row in bot_module._service_list_markup().rows[:-1] for label in row]
+        assert service_labels.count('Grok / X / Twitter') == 1
+        assert 'X / Twitter' not in service_labels
         assert ['✅ Подтвердить', 'Отмена'] in bot_module._build_telegram_confirm_markup().rows
 
         bot_module.start(message('/start'))
@@ -8901,6 +8904,9 @@ def test_custom_check_service_sources_are_synced():
     ]
     assert presets['grok']['label'] == 'Grok / X / Twitter'
     assert "source.get('include_services')" in bot_source
+    assert 'def _service_list_labels():' in bot_source
+    assert "names = ', '.join(_service_list_labels())" in bot_source
+    assert 'entries = _load_service_entries(service_key)' in bot_source
 
 
 def test_telegram_routes_include_mini_app_dependencies():

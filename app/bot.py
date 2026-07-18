@@ -6404,8 +6404,17 @@ def _handle_unblock_list_state(message, level, bypass, set_menu_state, reply_mar
     return True
 
 
+def _service_list_labels():
+    sources = _service_catalog().SERVICE_LIST_SOURCES
+    return [
+        str(sources[key].get('label') or key)
+        for key in SOCIALNET_SERVICE_KEYS
+        if key in sources
+    ]
+
+
 def _service_list_markup():
-    labels = [source['label'] for source in _service_catalog().SERVICE_LIST_SOURCES.values()]
+    labels = _service_list_labels()
     rows = [tuple(labels[index:index + 2]) for index in range(0, len(labels), 2)]
     return _reply_keyboard(*rows, ("🔙 Назад",))
 
@@ -6451,7 +6460,7 @@ def _append_entries_to_unblock_list(list_name, entries):
 def _handle_getlist_request(message, service_name, route_name=None, reply_markup=None):
     service_key = _resolve_service_list_name(service_name)
     if not service_key:
-        names = ', '.join(source['label'] for source in _service_catalog().SERVICE_LIST_SOURCES.values())
+        names = ', '.join(_service_list_labels())
         bot.send_message(message.chat.id, f'⚠️ Не знаю такой сервис. Доступно: {names}', reply_markup=reply_markup)
         return
 
@@ -6472,11 +6481,7 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
     source = _service_catalog().SERVICE_LIST_SOURCES[service_key]
     requests = _requests_module()
     try:
-        if source.get('entries'):
-            entries = _service_catalog().service_route_entries(service_key)
-        else:
-            raw_text = _fetch_remote_text(source['url'], timeout=25)
-            entries = _parse_service_domains(raw_text)
+        entries = _load_service_entries(service_key)
         if not entries:
             bot.send_message(message.chat.id, f'⚠️ Список {source["label"]} загружен, но домены не найдены.', reply_markup=reply_markup)
             return
@@ -6535,7 +6540,7 @@ def _handle_private_stateless_command(message, main, service):
     if command == '/getlist':
         parts = message.text.split()
         if len(parts) < 2:
-            names = ', '.join(source['label'] for source in _service_catalog().SERVICE_LIST_SOURCES.values())
+            names = ', '.join(_service_list_labels())
             bot.send_message(message.chat.id, f'Использование: /getlist название [маршрут]\nДоступно: {names}', reply_markup=main)
             return True
         route_name = parts[2] if len(parts) > 2 else None
