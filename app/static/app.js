@@ -280,8 +280,13 @@
                 }
                 let scale = Math.min(1, BACKGROUND_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight), Math.sqrt(BACKGROUND_MAX_PIXELS / (sourceWidth * sourceHeight)));
                 for (let attempt = 0; attempt < 5; attempt += 1) {
-                    const width = Math.max(1, Math.round(sourceWidth * scale));
-                    const height = Math.max(1, Math.round(sourceHeight * scale));
+                    let width = Math.max(1, Math.min(BACKGROUND_MAX_DIMENSION, Math.floor(sourceWidth * scale)));
+                    let height = Math.max(1, Math.min(BACKGROUND_MAX_DIMENSION, Math.floor(sourceHeight * scale)));
+                    while (width * height > BACKGROUND_MAX_PIXELS) {
+                        const correction = Math.sqrt(BACKGROUND_MAX_PIXELS / (width * height));
+                        width = Math.max(1, Math.floor(width * correction));
+                        height = Math.max(1, Math.floor(height * correction));
+                    }
                     const canvas = document.createElement('canvas');
                     canvas.width = width;
                     canvas.height = height;

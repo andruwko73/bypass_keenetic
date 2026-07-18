@@ -593,6 +593,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/api/ui_background":
             self._json(dict(BACKGROUND_STATE))
             return
+        if path == "/api/router_health":
+            self._json(_router_health())
+            return
         if path == "/api/status":
             params = parse_qs(parsed.query or "", keep_blank_values=True)
             lite = (params.get("lite") or [""])[0] == "1"

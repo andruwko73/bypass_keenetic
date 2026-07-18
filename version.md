@@ -1,5 +1,5 @@
-*v1.957 (19 Jul 2026) -* main
+*v1.958 (19 Jul 2026) -* main
 
-*Makes custom-background selection reliable on desktop, Android and iPhone browsers, including devices that omit the MIME type of a standard image.*
+*Fixes the boundary calculation for large background images: the browser now always produces dimensions inside the router limit, even after rounding.*
 
-*The browser still accepts only JPEG, PNG and WebP, then compresses the image to a safe WebP before it reaches the router.*
+*The cross-browser smoke test covers a 2560×1601 mobile-style input from preview through saving and deletion.*

@@ -1,6 +1,4 @@
 const { chromium, devices } = require('playwright');
-const fs = require('fs');
-const nodePath = require('path');
 
 const targetUrl = process.env.BYPASS_UI_URL || 'http://192.168.1.1:8080/';
 const chromeExecutable = process.env.CHROME_EXECUTABLE || undefined;
@@ -674,10 +672,18 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     throw new Error(`${name}: background UI must not expose a separate enable checkbox`);
   }
   if (!isMobile && modeConfig.mode === 'advanced') {
-    await page.locator('#background-file-input').setInputFiles({
-      name: 'background.png',
-      mimeType: 'application/octet-stream',
-      buffer: fs.readFileSync(nodePath.join(__dirname, '..', 'app', 'static', 'service-icons', 'grok.png')),
+    await page.locator('#background-file-input').evaluate(async (input) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2560;
+      canvas.height = 1601;
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#198a8a';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([blob], 'background.png', { type: 'application/octet-stream' }));
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await page.waitForFunction(() => !document.getElementById('background-save-button').disabled);
     await page.locator('#background-shade').evaluate((node) => {
