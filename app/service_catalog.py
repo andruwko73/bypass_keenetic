@@ -621,7 +621,7 @@ CUSTOM_CHECK_PRESETS = [
     },
     {
         'id': 'grok',
-        'label': 'Grok',
+        'label': 'Grok / X / Twitter',
         'url': 'https://grok.com',
         'urls': ['https://grok.com', 'https://x.ai', 'https://x.com', 'https://twitter.com'],
         'routes': GROK_ROUTE_ENTRIES,
@@ -919,10 +919,11 @@ SERVICE_LIST_SOURCES = {
         'udp_quic': True,
     },
     'grok': {
-        'label': 'Grok',
-        'aliases': ['grok', 'xai', 'x ai'],
+        'label': 'Grok / X / Twitter',
+        'aliases': ['grok', 'xai', 'x ai', 'x', 'twitter', 'твиттер'],
         'url': '',
         'entries': GROK_ROUTE_ENTRIES,
+        'include_services': ['twitter'],
         'udp_quic': True,
     },
     'deepseek': {

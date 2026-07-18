@@ -2831,7 +2831,6 @@ SOCIALNET_SERVICE_KEYS = (
     'chrome_remote_desktop',
     'meta',
     'tiktok',
-    'twitter',
 )
 SOCIALNET_ALL_KEY = 'all'
 SOCIALNET_EXCLUDED_ENTRIES = set()
@@ -2840,6 +2839,8 @@ SOCIALNET_EXCLUDED_ENTRIES = set()
 def _service_list_alias_map():
     aliases = {}
     for key, source in _service_catalog().SERVICE_LIST_SOURCES.items():
+        if key not in SOCIALNET_SERVICE_KEYS:
+            continue
         aliases[key] = key
         aliases[source.get('label', key).lower()] = key
         for alias in source.get('aliases', []):
@@ -6142,14 +6143,25 @@ def _socialnet_service_label(service_key):
     return _service_catalog().SERVICE_LIST_SOURCES.get(service_key, {}).get('label', service_key)
 
 
-def _load_service_entries(service_key):
+def _load_service_entries(service_key, _seen=None):
+    seen = set(_seen or ())
+    if service_key in seen:
+        return []
+    seen.add(service_key)
     source = _service_catalog().SERVICE_LIST_SOURCES.get(service_key)
     if not source:
         raise ValueError('Неизвестный сервис')
     if source.get('entries'):
-        return _socialnet_entries_from_text('\n'.join(_service_catalog().service_route_entries(service_key)))
-    raw_text = _fetch_remote_text(source['url'], timeout=25)
-    entries = _parse_service_domains(raw_text)
+        entries = _socialnet_entries_from_text('\n'.join(_service_catalog().service_route_entries(service_key)))
+    else:
+        raw_text = _fetch_remote_text(source['url'], timeout=25)
+        entries = _parse_service_domains(raw_text)
+    for linked_service in source.get('include_services') or []:
+        try:
+            entries.extend(_load_service_entries(linked_service, _seen=seen))
+        except Exception:
+            continue
+    entries = _socialnet_entries_from_text('\n'.join(entries))
     if not entries:
         raise ValueError(f'Список {source["label"]} пуст')
     return entries

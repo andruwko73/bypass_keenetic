@@ -8868,12 +8868,16 @@ def test_custom_check_service_sources_are_synced():
     assert service_catalog.SERVICE_LIST_SOURCES['copilot']['entries'] == service_catalog.COPILOT_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['perplexity']['entries'] == service_catalog.PERPLEXITY_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['grok']['entries'] == service_catalog.GROK_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['grok']['label'] == 'Grok / X / Twitter'
+    assert service_catalog.SERVICE_LIST_SOURCES['grok']['include_services'] == ['twitter']
     assert service_catalog.SERVICE_LIST_SOURCES['deepseek']['entries'] == service_catalog.DEEPSEEK_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['telegram']['entries'] == service_catalog.TELEGRAM_UNBLOCK_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['meta']['entries'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['meta']['label'] == 'Instagram / Facebook'
     assert 'telegram' in button_keys
     assert 'meta' in button_keys
+    assert 'grok' in button_keys
+    assert 'twitter' not in button_keys
     assert {'meta_ai', 'instagram', 'facebook'}.isdisjoint(button_keys)
     assert {'meta_ai', 'instagram', 'facebook'}.isdisjoint(preset_ids)
     assert presets['meta']['routes'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
@@ -8883,6 +8887,8 @@ def test_custom_check_service_sources_are_synced():
         'https://www.facebook.com',
         'https://graph.facebook.com',
     ]
+    assert presets['grok']['label'] == 'Grok / X / Twitter'
+    assert "source.get('include_services')" in bot_source
 
 
 def test_telegram_routes_include_mini_app_dependencies():
@@ -9702,7 +9708,15 @@ def test_web_form_blocks_helpers():
     button_picker = web_form_blocks.render_button_mode_picker('vless', csrf_input_html='<input name="csrf_token">')
     assert 'mode-choice-grid' in button_picker
     assert 'csrf_token' in button_picker
-    assert '<select' in web_form_blocks.render_select_mode_picker('none', '<input>')
+    expected_mode_order = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks', 'none')
+    assert [button_picker.index(f'data-mode-value="{mode}"') for mode in expected_mode_order] == sorted(
+        button_picker.index(f'data-mode-value="{mode}"') for mode in expected_mode_order
+    )
+    select_picker = web_form_blocks.render_select_mode_picker('none', '<input>')
+    assert '<select' in select_picker
+    assert [select_picker.index(f'value="{mode}"') for mode in expected_mode_order] == sorted(
+        select_picker.index(f'value="{mode}"') for mode in expected_mode_order
+    )
     app_picker = web_form_blocks.render_app_runtime_mode_picker(
         'advanced',
         [('advanced', 'Сложный', 'интерфейс с пулом ключей и Telegram-бот')],
