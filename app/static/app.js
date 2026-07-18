@@ -255,8 +255,16 @@
             });
         }
 
+        function isSupportedBackgroundInput(file) {
+            const type = String((file && file.type) || '').toLowerCase();
+            if (/^image\/(jpeg|png|webp)$/.test(type)) {
+                return true;
+            }
+            return /\.(jpe?g|png|webp)$/i.test(String((file && file.name) || ''));
+        }
+
         async function prepareBackgroundFile(file) {
-            if (!file || !/^image\/(jpeg|png|webp)$/i.test(file.type || '')) {
+            if (!file || !isSupportedBackgroundInput(file)) {
                 throw new Error('Выберите изображение JPEG, PNG или WebP.');
             }
             if (file.size < 1 || file.size > BACKGROUND_MAX_SOURCE_BYTES) {

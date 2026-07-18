@@ -676,7 +676,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (!isMobile && modeConfig.mode === 'advanced') {
     await page.locator('#background-file-input').setInputFiles({
       name: 'background.png',
-      mimeType: 'image/png',
+      mimeType: 'application/octet-stream',
       buffer: fs.readFileSync(nodePath.join(__dirname, '..', 'app', 'static', 'service-icons', 'grok.png')),
     });
     await page.waitForFunction(() => !document.getElementById('background-save-button').disabled);

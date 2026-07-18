@@ -1,5 +1,5 @@
-*v1.956 (19 Jul 2026) -* main
+*v1.957 (19 Jul 2026) -* main
 
-*Fixes custom-background preview and saving: selecting an image, setting dimming and saving now work as one predictable flow.*
+*Makes custom-background selection reliable on desktop, Android and iPhone browsers, including devices that omit the MIME type of a standard image.*
 
-*The update panel now shows the target release after it is downloaded, and future updates read the staged runtime-module manifest so new modules cannot be skipped during an upgrade.*
+*The browser still accepts only JPEG, PNG and WebP, then compresses the image to a safe WebP before it reaches the router.*
