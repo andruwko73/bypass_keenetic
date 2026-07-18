@@ -1,4 +1,6 @@
 const { chromium, devices } = require('playwright');
+const fs = require('fs');
+const nodePath = require('path');
 
 const targetUrl = process.env.BYPASS_UI_URL || 'http://192.168.1.1:8080/';
 const chromeExecutable = process.env.CHROME_EXECUTABLE || undefined;
@@ -667,6 +669,32 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   }
   if (await page.locator('#background-save-button').isDisabled() !== true) {
     throw new Error(`${name}: background save must be disabled before a file is selected`);
+  }
+  if (await page.locator('#background-enabled').count() !== 0) {
+    throw new Error(`${name}: background UI must not expose a separate enable checkbox`);
+  }
+  if (!isMobile && modeConfig.mode === 'advanced') {
+    await page.locator('#background-file-input').setInputFiles({
+      name: 'background.png',
+      mimeType: 'image/png',
+      buffer: fs.readFileSync(nodePath.join(__dirname, '..', 'app', 'static', 'service-icons', 'grok.png')),
+    });
+    await page.waitForFunction(() => !document.getElementById('background-save-button').disabled);
+    await page.locator('#background-shade').evaluate((node) => {
+      node.value = '38';
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    if (await page.locator('html[data-user-background="enabled"]').count() !== 1) {
+      throw new Error(`${name}: pending background preview was removed by shade adjustment`);
+    }
+    await page.locator('#background-save-button').click();
+    await page.waitForFunction(() => (document.getElementById('background-note').textContent || '').includes('сохран'));
+    if (await page.locator('html[data-user-background="enabled"]').count() !== 1) {
+      throw new Error(`${name}: saved background was not applied`);
+    }
+    page.once('dialog', (dialog) => dialog.accept().catch(() => {}));
+    await page.locator('#background-delete-button').click();
+    await page.waitForFunction(() => !document.documentElement.hasAttribute('data-user-background'));
   }
   await page.locator('#theme-toggle-button').click();
 

@@ -8378,6 +8378,7 @@ def _web_command_state_defaults():
         'result': '',
         'progress': 0,
         'progress_label': '',
+        'target_version': '',
         'expected_seconds': 0,
         'expected_samples': 0,
         'started_at': 0,
@@ -8446,6 +8447,10 @@ def _get_web_command_state():
         state['finished_at'] = time.time()
         _write_web_command_state_file(state)
     state = _attach_web_command_duration_estimate(state)
+    if state.get('running') and state.get('command') in WEB_UPDATE_COMMANDS:
+        update_state = update_status.read_update_status()
+        if update_state.get('running') and update_state.get('command') == state.get('command'):
+            state['target_version'] = update_state.get('target_version', '')
     with web_command_lock:
         web_command_state.update(state)
     return _command_state_snapshot(web_command_lock, web_command_state)

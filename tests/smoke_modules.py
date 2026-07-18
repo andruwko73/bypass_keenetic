@@ -3039,6 +3039,10 @@ def test_direct_update_script_records_update_status():
     assert 'write_cli_update_status update true 10 Downloading "Downloading update files"' in script
     assert 'download_update_file "$(repo_file_url script.sh)"' in script
     assert '"$stage_dir/script.sh" "#!/bin/sh" "script.sh"' in script
+    assert 'staged_runtime_modules=$(sed -n' in script
+    assert 'for module in $staged_runtime_modules; do' in script
+    assert 'target_release=$(sed -n' in script
+    assert 'write_cli_update_status update true 40 Staged "Update files staged" "$target_release"' in script
     assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script
     assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
     assert 'restore_file script.sh /opt/root/script.sh' in script
@@ -11620,10 +11624,18 @@ def test_update_status_helpers():
             progress=42,
             progress_label='Downloading',
             message='step',
+            target_version='v1.956',
             path=str(path),
         )
         assert status['running'] is True
         assert update_status.read_update_status(str(path))['progress'] == 42
+        assert update_status.read_update_status(str(path))['target_version'] == 'v1.956'
+        assert update_status.write_update_status(
+            command='update', running=True, progress=50, path=str(path)
+        )['target_version'] == 'v1.956'
+        assert update_status.write_update_status(
+            command='update', running=True, progress=50, target_version='unsafe version!', path=str(path)
+        )['target_version'] == ''
         finished = update_status.finish_update_status('update', 'done', path=str(path))
         assert finished['running'] is False
         assert finished['progress'] == 100

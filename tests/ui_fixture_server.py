@@ -18,6 +18,18 @@ APP_ROOT = ROOT / "app"
 sys.path.insert(0, str(APP_ROOT))
 sys.path.insert(0, str(ROOT))
 
+BACKGROUND_STATE = {
+    "ok": True,
+    "available": False,
+    "enabled": False,
+    "shade": 55,
+    "url": "",
+    "size": 0,
+    "width": 0,
+    "height": 0,
+}
+BACKGROUND_FIXTURE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL4JwAAAABJRU5ErkJggg=="
+
 import key_pool_web  # noqa: E402
 import service_routes  # noqa: E402
 import web_form_blocks  # noqa: E402
@@ -579,7 +591,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self._send((APP_ROOT / "static" / "app.js").read_text(encoding="utf-8"), "application/javascript; charset=utf-8")
             return
         if path == "/api/ui_background":
-            self._json({"ok": True, "available": False, "enabled": False, "shade": 55, "url": "", "size": 0, "width": 0, "height": 0})
+            self._json(dict(BACKGROUND_STATE))
             return
         if path == "/api/status":
             params = parse_qs(parsed.query or "", keep_blank_values=True)
@@ -714,6 +726,38 @@ class FixtureHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or "0")
         body = self.rfile.read(length).decode("utf-8", errors="replace") if length else ""
         params = parse_qs(body, keep_blank_values=True)
+        if path == "/api/ui_background/upload":
+            BACKGROUND_STATE.update({
+                "ok": True,
+                "available": True,
+                "enabled": True,
+                "url": BACKGROUND_FIXTURE_URL,
+                "size": max(1, length),
+                "width": 1,
+                "height": 1,
+            })
+            self._json(dict(BACKGROUND_STATE))
+            return
+        if path == "/api/ui_background/settings":
+            try:
+                shade = max(0, min(80, int((params.get("shade") or [55])[0])))
+            except (TypeError, ValueError):
+                shade = 55
+            BACKGROUND_STATE.update({"ok": True, "shade": shade, "enabled": bool(BACKGROUND_STATE["available"])})
+            self._json(dict(BACKGROUND_STATE))
+            return
+        if path == "/api/ui_background/delete":
+            BACKGROUND_STATE.update({
+                "ok": True,
+                "available": False,
+                "enabled": False,
+                "url": "",
+                "size": 0,
+                "width": 0,
+                "height": 0,
+            })
+            self._json(dict(BACKGROUND_STATE))
+            return
         protocol = (params.get("type") or params.get("protocol") or ["vless"])[0]
         if path == "/pool_apply":
             self._json(

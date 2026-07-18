@@ -111,6 +111,7 @@
         let backgroundPayload = null;
         let pendingBackgroundBlob = null;
         let pendingBackgroundUrl = '';
+        let backgroundSettingsDirty = false;
 
         function backgroundControls() {
             return {
@@ -119,7 +120,6 @@
                 fileInput: document.getElementById('background-file-input'),
                 selectButton: document.getElementById('background-select-button'),
                 saveButton: document.getElementById('background-save-button'),
-                enabled: document.getElementById('background-enabled'),
                 shade: document.getElementById('background-shade'),
                 shadeValue: document.getElementById('background-shade-value'),
                 deleteButton: document.getElementById('background-delete-button'),
@@ -169,7 +169,8 @@
             const normalized = payload || {};
             const shade = clampBackgroundShade(normalized.shade);
             const activeUrl = previewUrl || normalized.url || '';
-            const enabled = !!normalized.available && !!normalized.enabled && !!activeUrl;
+            const hasPendingPreview = !!pendingBackgroundBlob && !!pendingBackgroundUrl;
+            const enabled = (hasPendingPreview || (!!normalized.available && !!normalized.enabled)) && !!activeUrl;
             const root = document.documentElement;
             root.style.setProperty('--user-background-shade', String(shade / 100));
             if (enabled) {
@@ -179,7 +180,7 @@
                 root.removeAttribute('data-user-background');
                 root.style.removeProperty('--user-background-image');
             }
-            updateBackgroundPreview(activeUrl, normalized.available ? 'Пользовательский фон' : 'Стандартный фон');
+            updateBackgroundPreview(activeUrl, (normalized.available || hasPendingPreview) ? 'Пользовательский фон' : 'Стандартный фон');
         }
 
         function updateBackgroundControls() {
@@ -187,10 +188,6 @@
             const payload = backgroundPayload || {};
             const available = !!payload.available;
             const shade = clampBackgroundShade(controls.shade ? controls.shade.value : payload.shade);
-            if (controls.enabled) {
-                controls.enabled.checked = available && !!payload.enabled;
-                controls.enabled.disabled = !available;
-            }
             if (controls.shade) {
                 controls.shade.value = String(shade);
                 controls.shade.disabled = !available && !pendingBackgroundBlob;
@@ -199,7 +196,7 @@
                 controls.shadeValue.textContent = String(shade) + '%';
             }
             if (controls.saveButton) {
-                controls.saveButton.disabled = !pendingBackgroundBlob;
+                controls.saveButton.disabled = !pendingBackgroundBlob && !(available && backgroundSettingsDirty);
             }
             if (controls.deleteButton) {
                 controls.deleteButton.disabled = !available;
@@ -219,6 +216,7 @@
             return requestBackground('/api/ui_background', {cache: 'no-store'})
                 .then(function(payload) {
                     backgroundPayload = payload;
+                    backgroundSettingsDirty = false;
                     applyBackground(payload);
                     updateBackgroundControls();
                     if (payload.available) {
@@ -228,6 +226,7 @@
                 })
                 .catch(function() {
                     backgroundPayload = {available: false, enabled: false, shade: 55};
+                    backgroundSettingsDirty = false;
                     applyBackground(backgroundPayload);
                     updateBackgroundControls();
                     return backgroundPayload;
@@ -300,11 +299,11 @@
 
         function saveBackgroundSettings() {
             const controls = backgroundControls();
-            if (!backgroundPayload || !backgroundPayload.available || !controls.enabled || !controls.shade) {
+            if (!backgroundPayload || !backgroundPayload.available || !controls.shade) {
                 return Promise.resolve(backgroundPayload);
             }
             const body = new URLSearchParams({
-                enabled: controls.enabled.checked ? '1' : '0',
+                enabled: '1',
                 shade: String(clampBackgroundShade(controls.shade.value)),
                 csrf_token: CSRF_TOKEN
             });
@@ -317,6 +316,7 @@
                 body: body.toString()
             }).then(function(payload) {
                 backgroundPayload = payload;
+                backgroundSettingsDirty = false;
                 applyBackground(payload);
                 updateBackgroundControls();
                 return payload;
@@ -348,6 +348,7 @@
                         shade: clampBackgroundShade(controls.shade ? controls.shade.value : 55)
                     });
                     applyBackground(previewPayload, pendingBackgroundUrl);
+                    backgroundSettingsDirty = true;
                     updateBackgroundPreview(pendingBackgroundUrl, 'Предпросмотр до сохранения');
                     updateBackgroundControls();
                     setBackgroundNote('Подготовлен WebP: ' + Math.ceil(blob.size / 1024) + ' КБ. Нажмите «Сохранить».', false);
@@ -361,12 +362,12 @@
                 });
             });
             controls.saveButton.addEventListener('click', function() {
-                if (!pendingBackgroundBlob) {
+                if (!pendingBackgroundBlob && (!backgroundPayload || !backgroundPayload.available || !backgroundSettingsDirty)) {
                     return;
                 }
                 controls.saveButton.disabled = true;
                 setBackgroundNote('Сохраняем фон на роутере…', false);
-                requestBackground('/api/ui_background/upload', {
+                const saveRequest = pendingBackgroundBlob ? requestBackground('/api/ui_background/upload', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'image/webp',
@@ -375,12 +376,14 @@
                     body: pendingBackgroundBlob
                 }).then(function(payload) {
                     backgroundPayload = payload;
-                    if (controls.enabled) {
-                        controls.enabled.checked = true;
-                    }
                     return saveBackgroundSettings();
-                }).then(function(payload) {
+                }) : saveBackgroundSettings();
+                saveRequest.then(function(payload) {
+                    if (!payload || !payload.available) {
+                        throw new Error('Не удалось сохранить фон.');
+                    }
                     backgroundPayload = payload;
+                    backgroundSettingsDirty = false;
                     pendingBackgroundBlob = null;
                     revokePendingBackgroundUrl();
                     applyBackground(payload);
@@ -391,26 +394,19 @@
                     setBackgroundNote(error.message || 'Не удалось сохранить фон.', true);
                 });
             });
-            if (controls.enabled) {
-                controls.enabled.addEventListener('change', function() {
-                    saveBackgroundSettings().catch(function(error) {
-                        controls.enabled.checked = !!(backgroundPayload && backgroundPayload.enabled);
-                        setBackgroundNote(error.message || 'Не удалось изменить настройку фона.', true);
-                    });
-                });
-            }
             if (controls.shade) {
                 controls.shade.addEventListener('input', function() {
                     const shade = clampBackgroundShade(controls.shade.value);
                     if (controls.shadeValue) {
                         controls.shadeValue.textContent = String(shade) + '%';
                     }
-                    applyBackground(Object.assign({}, backgroundPayload || {}, {shade: shade}), pendingBackgroundUrl);
-                });
-                controls.shade.addEventListener('change', function() {
-                    saveBackgroundSettings().catch(function(error) {
-                        setBackgroundNote(error.message || 'Не удалось сохранить затемнение.', true);
-                    });
+                    backgroundSettingsDirty = true;
+                    applyBackground(Object.assign({}, backgroundPayload || {}, {
+                        available: !!pendingBackgroundBlob || !!(backgroundPayload && backgroundPayload.available),
+                        enabled: true,
+                        shade: shade
+                    }), pendingBackgroundUrl);
+                    updateBackgroundControls();
                 });
             }
             if (controls.deleteButton) {
@@ -425,6 +421,7 @@
                     }).then(function(payload) {
                         backgroundPayload = payload;
                         pendingBackgroundBlob = null;
+                        backgroundSettingsDirty = false;
                         revokePendingBackgroundUrl();
                         applyBackground(payload);
                         updateBackgroundControls();
@@ -3126,7 +3123,8 @@
             setCommandRunningLayout(!!state.running);
             const title = block.querySelector('strong');
             if (title) {
-                title.textContent = (state.running ? 'Команда выполняется: ' : 'Последняя команда: ') + state.label;
+                const targetVersion = state.running && state.command === 'update' && state.target_version ? ' ' + state.target_version : '';
+                title.textContent = (state.running ? 'Команда выполняется: ' : 'Последняя команда: ') + state.label + targetVersion;
             }
             const output = block.querySelector('.log-output');
             if (output) {

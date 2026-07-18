@@ -839,14 +839,15 @@ write_cli_update_status() {
   progress="${3:-0}"
   progress_label="${4:-}"
   message="${5:-}"
-  python3 - "$command" "$running" "$progress" "$progress_label" "$message" <<'PY' >/dev/null 2>&1 || true
+  target_version="${6:-}"
+  python3 - "$command" "$running" "$progress" "$progress_label" "$message" "$target_version" <<'PY' >/dev/null 2>&1 || true
 import json
 import os
 import sys
 import time
 
 path = '/opt/etc/bot/update_status.json'
-command, running, progress, progress_label, message = sys.argv[1:6]
+command, running, progress, progress_label, message, target_version = sys.argv[1:7]
 try:
     progress = max(0, min(100, int(progress or 0)))
 except Exception:
@@ -861,6 +862,8 @@ except Exception:
 started_at = now
 if current.get('running') and current.get('command') == command:
     started_at = current.get('started_at') or now
+    if not target_version:
+        target_version = current.get('target_version') or ''
 is_running = str(running).lower() in ('1', 'true', 'yes', 'y')
 status = {
     'running': is_running,
@@ -868,6 +871,7 @@ status = {
     'progress': progress,
     'progress_label': progress_label,
     'message': message,
+    'target_version': target_version,
     'started_at': started_at,
     'updated_at': now,
     'finished_at': 0 if is_running else now,
@@ -1679,7 +1683,9 @@ if [ "$1" = "-update" ]; then
     download_update_file "$(repo_file_url crontab)" "$stage_dir/crontab" "S99unblock tick" "crontab" || exit 1
     download_update_file "$(repo_file_url S99unblock)" "$stage_dir/S99unblock" "bypass unblock scheduler" "S99unblock" || exit 1
     download_update_file "$(repo_file_url bot.py)" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
-    for module in $BOT_RUNTIME_MODULES; do
+    staged_runtime_modules=$(sed -n 's/^BOT_RUNTIME_MODULES="\([^\"]*\)"$/\1/p' "$stage_dir/script.sh" | head -n1)
+    [ -n "$staged_runtime_modules" ] || { echo "Error: staged script has no runtime module manifest"; exit 1; }
+    for module in $staged_runtime_modules; do
       stage_runtime_module "$module" "" || exit 1
     done
     stage_runtime_module pool_probe_runner.py run_pool_probe_worker || exit 1
@@ -1724,7 +1730,8 @@ if [ "$1" = "-update" ]; then
     sed -i "s/40500/${dnsovertlsport}/g" "$stage_dir/dnsmasq.conf"
     sed -i "s/40508/${dnsoverhttpsport}/g" "$stage_dir/dnsmasq.conf"
     echo "Файлы успешно скачаны и подготовлены."
-    write_cli_update_status update true 40 Staged "Update files staged"
+    target_release=$(sed -n 's/^\*v\([0-9][0-9A-Za-z._-]*\).*/v\1/p' "$stage_dir/version.md" | head -n1)
+    write_cli_update_status update true 40 Staged "Update files staged" "$target_release"
     echo "Further update output is saved to $stage_dir/update.log."
     exec >> "$stage_dir/update.log" 2>&1
 

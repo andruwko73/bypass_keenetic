@@ -1,5 +1,5 @@
-*v1.955 (19 Jul 2026) -* main
+*v1.956 (19 Jul 2026) -* main
 
-*Adds a persistent custom WebP background for the web interface, with browser-side compression, safe streaming storage on the router and automatic preservation during updates.*
+*Fixes custom-background preview and saving: selecting an image, setting dimming and saving now work as one predictable flow.*
 
-*The image is never retained in the bot's static-asset cache: uploads and responses are bounded to small streaming blocks.*
+*The update panel now shows the target release after it is downloaded, and future updates read the staged runtime-module manifest so new modules cannot be skipped during an upgrade.*
