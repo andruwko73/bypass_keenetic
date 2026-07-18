@@ -879,7 +879,7 @@ class RouterHealthRuntime:
         time_provider=time.time,
         core_proxy_cache_ttl=60.0,
         dns_cache_ttl=45.0,
-        ndmc_cache_ttl=30.0,
+        ndmc_cache_ttl=5.0,
         related_process_cache_ttl=45.0,
         cpu_smoothing_factor=0.35,
     ):

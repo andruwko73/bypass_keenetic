@@ -877,6 +877,12 @@ def test_router_health_runtime_compact_snapshot_keeps_route_notes_cached():
     assert calls == {'dns': 1, 'core': 1, 'call': 1}
 
 
+def test_router_health_runtime_default_ndmc_ttl_matches_ui_refresh_window():
+    runtime = router_health_runtime.RouterHealthRuntime()
+    assert runtime.cache_ttl == 5.0
+    assert runtime.ndmc_cache_ttl == 5.0
+
+
 def test_router_health_runtime_compact_snapshot_refreshes_ndmc_by_ttl_and_force():
     calls = {'ndmc': 0}
     original = {
@@ -12316,6 +12322,7 @@ def main():
     test_router_metrics_runtime_snapshot()
     test_router_health_runtime_slow_snapshot_caches_heavy_checks()
     test_router_health_runtime_compact_snapshot_keeps_route_notes_cached()
+    test_router_health_runtime_default_ndmc_ttl_matches_ui_refresh_window()
     test_router_health_runtime_compact_snapshot_refreshes_ndmc_by_ttl_and_force()
     test_router_health_runtime_smooths_short_cpu_spikes()
     test_router_health_runtime_primes_cpu_baseline_without_page_render_sample()
