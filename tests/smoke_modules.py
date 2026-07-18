@@ -302,7 +302,7 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
         flash_storage={'path': '/opt', 'total_kb': 2048 * 1024, 'used_kb': 768 * 1024, 'free_kb': 1280 * 1024},
     )
     assert payload['memory_source'] == 'keenetic'
-    assert payload['memory_text'] == 'Память: доступно 201 MB из 485 MB.'
+    assert payload['memory_text'] == 'Память: доступно 201 MB из 485 MB'
     assert payload['used_percent'] == 55
     assert payload['total_kb'] == 485 * 1024
     assert payload['router_total_kb'] == 512 * 1024
@@ -359,7 +359,7 @@ def test_router_health_runtime_payload_marks_proc_fallbacks_explicitly():
         temp_xray_count=0,
     )
     assert payload['memory_source'] == 'proc'
-    assert payload['memory_text'] == 'Память: доступно 224 MB из 512 MB.'
+    assert payload['memory_text'] == 'Память: доступно 224 MB из 512 MB'
     assert payload['available_kb'] == 224 * 1024
     assert payload['linux_cache_kb'] == 112 * 1024
     assert payload['router_cache_kb'] == 96 * 1024
@@ -611,7 +611,8 @@ def test_router_health_runtime_related_process_snapshot():
         proc_root=str(proc_root),
         read_text=fake_read,
     )
-    assert idle_snapshot['pool_worker_count'] == 0
+    assert idle_snapshot['pool_worker_count'] == 1
+    assert idle_snapshot['pool_worker_rss_kb'] == 38000
     assert idle_snapshot['youtube_prefetch_count'] == 1
     assert idle_snapshot['background_worker_count'] == 1
     temp_dir.cleanup()
@@ -940,7 +941,7 @@ def test_router_health_runtime_compact_snapshot_refreshes_ndmc_by_ttl_and_force(
             setattr(router_health_runtime, name, value)
 
     assert calls['ndmc'] == 3
-    assert first['memory_text'] == 'Память: доступно 224 MB из 512 MB.'
+    assert first['memory_text'] == 'Память: доступно 224 MB из 512 MB'
     assert first['cpu_percent'] == 1
     assert first['cpu_source'] == 'keenetic'
     assert cached['used_kb'] == first['used_kb']
@@ -7444,6 +7445,35 @@ def test_pool_probe_controller_helpers():
     assert state['checked'] == 39
     assert state['total'] == 139
     assert state['started_at'] == 12.0
+
+    class _FailingThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError('thread start failed')
+
+    failed_state = {}
+    failed_lock = threading.Lock()
+    collected_after_start_failure = []
+    started, count = pool_probe_controller.start_pool_probe_worker(
+        [('vless', 'cannot-start')],
+        [],
+        scope='manual_all',
+        lock=failed_lock,
+        set_progress=lambda **updates: failed_state.update(updates),
+        run_worker=lambda *_args, **_kwargs: (0, 0),
+        invalidate_caches=lambda: None,
+        time_provider=lambda: 50.0,
+        collect_garbage=lambda: collected_after_start_failure.append(True),
+        thread_factory=_FailingThread,
+    )
+    assert started is False
+    assert count == 1
+    assert failed_state['running'] is False
+    assert failed_state['note'] == 'Не удалось запустить проверку пула.'
+    assert not failed_lock.locked()
+    assert collected_after_start_failure == [True]
 
     records = []
     tg_results = iter([(False, ''), (False, '')])

@@ -1,3 +1,3 @@
-*v1.949 (18 Jul 2026) -* main
+*v1.950 (18 Jul 2026) -* main
 
-*Removes the duplicate X / Twitter button from Telegram while keeping its list data in Grok / X / Twitter.*
+*Hardens pool-probe cleanup and keeps every worker process visible in router resource metrics.*

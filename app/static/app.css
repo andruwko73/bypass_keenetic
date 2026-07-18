@@ -843,6 +843,15 @@
         .confirm-card h2{margin:0 0 10px;font-size:22px;}
         .confirm-card p{margin:0 0 18px;color:var(--muted);}
         .confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+        @media (min-width: 1024px){
+            /* The list editor remains intentionally compact on tall desktop screens.
+               Long lists still scroll inside the editor instead of turning the page
+               into a mostly empty full-height panel. */
+            .app-view[data-view="lists"].active{grid-template-rows:auto auto auto;align-content:start;}
+            .list-workspace.active{height:auto;align-self:start;overflow:visible;}
+            .list-editor-form{height:auto;grid-template-rows:auto auto auto;align-content:start;overflow:visible;}
+            .list-editor-form textarea{height:clamp(180px,32vh,320px);min-height:180px;max-height:320px;overflow:auto;resize:vertical;}
+        }
         @media (max-width: 760px){
             :root{--control-height:38px;}
             :root{--mobile-status-gap:8px;}

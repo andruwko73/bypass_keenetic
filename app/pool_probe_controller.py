@@ -350,5 +350,23 @@ def start_pool_probe_worker(
             lock.release()
             collect_garbage()
 
-    thread_factory(target=worker, daemon=True).start()
+    try:
+        thread_factory(target=worker, daemon=True).start()
+    except Exception:
+        invalidate_caches()
+        set_progress(
+            running=False,
+            checked=initial_checked,
+            total=total_count,
+            scope=scope,
+            note='Не удалось запустить проверку пула.',
+            finished_at=time_provider(),
+        )
+        try:
+            probe_tasks.clear()
+        except Exception:
+            pass
+        lock.release()
+        collect_garbage()
+        return False, queued_count
     return True, queued_count

@@ -292,6 +292,28 @@ async function assertNoBrokenImages(page, label) {
   }
 }
 
+async function assertDesktopListEditorIsCompact(page, label) {
+  const layout = await page.evaluate(() => {
+    const textarea = document.querySelector('[data-view="lists"].active .list-editor-form textarea');
+    const workspace = document.querySelector('[data-view="lists"].active .list-workspace.active');
+    const actions = document.querySelector('[data-view="lists"].active .list-editor-form .form-actions');
+    const rect = (node) => node ? node.getBoundingClientRect() : null;
+    return {
+      viewportHeight: window.innerHeight,
+      textarea: rect(textarea),
+      workspace: rect(workspace),
+      actions: rect(actions),
+    };
+  });
+  if (layout.viewportHeight < 900) return;
+  if (!layout.textarea || !layout.workspace || !layout.actions) {
+    throw new Error(`${label}: list editor layout is missing nodes`);
+  }
+  if (layout.textarea.height > 324 || layout.workspace.height > 500) {
+    throw new Error(`${label}: list editor is needlessly stretched ${JSON.stringify(layout)}`);
+  }
+}
+
 async function assertPoolKeysAreMasked(page, label) {
   const leakage = await page.evaluate((needles) => ({
     dataKeyCount: document.querySelectorAll('[data-key]').length,
@@ -811,6 +833,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   await assertVisibleBox(page, '[data-view="lists"].active', `${name} lists view`);
   await assertNoBrokenImages(page, `${name} lists`);
   await assertNoHorizontalOverflow(page, `${name} lists`);
+  if (!isMobile) {
+    await assertDesktopListEditorIsCompact(page, `${name} lists`);
+  }
   assertNoPageFailures(failures);
 
   await context.close();
@@ -824,6 +849,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   try {
     for (const modeConfig of appModes) {
       await runViewport(browser, modeConfig, 'desktop', { width: 1365, height: 768 });
+      await runViewport(browser, modeConfig, 'full HD desktop', { width: 1920, height: 1080 });
       await runViewport(browser, modeConfig, 'compact desktop', { width: 915, height: 640 });
       await runViewport(browser, modeConfig, 'mobile', devices['Pixel 5'].viewport, true);
     }

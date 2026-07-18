@@ -306,7 +306,7 @@ def related_program_process_snapshot(
             result['youtube_prefetch_count'] += 1
             result['youtube_prefetch_rss_kb'] += rss_kb
             continue
-        if probe_running and (
+        if (
             'BYPASS_KEENETIC_POOL_PROBE_WORKER' in normalized or
             '_run_pool_probe_process_worker' in normalized
         ):
@@ -744,7 +744,7 @@ def build_router_health_payload(
     flash_total_mb = int(round(flash_total_kb / 1024.0)) if flash_total_kb else 0
     flash_used_mb = int(round(flash_used_kb / 1024.0)) if flash_used_kb else 0
     if total_mb and available_kb:
-        memory_text = f'Память: доступно {available_mb} MB из {total_mb} MB.'
+        memory_text = f'Память: доступно {available_mb} MB из {total_mb} MB'
     else:
         memory_text = 'Память: данные недоступны'
     router_details = []
