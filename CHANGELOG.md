@@ -1,3 +1,10 @@
+<a name="1.944"></a>
+# [1.944] - 18 Jul 2026
+
+- Makes the Router card use one fresh Keenetic NDMC snapshot for used RAM, total RAM, percentage and CPU; Linux `MemAvailable` and the program RSS breakdown remain explicitly separate.
+- Refreshes NDMC in compact status views by TTL and on `force=1`, including the first compact request, while retaining the independent `/proc` CPU sampler used by internal guards.
+- Corrects the protocol-specific key/subscription import hint in both renderers, translates visible subscription messages, and keeps route popovers inside compact desktop viewports.
+
 <a name="1.943"></a>
 # [1.943] - 13 Jul 2026
 

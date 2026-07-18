@@ -1,5 +1,6 @@
 import html
 
+from web_form_blocks import pool_import_hint
 from web_status_builder import cached_protocol_status as _cached_protocol_status
 
 from probe_cache import youtube_probe_state
@@ -7,7 +8,7 @@ from probe_cache import youtube_probe_state
 
 POOL_EMPTY_ROW_HTML = (
     '<tr class="pool-row pool-empty-row"><td colspan="6">'
-    'Пул пуст. Добавьте ключи или загрузите subscription'
+    'Пул пуст. Добавьте ключи или загрузите подписку'
     '</td></tr>'
 )
 POOL_LOADING_ROW_HTML = (
@@ -359,6 +360,7 @@ def render_protocol_panel(
     active_class = ' active' if active else ''
     safe_key_name = html.escape(key_name, quote=True)
     safe_title = html.escape(title)
+    safe_import_hint = html.escape(pool_import_hint(title))
     safe_value = html.escape(current_key_value or '')
     safe_placeholder = html.escape(placeholder)
     safe_tone = html.escape(status_info.get('tone', 'empty'), quote=True)
@@ -449,7 +451,7 @@ def render_protocol_panel(
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
                 <label class="field-label">Импорт ключей и подписки</label>
-                <p class="field-hint">Вставьте один ключ, список ключей или ссылку subscription. Vless-ключи попадут в пул {safe_title}; остальные протоколы будут разложены по своим пулам.</p>
+                <p class="field-hint">{safe_import_hint}</p>
                 <textarea name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
                 <label class="subscription-hwid-toggle">
                     <input type="checkbox" class="subscription-switch-input" name="send_router_hwid" value="1"{hwid_checked}>

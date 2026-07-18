@@ -740,17 +740,25 @@ def build_router_health_payload(
     flash_used_percent = int(round((flash_used_kb / float(flash_total_kb)) * 100)) if flash_total_kb else 0
     flash_total_mb = int(round(flash_total_kb / 1024.0)) if flash_total_kb else 0
     flash_used_mb = int(round(flash_used_kb / 1024.0)) if flash_used_kb else 0
-    if total_mb:
-        memory_text = f'Память: доступно {available_mb} MB из {total_mb} MB.'
+    if total_mb and memory_source == 'keenetic':
+        memory_text = f'Память роутера: занято {used_mb} MB из {total_mb} MB ({used_percent}%).'
+    elif total_mb:
+        memory_text = f'Память Linux: занято {used_mb} MB из {total_mb} MB ({used_percent}%).'
     else:
         memory_text = 'Память: данные недоступны'
     router_details = []
-    if used_mb:
-        router_details.append(f'Занято по данным роутера: {used_mb} MB ({used_percent}%)')
-    normalized_cpu_percent = _normalize_cpu_percent(cpu_percent)
+    if available_kb:
+        router_details.append(f'Доступно Linux: {available_mb} MB')
+    else:
+        router_details.append('Доступно Linux: -')
+    sampled_cpu_percent = _normalize_cpu_percent(cpu_percent)
+    keenetic_cpu_percent = _normalize_cpu_percent(ndmc_system.get('cpuload'))
+    normalized_cpu_percent = keenetic_cpu_percent if keenetic_cpu_percent is not None else sampled_cpu_percent
+    cpu_source = 'keenetic' if keenetic_cpu_percent is not None else 'proc'
     cpu_percent_text = _format_cpu_percent(normalized_cpu_percent)
     if cpu_percent_text:
-        router_details.append(f'Нагрузка CPU: {cpu_percent_text}')
+        cpu_label = 'Нагрузка CPU Keenetic' if cpu_source == 'keenetic' else 'Нагрузка CPU Linux'
+        router_details.append(f'{cpu_label}: {cpu_percent_text}')
     else:
         router_details.append('Нагрузка CPU: -')
     xray_rss_kb = int(xray_rss_kb or 0)
@@ -826,10 +834,13 @@ def build_router_health_payload(
         'total_kb': display_total_kb,
         'proc_total_kb': total_kb,
         'used_percent': used_percent,
-        'linux_cache_kb': display_cache_kb,
+        'linux_cache_kb': linux_cache_kb,
+        'router_cache_kb': display_cache_kb,
         'memory_source': memory_source,
         'load_text': load_text,
         'cpu_percent': normalized_cpu_percent,
+        'cpu_source': cpu_source,
+        'cpu_sample_percent': sampled_cpu_percent,
         'bot_rss_kb': bot_rss_kb or 0,
         'program_rss_kb': program_rss_kb,
         'xray_rss_kb': xray_rss_kb,
@@ -879,6 +890,7 @@ class RouterHealthRuntime:
         self.time_provider = time_provider
         self._lock = threading.Lock()
         self._cpu_lock = threading.Lock()
+        self._ndmc_lock = threading.Lock()
         self._cache = {'timestamp': 0, 'payload': None}
         self._compact_cache = {'timestamp': 0, 'payload': None}
         self._core_proxy_cache = {'timestamp': 0, 'payload': None}
@@ -889,10 +901,14 @@ class RouterHealthRuntime:
         self._last_cpu_percent = None
         self._cpu_prime_pending = False
 
-    def _cached_payload(self, cache_name, ttl, now, loader):
+    def _cached_payload(self, cache_name, ttl, now, loader, force_refresh=False):
         cache = getattr(self, cache_name)
         cached = cache.get('payload')
-        if cached is not None and now - float(cache.get('timestamp') or 0) < float(ttl or 0):
+        if (
+            not force_refresh and
+            cached is not None and
+            now - float(cache.get('timestamp') or 0) < float(ttl or 0)
+        ):
             return dict(cached) if isinstance(cached, dict) else cached
         payload = loader()
         setattr(self, cache_name, {'timestamp': now, 'payload': dict(payload) if isinstance(payload, dict) else payload})
@@ -933,13 +949,15 @@ class RouterHealthRuntime:
             lambda: read_dns_health(time_provider=self.time_provider),
         )
 
-    def _ndmc_snapshot(self, now):
-        return self._cached_payload(
-            '_ndmc_cache',
-            self.ndmc_cache_ttl,
-            now,
-            read_ndmc_system_snapshot,
-        )
+    def _ndmc_snapshot(self, now, force_refresh=False):
+        with self._ndmc_lock:
+            return self._cached_payload(
+                '_ndmc_cache',
+                self.ndmc_cache_ttl,
+                now,
+                read_ndmc_system_snapshot,
+                force_refresh=force_refresh,
+            )
 
     def sample_cpu(self, prime=False):
         with self._cpu_lock:
@@ -1000,13 +1018,13 @@ class RouterHealthRuntime:
                 now - float(self._compact_cache.get('timestamp') or 0) < self.cache_ttl
             ):
                 return dict(payload)
-            ndmc_cached = self._ndmc_cache.get('payload') if isinstance(self._ndmc_cache, dict) else None
         related_processes = self._related_process_snapshot(now, probe_running)
         dns_health = self._dns_snapshot(now)
         core_proxy_health = self._core_proxy_snapshot(now)
+        ndmc_system = self._ndmc_snapshot(now, force_refresh=force_refresh)
         payload = build_router_health_payload(
             meminfo=read_proc_meminfo(),
-            ndmc_system=ndmc_cached if isinstance(ndmc_cached, dict) else {},
+            ndmc_system=ndmc_system if isinstance(ndmc_system, dict) else {},
             load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
             cpu_percent=self._cpu_snapshot(sample=sample_cpu, prime=prime_cpu),
             bot_rss_kb=process_rss_kb('self'),
@@ -1054,7 +1072,7 @@ class RouterHealthRuntime:
         related_processes = self._related_process_snapshot(now, probe_running)
         payload = build_router_health_payload(
             meminfo=read_proc_meminfo(),
-            ndmc_system=self._ndmc_snapshot(now),
+            ndmc_system=self._ndmc_snapshot(now, force_refresh=force_refresh),
             load_text=' / '.join((read_proc_text('/proc/loadavg').split()[:3] or [])),
             cpu_percent=self._cpu_snapshot(sample=sample_cpu, prime=prime_cpu),
             bot_rss_kb=process_rss_kb('self'),

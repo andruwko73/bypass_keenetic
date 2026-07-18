@@ -1889,7 +1889,7 @@
             }
             clearPoolDeferred(body);
             if (!rows.length) {
-                body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите subscription.</td></tr>';
+                body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите подписку.</td></tr>';
                 body.innerHTML = body.innerHTML.replace('colspan="6"', 'colspan="' + poolCoreColspan(coreServices) + '"');
                 body.dataset.poolAppliedSort = '';
                 setupPoolControls(body.closest('[data-protocol-panel]') || document);
@@ -3115,16 +3115,22 @@
             }
             menu.classList.remove('drop-up');
             list.style.maxHeight = '';
+            list.style.top = '';
+            list.style.bottom = '';
             const rect = list.getBoundingClientRect();
+            const menuRect = menu.getBoundingClientRect();
             const viewportPadding = 12;
-            if (rect.bottom > window.innerHeight - viewportPadding) {
+            const availableBelow = Math.max(96, window.innerHeight - menuRect.bottom - viewportPadding);
+            const availableAbove = Math.max(96, menuRect.top - viewportPadding);
+            const dropUp = rect.bottom > window.innerHeight - viewportPadding && availableAbove >= availableBelow;
+            if (dropUp) {
                 menu.classList.add('drop-up');
+                list.style.top = 'auto';
+                list.style.bottom = 'calc(100% + 5px)';
             }
             const adjustedRect = list.getBoundingClientRect();
             if (adjustedRect.top < viewportPadding || adjustedRect.bottom > window.innerHeight - viewportPadding) {
-                const availableBelow = Math.max(96, window.innerHeight - adjustedRect.top - viewportPadding);
-                const availableAbove = Math.max(96, adjustedRect.bottom - viewportPadding);
-                const available = menu.classList.contains('drop-up') ? availableAbove : availableBelow;
+                const available = dropUp ? availableAbove : availableBelow;
                 list.style.maxHeight = available + 'px';
             }
         }

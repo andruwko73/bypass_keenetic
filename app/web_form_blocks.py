@@ -21,6 +21,14 @@ STATUS_REFRESH_PENDING_MARKERS = (
 )
 
 
+def pool_import_hint(title):
+    title = str(title or '').strip()
+    return (
+        'Вставьте один ключ, список ключей или ссылку на подписку. '
+        f'Ключи {title} будут добавлены в этот пул, а ключи остальных протоколов — в соответствующие им пулы.'
+    )
+
+
 def js_bool(value):
     return 'true' if value else 'false'
 
@@ -127,6 +135,7 @@ def _light_protocol_panel_html(
     active_class = ' active' if active else ''
     safe_key_name = html.escape(key_name, quote=True)
     safe_title = html.escape(title)
+    safe_import_hint = html.escape(pool_import_hint(title))
     safe_value = html.escape(current_key_value or '')
     safe_placeholder = html.escape(placeholder)
     status_info = status_info or {}
@@ -160,7 +169,7 @@ def _light_protocol_panel_html(
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
                 <label class="field-label">Импорт ключей и подписки</label>
-                <p class="field-hint">Вставьте один ключ, список ключей или ссылку subscription. Vless-ключи попадут в пул {safe_title}; остальные протоколы будут разложены по своим пулам.</p>
+                <p class="field-hint">{safe_import_hint}</p>
                 <textarea name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
                 <label class="subscription-hwid-toggle">
                     <input type="checkbox" class="subscription-switch-input" name="send_router_hwid" value="1"{hwid_checked}>

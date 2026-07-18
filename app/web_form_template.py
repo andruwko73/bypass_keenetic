@@ -269,7 +269,7 @@ def render_web_form(
     quick_key_secondary_label = 'Открыть пул ключей' if enable_key_pool else 'Открыть все ключи'
     router_health = router_health or {}
     router_memory_text = html.escape(str(router_health.get('memory_text') or 'недоступно'))
-    router_health_note = html.escape(_display_note_text(router_health.get('note') or 'данные обновляются из /proc с коротким кэшем'))
+    router_health_note = html.escape(_display_note_text(router_health.get('note') or 'данные обновляются с коротким кэшем'))
     router_dns_note = html.escape(_display_note_text(router_health.get('dns_note') or ''))
     router_core_proxy_note = html.escape(_display_note_text(router_health.get('core_proxy_note') or ''))
     router_telegram_call_note = html.escape(_display_note_text(router_health.get('telegram_call_note') or ''))

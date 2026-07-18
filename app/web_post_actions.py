@@ -461,7 +461,7 @@ def _format_subscription_import_result(proto, summary):
         parts.append(f'удалено устаревших: {removed_count}')
     if retained_count:
         parts.append(f'сохранено активных рабочих: {retained_count}')
-    return 'Subscription загружена; ' + '; '.join(parts)
+    return 'Подписка загружена; ' + '; '.join(parts)
 
 
 def _pool_import(ctx, data):
@@ -472,7 +472,7 @@ def _pool_import(ctx, data):
             raise ValueError('Неизвестный протокол')
         payload = first_form_value(data, ('import_payload', 'keys', 'url')).strip()
         if not payload:
-            raise ValueError('Вставьте ключ, список ключей или ссылку subscription')
+            raise ValueError('Вставьте ключ, список ключей или ссылку на подписку')
         non_empty_lines = [line.strip() for line in payload.splitlines() if line.strip()]
         if len(non_empty_lines) == 1 and _is_subscription_input(non_empty_lines[0]):
             subscription_url = non_empty_lines[0]
@@ -487,7 +487,7 @@ def _pool_import(ctx, data):
             selected_keys = subscription_keys_for_protocol(proto, fetched) if subscription_keys_for_protocol else []
             import_subscription = _ctx(ctx, 'import_subscription_keys_to_pools')
             if not import_subscription:
-                raise ValueError('Единый импорт subscription недоступен')
+                raise ValueError('Единый импорт подписки недоступен')
             previous_record = {}
             subscription_record = _ctx(ctx, 'subscription_record')
             if subscription_record:

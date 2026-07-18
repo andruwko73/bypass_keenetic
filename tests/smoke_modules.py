@@ -292,6 +292,7 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
             'memfree': 80 * 1024,
             'membuffers': 20 * 1024,
             'memcache': 130 * 1024,
+            'cpuload': 2,
         },
         load_text='0.10 / 0.14 / 0.10',
         cpu_percent=0.84,
@@ -301,12 +302,14 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
         flash_storage={'path': '/opt', 'total_kb': 2048 * 1024, 'used_kb': 768 * 1024, 'free_kb': 1280 * 1024},
     )
     assert payload['memory_source'] == 'keenetic'
-    assert payload['memory_text'] == 'Память: доступно 201 MB из 512 MB.'
+    assert payload['memory_text'] == 'Память роутера: занято 281 MB из 512 MB (55%).'
     assert payload['used_percent'] == 55
-    assert payload['cpu_percent'] == 0.84
+    assert payload['cpu_percent'] == 2
+    assert payload['cpu_source'] == 'keenetic'
+    assert payload['cpu_sample_percent'] == 0.84
     assert payload['pool_probe_text'] == 'Не запущена'
-    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 281 MB (55%); Нагрузка CPU: 0.84%'
-    assert 'Нагрузка CPU: 0.84%' in payload['note']
+    assert payload['note'].splitlines()[0] == 'Доступно Linux: 201 MB; Нагрузка CPU Keenetic: 2%'
+    assert 'Нагрузка CPU Keenetic: 2%' in payload['note']
     assert 'Программа использует 52 MB RAM' in payload['note']
     assert 'Flash-носитель: занято 768 из 2048 MB (38%)' in payload['note']
     assert '\n\n' not in payload['note']
@@ -331,9 +334,37 @@ def test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample
         temp_xray_count=0,
         flash_storage={'path': '/opt', 'total_kb': 29527 * 1024, 'used_kb': 862 * 1024, 'free_kb': 28665 * 1024},
     )
-    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 291 MB (57%); Нагрузка CPU: -'
+    assert payload['note'].splitlines()[0] == 'Доступно Linux: 256 MB; Нагрузка CPU: -'
     assert 'Средняя нагрузка' not in payload['note']
     assert '\n\n' not in payload['note']
+
+
+def test_router_health_runtime_payload_marks_proc_fallbacks_explicitly():
+    payload = router_health_runtime.build_router_health_payload(
+        meminfo={
+            'MemTotal': 512 * 1024,
+            'MemFree': 128 * 1024,
+            'Buffers': 32 * 1024,
+            'Cached': 64 * 1024,
+            'SReclaimable': 16 * 1024,
+            'MemAvailable': 224 * 1024,
+        },
+        ndmc_system={},
+        load_text='0.10 / 0.08 / 0.06',
+        cpu_percent=0.84,
+        bot_rss_kb=52 * 1024,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+    )
+    assert payload['memory_source'] == 'proc'
+    assert payload['memory_text'] == 'Память Linux: занято 288 MB из 512 MB (56%).'
+    assert payload['available_kb'] == 224 * 1024
+    assert payload['linux_cache_kb'] == 112 * 1024
+    assert payload['router_cache_kb'] == 96 * 1024
+    assert payload['cpu_percent'] == 0.84
+    assert payload['cpu_source'] == 'proc'
+    assert payload['cpu_sample_percent'] == 0.84
+    assert payload['note'].splitlines()[0] == 'Доступно Linux: 224 MB; Нагрузка CPU Linux: 0.84%'
 
 
 def test_router_health_runtime_program_rss_includes_related_processes():
@@ -358,7 +389,7 @@ def test_router_health_runtime_program_rss_includes_related_processes():
     assert payload['temporary_xray_rss_kb'] == 18 * 1024
     assert payload['youtube_prefetch_rss_kb'] == 14 * 1024
     assert payload['background_worker_rss_kb'] == 7 * 1024
-    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 318 MB (62%); Нагрузка CPU: 53.28%'
+    assert payload['note'].splitlines()[0] == 'Доступно Linux: 160 MB; Нагрузка CPU Linux: 53.28%'
     assert 'Программа использует 164 MB RAM: бот 63 MB, Xray 24 MB, проверка пула 38 MB, временный Xray 18 MB, YouTube prefetch 14 MB, фоновые задачи 7 MB' in payload['note']
     assert 'Flash-носитель: занято 774 из 29527 MB (3%)' in payload['note']
     assert '\n\n' not in payload['note']
@@ -842,6 +873,74 @@ def test_router_health_runtime_compact_snapshot_keeps_route_notes_cached():
     assert second['core_proxy_note'] == first['core_proxy_note']
     assert second['telegram_call_note'] == first['telegram_call_note']
     assert calls == {'dns': 1, 'core': 1, 'call': 1}
+
+
+def test_router_health_runtime_compact_snapshot_refreshes_ndmc_by_ttl_and_force():
+    calls = {'ndmc': 0}
+    original = {
+        'read_proc_meminfo': router_health_runtime.read_proc_meminfo,
+        'read_proc_text': router_health_runtime.read_proc_text,
+        'read_cpu_stat': router_health_runtime.read_cpu_stat,
+        'read_flash_storage': router_health_runtime.read_flash_storage,
+        'process_rss_kb': router_health_runtime.process_rss_kb,
+        'related_program_process_snapshot': router_health_runtime.related_program_process_snapshot,
+        'read_ndmc_system_snapshot': router_health_runtime.read_ndmc_system_snapshot,
+        'read_dns_health': router_health_runtime.read_dns_health,
+        'telegram_call_proxy_health': router_health_runtime.telegram_call_proxy_health,
+        'xray_compat_runtime': router_health_runtime.xray_compat_runtime,
+    }
+    ndmc_payloads = [
+        {'memory_total': 512 * 1024, 'memory_used': 256 * 1024, 'cpuload': 1},
+        {'memory_total': 512 * 1024, 'memory_used': 300 * 1024, 'cpuload': 5},
+        {'memory_total': 512 * 1024, 'memory_used': 320 * 1024, 'cpuload': 3},
+    ]
+
+    def fake_ndmc():
+        index = min(calls['ndmc'], len(ndmc_payloads) - 1)
+        calls['ndmc'] += 1
+        return dict(ndmc_payloads[index])
+
+    now = [100.0]
+    try:
+        router_health_runtime.read_proc_meminfo = lambda: {'MemTotal': 512 * 1024, 'MemAvailable': 224 * 1024, 'MemFree': 128 * 1024}
+        router_health_runtime.read_proc_text = lambda path, max_bytes=16384: '0.01 0.02 0.03 1/100 1\n'
+        router_health_runtime.read_cpu_stat = lambda stat_path='/proc/stat': None
+        router_health_runtime.read_flash_storage = lambda: {}
+        router_health_runtime.process_rss_kb = lambda pid='self': 64 * 1024
+        router_health_runtime.related_program_process_snapshot = lambda probe_running=False: {}
+        router_health_runtime.read_ndmc_system_snapshot = fake_ndmc
+        router_health_runtime.read_dns_health = lambda **kwargs: {}
+        router_health_runtime.telegram_call_proxy_health = lambda: {}
+        router_health_runtime.xray_compat_runtime = None
+        runtime = router_health_runtime.RouterHealthRuntime(
+            cache_ttl=0,
+            time_provider=lambda: now[0],
+            core_proxy_cache_ttl=60,
+            dns_cache_ttl=60,
+            ndmc_cache_ttl=30,
+            related_process_cache_ttl=45,
+        )
+        first = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True)
+        now[0] += 10
+        cached = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True)
+        now[0] += 21
+        refreshed = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True)
+        now[0] += 1
+        forced = runtime.snapshot(lambda: {'running': False, 'total': 0}, compact=True, force_refresh=True)
+    finally:
+        for name, value in original.items():
+            setattr(router_health_runtime, name, value)
+
+    assert calls['ndmc'] == 3
+    assert first['memory_text'] == 'Память роутера: занято 256 MB из 512 MB (50%).'
+    assert first['cpu_percent'] == 1
+    assert first['cpu_source'] == 'keenetic'
+    assert cached['used_kb'] == first['used_kb']
+    assert cached['cpu_percent'] == 1
+    assert refreshed['used_kb'] == 300 * 1024
+    assert refreshed['cpu_percent'] == 5
+    assert forced['used_kb'] == 320 * 1024
+    assert forced['cpu_percent'] == 3
 
 
 def test_router_health_runtime_smooths_short_cpu_spikes():
@@ -1591,6 +1690,76 @@ def test_key_pool_subscription_helpers():
     assert 'finally:\n            session.close()' in bot_source
 
 
+def test_key_pool_import_routes_selected_protocol_and_vless_context():
+    vless_key = 'vless://uuid@example.com:443?security=tls#sample'
+    vmess_key = 'vmess://sample'
+    cases = (
+        ('shadowsocks', SS_KEY, 'shadowsocks'),
+        ('vmess', vmess_key, 'vmess'),
+        ('vless', vless_key, 'vless'),
+        ('vless2', vless_key, 'vless2'),
+        ('trojan', TROJAN_KEY, 'trojan'),
+    )
+    for selected_proto, selected_key, target_proto in cases:
+        pools, added_by_proto = key_pool_store.add_keys_to_pools_by_protocol({}, selected_proto, selected_key)
+        assert added_by_proto == {target_proto: [selected_key]}
+        assert pools[target_proto] == [selected_key]
+
+    for selected_proto in ('shadowsocks', 'vmess', 'trojan'):
+        pools, added_by_proto = key_pool_store.add_keys_to_pools_by_protocol({}, selected_proto, vless_key)
+        assert added_by_proto == {'vless': [vless_key]}
+        assert pools['vless'] == [vless_key]
+        assert pools[selected_proto] == []
+
+
+def test_pool_import_hint_is_protocol_specific_in_both_renderers():
+    protocols = (
+        ('shadowsocks', 'Shadowsocks', 'ss://sample'),
+        ('vmess', 'Vmess', 'vmess://...'),
+        ('vless', 'Vless 1', 'vless://...'),
+        ('vless2', 'Vless 2', 'vless://...'),
+        ('trojan', 'Trojan', 'trojan://...'),
+    )
+    for key_name, title, placeholder in protocols:
+        hint = web_form_blocks.pool_import_hint(title)
+        assert hint == (
+            'Вставьте один ключ, список ключей или ссылку на подписку. '
+            f'Ключи {title} будут добавлены в этот пул, а ключи остальных протоколов — в соответствующие им пулы.'
+        )
+        assert 'Vless-ключи' not in hint
+        light_panel = web_form_blocks._light_protocol_panel_html(
+            key_name=key_name,
+            title=title,
+            rows=5,
+            placeholder=placeholder,
+            current_key_value='',
+            status_info={'tone': 'empty', 'label': '', 'details': ''},
+            active_status_icons='',
+        )
+        full_panel = web_pool_form_blocks.render_protocol_panel(
+            key_name=key_name,
+            title=title,
+            rows=5,
+            placeholder=placeholder,
+            current_key_value='',
+            status_info={'tone': 'empty', 'label': '', 'details': ''},
+            active_status_icons='',
+            pool_items_html='',
+            pool_table_class='pool-table',
+            pool_custom_col_width=32,
+            pool_mobile_custom_col_width=28,
+            custom_header_icons='',
+            custom_presets_html='',
+            custom_checks_html='',
+            telegram_icon_html=lambda opacity=1.0: '',
+            youtube_icon_html=lambda opacity=1.0: '',
+        )
+        assert hint in light_panel
+        assert hint in full_panel
+    assert 'загрузите подписку' in web_pool_form_blocks.POOL_EMPTY_ROW_HTML
+    assert 'subscription' not in web_pool_form_blocks.POOL_EMPTY_ROW_HTML
+
+
 def test_subscription_hwid_request_helpers():
     assert subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT == 'v2rayN/6.45'
     url, headers = subscription_runtime.apply_hwid_to_subscription_request(
@@ -2198,6 +2367,8 @@ def test_web_post_actions_helpers():
         {'type': ['vless2'], 'import_payload': ['https://subscription.example.test/path'], 'send_router_hwid': ['1']},
     )
     assert subscription_result['success'] is True
+    assert subscription_result['result'].startswith('Подписка загружена;')
+    assert 'Subscription' not in subscription_result['result']
     assert subscription_calls and subscription_calls[0][0] == 'vless2'
     assert subscription_calls[0][1]['sync_subscription'] is True
     assert subscription_calls[0][1]['previous_managed_keys'] == [old_vless_uri]
@@ -12131,6 +12302,8 @@ def test_service_route_runtime_auto_resolve_uses_cross_runtime_lock():
 def main():
     test_app_runtime_mode_setter_callbacks()
     test_router_health_runtime_payload_uses_keenetic_memory()
+    test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample()
+    test_router_health_runtime_payload_marks_proc_fallbacks_explicitly()
     test_router_health_runtime_program_rss_includes_related_processes()
     test_router_health_runtime_dns_payload()
     test_router_health_runtime_core_proxy_payload()
@@ -12140,6 +12313,8 @@ def main():
     test_router_health_runtime_related_process_snapshot()
     test_router_metrics_runtime_snapshot()
     test_router_health_runtime_slow_snapshot_caches_heavy_checks()
+    test_router_health_runtime_compact_snapshot_keeps_route_notes_cached()
+    test_router_health_runtime_compact_snapshot_refreshes_ndmc_by_ttl_and_force()
     test_router_health_runtime_smooths_short_cpu_spikes()
     test_router_health_runtime_primes_cpu_baseline_without_page_render_sample()
     test_proxy_config_builder()
@@ -12178,6 +12353,8 @@ def main():
     test_youtube_healthcheck_tolerates_multiple_transient_bootstrap_failures()
     test_youtube_healthcheck_rejects_failed_googlevideo_media_endpoint()
     test_key_pool_subscription_helpers()
+    test_key_pool_import_routes_selected_protocol_and_vless_context()
+    test_pool_import_hint_is_protocol_specific_in_both_renderers()
     test_subscription_hwid_request_helpers()
     test_subscription_pool_sync_preserves_manual_keys()
     test_subscription_pool_sync_preserves_active_managed_key()

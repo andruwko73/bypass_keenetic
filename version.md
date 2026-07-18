@@ -1,3 +1,3 @@
-*v1.943 (13 Jul 2026) -* main
+*v1.944 (18 Jul 2026) -* main
 
-*Retries guard-deferred subscription refreshes within five minutes while keeping the six-hour network cadence.*
+*Makes the router card match native Keenetic RAM/CPU data, preserves independent memory safeguards, and clarifies protocol-specific key imports.*
