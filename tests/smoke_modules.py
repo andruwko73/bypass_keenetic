@@ -36,6 +36,7 @@ import router_metrics
 import xray_compat_runtime
 import telegram_pool_ui
 import web_get_actions
+import web_background
 import web_command_state
 import web_commands_runtime
 import web_form_blocks
@@ -9463,6 +9464,105 @@ def test_repo_update_helpers():
     assert repo_update.direct_fetch_env(('HTTP_PROXY',), {'HTTP_PROXY': 'x', 'keep': 'y'}) == {'keep': 'y'}
 
 
+def test_web_background_helpers():
+    def webp_vp8x(width=1600, height=1000, padding=0):
+        header = bytearray(10)
+        header[4:7] = (width - 1).to_bytes(3, 'little')
+        header[7:10] = (height - 1).to_bytes(3, 'little')
+        body = b'WEBP' + b'VP8X' + (10).to_bytes(4, 'little') + bytes(header)
+        if padding:
+            padding_bytes = b'0' * padding
+            body += b'JUNK' + len(padding_bytes).to_bytes(4, 'little') + padding_bytes
+            if len(padding_bytes) & 1:
+                body += b'\0'
+        return b'RIFF' + len(body).to_bytes(4, 'little') + body
+
+    class TrackingReader(BytesIO):
+        def __init__(self, value):
+            super().__init__(value)
+            self.max_request = 0
+
+        def read(self, size=-1):
+            self.max_request = max(self.max_request, size)
+            return super().read(size)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = web_background.WebBackgroundStore(tmpdir)
+        assert store.payload()['available'] is False
+        image = webp_vp8x(padding=web_background.STREAM_CHUNK_BYTES * 2 + 7)
+        reader = TrackingReader(image)
+        payload = store.upload(reader, len(image), 'image/webp; charset=binary')
+        assert reader.max_request <= web_background.STREAM_CHUNK_BYTES
+        assert payload['available'] is True
+        assert payload['enabled'] is True
+        assert payload['width'] == 1600
+        assert payload['height'] == 1000
+        assert web_background.webp_dimensions(store.file_path()) == (1600, 1000)
+        assert os.path.getsize(store.file_path()) == len(image)
+        assert store.update_settings('0', '91')['enabled'] is False
+        assert store.payload()['shade'] == 80
+        previous = Path(store.file_path()).read_bytes()
+        try:
+            store.upload(BytesIO(image[:-1]), len(image), 'image/webp')
+            raise AssertionError('interrupted upload must fail')
+        except ValueError as exc:
+            assert 'прервалась' in str(exc)
+        assert Path(store.file_path()).read_bytes() == previous
+        for content_length, content_type in ((web_background.MAX_BACKGROUND_BYTES + 1, 'image/webp'), (len(image), 'image/png')):
+            try:
+                store.upload(BytesIO(image), content_length, content_type)
+                raise AssertionError('invalid upload must fail')
+            except ValueError:
+                pass
+        bad_path = Path(tmpdir) / 'bad.webp'
+        bad_path.write_bytes(b'not-webp')
+        try:
+            web_background.webp_dimensions(str(bad_path))
+            raise AssertionError('invalid WebP must fail')
+        except ValueError:
+            pass
+        context = {
+            'web_background_payload': store.payload,
+            'web_background_file_path': store.file_path,
+        }
+        api_action = web_get_actions.dispatch(context, '/api/ui_background')
+        assert api_action['payload']['available'] is True
+        file_action = web_get_actions.dispatch(context, '/ui/background.webp')
+        assert file_action['kind'] == 'file'
+        assert file_action['content_type'] == 'image/webp'
+        assert file_action['cache_control'].startswith('private')
+        class StreamingHandler(web_http_common.WebRequestMixin):
+            def __init__(self):
+                self.command = 'GET'
+                self.wfile = BytesIO()
+                self.headers = {}
+                self.response_status = None
+                self.response_headers = {}
+                self.close_connection = False
+
+            def send_response(self, status):
+                self.response_status = status
+
+            def send_header(self, name, value):
+                self.response_headers[name.lower()] = value
+
+            def end_headers(self):
+                return None
+
+        handler = StreamingHandler()
+        handler._send_binary_file(store.file_path(), 'image/webp')
+        assert handler.response_status == 200
+        assert handler.response_headers['content-type'] == 'image/webp'
+        assert handler.wfile.getvalue() == image
+        common_source = source_path('web_http_common.py').read_text(encoding='utf-8')
+        assert "handle.read(64 * 1024)" in common_source
+        update_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
+        assert 'web_background.py WebBackgroundStore' in update_source
+        assert '/opt/etc/unblock/web-ui/background.webp' in update_source
+        assert store.delete()['available'] is False
+        assert web_get_actions.dispatch(context, '/ui/background.webp') is None
+
+
 def test_web_get_actions_helpers():
     refreshed = []
     pool_snapshot_calls = []
@@ -12472,6 +12572,7 @@ def main():
     test_subscription_pool_sync_preserves_manual_keys()
     test_subscription_pool_sync_preserves_active_managed_key()
     test_telegram_pool_ui()
+    test_web_background_helpers()
     test_web_get_actions_helpers()
     test_web_form_blocks_helpers()
     test_web_pool_form_blocks_helpers()

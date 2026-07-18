@@ -1,5 +1,5 @@
-*v1.954 (18 Jul 2026) -* main
+*v1.955 (19 Jul 2026) -* main
 
-*Keeps desktop route menus inside the viewport and preserves the unified protocol order in keys, pools and live status output.*
+*Adds a persistent custom WebP background for the web interface, with browser-side compression, safe streaming storage on the router and automatic preservation during updates.*
 
-*Adapts the local web panel for 2K/4K displays and avoids unnecessary process-status reads during router health snapshots.*
+*The image is never retained in the bot's static-asset cache: uploads and responses are bounded to small streaming blocks.*

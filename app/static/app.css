@@ -38,6 +38,7 @@
             --shadow:0 18px 40px rgba(43, 55, 71, 0.14);
         }
         *{box-sizing:border-box;}
+        html[data-user-background="enabled"] body{background-color:var(--bg);background-image:linear-gradient(rgba(7,13,22,var(--user-background-shade,.55)),rgba(7,13,22,var(--user-background-shade,.55))),var(--user-background-image);background-position:center;background-size:cover;background-attachment:fixed;}
         body{
             margin:0;
                         font-family:Segoe UI,Helvetica,Arial,sans-serif;
@@ -77,6 +78,19 @@
                 .app-mode-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
                 .mode-choice.active{background:rgba(48,191,181,.18);border-color:rgba(78,216,205,.5);color:#94f3ec;}
                 .mode-choice:hover{filter:none;transform:none;background:rgba(35,98,104,.42);}
+                .theme-background-control{display:grid;gap:8px;padding-top:4px;border-top:1px solid rgba(91,124,150,.3);}
+                .background-preview{display:flex;align-items:flex-end;min-height:76px;padding:8px;border:1px solid rgba(91,124,150,.42);border-radius:10px;background:linear-gradient(145deg,rgba(48,191,181,.18),rgba(17,25,35,.76));background-size:cover;background-position:center;overflow:hidden;}
+                .background-preview span{display:inline-flex;padding:4px 6px;border-radius:6px;background:rgba(10,16,24,.78);color:#e7f4f6;font-size:11px;font-weight:700;line-height:1.2;}
+                .background-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
+                .background-actions .mode-choice{font-size:12px;}
+                .background-setting{display:flex;align-items:center;gap:7px;color:var(--text);font-size:12px;font-weight:700;cursor:pointer;}
+                .background-setting input[type="checkbox"]{width:16px;height:16px;accent-color:#30bfb5;}
+                .background-shade-setting{display:grid;gap:5px;}
+                .background-shade-setting > span{display:flex;justify-content:space-between;}
+                .background-shade-setting input{width:100%;accent-color:#30bfb5;}
+                .background-delete-button{width:100%;min-height:36px;font-size:12px;}
+                .background-note{margin:0;color:var(--muted);font-size:11px;line-height:1.35;}
+                .background-note.is-error{color:#f0a59f;}
         h1{margin:0 0 4px;font-size:22px;line-height:1.15;letter-spacing:0;color:var(--text);}
         h2{margin:0 0 14px;font-size:20px;color:var(--text);}
             p{margin:0 0 8px;line-height:1.5;color:var(--muted);}

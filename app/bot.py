@@ -170,6 +170,7 @@ from web_http_common import (
 import web_form_blocks
 import web_get_actions
 import web_post_actions
+import web_background
 import web_status_runtime
 import web_commands_runtime
 import event_history
@@ -12270,7 +12271,61 @@ def _web_get_context(handler):
         'time_provider': time.time,
         'static_dir': STATIC_DIR,
         'service_icons_enabled': True,
+        'web_background_payload': lambda: web_background.store_for_unblock_dir().payload(),
+        'web_background_file_path': lambda: web_background.store_for_unblock_dir().file_path(),
     }
+
+
+def _web_background_form_value(data, name, default=''):
+    values = data.get(name, []) if isinstance(data, dict) else []
+    return str(values[0] if values else default)
+
+
+def _handle_web_background_post(handler, path):
+    store = web_background.store_for_unblock_dir()
+    if path == '/api/ui_background/upload':
+        if not handler._ensure_csrf_allowed():
+            return True
+        try:
+            payload = store.upload(
+                handler.rfile,
+                handler.headers.get('Content-Length', ''),
+                handler.headers.get('Content-Type', ''),
+            )
+        except ValueError as exc:
+            handler._send_json({'ok': False, 'error': str(exc)}, status=400)
+            return True
+        except OSError:
+            handler._send_json({'ok': False, 'error': 'Не удалось сохранить фон на накопителе роутера.'}, status=507)
+            return True
+        handler._send_json(payload, status=200)
+        return True
+    if path == '/api/ui_background/delete':
+        if not handler._ensure_csrf_allowed():
+            return True
+        try:
+            handler._send_json(store.delete(), status=200)
+        except OSError:
+            handler._send_json({'ok': False, 'error': 'Не удалось удалить фон с накопителя роутера.'}, status=500)
+        return True
+    if path != '/api/ui_background/settings':
+        return False
+    try:
+        data = handler._read_post_data()
+    except ValueError as exc:
+        handler._send_json({'ok': False, 'error': str(exc)}, status=400)
+        return True
+    if not handler._ensure_csrf_allowed(data):
+        return True
+    try:
+        payload = store.update_settings(
+            _web_background_form_value(data, 'enabled'),
+            _web_background_form_value(data, 'shade'),
+        )
+        handler._send_json(payload, status=200)
+    except OSError:
+        handler._send_json({'ok': False, 'error': 'Не удалось сохранить настройку фона.'}, status=507)
+    return True
 
 
 def _default_web_protocol():
@@ -12680,6 +12735,12 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             )
         elif kind == 'png':
             self._send_png(action.get('path', ''))
+        elif kind == 'file':
+            self._send_binary_file(
+                action.get('path', ''),
+                action.get('content_type', 'application/octet-stream'),
+                cache_control=action.get('cache_control', 'private, max-age=0, no-cache'),
+            )
         else:
             self._send_html('<h1>404 Not Found</h1>', status=404)
 
@@ -12690,6 +12751,8 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
+        if _handle_web_background_post(self, path):
+            return
         try:
             data = self._read_post_data()
         except ValueError as exc:

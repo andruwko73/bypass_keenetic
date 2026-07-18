@@ -2,6 +2,7 @@ import base64
 import gzip
 import ipaddress
 import json
+import os
 import re
 import secrets
 import threading
@@ -339,6 +340,34 @@ class WebRequestMixin:
             self.send_response(404)
             self.send_header('Content-type', 'text/plain; charset=utf-8')
             self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self._write_response_body(body)
+        self.close_connection = True
+
+    def _send_binary_file(self, filepath, content_type='application/octet-stream', cache_control='private, max-age=0, no-cache'):
+        try:
+            file_size = os.path.getsize(filepath)
+            if not os.path.isfile(filepath) or file_size < 1:
+                raise OSError('file is unavailable')
+            self.send_response(200)
+            self.send_header('Content-type', content_type)
+            self.send_header('Content-Length', str(file_size))
+            self.send_header('Cache-Control', cache_control)
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            if str(getattr(self, 'command', '') or '').upper() != 'HEAD':
+                with open(filepath, 'rb') as handle:
+                    while True:
+                        chunk = handle.read(64 * 1024)
+                        if not chunk or not self._write_response_body(chunk):
+                            break
+        except OSError:
+            body = b'Not Found'
+            self.send_response(404)
+            self.send_header('Content-type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
             self.send_header('Connection', 'close')
             self.end_headers()
             self._write_response_body(body)

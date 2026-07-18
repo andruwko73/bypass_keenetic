@@ -661,6 +661,13 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await page.locator('#theme-toggle-button').click();
   await assertVisibleBox(page, '#theme-picker:not(.hidden)', `${name} theme picker`);
+  await assertVisibleBox(page, '#theme-picker:not(.hidden) #background-preview', `${name} background preview`);
+  if (await page.locator('#background-file-input[accept="image/jpeg,image/png,image/webp"]').count() !== 1) {
+    throw new Error(`${name}: background file input is missing or accepts unsafe formats`);
+  }
+  if (await page.locator('#background-save-button').isDisabled() !== true) {
+    throw new Error(`${name}: background save must be disabled before a file is selected`);
+  }
   await page.locator('#theme-toggle-button').click();
 
   const modeToggleCount = await page.locator('#mode-toggle-button').count();

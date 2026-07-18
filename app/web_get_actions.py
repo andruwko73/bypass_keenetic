@@ -351,6 +351,18 @@ def dispatch(ctx, path, query=''):
         }
     if path == '/api/status':
         return {'kind': 'json', 'payload': _status_payload(ctx, query), 'status': 200}
+    if path == '/api/ui_background':
+        return {'kind': 'json', 'payload': _call(ctx, 'web_background_payload') or {}, 'status': 200}
+    if path == '/ui/background.webp':
+        filepath = _call(ctx, 'web_background_file_path')
+        if filepath:
+            return {
+                'kind': 'file',
+                'path': filepath,
+                'content_type': 'image/webp',
+                'cache_control': 'private, max-age=31536000, immutable',
+            }
+        return None
     if path == '/api/unblock_list':
         params = parse_qs(query or '', keep_blank_values=True)
         list_name = str((params.get('name') or [''])[0] or '').strip()

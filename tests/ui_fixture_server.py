@@ -578,6 +578,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/static/app.js":
             self._send((APP_ROOT / "static" / "app.js").read_text(encoding="utf-8"), "application/javascript; charset=utf-8")
             return
+        if path == "/api/ui_background":
+            self._json({"ok": True, "available": False, "enabled": False, "shade": 55, "url": "", "size": 0, "width": 0, "height": 0})
+            return
         if path == "/api/status":
             params = parse_qs(parsed.query or "", keep_blank_values=True)
             lite = (params.get("lite") or [""])[0] == "1"

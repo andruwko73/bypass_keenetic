@@ -88,7 +88,7 @@ function fixtureRequest(port, route) {
 async function runConcurrencySmoke(port) {
   const protocols = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks'];
   const routes = [
-    '/', '/static/app.css', '/static/app.js', '/api/status', '/api/status?compact=1', '/api/status?lite=1',
+    '/', '/static/app.css', '/static/app.js', '/api/ui_background', '/api/status', '/api/status?compact=1', '/api/status?lite=1',
     '/api/pools', '/api/pool_probe', '/api/command_state', '/api/router_metrics', '/api/event_history', '/api/service_routes',
     ...protocols.flatMap((proto) => [`/api/protocol_panel?proto=${proto}`, `/api/protocol_check_panel?proto=${proto}`]),
   ];

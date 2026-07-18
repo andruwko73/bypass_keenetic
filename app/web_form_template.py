@@ -445,6 +445,19 @@ def render_web_form(
                                 <button type="button" class="mode-choice" data-theme-choice="light" onclick="setTheme('light')"><span>Светлая</span></button>
                                 <button type="button" class="mode-choice" data-theme-choice="glass" onclick="setTheme('glass')"><span>Liquid Glass</span></button>
                             </div>
+                            <div class="theme-background-control">
+                                <span class="mode-picker-label">Фон интерфейса</span>
+                                <div id="background-preview" class="background-preview" aria-live="polite"><span id="background-preview-label">Стандартный фон</span></div>
+                                <input id="background-file-input" type="file" accept="image/jpeg,image/png,image/webp" class="hidden">
+                                <div class="background-actions">
+                                    <button type="button" class="mode-choice" id="background-select-button">Выбрать</button>
+                                    <button type="button" class="mode-choice" id="background-save-button" disabled>Сохранить</button>
+                                </div>
+                                <label class="background-setting"><input type="checkbox" id="background-enabled"><span>Использовать фон</span></label>
+                                <label class="background-setting background-shade-setting"><span>Затемнение <output id="background-shade-value">55%</output></span><input type="range" id="background-shade" min="0" max="80" step="1" value="55"></label>
+                                <button type="button" class="secondary-button background-delete-button" id="background-delete-button" disabled>Удалить фон</button>
+                                <p id="background-note" class="background-note">Можно выбрать фото до 20 МБ: браузер сожмёт его до WebP не больше 1 МБ.</p>
+                            </div>
                         </div>
                     </div>
                 </div>

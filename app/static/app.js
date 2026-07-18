@@ -104,6 +104,340 @@
             updateThemeControls();
         }
 
+        const BACKGROUND_MAX_SOURCE_BYTES = 20 * 1024 * 1024;
+        const BACKGROUND_MAX_OUTPUT_BYTES = 1024 * 1024;
+        const BACKGROUND_MAX_DIMENSION = 2560;
+        const BACKGROUND_MAX_PIXELS = 2560 * 1600;
+        let backgroundPayload = null;
+        let pendingBackgroundBlob = null;
+        let pendingBackgroundUrl = '';
+
+        function backgroundControls() {
+            return {
+                preview: document.getElementById('background-preview'),
+                previewLabel: document.getElementById('background-preview-label'),
+                fileInput: document.getElementById('background-file-input'),
+                selectButton: document.getElementById('background-select-button'),
+                saveButton: document.getElementById('background-save-button'),
+                enabled: document.getElementById('background-enabled'),
+                shade: document.getElementById('background-shade'),
+                shadeValue: document.getElementById('background-shade-value'),
+                deleteButton: document.getElementById('background-delete-button'),
+                note: document.getElementById('background-note')
+            };
+        }
+
+        function setBackgroundNote(message, isError) {
+            const note = backgroundControls().note;
+            if (!note) {
+                return;
+            }
+            note.textContent = message || '';
+            note.classList.toggle('is-error', !!isError);
+        }
+
+        function clampBackgroundShade(value) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) {
+                return 55;
+            }
+            return Math.max(0, Math.min(80, Math.round(number)));
+        }
+
+        function cssBackgroundUrl(url) {
+            return 'url(' + JSON.stringify(String(url || '')) + ')';
+        }
+
+        function revokePendingBackgroundUrl() {
+            if (pendingBackgroundUrl) {
+                URL.revokeObjectURL(pendingBackgroundUrl);
+                pendingBackgroundUrl = '';
+            }
+        }
+
+        function updateBackgroundPreview(url, label) {
+            const controls = backgroundControls();
+            if (controls.preview) {
+                controls.preview.style.backgroundImage = url ? cssBackgroundUrl(url) : '';
+            }
+            if (controls.previewLabel) {
+                controls.previewLabel.textContent = label || 'Стандартный фон';
+            }
+        }
+
+        function applyBackground(payload, previewUrl) {
+            const normalized = payload || {};
+            const shade = clampBackgroundShade(normalized.shade);
+            const activeUrl = previewUrl || normalized.url || '';
+            const enabled = !!normalized.available && !!normalized.enabled && !!activeUrl;
+            const root = document.documentElement;
+            root.style.setProperty('--user-background-shade', String(shade / 100));
+            if (enabled) {
+                root.style.setProperty('--user-background-image', cssBackgroundUrl(activeUrl));
+                root.setAttribute('data-user-background', 'enabled');
+            } else {
+                root.removeAttribute('data-user-background');
+                root.style.removeProperty('--user-background-image');
+            }
+            updateBackgroundPreview(activeUrl, normalized.available ? 'Пользовательский фон' : 'Стандартный фон');
+        }
+
+        function updateBackgroundControls() {
+            const controls = backgroundControls();
+            const payload = backgroundPayload || {};
+            const available = !!payload.available;
+            const shade = clampBackgroundShade(controls.shade ? controls.shade.value : payload.shade);
+            if (controls.enabled) {
+                controls.enabled.checked = available && !!payload.enabled;
+                controls.enabled.disabled = !available;
+            }
+            if (controls.shade) {
+                controls.shade.value = String(shade);
+                controls.shade.disabled = !available && !pendingBackgroundBlob;
+            }
+            if (controls.shadeValue) {
+                controls.shadeValue.textContent = String(shade) + '%';
+            }
+            if (controls.saveButton) {
+                controls.saveButton.disabled = !pendingBackgroundBlob;
+            }
+            if (controls.deleteButton) {
+                controls.deleteButton.disabled = !available;
+            }
+        }
+
+        async function requestBackground(url, options) {
+            const response = await fetch(url, options || {});
+            const payload = await response.json();
+            if (!response.ok || !payload || payload.ok === false) {
+                throw new Error((payload && payload.error) || 'Не удалось изменить фон.');
+            }
+            return payload;
+        }
+
+        function loadBackground() {
+            return requestBackground('/api/ui_background', {cache: 'no-store'})
+                .then(function(payload) {
+                    backgroundPayload = payload;
+                    applyBackground(payload);
+                    updateBackgroundControls();
+                    if (payload.available) {
+                        setBackgroundNote('Фон сохранён на роутере: ' + Math.ceil(Number(payload.size || 0) / 1024) + ' КБ.', false);
+                    }
+                    return payload;
+                })
+                .catch(function() {
+                    backgroundPayload = {available: false, enabled: false, shade: 55};
+                    applyBackground(backgroundPayload);
+                    updateBackgroundControls();
+                    return backgroundPayload;
+                });
+        }
+
+        function imageFromFile(file) {
+            return new Promise(function(resolve, reject) {
+                const image = new Image();
+                const objectUrl = URL.createObjectURL(file);
+                image.onload = function() {
+                    URL.revokeObjectURL(objectUrl);
+                    resolve(image);
+                };
+                image.onerror = function() {
+                    URL.revokeObjectURL(objectUrl);
+                    reject(new Error('Не удалось прочитать изображение.'));
+                };
+                image.src = objectUrl;
+            });
+        }
+
+        function canvasWebpBlob(canvas, quality) {
+            return new Promise(function(resolve) {
+                canvas.toBlob(resolve, 'image/webp', quality);
+            });
+        }
+
+        async function prepareBackgroundFile(file) {
+            if (!file || !/^image\/(jpeg|png|webp)$/i.test(file.type || '')) {
+                throw new Error('Выберите изображение JPEG, PNG или WebP.');
+            }
+            if (file.size < 1 || file.size > BACKGROUND_MAX_SOURCE_BYTES) {
+                throw new Error('Исходное изображение должно быть не больше 20 МБ.');
+            }
+            let source = null;
+            try {
+                source = window.createImageBitmap ? await window.createImageBitmap(file) : await imageFromFile(file);
+                const sourceWidth = Number(source.width || source.naturalWidth || 0);
+                const sourceHeight = Number(source.height || source.naturalHeight || 0);
+                if (sourceWidth < 1 || sourceHeight < 1) {
+                    throw new Error('Не удалось определить размер изображения.');
+                }
+                let scale = Math.min(1, BACKGROUND_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight), Math.sqrt(BACKGROUND_MAX_PIXELS / (sourceWidth * sourceHeight)));
+                for (let attempt = 0; attempt < 5; attempt += 1) {
+                    const width = Math.max(1, Math.round(sourceWidth * scale));
+                    const height = Math.max(1, Math.round(sourceHeight * scale));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const context = canvas.getContext('2d', {alpha: false});
+                    context.drawImage(source, 0, 0, width, height);
+                    for (const quality of [0.84, 0.76, 0.68, 0.6, 0.52, 0.45]) {
+                        const blob = await canvasWebpBlob(canvas, quality);
+                        if (blob && blob.type === 'image/webp' && blob.size <= BACKGROUND_MAX_OUTPUT_BYTES) {
+                            return blob;
+                        }
+                    }
+                    canvas.width = 1;
+                    canvas.height = 1;
+                    scale *= 0.82;
+                }
+                throw new Error('Не удалось сжать изображение до 1 МБ. Выберите более простое изображение.');
+            } finally {
+                if (source && typeof source.close === 'function') {
+                    source.close();
+                }
+            }
+        }
+
+        function saveBackgroundSettings() {
+            const controls = backgroundControls();
+            if (!backgroundPayload || !backgroundPayload.available || !controls.enabled || !controls.shade) {
+                return Promise.resolve(backgroundPayload);
+            }
+            const body = new URLSearchParams({
+                enabled: controls.enabled.checked ? '1' : '0',
+                shade: String(clampBackgroundShade(controls.shade.value)),
+                csrf_token: CSRF_TOKEN
+            });
+            return requestBackground('/api/ui_background/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                    'X-CSRF-Token': CSRF_TOKEN
+                },
+                body: body.toString()
+            }).then(function(payload) {
+                backgroundPayload = payload;
+                applyBackground(payload);
+                updateBackgroundControls();
+                return payload;
+            });
+        }
+
+        function setupBackgroundControls() {
+            const controls = backgroundControls();
+            if (!controls.fileInput || !controls.selectButton || !controls.saveButton) {
+                return;
+            }
+            controls.selectButton.addEventListener('click', function() {
+                controls.fileInput.click();
+            });
+            controls.fileInput.addEventListener('change', function() {
+                const file = controls.fileInput.files && controls.fileInput.files[0];
+                if (!file) {
+                    return;
+                }
+                controls.selectButton.disabled = true;
+                setBackgroundNote('Подготавливаем изображение в браузере…', false);
+                prepareBackgroundFile(file).then(function(blob) {
+                    revokePendingBackgroundUrl();
+                    pendingBackgroundBlob = blob;
+                    pendingBackgroundUrl = URL.createObjectURL(blob);
+                    const previewPayload = Object.assign({}, backgroundPayload || {}, {
+                        available: true,
+                        enabled: true,
+                        shade: clampBackgroundShade(controls.shade ? controls.shade.value : 55)
+                    });
+                    applyBackground(previewPayload, pendingBackgroundUrl);
+                    updateBackgroundPreview(pendingBackgroundUrl, 'Предпросмотр до сохранения');
+                    updateBackgroundControls();
+                    setBackgroundNote('Подготовлен WebP: ' + Math.ceil(blob.size / 1024) + ' КБ. Нажмите «Сохранить».', false);
+                }).catch(function(error) {
+                    pendingBackgroundBlob = null;
+                    updateBackgroundControls();
+                    setBackgroundNote(error.message || 'Не удалось подготовить изображение.', true);
+                }).finally(function() {
+                    controls.selectButton.disabled = false;
+                    controls.fileInput.value = '';
+                });
+            });
+            controls.saveButton.addEventListener('click', function() {
+                if (!pendingBackgroundBlob) {
+                    return;
+                }
+                controls.saveButton.disabled = true;
+                setBackgroundNote('Сохраняем фон на роутере…', false);
+                requestBackground('/api/ui_background/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'image/webp',
+                        'X-CSRF-Token': CSRF_TOKEN
+                    },
+                    body: pendingBackgroundBlob
+                }).then(function(payload) {
+                    backgroundPayload = payload;
+                    if (controls.enabled) {
+                        controls.enabled.checked = true;
+                    }
+                    return saveBackgroundSettings();
+                }).then(function(payload) {
+                    backgroundPayload = payload;
+                    pendingBackgroundBlob = null;
+                    revokePendingBackgroundUrl();
+                    applyBackground(payload);
+                    updateBackgroundControls();
+                    setBackgroundNote('Фон сохранён на роутере.', false);
+                }).catch(function(error) {
+                    updateBackgroundControls();
+                    setBackgroundNote(error.message || 'Не удалось сохранить фон.', true);
+                });
+            });
+            if (controls.enabled) {
+                controls.enabled.addEventListener('change', function() {
+                    saveBackgroundSettings().catch(function(error) {
+                        controls.enabled.checked = !!(backgroundPayload && backgroundPayload.enabled);
+                        setBackgroundNote(error.message || 'Не удалось изменить настройку фона.', true);
+                    });
+                });
+            }
+            if (controls.shade) {
+                controls.shade.addEventListener('input', function() {
+                    const shade = clampBackgroundShade(controls.shade.value);
+                    if (controls.shadeValue) {
+                        controls.shadeValue.textContent = String(shade) + '%';
+                    }
+                    applyBackground(Object.assign({}, backgroundPayload || {}, {shade: shade}), pendingBackgroundUrl);
+                });
+                controls.shade.addEventListener('change', function() {
+                    saveBackgroundSettings().catch(function(error) {
+                        setBackgroundNote(error.message || 'Не удалось сохранить затемнение.', true);
+                    });
+                });
+            }
+            if (controls.deleteButton) {
+                controls.deleteButton.addEventListener('click', function() {
+                    if (!window.confirm('Удалить пользовательский фон с роутера?')) {
+                        return;
+                    }
+                    controls.deleteButton.disabled = true;
+                    requestBackground('/api/ui_background/delete', {
+                        method: 'POST',
+                        headers: {'X-CSRF-Token': CSRF_TOKEN}
+                    }).then(function(payload) {
+                        backgroundPayload = payload;
+                        pendingBackgroundBlob = null;
+                        revokePendingBackgroundUrl();
+                        applyBackground(payload);
+                        updateBackgroundControls();
+                        setBackgroundNote('Пользовательский фон удалён.', false);
+                    }).catch(function(error) {
+                        updateBackgroundControls();
+                        setBackgroundNote(error.message || 'Не удалось удалить фон.', true);
+                    });
+                });
+            }
+            loadBackground();
+        }
+
         function setupLiquidPointer() {
             if (document.body.dataset.liquidPointerReady === '1') {
                 return;
@@ -3455,6 +3789,7 @@
             setupPoolControls();
             setupServiceRouteMenus();
             setupEventHistoryPanel();
+            setupBackgroundControls();
             setupLiquidPointer();
             setupAsyncForms();
             if (['127.0.0.1', 'localhost', '::1'].indexOf(window.location.hostname) !== -1) {
