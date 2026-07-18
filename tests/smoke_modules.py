@@ -6428,13 +6428,21 @@ def test_telegram_recovery_redacts_bot_api_token():
 
 
 def test_telegram_key_ui_helpers():
-    assert telegram_key_ui.key_menu_rows()[0] == ('Shadowsocks', 'Vmess')
+    assert telegram_key_ui.key_menu_rows()[:3] == (
+        ('Vless 1', 'Vless 2'),
+        ('Vmess', 'Trojan'),
+        ('Shadowsocks',),
+    )
     assert ('📦 Пул ключей' in telegram_key_ui.key_menu_rows(include_pool=True)[3])
     assert telegram_key_ui.key_input_level('Trojan', trojan_level=13) == 13
     assert telegram_key_ui.key_input_level('Vless 2', trojan_level=13) == 12
     assert telegram_key_ui.key_install_protocol(13, trojan_level=13) == 'trojan'
     assert telegram_key_ui.key_install_protocol(12, trojan_level=13) == 'vless2'
     assert 'http://192.168.1.1:8080/' in telegram_key_ui.browser_hint('192.168.1.1', 8080)
+    bot_source = (ROOT / 'app' / 'bot.py').read_text(encoding='utf-8')
+    report_start = bot_source.index('def _send_key_status_report(')
+    report_end = bot_source.index('\ndef ', report_start + 1)
+    assert 'for proto in POOL_PROTOCOL_ORDER:' in bot_source[report_start:report_end]
 
 
 def test_proxy_diagnostics_redact_credential_ids():
@@ -6599,11 +6607,11 @@ def test_telegram_bot_menu_button_smoke():
         )
         bot_module._format_pool_summary = lambda: 'POOL SUMMARY'
         bot_module._telegram_unblock_list_options = lambda: [
-            ('Shadowsocks', 'shadowsocks'),
-            ('Vmess', 'vmess'),
             ('Vless 1', 'vless'),
             ('Vless 2', 'vless-2'),
+            ('Vmess', 'vmess'),
             ('Trojan', 'trojan'),
+            ('Shadowsocks', 'shadowsocks'),
         ]
 
         assert bot_module.AUTHORIZED_USERNAMES == {'alloweduser'}
@@ -6614,7 +6622,11 @@ def test_telegram_bot_menu_button_smoke():
             ['📄 Информация', '⚙️ Сервис'],
         ]
         assert ['♻️ Перезагрузить сервисы', '‼️Перезагрузить роутер'] in bot_module._build_service_menu_markup().rows
-        assert ['Shadowsocks', 'Vmess'] in bot_module._build_keys_menu_markup().rows
+        assert bot_module._build_keys_menu_markup().rows[:3] == [
+            ['Vless 1', 'Vless 2'],
+            ['Vmess', 'Trojan'],
+            ['Shadowsocks'],
+        ]
         assert ['✅ Подтвердить', 'Отмена'] in bot_module._build_telegram_confirm_markup().rows
 
         bot_module.start(message('/start'))
@@ -11287,7 +11299,11 @@ def test_telegram_pool_ui():
         ['Vless 1', 'Vless 2', 'Vmess', 'Trojan', 'Shadowsocks'],
     )
     assert markup.resize_keyboard is True
-    assert markup.rows[0] == ['Vless 1', 'Vless 2']
+    assert markup.rows[:3] == [
+        ['Vless 1', 'Vless 2'],
+        ['Vmess', 'Trojan'],
+        ['Shadowsocks'],
+    ]
     assert markup.rows[-1][0].startswith('\U0001f519')
 
     label = telegram_pool_ui.pool_key_button_label(

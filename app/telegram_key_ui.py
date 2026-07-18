@@ -21,9 +21,9 @@ KEY_INSTALL_PROTOCOLS = {
 def key_menu_rows(include_pool=False):
     help_row = (KEY_HELP_TEXT, '📦 Пул ключей') if include_pool else (KEY_HELP_TEXT,)
     return (
-        ('Shadowsocks', 'Vmess'),
         ('Vless 1', 'Vless 2'),
-        ('Trojan',),
+        ('Vmess', 'Trojan'),
+        ('Shadowsocks',),
         help_row,
         (KEY_BROWSER_TEXT,),
         ('🔙 Назад',),

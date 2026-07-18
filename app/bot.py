@@ -6513,7 +6513,7 @@ def _send_key_status_report(message, service_markup):
     except Exception as exc:
         statuses = {}
         text_lines.append(f'❌ Ошибка получения статуса: {html.escape(str(exc))}')
-    for proto in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+    for proto in POOL_PROTOCOL_ORDER:
         st = statuses.get(proto, {}) if isinstance(statuses, dict) else {}
         mark = emoji.get(st.get('tone', 'empty'), '➖')
         label = proto_labels.get(proto, proto)
