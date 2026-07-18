@@ -9725,6 +9725,10 @@ def test_web_get_actions_helpers():
 
 
 def test_web_form_blocks_helpers():
+    expected_protocol_order = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+    assert key_pool_store.PROTOCOLS == expected_protocol_order
+    assert web_form_blocks.PROXY_PROTOCOLS == expected_protocol_order
+    assert tuple(item[0] for item in web_form_blocks.PROTOCOL_SECTIONS) == expected_protocol_order
     assert web_form_blocks.proxy_mode_label('none') == 'Без прокси'
     assert web_form_blocks.js_bool(True) == 'true'
     assert web_form_blocks.js_bool(False) == 'false'

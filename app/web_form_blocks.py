@@ -1,7 +1,7 @@
 import html
 
 
-PROXY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+PROXY_PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
 PROTOCOL_SECTIONS = [
     ('vless', 'Vless 1', 6, 'vless://...'),
     ('vless2', 'Vless 2', 6, 'vless://...'),

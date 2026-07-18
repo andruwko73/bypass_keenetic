@@ -1,4 +1,4 @@
-PROXY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+PROXY_PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
 
 
 def telegram_api_success_message():

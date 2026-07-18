@@ -6,7 +6,7 @@ import time
 from urllib.parse import urlsplit
 
 
-PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
 SCHEME_PROTOCOLS = {
     'ss': 'shadowsocks',
     'vmess': 'vmess',
