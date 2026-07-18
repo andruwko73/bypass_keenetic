@@ -302,14 +302,16 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
         flash_storage={'path': '/opt', 'total_kb': 2048 * 1024, 'used_kb': 768 * 1024, 'free_kb': 1280 * 1024},
     )
     assert payload['memory_source'] == 'keenetic'
-    assert payload['memory_text'] == 'Память роутера: занято 281 MB из 512 MB (55%).'
+    assert payload['memory_text'] == 'Память: доступно 201 MB из 485 MB.'
     assert payload['used_percent'] == 55
+    assert payload['total_kb'] == 485 * 1024
+    assert payload['router_total_kb'] == 512 * 1024
     assert payload['cpu_percent'] == 2
     assert payload['cpu_source'] == 'keenetic'
     assert payload['cpu_sample_percent'] == 0.84
     assert payload['pool_probe_text'] == 'Не запущена'
-    assert payload['note'].splitlines()[0] == 'Доступно Linux: 201 MB; Нагрузка CPU Keenetic: 2%'
-    assert 'Нагрузка CPU Keenetic: 2%' in payload['note']
+    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 281 MB (55%); Нагрузка CPU: 2%'
+    assert 'Нагрузка CPU: 2%' in payload['note']
     assert 'Программа использует 52 MB RAM' in payload['note']
     assert 'Flash-носитель: занято 768 из 2048 MB (38%)' in payload['note']
     assert '\n\n' not in payload['note']
@@ -334,7 +336,7 @@ def test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample
         temp_xray_count=0,
         flash_storage={'path': '/opt', 'total_kb': 29527 * 1024, 'used_kb': 862 * 1024, 'free_kb': 28665 * 1024},
     )
-    assert payload['note'].splitlines()[0] == 'Доступно Linux: 256 MB; Нагрузка CPU: -'
+    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 291 MB (57%); Нагрузка CPU: -'
     assert 'Средняя нагрузка' not in payload['note']
     assert '\n\n' not in payload['note']
 
@@ -357,14 +359,14 @@ def test_router_health_runtime_payload_marks_proc_fallbacks_explicitly():
         temp_xray_count=0,
     )
     assert payload['memory_source'] == 'proc'
-    assert payload['memory_text'] == 'Память Linux: занято 288 MB из 512 MB (56%).'
+    assert payload['memory_text'] == 'Память: доступно 224 MB из 512 MB.'
     assert payload['available_kb'] == 224 * 1024
     assert payload['linux_cache_kb'] == 112 * 1024
     assert payload['router_cache_kb'] == 96 * 1024
     assert payload['cpu_percent'] == 0.84
     assert payload['cpu_source'] == 'proc'
     assert payload['cpu_sample_percent'] == 0.84
-    assert payload['note'].splitlines()[0] == 'Доступно Linux: 224 MB; Нагрузка CPU Linux: 0.84%'
+    assert payload['note'].splitlines()[0] == 'Занято: 288 MB (56%); Нагрузка CPU: 0.84%'
 
 
 def test_router_health_runtime_program_rss_includes_related_processes():
@@ -389,7 +391,7 @@ def test_router_health_runtime_program_rss_includes_related_processes():
     assert payload['temporary_xray_rss_kb'] == 18 * 1024
     assert payload['youtube_prefetch_rss_kb'] == 14 * 1024
     assert payload['background_worker_rss_kb'] == 7 * 1024
-    assert payload['note'].splitlines()[0] == 'Доступно Linux: 160 MB; Нагрузка CPU Linux: 53.28%'
+    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 318 MB (62%); Нагрузка CPU: 53.28%'
     assert 'Программа использует 164 MB RAM: бот 63 MB, Xray 24 MB, проверка пула 38 MB, временный Xray 18 MB, YouTube prefetch 14 MB, фоновые задачи 7 MB' in payload['note']
     assert 'Flash-носитель: занято 774 из 29527 MB (3%)' in payload['note']
     assert '\n\n' not in payload['note']
@@ -932,7 +934,7 @@ def test_router_health_runtime_compact_snapshot_refreshes_ndmc_by_ttl_and_force(
             setattr(router_health_runtime, name, value)
 
     assert calls['ndmc'] == 3
-    assert first['memory_text'] == 'Память роутера: занято 256 MB из 512 MB (50%).'
+    assert first['memory_text'] == 'Память: доступно 224 MB из 512 MB.'
     assert first['cpu_percent'] == 1
     assert first['cpu_source'] == 'keenetic'
     assert cached['used_kb'] == first['used_kb']
