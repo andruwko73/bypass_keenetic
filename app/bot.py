@@ -2513,7 +2513,8 @@ TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS = max(
 TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enabled', False))
 TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
 TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(_TELEGRAM_CALL_LEARNING_CLIENT_IPSETS)
-TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+PROTOCOL_DISPLAY_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = PROTOCOL_DISPLAY_ORDER
 
 bot_ready = False
 bot_polling = False
@@ -8345,9 +8346,21 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
     )
 
 
+def _ordered_protocol_items(current_keys):
+    current_keys = current_keys or {}
+    ordered = []
+    known = set()
+    for proto in PROTOCOL_DISPLAY_ORDER:
+        if proto in current_keys:
+            ordered.append((proto, current_keys.get(proto, '')))
+            known.add(proto)
+    ordered.extend((proto, key_value) for proto, key_value in current_keys.items() if proto not in known)
+    return ordered
+
+
 def _placeholder_protocol_statuses(current_keys):
     return _status_placeholder_protocols(
-        current_keys,
+        dict(_ordered_protocol_items(current_keys)),
         pending_details='Фоновая проверка ключа выполняется. Статус обновится без перезагрузки страницы',
     )
 
@@ -8720,7 +8733,7 @@ def _pool_key_display_name(key_value):
     return label or 'Ключ прокси'
 
 
-POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
+POOL_PROTOCOL_ORDER = list(PROTOCOL_DISPLAY_ORDER)
 # Telegram прокручивает reply-клавиатуру целиком, без закрепления нижних строк.
 # Поэтому показываем весь пул в одной прокручиваемой клавиатуре, а служебные
 # кнопки добавляем после списка ключей.
@@ -11511,7 +11524,7 @@ def _build_status_snapshot(current_keys, force_refresh=False, background_checks=
     route_states = _service_route_summary() if custom_checks else None
     key_probe_cache = _load_key_probe_cache()
     protocols = {}
-    for key_name, key_value in current_keys.items():
+    for key_name, key_value in _ordered_protocol_items(current_keys):
         try:
             if key_name == proxy_mode:
                 protocols[key_name] = _protocol_status_for_key(
@@ -11574,7 +11587,7 @@ def _active_mode_status_snapshot_from_base(
         key_probe_cache = None
         light_key_probe_cache = None
         light_youtube_proto = None
-        for key_name, key_value in (current_keys or {}).items():
+        for key_name, key_value in _ordered_protocol_items(current_keys):
             if key_name == proxy_mode:
                 continue
             try:
@@ -11774,7 +11787,7 @@ def _placeholder_status_snapshot(current_keys, include_pool_details=True):
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary() if custom_checks else None
-    for key_name, key_value in (current_keys or {}).items():
+    for key_name, key_value in _ordered_protocol_items(current_keys):
         if not str(key_value or '').strip():
             continue
         protocols[key_name] = _cached_protocol_status_for_key(

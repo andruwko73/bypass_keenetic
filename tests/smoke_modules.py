@@ -4042,7 +4042,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_restore_backup_file(bot_config_backup, '/opt/etc/bot_config.py', 0o644)" in source
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
-    assert 'for key_name, key_value in (current_keys or {}).items()' in source
+    assert 'for key_name, key_value in _ordered_protocol_items(current_keys):' in source
     assert 'cached_active = _cached_active_mode_protocol_status(current_keys)' in source
     assert 'allow_youtube_confirm=False' in source
     assert 'def _pool_probe_cpu_busy_percent' in source
@@ -9729,6 +9729,9 @@ def test_web_form_blocks_helpers():
     assert key_pool_store.PROTOCOLS == expected_protocol_order
     assert web_form_blocks.PROXY_PROTOCOLS == expected_protocol_order
     assert tuple(item[0] for item in web_form_blocks.PROTOCOL_SECTIONS) == expected_protocol_order
+    bot_source = source_path('bot.py').read_text(encoding='utf-8')
+    assert "PROTOCOL_DISPLAY_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')" in bot_source
+    assert 'for key_name, key_value in _ordered_protocol_items(current_keys):' in bot_source
     assert web_form_blocks.proxy_mode_label('none') == 'Без прокси'
     assert web_form_blocks.js_bool(True) == 'true'
     assert web_form_blocks.js_bool(False) == 'false'
