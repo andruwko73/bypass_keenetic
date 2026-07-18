@@ -1,5 +1,5 @@
-*v1.953 (18 Jul 2026) -* main
+*v1.954 (18 Jul 2026) -* main
 
-*Unifies the Vless 1, Vless 2, Vmess, Trojan, Shadowsocks order in keys, pools and live status output.*
+*Keeps desktop route menus inside the viewport and preserves the unified protocol order in keys, pools and live status output.*
 
 *Adapts the local web panel for 2K/4K displays and avoids unnecessary process-status reads during router health snapshots.*
