@@ -4,7 +4,7 @@ import threading
 import time
 
 
-JOB_ALREADY_RUNNING_MESSAGE = '⏳ Уже выполняется обновление. Дождитесь итогового сообщения после перезапуска бота.'
+JOB_ALREADY_RUNNING_MESSAGE = '⏳ Уже выполняется служебная команда. Дождитесь итогового сообщения после перезапуска бота.'
 
 
 def command_result_payload(action, chat_id, menu_name, return_code, output, *, now=None):
@@ -22,10 +22,12 @@ def command_result_payload(action, chat_id, menu_name, return_code, output, *, n
 def background_command_code(bot_source_path, action, repo_owner, repo_name, chat_id, menu_name, branch):
     module_name = os.path.splitext(os.path.basename(bot_source_path))[0]
     module_dir = os.path.dirname(bot_source_path)
+    start_delay = 'time.sleep(1.0); ' if action == 'rollback_update' else ''
     return (
-        'import os, sys; '
+        'import os, sys, time; '
         "os.environ['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'; "
         f"sys.path.insert(0, {module_dir!r}); "
+        f'{start_delay}'
         f'import {module_name} as bot_module; '
         f'bot_module._run_telegram_command_worker({action!r}, {repo_owner!r}, {repo_name!r}, '
         f'{int(chat_id)!r}, {menu_name!r}, branch={branch!r})'
@@ -78,6 +80,10 @@ def start_background_command(
 
 
 def final_message(action, return_code):
+    if action == 'rollback_update':
+        if int(return_code) == 0:
+            return '✅ Откат обновления завершён. Подробный результат отправлен выше.'
+        return '⚠️ Откат обновления завершился с ошибкой. Подробный результат отправлен выше.'
     if int(return_code) == 0:
         return '✅ Обновление завершено. Лог отправлен выше.' if action == '-update' else '✅ Команда завершена. Лог отправлен выше.'
     return '⚠️ Обновление завершилось с ошибкой. Полный лог отправлен выше.' if action == '-update' else '⚠️ Команда завершилась с ошибкой. Полный лог отправлен выше.'

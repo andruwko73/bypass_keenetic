@@ -6802,6 +6802,24 @@ def _execute_confirmed_telegram_action(chat_id, action, reply_markup):
             start_message=params['message'],
         )
         return
+    if action == 'rollback_update':
+        started, status_message = _start_telegram_background_command(
+            'rollback_update',
+            fork_repo_owner,
+            fork_repo_name,
+            chat_id,
+            'main',
+        )
+        if not started:
+            bot.send_message(chat_id, status_message, reply_markup=reply_markup)
+            return
+        bot.send_message(
+            chat_id,
+            'Запускаю откат последнего обновления. Будет восстановлена последняя резервная копия, '
+            'после чего бот перезапустится и сам пришлёт в этот чат результат.',
+            reply_markup=reply_markup,
+        )
+        return
     if action == 'restart_services':
         bot.send_message(chat_id, '🔄 Выполняется перезагрузка сервисов!', reply_markup=reply_markup)
         _restart_router_services()
@@ -6966,11 +6984,26 @@ def _telegram_command_markup(menu_name):
 
 
 def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
+    is_rollback = action == 'rollback_update'
+    if is_rollback:
+        update_status.write_update_status(
+            command='rollback_update',
+            running=True,
+            progress=5,
+            progress_label='Подготовка отката',
+            message='Восстанавливается последняя резервная копия.',
+        )
     try:
-        return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
+        if is_rollback:
+            output = _rollback_last_update()
+            return_code = 0 if output.startswith('Откат выполнен') else 1
+        else:
+            return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
     except Exception as exc:
         return_code = 1
         output = f'Ошибка запуска фоновой команды: {exc}'
+    if is_rollback:
+        update_status.finish_update_status('rollback_update', output, progress=100)
     _write_json_file(
         TELEGRAM_COMMAND_RESULT_FILE,
         _telegram_command_result_payload(action, chat_id, menu_name, return_code, output),

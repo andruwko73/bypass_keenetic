@@ -6568,8 +6568,10 @@ def test_telegram_confirm_state_source():
     for action in ('restart_services', 'reboot', 'dns_on', 'dns_off'):
         assert f"'{action}'" in source
     assert "_request_telegram_confirmation(message, set_menu_state, 'update_main')" in source
-    for action in ('update_main', 'remove'):
+    for action in ('update_main', 'rollback_update', 'remove'):
         assert f"'{action}'" in install_source
+    assert "_start_telegram_background_command(\n            'rollback_update'" in source
+    assert 'output = _rollback_last_update()' in source
 
 
 def test_telegram_confirm_helpers():
@@ -6577,6 +6579,9 @@ def test_telegram_confirm_helpers():
     assert telegram_confirm.telegram_is_confirm('✅ Подтвердить')
     assert telegram_confirm.telegram_is_cancel('Отмена')
     assert 'Обновить до последнего релиза?' in telegram_confirm.telegram_confirm_prompt('update_main')
+    rollback_prompt = telegram_confirm.telegram_confirm_prompt('rollback_update')
+    assert 'Откатить последнее обновление?' in rollback_prompt
+    assert '/opt/root' in rollback_prompt
     assert 'Перезагрузить роутер?' in telegram_confirm.telegram_confirm_prompt('reboot')
 
 
@@ -6636,10 +6641,17 @@ def test_telegram_jobs_helpers():
     assert payload['finished_at'] == 123.0
     assert telegram_jobs.final_message('-update', 0).startswith('✅ Обновление')
     assert telegram_jobs.final_message('-remove', 1).startswith('⚠️ Команда')
+    assert telegram_jobs.final_message('rollback_update', 0).startswith('✅ Откат обновления')
+    assert telegram_jobs.final_message('rollback_update', 1).startswith('⚠️ Откат обновления')
     code = telegram_jobs.background_command_code('/opt/etc/bot/main.py', '-update', 'owner', 'repo', 42, 'service', 'branch')
     assert 'sys.path.insert' in code
     assert 'BYPASS_KEENETIC_COMMAND_WORKER' in code
     assert 'branch=' in code
+    rollback_code = telegram_jobs.background_command_code(
+        '/opt/etc/bot/main.py', 'rollback_update', 'owner', 'repo', 42, 'main', 'main'
+    )
+    assert 'time.sleep(1.0)' in rollback_code
+    assert 'rollback_update' in rollback_code
 
     written = []
     popen_calls = []
@@ -6665,6 +6677,8 @@ def test_telegram_jobs_helpers():
 def test_telegram_install_ui_helpers():
     assert telegram_install_ui.install_action_for_text('🔰 Установка и удаление', include_web_only=True) == 'menu'
     assert telegram_install_ui.install_action_for_text('⬆️ Обновить до последнего релиза', include_web_only=True) == 'update_main'
+    assert telegram_install_ui.install_action_for_text('↩️ Откатить обновление', include_web_only=True) == 'rollback_update'
+    assert telegram_install_ui.install_action_for_text('Откатить обновление', include_web_only=True) == 'rollback_update'
     assert telegram_install_ui.install_action_for_text('♻️ Установка и переустановка', include_web_only=True) == 'update_main'
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (ветка independent)', include_web_only=True) is None
     assert telegram_install_ui.install_action_for_text('♻️ Переустановка (без Telegram бота)', include_web_only=True) is None

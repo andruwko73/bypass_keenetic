@@ -1,5 +1,5 @@
-*v1.968 (19 Jul 2026) -* main
+*v1.969 (19 Jul 2026) -* main
 
-*Refreshes static UI assets safely after updates while preserving the 1.967 layout and background fixes.*
+*Adds a confirmed update rollback command to the Telegram bot, using the same backup restoration path as the web interface.*
 
-*Removes a dead /proc scanner and a repeated failover ranking lookup without changing output order.*
+*Runs rollback only on demand in an isolated command worker and reports the result after the bot restarts.*
