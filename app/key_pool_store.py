@@ -336,7 +336,7 @@ def failover_candidates(
         if proto not in priority:
             priority.append(proto)
     candidates = []
-    for proto in priority:
+    for proto_rank, proto in enumerate(priority):
         for index, key_value in enumerate(pools.get(proto, []) or []):
             key_value = str(key_value or '').strip()
             if not key_value:
@@ -348,7 +348,6 @@ def failover_candidates(
             score, checked_ts, recently_failed = probe_score(key_value)
             if recently_failed:
                 continue
-            proto_rank = priority.index(proto)
             if service != 'youtube' and skip_failed and score <= 1:
                 continue
             candidates.append((proto, key_value, score, checked_ts, proto_rank, index))

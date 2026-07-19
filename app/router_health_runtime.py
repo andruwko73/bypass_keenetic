@@ -249,21 +249,6 @@ def process_rss_kb(pid='self', read_text=read_proc_text):
     return parse_process_rss_kb(read_text(f'/proc/{pid}/status'))
 
 
-def count_proc_cmdline(marker, proc_root='/proc', read_text=read_proc_text):
-    count = 0
-    try:
-        names = os.listdir(proc_root)
-    except Exception:
-        return 0
-    for name in names:
-        if not name.isdigit():
-            continue
-        text = read_text(os.path.join(proc_root, name, 'cmdline'), max_bytes=2048)
-        if marker in text.replace('\x00', ' '):
-            count += 1
-    return count
-
-
 def related_program_process_snapshot(
     *,
     probe_running=False,

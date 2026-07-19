@@ -685,9 +685,10 @@ def test_router_health_runtime_related_process_snapshot_skips_unrelated_status_r
     reads = {'cmdline': 0, 'status': 0}
 
     def fake_read(path, max_bytes=16384):
-        if str(path).endswith('/cmdline'):
+        file_name = Path(path).name
+        if file_name == 'cmdline':
             reads['cmdline'] += 1
-        elif str(path).endswith('/status'):
+        elif file_name == 'status':
             reads['status'] += 1
         return Path(path).read_text(encoding='utf-8')
 
@@ -3261,13 +3262,17 @@ def test_application_update_maintenance_mode_keeps_web_available():
     assert "signal.signal(signal.SIGUSR2" in source
     assert "name='update-maintenance-ready'" in source
     assert 'update_maintenance_web_requests = 0' in source
+    assert 'return update_maintenance_requested.is_set()' in source
+    assert 'or os.path.isfile(UPDATE_MAINTENANCE_PATH)' not in source
+    assert 'import update_maintenance_runtime as module' in source
+    assert '\nimport update_maintenance_runtime\n' not in source
     assert '_update_maintenance_web_request_started()' in source
     assert '_update_maintenance_web_request_finished()' in source
     assert "bot.stop_polling()" in source
     assert "pool_probe_cancel_event.set()" in source
     assert "telegram_call_learning_cancel_event.set()" in source
     assert "if _update_maintenance_active():\n            maintenance_status = update_status.read_update_status()" in source
-    assert "update_maintenance_runtime.render_maintenance_page" in source
+    assert "_update_maintenance_runtime().render_maintenance_page" in source
     assert "'Функция временно приостановлена до завершения обновления.'" in source
     assert "if _update_maintenance_active():\n            self._send_json({" in source
     assert "if _update_maintenance_active():\n        return False, None" in source
@@ -12789,6 +12794,7 @@ def main():
     test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys()
     test_router_health_runtime_process_rss_parser()
     test_router_health_runtime_related_process_snapshot()
+    test_router_health_runtime_related_process_snapshot_skips_unrelated_status_reads()
     test_router_metrics_runtime_snapshot()
     test_router_health_runtime_slow_snapshot_caches_heavy_checks()
     test_router_health_runtime_compact_snapshot_keeps_route_notes_cached()

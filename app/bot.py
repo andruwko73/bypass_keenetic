@@ -175,7 +175,6 @@ import web_status_runtime
 import web_commands_runtime
 import event_history
 import update_status
-import update_maintenance_runtime
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
@@ -276,6 +275,7 @@ _subscription_runtime_module = subscription_runtime
 _youtube_route_owner_module = None
 _custom_checks_store_module = None
 _service_catalog_module = None
+_update_maintenance_runtime_module = None
 
 _KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 _KEY_PROBE_CACHE_SCHEMA_VERSION = 8
@@ -367,6 +367,15 @@ def _pool_probe_controller():
 
         _pool_probe_controller_module = module
     return _pool_probe_controller_module
+
+
+def _update_maintenance_runtime():
+    global _update_maintenance_runtime_module
+    if _update_maintenance_runtime_module is None:
+        import update_maintenance_runtime as module
+
+        _update_maintenance_runtime_module = module
+    return _update_maintenance_runtime_module
 
 
 def _probe_cache():
@@ -5912,7 +5921,11 @@ def _request_shutdown(reason=''):
 
 
 def _update_maintenance_active():
-    return update_maintenance_requested.is_set() or os.path.isfile(UPDATE_MAINTENANCE_PATH)
+    # The updater creates the marker before sending SIGUSR1 and does not replace
+    # files until this process confirms readiness.  The in-process event is
+    # therefore authoritative and avoids a filesystem stat on every web and
+    # background check during normal operation.
+    return update_maintenance_requested.is_set()
 
 
 def _update_maintenance_web_request_started():
@@ -12933,7 +12946,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if _update_maintenance_active():
             maintenance_status = update_status.read_update_status()
             if path == '/api/command_state':
-                self._send_json(update_maintenance_runtime.maintenance_command_state(maintenance_status))
+                self._send_json(_update_maintenance_runtime().maintenance_command_state(maintenance_status))
             elif path == '/api/update_status':
                 self._send_json(maintenance_status)
             elif path.startswith('/api/'):
@@ -12949,7 +12962,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                     cache_seconds=0,
                 )
             else:
-                self._send_html(update_maintenance_runtime.render_maintenance_page(
+                self._send_html(_update_maintenance_runtime().render_maintenance_page(
                     maintenance_status,
                     current_version=APP_VERSION_LABEL,
                 ))

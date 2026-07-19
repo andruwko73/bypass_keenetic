@@ -1,5 +1,5 @@
-*v1.965 (19 Jul 2026) -* main
+*v1.966 (19 Jul 2026) -* main
 
-*Keeps the main web server available in a safe maintenance mode while Telegram, probes, and background tasks are paused for an update.*
+*Reduces steady-state filesystem work and startup memory while preserving the safe web maintenance mode during updates.*
 
-*Keeps the interface-theme menu dense and blurred even when panel transparency is set to 100%.*
+*Removes a dead /proc scanner and a repeated failover ranking lookup without changing output order.*
