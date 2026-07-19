@@ -291,20 +291,67 @@ download_static_asset() {
   return 1
 }
 
-install_static_assets() {
+static_asset_paths() {
+  printf '%s\n' \
+    app.css app.js telegram.svg youtube.svg \
+    service-icons/chatgpt.png service-icons/claude.png service-icons/copilot.png \
+    service-icons/deepseek.png service-icons/discord.png service-icons/facebook.png \
+    service-icons/gemini.png service-icons/grok.png service-icons/instagram.png \
+    service-icons/meta.png service-icons/perplexity.png
+}
+
+activate_static_assets_dir() {
+  source_dir="$1"
   static_dir="${BOT_RUNTIME_DIR}/static"
-  icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
-  mkdir -p "$static_dir/service-icons"
-  download_static_asset "static/app.css" "$static_dir/app.css" || return 1
-  download_static_asset "static/app.js" "$static_dir/app.js" || return 1
-  download_static_asset "static/telegram.svg" "$static_dir/telegram.svg"
-  download_static_asset "static/youtube.svg" "$static_dir/youtube.svg"
-  rm -f "$static_dir/telegram.png" "$static_dir/youtube.png"
-  for icon in $icons; do
-    download_static_asset "static/service-icons/${icon}.png" "$static_dir/service-icons/${icon}.png"
+  next_dir="${BOT_RUNTIME_DIR}/.static.next.$$"
+  old_dir="${BOT_RUNTIME_DIR}/.static.old.$$"
+
+  [ -s "$source_dir/app.css" ] || return 1
+  [ -s "$source_dir/app.js" ] || return 1
+  rm -rf "$next_dir" "$old_dir"
+  mkdir -p "$next_dir" || return 1
+  cp -a "$source_dir"/. "$next_dir"/ || { rm -rf "$next_dir"; return 1; }
+  find "$next_dir" -type d -exec chmod 755 {} \; 2>/dev/null || true
+  find "$next_dir" -type f -exec chmod 644 {} \; 2>/dev/null || true
+
+  if [ -d "$static_dir" ]; then
+    mv "$static_dir" "$old_dir" || { rm -rf "$next_dir"; return 1; }
+  fi
+  if ! mv "$next_dir" "$static_dir"; then
+    [ -d "$old_dir" ] && mv "$old_dir" "$static_dir" 2>/dev/null || true
+    rm -rf "$next_dir"
+    return 1
+  fi
+  rm -rf "$old_dir" "$source_dir"
+}
+
+install_static_assets() {
+  download_dir="${BOT_RUNTIME_DIR}/.static.download.$$"
+  rm -rf "$download_dir"
+  mkdir -p "$download_dir/service-icons" || return 1
+  for asset_path in $(static_asset_paths); do
+    download_static_asset "static/${asset_path}" "$download_dir/${asset_path}" || {
+      rm -rf "$download_dir"
+      return 1
+    }
   done
-  find "$static_dir" -type d -exec chmod 755 {} \; 2>/dev/null || true
-  find "$static_dir" -type f -exec chmod 644 {} \; 2>/dev/null || true
+  activate_static_assets_dir "$download_dir"
+}
+
+stage_static_assets() {
+  staged_static_dir="$stage_dir/static"
+  rm -rf "$staged_static_dir"
+  mkdir -p "$staged_static_dir/service-icons" || return 1
+  for asset_path in $(static_asset_paths); do
+    marker=""
+    [ "$asset_path" = "app.css" ] && marker=".hero-popover"
+    [ "$asset_path" = "app.js" ] && marker="setupBackgroundControls"
+    download_update_file "$(repo_file_url "static/${asset_path}")" "$staged_static_dir/${asset_path}" "$marker" "static/${asset_path}" || return 1
+  done
+}
+
+install_staged_static_assets() {
+  activate_static_assets_dir "$stage_dir/static"
 }
 
 telegram_config_complete() {
@@ -1880,6 +1927,7 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module installer_common.py browser_port_is_valid || exit 1
     download_update_file "$(repo_file_url S98telegram_bot_installer)" "$stage_dir/S98telegram_bot_installer" "Installer started" "S98telegram_bot_installer" || exit 1
     download_update_file "$(repo_file_url S99telegram_bot)" "$stage_dir/S99telegram_bot" "Bot started" "S99telegram_bot" || exit 1
+    stage_static_assets || exit 1
 
     set_type="$(detect_ipset_type)"
     sed -i "s/hash:net/${set_type}/g" "$stage_dir/100-ipset.sh"
@@ -1990,7 +2038,7 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$(dirname "$INSTALLER_MAIN_PATH")"
     mv "$stage_dir/installer.py" "$INSTALLER_MAIN_PATH"
     chmod 755 "$INSTALLER_MAIN_PATH"
-    install_static_assets || exit 1
+    install_staged_static_assets || exit 1
     rm -f "$BOT_RUNTIME_DIR/web_asset_builder.py" "$BOT_RUNTIME_DIR/web_template_styles.py" "$BOT_RUNTIME_DIR/web_template_scripts.py"
     mv "$stage_dir/S98telegram_bot_installer" "$INSTALLER_SERVICE_PATH"
     mv "$stage_dir/S99telegram_bot" "$BOT_SERVICE_PATH"

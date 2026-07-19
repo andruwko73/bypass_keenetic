@@ -610,6 +610,35 @@ async function clickLazyProtocol(page, protocol, label) {
   await assertVisibleBox(page, `[data-protocol-panel="${protocol}"].active:not([data-protocol-panel-lazy="1"])`, `${label} ${protocol} panel`);
 }
 
+async function assertCompactProtocolCheckWorkspace(page, label) {
+  const layout = await page.evaluate(() => {
+    const workspace = document.querySelector('[data-protocol-panel].active');
+    const check = workspace ? workspace.querySelector('.protocol-subview-check.active') : null;
+    if (!workspace || !check) {
+      return null;
+    }
+    const children = Array.from(check.children).filter((node) => {
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.height > 0;
+    });
+    const workspaceRect = workspace.getBoundingClientRect();
+    const lastBottom = children.reduce((bottom, node) => Math.max(bottom, node.getBoundingClientRect().bottom), 0);
+    return {
+      emptyBottom: Math.round(workspaceRect.bottom - lastBottom),
+      lastBottom: Math.round(lastBottom),
+      viewportHeight: window.innerHeight,
+      workspaceHeight: Math.round(workspaceRect.height),
+    };
+  });
+  if (!layout) {
+    throw new Error(`${label}: active protocol check workspace is missing`);
+  }
+  if (layout.lastBottom <= layout.viewportHeight + 2 && layout.emptyBottom > 32) {
+    throw new Error(`${label}: protocol check workspace leaves excessive empty space ${JSON.stringify(layout)}`);
+  }
+}
+
 async function runViewport(browser, modeConfig, viewportName, viewport, isMobile = false) {
   const name = `${modeConfig.mode} ${viewportName}`;
   const context = await browser.newContext({
@@ -720,13 +749,23 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       const style = getComputedStyle(node);
       const alphaValues = Array.from(style.backgroundImage.matchAll(/rgba?\([^)]*[,/]\s*(0?\.\d+)\s*\)/g))
         .map((match) => Number(match[1]));
+      const colorAlphaMatch = style.backgroundColor.match(/rgba\([^)]*,\s*(0?\.\d+)\s*\)$/);
       return {
+        backgroundColor: style.backgroundColor,
+        backgroundColorAlpha: colorAlphaMatch ? Number(colorAlphaMatch[1]) : 1,
         backgroundImage: style.backgroundImage,
         backdropFilter: style.backdropFilter || style.webkitBackdropFilter || '',
         hasDenseLayer: alphaValues.some((value) => value >= 0.95),
+        isolation: style.isolation,
       };
     });
-    if (pickerSurface.backgroundImage === 'none' || !pickerSurface.hasDenseLayer || !pickerSurface.backdropFilter.includes('blur')) {
+    if (
+      pickerSurface.backgroundColorAlpha < 0.98 ||
+      pickerSurface.backgroundImage === 'none' ||
+      !pickerSurface.hasDenseLayer ||
+      !pickerSurface.backdropFilter.includes('blur') ||
+      pickerSurface.isolation !== 'isolate'
+    ) {
       throw new Error(`${name}: theme picker must remain dense and blurred at 100% panel transparency`);
     }
     await page.locator('#background-panel-transparency').evaluate((node) => {
@@ -812,6 +851,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     await page.locator('[data-protocol-panel].active [data-subview-target="check"]').click();
     await assertVisibleBox(page, '[data-protocol-panel].active .service-route-tools', `${name} service route tools`);
+    if (!isMobile && viewport.width >= 1024) {
+      await assertCompactProtocolCheckWorkspace(page, name);
+    }
     if (injectedCheck404) {
       for (let index = failures.length - 1; index >= 0; index -= 1) {
         if (

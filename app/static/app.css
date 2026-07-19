@@ -858,6 +858,11 @@
         .confirm-card p{margin:0 0 18px;color:var(--muted);}
         .confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
         @media (min-width: 1024px){
+            /* A short check result should size to its content.  Only the surrounding
+               protocol area scrolls when the result is taller than the viewport. */
+            .protocol-panels:has(.protocol-workspace.active .protocol-subview-check.active){overflow:auto;padding-right:2px;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active){height:auto;max-height:none;grid-template-rows:auto auto auto;align-self:start;overflow:visible;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active) .protocol-subview-check.active{max-height:none;overflow:visible;padding-right:0;}
             /* The list editor remains intentionally compact on tall desktop screens.
                Long lists still scroll inside the editor instead of turning the page
                into a mostly empty full-height panel. */
@@ -1748,13 +1753,17 @@
         html[data-user-background="enabled"][data-theme="light"] .event-history-drawer,
         html[data-user-background="enabled"][data-theme="light"] .mobile-nav{background:rgba(231,235,240,var(--user-background-panel-alpha,.94));}
         html[data-user-background="enabled"] .topbar .hero-popover{
-            background:linear-gradient(180deg,rgba(23,30,40,.98),rgba(20,31,43,.97));
+            background-color:#111923;
+            background-image:linear-gradient(180deg,rgba(23,30,40,.98),rgba(20,31,43,.97));
             backdrop-filter:blur(20px) saturate(128%);
             -webkit-backdrop-filter:blur(20px) saturate(128%);
+            isolation:isolate;
         }
         html[data-user-background="enabled"][data-theme="light"] .topbar .hero-popover{
-            background:linear-gradient(180deg,rgba(238,241,245,.98),rgba(222,228,235,.97));
+            background-color:#eef1f5;
+            background-image:linear-gradient(180deg,rgba(238,241,245,.98),rgba(222,228,235,.97));
         }
         html[data-user-background="enabled"][data-theme="glass"] .topbar .hero-popover{
-            background:linear-gradient(145deg,rgba(38,58,70,.98),rgba(15,28,38,.97));
+            background-color:#0f1c26;
+            background-image:linear-gradient(145deg,rgba(38,58,70,.98),rgba(15,28,38,.97));
         }

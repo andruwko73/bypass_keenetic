@@ -3223,7 +3223,8 @@ def test_direct_update_script_records_update_status():
     manifest_index = script.index('staged_runtime_modules=$(sed -n')
     manifest_activation_index = script.index('BOT_RUNTIME_MODULES="$staged_runtime_modules"', manifest_index)
     module_stage_index = script.index('for module in $staged_runtime_modules; do', manifest_activation_index)
-    assert manifest_index < manifest_activation_index < module_stage_index < update_log_index
+    static_stage_index = script.index('stage_static_assets || exit 1', module_stage_index)
+    assert manifest_index < manifest_activation_index < module_stage_index < static_stage_index < update_log_index
     assert '.runtime-absent-$module' in script
     assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script
     assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
@@ -3238,6 +3239,7 @@ def test_direct_update_script_records_update_status():
         'write_cli_update_status update true 88 Starting "Starting application and web interface"',
         files_replace_index,
     )
+    static_install_index = script.index('install_staged_static_assets || exit 1', files_replace_index)
     final_stop_index = script.index('stop_application_for_final_restart || {', application_start_index)
     bot_restart_index = script.index('"$BOT_SERVICE_PATH" start', final_stop_index)
     web_available_index = script.index(
@@ -3245,7 +3247,7 @@ def test_direct_update_script_records_update_status():
         bot_restart_index,
     )
     ipset_refresh_index = script.index('run_update_ipset_refresh "Post-update"', web_available_index)
-    assert files_replace_index < application_start_index < final_stop_index < bot_restart_index < web_available_index < ipset_refresh_index
+    assert files_replace_index < static_install_index < application_start_index < final_stop_index < bot_restart_index < web_available_index < ipset_refresh_index
     assert 'keep_count="${1:-1}"' in script
     assert 'cleanup_update_artifacts 1' in script
     assert 'cleanup_update_artifacts 3' not in script
@@ -3293,8 +3295,16 @@ def test_update_static_assets_use_archive_fallback():
     curl_index = function_body.index('curl -fsSL')
     assert archive_index < api_index < curl_index
     assert 'mv -f "$temporary" "$target"' in function_body
+    assert 'static_asset_paths() {' in script
+    assert 'activate_static_assets_dir() {' in script
+    assert 'stage_static_assets() {' in script
+    assert 'install_staged_static_assets() {' in script
+    assert 'stage_static_assets || exit 1' in script
+    assert 'install_staged_static_assets || exit 1' in script
+    assert 'mv "$static_dir" "$old_dir"' in script
+    assert 'mv "$next_dir" "$static_dir"' in script
     assert 'install_static_assets' in script
-    assert 'static/service-icons/${icon}.png' in script
+    assert 'service-icons/chatgpt.png' in script
 
 
 def test_local_archive_update_env_is_preserved():
@@ -10647,8 +10657,10 @@ def test_web_template_styles_helpers():
     assert 'tg-icon' not in styles
     assert '[data-theme="glass"]' in styles
     assert 'html[data-user-background="enabled"] .topbar .hero-popover{' in styles
-    assert 'background:linear-gradient(180deg,rgba(23,30,40,.98),rgba(20,31,43,.97));' in styles
+    assert 'background-color:#111923;' in styles
+    assert 'background-image:linear-gradient(180deg,rgba(23,30,40,.98),rgba(20,31,43,.97));' in styles
     assert 'backdrop-filter:blur(20px) saturate(128%);' in styles
+    assert 'isolation:isolate;' in styles
     assert 'html[data-user-background="enabled"][data-theme="light"] .topbar .hero-popover{' in styles
     assert 'html[data-user-background="enabled"][data-theme="glass"] .topbar .hero-popover{' in styles
     assert '--glass-blur' in styles
