@@ -175,6 +175,7 @@ import web_status_runtime
 import web_commands_runtime
 import event_history
 import update_status
+import update_maintenance_runtime
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
@@ -2538,6 +2539,12 @@ bot_ready = False
 bot_polling = False
 web_httpd = None
 shutdown_requested = threading.Event()
+UPDATE_MAINTENANCE_PATH = '/tmp/bypass_update_maintenance'
+UPDATE_MAINTENANCE_READY_PATH = '/tmp/bypass_update_maintenance.ready'
+update_maintenance_requested = threading.Event()
+update_maintenance_ready_thread = None
+update_maintenance_web_lock = threading.Lock()
+update_maintenance_web_requests = 0
 proxy_mode = config.default_proxy_mode
 proxy_settings = {
     'none': None,
@@ -4731,7 +4738,8 @@ def _start_youtube_edge_prefetch_thread():
     def worker():
         shutdown_requested.wait(YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS)
         while not shutdown_requested.is_set():
-            _run_youtube_edge_prefetch_once()
+            if not _update_maintenance_active():
+                _run_youtube_edge_prefetch_once()
             shutdown_requested.wait(YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -4905,6 +4913,8 @@ def _background_task_economy_mode():
 
 
 def _background_task_allowed(task_name, *, allow_high_rss=False, task_class='normal'):
+    if _update_maintenance_active():
+        return False
     now = time.time()
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
     skip_reason = str(background_task_skip_reason.get(task_name) or '')
@@ -4994,6 +5004,8 @@ def _background_task_allowed(task_name, *, allow_high_rss=False, task_class='nor
 
 def _run_coordinated_background_task(task_name, callback):
     """Run one costly background operation at a time without dropping it."""
+    if _update_maintenance_active():
+        return False, None
     if not background_task_coordinator_lock.acquire(blocking=False):
         now = time.time()
         last_log = float(background_task_skip_log_at.get(f'{task_name}:coordinator') or 0.0)
@@ -5899,6 +5911,111 @@ def _request_shutdown(reason=''):
             pass
 
 
+def _update_maintenance_active():
+    return update_maintenance_requested.is_set() or os.path.isfile(UPDATE_MAINTENANCE_PATH)
+
+
+def _update_maintenance_web_request_started():
+    global update_maintenance_web_requests
+    with update_maintenance_web_lock:
+        update_maintenance_web_requests += 1
+
+
+def _update_maintenance_web_request_finished():
+    global update_maintenance_web_requests
+    with update_maintenance_web_lock:
+        update_maintenance_web_requests = max(0, update_maintenance_web_requests - 1)
+
+
+def _update_maintenance_locks_idle():
+    locks = (
+        background_task_coordinator_lock,
+        pool_probe_lock,
+        pool_apply_lock,
+        youtube_edge_prefetch_lock,
+        telegram_call_learning_lock,
+    )
+    if any(lock.locked() for lock in locks):
+        return False
+    with update_maintenance_web_lock:
+        if update_maintenance_web_requests:
+            return False
+    with status_refresh_lock:
+        return not status_refresh_in_progress
+
+
+def _write_update_maintenance_ready():
+    temporary = f'{UPDATE_MAINTENANCE_READY_PATH}.tmp.{os.getpid()}'
+    try:
+        with open(temporary, 'w', encoding='utf-8') as file:
+            file.write(str(os.getpid()))
+        os.replace(temporary, UPDATE_MAINTENANCE_READY_PATH)
+    finally:
+        try:
+            os.remove(temporary)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
+
+def _update_maintenance_ready_worker():
+    try:
+        _cleanup_pool_probe_runtime_light(kill_processes=True)
+        deadline = time.monotonic() + 30.0
+        idle_since = 0.0
+        while _update_maintenance_active() and not shutdown_requested.is_set():
+            if _update_maintenance_locks_idle():
+                if not idle_since:
+                    idle_since = time.monotonic()
+                elif time.monotonic() - idle_since >= 1.0:
+                    _write_update_maintenance_ready()
+                    _write_runtime_log('Update maintenance mode is ready; web interface remains available.')
+                    return
+            else:
+                idle_since = 0.0
+            if time.monotonic() >= deadline:
+                _write_runtime_log('Update maintenance mode could not become idle in 30 seconds.')
+                return
+            shutdown_requested.wait(0.2)
+    except Exception as exc:
+        _write_runtime_log(f'Update maintenance preparation failed: {exc}')
+
+
+def _request_update_maintenance(reason='update'):
+    global bot_polling, update_maintenance_ready_thread
+    update_maintenance_requested.set()
+    bot_polling = False
+    pool_probe_cancel_event.set()
+    telegram_call_learning_cancel_event.set()
+    try:
+        bot.stop_polling()
+    except Exception:
+        pass
+    if update_maintenance_ready_thread and update_maintenance_ready_thread.is_alive():
+        return
+    update_maintenance_ready_thread = threading.Thread(
+        target=_update_maintenance_ready_worker,
+        name='update-maintenance-ready',
+        daemon=True,
+    )
+    update_maintenance_ready_thread.start()
+    _write_runtime_log(f'Update maintenance mode requested: {reason}')
+
+
+def _release_update_maintenance(reason='update cancelled'):
+    update_maintenance_requested.clear()
+    pool_probe_cancel_event.clear()
+    telegram_call_learning_cancel_event.clear()
+    try:
+        os.remove(UPDATE_MAINTENANCE_READY_PATH)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    _write_runtime_log(f'Update maintenance mode released: {reason}')
+
+
 def _finalize_shutdown():
     if web_httpd is not None:
         try:
@@ -5935,6 +6052,17 @@ def _register_signal_handlers():
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             signal.signal(sig, _handle_stop_signal)
+        except Exception:
+            pass
+
+    if hasattr(signal, 'SIGUSR1'):
+        try:
+            signal.signal(signal.SIGUSR1, lambda _signum, _frame: _request_update_maintenance('SIGUSR1'))
+        except Exception:
+            pass
+    if hasattr(signal, 'SIGUSR2'):
+        try:
+            signal.signal(signal.SIGUSR2, lambda _signum, _frame: _release_update_maintenance('SIGUSR2'))
         except Exception:
             pass
 
@@ -6924,7 +7052,7 @@ def _start_telegram_result_retry_worker():
     _telegram_start_result_retry_worker(
         shutdown_event=shutdown_requested,
         result_file=TELEGRAM_COMMAND_RESULT_FILE,
-        deliver_result=_deliver_pending_telegram_command_result,
+        deliver_result=lambda: None if _update_maintenance_active() else _deliver_pending_telegram_command_result(),
         log_callback=_write_runtime_log,
         retry_interval=TELEGRAM_RESULT_RETRY_INTERVAL,
     )
@@ -11276,6 +11404,9 @@ def _start_background_maintenance_thread():
 
     def worker():
         while not shutdown_requested.is_set():
+            if _update_maintenance_active():
+                shutdown_requested.wait(1.0)
+                continue
             now = time.monotonic()
             next_due_at = now + 60.0
             for name, interval, _initial_delay, callback in tasks:
@@ -12799,14 +12930,42 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             return
         parsed_url = urlparse(self.path)
         path = parsed_url.path
-        try:
-            action = web_get_actions.dispatch(_web_get_context(self), path, parsed_url.query)
-        except Exception as exc:
-            if path.startswith('/api/'):
-                self._send_json({'error': str(exc)}, status=500)
+        if _update_maintenance_active():
+            maintenance_status = update_status.read_update_status()
+            if path == '/api/command_state':
+                self._send_json(update_maintenance_runtime.maintenance_command_state(maintenance_status))
+            elif path == '/api/update_status':
+                self._send_json(maintenance_status)
+            elif path.startswith('/api/'):
+                self._send_json({
+                    'ok': False,
+                    'updating': True,
+                    'error': 'Функция временно приостановлена до завершения обновления.',
+                }, status=503)
+            elif path.startswith('/static/'):
+                self._send_text_asset(
+                    'Обновление выполняется.',
+                    content_type='text/plain; charset=utf-8',
+                    cache_seconds=0,
+                )
             else:
-                self._send_html(f'<h1>500 Internal Server Error</h1><p>{html.escape(str(exc))}</p>', status=500)
+                self._send_html(update_maintenance_runtime.render_maintenance_page(
+                    maintenance_status,
+                    current_version=APP_VERSION_LABEL,
+                ))
             return
+        _update_maintenance_web_request_started()
+        try:
+            try:
+                action = web_get_actions.dispatch(_web_get_context(self), path, parsed_url.query)
+            except Exception as exc:
+                if path.startswith('/api/'):
+                    self._send_json({'error': str(exc)}, status=500)
+                else:
+                    self._send_html(f'<h1>500 Internal Server Error</h1><p>{html.escape(str(exc))}</p>', status=500)
+                return
+        finally:
+            _update_maintenance_web_request_finished()
         if action is None:
             self._send_html('<h1>404 Not Found</h1>', status=404)
             return
@@ -12847,24 +13006,35 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
         if not self._ensure_request_allowed():
             return
         path = urlparse(self.path).path
-        if _handle_web_background_post(self, path):
+        if _update_maintenance_active():
+            self._send_json({
+                'ok': False,
+                'updating': True,
+                'error': 'Изменения временно запрещены до завершения обновления.',
+            }, status=503)
             return
+        _update_maintenance_web_request_started()
         try:
-            data = self._read_post_data()
-        except ValueError as exc:
-            self._send_action_result(str(exc), success=False)
-            return
-        if not self._ensure_csrf_allowed(data):
-            return
-        action = web_post_actions.dispatch(_web_action_context(), path, data)
-        if action is None:
-            self._send_html('<h1>404 Not Found</h1>', status=404)
-            return
-        self._send_action_result(
-            action.get('result', ''),
-            success=action.get('success', True),
-            extra=action.get('extra') or None,
-        )
+            if _handle_web_background_post(self, path):
+                return
+            try:
+                data = self._read_post_data()
+            except ValueError as exc:
+                self._send_action_result(str(exc), success=False)
+                return
+            if not self._ensure_csrf_allowed(data):
+                return
+            action = web_post_actions.dispatch(_web_action_context(), path, data)
+            if action is None:
+                self._send_html('<h1>404 Not Found</h1>', status=404)
+                return
+            self._send_action_result(
+                action.get('result', ''),
+                success=action.get('success', True),
+                extra=action.get('extra') or None,
+            )
+        finally:
+            _update_maintenance_web_request_finished()
 
 def start_http_server():
     global web_httpd
@@ -13345,6 +13515,10 @@ def _restore_startup_proxy_mode():
 def _run_telegram_polling_loop():
     global bot_polling
     while not shutdown_requested.is_set():
+        if _update_maintenance_active():
+            bot_polling = False
+            shutdown_requested.wait(0.5)
+            continue
         try:
             if proxy_mode in PROXY_LOCAL_PORTS:
                 preflight_ok, preflight_message = _check_telegram_api_through_proxy(

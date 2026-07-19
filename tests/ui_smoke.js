@@ -712,6 +712,27 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (await page.locator('html[data-user-background="enabled"]').count() !== 1) {
       throw new Error(`${name}: pending background preview was removed by shade adjustment`);
     }
+    await page.locator('#background-panel-transparency').evaluate((node) => {
+      node.value = '100';
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const pickerSurface = await page.locator('#theme-picker:not(.hidden)').evaluate((node) => {
+      const style = getComputedStyle(node);
+      const alphaValues = Array.from(style.backgroundImage.matchAll(/rgba?\([^)]*[,/]\s*(0?\.\d+)\s*\)/g))
+        .map((match) => Number(match[1]));
+      return {
+        backgroundImage: style.backgroundImage,
+        backdropFilter: style.backdropFilter || style.webkitBackdropFilter || '',
+        hasDenseLayer: alphaValues.some((value) => value >= 0.95),
+      };
+    });
+    if (pickerSurface.backgroundImage === 'none' || !pickerSurface.hasDenseLayer || !pickerSurface.backdropFilter.includes('blur')) {
+      throw new Error(`${name}: theme picker must remain dense and blurred at 100% panel transparency`);
+    }
+    await page.locator('#background-panel-transparency').evaluate((node) => {
+      node.value = '64';
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+    });
     await page.locator('#background-save-button').click();
     await page.waitForFunction(() => (document.getElementById('background-note').textContent || '').includes('сохран'));
     if (await page.locator('html[data-user-background="enabled"]').count() !== 1) {

@@ -1,5 +1,5 @@
-*v1.964 (19 Jul 2026) -* main
+*v1.965 (19 Jul 2026) -* main
 
-*Restarts the bot and web interface immediately after program files and services are ready, before the longer post-update network-list refresh.*
+*Keeps the main web server available in a safe maintenance mode while Telegram, probes, and background tasks are paused for an update.*
 
-*The web interface can reconnect and display the final update progress instead of remaining unavailable for several minutes.*
+*Keeps the interface-theme menu dense and blurred even when panel transparency is set to 100%.*

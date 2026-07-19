@@ -81,6 +81,7 @@ import failover_candidate_runner
 import health_check_runner
 import route_intersections
 import service_routes
+import update_maintenance_runtime
 import update_status
 import youtube_healthcheck
 import youtube_edge_prefetch
@@ -3199,20 +3200,25 @@ def test_direct_update_script_records_update_status():
     assert 'for module in $staged_runtime_modules; do' in script
     assert 'target_release=$(sed -n' in script
     assert 'write_cli_update_status update true 40 Staged "Update files staged" "$target_release"' in script
-    assert 'stop_application_for_update() {' in script
+    assert 'prepare_application_for_update() {' in script
+    assert 'stop_application_for_final_restart() {' in script
     assert 'recover_runtime_after_failed_update() {' in script
     assert 'handle_cli_update_exit() {' in script
     assert 'trap \'handle_cli_update_exit "$?"\' EXIT' in script
-    assert '"$BOT_SERVICE_PATH" stop || {' in script
+    assert 'UPDATE_MAINTENANCE_PATH="/tmp/bypass_update_maintenance"' in script
+    assert 'kill -USR1 "$bot_pid"' in script
+    assert 'kill -USR2 "$bot_pid"' in script
+    assert 'application did not confirm maintenance mode; update cancelled before file replacement' in script
     assert 'cleanup_pool_probe_runtime' in script
     assert 'Error: pool probe worker is still running; update cancelled before file replacement' in script
     assert 'proxy_config_recovery.py' in script
     update_log_index = script.index('exec >> "$stage_dir/update.log" 2>&1')
-    quiesce_index = script.index('stop_application_for_update || exit 1', update_log_index)
+    quiesce_index = script.index('prepare_application_for_update || exit 1', update_log_index)
     recovery_index = script.index('python3 "$stage_dir/proxy_config_recovery.py" || exit 1', quiesce_index)
     services_stop_index = script.index('/opt/etc/init.d/S22shadowsocks stop', recovery_index)
     files_replace_index = script.index('mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"', services_stop_index)
     assert update_log_index < quiesce_index < recovery_index < services_stop_index < files_replace_index
+    assert '"$BOT_SERVICE_PATH" stop' not in script[quiesce_index:files_replace_index]
     manifest_index = script.index('staged_runtime_modules=$(sed -n')
     manifest_activation_index = script.index('BOT_RUNTIME_MODULES="$staged_runtime_modules"', manifest_index)
     module_stage_index = script.index('for module in $staged_runtime_modules; do', manifest_activation_index)
@@ -3231,19 +3237,40 @@ def test_direct_update_script_records_update_status():
         'write_cli_update_status update true 88 Starting "Starting application and web interface"',
         files_replace_index,
     )
-    bot_restart_index = script.index('"$BOT_SERVICE_PATH" restart', application_start_index)
+    final_stop_index = script.index('stop_application_for_final_restart || {', application_start_index)
+    bot_restart_index = script.index('"$BOT_SERVICE_PATH" start', final_stop_index)
     web_available_index = script.index(
         'write_cli_update_status update true 90 Finalizing "Web interface is available; finalizing network lists"',
         bot_restart_index,
     )
     ipset_refresh_index = script.index('run_update_ipset_refresh "Post-update"', web_available_index)
-    assert files_replace_index < application_start_index < bot_restart_index < web_available_index < ipset_refresh_index
+    assert files_replace_index < application_start_index < final_stop_index < bot_restart_index < web_available_index < ipset_refresh_index
     assert 'keep_count="${1:-1}"' in script
     assert 'cleanup_update_artifacts 1' in script
     assert 'cleanup_update_artifacts 3' not in script
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     assert 'cleanup_bootstrap_backups()' in bootstrap
     assert 'cleanup_bootstrap_backups 1' in bootstrap
+
+
+def test_application_update_maintenance_mode_keeps_web_available():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    assert "UPDATE_MAINTENANCE_PATH = '/tmp/bypass_update_maintenance'" in source
+    assert "UPDATE_MAINTENANCE_READY_PATH = '/tmp/bypass_update_maintenance.ready'" in source
+    assert "signal.signal(signal.SIGUSR1" in source
+    assert "signal.signal(signal.SIGUSR2" in source
+    assert "name='update-maintenance-ready'" in source
+    assert 'update_maintenance_web_requests = 0' in source
+    assert '_update_maintenance_web_request_started()' in source
+    assert '_update_maintenance_web_request_finished()' in source
+    assert "bot.stop_polling()" in source
+    assert "pool_probe_cancel_event.set()" in source
+    assert "telegram_call_learning_cancel_event.set()" in source
+    assert "if _update_maintenance_active():\n            maintenance_status = update_status.read_update_status()" in source
+    assert "update_maintenance_runtime.render_maintenance_page" in source
+    assert "'Функция временно приостановлена до завершения обновления.'" in source
+    assert "if _update_maintenance_active():\n            self._send_json({" in source
+    assert "if _update_maintenance_active():\n        return False, None" in source
 
 
 def test_update_static_assets_use_archive_fallback():
@@ -3256,10 +3283,11 @@ def test_update_static_assets_use_archive_fallback():
     assert update_archive_index < update_api_index < update_raw_index < update_socks_notice_index
     assert 'raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS.' not in update_body
     function_body = re.search(r'download_static_asset\(\) \{(?P<body>.*?)\n\}', script, re.S).group('body')
-    archive_index = function_body.index('download_repo_file_from_archive "$url" "$target"')
-    api_index = function_body.index('download_repo_file_via_api "$url" "$target"')
+    archive_index = function_body.index('download_repo_file_from_archive "$url" "$temporary"')
+    api_index = function_body.index('download_repo_file_via_api "$url" "$temporary"')
     curl_index = function_body.index('curl -fsSL')
     assert archive_index < api_index < curl_index
+    assert 'mv -f "$temporary" "$target"' in function_body
     assert 'install_static_assets' in script
     assert 'static/service-icons/${icon}.png' in script
 
@@ -10613,6 +10641,11 @@ def test_web_template_styles_helpers():
     assert 'url("/static/telegram.svg")' in styles
     assert 'tg-icon' not in styles
     assert '[data-theme="glass"]' in styles
+    assert 'html[data-user-background="enabled"] .topbar .hero-popover{' in styles
+    assert 'background:linear-gradient(180deg,rgba(23,30,40,.98),rgba(20,31,43,.97));' in styles
+    assert 'backdrop-filter:blur(20px) saturate(128%);' in styles
+    assert 'html[data-user-background="enabled"][data-theme="light"] .topbar .hero-popover{' in styles
+    assert 'html[data-user-background="enabled"][data-theme="glass"] .topbar .hero-popover{' in styles
     assert '--glass-blur' in styles
     assert '@supports not ((backdrop-filter:blur(1px))' in styles
     assert '@media (prefers-reduced-motion: reduce)' in styles
@@ -11838,6 +11871,29 @@ def test_update_status_helpers():
         assert finished['progress'] == 100
 
 
+def test_update_maintenance_runtime():
+    state = update_maintenance_runtime.maintenance_command_state({
+        'running': True,
+        'command': 'update',
+        'progress': 64,
+        'progress_label': 'Установка файлов',
+        'message': 'Веб-интерфейс работает',
+        'target_version': 'v1.965',
+        'started_at': 100,
+    })
+    assert state['running'] is True
+    assert state['label'] == 'Обновление до последнего релиза'
+    assert state['progress'] == 64
+    assert state['target_version'] == 'v1.965'
+    page = update_maintenance_runtime.render_maintenance_page(state, current_version='1.964')
+    assert '<html lang="ru">' in page
+    assert 'Обновление до последнего релиза v1.965' in page
+    assert 'Веб-интерфейс остаётся доступным' in page
+    assert 'Telegram и фоновые проверки приостановлены' in page
+    assert 'width:64%' in page
+    assert '/api/update_status' in page
+
+
 def test_service_routes_apply_and_profile():
     with tempfile.TemporaryDirectory() as tmp:
         callbacks = []
@@ -12751,6 +12807,7 @@ def main():
     test_primary_vless_does_not_capture_gmail_domains()
     test_custom_check_service_sources_are_synced()
     test_direct_update_script_records_update_status()
+    test_application_update_maintenance_mode_keeps_web_available()
     test_update_static_assets_use_archive_fallback()
     test_local_archive_update_env_is_preserved()
     test_chatgpt_codex_custom_check_migration()
@@ -12845,6 +12902,7 @@ def main():
     test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port()
     test_event_history_helpers()
     test_update_status_helpers()
+    test_update_maintenance_runtime()
     test_service_routes_apply_and_profile()
     test_route_intersections_helpers()
     test_route_intersections_filters_comments_and_ip_domain_noise()

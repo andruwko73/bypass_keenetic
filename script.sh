@@ -104,49 +104,127 @@ if [ -d "/opt/etc/bot" ] || grep -q '/opt/etc/bot/main.py' /opt/etc/init.d/S99te
   BOT_MAIN_PATH="/opt/etc/bot/main.py"
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
+UPDATE_MAINTENANCE_PATH="/tmp/bypass_update_maintenance"
+UPDATE_MAINTENANCE_READY_PATH="/tmp/bypass_update_maintenance.ready"
+update_application_maintenance_active=0
+update_application_was_running=0
 
-stop_application_for_update() {
-  echo "Останавливаем бот и фоновые проверки перед заменой файлов."
-  write_cli_update_status update true 50 Stopping "Stopping bot and background checks"
+main_application_pids() {
+  lock_pid=""
+  [ -f /tmp/bypass_telegram_bot_main.lock/pid ] && lock_pid=$(cat /tmp/bypass_telegram_bot_main.lock/pid 2>/dev/null || true)
+  case "$lock_pid" in
+    ''|*[!0-9]*) ;;
+    *)
+      if [ -r "/proc/$lock_pid/cmdline" ] && grep -qa "$BOT_MAIN_PATH" "/proc/$lock_pid/cmdline"; then
+        printf '%s\n' "$lock_pid"
+        return 0
+      fi
+      ;;
+  esac
+  pgrep -f "python3.*$BOT_MAIN_PATH" 2>/dev/null | head -n1 || true
+}
 
-  if [ -x "$BOT_SERVICE_PATH" ]; then
-    "$BOT_SERVICE_PATH" stop || {
-      echo "Error: bot must stop before update files are replaced"
-      return 1
-    }
-  else
-    for bot_pid in $(pgrep -f "python3.*$BOT_MAIN_PATH" 2>/dev/null); do
-      kill "$bot_pid" >/dev/null 2>&1 || true
+clear_update_maintenance_files() {
+  rm -f "$UPDATE_MAINTENANCE_PATH" "$UPDATE_MAINTENANCE_READY_PATH" 2>/dev/null || true
+}
+
+resume_application_after_cancelled_update() {
+  clear_update_maintenance_files
+  if grep -q 'UPDATE_MAINTENANCE_READY_PATH' "$BOT_MAIN_PATH" 2>/dev/null; then
+    for bot_pid in $(main_application_pids); do
+      kill -USR2 "$bot_pid" >/dev/null 2>&1 || true
     done
-    sleep 2
-    if pgrep -f "python3.*$BOT_MAIN_PATH" >/dev/null 2>&1; then
-      echo "Error: bot must stop before update files are replaced"
-      return 1
-    fi
   fi
+  update_application_maintenance_active=0
+}
+
+prepare_application_for_update() {
+  echo "Переводим программу в режим обслуживания; веб-интерфейс остаётся доступным."
+  write_cli_update_status update true 50 Maintenance "Pausing Telegram and background checks; web remains available"
 
   [ -x "$INSTALLER_SERVICE_PATH" ] && "$INSTALLER_SERVICE_PATH" stop >/dev/null 2>&1 || true
   cleanup_pool_probe_runtime
-  cleanup_web_only_runtime
 
   if pgrep -f "/tmp/bypass_pool_probe_" >/dev/null 2>&1; then
     echo "Error: pool probe worker is still running; update cancelled before file replacement"
     return 1
   fi
-  if pgrep -f "python3.*$BOT_MAIN_PATH" >/dev/null 2>&1; then
-    echo "Error: bot is still running; update cancelled before file replacement"
+
+  bot_pids=$(main_application_pids)
+  if [ -z "$bot_pids" ]; then
+    echo "Основной процесс не запущен; обновление продолжится без режима обслуживания веб-интерфейса."
+    update_application_was_running=0
+    return 0
+  fi
+
+  update_application_was_running=1
+  clear_update_maintenance_files
+  : > "$UPDATE_MAINTENANCE_PATH"
+
+  if grep -q 'UPDATE_MAINTENANCE_READY_PATH' "$BOT_MAIN_PATH" 2>/dev/null; then
+    for bot_pid in $bot_pids; do
+      kill -USR1 "$bot_pid" >/dev/null 2>&1 || {
+        resume_application_after_cancelled_update
+        echo "Error: failed to request application maintenance mode"
+        return 1
+      }
+    done
+    attempts=0
+    while [ ! -f "$UPDATE_MAINTENANCE_READY_PATH" ] && [ "$attempts" -lt 35 ]; do
+      sleep 1
+      attempts=$((attempts + 1))
+    done
+    if [ ! -f "$UPDATE_MAINTENANCE_READY_PATH" ]; then
+      resume_application_after_cancelled_update
+      echo "Error: application did not confirm maintenance mode; update cancelled before file replacement"
+      return 1
+    fi
+  else
+    echo "Текущая версия ещё не поддерживает сигнал обслуживания; сохраняем прежнюю работу веб-интерфейса и блокируем внешние проверки скриптом."
+    sleep 2
+  fi
+
+  if [ -z "$(main_application_pids)" ]; then
+    clear_update_maintenance_files
+    echo "Error: application stopped while entering maintenance mode"
     return 1
   fi
+  update_application_maintenance_active=1
+  echo "Режим обслуживания подтверждён; порт веб-интерфейса остаётся активным."
+  return 0
+}
+
+stop_application_for_final_restart() {
+  if [ -x "$BOT_SERVICE_PATH" ]; then
+    "$BOT_SERVICE_PATH" stop || return 1
+  else
+    for bot_pid in $(main_application_pids); do
+      kill "$bot_pid" >/dev/null 2>&1 || true
+    done
+    attempts=0
+    while [ -n "$(main_application_pids)" ] && [ "$attempts" -lt 20 ]; do
+      sleep 1
+      attempts=$((attempts + 1))
+    done
+    [ -z "$(main_application_pids)" ] || return 1
+  fi
+  clear_update_maintenance_files
+  update_application_maintenance_active=0
   return 0
 }
 
 recover_runtime_after_failed_update() {
   [ "${update_runtime_quiesced:-0}" = "1" ] || return 0
-  echo "Обновление прервано после остановки программы. Восстанавливаем рабочее состояние."
+  echo "Обновление прервано в режиме обслуживания. Восстанавливаем рабочее состояние."
   if [ -n "${backup_dir:-}" ] && [ -x "$backup_dir/rollback.sh" ]; then
     /bin/sh "$backup_dir/rollback.sh" && return 0
     echo "Warning: automatic rollback failed; trying to start the installed bot service."
   fi
+  if [ "${update_application_was_running:-0}" = "1" ] && [ -n "$(main_application_pids)" ]; then
+    resume_application_after_cancelled_update
+    return 0
+  fi
+  clear_update_maintenance_files
   clear_runtime_update_env
   if [ -x "$BOT_SERVICE_PATH" ]; then
     "$BOT_SERVICE_PATH" start >/dev/null 2>&1 || "$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || true
@@ -195,14 +273,22 @@ download_static_asset() {
   repo_path="$1"
   target="$2"
   url="$(repo_file_url "$repo_path")"
+  temporary="${target}.update.$$"
 
-  rm -f "$target"
-  download_repo_file_from_archive "$url" "$target" >/dev/null 2>&1 || true
-  GITHUB_API_TIMEOUT=12 download_repo_file_via_api "$url" "$target" >/dev/null 2>&1 || true
-  if [ ! -s "$target" ]; then
-    curl -fsSL --connect-timeout 12 --max-time 30 --retry 2 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1 || true
+  rm -f "$temporary"
+  download_repo_file_from_archive "$url" "$temporary" >/dev/null 2>&1 || true
+  if [ ! -s "$temporary" ]; then
+    GITHUB_API_TIMEOUT=12 download_repo_file_via_api "$url" "$temporary" >/dev/null 2>&1 || true
   fi
-  [ -s "$target" ] || rm -f "$target"
+  if [ ! -s "$temporary" ]; then
+    curl -fsSL --connect-timeout 12 --max-time 30 --retry 2 --retry-delay 1 -o "$temporary" "$url" >/dev/null 2>&1 || true
+  fi
+  if [ -s "$temporary" ]; then
+    mv -f "$temporary" "$target"
+    return 0
+  fi
+  rm -f "$temporary"
+  return 1
 }
 
 install_static_assets() {
@@ -757,6 +843,8 @@ BOT_RUNTIME_DIR="$BOT_RUNTIME_DIR"
 BOT_SERVICE_PATH="$BOT_SERVICE_PATH"
 INSTALLER_MAIN_PATH="$INSTALLER_MAIN_PATH"
 INSTALLER_SERVICE_PATH="$INSTALLER_SERVICE_PATH"
+UPDATE_MAINTENANCE_PATH="$UPDATE_MAINTENANCE_PATH"
+UPDATE_MAINTENANCE_READY_PATH="$UPDATE_MAINTENANCE_READY_PATH"
 ROLLBACK_MODULES="$BOT_RUNTIME_MODULES CHANGELOG.md"
 
 restore_file() {
@@ -875,6 +963,7 @@ install_unblock_ipset_cron_job || true
 [ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || /opt/etc/init.d/S24xray start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || /opt/etc/init.d/S24v2ray start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan start >/dev/null 2>&1 || true
+rm -f "\$UPDATE_MAINTENANCE_PATH" "\$UPDATE_MAINTENANCE_READY_PATH" 2>/dev/null || true
 [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "\$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
 
 echo "Rollback restored files from \$BACKUP_DIR."
@@ -889,7 +978,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -1815,7 +1904,7 @@ if [ "$1" = "-update" ]; then
     exec >> "$stage_dir/update.log" 2>&1
 
     update_runtime_quiesced=1
-    stop_application_for_update || exit 1
+    prepare_application_for_update || exit 1
     echo "Пересобираем конфигурацию core proxy из сохранённых ключей."
     PYTHONPATH="$stage_dir:$BOT_RUNTIME_DIR" python3 "$stage_dir/proxy_config_recovery.py" || exit 1
 
@@ -1933,11 +2022,15 @@ if [ "$1" = "-update" ]; then
     clear_runtime_update_env
     update_completion_message="CLI update complete"
     write_cli_update_status update true 88 Starting "Starting application and web interface"
+    stop_application_for_final_restart || {
+      echo "Error: failed to stop maintenance process for the final restart"
+      exit 1
+    }
     if ! telegram_config_complete; then
       start_telegram_installer
       update_completion_message="CLI update complete; installer started"
     elif [ -x "$BOT_SERVICE_PATH" ]; then
-      "$BOT_SERVICE_PATH" restart
+      "$BOT_SERVICE_PATH" start
       sleep 3
       if "$BOT_SERVICE_PATH" status | grep -q "Bot is running"; then
         echo "Бот запущен. Нажмите сюда: /start"

@@ -1718,7 +1718,6 @@
         html[data-user-background="enabled"] .service-panel,
         html[data-user-background="enabled"] .overview-key-panel,
         html[data-user-background="enabled"] .status-card,
-        html[data-user-background="enabled"] .hero-popover,
         html[data-user-background="enabled"] .confirm-card,
         html[data-user-background="enabled"] .event-history-drawer,
         html[data-user-background="enabled"] .mobile-nav{
@@ -1745,7 +1744,17 @@
         html[data-user-background="enabled"][data-theme="light"] .service-panel,
         html[data-user-background="enabled"][data-theme="light"] .overview-key-panel,
         html[data-user-background="enabled"][data-theme="light"] .status-card,
-        html[data-user-background="enabled"][data-theme="light"] .hero-popover,
         html[data-user-background="enabled"][data-theme="light"] .confirm-card,
         html[data-user-background="enabled"][data-theme="light"] .event-history-drawer,
         html[data-user-background="enabled"][data-theme="light"] .mobile-nav{background:rgba(231,235,240,var(--user-background-panel-alpha,.94));}
+        html[data-user-background="enabled"] .topbar .hero-popover{
+            background:linear-gradient(180deg,rgba(23,30,40,.98),rgba(20,31,43,.97));
+            backdrop-filter:blur(20px) saturate(128%);
+            -webkit-backdrop-filter:blur(20px) saturate(128%);
+        }
+        html[data-user-background="enabled"][data-theme="light"] .topbar .hero-popover{
+            background:linear-gradient(180deg,rgba(238,241,245,.98),rgba(222,228,235,.97));
+        }
+        html[data-user-background="enabled"][data-theme="glass"] .topbar .hero-popover{
+            background:linear-gradient(145deg,rgba(38,58,70,.98),rgba(15,28,38,.97));
+        }
