@@ -3549,13 +3549,16 @@
                 });
                 const trigger = menu.querySelector('summary');
                 if (trigger) {
-                    trigger.addEventListener('click', function() {
-                        Promise.resolve().then(function() {
-                            if (menu.open) {
-                                closeServiceRouteMenus(menu);
-                                positionServiceRouteMenu(menu);
-                            }
-                        });
+                    trigger.addEventListener('click', function(event) {
+                        event.preventDefault();
+                        if (menu.open) {
+                            menu.open = false;
+                            menu.classList.remove('drop-up');
+                            return;
+                        }
+                        closeServiceRouteMenus(menu);
+                        menu.open = true;
+                        scheduleServiceRouteMenuPosition(menu);
                     });
                 }
             });

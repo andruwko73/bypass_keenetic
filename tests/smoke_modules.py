@@ -4428,6 +4428,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'return cached_payload if isinstance(cached_payload, str) else None' in source
     assert 'asset_cache_key=path if path in' in source
     assert "action === 'pool-apply'" in (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
+    app_js_source = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
+    assert "trigger.addEventListener('click', function(event)" in app_js_source
+    assert 'event.preventDefault();' in app_js_source
+    assert 'scheduleServiceRouteMenuPosition(menu);' in app_js_source
     assert 'avoid rendering full probe details twice' in source
     assert 'event_history_api_cache[\'payload\'] = payload' not in source
     assert "last_scan_count" in source
