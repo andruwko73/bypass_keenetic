@@ -1,5 +1,5 @@
-*v1.967 (19 Jul 2026) -* main
+*v1.968 (19 Jul 2026) -* main
 
-*Keeps desktop key checks compact, protects the background menu from transparency, and activates complete static releases atomically.*
+*Refreshes static UI assets safely after updates while preserving the 1.967 layout and background fixes.*
 
 *Removes a dead /proc scanner and a repeated failover ranking lookup without changing output order.*

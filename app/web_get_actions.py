@@ -340,14 +340,14 @@ def dispatch(ctx, path, query=''):
             'kind': 'text',
             'text': _call(ctx, 'build_style_asset') or '',
             'content_type': 'text/css; charset=utf-8',
-            'cache_seconds': 31536000,
+            'cache_seconds': 300,
         }
     if path == '/static/app.js':
         return {
             'kind': 'text',
             'text': _call(ctx, 'build_script_asset') or '',
             'content_type': 'application/javascript; charset=utf-8',
-            'cache_seconds': 31536000,
+            'cache_seconds': 300,
         }
     if path == '/api/status':
         return {'kind': 'json', 'payload': _status_payload(ctx, query), 'status': 200}

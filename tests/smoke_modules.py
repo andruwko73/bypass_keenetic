@@ -9545,6 +9545,9 @@ def test_web_http_gzip_and_head_responses():
     immutable_asset = _Request({'Accept-Encoding': 'gzip'})
     immutable_asset._send_text_asset(html, 'text/css; charset=utf-8', cache_seconds=31536000, asset_cache_key='immutable.css')
     assert dict(immutable_asset.sent_headers)['Cache-Control'] == 'public, max-age=31536000, immutable'
+    short_cache_asset = _Request({'Accept-Encoding': 'gzip'})
+    short_cache_asset._send_text_asset(html, 'text/css; charset=utf-8', cache_seconds=300, asset_cache_key='short.css')
+    assert dict(short_cache_asset.sent_headers)['Cache-Control'] == 'public, max-age=300'
     with tempfile.TemporaryDirectory() as tmp:
         first_path = Path(tmp) / 'first.css'
         second_path = Path(tmp) / 'second.js'
@@ -10061,9 +10064,9 @@ def test_web_get_actions_helpers():
     check_panel = web_get_actions.dispatch(ctx, '/api/protocol_check_panel', 'proto=vless')
     assert check_panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'check:vless'}
     script_asset = web_get_actions.dispatch({'build_script_asset': lambda: 'js'}, '/static/app.js')
-    assert script_asset['cache_seconds'] == 31536000
+    assert script_asset['cache_seconds'] == 300
     style_asset = web_get_actions.dispatch({'build_style_asset': lambda: 'css'}, '/static/app.css')
-    assert style_asset['cache_seconds'] == 31536000
+    assert style_asset['cache_seconds'] == 300
     static = web_get_actions.dispatch(ctx, '/static/service-icons/test.png')
     assert static['path'].replace('\\', '/').endswith('/service-icons/test.png')
 
