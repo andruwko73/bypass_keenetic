@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 
 
 XRAY_CONFIG_PATH = '/opt/etc/xray/config.json'
@@ -45,6 +46,26 @@ def drop_xray_removed_options(value):
     return False
 
 
+def _write_text_atomic(path, text):
+    directory = os.path.dirname(path)
+    fd, temp_path = tempfile.mkstemp(prefix='.' + os.path.basename(path) + '.', suffix='.tmp', dir=directory or None)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as file:
+            file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+        if os.path.exists(path):
+            os.chmod(temp_path, os.stat(path).st_mode & 0o777)
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def _write_json_atomic(path, payload):
+    _write_text_atomic(path, json.dumps(payload, ensure_ascii=False, indent=2) + '\n')
+
+
 def sanitize_xray_config_file(config_path=XRAY_CONFIG_PATH):
     if not os.path.isfile(config_path):
         return False
@@ -52,8 +73,7 @@ def sanitize_xray_config_file(config_path=XRAY_CONFIG_PATH):
         config_data = json.load(file)
     if not drop_xray_removed_options(config_data):
         return False
-    with open(config_path, 'w', encoding='utf-8') as file:
-        json.dump(config_data, file, ensure_ascii=False, indent=2)
+    _write_json_atomic(config_path, config_data)
     return True
 
 
@@ -68,8 +88,7 @@ def sanitize_proxy_protocols_file(protocols_path=PROXY_PROTOCOLS_PATH):
         line for line in text.splitlines(True)
         if not any(option in line for option in XRAY_REMOVED_OPTIONS)
     )
-    with open(protocols_path, 'w', encoding='utf-8') as file:
-        file.write(filtered)
+    _write_text_atomic(protocols_path, filtered)
     return True
 
 

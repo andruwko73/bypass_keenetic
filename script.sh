@@ -140,6 +140,29 @@ stop_application_for_update() {
   return 0
 }
 
+recover_runtime_after_failed_update() {
+  [ "${update_runtime_quiesced:-0}" = "1" ] || return 0
+  echo "Обновление прервано после остановки программы. Восстанавливаем рабочее состояние."
+  if [ -n "${backup_dir:-}" ] && [ -x "$backup_dir/rollback.sh" ]; then
+    /bin/sh "$backup_dir/rollback.sh" && return 0
+    echo "Warning: automatic rollback failed; trying to start the installed bot service."
+  fi
+  clear_runtime_update_env
+  if [ -x "$BOT_SERVICE_PATH" ]; then
+    "$BOT_SERVICE_PATH" start >/dev/null 2>&1 || "$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || true
+  fi
+}
+
+handle_cli_update_exit() {
+  update_exit_code="$1"
+  trap - EXIT
+  if [ "${cli_update_status_active:-0}" = "1" ] && [ "$update_exit_code" -ne 0 ]; then
+    recover_runtime_after_failed_update
+    write_cli_update_status update false 100 Error "CLI update failed; runtime recovery attempted"
+  fi
+  exit "$update_exit_code"
+}
+
 clear_runtime_update_env() {
   if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then
     unset RAW_GITHUB_USE_SOCKS RAW_GITHUB_SOCKS_NOTICE_SHOWN
@@ -620,7 +643,11 @@ stage_runtime_module() {
 
 backup_runtime_module() {
   module="$1"
-  [ -f "$BOT_RUNTIME_DIR/$module" ] && mv "$BOT_RUNTIME_DIR/$module" "$backup_dir/$module"
+  if [ -f "$BOT_RUNTIME_DIR/$module" ]; then
+    mv "$BOT_RUNTIME_DIR/$module" "$backup_dir/$module"
+  else
+    : > "$backup_dir/.runtime-absent-$module"
+  fi
 }
 
 activate_runtime_module() {
@@ -818,7 +845,11 @@ restore_file unblock_vless.txt /opt/etc/unblock/vless.txt
 restore_file unblock_vless2.txt /opt/etc/unblock/vless-2.txt
 
 for module in \$ROLLBACK_MODULES; do
-  restore_file "\$module" "\$BOT_RUNTIME_DIR/\$module"
+  if [ -f "\$BACKUP_DIR/.runtime-absent-\$module" ]; then
+    rm -f "\$BOT_RUNTIME_DIR/\$module"
+  else
+    restore_file "\$module" "\$BOT_RUNTIME_DIR/\$module"
+  fi
 done
 if [ -d "\$BACKUP_DIR/static" ]; then
   mkdir -p "\$BOT_RUNTIME_DIR/static"
@@ -858,7 +889,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -1699,7 +1730,8 @@ if [ "$1" = "-update" ]; then
     echo "Начинаем обновление."
     cli_update_status_active=1
     write_cli_update_status update true 3 Preparing "CLI update started"
-    trap 'rc=$?; if [ "${cli_update_status_active:-0}" = "1" ] && [ "$rc" -ne 0 ]; then write_cli_update_status update false 100 Error "CLI update failed"; fi' EXIT
+    update_runtime_quiesced=0
+    trap 'handle_cli_update_exit "$?"' EXIT
   ensure_entware_dns
     opkg update > /dev/null 2>&1
     core_proxy_pkg=$(detect_core_proxy_package)
@@ -1731,6 +1763,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "$(repo_file_url bot.py)" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
     staged_runtime_modules=$(sed -n 's/^BOT_RUNTIME_MODULES="\([^\"]*\)"$/\1/p' "$stage_dir/script.sh" | head -n1)
     [ -n "$staged_runtime_modules" ] || { echo "Error: staged script has no runtime module manifest"; exit 1; }
+    BOT_RUNTIME_MODULES="$staged_runtime_modules"
     for module in $staged_runtime_modules; do
       stage_runtime_module "$module" "" || exit 1
     done
@@ -1781,7 +1814,10 @@ if [ "$1" = "-update" ]; then
     echo "Further update output is saved to $stage_dir/update.log."
     exec >> "$stage_dir/update.log" 2>&1
 
+    update_runtime_quiesced=1
     stop_application_for_update || exit 1
+    echo "Пересобираем конфигурацию core proxy из сохранённых ключей."
+    PYTHONPATH="$stage_dir:$BOT_RUNTIME_DIR" python3 "$stage_dir/proxy_config_recovery.py" || exit 1
 
     /opt/etc/init.d/S22shadowsocks stop > /dev/null 2>&1
     /opt/etc/init.d/S24xray stop > /dev/null 2>&1
@@ -1934,6 +1970,7 @@ if [ "$1" = "-update" ]; then
     run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
     write_cli_update_status update false 100 Done "CLI update complete"
     cli_update_status_active=0
+    update_runtime_quiesced=0
     trap - EXIT
     exit 0
 fi

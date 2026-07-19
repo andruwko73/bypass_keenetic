@@ -1,5 +1,5 @@
-*v1.962 (19 Jul 2026) -* main
+*v1.963 (19 Jul 2026) -* main
 
-*Stops the bot and all pool-probe workers before replacing program files during an update, preventing a partial runtime update when a background check is active.*
+*Makes Xray configuration writes atomic and rebuilds the core proxy configuration from saved keys before an update validates and restarts Xray.*
 
-*If the program cannot stop cleanly, the update is cancelled before any runtime file is changed.*
+*If an update fails after stopping the application, it automatically restores or restarts the previous runtime instead of leaving the bot and web interface offline.*

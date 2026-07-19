@@ -2400,6 +2400,7 @@ CORE_PROXY_SERVICE_SCRIPT = XRAY_SERVICE_SCRIPT if os.path.exists(XRAY_SERVICE_S
 CORE_PROXY_CONFIG_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'config.json')
 CORE_PROXY_ERROR_LOG = os.path.join(CORE_PROXY_CONFIG_DIR, 'error.log')
 CORE_PROXY_ACCESS_LOG = os.path.join(CORE_PROXY_CONFIG_DIR, 'access.log')
+core_proxy_config_write_lock = threading.RLock()
 UDP_POLICY_CONFIG_PATH = '/opt/etc/bot/udp_policy.conf'
 CALL_SIGNAL_ROUTES_PATH = '/opt/etc/bot/call_signal_routes.txt'
 UDP_QUIC_BLOCK_SHADOWSOCKS_ENABLED = bool(getattr(config, 'udp_quic_block_shadowsocks_enabled', True))
@@ -12998,28 +12999,27 @@ def _current_core_proxy_endpoint(outbound_tag):
 
 
 def _write_core_proxy_endpoint(outbound_tag, endpoint, server_name):
-    with open(CORE_PROXY_CONFIG_PATH, 'r', encoding='utf-8') as file:
-        config_data = json.load(file)
-    changed = False
-    for outbound in config_data.get('outbounds', []):
-        if outbound.get('tag') != outbound_tag:
-            continue
-        vnext = outbound.get('settings', {}).get('vnext') or []
-        if not vnext:
-            continue
-        reality_settings = outbound.get('streamSettings', {}).get('realitySettings', {})
-        if vnext[0].get('address') != endpoint:
-            vnext[0]['address'] = endpoint
-            changed = True
-        if server_name and reality_settings.get('serverName') != server_name:
-            reality_settings['serverName'] = server_name
-            changed = True
-    if not changed:
-        return False
-    with open(CORE_PROXY_CONFIG_PATH, 'w', encoding='utf-8') as file:
-        json.dump(config_data, file, ensure_ascii=False, indent=2)
-        file.write('\n')
-    return True
+    with core_proxy_config_write_lock:
+        with open(CORE_PROXY_CONFIG_PATH, 'r', encoding='utf-8') as file:
+            config_data = json.load(file)
+        changed = False
+        for outbound in config_data.get('outbounds', []):
+            if outbound.get('tag') != outbound_tag:
+                continue
+            vnext = outbound.get('settings', {}).get('vnext') or []
+            if not vnext:
+                continue
+            reality_settings = outbound.get('streamSettings', {}).get('realitySettings', {})
+            if vnext[0].get('address') != endpoint:
+                vnext[0]['address'] = endpoint
+                changed = True
+            if server_name and reality_settings.get('serverName') != server_name:
+                reality_settings['serverName'] = server_name
+                changed = True
+        if not changed:
+            return False
+        _write_json_file(CORE_PROXY_CONFIG_PATH, config_data)
+        return True
 
 
 def _probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service='telegram'):
@@ -13229,8 +13229,8 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
 def _write_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
     config_json = _build_v2ray_config(vmess_key, vless_key, vless2_key, shadowsocks_key, trojan_key)
     os.makedirs(CORE_PROXY_CONFIG_DIR, exist_ok=True)
-    with open(CORE_PROXY_CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(config_json, f, ensure_ascii=False, indent=2)
+    with core_proxy_config_write_lock:
+        _write_json_file(CORE_PROXY_CONFIG_PATH, config_json)
 
 
 def _write_all_proxy_core_config():

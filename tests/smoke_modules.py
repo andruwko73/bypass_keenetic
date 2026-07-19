@@ -65,6 +65,7 @@ import pool_probe_runner
 import probe_cache
 import auto_failover_runtime
 import proxy_apply_runtime
+import proxy_config_recovery
 import proxy_status
 import proxy_protocols
 import unblock_lists
@@ -554,12 +555,61 @@ def test_xray_compat_runtime_helpers():
         assert xray_compat_runtime.sanitize_xray_config_file(str(config_path))
         sanitized = json.loads(config_path.read_text(encoding='utf-8'))
     assert 'allowInsecure' not in json.dumps(sanitized)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config_path = Path(tmp_dir) / 'config.json'
+        original_text = json.dumps({'tlsSettings': {'allowInsecure': True}, 'keep': 1})
+        config_path.write_text(original_text, encoding='utf-8')
+        original_replace = xray_compat_runtime.os.replace
+        try:
+            def fail_replace(_source, _target):
+                raise OSError('simulated interrupted replace')
+
+            xray_compat_runtime.os.replace = fail_replace
+            try:
+                xray_compat_runtime.sanitize_xray_config_file(str(config_path))
+                raise AssertionError('sanitize must report the simulated replace failure')
+            except OSError as exc:
+                assert 'simulated interrupted replace' in str(exc)
+        finally:
+            xray_compat_runtime.os.replace = original_replace
+        assert config_path.read_text(encoding='utf-8') == original_text
     netstat_text = (
         'tcp 0 0 127.0.0.1:10811 0.0.0.0:* LISTEN 1/xray\n'
         'tcp 0 0 127.0.0.1:10813 0.0.0.0:* LISTEN 1/xray\n'
     )
     ports = xray_compat_runtime.listening_ports((10811, 10812, 10813), netstat_text=netstat_text)
     assert ports == {10811: True, 10812: False, 10813: True}
+
+
+def test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        xray_dir = Path(tmp_dir) / 'xray'
+        v2ray_dir = Path(tmp_dir) / 'v2ray'
+        xray_dir.mkdir()
+        v2ray_dir.mkdir()
+        (xray_dir / 'vless.key').write_text(
+            'vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none&security=tls&type=tcp#test',
+            encoding='utf-8',
+        )
+        output_path = xray_dir / 'config.json'
+        fake_config = py_types.SimpleNamespace(
+            localportvmess='10810',
+            localportvless='10811',
+            localportsh_bot='10820',
+            localporttrojan_bot='10830',
+        )
+        result_path = proxy_config_recovery.rebuild_proxy_core_config(
+            config_module=fake_config,
+            core_config_dir=str(xray_dir),
+            xray_config_dir=str(xray_dir),
+            v2ray_config_dir=str(v2ray_dir),
+            output_path=str(output_path),
+        )
+        assert result_path == str(output_path)
+        rebuilt = json.loads(output_path.read_text(encoding='utf-8'))
+        assert output_path.stat().st_size > 100
+        assert any(outbound.get('tag') == 'proxy-vless' for outbound in rebuilt['outbounds'])
+        assert any(inbound.get('port') == 10811 for inbound in rebuilt['inbounds'])
 
 
 def test_router_health_runtime_process_rss_parser():
@@ -3145,25 +3195,36 @@ def test_direct_update_script_records_update_status():
     assert 'download_update_file "$(repo_file_url script.sh)"' in script
     assert '"$stage_dir/script.sh" "#!/bin/sh" "script.sh"' in script
     assert 'staged_runtime_modules=$(sed -n' in script
+    assert 'BOT_RUNTIME_MODULES="$staged_runtime_modules"' in script
     assert 'for module in $staged_runtime_modules; do' in script
     assert 'target_release=$(sed -n' in script
     assert 'write_cli_update_status update true 40 Staged "Update files staged" "$target_release"' in script
     assert 'stop_application_for_update() {' in script
+    assert 'recover_runtime_after_failed_update() {' in script
+    assert 'handle_cli_update_exit() {' in script
+    assert 'trap \'handle_cli_update_exit "$?"\' EXIT' in script
     assert '"$BOT_SERVICE_PATH" stop || {' in script
     assert 'cleanup_pool_probe_runtime' in script
     assert 'Error: pool probe worker is still running; update cancelled before file replacement' in script
+    assert 'proxy_config_recovery.py' in script
     update_log_index = script.index('exec >> "$stage_dir/update.log" 2>&1')
     quiesce_index = script.index('stop_application_for_update || exit 1', update_log_index)
-    services_stop_index = script.index('/opt/etc/init.d/S22shadowsocks stop', quiesce_index)
+    recovery_index = script.index('python3 "$stage_dir/proxy_config_recovery.py" || exit 1', quiesce_index)
+    services_stop_index = script.index('/opt/etc/init.d/S22shadowsocks stop', recovery_index)
     files_replace_index = script.index('mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"', services_stop_index)
-    assert update_log_index < quiesce_index < services_stop_index < files_replace_index
+    assert update_log_index < quiesce_index < recovery_index < services_stop_index < files_replace_index
+    manifest_index = script.index('staged_runtime_modules=$(sed -n')
+    manifest_activation_index = script.index('BOT_RUNTIME_MODULES="$staged_runtime_modules"', manifest_index)
+    module_stage_index = script.index('for module in $staged_runtime_modules; do', manifest_activation_index)
+    assert manifest_index < manifest_activation_index < module_stage_index < update_log_index
+    assert '.runtime-absent-$module' in script
     assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script
     assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
     assert 'restore_file script.sh /opt/root/script.sh' in script
     assert 'write_cli_update_status update true 85 Restarting "Restarting services"' in script
     assert 'write_cli_update_status update false 100 Done "CLI update complete"' in script
     assert 'write_cli_update_status update false 100 Done "CLI update complete; installer started"' in script
-    assert 'write_cli_update_status update false 100 Error "CLI update failed"' in script
+    assert 'write_cli_update_status update false 100 Error "CLI update failed; runtime recovery attempted"' in script
     assert 'keep_count="${1:-1}"' in script
     assert 'cleanup_update_artifacts 1' in script
     assert 'cleanup_update_artifacts 3' not in script
@@ -12656,6 +12717,7 @@ def main():
     test_router_health_runtime_core_proxy_payload()
     test_router_health_runtime_dns_parsers()
     test_xray_compat_runtime_helpers()
+    test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys()
     test_router_health_runtime_process_rss_parser()
     test_router_health_runtime_related_process_snapshot()
     test_router_metrics_runtime_snapshot()
