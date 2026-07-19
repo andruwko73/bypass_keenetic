@@ -105,6 +105,41 @@ if [ -d "/opt/etc/bot" ] || grep -q '/opt/etc/bot/main.py' /opt/etc/init.d/S99te
 fi
 BOT_RUNTIME_DIR=$(dirname "$BOT_MAIN_PATH")
 
+stop_application_for_update() {
+  echo "Останавливаем бот и фоновые проверки перед заменой файлов."
+  write_cli_update_status update true 50 Stopping "Stopping bot and background checks"
+
+  if [ -x "$BOT_SERVICE_PATH" ]; then
+    "$BOT_SERVICE_PATH" stop || {
+      echo "Error: bot must stop before update files are replaced"
+      return 1
+    }
+  else
+    for bot_pid in $(pgrep -f "python3.*$BOT_MAIN_PATH" 2>/dev/null); do
+      kill "$bot_pid" >/dev/null 2>&1 || true
+    done
+    sleep 2
+    if pgrep -f "python3.*$BOT_MAIN_PATH" >/dev/null 2>&1; then
+      echo "Error: bot must stop before update files are replaced"
+      return 1
+    fi
+  fi
+
+  [ -x "$INSTALLER_SERVICE_PATH" ] && "$INSTALLER_SERVICE_PATH" stop >/dev/null 2>&1 || true
+  cleanup_pool_probe_runtime
+  cleanup_web_only_runtime
+
+  if pgrep -f "/tmp/bypass_pool_probe_" >/dev/null 2>&1; then
+    echo "Error: pool probe worker is still running; update cancelled before file replacement"
+    return 1
+  fi
+  if pgrep -f "python3.*$BOT_MAIN_PATH" >/dev/null 2>&1; then
+    echo "Error: bot is still running; update cancelled before file replacement"
+    return 1
+  fi
+  return 0
+}
+
 clear_runtime_update_env() {
   if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then
     unset RAW_GITHUB_USE_SOCKS RAW_GITHUB_SOCKS_NOTICE_SHOWN
@@ -1746,6 +1781,8 @@ if [ "$1" = "-update" ]; then
     echo "Further update output is saved to $stage_dir/update.log."
     exec >> "$stage_dir/update.log" 2>&1
 
+    stop_application_for_update || exit 1
+
     /opt/etc/init.d/S22shadowsocks stop > /dev/null 2>&1
     /opt/etc/init.d/S24xray stop > /dev/null 2>&1
     /opt/etc/init.d/S24v2ray stop > /dev/null 2>&1
@@ -1864,9 +1901,6 @@ if [ "$1" = "-update" ]; then
     sleep 2
     echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен бот (~15-30 сек)."
     sleep 7
-    cleanup_pool_probe_runtime
-    cleanup_web_only_runtime
-    cleanup_pool_probe_runtime
     clear_runtime_update_env
     if ! telegram_config_complete; then
       write_cli_update_status update false 100 Done "CLI update complete; installer started"

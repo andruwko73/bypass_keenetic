@@ -3148,6 +3148,15 @@ def test_direct_update_script_records_update_status():
     assert 'for module in $staged_runtime_modules; do' in script
     assert 'target_release=$(sed -n' in script
     assert 'write_cli_update_status update true 40 Staged "Update files staged" "$target_release"' in script
+    assert 'stop_application_for_update() {' in script
+    assert '"$BOT_SERVICE_PATH" stop || {' in script
+    assert 'cleanup_pool_probe_runtime' in script
+    assert 'Error: pool probe worker is still running; update cancelled before file replacement' in script
+    update_log_index = script.index('exec >> "$stage_dir/update.log" 2>&1')
+    quiesce_index = script.index('stop_application_for_update || exit 1', update_log_index)
+    services_stop_index = script.index('/opt/etc/init.d/S22shadowsocks stop', quiesce_index)
+    files_replace_index = script.index('mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"', services_stop_index)
+    assert update_log_index < quiesce_index < services_stop_index < files_replace_index
     assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script
     assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
     assert 'restore_file script.sh /opt/root/script.sh' in script

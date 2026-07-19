@@ -1,5 +1,5 @@
-*v1.961 (19 Jul 2026) -* main
+*v1.962 (19 Jul 2026) -* main
 
-*Makes the background dimmer fill the whole slider at 100% and adds a persistent transparency control for interface cards and buttons.*
+*Stops the bot and all pool-probe workers before replacing program files during an update, preventing a partial runtime update when a background check is active.*
 
-*The controls preview changes immediately and are saved together with the selected background on the router.*
+*If the program cannot stop cleanly, the update is cancelled before any runtime file is changed.*
