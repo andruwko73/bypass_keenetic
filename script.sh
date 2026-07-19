@@ -620,6 +620,7 @@ backup_runtime_state_files() {
   backup_runtime_state_file "$BOT_CONFIG_PATH" bot_config.py
   backup_runtime_state_file /opt/etc/bot/key_pools.json key_pools.json
   backup_runtime_state_file /opt/etc/bot/subscriptions.json subscriptions.json
+  backup_runtime_state_file /opt/etc/bot/subscription_nightly_pool_probe.json subscription_nightly_pool_probe.json
   backup_runtime_state_file /opt/etc/bot/custom_checks.json custom_checks.json
   backup_runtime_state_file /opt/etc/xray/vmess.key vmess.key
   backup_runtime_state_file /opt/etc/xray/vless.key vless.key
@@ -654,6 +655,7 @@ restore_runtime_state_files_after_update() {
   restore_runtime_state_file_after_update bot_autostart /opt/etc/bot_autostart 0644
   restore_runtime_state_file_after_update key_pools.json "$BOT_RUNTIME_DIR/key_pools.json" 0644
   restore_runtime_state_file_after_update subscriptions.json "$BOT_RUNTIME_DIR/subscriptions.json" 0644
+  restore_runtime_state_file_after_update subscription_nightly_pool_probe.json "$BOT_RUNTIME_DIR/subscription_nightly_pool_probe.json" 0644
   restore_runtime_state_file_after_update custom_checks.json "$BOT_RUNTIME_DIR/custom_checks.json" 0644
   restore_runtime_state_file_after_update vmess.key /opt/etc/xray/vmess.key 0600
   restore_runtime_state_file_after_update vless.key /opt/etc/xray/vless.key 0600
@@ -765,6 +767,7 @@ restore_file bot_config.py "\$BOT_CONFIG_PATH"
 restore_file bot_config.py /opt/etc/bot_config.py
 restore_file key_pools.json "\$BOT_RUNTIME_DIR/key_pools.json"
 restore_file subscriptions.json "\$BOT_RUNTIME_DIR/subscriptions.json"
+restore_file subscription_nightly_pool_probe.json "\$BOT_RUNTIME_DIR/subscription_nightly_pool_probe.json"
 restore_file custom_checks.json "\$BOT_RUNTIME_DIR/custom_checks.json"
 restore_file vmess.key /opt/etc/xray/vmess.key
 restore_file vless.key /opt/etc/xray/vless.key
@@ -925,6 +928,10 @@ migrate_runtime_config_defaults() {
   grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^subscription_nightly_pool_probe_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_nightly_pool_probe_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^subscription_nightly_pool_probe_start_hour[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_nightly_pool_probe_start_hour = 3\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^subscription_nightly_pool_probe_end_hour[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_nightly_pool_probe_end_hour = 6\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^subscription_nightly_pool_probe_max_refresh_age_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'subscription_nightly_pool_probe_max_refresh_age_seconds = 28800\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^telegram_bot_num_threads[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'telegram_bot_num_threads = 1\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^status_refresh_min_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'status_refresh_min_interval_seconds = 180.0\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^status_refresh_pending_min_interval_seconds[[:space:]]*=[[:space:]]*(15\.0|15|30\.0|30)([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
@@ -978,6 +985,10 @@ migrate_runtime_config_defaults() {
     grep -Eq '^subscription_auto_refresh_min_available_kb[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_min_available_kb = 92160\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_cpu_percent[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_cpu_percent = 80.0\n' >> /opt/etc/bot_config.py
     grep -Eq '^subscription_auto_refresh_max_load1[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_auto_refresh_max_load1 = 2.5\n' >> /opt/etc/bot_config.py
+    grep -Eq '^subscription_nightly_pool_probe_enabled[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_nightly_pool_probe_enabled = True\n' >> /opt/etc/bot_config.py
+    grep -Eq '^subscription_nightly_pool_probe_start_hour[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_nightly_pool_probe_start_hour = 3\n' >> /opt/etc/bot_config.py
+    grep -Eq '^subscription_nightly_pool_probe_end_hour[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_nightly_pool_probe_end_hour = 6\n' >> /opt/etc/bot_config.py
+    grep -Eq '^subscription_nightly_pool_probe_max_refresh_age_seconds[[:space:]]*=' /opt/etc/bot_config.py || printf 'subscription_nightly_pool_probe_max_refresh_age_seconds = 28800\n' >> /opt/etc/bot_config.py
     grep -Eq '^telegram_bot_num_threads[[:space:]]*=' /opt/etc/bot_config.py || printf 'telegram_bot_num_threads = 1\n' >> /opt/etc/bot_config.py
     if grep -Eq '^router_health_cache_ttl[[:space:]]*=[[:space:]]*15\.0([[:space:]#]|$)' /opt/etc/bot_config.py; then
       sed -i 's/^router_health_cache_ttl[[:space:]]*=.*/router_health_cache_ttl = 30.0/' /opt/etc/bot_config.py || true

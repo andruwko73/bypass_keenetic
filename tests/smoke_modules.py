@@ -1819,6 +1819,111 @@ def test_subscription_hwid_request_helpers():
     assert subscription_runtime.extract_router_hwid(text) == 'ABCD-1234'
 
 
+def test_subscription_nightly_pool_probe_schedule_helpers():
+    night = time.struct_time((2026, 7, 19, 3, 15, 0, 0, 200, -1))
+    morning = time.struct_time((2026, 7, 19, 6, 0, 0, 0, 200, -1))
+    assert subscription_runtime.nightly_pool_probe_window_date(
+        123,
+        start_hour=3,
+        end_hour=6,
+        localtime=lambda _timestamp: night,
+    ) == '2026-07-19'
+    assert subscription_runtime.nightly_pool_probe_window_date(
+        123,
+        start_hour=3,
+        end_hour=6,
+        localtime=lambda _timestamp: morning,
+    ) == ''
+    state = subscription_runtime.normalize_subscription_state({
+        'vless': {
+            'url': 'https://subscription.example.test/list',
+            'hwid_enabled': True,
+            'last_success_at': 9_980,
+        },
+        'trojan': {
+            'url': 'https://subscription.example.test/old',
+            'hwid_enabled': True,
+            'last_success_at': 1_000,
+        },
+    })
+    assert subscription_runtime.latest_recent_subscription_success_at(
+        state,
+        10_000,
+        max_age_seconds=60,
+    ) == 9_980
+    assert subscription_runtime.latest_recent_subscription_success_at(
+        state,
+        10_000,
+        max_age_seconds=10,
+    ) == 0
+
+
+def test_subscription_nightly_pool_probe_runtime_wiring():
+    source = source_path('bot.py').read_text(encoding='utf-8')
+    script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    example = source_path('bot_config.example.py').read_text(encoding='utf-8')
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+
+    assert 'def _maybe_start_nightly_subscription_pool_probe' in source
+    assert "scope='nightly_subscription'" in source
+    assert 'stale_only=False,' in source
+    assert 'max_keys=None,' in source
+    assert "getattr(config, 'subscription_nightly_pool_probe_enabled', True)" in source
+    for text in (example, bootstrap, script_source):
+        assert 'subscription_nightly_pool_probe_enabled = True' in text
+        assert 'subscription_nightly_pool_probe_start_hour = 3' in text
+        assert 'subscription_nightly_pool_probe_end_hour = 6' in text
+        assert 'subscription_nightly_pool_probe_max_refresh_age_seconds = 28800' in text
+    assert 'subscription_nightly_pool_probe.json' in script_source
+
+
+def test_subscription_nightly_pool_probe_dispatches_full_pool_once():
+    with tempfile.TemporaryDirectory() as directory:
+        temp_path = Path(directory)
+        (temp_path / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import sys, threading\n"
+            f"sys.path.insert(0, {str(temp_path)!r})\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            "import bot\n"
+            "calls, marks = [], []\n"
+            "class Runtime:\n"
+            "    def nightly_pool_probe_window_date(self, *_args, **_kwargs): return '2026-07-19'\n"
+            "    def latest_recent_subscription_success_at(self, *_args, **_kwargs): return 123.0\n"
+            "bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED = True\n"
+            "bot._app_mode_pool_enabled = lambda: True\n"
+            "bot._subscription_runtime = lambda: Runtime()\n"
+            "bot._nightly_subscription_pool_probe_state = lambda: {}\n"
+            "bot._background_task_allowed = lambda _name: True\n"
+            "bot.pool_probe_lock = threading.Lock()\n"
+            "bot._has_pool_probe_resume_payload = lambda: False\n"
+            "bot._run_coordinated_background_task = lambda _name, callback: (True, callback())\n"
+            "bot._probe_all_pool_keys_async = lambda **kwargs: (calls.append(kwargs) or (True, 17))\n"
+            "bot._mark_nightly_subscription_pool_probe_started = lambda day, now: marks.append((day, now))\n"
+            "bot._write_runtime_log = lambda _message: None\n"
+            "assert bot._maybe_start_nightly_subscription_pool_probe({}, now=456.0)\n"
+            "assert calls == [{'stale_only': False, 'max_keys': None, 'scope': 'nightly_subscription'}]\n"
+            "assert marks == [('2026-07-19', 456.0)]\n"
+            "bot._nightly_subscription_pool_probe_state = lambda: {'window_date': '2026-07-19'}\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=457.0)\n"
+            "assert len(calls) == 1\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+
 def test_subscription_pool_sync_preserves_manual_keys():
     old_key = 'vless://old@example.com:443#old'
     new_key = 'vless://new@example.com:443#new'

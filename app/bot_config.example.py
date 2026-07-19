@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.959
+# ВЕРСИЯ СКРИПТА v1.960
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -26,6 +26,10 @@ subscription_auto_refresh_max_bot_rss_kb = 71680  # lightweight subscription ref
 subscription_auto_refresh_min_available_kb = 92160
 subscription_auto_refresh_max_cpu_percent = 80.0
 subscription_auto_refresh_max_load1 = 2.5
+subscription_nightly_pool_probe_enabled = True  # once per local calendar day, after a recent successful subscription refresh
+subscription_nightly_pool_probe_start_hour = 3  # local router time, inclusive
+subscription_nightly_pool_probe_end_hour = 6  # local router time, exclusive
+subscription_nightly_pool_probe_max_refresh_age_seconds = 28800  # require a successful subscription refresh within the last 8 hours
 pool_probe_process_worker_enabled = True  # run full pool checks in a separate Python process so main bot RSS can return to baseline
 pool_probe_inprocess_fallback_enabled = False  # keep full pool checks out of the long-running bot process on routers
 pool_probe_process_worker_poll_seconds = 0.75

@@ -707,6 +707,9 @@ else:
 # --- Пул ключей и авто-фейловер Telegram API ---
 KEY_POOLS_PATH = '/opt/etc/bot/key_pools.json'
 SUBSCRIPTION_STATE_PATH = str(getattr(config, 'subscription_state_path', '/opt/etc/bot/subscriptions.json') or '').strip()
+SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH = str(
+    getattr(config, 'subscription_nightly_pool_probe_state_path', '/opt/etc/bot/subscription_nightly_pool_probe.json') or ''
+).strip()
 SUBSCRIPTION_MAX_BYTES = int(getattr(config, 'subscription_max_bytes', 2 * 1024 * 1024))
 SUBSCRIPTION_ALLOW_PRIVATE_URLS = bool(getattr(config, 'subscription_allow_private_urls', False))
 SUBSCRIPTION_HWID_VALUE = str(getattr(config, 'subscription_router_hwid', '') or '').strip()
@@ -761,6 +764,19 @@ SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT = max(
 SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1 = max(
     0.0,
     float(getattr(config, 'subscription_auto_refresh_max_load1', 2.5)),
+)
+SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED = bool(getattr(config, 'subscription_nightly_pool_probe_enabled', True))
+SUBSCRIPTION_NIGHTLY_POOL_PROBE_START_HOUR = max(
+    0,
+    min(23, int(getattr(config, 'subscription_nightly_pool_probe_start_hour', 3))),
+)
+SUBSCRIPTION_NIGHTLY_POOL_PROBE_END_HOUR = max(
+    SUBSCRIPTION_NIGHTLY_POOL_PROBE_START_HOUR + 1,
+    min(24, int(getattr(config, 'subscription_nightly_pool_probe_end_hour', 6))),
+)
+SUBSCRIPTION_NIGHTLY_POOL_PROBE_MAX_REFRESH_AGE_SECONDS = max(
+    3600,
+    int(getattr(config, 'subscription_nightly_pool_probe_max_refresh_age_seconds', 8 * 3600)),
 )
 AUTO_FAILOVER_GRACE_SECONDS = int(getattr(config, 'auto_failover_grace_seconds', 180))
 AUTO_FAILOVER_POLL_SECONDS = int(getattr(config, 'auto_failover_poll_seconds', 60))
@@ -11120,6 +11136,75 @@ def _subscription_refresh_due(record, now):
     return True
 
 
+def _nightly_subscription_pool_probe_state():
+    if not SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH:
+        return {}
+    payload = _read_json_file(SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH, {}) or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _mark_nightly_subscription_pool_probe_started(window_date, now):
+    if not SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH or not window_date:
+        return
+    _write_json_file(
+        SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH,
+        {
+            'window_date': str(window_date),
+            'started_at': float(now),
+        },
+    )
+
+
+def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
+    """Queue one full pool probe after a recent successful nightly subscription refresh."""
+    if not SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED or not _app_mode_pool_enabled():
+        return False
+    now = time.time() if now is None else float(now)
+    window_date = _subscription_runtime().nightly_pool_probe_window_date(
+        now,
+        start_hour=SUBSCRIPTION_NIGHTLY_POOL_PROBE_START_HOUR,
+        end_hour=SUBSCRIPTION_NIGHTLY_POOL_PROBE_END_HOUR,
+    )
+    if not window_date:
+        return False
+    state = _nightly_subscription_pool_probe_state()
+    if str(state.get('window_date') or '') == window_date:
+        return False
+    refreshed_at = _subscription_runtime().latest_recent_subscription_success_at(
+        subscription_state,
+        now,
+        max_age_seconds=SUBSCRIPTION_NIGHTLY_POOL_PROBE_MAX_REFRESH_AGE_SECONDS,
+    )
+    if not refreshed_at:
+        return False
+    task_name = 'Nightly subscription pool probe'
+    if not _background_task_allowed(task_name):
+        return False
+    if pool_probe_lock.locked() or _has_pool_probe_resume_payload():
+        background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
+        background_task_skip_reason[task_name] = 'pool_probe'
+        return False
+    coordinator_started, result = _run_coordinated_background_task(
+        task_name,
+        lambda: _probe_all_pool_keys_async(
+            stale_only=False,
+            max_keys=None,
+            scope='nightly_subscription',
+        ),
+    )
+    if not coordinator_started or not isinstance(result, tuple):
+        return False
+    probe_started, queued = result
+    if not probe_started:
+        return False
+    _mark_nightly_subscription_pool_probe_started(window_date, now)
+    _write_runtime_log(
+        f'Nightly subscription pool probe started after refresh at {time.strftime("%H:%M", time.localtime(refreshed_at))}: '
+        f'{int(queued or 0)} keys queued.'
+    )
+    return True
+
+
 def _run_subscription_auto_refresh_cycle():
     if not SUBSCRIPTION_AUTO_REFRESH_ENABLED or not SUBSCRIPTION_STATE_PATH:
         return
@@ -11131,16 +11216,20 @@ def _run_subscription_auto_refresh_cycle():
             if shutdown_requested.is_set():
                 break
             if _subscription_refresh_due(record, now):
-                started, _result = _run_coordinated_background_task(
+                started, result = _run_coordinated_background_task(
                     'Subscription auto refresh',
                     lambda: _refresh_subscription_once(proto, record, source='auto'),
                 )
-                refreshed = refreshed or started
+                refreshed = refreshed or bool(started and result)
     except Exception as exc:
         _write_runtime_log(f'Subscription auto refresh error: {exc}')
     finally:
         if refreshed:
             _memory_cleanup('Subscription auto refresh cycle', clear_status=False, log=False)
+        try:
+            _maybe_start_nightly_subscription_pool_probe(_load_subscription_state())
+        except Exception as exc:
+            _write_runtime_log(f'Nightly subscription pool probe scheduling error: {exc}')
 
 
 def _background_maintenance_tasks():

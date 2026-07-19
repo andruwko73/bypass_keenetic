@@ -1,4 +1,5 @@
 import re
+import time
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 import key_pool_store
@@ -83,6 +84,45 @@ def normalize_subscription_state(payload):
 def serialize_subscription_state(state):
     state = normalize_subscription_state(state)
     return {'subscriptions': state}
+
+
+def nightly_pool_probe_window_date(timestamp, *, start_hour=3, end_hour=6, localtime=time.localtime):
+    """Return the local calendar day for a configured nightly window, or ``''``.
+
+    The caller persists the returned day after dispatching the full probe, which
+    prevents duplicate launches when the maintenance scheduler wakes every few
+    minutes or the bot restarts during the same window.
+    """
+    try:
+        start_hour = max(0, min(23, int(start_hour)))
+        end_hour = max(start_hour + 1, min(24, int(end_hour)))
+        local = localtime(float(timestamp))
+    except Exception:
+        return ''
+    if not start_hour <= int(local.tm_hour) < end_hour:
+        return ''
+    return time.strftime('%Y-%m-%d', local)
+
+
+def latest_recent_subscription_success_at(state, now, *, max_age_seconds):
+    """Return the newest eligible subscription refresh in a bounded age window."""
+    try:
+        now = float(now)
+        max_age_seconds = max(0.0, float(max_age_seconds))
+    except (TypeError, ValueError):
+        return 0.0
+    latest = 0.0
+    for record in normalize_subscription_state(state).values():
+        if not record.get('url') or not record.get('hwid_enabled'):
+            continue
+        try:
+            success_at = float(record.get('last_success_at') or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if success_at <= 0.0 or success_at > now or now - success_at > max_age_seconds:
+            continue
+        latest = max(latest, success_at)
+    return latest
 
 
 def subscription_public_settings(state):
