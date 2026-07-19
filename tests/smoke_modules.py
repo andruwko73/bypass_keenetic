@@ -9504,7 +9504,7 @@ def test_web_background_helpers():
         assert web_background.webp_dimensions(store.file_path()) == (1600, 1000)
         assert os.path.getsize(store.file_path()) == len(image)
         assert store.update_settings('0', '91')['enabled'] is False
-        assert store.payload()['shade'] == 80
+        assert store.payload()['shade'] == 91
         previous = Path(store.file_path()).read_bytes()
         try:
             store.upload(BytesIO(image[:-1]), len(image), 'image/webp')

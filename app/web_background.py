@@ -23,7 +23,7 @@ def _as_bool(value):
 
 def _bounded_shade(value, default=DEFAULT_SETTINGS['shade']):
     try:
-        return max(0, min(80, int(value)))
+        return max(0, min(100, int(value)))
     except (TypeError, ValueError):
         return default
 

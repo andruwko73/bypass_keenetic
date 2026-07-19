@@ -1,5 +1,5 @@
-*v1.958 (19 Jul 2026) -* main
+*v1.959 (19 Jul 2026) -* main
 
-*Fixes the boundary calculation for large background images: the browser now always produces dimensions inside the router limit, even after rounding.*
+*Lets the interface-background dimming slider use the full 0–100% range without reducing the value on the router.*
 
-*The cross-browser smoke test covers a 2560×1601 mobile-style input from preview through saving and deletion.*
+*100% makes the background fully dark while preserving the interface controls.*

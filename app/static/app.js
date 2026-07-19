@@ -141,7 +141,7 @@
             if (!Number.isFinite(number)) {
                 return 55;
             }
-            return Math.max(0, Math.min(80, Math.round(number)));
+            return Math.max(0, Math.min(100, Math.round(number)));
         }
 
         function cssBackgroundUrl(url) {

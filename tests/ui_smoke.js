@@ -687,9 +687,12 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     });
     await page.waitForFunction(() => !document.getElementById('background-save-button').disabled);
     await page.locator('#background-shade').evaluate((node) => {
-      node.value = '38';
+      node.value = '100';
       node.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    if (await page.locator('#background-shade-value').textContent() !== '100%') {
+      throw new Error(`${name}: background shade must support 100%`);
+    }
     if (await page.locator('html[data-user-background="enabled"]').count() !== 1) {
       throw new Error(`${name}: pending background preview was removed by shade adjustment`);
     }

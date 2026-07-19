@@ -743,7 +743,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/ui_background/settings":
             try:
-                shade = max(0, min(80, int((params.get("shade") or [55])[0])))
+                shade = max(0, min(100, int((params.get("shade") or [55])[0])))
             except (TypeError, ValueError):
                 shade = 55
             BACKGROUND_STATE.update({"ok": True, "shade": shade, "enabled": bool(BACKGROUND_STATE["available"])})
