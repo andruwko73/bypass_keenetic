@@ -3222,9 +3222,22 @@ def test_direct_update_script_records_update_status():
     assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
     assert 'restore_file script.sh /opt/root/script.sh' in script
     assert 'write_cli_update_status update true 85 Restarting "Restarting services"' in script
-    assert 'write_cli_update_status update false 100 Done "CLI update complete"' in script
-    assert 'write_cli_update_status update false 100 Done "CLI update complete; installer started"' in script
+    assert 'write_cli_update_status update true 88 Starting "Starting application and web interface"' in script
+    assert 'write_cli_update_status update true 90 Finalizing "Web interface is available; finalizing network lists"' in script
+    assert 'update_completion_message="CLI update complete; installer started"' in script
+    assert 'write_cli_update_status update false 100 Done "$update_completion_message"' in script
     assert 'write_cli_update_status update false 100 Error "CLI update failed; runtime recovery attempted"' in script
+    application_start_index = script.index(
+        'write_cli_update_status update true 88 Starting "Starting application and web interface"',
+        files_replace_index,
+    )
+    bot_restart_index = script.index('"$BOT_SERVICE_PATH" restart', application_start_index)
+    web_available_index = script.index(
+        'write_cli_update_status update true 90 Finalizing "Web interface is available; finalizing network lists"',
+        bot_restart_index,
+    )
+    ipset_refresh_index = script.index('run_update_ipset_refresh "Post-update"', web_available_index)
+    assert files_replace_index < application_start_index < bot_restart_index < web_available_index < ipset_refresh_index
     assert 'keep_count="${1:-1}"' in script
     assert 'cleanup_update_artifacts 1' in script
     assert 'cleanup_update_artifacts 3' not in script

@@ -1915,10 +1915,6 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
     start_preferred_core_service || exit 1
     /opt/etc/init.d/S22trojan start > /dev/null 2>&1
-    sleep 2
-    echo "Refreshing ipset after proxy core startup."
-    run_update_ipset_refresh "Post-update"
-    run_youtube_edge_prefetch_once "Post-update"
     /opt/etc/init.d/S99unblock restart > /dev/null 2>&1 || /opt/etc/init.d/S99unblock start > /dev/null 2>&1 || true
 
     bot_old_version=$(grep -m1 "ВЕРСИЯ" "$BOT_CONFIG_PATH" 2>/dev/null | grep -Eo "[0-9][0-9A-Za-z._ -]*" | head -n1)
@@ -1934,24 +1930,20 @@ if [ "$1" = "-update" ]; then
     else
       echo "Версия бота обновлена."
     fi
-    sleep 2
-    echo "Обновление выполнено. Сервисы перезапущены. Сейчас будет перезапущен бот (~15-30 сек)."
-    sleep 7
     clear_runtime_update_env
+    update_completion_message="CLI update complete"
+    write_cli_update_status update true 88 Starting "Starting application and web interface"
     if ! telegram_config_complete; then
-      write_cli_update_status update false 100 Done "CLI update complete; installer started"
-      cli_update_status_active=0
-      trap - EXIT
       start_telegram_installer
-      exit 0
-    fi
-    if [ -x "$BOT_SERVICE_PATH" ]; then
+      update_completion_message="CLI update complete; installer started"
+    elif [ -x "$BOT_SERVICE_PATH" ]; then
       "$BOT_SERVICE_PATH" restart
       sleep 3
       if "$BOT_SERVICE_PATH" status | grep -q "Bot is running"; then
         echo "Бот запущен. Нажмите сюда: /start"
       else
-        echo "⚠️ Не удалось подтвердить перезапуск бота через сервис $BOT_SERVICE_PATH"
+        echo "Error: failed to confirm bot restart through $BOT_SERVICE_PATH"
+        exit 1
       fi
     else
       bot_pid=$(pgrep -f "python3 $BOT_MAIN_PATH")
@@ -1963,14 +1955,20 @@ if [ "$1" = "-update" ]; then
       if [ -n "${check_running}" ]; then
         echo "Бот запущен. Нажмите сюда: /start"
       else
-        echo "⚠️ Не удалось подтвердить перезапуск бота"
+        echo "Error: failed to confirm bot restart"
+        exit 1
       fi
     fi
 
-    run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
-    write_cli_update_status update false 100 Done "CLI update complete"
-    cli_update_status_active=0
     update_runtime_quiesced=0
+    write_cli_update_status update true 90 Finalizing "Web interface is available; finalizing network lists"
+    echo "Веб-интерфейс запущен. Завершаем обновление сетевых списков."
+    echo "Refreshing ipset after proxy core startup."
+    run_update_ipset_refresh "Post-update"
+    run_youtube_edge_prefetch_once "Post-update"
+    run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
+    write_cli_update_status update false 100 Done "$update_completion_message"
+    cli_update_status_active=0
     trap - EXIT
     exit 0
 fi

@@ -1,5 +1,5 @@
-*v1.963 (19 Jul 2026) -* main
+*v1.964 (19 Jul 2026) -* main
 
-*Makes Xray configuration writes atomic and rebuilds the core proxy configuration from saved keys before an update validates and restarts Xray.*
+*Restarts the bot and web interface immediately after program files and services are ready, before the longer post-update network-list refresh.*
 
-*If an update fails after stopping the application, it automatically restores or restarts the previous runtime instead of leaving the bot and web interface offline.*
+*The web interface can reconnect and display the final update progress instead of remaining unavailable for several minutes.*
