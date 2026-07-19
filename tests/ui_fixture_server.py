@@ -23,6 +23,7 @@ BACKGROUND_STATE = {
     "available": False,
     "enabled": False,
     "shade": 55,
+    "panel_transparency": 0,
     "url": "",
     "size": 0,
     "width": 0,
@@ -746,7 +747,16 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 shade = max(0, min(100, int((params.get("shade") or [55])[0])))
             except (TypeError, ValueError):
                 shade = 55
-            BACKGROUND_STATE.update({"ok": True, "shade": shade, "enabled": bool(BACKGROUND_STATE["available"])})
+            try:
+                panel_transparency = max(0, min(100, int((params.get("panel_transparency") or [0])[0])))
+            except (TypeError, ValueError):
+                panel_transparency = 0
+            BACKGROUND_STATE.update({
+                "ok": True,
+                "shade": shade,
+                "panel_transparency": panel_transparency,
+                "enabled": bool(BACKGROUND_STATE["available"]),
+            })
             self._json(dict(BACKGROUND_STATE))
             return
         if path == "/api/ui_background/delete":

@@ -453,7 +453,8 @@ def render_web_form(
                                     <button type="button" class="mode-choice" id="background-select-button">Выбрать</button>
                                     <button type="button" class="mode-choice" id="background-save-button" disabled>Сохранить</button>
                                 </div>
-                                <label class="background-setting background-shade-setting"><span>Затемнение <output id="background-shade-value">55%</output></span><input type="range" id="background-shade" min="0" max="100" step="1" value="55"></label>
+                                <label class="background-setting background-shade-setting"><span>Затемнение фона <output id="background-shade-value">55%</output></span><input type="range" id="background-shade" min="0" max="100" step="1" value="55"></label>
+                                <label class="background-setting background-shade-setting"><span>Прозрачность блоков и кнопок <output id="background-panel-transparency-value">0%</output></span><input type="range" id="background-panel-transparency" min="0" max="100" step="1" value="0"></label>
                                 <button type="button" class="secondary-button background-delete-button" id="background-delete-button" disabled>Удалить фон</button>
                                 <p id="background-note" class="background-note">Можно выбрать фото до 20 МБ: браузер сожмёт его до WebP не больше 1 МБ.</p>
                             </div>

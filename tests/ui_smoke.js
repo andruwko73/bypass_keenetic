@@ -671,6 +671,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (await page.locator('#background-enabled').count() !== 0) {
     throw new Error(`${name}: background UI must not expose a separate enable checkbox`);
   }
+  if (await page.locator('#background-panel-transparency[type="range"]').count() !== 1) {
+    throw new Error(`${name}: background panel transparency range is missing`);
+  }
   if (!isMobile && modeConfig.mode === 'advanced') {
     await page.locator('#background-file-input').evaluate(async (input) => {
       const canvas = document.createElement('canvas');
@@ -692,6 +695,19 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     });
     if (await page.locator('#background-shade-value').textContent() !== '100%') {
       throw new Error(`${name}: background shade must support 100%`);
+    }
+    if (await page.locator('#background-shade').evaluate((node) => node.style.getPropertyValue('--range-progress')) !== '100%') {
+      throw new Error(`${name}: background shade range must visually fill to 100%`);
+    }
+    await page.locator('#background-panel-transparency').evaluate((node) => {
+      node.value = '64';
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    if (await page.locator('#background-panel-transparency-value').textContent() !== '64%') {
+      throw new Error(`${name}: background panel transparency must be adjustable`);
+    }
+    if (await page.locator('html').evaluate((node) => node.style.getPropertyValue('--user-background-panel-alpha')) !== '0.576') {
+      throw new Error(`${name}: background panel transparency preview was not applied`);
     }
     if (await page.locator('html[data-user-background="enabled"]').count() !== 1) {
       throw new Error(`${name}: pending background preview was removed by shade adjustment`);

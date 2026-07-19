@@ -9608,8 +9608,9 @@ def test_web_background_helpers():
         assert payload['height'] == 1000
         assert web_background.webp_dimensions(store.file_path()) == (1600, 1000)
         assert os.path.getsize(store.file_path()) == len(image)
-        assert store.update_settings('0', '91')['enabled'] is False
+        assert store.update_settings('0', '91', '64')['enabled'] is False
         assert store.payload()['shade'] == 91
+        assert store.payload()['panel_transparency'] == 64
         previous = Path(store.file_path()).read_bytes()
         try:
             store.upload(BytesIO(image[:-1]), len(image), 'image/webp')
@@ -9668,6 +9669,14 @@ def test_web_background_helpers():
         update_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
         assert 'web_background.py WebBackgroundStore' in update_source
         assert '/opt/etc/unblock/web-ui/background.webp' in update_source
+        template_source = source_path('web_form_template.py').read_text(encoding='utf-8')
+        script_source = source_path('static/app.js').read_text(encoding='utf-8')
+        style_source = source_path('static/app.css').read_text(encoding='utf-8')
+        assert 'Затемнение фона' in template_source
+        assert 'Прозрачность блоков и кнопок' in template_source
+        assert 'background-panel-transparency' in template_source
+        assert 'panel_transparency' in script_source
+        assert '--range-progress' in style_source
         assert store.delete()['available'] is False
         assert web_get_actions.dispatch(context, '/ui/background.webp') is None
 

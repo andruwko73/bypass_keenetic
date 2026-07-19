@@ -122,6 +122,8 @@
                 saveButton: document.getElementById('background-save-button'),
                 shade: document.getElementById('background-shade'),
                 shadeValue: document.getElementById('background-shade-value'),
+                panelTransparency: document.getElementById('background-panel-transparency'),
+                panelTransparencyValue: document.getElementById('background-panel-transparency-value'),
                 deleteButton: document.getElementById('background-delete-button'),
                 note: document.getElementById('background-note')
             };
@@ -142,6 +144,20 @@
                 return 55;
             }
             return Math.max(0, Math.min(100, Math.round(number)));
+        }
+
+        function clampBackgroundPanelTransparency(value) {
+            const number = Number(value);
+            if (!Number.isFinite(number)) {
+                return 0;
+            }
+            return Math.max(0, Math.min(100, Math.round(number)));
+        }
+
+        function setBackgroundRangeProgress(control, value) {
+            if (control) {
+                control.style.setProperty('--range-progress', String(value) + '%');
+            }
         }
 
         function cssBackgroundUrl(url) {
@@ -168,11 +184,14 @@
         function applyBackground(payload, previewUrl) {
             const normalized = payload || {};
             const shade = clampBackgroundShade(normalized.shade);
+            const panelTransparency = clampBackgroundPanelTransparency(normalized.panel_transparency);
             const activeUrl = previewUrl || normalized.url || '';
             const hasPendingPreview = !!pendingBackgroundBlob && !!pendingBackgroundUrl;
             const enabled = (hasPendingPreview || (!!normalized.available && !!normalized.enabled)) && !!activeUrl;
             const root = document.documentElement;
             root.style.setProperty('--user-background-shade', String(shade / 100));
+            root.style.setProperty('--user-background-panel-alpha', (0.96 - panelTransparency * 0.006).toFixed(3));
+            root.style.setProperty('--user-background-button-alpha', (0.28 - panelTransparency * 0.002).toFixed(3));
             if (enabled) {
                 root.style.setProperty('--user-background-image', cssBackgroundUrl(activeUrl));
                 root.setAttribute('data-user-background', 'enabled');
@@ -188,12 +207,24 @@
             const payload = backgroundPayload || {};
             const available = !!payload.available;
             const shade = clampBackgroundShade(controls.shade ? controls.shade.value : payload.shade);
+            const panelTransparency = clampBackgroundPanelTransparency(
+                controls.panelTransparency ? controls.panelTransparency.value : payload.panel_transparency
+            );
             if (controls.shade) {
                 controls.shade.value = String(shade);
                 controls.shade.disabled = !available && !pendingBackgroundBlob;
+                setBackgroundRangeProgress(controls.shade, shade);
             }
             if (controls.shadeValue) {
                 controls.shadeValue.textContent = String(shade) + '%';
+            }
+            if (controls.panelTransparency) {
+                controls.panelTransparency.value = String(panelTransparency);
+                controls.panelTransparency.disabled = !available && !pendingBackgroundBlob;
+                setBackgroundRangeProgress(controls.panelTransparency, panelTransparency);
+            }
+            if (controls.panelTransparencyValue) {
+                controls.panelTransparencyValue.textContent = String(panelTransparency) + '%';
             }
             if (controls.saveButton) {
                 controls.saveButton.disabled = !pendingBackgroundBlob && !(available && backgroundSettingsDirty);
@@ -225,7 +256,7 @@
                     return payload;
                 })
                 .catch(function() {
-                    backgroundPayload = {available: false, enabled: false, shade: 55};
+                    backgroundPayload = {available: false, enabled: false, shade: 55, panel_transparency: 0};
                     backgroundSettingsDirty = false;
                     applyBackground(backgroundPayload);
                     updateBackgroundControls();
@@ -318,6 +349,9 @@
             const body = new URLSearchParams({
                 enabled: '1',
                 shade: String(clampBackgroundShade(controls.shade.value)),
+                panel_transparency: String(clampBackgroundPanelTransparency(
+                    controls.panelTransparency ? controls.panelTransparency.value : backgroundPayload.panel_transparency
+                )),
                 csrf_token: CSRF_TOKEN
             });
             return requestBackground('/api/ui_background/settings', {
@@ -358,7 +392,10 @@
                     const previewPayload = Object.assign({}, backgroundPayload || {}, {
                         available: true,
                         enabled: true,
-                        shade: clampBackgroundShade(controls.shade ? controls.shade.value : 55)
+                        shade: clampBackgroundShade(controls.shade ? controls.shade.value : 55),
+                        panel_transparency: clampBackgroundPanelTransparency(
+                            controls.panelTransparency ? controls.panelTransparency.value : 0
+                        )
                     });
                     applyBackground(previewPayload, pendingBackgroundUrl);
                     backgroundSettingsDirty = true;
@@ -407,20 +444,25 @@
                     setBackgroundNote(error.message || 'Не удалось сохранить фон.', true);
                 });
             });
+            function previewBackgroundSettings() {
+                const shade = clampBackgroundShade(controls.shade ? controls.shade.value : 55);
+                const panelTransparency = clampBackgroundPanelTransparency(
+                    controls.panelTransparency ? controls.panelTransparency.value : 0
+                );
+                backgroundSettingsDirty = true;
+                applyBackground(Object.assign({}, backgroundPayload || {}, {
+                    available: !!pendingBackgroundBlob || !!(backgroundPayload && backgroundPayload.available),
+                    enabled: true,
+                    shade: shade,
+                    panel_transparency: panelTransparency
+                }), pendingBackgroundUrl);
+                updateBackgroundControls();
+            }
             if (controls.shade) {
-                controls.shade.addEventListener('input', function() {
-                    const shade = clampBackgroundShade(controls.shade.value);
-                    if (controls.shadeValue) {
-                        controls.shadeValue.textContent = String(shade) + '%';
-                    }
-                    backgroundSettingsDirty = true;
-                    applyBackground(Object.assign({}, backgroundPayload || {}, {
-                        available: !!pendingBackgroundBlob || !!(backgroundPayload && backgroundPayload.available),
-                        enabled: true,
-                        shade: shade
-                    }), pendingBackgroundUrl);
-                    updateBackgroundControls();
-                });
+                controls.shade.addEventListener('input', previewBackgroundSettings);
+            }
+            if (controls.panelTransparency) {
+                controls.panelTransparency.addEventListener('input', previewBackgroundSettings);
             }
             if (controls.deleteButton) {
                 controls.deleteButton.addEventListener('click', function() {

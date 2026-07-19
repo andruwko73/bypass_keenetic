@@ -12415,6 +12415,7 @@ def _handle_web_background_post(handler, path):
         payload = store.update_settings(
             _web_background_form_value(data, 'enabled'),
             _web_background_form_value(data, 'shade'),
+            _web_background_form_value(data, 'panel_transparency'),
         )
         handler._send_json(payload, status=200)
     except OSError:

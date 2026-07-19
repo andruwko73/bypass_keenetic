@@ -14,6 +14,7 @@ SETTINGS_FILENAME = 'background.json'
 DEFAULT_SETTINGS = {
     'enabled': False,
     'shade': 55,
+    'panel_transparency': 0,
 }
 
 
@@ -22,6 +23,13 @@ def _as_bool(value):
 
 
 def _bounded_shade(value, default=DEFAULT_SETTINGS['shade']):
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _bounded_panel_transparency(value, default=DEFAULT_SETTINGS['panel_transparency']):
     try:
         return max(0, min(100, int(value)))
     except (TypeError, ValueError):
@@ -119,6 +127,7 @@ class WebBackgroundStore:
         return {
             'enabled': bool(saved.get('enabled')),
             'shade': _bounded_shade(saved.get('shade')),
+            'panel_transparency': _bounded_panel_transparency(saved.get('panel_transparency')),
             'width': _bounded_dimension(saved.get('width')),
             'height': _bounded_dimension(saved.get('height')),
         }
@@ -127,6 +136,7 @@ class WebBackgroundStore:
         _write_json_atomic(self.settings_path, {
             'enabled': bool(settings.get('enabled')),
             'shade': _bounded_shade(settings.get('shade')),
+            'panel_transparency': _bounded_panel_transparency(settings.get('panel_transparency')),
             'width': _bounded_dimension(settings.get('width')),
             'height': _bounded_dimension(settings.get('height')),
         })
@@ -149,6 +159,7 @@ class WebBackgroundStore:
                 'available': False,
                 'enabled': False,
                 'shade': settings['shade'],
+                'panel_transparency': settings['panel_transparency'],
                 'url': '',
                 'size': 0,
                 'width': 0,
@@ -160,16 +171,18 @@ class WebBackgroundStore:
             'available': True,
             'enabled': bool(settings['enabled']),
             'shade': settings['shade'],
+            'panel_transparency': settings['panel_transparency'],
             'url': '/ui/background.webp?v=' + version,
             'size': int(stat.st_size),
             'width': settings['width'],
             'height': settings['height'],
         }
 
-    def update_settings(self, enabled, shade):
+    def update_settings(self, enabled, shade, panel_transparency=DEFAULT_SETTINGS['panel_transparency']):
         settings = self._settings()
         settings['enabled'] = _as_bool(enabled) and self._background_stat() is not None
         settings['shade'] = _bounded_shade(shade)
+        settings['panel_transparency'] = _bounded_panel_transparency(panel_transparency)
         self._save_settings(settings)
         return self.payload()
 

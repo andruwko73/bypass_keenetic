@@ -1680,3 +1680,72 @@
             [data-theme="glass"] .mobile-nav{background:rgba(13,27,36,.82);}
             [data-theme="glass"] .hero-popover.hidden{display:none;}
         }
+        .background-shade-setting input[type="range"]{
+            width:100%;
+            min-height:28px;
+            height:28px;
+            margin:0;
+            padding:0;
+            border:0;
+            border-radius:999px;
+            appearance:none;
+            -webkit-appearance:none;
+            accent-color:#30bfb5;
+            background:linear-gradient(to right,#30bfb5 0,#30bfb5 var(--range-progress,0%),rgba(125,145,165,.46) var(--range-progress,0%),rgba(125,145,165,.46) 100%);
+            cursor:pointer;
+        }
+        .background-shade-setting input[type="range"]::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:transparent;}
+        .background-shade-setting input[type="range"]::-webkit-slider-thumb{
+            width:28px;
+            height:28px;
+            margin-top:-10px;
+            border:1px solid rgba(78,216,205,.76);
+            border-radius:50%;
+            appearance:none;
+            -webkit-appearance:none;
+            background:#30bfb5;
+            box-shadow:0 2px 9px rgba(0,0,0,.34);
+        }
+        .background-shade-setting input[type="range"]::-moz-range-track{height:8px;border:0;border-radius:999px;background:rgba(125,145,165,.46);}
+        .background-shade-setting input[type="range"]::-moz-range-progress{height:8px;border-radius:999px;background:#30bfb5;}
+        .background-shade-setting input[type="range"]::-moz-range-thumb{width:26px;height:26px;border:1px solid rgba(78,216,205,.76);border-radius:50%;background:#30bfb5;box-shadow:0 2px 9px rgba(0,0,0,.34);}
+        html[data-user-background="enabled"] .topbar,
+        html[data-user-background="enabled"] .side-nav,
+        html[data-user-background="enabled"] .view-head,
+        html[data-user-background="enabled"] .panel,
+        html[data-user-background="enabled"] .protocol-workspace,
+        html[data-user-background="enabled"] .list-workspace,
+        html[data-user-background="enabled"] .service-panel,
+        html[data-user-background="enabled"] .overview-key-panel,
+        html[data-user-background="enabled"] .status-card,
+        html[data-user-background="enabled"] .hero-popover,
+        html[data-user-background="enabled"] .confirm-card,
+        html[data-user-background="enabled"] .event-history-drawer,
+        html[data-user-background="enabled"] .mobile-nav{
+            background:rgba(17,25,35,var(--user-background-panel-alpha,.96));
+            backdrop-filter:blur(14px) saturate(118%);
+        }
+        html[data-user-background="enabled"] button,
+        html[data-user-background="enabled"] .mode-choice,
+        html[data-user-background="enabled"] .theme-toggle,
+        html[data-user-background="enabled"] .mode-toggle,
+        html[data-user-background="enabled"] .nav-item{
+            background:rgba(34,67,73,var(--user-background-button-alpha,.28));
+        }
+        html[data-user-background="enabled"] button.danger{background:rgba(94,36,42,var(--user-background-button-alpha,.34));}
+        html[data-user-background="enabled"] input:not([type="range"]),
+        html[data-user-background="enabled"] textarea,
+        html[data-user-background="enabled"] select{background:rgba(17,25,35,var(--user-background-panel-alpha,.76));}
+        html[data-user-background="enabled"][data-theme="light"] .topbar,
+        html[data-user-background="enabled"][data-theme="light"] .side-nav,
+        html[data-user-background="enabled"][data-theme="light"] .view-head,
+        html[data-user-background="enabled"][data-theme="light"] .panel,
+        html[data-user-background="enabled"][data-theme="light"] .protocol-workspace,
+        html[data-user-background="enabled"][data-theme="light"] .list-workspace,
+        html[data-user-background="enabled"][data-theme="light"] .service-panel,
+        html[data-user-background="enabled"][data-theme="light"] .overview-key-panel,
+        html[data-user-background="enabled"][data-theme="light"] .status-card,
+        html[data-user-background="enabled"][data-theme="light"] .hero-popover,
+        html[data-user-background="enabled"][data-theme="light"] .confirm-card,
+        html[data-user-background="enabled"][data-theme="light"] .event-history-drawer,
+        html[data-user-background="enabled"][data-theme="light"] .mobile-nav{background:rgba(231,235,240,var(--user-background-panel-alpha,.94));}

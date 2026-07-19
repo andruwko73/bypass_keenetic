@@ -1,5 +1,5 @@
-*v1.960 (19 Jul 2026) -* main
+*v1.961 (19 Jul 2026) -* main
 
-*Runs a full pool-key verification once a day in the local 03:00–06:00 window, after a recent successful subscription refresh.*
+*Makes the background dimmer fill the whole slider at 100% and adds a persistent transparency control for interface cards and buttons.*
 
-*The task is deferred when an update, another memory-sensitive operation, or a pool probe is already running; it uses the existing external worker and memory/CPU guards.*
+*The controls preview changes immediately and are saved together with the selected background on the router.*
