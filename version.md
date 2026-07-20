@@ -1,5 +1,5 @@
-*v1.971 (20 Jul 2026) -* main
+*v1.972 (20 Jul 2026) -* main
 
-*Restores guarded automatic YouTube edge prefetch every two hours without moving the work into the long-running bot process.*
+*Applies the guarded automatic YouTube edge prefetch settings before the updated bot starts.*
 
-*Forces a fresh post-update warmup when the restored cache is too small or older than six hours, while retaining CPU, load, memory, and maintenance guards.*
+*Migrates an existing disabled interval to two hours and installs the cache freshness thresholds even when the previous release performs the update.*

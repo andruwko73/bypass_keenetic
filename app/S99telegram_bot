@@ -109,6 +109,24 @@ has_config() {
     grep -q "^usernames[[:space:]]*=" "$config_path" || return 1
 }
 
+migrate_youtube_edge_prefetch_config() {
+    config_path=""
+    [ -f "$BOT_CONFIG_PATH" ] && config_path="$BOT_CONFIG_PATH"
+    [ -z "$config_path" ] && [ -f "$LEGACY_CONFIG_PATH" ] && config_path="$LEGACY_CONFIG_PATH"
+    [ -n "$config_path" ] || return 0
+
+    if grep -Eq '^youtube_edge_prefetch_interval_seconds[[:space:]]*=[[:space:]]*0([[:space:]#]|$)' "$config_path"; then
+        sed -i 's/^youtube_edge_prefetch_interval_seconds[[:space:]]*=.*/youtube_edge_prefetch_interval_seconds = 7200/' "$config_path" || true
+    elif ! grep -Eq '^youtube_edge_prefetch_interval_seconds[[:space:]]*=' "$config_path"; then
+        printf '\nyoutube_edge_prefetch_interval_seconds = 7200\n' >> "$config_path"
+    fi
+
+    grep -Eq '^youtube_edge_prefetch_cache_restore_min_candidates[[:space:]]*=' "$config_path" || \
+        printf '\nyoutube_edge_prefetch_cache_restore_min_candidates = 8\n' >> "$config_path"
+    grep -Eq '^youtube_edge_prefetch_cache_restore_max_age_seconds[[:space:]]*=' "$config_path" || \
+        printf 'youtube_edge_prefetch_cache_restore_max_age_seconds = 21600\n' >> "$config_path"
+}
+
 stop_main_process() {
     cleanup_pool_probe_runtime
     pids=$(check_process)
@@ -159,6 +177,8 @@ case "$1" in
             start_installer_instead
             exit $?
         fi
+
+        migrate_youtube_edge_prefetch_config
 
         if has_running_process; then
             echo "Bot is already running"

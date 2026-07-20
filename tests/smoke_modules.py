@@ -3899,6 +3899,13 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT"' in service
     assert 'cleanup_python_bytecode' in service
     assert 'trim_runtime_logs' in service
+    assert 'migrate_youtube_edge_prefetch_config()' in service
+    prefetch_migration = service.split('migrate_youtube_edge_prefetch_config() {', 1)[1].split('\n}', 1)[0]
+    assert 'youtube_edge_prefetch_interval_seconds = 7200' in prefetch_migration
+    assert 'youtube_edge_prefetch_cache_restore_min_candidates = 8' in prefetch_migration
+    assert 'youtube_edge_prefetch_cache_restore_max_age_seconds = 21600' in prefetch_migration
+    start_block = service.split('    start)', 1)[1].split('    stop)', 1)[0]
+    assert start_block.index('migrate_youtube_edge_prefetch_config') < start_block.index('python3 "$MAIN_SCRIPT"')
     assert 'unset BYPASS_KEENETIC_COMMAND_WORKER' in service
     assert 'SERVICE_LOCK_DIR="/tmp/bypass_telegram_bot_service.lock"' in service
     assert 'def release_service_lock' not in service

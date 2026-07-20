@@ -1,3 +1,9 @@
+<a name="1.972"></a>
+# [1.972] - 20 Jul 2026
+
+- Moved the YouTube prefetch configuration migration into the newly installed bot service startup path.
+- Existing routers now receive the two-hour guarded interval and cache freshness thresholds during the same update, before the bot imports its configuration.
+
 <a name="1.971"></a>
 # [1.971] - 20 Jul 2026
 
