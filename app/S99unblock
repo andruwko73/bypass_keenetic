@@ -28,7 +28,7 @@ UNBLOCK_IPSET_LOCK_DIR="${UNBLOCK_IPSET_LOCK_DIR:-/tmp/bypass-unblock-ipset.lock
 UNBLOCK_IPSET_LOCK_STALE_SECONDS="${UNBLOCK_IPSET_LOCK_STALE_SECONDS:-600}"
 YOUTUBE_EDGE_PREFETCH_RUNNER="${YOUTUBE_EDGE_PREFETCH_RUNNER:-/opt/etc/bot/youtube_edge_prefetch_runner.py}"
 YOUTUBE_EDGE_PREFETCH_STATUS_FILE="${YOUTUBE_EDGE_PREFETCH_STATUS_FILE:-/opt/etc/bot/youtube_edge_prefetch_status.json}"
-YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-0}"
+YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-7200}"
 YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"
 YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS="${YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS:-120}"
 YOUTUBE_EDGE_PREFETCH_LOG="${YOUTUBE_EDGE_PREFETCH_LOG:-/opt/var/log/bypass-youtube-edge-prefetch.log}"
@@ -156,9 +156,11 @@ youtube_edge_prefetch_due() {
     esac
     interval="$base_interval"
     skipped_reason="$(youtube_edge_prefetch_skipped_reason)"
-    if [ "$skipped_reason" = "low_available_memory" ]; then
-        interval="$YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS"
-    fi
+    case "$skipped_reason" in
+        low_available_memory|high_cpu|high_load|unblock_running|pool_probe_running|already_running)
+            interval="$YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS"
+            ;;
+    esac
     case "$interval" in
         ''|*[!0-9]*|0) interval="$base_interval" ;;
     esac

@@ -673,6 +673,8 @@ def restore_cached_ipsets(
         'mode': 'cache_restore',
         'candidates': 0,
         'cache_entries': 0,
+        'cache_newest_seen_at': 0,
+        'cache_newest_age_seconds': 0,
         'added_addresses': 0,
         'added_sets': 0,
         'deleted_sets': 0,
@@ -706,6 +708,10 @@ def restore_cached_ipsets(
     )
     status['cache_entries'] = int(restore_stats.get('cache_entries') or 0)
     status['candidates'] = len(candidates)
+    newest_seen_at = max((int(candidate.get('last_seen') or 0) for candidate in candidates), default=0)
+    status['cache_newest_seen_at'] = newest_seen_at
+    if newest_seen_at > 0:
+        status['cache_newest_age_seconds'] = int(max(0, now - newest_seen_at))
     status['shared_candidates_skipped'] = int(restore_stats.get('skipped_shared') or 0)
     status['cache_restore_skipped_no_quality'] = int(restore_stats.get('skipped_no_quality') or 0)
     status['cache_restore_skipped_recent_bad_quality'] = int(

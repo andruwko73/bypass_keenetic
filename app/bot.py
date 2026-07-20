@@ -965,7 +965,7 @@ YOUTUBE_EDGE_PREFETCH_START_DELAY_SECONDS = max(
 )
 YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS = max(
     0,
-    int(getattr(config, 'youtube_edge_prefetch_interval_seconds', 0)),
+    int(getattr(config, 'youtube_edge_prefetch_interval_seconds', 7200)),
 )
 YOUTUBE_EDGE_PREFETCH_CACHE_PATH = str(
     getattr(config, 'youtube_edge_prefetch_cache_path', '/opt/etc/bot/youtube_edge_cache.json') or ''

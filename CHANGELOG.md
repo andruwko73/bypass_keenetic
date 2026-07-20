@@ -1,3 +1,10 @@
+<a name="1.971"></a>
+# [1.971] - 20 Jul 2026
+
+- Restored guarded external YouTube edge prefetch every two hours after release 1.932 disabled periodic runs.
+- Scheduled refreshes now execute the full prefetch path and retry quickly when CPU, load, memory, or another maintenance task is busy.
+- Post-update refresh no longer accepts a cache with fewer than eight usable candidates or data older than six hours.
+
 <a name="1.970"></a>
 # [1.970] - 19 Jul 2026
 

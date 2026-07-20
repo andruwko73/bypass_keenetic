@@ -61,6 +61,12 @@ FAST_PREFETCH_TRIGGERS = (
     'route-change',
     'manual-fast',
 )
+CACHE_FRESHNESS_TRIGGERS = (
+    'post-install',
+    'post-update',
+    'first-run',
+    'startup',
+)
 CACHE_RESTORE_TRIGGERS = FAST_PREFETCH_TRIGGERS + (
     'manual-restore',
 )
@@ -403,8 +409,20 @@ def _self_test_required_for_trigger(trigger):
     return any(text.startswith(prefix) for prefix in FAST_PREFETCH_TRIGGERS)
 
 
+def _cache_freshness_required_for_trigger(trigger):
+    text = str(trigger or '').strip().lower()
+    return any(text.startswith(prefix) for prefix in CACHE_FRESHNESS_TRIGGERS)
+
+
 def _manual_prefetch_requested(trigger):
-    return str(trigger or '').strip().lower() in ('manual', 'manual-prefetch', 'manual-restore')
+    return str(trigger or '').strip().lower() in (
+        'manual',
+        'manual-prefetch',
+        'manual-restore',
+        'manual-refresh',
+        'scheduler',
+        'ipset-refresh',
+    )
 
 
 def youtube_route_self_test(route_protocol):
@@ -842,7 +860,24 @@ def _cache_restore_satisfies_prefetch(trigger, status):
         return False
     if int((status or {}).get('failed_sets') or 0) > 0:
         return False
-    return int((status or {}).get('candidates') or 0) > 0
+    min_candidates = _config_int(
+        'youtube_edge_prefetch_cache_restore_min_candidates',
+        8,
+        minimum=1,
+    )
+    if int((status or {}).get('candidates') or 0) < min_candidates:
+        return False
+    max_age_seconds = _config_int(
+        'youtube_edge_prefetch_cache_restore_max_age_seconds',
+        6 * 3600,
+        minimum=0,
+    )
+    if max_age_seconds > 0:
+        raw_age_seconds = (status or {}).get('cache_newest_age_seconds')
+        newest_age_seconds = max_age_seconds + 1 if raw_age_seconds is None else int(raw_age_seconds)
+        if newest_age_seconds > max_age_seconds:
+            return False
+    return True
 
 
 def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock_dir=None):
@@ -928,7 +963,7 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
             return status
         if _self_test_required_for_trigger(trigger):
             self_test = youtube_route_self_test(route_protocol)
-            if self_test.get('ok'):
+            if self_test.get('ok') and not _cache_freshness_required_for_trigger(trigger):
                 status = {
                     'ok': True,
                     'route_protocol': route_protocol,
@@ -994,6 +1029,8 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                     cache_restore_status['cache_restored_addresses'] = int(
                         cache_restore_status.get('added_addresses') or 0
                     )
+                if self_test is not None:
+                    cache_restore_status['self_test'] = self_test
                 status = _normalize_status(
                     cache_restore_status,
                     trigger=trigger,
@@ -1134,6 +1171,8 @@ def run_prefetch(trigger='manual', *, status_path=None, cache_path=None, unblock
                 'skipped_reason': str(cache_restore_status.get('skipped_reason') or ''),
                 'candidates': int(cache_restore_status.get('candidates') or 0),
                 'cache_entries': int(cache_restore_status.get('cache_entries') or 0),
+                'cache_newest_seen_at': int(cache_restore_status.get('cache_newest_seen_at') or 0),
+                'cache_newest_age_seconds': int(cache_restore_status.get('cache_newest_age_seconds') or 0),
                 'added_addresses': int(cache_restore_status.get('added_addresses') or 0),
                 'added_sets': int(cache_restore_status.get('added_sets') or 0),
                 'deleted_sets': int(cache_restore_status.get('deleted_sets') or 0),

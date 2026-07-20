@@ -1,5 +1,5 @@
-*v1.970 (19 Jul 2026) -* main
+*v1.971 (20 Jul 2026) -* main
 
-*Keeps the new Telegram rollback command and stabilizes service-route popovers on compact desktop screens.*
+*Restores guarded automatic YouTube edge prefetch every two hours without moving the work into the long-running bot process.*
 
-*Positions route menus before rendering so short viewports no longer show a clipped popover.*
+*Forces a fresh post-update warmup when the restored cache is too small or older than six hours, while retaining CPU, load, memory, and maintenance guards.*

@@ -836,7 +836,7 @@ telegram_udp_policy = 'auto'
 youtube_edge_prefetch_enabled = True
 youtube_edge_prefetch_mode = 'external'
 youtube_edge_prefetch_start_delay_seconds = 120
-youtube_edge_prefetch_interval_seconds = 0
+youtube_edge_prefetch_interval_seconds = 7200
 youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'
 youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'
 youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'
@@ -853,6 +853,8 @@ youtube_edge_prefetch_protect_shared_google = True
 youtube_edge_prefetch_cache_restore_enabled = True
 youtube_edge_prefetch_cache_restore_max_addresses = 16
 youtube_edge_prefetch_cache_restore_require_quality_ok = True
+youtube_edge_prefetch_cache_restore_min_candidates = 8
+youtube_edge_prefetch_cache_restore_max_age_seconds = 21600
 youtube_edge_prefetch_fast_warm_enabled = True
 youtube_edge_prefetch_fast_hosts = (
     'www.youtube.com',

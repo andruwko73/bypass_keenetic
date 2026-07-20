@@ -2857,7 +2857,7 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_enabled = True',
         "youtube_edge_prefetch_mode = 'external'",
         'youtube_edge_prefetch_start_delay_seconds = 120',
-        'youtube_edge_prefetch_interval_seconds = 0',
+        'youtube_edge_prefetch_interval_seconds = 7200',
         "youtube_edge_prefetch_cache_path = '/opt/etc/bot/youtube_edge_cache.json'",
         "youtube_edge_prefetch_status_path = '/opt/etc/bot/youtube_edge_prefetch_status.json'",
         "youtube_edge_prefetch_lock_dir = '/tmp/bypass-youtube-edge-prefetch.lock'",
@@ -2874,6 +2874,8 @@ def test_codex_version_matches_commit_count():
         'youtube_edge_prefetch_cache_restore_enabled = True',
         'youtube_edge_prefetch_cache_restore_max_addresses = 16',
         'youtube_edge_prefetch_cache_restore_require_quality_ok = True',
+        'youtube_edge_prefetch_cache_restore_min_candidates = 8',
+        'youtube_edge_prefetch_cache_restore_max_age_seconds = 21600',
         'youtube_edge_prefetch_fast_warm_enabled = True',
         'youtube_edge_prefetch_fast_hosts = (',
         'youtube_edge_prefetch_fast_max_hosts_per_run = 4',
@@ -3384,13 +3386,13 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'priority_refresh_due()' in s99unblock
     assert 'dedupe_vless_priority_overlaps()' in s99unblock
     assert 'remove_runtime_overlap_from_set "unblockvlesspriority" "unblockvless2udp"' in s99unblock
-    assert 'YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-0}"' in s99unblock
+    assert 'YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS:-7200}"' in s99unblock
     assert 'YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"' in s99unblock
     assert 'APP_RUNTIME_MODE_FILE="${APP_RUNTIME_MODE_FILE:-/opt/etc/bot_app_mode}"' in s99unblock
     assert 'dedupe_lock_pid_is_active()' in s99unblock
     assert 'dedupe_lock_age_seconds()' in s99unblock
     assert 'youtube_edge_prefetch_skipped_reason()' in s99unblock
-    assert '[ "$skipped_reason" = "low_available_memory" ]' in s99unblock
+    assert 'low_available_memory|high_cpu|high_load|unblock_running|pool_probe_running|already_running)' in s99unblock
     assert 'refresh_skip_allowed()' in s99unblock
     assert 'refresh_effective_updated_at()' in s99unblock
     assert 'mark_refresh_state()' in s99unblock
@@ -5617,6 +5619,8 @@ def test_youtube_edge_prefetch_restores_only_quality_approved_cache():
     assert status['shared_candidates_skipped'] == 1
     assert status['cache_restore_skipped_recent_bad_quality'] == 1
     assert status['cache_restore_skipped_no_quality'] == 1
+    assert status['cache_newest_seen_at'] == now - 10
+    assert status['cache_newest_age_seconds'] == 10
 
 
 def test_youtube_edge_prefetch_removes_opposite_priority_for_existing_target():
@@ -5828,6 +5832,109 @@ def test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers():
         youtube_edge_prefetch_runner.config = original_config
 
 
+def test_youtube_edge_prefetch_runner_requests_guarded_scheduled_runs():
+    assert youtube_edge_prefetch_runner._manual_prefetch_requested('scheduler')
+    assert youtube_edge_prefetch_runner._manual_prefetch_requested('ipset-refresh')
+    assert youtube_edge_prefetch_runner._manual_prefetch_requested('manual-refresh')
+    assert youtube_edge_prefetch_runner._manual_prefetch_requested('manual-prefetch')
+    assert not youtube_edge_prefetch_runner._manual_prefetch_requested('status')
+    assert youtube_edge_prefetch_runner._cache_freshness_required_for_trigger('Post-update')
+    assert youtube_edge_prefetch_runner._cache_freshness_required_for_trigger('Post-update-late')
+    assert not youtube_edge_prefetch_runner._cache_freshness_required_for_trigger('route-change')
+
+
+def test_youtube_edge_prefetch_runner_requires_fresh_sufficient_cache_restore():
+    original_config = youtube_edge_prefetch_runner.config
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_fast_warm_enabled=True,
+            youtube_edge_prefetch_cache_restore_min_candidates=8,
+            youtube_edge_prefetch_cache_restore_max_age_seconds=21600,
+        )
+        base = {
+            'ok': True,
+            'failed_sets': 0,
+            'candidates': 8,
+            'cache_newest_age_seconds': 120,
+        }
+        assert youtube_edge_prefetch_runner._cache_restore_satisfies_prefetch('Post-update', base)
+        assert youtube_edge_prefetch_runner._cache_restore_satisfies_prefetch(
+            'Post-update',
+            {**base, 'cache_newest_age_seconds': 0},
+        )
+        assert not youtube_edge_prefetch_runner._cache_restore_satisfies_prefetch(
+            'Post-update',
+            {**base, 'candidates': 7},
+        )
+        assert not youtube_edge_prefetch_runner._cache_restore_satisfies_prefetch(
+            'Post-update',
+            {**base, 'cache_newest_age_seconds': 21601},
+        )
+        assert not youtube_edge_prefetch_runner._cache_restore_satisfies_prefetch('scheduler', base)
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+
+
+def test_youtube_edge_prefetch_runner_executes_scheduled_full_prefetch():
+    original_config = youtube_edge_prefetch_runner.config
+    original_acquire_lock = youtube_edge_prefetch_runner.acquire_lock
+    original_release_lock = youtube_edge_prefetch_runner.release_lock
+    original_read_available = youtube_edge_prefetch_runner.read_available_memory_kb
+    original_detect_route = youtube_edge_prefetch_runner.detect_youtube_route_protocol
+    original_prefetch = youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once
+    prefetch_calls = []
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_enabled=True,
+            youtube_edge_prefetch_min_available_kb=0,
+            youtube_edge_prefetch_lock_dir='/tmp/test-youtube-prefetch.lock',
+            youtube_edge_prefetch_scheduler_max_cpu_percent=0,
+            youtube_edge_prefetch_scheduler_max_load1=0,
+            youtube_edge_watch_warm_enabled=False,
+            youtube_edge_prefetch_quality_probe_enabled=False,
+        )
+        youtube_edge_prefetch_runner.acquire_lock = lambda lock_dir: True
+        youtube_edge_prefetch_runner.release_lock = lambda lock_dir: None
+        youtube_edge_prefetch_runner.read_available_memory_kb = lambda: 200000
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = lambda **kwargs: 'vless2'
+
+        def fake_prefetch(**kwargs):
+            prefetch_calls.append(kwargs)
+            return {
+                'ok': True,
+                'route_protocol': 'vless2',
+                'skipped_reason': '',
+                'candidates': 4,
+                'cache_entries': 4,
+                'added_addresses': 1,
+                'added_sets': 3,
+                'deleted_sets': 0,
+                'failed_sets': 0,
+            }
+
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = fake_prefetch
+        with tempfile.TemporaryDirectory() as tmp:
+            status = youtube_edge_prefetch_runner.run_prefetch(
+                trigger='scheduler',
+                status_path=str(Path(tmp) / 'status.json'),
+                cache_path=str(Path(tmp) / 'cache.json'),
+                unblock_dir=str(Path(tmp) / 'unblock'),
+            )
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner.acquire_lock = original_acquire_lock
+        youtube_edge_prefetch_runner.release_lock = original_release_lock
+        youtube_edge_prefetch_runner.read_available_memory_kb = original_read_available
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = original_detect_route
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = original_prefetch
+
+    assert len(prefetch_calls) == 1
+    assert status['ok'] is True
+    assert status['trigger'] == 'scheduler'
+    assert status['warm_mode'] == 'full'
+    assert status['skipped_reason'] == ''
+
+
 def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_sufficient(tmp_path):
     original_config = youtube_edge_prefetch_runner.config
     original_acquire_lock = youtube_edge_prefetch_runner.acquire_lock
@@ -5843,6 +5950,8 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
             youtube_edge_prefetch_enabled=True,
             youtube_edge_prefetch_fast_warm_enabled=True,
             youtube_edge_prefetch_cache_restore_enabled=True,
+            youtube_edge_prefetch_cache_restore_min_candidates=3,
+            youtube_edge_prefetch_cache_restore_max_age_seconds=3600,
             youtube_edge_prefetch_min_available_kb=0,
             youtube_edge_prefetch_lock_dir=str(tmp_path / 'lock'),
         )
@@ -5851,9 +5960,8 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
         youtube_edge_prefetch_runner.read_available_memory_kb = lambda: 200000
         youtube_edge_prefetch_runner.detect_youtube_route_protocol = lambda **kwargs: 'vless2'
         youtube_edge_prefetch_runner.youtube_route_self_test = lambda protocol: {
-            'ok': False,
-            'reason': 'request_failed',
-            'http_code': '000',
+            'ok': True,
+            'protocol': protocol,
             'duration_ms': 1,
         }
 
@@ -5867,6 +5975,8 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
                 'mode': 'cache_restore',
                 'candidates': 3,
                 'cache_entries': 4,
+                'cache_newest_seen_at': 90,
+                'cache_newest_age_seconds': 10,
                 'added_addresses': 1,
                 'added_sets': 2,
                 'deleted_sets': 0,
@@ -5901,6 +6011,7 @@ def test_youtube_edge_prefetch_runner_cache_restore_skips_fast_prefetch_when_suf
     assert status['warm_mode'] == 'cache_restore'
     assert status['prefetch_skipped_reason'] == 'cache_restore_sufficient'
     assert status['cache_restored_addresses'] == 1
+    assert status['self_test']['ok'] is True
     assert status['last_message'] == 'vless2: added 1 addresses, candidates 3, cache 4'
 
 
@@ -12921,6 +13032,9 @@ def main():
     test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers()
     test_youtube_edge_prefetch_runner_skips_scheduler_full_run_on_high_cpu()
     test_youtube_edge_prefetch_runner_uses_cache_restore_for_start_triggers()
+    test_youtube_edge_prefetch_runner_requests_guarded_scheduled_runs()
+    test_youtube_edge_prefetch_runner_requires_fresh_sufficient_cache_restore()
+    test_youtube_edge_prefetch_runner_executes_scheduled_full_prefetch()
     test_entware_dns_runtime_helpers()
     test_web_status_runtime_helpers()
     test_cached_protocol_status_description_has_no_static_trailing_period()
