@@ -5,11 +5,28 @@ import tempfile
 from proxy_config_builder import build_proxy_core_config
 from proxy_key_store import load_current_keys
 from service_catalog import CONNECTIVITY_CHECK_DOMAINS
+from transparent_route_policy import compile_protocol_policies, normalize_protocol_set
+from unblock_lists import UNBLOCK_DIR, read_unblock_list_entries
 
 
 XRAY_CONFIG_DIR = '/opt/etc/xray'
 V2RAY_CONFIG_DIR = '/opt/etc/v2ray'
 XRAY_SERVICE_PATH = '/opt/etc/init.d/S24xray'
+
+
+def _configured_protocols(config_module, name):
+    return normalize_protocol_set(getattr(config_module, name, ()))
+
+
+def _transparent_route_entries(unblock_dir=UNBLOCK_DIR):
+    routes = {'vmess': 'vmess', 'vless': 'vless', 'vless2': 'vless-2'}
+    result = {}
+    for protocol, route_name in routes.items():
+        try:
+            result[protocol] = read_unblock_list_entries(route_name, unblock_dir=unblock_dir)
+        except Exception:
+            result[protocol] = ()
+    return result
 
 
 def _config_port(config_module, name, default):
@@ -54,6 +71,7 @@ def rebuild_proxy_core_config(
         xray_config_dir,
         v2ray_config_dir,
     )
+    strict_transparent_protocols = _configured_protocols(config_module, 'xray_strict_transparent_protocols')
     payload = build_proxy_core_config(
         vmess_key=keys.get('vmess') or '',
         vless_key=keys.get('vless') or '',
@@ -80,6 +98,13 @@ def rebuild_proxy_core_config(
         loglevel='warning',
         connectivity_check_domains=CONNECTIVITY_CHECK_DOMAINS,
         include_vmess_transparent=True,
+        route_only_transparent_protocols=_configured_protocols(config_module, 'xray_route_only_transparent_protocols'),
+        route_only_tproxy_protocols=_configured_protocols(config_module, 'xray_route_only_tproxy_protocols'),
+        strict_transparent_protocols=strict_transparent_protocols,
+        transparent_route_policies=compile_protocol_policies(
+            _transparent_route_entries(), strict_transparent_protocols,
+        ),
+        bittorrent_direct_enabled=bool(getattr(config_module, 'xray_bittorrent_direct_enabled', False)),
     )
     _write_json_atomic(output_path, payload)
     return output_path

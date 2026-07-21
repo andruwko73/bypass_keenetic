@@ -1,5 +1,5 @@
-*v1.972 (20 Jul 2026) -* main
+*v1.973 (21 Jul 2026) -* main
 
-*Applies the guarded automatic YouTube edge prefetch settings before the updated bot starts.*
+*Sends detected BitTorrent traffic directly, so ordinary torrent transfers do not consume a proxy key.*
 
-*Migrates an existing disabled interval to two hours and installs the cache freshness thresholds even when the previous release performs the update.*
+*Adds an optional strict transparent-route policy: confirmed service addresses remain proxied, while unknown transparent traffic stays direct. The option is disabled by default.*

@@ -63,6 +63,10 @@ from proxy_config_builder import (
     build_shadowsocks_config as _builder_build_shadowsocks_config,
     build_trojan_config as _builder_build_trojan_config,
 )
+from transparent_route_policy import (
+    compile_protocol_policies as _compile_transparent_route_policies,
+    normalize_protocol_set as _normalize_transparent_protocol_set,
+)
 from proxy_apply_runtime import (
     apply_installed_proxy_runtime as _runtime_apply_installed_proxy,
     proxy_apply_settings as _runtime_proxy_apply_settings,
@@ -2090,6 +2094,16 @@ localportvmess_tproxy = str(getattr(config, 'localportvmess_tproxy', 11815))
 localportvless_tproxy = str(getattr(config, 'localportvless_tproxy', 11812))
 localportvless2_tproxy = str(getattr(config, 'localportvless2_tproxy', 11814))
 localporttrojan_tproxy = str(getattr(config, 'localporttrojan_tproxy', 11829))
+XRAY_BITTORRENT_DIRECT_ENABLED = bool(getattr(config, 'xray_bittorrent_direct_enabled', False))
+XRAY_STRICT_TRANSPARENT_PROTOCOLS = _normalize_transparent_protocol_set(
+    getattr(config, 'xray_strict_transparent_protocols', ())
+)
+XRAY_ROUTE_ONLY_TRANSPARENT_PROTOCOLS = _normalize_transparent_protocol_set(
+    getattr(config, 'xray_route_only_transparent_protocols', ())
+)
+XRAY_ROUTE_ONLY_TPROXY_PROTOCOLS = _normalize_transparent_protocol_set(
+    getattr(config, 'xray_route_only_tproxy_protocols', ())
+)
 dnsovertlsport = config.dnsovertlsport
 dnsoverhttpsport = config.dnsoverhttpsport
 
@@ -3958,6 +3972,23 @@ def _sync_udp_policy_config():
         _write_text_file_atomic(CALL_SIGNAL_ROUTES_PATH, call_signal_routes_payload)
     except Exception as exc:
         _write_runtime_log(f'UDP policy sync failed: {exc}')
+
+
+def _sync_proxy_route_policy_config():
+    """Keep the strict transparent Xray policy in sync with edited lists."""
+    _sync_udp_policy_config()
+    if not XRAY_STRICT_TRANSPARENT_PROTOCOLS:
+        return
+    try:
+        _write_all_proxy_core_config()
+        ok, note = _restart_core_proxy_after_validation()
+    except Exception as exc:
+        _write_runtime_log(f'Strict transparent route sync failed: {exc}')
+        return
+    if not ok:
+        _write_runtime_log(f'Strict transparent route sync warning: {note}')
+    _invalidate_web_status_cache()
+    _invalidate_key_status_cache()
 
 
 def _normalize_route_domain_entry(entry):
@@ -7533,7 +7564,7 @@ def _current_bot_version():
 def _save_unblock_list(list_name, text):
     if not os.path.basename(list_name).endswith('.txt'):
         raise ValueError('Список должен быть .txt файлом')
-    safe_name = _save_unblock_list_file(list_name, text, before_update=_sync_udp_policy_config, async_update=True)
+    safe_name = _save_unblock_list_file(list_name, text, before_update=_sync_proxy_route_policy_config, async_update=True)
     return f'Список {safe_name} сохранён. Применение маршрутов запущено в фоне.'
 
 
@@ -7547,7 +7578,7 @@ def _route_tools_runtime():
             service_icon_html=_service_icon_html,
             telegram_icon_html=_telegram_icon_html,
             youtube_icon_html=_youtube_icon_html,
-            sync_udp_policy_config=_sync_udp_policy_config,
+            sync_udp_policy_config=_sync_proxy_route_policy_config,
             invalidate_web_status_cache=_invalidate_web_status_cache,
             intersections_cache_ttl=SERVICE_ROUTE_INTERSECTIONS_CACHE_TTL,
         )
@@ -13412,6 +13443,30 @@ def _repair_active_reality_endpoint(proto, failure_message='', service='telegram
     return False
 
 
+def _transparent_route_entries_by_protocol():
+    route_names = {
+        'vmess': 'vmess',
+        'vless': 'vless',
+        'vless2': 'vless-2',
+    }
+    entries = {}
+    for protocol, route_name in route_names.items():
+        try:
+            entries[protocol] = _read_unblock_list_entries(route_name)
+        except Exception:
+            entries[protocol] = ()
+    return entries
+
+
+def _transparent_route_policies():
+    if not XRAY_STRICT_TRANSPARENT_PROTOCOLS:
+        return {}
+    return _compile_transparent_route_policies(
+        _transparent_route_entries_by_protocol(),
+        XRAY_STRICT_TRANSPARENT_PROTOCOLS,
+    )
+
+
 def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
     return _builder_build_proxy_core_config(
         vmess_key=vmess_key,
@@ -13439,6 +13494,11 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
         loglevel='warning',
         connectivity_check_domains=_service_catalog().CONNECTIVITY_CHECK_DOMAINS,
         include_vmess_transparent=True,
+        route_only_transparent_protocols=XRAY_ROUTE_ONLY_TRANSPARENT_PROTOCOLS,
+        route_only_tproxy_protocols=XRAY_ROUTE_ONLY_TPROXY_PROTOCOLS,
+        strict_transparent_protocols=XRAY_STRICT_TRANSPARENT_PROTOCOLS,
+        transparent_route_policies=_transparent_route_policies(),
+        bittorrent_direct_enabled=XRAY_BITTORRENT_DIRECT_ENABLED,
     )
 
 

@@ -1,3 +1,11 @@
+<a name="1.973"></a>
+# [1.973] - 21 Jul 2026
+
+- Added the Xray `bittorrent-direct` rule for transparent and TPROXY traffic, enabled by default.
+- Added an optional strict transparent-route policy: known service domains and IP ranges use the selected proxy, and other transparent traffic remains direct.
+- Preserved the existing proxy behaviour by default; `routeOnly` options remain disabled until explicitly selected.
+- Included the transparent-route policy module in installation, update and recovery paths.
+
 <a name="1.972"></a>
 # [1.972] - 20 Jul 2026
 

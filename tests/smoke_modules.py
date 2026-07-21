@@ -68,6 +68,7 @@ import proxy_apply_runtime
 import proxy_config_recovery
 import proxy_status
 import proxy_protocols
+import transparent_route_policy
 import unblock_lists
 import service_catalog
 import custom_checks_store
@@ -598,19 +599,39 @@ def test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys():
             localportvless='10811',
             localportsh_bot='10820',
             localporttrojan_bot='10830',
+            xray_bittorrent_direct_enabled=True,
+            xray_strict_transparent_protocols=('vless',),
+            xray_route_only_transparent_protocols=('vless',),
+            xray_route_only_tproxy_protocols=('vless',),
         )
-        result_path = proxy_config_recovery.rebuild_proxy_core_config(
-            config_module=fake_config,
-            core_config_dir=str(xray_dir),
-            xray_config_dir=str(xray_dir),
-            v2ray_config_dir=str(v2ray_dir),
-            output_path=str(output_path),
-        )
+        original_read_unblock_list_entries = proxy_config_recovery.read_unblock_list_entries
+        proxy_config_recovery.read_unblock_list_entries = lambda name, **_kwargs: {
+            'vless': ['api.telegram.org', '149.154.167.0/24'],
+        }.get(name, [])
+        try:
+            result_path = proxy_config_recovery.rebuild_proxy_core_config(
+                config_module=fake_config,
+                core_config_dir=str(xray_dir),
+                xray_config_dir=str(xray_dir),
+                v2ray_config_dir=str(v2ray_dir),
+                output_path=str(output_path),
+            )
+        finally:
+            proxy_config_recovery.read_unblock_list_entries = original_read_unblock_list_entries
         assert result_path == str(output_path)
         rebuilt = json.loads(output_path.read_text(encoding='utf-8'))
         assert output_path.stat().st_size > 100
         assert any(outbound.get('tag') == 'proxy-vless' for outbound in rebuilt['outbounds'])
         assert any(inbound.get('port') == 10811 for inbound in rebuilt['inbounds'])
+        assert any(rule.get('ruleTag') == 'bittorrent-direct' for rule in rebuilt['routing']['rules'])
+        inbounds_by_tag = {inbound['tag']: inbound for inbound in rebuilt['inbounds']}
+        assert inbounds_by_tag['in-vless-transparent']['sniffing']['routeOnly'] is True
+        assert any(
+            rule.get('inboundTag') == ['in-vless-transparent']
+            and rule.get('ip') == ['149.154.167.0/24']
+            and rule.get('port') == '80,443,5222'
+            for rule in rebuilt['routing']['rules']
+        )
 
 
 def test_router_health_runtime_process_rss_parser():
@@ -1311,6 +1332,73 @@ def test_proxy_config_builder():
         'proxy-vless',
     )
     assert default_reality_outbound['streamSettings']['realitySettings']['fingerprint'] == 'chrome'
+
+
+def test_transparent_route_policy_and_xray_strict_routes():
+    route_entries = [
+        'youtube.com',
+        'full:api.telegram.org',
+        '+.googlevideo.com',
+        'https://chatgpt.com/path',
+        '149.154.167.0/24',
+        '2001:db8::1',
+        'not a route entry',
+    ]
+    policy = transparent_route_policy.compile_protocol_policies(
+        {'vless': route_entries}, ('vless',),
+    )['vless']
+    assert policy['domains'] == (
+        'domain:youtube.com',
+        'full:api.telegram.org',
+        'domain:googlevideo.com',
+        'domain:chatgpt.com',
+    )
+    assert policy['ips'] == ('149.154.167.0/24', '2001:db8::1/128')
+    assert transparent_route_policy.normalize_protocol_set('vless2, vmess invalid') == {'vless2', 'vmess'}
+    assert policy['ip_ports'] == '80,443,5222'
+
+    vless_key = 'vless://00000000-0000-0000-0000-000000000000@example.com:443?security=tls#sample'
+    core_config = build_proxy_core_config(
+        vless_key=vless_key,
+        ports=PORTS,
+        error_log_path='/tmp/xray-error.log',
+        include_vmess_transparent=True,
+        strict_transparent_protocols=('vless',),
+        transparent_route_policies={'vless': policy},
+        route_only_transparent_protocols=('vless',),
+        route_only_tproxy_protocols=('vless',),
+        bittorrent_direct_enabled=True,
+    )
+    rules = core_config['routing']['rules']
+    bittorrent_rule = next(rule for rule in rules if rule.get('ruleTag') == 'bittorrent-direct')
+    assert bittorrent_rule['outboundTag'] == 'direct'
+    assert {'in-vless-transparent', 'in-vless-tproxy'} <= set(bittorrent_rule['inboundTag'])
+    domain_rule = next(
+        rule for rule in rules
+        if rule.get('inboundTag') == ['in-vless-transparent'] and rule.get('domain') == list(policy['domains'])
+    )
+    ip_rule = next(
+        rule for rule in rules
+        if rule.get('inboundTag') == ['in-vless-transparent'] and rule.get('ip') == list(policy['ips'])
+    )
+    fallback_rule = next(
+        rule for rule in rules
+        if rule.get('inboundTag') == ['in-vless-transparent']
+        and rule.get('outboundTag') == 'direct'
+        and 'domain' not in rule and 'ip' not in rule
+    )
+    assert domain_rule['outboundTag'] == 'proxy-vless'
+    assert ip_rule['outboundTag'] == 'proxy-vless'
+    assert ip_rule['port'] == '80,443,5222'
+    assert rules.index(bittorrent_rule) < rules.index(domain_rule) < rules.index(fallback_rule)
+    assert not any(
+        rule.get('inboundTag') == ['in-vless-transparent'] and rule.get('outboundTag') == 'proxy-vless'
+        and 'domain' not in rule and 'ip' not in rule
+        for rule in rules
+    )
+    inbounds_by_tag = {inbound['tag']: inbound for inbound in core_config['inbounds']}
+    assert inbounds_by_tag['in-vless-transparent']['sniffing']['routeOnly'] is True
+    assert inbounds_by_tag['in-vless-tproxy']['sniffing']['routeOnly'] is True
 
 
 def test_key_pool_web():

@@ -1025,7 +1025,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -1416,6 +1416,10 @@ PYCFG
   grep -Eq '^localportvless_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportvless_tproxy = '11812'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^localportvless2_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportvless2_tproxy = '11814'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^localporttrojan_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localporttrojan_tproxy = '11829'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^xray_bittorrent_direct_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_bittorrent_direct_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^xray_strict_transparent_protocols[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_strict_transparent_protocols = ()\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^xray_route_only_transparent_protocols[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_route_only_transparent_protocols = ()\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^xray_route_only_tproxy_protocols[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_route_only_tproxy_protocols = ()\n' >> "$BOT_CONFIG_PATH"
 }
 
 repair_service_route_catalog_drift() {
@@ -1924,6 +1928,7 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module proxy_key_store.py load_current_keys || exit 1
     stage_runtime_module proxy_protocols.py proxy_outbound_from_key || exit 1
     stage_runtime_module proxy_config_builder.py build_proxy_core_config || exit 1
+    stage_runtime_module transparent_route_policy.py compile_protocol_policies || exit 1
     stage_runtime_module proxy_status.py status_snapshot_signature || exit 1
     download_update_file "$(repo_file_url installer.py)" "$stage_dir/installer.py" "ThreadingHTTPServer" "installer.py" || exit 1
     stage_runtime_module installer_common.py browser_port_is_valid || exit 1

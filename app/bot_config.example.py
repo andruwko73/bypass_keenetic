@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.972
+# ВЕРСИЯ СКРИПТА v1.973
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -103,6 +103,10 @@ udp_quic_block_vmess_enabled = True  # smart QUIC/UDP 443 fallback for service d
 udp_quic_block_vless_enabled = True  # smart QUIC/UDP 443 fallback for non-YouTube routes
 udp_quic_block_vless2_enabled = True  # smart QUIC/UDP 443 fallback for non-YouTube routes
 udp_quic_block_trojan_enabled = True  # smart QUIC/UDP 443 fallback for service domains from the Trojan list
+xray_bittorrent_direct_enabled = True  # detected BitTorrent through transparent Xray inputs goes directly to the provider
+xray_strict_transparent_protocols = ()  # canary: ('vless2',) proxies only confirmed domains/IPs from that route list
+xray_route_only_transparent_protocols = ()  # canary: ('vless2',) keeps the original destination IP after SNI/Host sniffing
+xray_route_only_tproxy_protocols = ()  # enable only after separate Telegram-call verification
 youtube_quic_policy = 'auto'  # auto blocks QUIC for routes that contain YouTube; allow permits QUIC; block forces TCP fallback
 telegram_udp_policy = 'auto'  # auto/allow keep UDP open for Telegram routes so native calls can use relay/media traffic; block disables it
 youtube_edge_prefetch_enabled = True  # lightweight DNS/IP prefetch for the active YouTube route
