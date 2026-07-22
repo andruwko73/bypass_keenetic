@@ -32,6 +32,8 @@ YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS="${YOUTUBE_EDGE_PREFETCH_INTERVAL_SECONDS
 YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS="${YOUTUBE_EDGE_PREFETCH_RETRY_SECONDS:-180}"
 YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS="${YOUTUBE_EDGE_PREFETCH_AFTER_REFRESH_DELAY_SECONDS:-120}"
 YOUTUBE_EDGE_PREFETCH_LOG="${YOUTUBE_EDGE_PREFETCH_LOG:-/opt/var/log/bypass-youtube-edge-prefetch.log}"
+YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS="${YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS:-1800}"
+YOUTUBE_EDGE_CDN_QUALITY_STATE_FILE="${YOUTUBE_EDGE_CDN_QUALITY_STATE_FILE:-/tmp/bypass-youtube-edge-cdn-quality.state}"
 YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com m.youtube.com youtu.be youtube-nocookie.com youtube.googleapis.com youtubei.googleapis.com youtubei-att.googleapis.com youtube-ui.l.google.com wide-youtube.l.google.com googlevideo.com manifest.googlevideo.com redirector.googlevideo.com c.youtube.com ytimg.com i.ytimg.com s.ytimg.com ggpht.com yt3.ggpht.com gvt1.com ssl.gstatic.com www.gstatic.com fonts.googleapis.com fonts.gstatic.com www.googletagmanager.com ad.doubleclick.net googleads.g.doubleclick.net googleadservices.com pagead2.googlesyndication.com securepubads.g.doubleclick.net static.doubleclick.net}"
 YOUTUBE_ROUTE_OWNER_STATE_FILE="${YOUTUBE_ROUTE_OWNER_STATE_FILE:-/opt/tmp/bypass-youtube-route-owner.json}"
 VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com $YOUTUBE_ROUTE_PRIORITY_DOMAINS rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
@@ -236,6 +238,31 @@ run_youtube_edge_prefetch_if_due() {
     esac
     youtube_edge_prefetch_background_busy && return 0
     run_youtube_edge_prefetch "$trigger"
+}
+
+youtube_edge_cdn_quality_due() {
+    interval="$YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS"
+    case "$interval" in
+        ''|*[!0-9]*|0) return 1 ;;
+    esac
+    last_at=0
+    if [ -r "$YOUTUBE_EDGE_CDN_QUALITY_STATE_FILE" ]; then
+        last_at="$(sed -n '1p' "$YOUTUBE_EDGE_CDN_QUALITY_STATE_FILE" 2>/dev/null | tr -cd '0-9')"
+    fi
+    [ -n "$last_at" ] || last_at=0
+    now="$(date +%s 2>/dev/null || echo 0)"
+    case "$now:$last_at" in
+        *[!0-9:]*|0:*|*:0) return 1 ;;
+    esac
+    [ "$last_at" -eq 0 ] 2>/dev/null || [ $((now - last_at)) -ge "$interval" ] 2>/dev/null
+}
+
+run_youtube_edge_cdn_quality_if_due() {
+    youtube_edge_cdn_quality_due || return 0
+    youtube_edge_prefetch_background_busy && return 0
+    run_youtube_edge_prefetch "cdn-quality"
+    mkdir -p "$(dirname "$YOUTUBE_EDGE_CDN_QUALITY_STATE_FILE")" 2>/dev/null || true
+    date +%s > "$YOUTUBE_EDGE_CDN_QUALITY_STATE_FILE" 2>/dev/null || true
 }
 
 detect_dns_backend() {
@@ -853,6 +880,7 @@ run_scheduler_loop() {
     last_refresh_check=0
     while :; do
         run_refresh_if_check_due
+        run_youtube_edge_cdn_quality_if_due
         run_youtube_edge_prefetch_if_due
         run_runtime_dedupe
         sleep_seconds="$DEDUP_INTERVAL_SECONDS"
@@ -869,6 +897,7 @@ run_tick() {
         return 0
     fi
     run_refresh_if_due
+    run_youtube_edge_cdn_quality_if_due
     run_youtube_edge_prefetch_if_due
     run_runtime_dedupe
 }

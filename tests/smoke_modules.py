@@ -632,6 +632,7 @@ def test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys():
             and rule.get('port') == '80,443,5222'
             for rule in rebuilt['routing']['rules']
         )
+        assert not any('web-fallback' in str(rule.get('ruleTag') or '') for rule in rebuilt['routing']['rules'])
 
 
 def test_router_health_runtime_process_rss_parser():
@@ -1344,9 +1345,7 @@ def test_transparent_route_policy_and_xray_strict_routes():
         '2001:db8::1',
         'not a route entry',
     ]
-    policy = transparent_route_policy.compile_protocol_policies(
-        {'vless': route_entries}, ('vless',),
-    )['vless']
+    policy = transparent_route_policy.compile_protocol_policies({'vless': route_entries}, ('vless',))['vless']
     assert policy['domains'] == (
         'domain:youtube.com',
         'full:api.telegram.org',
@@ -1390,10 +1389,10 @@ def test_transparent_route_policy_and_xray_strict_routes():
     assert domain_rule['outboundTag'] == 'proxy-vless'
     assert ip_rule['outboundTag'] == 'proxy-vless'
     assert ip_rule['port'] == '80,443,5222'
-    assert rules.index(bittorrent_rule) < rules.index(domain_rule) < rules.index(fallback_rule)
+    assert rules.index(bittorrent_rule) < rules.index(domain_rule) < rules.index(ip_rule) < rules.index(fallback_rule)
     assert not any(
         rule.get('inboundTag') == ['in-vless-transparent'] and rule.get('outboundTag') == 'proxy-vless'
-        and 'domain' not in rule and 'ip' not in rule
+        and 'domain' not in rule and 'ip' not in rule and 'port' not in rule
         for rule in rules
     )
     inbounds_by_tag = {inbound['tag']: inbound for inbound in core_config['inbounds']}
@@ -3024,7 +3023,8 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_edge_prefetch_cpu_sample_ms = 250' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'active_status_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'auto_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
-    assert 'youtube_vless2_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'youtube_route_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'event_history_duplicate_window_seconds = 300' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'jfKfPfyJRdk' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
         'telegram_call_learning_enabled = True',
@@ -3073,15 +3073,32 @@ def test_codex_version_matches_commit_count():
     assert 'auto_failover_traffic_guard_bypass_failures = 3' in example
     assert 'auto_failover_traffic_guard_bypass_failures = 3' in installer
     assert 'auto_failover_traffic_guard_bypass_failures = 3' in bootstrap
-    assert 'youtube_vless2_failover_enabled = True' in example
-    assert 'youtube_vless2_failover_enabled = True' in installer
-    assert 'youtube_vless2_failover_enabled = True' in bootstrap
-    assert 'youtube_vless2_failover_check_connect_timeout = 6' in example
-    assert 'youtube_vless2_failover_check_connect_timeout = 6' in installer
-    assert 'youtube_vless2_failover_check_connect_timeout = 6' in bootstrap
-    assert 'youtube_vless2_failover_check_read_timeout = 10' in example
-    assert 'youtube_vless2_failover_check_read_timeout = 10' in installer
-    assert 'youtube_vless2_failover_check_read_timeout = 10' in bootstrap
+    assert 'youtube_route_failover_enabled = True' in example
+    assert 'youtube_route_failover_enabled = True' in installer
+    assert 'youtube_route_failover_enabled = True' in bootstrap
+    assert 'youtube_route_failover_check_connect_timeout = 6' in example
+    assert 'youtube_route_failover_check_connect_timeout = 6' in installer
+    assert 'youtube_route_failover_check_connect_timeout = 6' in bootstrap
+    assert 'youtube_route_failover_check_read_timeout = 10' in example
+    assert 'youtube_route_failover_check_read_timeout = 10' in installer
+    assert 'youtube_route_failover_check_read_timeout = 10' in bootstrap
+    for config_line in (
+        'youtube_edge_dns_quality_enabled = True',
+        "youtube_edge_dns_quality_hosts = ('i.ytimg.com',)",
+        'youtube_edge_dns_quality_min_addresses = 2',
+        'youtube_edge_dns_quality_max_addresses = 3',
+        'youtube_edge_cdn_quality_interval_seconds = 1800',
+        'youtube_edge_cdn_quality_max_candidates = 6',
+        'youtube_edge_cdn_quality_timeout_seconds = 3',
+    ):
+        assert config_line in example
+        assert config_line in installer
+        assert config_line in bootstrap
+    assert 'addn-hosts=/opt/etc/bot/youtube_edge_quality.hosts' in (APP_ROOT / 'dnsmasq.conf').read_text(encoding='utf-8')
+    assert 'run_youtube_edge_cdn_quality_if_due()' in (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
+    assert 'YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS="${YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS:-1800}"' in (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
+    assert 'youtube_edge_cdn_quality_interval_seconds = 1800' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert '/opt/etc/init.d/S56dnsmasq restart' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in example
 
 
@@ -4469,7 +4486,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'bool(bot_ready)' in source
     assert 'bool(bot_polling)' in source
     assert "'stream_guard_defer'" in source
-    assert "youtube_vless2_failover_recent_success_ttl', 900" in source
+    assert "'youtube_route_failover_recent_success_ttl'," in source
     assert 'def _youtube_route_protocol' in source
     assert 'def _youtube_route_owner' in source
     assert 'youtube_route_owner(default=\'vless2\')' not in source
@@ -4533,8 +4550,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'event_history_api_cache[\'payload\'] = payload' not in source
     assert "last_scan_count" in source
     assert "cached_fail_since or now" in source
-    assert "getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)" in source
-    assert "getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)" in source
+    assert "'youtube_route_failover_check_connect_timeout'," in source
+    assert "'youtube_route_failover_check_read_timeout'," in source
     assert 'YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS' in source
     assert 'REALITY_ENDPOINT_REPAIR_DNS_SERVERS' in source
     assert 'def _resolve_domain_ipv4_addresses(domain, external_dns=True):' in source
@@ -5540,6 +5557,233 @@ def test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof():
     ]
 
 
+def test_youtube_edge_prefetch_quality_hosts_require_fresh_multiple_successes():
+    now = 1_800_000
+    cache = {
+        'version': 1,
+        'updated_at': now,
+        'entries': {
+            '142.250.150.119': {
+                'host': 'i.ytimg.com',
+                'quality_last_checked': now - 10,
+                'quality_last_ok': now - 10,
+                'quality_latency_ms': 800,
+            },
+            '142.251.38.106': {
+                'host': 'i.ytimg.com',
+                'quality_last_checked': now - 20,
+                'quality_last_ok': now - 20,
+                'quality_latency_ms': 350,
+            },
+            '142.251.38.107': {
+                'host': 'i.ytimg.com',
+                'quality_last_checked': now - 5,
+                'quality_last_ok': now - 20,
+                'quality_last_fail': now - 5,
+                'quality_latency_ms': 100,
+            },
+            '142.251.38.108': {
+                'host': 'i.ytimg.com',
+                'quality_last_checked': now - 4000,
+                'quality_last_ok': now - 4000,
+                'quality_latency_ms': 100,
+            },
+        },
+    }
+    selected = youtube_edge_prefetch.quality_host_addresses(
+        cache,
+        hosts=('i.ytimg.com',),
+        now=now,
+        min_addresses=2,
+        max_addresses=3,
+        max_age_seconds=2700,
+    )
+    assert selected == {'i.ytimg.com': ('142.251.38.106', '142.250.150.119')}
+    assert youtube_edge_prefetch.quality_host_addresses(
+        cache,
+        hosts=('i.ytimg.com',),
+        now=now,
+        min_addresses=3,
+        max_addresses=3,
+        max_age_seconds=2700,
+    ) == {}
+    assert youtube_edge_prefetch.render_quality_hosts_file(selected).splitlines() == [
+        '# Managed by bypass_keenetic YouTube CDN quality worker.',
+        '142.251.38.106 i.ytimg.com',
+        '142.250.150.119 i.ytimg.com',
+    ]
+
+
+def test_youtube_edge_prefetch_runner_syncs_dnsmasq_quality_hosts():
+    now = 1_800_000
+    original_config = youtube_edge_prefetch_runner.config
+    original_reload = youtube_edge_prefetch_runner._reload_dnsmasq_hosts
+    reload_calls = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        cache_path = tmp_path / 'youtube_edge_cache.json'
+        hosts_path = tmp_path / 'youtube_edge_quality.hosts'
+        dnsmasq_path = tmp_path / 'dnsmasq.conf'
+        dnsmasq_path.write_text(f'addn-hosts={hosts_path}\n', encoding='utf-8')
+        cache_path.write_text(json.dumps({
+            'version': 1,
+            'updated_at': now,
+            'entries': {
+                '142.250.150.119': {
+                    'host': 'i.ytimg.com',
+                    'last_seen': now,
+                    'quality_last_checked': now - 10,
+                    'quality_last_ok': now - 10,
+                    'quality_latency_ms': 650,
+                },
+                '142.251.38.106': {
+                    'host': 'i.ytimg.com',
+                    'last_seen': now,
+                    'quality_last_checked': now - 20,
+                    'quality_last_ok': now - 20,
+                    'quality_latency_ms': 420,
+                },
+            },
+        }), encoding='utf-8')
+        try:
+            youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+                youtube_edge_dns_quality_enabled=True,
+                youtube_edge_dns_quality_hosts=('i.ytimg.com',),
+                youtube_edge_dns_quality_hosts_path=str(hosts_path),
+                youtube_edge_dnsmasq_config_path=str(dnsmasq_path),
+                youtube_edge_dns_quality_min_addresses=2,
+                youtube_edge_dns_quality_max_addresses=3,
+                youtube_edge_dns_quality_max_age_seconds=2700,
+                youtube_edge_prefetch_cache_ttl_seconds=259200,
+                youtube_edge_prefetch_max_cache_entries=128,
+            )
+            youtube_edge_prefetch_runner._reload_dnsmasq_hosts = lambda: reload_calls.append(True) or True
+            first = youtube_edge_prefetch_runner.sync_quality_hosts_file(str(cache_path), now=now)
+            second = youtube_edge_prefetch_runner.sync_quality_hosts_file(str(cache_path), now=now)
+        finally:
+            youtube_edge_prefetch_runner.config = original_config
+            youtube_edge_prefetch_runner._reload_dnsmasq_hosts = original_reload
+
+        assert '142.251.38.106 i.ytimg.com' in hosts_path.read_text(encoding='utf-8')
+
+    assert first == {
+        'enabled': True,
+        'hosts': 1,
+        'addresses': 2,
+        'changed': True,
+        'reloaded': True,
+        'skipped_reason': '',
+    }
+    assert second['changed'] is False
+    assert reload_calls == [True]
+
+
+def test_youtube_edge_prefetch_runner_keeps_cdn_quality_status_separate_and_skips_when_disabled():
+    original_config = youtube_edge_prefetch_runner.config
+    original_status_path = youtube_edge_prefetch_runner.STATUS_PATH
+    original_cdn_status_path = youtube_edge_prefetch_runner.CDN_QUALITY_STATUS_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        normal_status = tmp_path / 'youtube_edge_prefetch_status.json'
+        cdn_status = tmp_path / 'youtube_edge_cdn_quality_status.json'
+        try:
+            youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+                youtube_edge_prefetch_enabled=True,
+                youtube_edge_dns_quality_enabled=False,
+            )
+            youtube_edge_prefetch_runner.STATUS_PATH = str(normal_status)
+            youtube_edge_prefetch_runner.CDN_QUALITY_STATUS_PATH = str(cdn_status)
+            status = youtube_edge_prefetch_runner.run_prefetch(trigger='cdn-quality')
+        finally:
+            youtube_edge_prefetch_runner.config = original_config
+            youtube_edge_prefetch_runner.STATUS_PATH = original_status_path
+            youtube_edge_prefetch_runner.CDN_QUALITY_STATUS_PATH = original_cdn_status_path
+
+        assert status['ok'] is True
+        assert status['skipped_reason'] == 'cdn_quality_disabled'
+        assert not normal_status.exists()
+        saved = json.loads(cdn_status.read_text(encoding='utf-8'))
+        assert saved['trigger'] == 'cdn-quality'
+        assert saved['skipped_reason'] == 'cdn_quality_disabled'
+
+
+def test_youtube_edge_prefetch_runner_limits_cdn_quality_to_approved_host():
+    original_config = youtube_edge_prefetch_runner.config
+    original_acquire_lock = youtube_edge_prefetch_runner.acquire_lock
+    original_release_lock = youtube_edge_prefetch_runner.release_lock
+    original_read_available = youtube_edge_prefetch_runner.read_available_memory_kb
+    original_detect_route = youtube_edge_prefetch_runner.detect_youtube_route_protocol
+    original_prefetch = youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once
+    original_sync = youtube_edge_prefetch_runner.sync_quality_hosts_file
+    prefetch_calls = []
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_prefetch_enabled=True,
+            youtube_edge_dns_quality_enabled=True,
+            youtube_edge_dns_quality_hosts=('i.ytimg.com',),
+            youtube_edge_prefetch_min_available_kb=0,
+            youtube_edge_prefetch_lock_dir='/tmp/test-youtube-cdn-quality.lock',
+            youtube_edge_prefetch_scheduler_max_cpu_percent=0,
+            youtube_edge_prefetch_scheduler_max_load1=0,
+            youtube_edge_prefetch_quality_probe_enabled=True,
+            youtube_edge_cdn_quality_max_candidates=6,
+            youtube_edge_cdn_quality_timeout_seconds=3,
+        )
+        youtube_edge_prefetch_runner.acquire_lock = lambda lock_dir: True
+        youtube_edge_prefetch_runner.release_lock = lambda lock_dir: None
+        youtube_edge_prefetch_runner.read_available_memory_kb = lambda: 200000
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = lambda **kwargs: 'vless2'
+
+        def fake_prefetch(**kwargs):
+            prefetch_calls.append(kwargs)
+            return {
+                'ok': True,
+                'route_protocol': 'vless2',
+                'skipped_reason': '',
+                'candidates': 2,
+                'cache_entries': 2,
+                'added_addresses': 0,
+                'added_sets': 0,
+                'deleted_sets': 0,
+                'failed_sets': 0,
+            }
+
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = fake_prefetch
+        youtube_edge_prefetch_runner.sync_quality_hosts_file = lambda cache_path, now=None: {
+            'enabled': True,
+            'hosts': 0,
+            'addresses': 0,
+            'changed': False,
+            'reloaded': False,
+            'skipped_reason': 'not_enough_approved_addresses',
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            status = youtube_edge_prefetch_runner.run_prefetch(
+                trigger='cdn-quality',
+                status_path=str(Path(tmp) / 'cdn-status.json'),
+                cache_path=str(Path(tmp) / 'cache.json'),
+                unblock_dir=str(Path(tmp) / 'unblock'),
+            )
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner.acquire_lock = original_acquire_lock
+        youtube_edge_prefetch_runner.release_lock = original_release_lock
+        youtube_edge_prefetch_runner.read_available_memory_kb = original_read_available
+        youtube_edge_prefetch_runner.detect_youtube_route_protocol = original_detect_route
+        youtube_edge_prefetch_runner.youtube_edge_prefetch.prefetch_once = original_prefetch
+        youtube_edge_prefetch_runner.sync_quality_hosts_file = original_sync
+
+    assert status['ok'] is True
+    assert status['watch_edge']['skipped_reason'] == 'cdn_quality_only'
+    assert len(prefetch_calls) == 1
+    call = prefetch_calls[0]
+    assert call['hosts'] == ('i.ytimg.com',)
+    assert call['priority_hosts'] == ('i.ytimg.com',)
+    assert call['max_candidates'] == 6
+    assert call['max_addresses_per_run'] == 6
+    assert call['quality_probe_existing'] is True
+
+
 def test_youtube_edge_prefetch_skips_recent_bad_quality_cache():
     now = 1_800_000
     cache = {
@@ -5783,6 +6027,44 @@ def test_youtube_edge_prefetch_runner_collects_watch_hosts_through_route_socks()
     assert calls[0][1] == 12002
     assert status['socks_port'] == 12002
     assert status['hosts'] == 1
+    assert status['fetch_attempts'] == 1
+
+
+def test_youtube_edge_prefetch_runner_retries_failed_watch_fetch_once():
+    original_config = youtube_edge_prefetch_runner.config
+    original_fetch = youtube_edge_prefetch_runner._fetch_watch_page
+    calls = []
+
+    try:
+        youtube_edge_prefetch_runner.config = py_types.SimpleNamespace(
+            youtube_edge_watch_warm_enabled=True,
+            youtube_edge_watch_warm_urls=('https://www.youtube.com/watch?v=aqz-KE-bpKQ',),
+            youtube_edge_watch_warm_max_pages=1,
+            youtube_edge_watch_warm_max_hosts=2,
+            youtube_edge_watch_warm_max_bytes=200000,
+            youtube_edge_watch_warm_connect_timeout=1,
+            youtube_edge_watch_warm_max_time=2,
+            youtube_edge_watch_warm_retry_count=2,
+            youtube_edge_watch_warm_retry_delay_seconds=0,
+            localportvless='12000',
+        )
+
+        def fake_fetch(url, socks_port, **kwargs):
+            calls.append((url, socks_port, kwargs))
+            if len(calls) == 1:
+                return '', 'timeout'
+            return 'https://rr3---sn-4g5ednsl.googlevideo.com/videoplayback', ''
+
+        youtube_edge_prefetch_runner._fetch_watch_page = fake_fetch
+        hosts, status = youtube_edge_prefetch_runner.collect_watch_edge_hosts('vless2')
+    finally:
+        youtube_edge_prefetch_runner.config = original_config
+        youtube_edge_prefetch_runner._fetch_watch_page = original_fetch
+
+    assert hosts == ('rr3---sn-4g5ednsl.googlevideo.com',)
+    assert len(calls) == 2
+    assert status['fetch_attempts'] == 2
+    assert status['last_fetch_error'] == 'timeout'
 
 
 def test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts():
@@ -5796,7 +6078,7 @@ def test_youtube_edge_prefetch_runner_extends_existing_prefetch_hosts():
     finally:
         youtube_edge_prefetch_runner.config = original_config
 
-    assert hosts[:2] == ('www.youtube.com', 'i.ytimg.com')
+    assert hosts[:2] == ('i.ytimg.com', 'www.youtube.com')
     assert 'youtube.com' in hosts
     assert 'manifest.googlevideo.com' in hosts
     assert 'jnn-pa.googleapis.com' in hosts
@@ -5873,7 +6155,7 @@ def test_youtube_edge_prefetch_runner_uses_fast_hosts_for_start_triggers():
 
     assert youtube_edge_prefetch_runner._fast_warm_enabled_for_trigger('Post-update-late')
     assert not youtube_edge_prefetch_runner._fast_warm_enabled_for_trigger('scheduler')
-    assert hosts[:2] == ('youtubei.googleapis.com', 'www.youtube.com')
+    assert hosts[:3] == ('i.ytimg.com', 'youtubei.googleapis.com', 'www.youtube.com')
     assert 'youtube.com' in hosts
     assert 'manifest.googlevideo.com' in hosts
     assert 'i.ytimg.com' in hosts
@@ -12012,6 +12294,94 @@ def test_event_history_helpers():
     assert 'vless://' not in redacted_events[-1]['message']
     assert redacted_events[-1]['details']['last_activity_age_s'] == '0'
 
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'dedupe.jsonl'
+        assert event_history.record_event(
+            action='background_check',
+            message='same periodic result',
+            event_path=str(path),
+            dedupe_seconds=300,
+            time_provider=lambda: 100,
+        )
+        assert event_history.record_event(
+            action='background_check',
+            message='same periodic result',
+            event_path=str(path),
+            dedupe_seconds=300,
+            time_provider=lambda: 120,
+        )
+        assert event_history.record_event(
+            action='key_switch_auto',
+            message='same automatic switch record',
+            event_path=str(path),
+            dedupe_seconds=300,
+            time_provider=lambda: 121,
+        )
+        assert event_history.record_event(
+            action='key_switch_auto',
+            message='same automatic switch record',
+            event_path=str(path),
+            dedupe_seconds=300,
+            time_provider=lambda: 122,
+        )
+        events = event_history.load_events(limit=10, event_path=str(path))
+    assert [event['action'] for event in events] == ['key_switch_auto', 'key_switch_auto', 'background_check']
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / 'display-compaction.jsonl'
+        for index in range(90):
+            assert event_history.record_event(
+                action='stream_guard_defer',
+                message=f'technical defer {index}',
+                source='watchdog',
+                protocol='vless',
+                service='network',
+                details={'reason': 'UDP/QUIC drift refresh'},
+                event_path=str(path),
+            )
+        assert event_history.record_event(
+            action='key_switch_auto',
+            message='Автоматически выбран ключ',
+            source='telegram_auto_failover',
+            protocol='vless',
+            event_path=str(path),
+        )
+        events = event_history.load_events(limit=10, event_path=str(path))
+    assert [event['action'] for event in events] == ['key_switch_auto', 'stream_guard_defer']
+    assert events[1]['repeat_count'] == 90
+    rendered = web_form_blocks.render_event_history_html([
+        {
+            'ts': 0,
+            'action': 'key_switch_auto',
+            'protocol_label': 'Vless 1',
+            'service': 'youtube',
+            'source': 'youtube_auto_failover',
+            'key_hash': 'abc123',
+            'message': 'Автоматически выбран ключ',
+            'details': {},
+        },
+        {
+            'ts': 0,
+            'action': 'stream_guard_defer',
+            'protocol_label': 'Vless 1',
+            'service': 'youtube',
+            'source': 'watchdog',
+            'message': 'Техническая отсрочка',
+            'details': {},
+            'repeat_count': 3,
+        },
+    ])
+    assert 'Автоматическая смена ключа' in rendered
+    assert 'автоматически: YouTube' in rendered
+    assert 'Повторов: 3' in rendered
+    legacy_auto_rendered = web_form_blocks.render_event_history_html([{
+        'ts': 0,
+        'action': 'key_switch',
+        'source': 'telegram_auto_failover',
+        'message': 'Ключ выбран автоматически',
+    }])
+    assert 'Автоматическая смена ключа' in legacy_auto_rendered
+    assert 'автоматически: Telegram' in legacy_auto_rendered
+
 
 def test_telegram_call_learning_event_history_redacts_ip_addresses():
     with tempfile.TemporaryDirectory() as tmp:
@@ -13117,6 +13487,10 @@ def main():
     test_youtube_edge_prefetch_runner_deletes_covering_ipset_network()
     test_youtube_edge_prefetch_cleans_other_sets_when_target_network_already_contains_ip()
     test_youtube_edge_prefetch_quality_probe_filters_slow_and_eof()
+    test_youtube_edge_prefetch_quality_hosts_require_fresh_multiple_successes()
+    test_youtube_edge_prefetch_runner_syncs_dnsmasq_quality_hosts()
+    test_youtube_edge_prefetch_runner_keeps_cdn_quality_status_separate_and_skips_when_disabled()
+    test_youtube_edge_prefetch_runner_limits_cdn_quality_to_approved_host()
     test_youtube_edge_prefetch_skips_recent_bad_quality_cache()
     test_youtube_edge_prefetch_quality_probe_can_score_existing_ipset_entries()
     test_youtube_edge_prefetch_protects_shared_google_candidates()

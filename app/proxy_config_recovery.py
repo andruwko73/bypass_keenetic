@@ -102,7 +102,8 @@ def rebuild_proxy_core_config(
         route_only_tproxy_protocols=_configured_protocols(config_module, 'xray_route_only_tproxy_protocols'),
         strict_transparent_protocols=strict_transparent_protocols,
         transparent_route_policies=compile_protocol_policies(
-            _transparent_route_entries(), strict_transparent_protocols,
+            _transparent_route_entries(),
+            strict_transparent_protocols,
         ),
         bittorrent_direct_enabled=bool(getattr(config_module, 'xray_bittorrent_direct_enabled', False)),
     )

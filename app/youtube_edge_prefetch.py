@@ -34,6 +34,10 @@ DEFAULT_WATCH_EDGE_MAX_HOSTS = 4
 DEFAULT_QUALITY_TARGET_MS = 1000
 DEFAULT_QUALITY_BAD_COOLDOWN_SECONDS = 3600
 DEFAULT_QUALITY_MAX_CANDIDATES = 12
+DEFAULT_DNS_QUALITY_HOSTS = ('i.ytimg.com',)
+DEFAULT_DNS_QUALITY_MIN_ADDRESSES = 2
+DEFAULT_DNS_QUALITY_MAX_ADDRESSES = 3
+DEFAULT_DNS_QUALITY_MAX_AGE_SECONDS = 2700
 GOOGLEVIDEO_EDGE_PREFIX_RE = re.compile(r'^rr[0-9a-z-]*---', re.IGNORECASE)
 QUALITY_CACHE_FIELDS = (
     'quality_last_checked',
@@ -370,6 +374,70 @@ def load_cache(path, *, now=None, ttl_seconds=DEFAULT_CACHE_TTL_SECONDS, max_ent
     if not isinstance(cache, dict):
         cache = _fresh_cache(now)
     return prune_cache(cache, now=now, ttl_seconds=ttl_seconds, max_entries=max_entries)
+
+
+def quality_host_addresses(
+    cache,
+    *,
+    hosts=DEFAULT_DNS_QUALITY_HOSTS,
+    now=None,
+    min_addresses=DEFAULT_DNS_QUALITY_MIN_ADDRESSES,
+    max_addresses=DEFAULT_DNS_QUALITY_MAX_ADDRESSES,
+    max_age_seconds=DEFAULT_DNS_QUALITY_MAX_AGE_SECONDS,
+):
+    """Return recent, successful IPv4 answers for exact stable YouTube hosts.
+
+    The result is deliberately conservative: a host is omitted unless it has
+    enough independently successful addresses.  Callers can then retain normal
+    DNS instead of pinning a single CDN endpoint after a partial outage.
+    """
+    requested = normalize_hosts(hosts)
+    if not requested:
+        return {}
+    try:
+        now_value = float(time.time() if now is None else now)
+    except (TypeError, ValueError):
+        now_value = time.time()
+    min_count = max(1, int(min_addresses or DEFAULT_DNS_QUALITY_MIN_ADDRESSES))
+    max_count = max(min_count, int(max_addresses or DEFAULT_DNS_QUALITY_MAX_ADDRESSES))
+    freshness = max(0, int(max_age_seconds or DEFAULT_DNS_QUALITY_MAX_AGE_SECONDS))
+    requested_set = set(requested)
+    grouped = {host: [] for host in requested}
+    entries = (cache or {}).get('entries') if isinstance(cache, dict) else {}
+    if not isinstance(entries, dict):
+        entries = {}
+    for address, raw_entry in entries.items():
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
+        host_values = normalize_hosts((entry.get('host'),))
+        host = host_values[0] if host_values else ''
+        if host not in requested_set or not is_public_ipv4(address):
+            continue
+        checked_at = _bounded_int(entry.get('quality_last_checked'), 0, minimum=0)
+        ok_at = _bounded_int(entry.get('quality_last_ok'), 0, minimum=0)
+        fail_at = _bounded_int(entry.get('quality_last_fail'), 0, minimum=0)
+        if not checked_at or not ok_at or fail_at > ok_at:
+            continue
+        if freshness and now_value - ok_at > freshness:
+            continue
+        latency_ms = _bounded_int(entry.get('quality_latency_ms'), 0, minimum=0)
+        grouped[host].append((latency_ms or 2 ** 31, -ok_at, str(address)))
+    selected = {}
+    for host in requested:
+        values = sorted(set(grouped[host]))
+        if len(values) >= min_count:
+            selected[host] = tuple(address for _latency, _seen, address in values[:max_count])
+    return selected
+
+
+def render_quality_hosts_file(host_addresses):
+    """Render a dnsmasq addn-hosts payload from approved host/address pairs."""
+    lines = ['# Managed by bypass_keenetic YouTube CDN quality worker.']
+    for host in normalize_hosts((host_addresses or {}).keys()):
+        addresses = (host_addresses or {}).get(host) or ()
+        for address in addresses:
+            if is_public_ipv4(address):
+                lines.append(f'{address} {host}')
+    return '\n'.join(lines) + '\n'
 
 
 def save_cache(path, cache, *, now=None, ttl_seconds=DEFAULT_CACHE_TTL_SECONDS, max_entries=DEFAULT_MAX_CACHE_ENTRIES):

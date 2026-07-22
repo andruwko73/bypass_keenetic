@@ -201,6 +201,13 @@ def _config_sequence(name, default=()):
         return tuple(default)
 
 
+def _config_current_or_legacy(name, legacy_name, default):
+    """Prefer the protocol-neutral setting while accepting old router config."""
+    if hasattr(config, name):
+        return getattr(config, name)
+    return getattr(config, legacy_name, default)
+
+
 def _requests_module():
     import requests
     return requests
@@ -911,41 +918,114 @@ def _mark_active_telegram_failure(message):
         )
 
 
-YOUTUBE_VLESS2_FAILOVER_ENABLED = bool(getattr(config, 'youtube_vless2_failover_enabled', True))
-YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS = max(180, int(getattr(config, 'youtube_vless2_failover_grace_seconds', 180)))
-YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS = max(120, int(getattr(config, 'youtube_vless2_failover_poll_seconds', 120)))
-YOUTUBE_VLESS2_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(
-    max(300, int(getattr(config, 'youtube_vless2_failover_switch_cooldown_seconds', 300)))
+YOUTUBE_ROUTE_FAILOVER_ENABLED = bool(
+    _config_current_or_legacy('youtube_route_failover_enabled', 'youtube_vless2_failover_enabled', True)
 )
-YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT = float(
-    max(6.0, float(getattr(config, 'youtube_vless2_failover_check_connect_timeout', 6)))
-)
-YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT = float(
-    max(10.0, float(getattr(config, 'youtube_vless2_failover_check_read_timeout', 10)))
-)
-YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES = max(3, int(getattr(config, 'youtube_vless2_failover_confirm_retries', 3)))
-YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = max(
-    8.0,
-    float(getattr(config, 'youtube_vless2_failover_confirm_delay_seconds', 8.0)),
-)
-YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL = max(
+YOUTUBE_ROUTE_FAILOVER_GRACE_SECONDS = max(180, int(
+    _config_current_or_legacy('youtube_route_failover_grace_seconds', 'youtube_vless2_failover_grace_seconds', 180)
+))
+YOUTUBE_ROUTE_FAILOVER_POLL_SECONDS = max(120, int(
+    _config_current_or_legacy('youtube_route_failover_poll_seconds', 'youtube_vless2_failover_poll_seconds', 120)
+))
+YOUTUBE_ROUTE_FAILOVER_SWITCH_COOLDOWN_SECONDS = int(max(300, int(
+    _config_current_or_legacy(
+        'youtube_route_failover_switch_cooldown_seconds',
+        'youtube_vless2_failover_switch_cooldown_seconds',
+        300,
+    )
+)))
+YOUTUBE_ROUTE_FAILOVER_CHECK_CONNECT_TIMEOUT = float(max(6.0, float(
+    _config_current_or_legacy(
+        'youtube_route_failover_check_connect_timeout',
+        'youtube_vless2_failover_check_connect_timeout',
+        6,
+    )
+)))
+YOUTUBE_ROUTE_FAILOVER_CHECK_READ_TIMEOUT = float(max(10.0, float(
+    _config_current_or_legacy(
+        'youtube_route_failover_check_read_timeout',
+        'youtube_vless2_failover_check_read_timeout',
+        10,
+    )
+)))
+YOUTUBE_ROUTE_FAILOVER_CONFIRM_RETRIES = max(3, int(
+    _config_current_or_legacy(
+        'youtube_route_failover_confirm_retries',
+        'youtube_vless2_failover_confirm_retries',
+        3,
+    )
+))
+YOUTUBE_ROUTE_FAILOVER_CONFIRM_DELAY_SECONDS = max(8.0, float(
+    _config_current_or_legacy(
+        'youtube_route_failover_confirm_delay_seconds',
+        'youtube_vless2_failover_confirm_delay_seconds',
+        8.0,
+    )
+))
+YOUTUBE_ROUTE_FAILOVER_RECENT_SUCCESS_TTL = max(0, int(
+    _config_current_or_legacy(
+        'youtube_route_failover_recent_success_ttl',
+        'youtube_vless2_failover_recent_success_ttl',
+        900,
+    )
+))
+YOUTUBE_ROUTE_HEALTHCHECK_URLS = tuple(_config_current_or_legacy(
+    'youtube_route_healthcheck_urls',
+    'youtube_vless2_healthcheck_urls',
+    _POOL_YOUTUBE_HEALTHCHECK_URLS,
+))
+YOUTUBE_ROUTE_HEALTHCHECK_MIN_OK = max(1, int(_config_current_or_legacy(
+    'youtube_route_healthcheck_min_ok',
+    'youtube_vless2_healthcheck_min_ok',
+    _POOL_YOUTUBE_HEALTHCHECK_MIN_OK,
+)))
+YOUTUBE_ROUTE_RESTART_RECHECK_ENABLED = bool(_config_current_or_legacy(
+    'youtube_route_restart_recheck_enabled',
+    'youtube_vless2_restart_recheck_enabled',
+    True,
+))
+YOUTUBE_ROUTE_RESTART_RECHECK_COOLDOWN_SECONDS = max(120, int(
+    _config_current_or_legacy(
+        'youtube_route_restart_recheck_cooldown_seconds',
+        'youtube_vless2_restart_recheck_cooldown_seconds',
+        300,
+    )
+))
+YOUTUBE_ROUTE_FAILOVER_CONSECUTIVE_FAILURES = max(1, int(
+    _config_current_or_legacy(
+        'youtube_route_failover_consecutive_failures',
+        'youtube_vless2_failover_consecutive_failures',
+        3,
+    )
+))
+YOUTUBE_ROUTE_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS = max(45, int(
+    _config_current_or_legacy(
+        'youtube_route_hard_failure_recovery_cooldown_seconds',
+        'youtube_vless2_hard_failure_recovery_cooldown_seconds',
+        90,
+    )
+))
+
+# Compatibility aliases for router configurations and narrow helpers created
+# before the route could be owned by any supported proxy protocol.
+YOUTUBE_VLESS2_FAILOVER_ENABLED = YOUTUBE_ROUTE_FAILOVER_ENABLED
+YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS = YOUTUBE_ROUTE_FAILOVER_GRACE_SECONDS
+YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS = YOUTUBE_ROUTE_FAILOVER_POLL_SECONDS
+YOUTUBE_VLESS2_FAILOVER_SWITCH_COOLDOWN_SECONDS = YOUTUBE_ROUTE_FAILOVER_SWITCH_COOLDOWN_SECONDS
+YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT = YOUTUBE_ROUTE_FAILOVER_CHECK_CONNECT_TIMEOUT
+YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT = YOUTUBE_ROUTE_FAILOVER_CHECK_READ_TIMEOUT
+YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES = YOUTUBE_ROUTE_FAILOVER_CONFIRM_RETRIES
+YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS = YOUTUBE_ROUTE_FAILOVER_CONFIRM_DELAY_SECONDS
+YOUTUBE_VLESS2_FAILOVER_RECENT_SUCCESS_TTL = YOUTUBE_ROUTE_FAILOVER_RECENT_SUCCESS_TTL
+YOUTUBE_VLESS2_HEALTHCHECK_URLS = YOUTUBE_ROUTE_HEALTHCHECK_URLS
+YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK = YOUTUBE_ROUTE_HEALTHCHECK_MIN_OK
+YOUTUBE_VLESS2_RESTART_RECHECK_ENABLED = YOUTUBE_ROUTE_RESTART_RECHECK_ENABLED
+YOUTUBE_VLESS2_RESTART_RECHECK_COOLDOWN_SECONDS = YOUTUBE_ROUTE_RESTART_RECHECK_COOLDOWN_SECONDS
+YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES = YOUTUBE_ROUTE_FAILOVER_CONSECUTIVE_FAILURES
+YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS = YOUTUBE_ROUTE_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS
+EVENT_HISTORY_DUPLICATE_WINDOW_SECONDS = max(
     0,
-    int(getattr(config, 'youtube_vless2_failover_recent_success_ttl', 900)),
-)
-YOUTUBE_VLESS2_HEALTHCHECK_URLS = tuple(getattr(config, 'youtube_vless2_healthcheck_urls', _POOL_YOUTUBE_HEALTHCHECK_URLS))
-YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK = max(1, int(getattr(config, 'youtube_vless2_healthcheck_min_ok', _POOL_YOUTUBE_HEALTHCHECK_MIN_OK)))
-YOUTUBE_VLESS2_RESTART_RECHECK_ENABLED = bool(getattr(config, 'youtube_vless2_restart_recheck_enabled', True))
-YOUTUBE_VLESS2_RESTART_RECHECK_COOLDOWN_SECONDS = max(
-    120,
-    int(getattr(config, 'youtube_vless2_restart_recheck_cooldown_seconds', 300)),
-)
-YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES = max(
-    1,
-    int(getattr(config, 'youtube_vless2_failover_consecutive_failures', 3)),
-)
-YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS = max(
-    45,
-    int(getattr(config, 'youtube_vless2_hard_failure_recovery_cooldown_seconds', 90)),
+    int(getattr(config, 'event_history_duplicate_window_seconds', 300)),
 )
 YOUTUBE_STREAM_GUARD_ENABLED = bool(getattr(config, 'youtube_stream_guard_enabled', True))
 YOUTUBE_STREAM_GUARD_HOLD_SECONDS = max(60, int(getattr(config, 'youtube_stream_guard_hold_seconds', 300)))
@@ -954,8 +1034,8 @@ YOUTUBE_STREAM_GUARD_MIN_BYTES = max(1024, int(getattr(config, 'youtube_stream_g
 YOUTUBE_STREAM_GUARD_MIN_PACKETS = max(1, int(getattr(config, 'youtube_stream_guard_min_packets', 8)))
 YOUTUBE_STREAM_GUARD_LOG_INTERVAL = max(60, int(getattr(config, 'youtube_stream_guard_log_interval_seconds', 180)))
 YOUTUBE_STREAM_GUARD_EVENT_INTERVAL = max(
-    1800,
-    int(getattr(config, 'youtube_stream_guard_event_interval_seconds', 1800)),
+    21600,
+    int(getattr(config, 'youtube_stream_guard_event_interval_seconds', 21600)),
 )
 YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS = max(
     1.0,
@@ -1021,14 +1101,15 @@ YOUTUBE_EDGE_PREFETCH_DNS_SERVERS = _config_sequence(
     _YOUTUBE_EDGE_PREFETCH_DEFAULT_DNS_SERVERS,
 )
 YOUTUBE_EDGE_PREFETCH_EXCLUSIVE_IPSETS = bool(getattr(config, 'youtube_edge_prefetch_exclusive_ipsets', True))
-youtube_vless2_failover_state = {
+youtube_route_failover_state = {
     'last_ok': 0.0,
     'last_fail': 0.0,
     'last_attempt': 0.0,
     'consecutive_failures': 0,
     'in_progress': False,
 }
-youtube_failover_states = {'vless2': youtube_vless2_failover_state}
+youtube_vless2_failover_state = youtube_route_failover_state
+youtube_failover_states = {}
 youtube_stream_guard_state = {
     'last_active': 0.0,
     'last_log': 0.0,
@@ -2030,6 +2111,10 @@ def _attempt_youtube_failover():
 
 
 def _attempt_youtube_vless2_failover():
+    return _attempt_youtube_route_failover()
+
+
+def _attempt_youtube_route_failover():
     return _attempt_youtube_failover()
 
 
@@ -2055,14 +2140,14 @@ def _run_auto_failover_cycle():
 
 
 def _run_youtube_failover_cycle():
-    if not YOUTUBE_VLESS2_FAILOVER_ENABLED or not _app_mode_pool_enabled():
+    if not YOUTUBE_ROUTE_FAILOVER_ENABLED or not _app_mode_pool_enabled():
         return
     ran = False
     try:
         if _background_task_allowed('YouTube failover', task_class='critical'):
             ran, _result = _run_coordinated_background_task(
                 'YouTube failover',
-                _attempt_youtube_vless2_failover,
+                _attempt_youtube_route_failover,
             )
     except Exception as exc:
         _write_runtime_log(f'YouTube failover error: {exc}')
@@ -2956,6 +3041,7 @@ def _record_event(action, message='', level='info', source='system', protocol='s
         service=service,
         key_hash=key_hash,
         details=details,
+        dedupe_seconds=EVENT_HISTORY_DUPLICATE_WINDOW_SECONDS,
     )
 
 
@@ -3009,12 +3095,23 @@ def _audit_key_switch(source, proto, key_value, reason=''):
             file.write(line)
     except Exception:
         pass
+    source = str(source or 'system').strip()
+    auto_source = source in ('youtube_auto_failover', 'telegram_auto_failover', 'auto_failover')
+    service = 'youtube' if source == 'youtube_auto_failover' else ('telegram' if auto_source else '')
+    message = f'Автоматически выбран ключ: {display_name}' if auto_source else display_name
+    if reason:
+        message = f'{message}. Причина: {reason}'
     _record_event(
-        action='key_switch',
+        action='key_switch_auto' if auto_source else 'key_switch',
         source=source,
         protocol=proto,
+        service=service,
         key_hash=key_id,
-        message=f'{display_name} {reason}'.strip(),
+        message=message.strip(),
+        details={
+            'mode': 'automatic' if auto_source else 'manual',
+            'reason': reason,
+        },
     )
 
 

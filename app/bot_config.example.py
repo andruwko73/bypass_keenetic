@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.973
+# ВЕРСИЯ СКРИПТА v1.974
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -149,6 +149,16 @@ youtube_edge_prefetch_quality_target_ms = 1000
 youtube_edge_prefetch_quality_timeout_seconds = 5
 youtube_edge_prefetch_quality_bad_cooldown_seconds = 3600
 youtube_edge_prefetch_quality_max_candidates = 12
+youtube_edge_dns_quality_enabled = True  # use only fresh, independently approved CDN addresses
+youtube_edge_dns_quality_hosts = ('i.ytimg.com',)
+youtube_edge_dns_quality_hosts_path = '/opt/etc/bot/youtube_edge_quality.hosts'
+youtube_edge_dnsmasq_config_path = '/opt/etc/dnsmasq.conf'
+youtube_edge_dns_quality_min_addresses = 2
+youtube_edge_dns_quality_max_addresses = 3
+youtube_edge_dns_quality_max_age_seconds = 2700
+youtube_edge_cdn_quality_interval_seconds = 1800
+youtube_edge_cdn_quality_max_candidates = 6
+youtube_edge_cdn_quality_timeout_seconds = 3
 youtube_edge_prefetch_scheduler_max_cpu_percent = 45
 youtube_edge_prefetch_scheduler_max_load1 = 2.0
 youtube_edge_prefetch_cpu_sample_ms = 250
@@ -166,6 +176,8 @@ youtube_edge_watch_warm_max_hosts = 6
 youtube_edge_watch_warm_max_bytes = 450000
 youtube_edge_watch_warm_connect_timeout = 4
 youtube_edge_watch_warm_max_time = 10
+youtube_edge_watch_warm_retry_count = 2  # одна короткая повторная попытка только при сбое прогрева
+youtube_edge_watch_warm_retry_delay_seconds = 2.0
 youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')
 youtube_edge_prefetch_hosts = (
     'www.youtube.com',
@@ -209,26 +221,27 @@ reality_endpoint_repair_max_candidates = 6
 reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')
 auto_failover_startup_hold_seconds = 180  # после рестарта бот не переключает Telegram-ключи, пока Xray и маршруты стабилизируются
 auto_failover_idle_log_interval_seconds = 900  # log healthy idle Telegram failover gate rarely; confirmed failures still trigger immediately
-youtube_vless2_failover_enabled = True  # YouTube остается на Vless 2: если текущий Vless2 ключ перестал отвечать, бот подберет другой из пула Vless2
+youtube_route_failover_enabled = True  # если ключ текущего маршрута YouTube перестал отвечать, бот подберёт другой ключ только из пула этого протокола
 auto_failover_consecutive_failures = 3  # switch Telegram key only after repeated confirmed failures
 auto_failover_traffic_guard_bypass_failures = 3  # allow Telegram failover through traffic guard after repeated confirmed failures
-youtube_vless2_failover_grace_seconds = 180
-youtube_vless2_failover_poll_seconds = 120
-youtube_vless2_failover_switch_cooldown_seconds = 300
-youtube_vless2_failover_check_connect_timeout = 6
-youtube_vless2_failover_check_read_timeout = 10
-youtube_vless2_failover_confirm_retries = 3
-youtube_vless2_failover_confirm_delay_seconds = 8.0
+youtube_route_failover_grace_seconds = 180
+youtube_route_failover_poll_seconds = 120
+youtube_route_failover_switch_cooldown_seconds = 300
+youtube_route_failover_check_connect_timeout = 6
+youtube_route_failover_check_read_timeout = 10
+youtube_route_failover_confirm_retries = 3
+youtube_route_failover_confirm_delay_seconds = 8.0
 active_status_recent_success_ttl = 900
 auto_failover_recent_success_ttl = 900
-youtube_vless2_failover_recent_success_ttl = 900
-youtube_vless2_restart_recheck_enabled = True
-youtube_vless2_restart_recheck_cooldown_seconds = 300
-youtube_vless2_failover_consecutive_failures = 3
-youtube_vless2_hard_failure_recovery_cooldown_seconds = 90
+youtube_route_failover_recent_success_ttl = 900
+youtube_route_restart_recheck_enabled = True
+youtube_route_restart_recheck_cooldown_seconds = 300
+youtube_route_failover_consecutive_failures = 3
+youtube_route_hard_failure_recovery_cooldown_seconds = 90
+event_history_duplicate_window_seconds = 300  # объединять только одинаковые фоновые события; смены ключей всегда видны отдельно
 youtube_stream_guard_scan_cache_seconds = 8.0  # reuse recent conntrack scan results to avoid repeated CPU spikes
 youtube_stream_guard_failover_hold_seconds = 45  # Если при просмотре YouTube трафик пропал, автозамена Vless2 сможет продолжиться после этой паузы
-youtube_stream_guard_event_interval_seconds = 1800  # не чаще одного stream_guard_defer в истории за 30 минут
+youtube_stream_guard_event_interval_seconds = 21600  # не чаще одного stream_guard_defer в истории за 6 часов
 
 # следующие настройки могут быть оставлены по умолчанию, но можно будет что-то поменять
 localportsh = '1082'  # локальный порт для shadowsocks

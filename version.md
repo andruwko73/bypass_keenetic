@@ -1,5 +1,5 @@
-*v1.973 (21 Jul 2026) -* main
+*v1.974 (22 Jul 2026) -* main
 
-*Sends detected BitTorrent traffic directly, so ordinary torrent transfers do not consume a proxy key.*
+*Keeps every YouTube address exclusively on its configured route, adds a guarded small CDN-quality preference, and makes key failover history clearer.*
 
-*Adds an optional strict transparent-route policy: confirmed service addresses remain proxied, while unknown transparent traffic stays direct. The option is disabled by default.*
+*Uses only two or three freshly approved `i.ytimg.com` addresses for an optional DNS preference; normal DNS remains active whenever the quality threshold is not met.*

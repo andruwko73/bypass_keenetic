@@ -347,6 +347,26 @@ def compact_event_details(details):
     return ' · '.join(parts)
 
 
+EVENT_ACTION_LABELS = {
+    'key_switch': 'Смена ключа',
+    'key_switch_auto': 'Автоматическая смена ключа',
+}
+
+EVENT_SOURCE_LABELS = {
+    'youtube_auto_failover': 'автоматически: YouTube',
+    'telegram_auto_failover': 'автоматически: Telegram',
+    'auto_failover': 'автоматически: Telegram',
+    'youtube_failover_restore': 'восстановление YouTube',
+    'web_pool_apply': 'веб-интерфейс',
+    'web_manual_install': 'веб-интерфейс',
+}
+AUTO_FAILOVER_SOURCES = frozenset({
+    'youtube_auto_failover',
+    'telegram_auto_failover',
+    'auto_failover',
+})
+
+
 def render_event_history_html(events, *, time_formatter=None):
     events = events or []
     if not events:
@@ -364,16 +384,25 @@ def render_event_history_html(events, *, time_formatter=None):
         except Exception:
             stamp = ''
         level = html.escape(event.get('level') or 'info', quote=True)
-        action = html.escape(event.get('action') or '')
+        action_value = event.get('action') or ''
         protocol = html.escape(event.get('protocol_label') or event.get('protocol') or '')
         service = html.escape(event.get('service') or '')
-        source = html.escape(event.get('source') or '')
+        source_value = event.get('source') or ''
+        if action_value == 'key_switch' and source_value in AUTO_FAILOVER_SOURCES:
+            action_value = 'key_switch_auto'
+        action = html.escape(EVENT_ACTION_LABELS.get(action_value, action_value))
+        source = html.escape(EVENT_SOURCE_LABELS.get(source_value, source_value))
         key_hash = html.escape(event.get('key_hash') or '')
         message = html.escape(event.get('message') or '')
         details_text = compact_event_details(event.get('details') or {})
         details = html.escape(details_text)
+        try:
+            repeat_count = max(1, int(event.get('repeat_count') or 1))
+        except (TypeError, ValueError):
+            repeat_count = 1
+        repeat_label = f'Повторов: {repeat_count}' if repeat_count > 1 else ''
         meta = ' · '.join(item for item in (protocol, service, source, key_hash) if item)
-        message_line = ' · '.join(item for item in (message, details) if item)
+        message_line = ' · '.join(item for item in (message, details, repeat_label) if item)
         title = html.escape(
             ' | '.join(
                 item for item in (
@@ -382,6 +411,7 @@ def render_event_history_html(events, *, time_formatter=None):
                     meta,
                     event.get('message') or '',
                     details_text,
+                    repeat_label,
                 )
                 if item
             ),

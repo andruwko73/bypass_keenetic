@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import threading
 import time
 from collections import deque
 
@@ -10,6 +11,15 @@ MAX_EVENTS = 120
 TRIM_EVERY_WRITES = 10
 TRIM_SIZE_BYTES = 96 * 1024
 _trim_write_counts = {}
+_recent_event_lock = threading.Lock()
+_recent_event_fingerprints = {}
+MAX_RECENT_EVENT_FINGERPRINTS = 128
+NEVER_DEDUPLICATE_ACTIONS = frozenset({'key_switch', 'key_switch_auto'})
+DISPLAY_COMPACT_ACTIONS = frozenset({
+    'stream_guard_defer',
+    'udp_quic_drift_fast_add',
+    'auto_failover_skip',
+})
 
 PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
@@ -99,6 +109,41 @@ def _compact_event_detail(action, key, value):
     return value
 
 
+def _event_fingerprint(event):
+    return json.dumps(
+        {
+            'action': event.get('action') or '',
+            'level': event.get('level') or '',
+            'source': event.get('source') or '',
+            'protocol': event.get('protocol') or '',
+            'service': event.get('service') or '',
+            'key_hash': event.get('key_hash') or '',
+            'message': event.get('message') or '',
+            'details': event.get('details') or {},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+
+
+def _event_is_recent_duplicate(event, path, dedupe_seconds):
+    try:
+        window = max(0, int(dedupe_seconds or 0))
+        timestamp = int(event.get('ts') or 0)
+    except (TypeError, ValueError):
+        return False
+    if not window or event.get('action') in NEVER_DEDUPLICATE_ACTIONS:
+        return False
+    key = (str(path or ''), _event_fingerprint(event))
+    with _recent_event_lock:
+        previous = _recent_event_fingerprints.get(key)
+        _recent_event_fingerprints[key] = timestamp
+        if len(_recent_event_fingerprints) > MAX_RECENT_EVENT_FINGERPRINTS:
+            _recent_event_fingerprints.pop(next(iter(_recent_event_fingerprints)), None)
+    return previous is not None and timestamp >= previous and timestamp - previous < window
+
+
 def _trim_history(path, max_events, *, force=False):
     if not force:
         _trim_write_counts[path] = int(_trim_write_counts.get(path, 0) or 0) + 1
@@ -144,6 +189,7 @@ def record_event(
     details=None,
     event_path=None,
     max_events=MAX_EVENTS,
+    dedupe_seconds=0,
     time_provider=time.time,
 ):
     path = _event_path(event_path)
@@ -170,6 +216,8 @@ def record_event(
             for key, value in details.items()
             if value is not None
         }
+    if _event_is_recent_duplicate(event, path, dedupe_seconds):
+        return True
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'a', encoding='utf-8') as file:
@@ -201,6 +249,22 @@ def _redact_loaded_event(event):
     return event
 
 
+def _display_compact_key(event):
+    """Return the display group for noisy technical events, never key switches."""
+    action = str(event.get('action') or '')
+    if action not in DISPLAY_COMPACT_ACTIONS:
+        return None
+    details = event.get('details')
+    reason = details.get('reason') if isinstance(details, dict) else ''
+    return (
+        action,
+        str(event.get('source') or ''),
+        _normalize_protocol(event.get('protocol')),
+        str(event.get('service') or ''),
+        str(reason or ''),
+    )
+
+
 def load_events(limit=50, *, event_path=None):
     path = _event_path(event_path)
     try:
@@ -209,10 +273,13 @@ def load_events(limit=50, *, event_path=None):
         limit_value = 50
     try:
         with open(path, 'r', encoding='utf-8', errors='ignore') as file:
-            lines = deque((line.strip() for line in file if line.strip()), maxlen=max(limit_value * 2, limit_value + 20))
+            # The on-disk history is capped at MAX_EVENTS, so one bounded read can
+            # compact every technical repeat before applying the display limit.
+            lines = deque((line.strip() for line in file if line.strip()), maxlen=MAX_EVENTS)
     except Exception:
         return []
     events = []
+    compacted = {}
     for line in reversed(lines):
         try:
             event = json.loads(line)
@@ -221,6 +288,14 @@ def load_events(limit=50, *, event_path=None):
         if isinstance(event, dict):
             event = _redact_loaded_event(event)
             event['protocol_label'] = PROTOCOL_LABELS.get(event.get('protocol'), event.get('protocol') or 'Система')
+            compact_key = _display_compact_key(event)
+            if compact_key:
+                previous = compacted.get(compact_key)
+                if previous is not None:
+                    previous['repeat_count'] = int(previous.get('repeat_count') or 1) + 1
+                    continue
+                event['repeat_count'] = 1
+                compacted[compact_key] = event
             events.append(event)
         if len(events) >= limit_value:
             break

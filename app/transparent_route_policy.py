@@ -26,7 +26,6 @@ STRICT_TRANSPARENT_IP_PORTS = {
     'vless2': '80,443',
 }
 
-
 def normalize_protocol_set(value, allowed=SUPPORTED_PROTOCOLS):
     """Return a stable set of configured protocol names.
 

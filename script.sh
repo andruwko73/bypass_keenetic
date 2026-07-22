@@ -1317,6 +1317,16 @@ PYCFG
     sed -i 's/^youtube_edge_prefetch_quality_max_candidates[[:space:]]*=.*/youtube_edge_prefetch_quality_max_candidates = 12/' "$BOT_CONFIG_PATH" || true
   fi
   grep -Eq '^youtube_edge_prefetch_quality_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_quality_max_candidates = 12\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_dns_quality_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_dns_quality_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_dns_quality_hosts[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_dns_quality_hosts = ('i.ytimg.com',)\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_dns_quality_hosts_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_dns_quality_hosts_path = '/opt/etc/bot/youtube_edge_quality.hosts'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_dnsmasq_config_path[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_dnsmasq_config_path = '/opt/etc/dnsmasq.conf'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_dns_quality_min_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_dns_quality_min_addresses = 2\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_dns_quality_max_addresses[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_dns_quality_max_addresses = 3\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_dns_quality_max_age_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_dns_quality_max_age_seconds = 2700\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_cdn_quality_interval_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_cdn_quality_interval_seconds = 1800\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_cdn_quality_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_cdn_quality_max_candidates = 6\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_cdn_quality_timeout_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_cdn_quality_timeout_seconds = 3\n' >> "$BOT_CONFIG_PATH"
   if grep -Eq '^youtube_edge_prefetch_scheduler_max_cpu_percent[[:space:]]*=[[:space:]]*60([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
     sed -i 's/^youtube_edge_prefetch_scheduler_max_cpu_percent[[:space:]]*=.*/youtube_edge_prefetch_scheduler_max_cpu_percent = 45/' "$BOT_CONFIG_PATH" || true
   fi
@@ -1329,7 +1339,8 @@ PYCFG
   grep -Eq '^youtube_edge_prefetch_unblock_lock_stale_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_unblock_lock_stale_seconds = 600\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^active_status_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'active_status_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^auto_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
-  grep -Eq '^youtube_vless2_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_vless2_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^(youtube_route_failover_recent_success_ttl|youtube_vless2_failover_recent_success_ttl)[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^event_history_duplicate_window_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'event_history_duplicate_window_seconds = 300\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_urls[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_watch_warm_urls = ('https://www.youtube.com/watch?v=aqz-KE-bpKQ', 'https://www.youtube.com/watch?v=jfKfPfyJRdk')\n" >> "$BOT_CONFIG_PATH"
   if grep -Eq '^youtube_edge_watch_warm_max_pages[[:space:]]*=[[:space:]]*2([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
@@ -1352,6 +1363,8 @@ PYCFG
     sed -i 's/^youtube_edge_watch_warm_max_time[[:space:]]*=.*/youtube_edge_watch_warm_max_time = 10/' "$BOT_CONFIG_PATH" || true
   fi
   grep -Eq '^youtube_edge_watch_warm_max_time[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_max_time = 10\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_watch_warm_retry_count[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_retry_count = 2\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_edge_watch_warm_retry_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_retry_delay_seconds = 2.0\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_prefetch_dns_servers[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "youtube_edge_prefetch_dns_servers = ('local', '1.1.1.1', '8.8.8.8')\n" >> "$BOT_CONFIG_PATH"
   if ! grep -Eq '^youtube_edge_prefetch_hosts[[:space:]]*=' "$BOT_CONFIG_PATH"; then
     cat >> "$BOT_CONFIG_PATH" <<'PYCFG'
@@ -1817,6 +1830,8 @@ PY
     rm -f /opt/etc/dnsmasq.conf
     curl -o /opt/etc/dnsmasq.conf "$(repo_file_url dnsmasq.conf)"
     chmod 755 /opt/etc/dnsmasq.conf
+    mkdir -p "$BOT_RUNTIME_DIR"
+    [ -f "$BOT_RUNTIME_DIR/youtube_edge_quality.hosts" ] || printf '# Managed by bypass_keenetic YouTube CDN quality worker.\n' > "$BOT_RUNTIME_DIR/youtube_edge_quality.hosts"
     sed -i "s/192.168.1.1/${lanip}/g" /opt/etc/dnsmasq.conf
     sed -i "s/40500/${dnsovertlsport}/g" /opt/etc/dnsmasq.conf
     sed -i "s/40508/${dnsoverhttpsport}/g" /opt/etc/dnsmasq.conf
@@ -2024,6 +2039,11 @@ if [ "$1" = "-update" ]; then
 
     mv "$stage_dir/dnsmasq.conf" /opt/etc/dnsmasq.conf
     chmod 755 /opt/etc/dnsmasq.conf
+    mkdir -p "$BOT_RUNTIME_DIR"
+    [ -f "$BOT_RUNTIME_DIR/youtube_edge_quality.hosts" ] || printf '# Managed by bypass_keenetic YouTube CDN quality worker.\n' > "$BOT_RUNTIME_DIR/youtube_edge_quality.hosts"
+    if [ -x /opt/etc/init.d/S56dnsmasq ]; then
+      /opt/etc/init.d/S56dnsmasq restart > /dev/null 2>&1 || /opt/etc/init.d/S56dnsmasq start > /dev/null 2>&1 || true
+    fi
     mv "$stage_dir/crontab" /opt/etc/crontab
     chmod 755 /opt/etc/crontab
     install_unblock_ipset_cron_job || true

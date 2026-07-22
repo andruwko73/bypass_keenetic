@@ -1,10 +1,12 @@
-<a name="1.973"></a>
-# [1.973] - 21 Jul 2026
+<a name="1.974"></a>
+# [1.974] - 22 Jul 2026
 
-- Added the Xray `bittorrent-direct` rule for transparent and TPROXY traffic, enabled by default.
-- Added an optional strict transparent-route policy: known service domains and IP ranges use the selected proxy, and other transparent traffic remains direct.
-- Preserved the existing proxy behaviour by default; `routeOnly` options remain disabled until explicitly selected.
-- Included the transparent-route policy module in installation, update and recovery paths.
+- Kept all YouTube traffic on the protocol selected for the YouTube list: no port-only 80/443 fallback, automatic key change, pool rewrite, list change, or route-owner change is introduced by this release.
+- Added a bounded, separate CDN-quality worker for the stable `i.ytimg.com` host: at most six addresses are checked every 30 minutes, and dnsmasq receives a preference only after at least two fresh successful checks. If the threshold is not met, the optional override is cleared and normal DNS remains in use.
+- Isolated the CDN-quality status from the ordinary YouTube prefetch schedule; it yields to pool, list, CPU, load, and memory guards and does not fetch watch pages.
+- Added a second watch-page warm-up attempt with compact diagnostics when the first request fails.
+- Made automatic key changes explicit in the web event history, including legacy Telegram and YouTube failover entries.
+- Compacted repeated technical stream-guard events in the display while keeping every key-switch record visible.
 
 <a name="1.972"></a>
 # [1.972] - 20 Jul 2026
