@@ -95,6 +95,8 @@ def attempt_auto_failover(
     repair_active_proxy=None,
     audit_key_switch=None,
     defer_switch=None,
+    confirm_candidate=None,
+    max_runtime_candidates=3,
     time_provider=time.time,
 ):
     now = time_provider()
@@ -350,28 +352,102 @@ def attempt_auto_failover(
             f'Auto-failover: Telegram API не отвечает >{grace_seconds}s '
             f'(режим {proxy_mode}). Проверяем кандидатов через временный xray.'
         )
-        candidate = find_pool_failover_candidate(candidates, service='telegram')
-        if not candidate:
+        remaining_candidates = list(candidates)
+        attempted_candidates = 0
+        try:
+            max_attempts = max(1, int(max_runtime_candidates or 1))
+        except (TypeError, ValueError):
+            max_attempts = 3
+        while remaining_candidates and attempted_candidates < max_attempts:
+            candidate = find_pool_failover_candidate(remaining_candidates, service='telegram')
+            if not candidate:
+                break
+
+            proto, key_value, tg_ok, yt_ok = candidate
+            attempted_candidates += 1
+            remaining_candidates = [
+                item for item in remaining_candidates
+                if not (item[0] == proto and item[1] == key_value)
+            ]
+            try:
+                result = install_key_for_protocol(proto, key_value, verify=False)
+            except Exception as exc:
+                record_key_probe(
+                    proto,
+                    key_value,
+                    tg_ok=False,
+                    yt_ok=None,
+                    verification_kind='runtime',
+                    allow_recent_success_downgrade=True,
+                )
+                log(f'Auto-failover: ошибка установки {proto} ключа; пробуем следующий кандидат: {exc}')
+                continue
+
+            try:
+                update_result = update_proxy(proto)
+                if isinstance(update_result, tuple) and update_result and update_result[0] is False:
+                    raise RuntimeError(str(update_result[1] or 'failed to activate candidate proxy'))
+                if callable(confirm_candidate):
+                    confirm_ok, confirm_message = confirm_candidate(proto, key_value)
+                else:
+                    confirm_ok, confirm_message = check_telegram_api(
+                        proxy_url,
+                        connect_timeout=max(float(connect_timeout or 0), 5.0),
+                        read_timeout=max(float(read_timeout or 0), 8.0),
+                    )
+            except Exception as exc:
+                confirm_ok, confirm_message = False, f'candidate activation failed: {exc}'
+            if confirm_ok is not True:
+                record_key_probe(
+                    proto,
+                    key_value,
+                    tg_ok=False,
+                    yt_ok=None,
+                    verification_kind='runtime',
+                    allow_recent_success_downgrade=True,
+                )
+                status = 'unavailable' if confirm_ok is None else 'failed'
+                log(
+                    f'Auto-failover: candidate {proto} passed temporary Xray screening but {status} '
+                    f'on the permanent proxy; trying the next candidate. {confirm_message}'
+                )
+                continue
+
+            set_active_key(proto, key_value)
+            if callable(audit_key_switch):
+                audit_key_switch('telegram_auto_failover', proto, key_value, failure_message)
+            record_key_probe(
+                proto,
+                key_value,
+                tg_ok=True,
+                yt_ok=yt_ok,
+                verification_kind='runtime',
+            )
+            state['last_ok'] = time_provider()
+            state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
+            log(
+                f'Auto-failover: переключено на {proto}; Telegram API подтверждён через рабочий Xray. {result}'
+            )
+            return True
+
+        if not attempted_candidates:
             log('Auto-failover: перебор ключей из пулов не дал доступа к Telegram API.')
             return False
-
-        proto, key_value, tg_ok, yt_ok = candidate
         try:
-            result = install_key_for_protocol(proto, key_value, verify=False)
-        except Exception as exc:
-            log(f'Auto-failover: ошибка установки {proto} ключа: {exc}')
+            install_key_for_protocol(proxy_mode, active_key, verify=False)
+            restore_result = update_proxy(proxy_mode)
+            if isinstance(restore_result, tuple) and restore_result and restore_result[0] is False:
+                raise RuntimeError(str(restore_result[1] or 'failed to restore previous proxy'))
+            set_active_key(proxy_mode, active_key)
+        except Exception as restore_exc:
+            log(f'Auto-failover: failed to restore previous {proxy_mode} key after all candidate checks: {restore_exc}')
             return False
-
-        update_proxy(proto)
-        set_active_key(proto, key_value)
-        if callable(audit_key_switch):
-            audit_key_switch('telegram_auto_failover', proto, key_value, failure_message)
-        record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok)
-        state['last_ok'] = time_provider()
-        state['last_fail'] = 0.0
-        state['consecutive_failures'] = 0
-        state['last_failure_message'] = ''
-        log(f'Auto-failover: переключено на {proto}; Telegram API доступен. {result}')
-        return True
+        log(
+            f'Auto-failover: {attempted_candidates} candidate(s) did not pass confirmation on the permanent proxy; '
+            f'previous {proxy_mode} configuration restored without marking it working.'
+        )
+        return False
     finally:
         state['in_progress'] = False

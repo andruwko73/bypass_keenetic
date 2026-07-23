@@ -9,10 +9,12 @@ KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 KEY_PROBE_CACHE_TTL = 3600
 KEY_PROBE_FAILURE_TTL = 300
 KEY_PROBE_MIN_WRITE_INTERVAL = 30
-KEY_PROBE_CACHE_SCHEMA_VERSION = 8
-KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7, 8)
+KEY_PROBE_CACHE_SCHEMA_VERSION = 9
+KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7, 8, 9)
 KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 KEY_PROBE_ERROR_TEXT_MAX_CHARS = 120
+PROBE_VERIFICATION_SCREENING = 'screening'
+PROBE_VERIFICATION_RUNTIME = 'runtime'
 YOUTUBE_QUALITY_STABLE = 'stable'
 YOUTUBE_QUALITY_FAST = 'fast'
 YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
@@ -192,6 +194,25 @@ def youtube_probe_state(entry):
     return 'unknown'
 
 
+def probe_verification_kind(entry):
+    """Return how the latest result was obtained, without trusting legacy cache data."""
+    if not isinstance(entry, dict):
+        return ''
+    value = str(entry.get('last_probe_kind') or '').strip().lower()
+    if value in (PROBE_VERIFICATION_SCREENING, PROBE_VERIFICATION_RUNTIME):
+        return value
+    return ''
+
+
+def probe_runtime_confirmed_at(entry):
+    if not isinstance(entry, dict):
+        return 0.0
+    try:
+        return max(0.0, float(entry.get('runtime_confirmed_ts') or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def youtube_probe_effective_ok(entry):
     return youtube_probe_state(entry) in ('ok', 'warn')
 
@@ -273,6 +294,7 @@ def update_key_probe_cache_entry(
     min_1600p_mbps=YOUTUBE_QUALITY_DEFAULT_1600P_MBPS,
     min_4k_mbps=YOUTUBE_QUALITY_DEFAULT_4K_MBPS,
     allow_recent_success_downgrade=False,
+    verification_kind=PROBE_VERIFICATION_RUNTIME,
 ):
     cache = cache if isinstance(cache, dict) else {}
     key_id = str(key_id or hash_key(key_value))
@@ -305,6 +327,9 @@ def update_key_probe_cache_entry(
         yt_score is not None or yt_quality is not None or yt_stream_tier is not None or
         bool(quality_error)
     )
+    normalized_verification_kind = str(verification_kind or '').strip().lower()
+    if normalized_verification_kind not in (PROBE_VERIFICATION_SCREENING, PROBE_VERIFICATION_RUNTIME):
+        normalized_verification_kind = PROBE_VERIFICATION_RUNTIME
     timeout = bool(timeout)
     if timeout:
         reason = _stored_error_text(timeout_reason, fallback='timeout')
@@ -482,9 +507,27 @@ def update_key_probe_cache_entry(
                 entry['custom_sig'] = signature
                 changed = True
 
-    if (not skipped_downgrade or changed) and (
+    may_refresh = (
         changed or not previous_ts or now - previous_ts >= float(min_write_interval or 0)
-    ):
+    )
+    if (timeout or has_probe_value) and may_refresh and (not skipped_downgrade or changed):
+        if entry.get('last_probe_kind') != normalized_verification_kind:
+            entry['last_probe_kind'] = normalized_verification_kind
+            changed = True
+        if normalized_verification_kind == PROBE_VERIFICATION_SCREENING:
+            if entry.get('screened_ts') != now:
+                entry['screened_ts'] = now
+                changed = True
+        else:
+            if entry.get('runtime_checked_ts') != now:
+                entry['runtime_checked_ts'] = now
+                changed = True
+            if tg_ok is True or yt_ok is True:
+                if entry.get('runtime_confirmed_ts') != now:
+                    entry['runtime_confirmed_ts'] = now
+                    changed = True
+
+    if (not skipped_downgrade or changed) and may_refresh:
         entry['ts'] = now
         changed = True
 

@@ -88,7 +88,13 @@ import youtube_healthcheck
 import youtube_edge_prefetch
 import youtube_edge_prefetch_runner
 import youtube_route_owner
-from proxy_config_builder import build_proxy_core_config, build_shadowsocks_config, build_trojan_config
+from proxy_config_builder import (
+    build_proxy_core_config,
+    build_shadowsocks_config,
+    build_trojan_config,
+    socks_inbound,
+    xray_base_config,
+)
 
 
 def test_pool_probe_runner_defers_failover_healthcheck_imports():
@@ -7503,6 +7509,7 @@ def test_auto_failover_runtime_helpers():
         log=lambda message: calls.append(('log', message)),
         grace_seconds=10,
         switch_cooldown_seconds=30,
+        confirm_candidate=lambda proto, key: calls.append(('confirm', proto, key)) or (True, 'confirmed'),
         time_provider=iter([20.0, 21.0]).__next__,
     )
     assert switched is True
@@ -7510,7 +7517,12 @@ def test_auto_failover_runtime_helpers():
     assert state['last_failure_message'] == ''
     assert state['last_fail'] == 0.0
     assert ('update', 'vless') in calls
-    assert any(call[0] == 'probe' and call[3] == {'tg_ok': True, 'yt_ok': None} for call in calls)
+    assert ('confirm', 'vless', 'next') in calls
+    assert any(
+        call[0] == 'probe' and
+        call[3] == {'tg_ok': True, 'yt_ok': None, 'verification_kind': 'runtime'}
+        for call in calls
+    )
     transient_calls = []
     transient_state = {
         'last_ok': 0.0,
@@ -7818,6 +7830,7 @@ def test_auto_failover_runtime_helpers():
             grace_seconds=10,
             switch_cooldown_seconds=30,
             min_consecutive_failures=3,
+            confirm_candidate=lambda proto, key: repeated_calls.append(('confirm', proto, key)) or (True, 'confirmed'),
             time_provider=iter([now_value, now_value + 1]).__next__,
         )
 
@@ -7895,6 +7908,7 @@ def test_auto_failover_runtime_helpers():
         grace_seconds=10,
         switch_cooldown_seconds=30,
         min_consecutive_failures=1,
+        confirm_candidate=lambda proto, key: exclude_calls.append(('confirm', proto, key)) or (True, 'confirmed'),
         time_provider=lambda: 20.0,
     ) is True
     assert ('exclude', ('other-active',)) in exclude_calls
@@ -8096,6 +8110,105 @@ def test_proxy_apply_runtime_helpers():
     assert routed_vless_records[0][2]['yt_stability'] == 'stable'
 
 
+def test_auto_failover_restores_candidate_that_fails_permanent_proxy():
+    state = {
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_failure_message': 'Telegram API timed out',
+        'last_attempt': 0.0,
+        'in_progress': False,
+    }
+    calls = []
+    switched = auto_failover_runtime.attempt_auto_failover(
+        state=state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy-vless',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'Telegram API timed out'),
+        load_current_keys=lambda: {'vless': 'original'},
+        load_key_pools=lambda: {'vless': ['original', 'candidate']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [('vless', 'candidate')],
+        find_pool_failover_candidate=lambda candidates, service='telegram': ('vless', 'candidate', True, None),
+        install_key_for_protocol=lambda proto, key, verify=True: calls.append(('install', proto, key, verify)) or 'ok',
+        update_proxy=lambda proto: calls.append(('update', proto)) or (True, None),
+        set_active_key=lambda proto, key: calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: calls.append(('log', message)),
+        grace_seconds=10,
+        switch_cooldown_seconds=30,
+        confirm_candidate=lambda proto, key: calls.append(('confirm', proto, key)) or (False, 'permanent timeout'),
+        time_provider=lambda: 20.0,
+    )
+    assert switched is False
+    assert ('install', 'vless', 'candidate', False) in calls
+    assert ('confirm', 'vless', 'candidate') in calls
+    assert ('install', 'vless', 'original', False) in calls
+    assert ('update', 'vless') in calls
+    assert ('active', 'vless', 'original') in calls
+    assert any(
+        call[0] == 'probe' and call[1:3] == ('vless', 'candidate') and
+        call[3].get('tg_ok') is False and call[3].get('verification_kind') == 'runtime'
+        for call in calls
+    )
+    assert any(call[0] == 'log' and 'configuration restored' in call[1] for call in calls)
+
+
+def test_auto_failover_tries_next_candidate_after_permanent_failure():
+    state = {
+        'last_ok': 0.0,
+        'last_fail': 1.0,
+        'last_failure_message': 'Telegram API timed out',
+        'last_attempt': 0.0,
+        'in_progress': False,
+    }
+    calls = []
+
+    def select_candidate(candidates, service='telegram'):
+        calls.append(('screen', tuple(candidates), service))
+        proto, key_value = candidates[0]
+        return proto, key_value, True, None
+
+    switched = auto_failover_runtime.attempt_auto_failover(
+        state=state,
+        pool_probe_locked=lambda: False,
+        proxy_mode='vless',
+        proxy_url='proxy-vless',
+        check_telegram_api=lambda proxy, **kwargs: (False, 'Telegram API timed out'),
+        load_current_keys=lambda: {'vless': 'original'},
+        load_key_pools=lambda: {'vless': ['original', 'candidate-one', 'candidate-two']},
+        failover_candidates=lambda pools, mode, active, protocols=(), **kwargs: [
+            ('vless', 'candidate-one'),
+            ('vless', 'candidate-two'),
+        ],
+        find_pool_failover_candidate=select_candidate,
+        install_key_for_protocol=lambda proto, key, verify=True: calls.append(('install', proto, key, verify)) or 'ok',
+        update_proxy=lambda proto: calls.append(('update', proto)) or (True, None),
+        set_active_key=lambda proto, key: calls.append(('active', proto, key)),
+        record_key_probe=lambda proto, key, **kwargs: calls.append(('probe', proto, key, kwargs)),
+        log=lambda message: calls.append(('log', message)),
+        grace_seconds=30,
+        switch_cooldown_seconds=60,
+        confirm_candidate=lambda proto, key: (key == 'candidate-two', 'permanent result'),
+        time_provider=lambda: 100.0,
+    )
+
+    assert switched is True
+    assert ('install', 'vless', 'candidate-one', False) in calls
+    assert ('install', 'vless', 'candidate-two', False) in calls
+    assert ('install', 'vless', 'original', False) not in calls
+    assert ('active', 'vless', 'candidate-two') in calls
+    assert any(
+        call[0] == 'probe' and call[1:3] == ('vless', 'candidate-one') and
+        call[3].get('tg_ok') is False and call[3].get('verification_kind') == 'runtime'
+        for call in calls
+    )
+    assert any(
+        call[0] == 'probe' and call[1:3] == ('vless', 'candidate-two') and
+        call[3].get('tg_ok') is True and call[3].get('verification_kind') == 'runtime'
+        for call in calls
+    )
+
+
 def test_pool_probe_controller_helpers():
     progress = pool_probe_controller.PoolProbeProgress()
     assert progress.snapshot()['running'] is False
@@ -8276,6 +8389,7 @@ def test_pool_probe_controller_helpers():
             'custom': {'custom': False},
             'custom_checks': [{'id': 'custom'}],
             'allow_recent_success_downgrade': True,
+            'verification_kind': 'screening',
         },
     )
 
@@ -8617,7 +8731,7 @@ def test_pool_probe_runner_failover_candidate():
         collect_garbage=lambda: None,
     )
     assert result == ('vless', 'ok', True, None)
-    assert records == [('vless', 'ok', {'tg_ok': True, 'yt_ok': None})]
+    assert records == [('vless', 'ok', {'tg_ok': True, 'yt_ok': None, 'verification_kind': 'screening'})]
     assert failover_http_calls == [{'url': 'https://web.telegram.org/', 'connect_timeout': 3, 'read_timeout': 4}]
     assert stopped == [('process', 'config.json')]
     assert cleaned == [True]
@@ -8645,8 +8759,11 @@ def test_pool_probe_runner_failover_candidate():
         collect_garbage=lambda: None,
     )
     assert result == ('vless', 'ok', True, None)
-    assert records[0] == ('vless', 'fail', {'tg_ok': False, 'yt_ok': None, 'allow_recent_success_downgrade': True})
-    assert records[1] == ('vless', 'ok', {'tg_ok': True, 'yt_ok': None})
+    assert records[0] == (
+        'vless', 'fail',
+        {'tg_ok': False, 'yt_ok': None, 'allow_recent_success_downgrade': True, 'verification_kind': 'screening'},
+    )
+    assert records[1] == ('vless', 'ok', {'tg_ok': True, 'yt_ok': None, 'verification_kind': 'screening'})
     assert 'не подготовлен' in logs[0]
 
     api_only_records = []
@@ -8672,7 +8789,10 @@ def test_pool_probe_runner_failover_candidate():
         collect_garbage=lambda: None,
     )
     assert api_only_result is None
-    assert api_only_records == [('vless', 'api-only', {'tg_ok': False, 'yt_ok': None, 'allow_recent_success_downgrade': True})]
+    assert api_only_records == [(
+        'vless', 'api-only',
+        {'tg_ok': False, 'yt_ok': None, 'allow_recent_success_downgrade': True, 'verification_kind': 'screening'},
+    )]
 
     youtube_records = []
     youtube_result = pool_probe_runner.find_pool_failover_candidate(
@@ -8702,6 +8822,7 @@ def test_pool_probe_runner_failover_candidate():
     assert youtube_records[0][2]['tg_ok'] is None
     assert youtube_records[0][2]['yt_ok'] is True
     assert youtube_records[0][2]['yt_stability'] == 'stable'
+    assert youtube_records[0][2]['verification_kind'] == 'screening'
 
     cancel_event = threading.Event()
     cancel_event.set()
@@ -11701,6 +11822,55 @@ def test_pool_probe_config_does_not_pin_telegram_api_ip():
     assert '149.154.167.220' not in json.dumps(config)
 
 
+def test_pool_probe_config_matches_persistent_xray_foundation():
+    probe_config = pool_probe_runner.build_pool_probe_core_config_batch(
+        [('vless', 'vless://id@example.com:443?security=tls#sample')],
+        29000,
+        lambda proto, key, tag, email='pool-probe@local': {
+            'protocol': 'freedom',
+            'tag': tag,
+            'settings': {},
+        },
+    )
+    persistent_foundation = xray_base_config(error_log_path='/tmp/xray-error.log')
+    assert probe_config['dns'] == persistent_foundation['dns']
+    assert probe_config['routing']['domainStrategy'] == persistent_foundation['routing']['domainStrategy']
+    assert probe_config['inbounds'][0] == socks_inbound(29000, 'in-pool-probe-0')
+    assert probe_config['inbounds'][0]['sniffing'] == {'enabled': False}
+
+
+def test_probe_cache_keeps_runtime_confirmation_after_screening():
+    cache = {}
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless2',
+        'key-runtime',
+        tg_ok=True,
+        yt_ok=True,
+        verification_kind='runtime',
+        now=100,
+    )
+    entry = cache[probe_cache.hash_key('key-runtime')]
+    assert probe_cache.probe_verification_kind(entry) == 'runtime'
+    assert probe_cache.probe_runtime_confirmed_at(entry) == 100
+
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless2',
+        'key-runtime',
+        tg_ok=True,
+        yt_ok=True,
+        verification_kind='screening',
+        now=200,
+    )
+    entry = cache[probe_cache.hash_key('key-runtime')]
+    assert probe_cache.probe_verification_kind(entry) == 'screening'
+    assert entry['screened_ts'] == 200
+    assert probe_cache.probe_runtime_confirmed_at(entry) == 100
+    assert entry['tg_ok'] is True
+    assert entry['yt_ok'] is True
+
+
 def test_web_template_scripts_helpers():
     scripts = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert 'const APP_CONFIG = window.BK_APP_CONFIG || {};' in scripts
@@ -13465,6 +13635,7 @@ def main():
     test_probe_cache_invalidates_changed_custom_check_targets()
     test_probe_cache_failed_results_expire_quickly()
     test_probe_cache_keeps_recent_success_on_transient_downgrade()
+    test_probe_cache_keeps_runtime_confirmation_after_screening()
     test_telegram_call_learning_helpers()
     test_web_template_scripts_helpers()
     test_web_form_template_smoke()
@@ -13519,6 +13690,8 @@ def main():
     test_telegram_bot_menu_button_smoke()
     test_telegram_info_runtime_helpers()
     test_auto_failover_runtime_helpers()
+    test_auto_failover_restores_candidate_that_fails_permanent_proxy()
+    test_auto_failover_tries_next_candidate_after_permanent_failure()
     test_proxy_apply_runtime_helpers()
     test_pool_probe_controller_helpers()
     test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port()
@@ -13540,6 +13713,7 @@ def main():
     test_service_route_runtime_pending_auto_resolve_is_cached()
     test_service_route_runtime_auto_resolve_uses_cross_runtime_lock()
     test_pool_probe_runner_failover_candidate()
+    test_pool_probe_config_matches_persistent_xray_foundation()
     print('smoke_modules: ok')
 
 

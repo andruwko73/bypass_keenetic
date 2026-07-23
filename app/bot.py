@@ -1602,6 +1602,11 @@ def _attempt_auto_failover():
         repair_active_proxy=_repair_active_reality_endpoint,
         protocols=(telegram_route_proto,),
         defer_switch=_auto_failover_defer_switch_for_traffic_guard,
+        confirm_candidate=lambda proto, _key: _check_telegram_api_for_background(
+            proxy_settings.get(proto),
+            connect_timeout=max(float(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT), 5.0),
+            read_timeout=max(float(AUTO_FAILOVER_CHECK_READ_TIMEOUT), 8.0),
+        ),
     )
     _restore_telegram_polling_after_verified_recovery()
     return switched
@@ -2046,7 +2051,13 @@ def _attempt_youtube_failover():
             try:
                 result = _install_key_for_protocol(route_proto, key_value, verify=False)
             except Exception as exc:
-                _record_key_probe(route_proto, key_value, tg_ok=tg_ok, yt_ok=False)
+                _record_key_probe(
+                    route_proto,
+                    key_value,
+                    tg_ok=tg_ok,
+                    yt_ok=False,
+                    verification_kind='runtime',
+                )
                 _write_runtime_log(f'YouTube failover: failed to install candidate {key_hash}: {exc}')
                 continue
 
@@ -2080,7 +2091,13 @@ def _attempt_youtube_failover():
                     )
                     return False
                 if not tg_ok:
-                    _record_key_probe(route_proto, key_value, tg_ok=False, yt_ok=True)
+                    _record_key_probe(
+                        route_proto,
+                        key_value,
+                        tg_ok=False,
+                        yt_ok=True,
+                        verification_kind='runtime',
+                    )
                     _write_runtime_log(
                         f'YouTube failover: candidate {key_hash} has YouTube, '
                         f'but Telegram is required because bot mode is {_pool_proto_label(route_proto)}: {tg_message}'
@@ -2089,7 +2106,13 @@ def _attempt_youtube_failover():
 
             _set_active_key(route_proto, key_value)
             _audit_key_switch('youtube_auto_failover', route_proto, key_value, confirm_message)
-            _record_key_probe(route_proto, key_value, tg_ok=tg_ok, yt_ok=True)
+            _record_key_probe(
+                route_proto,
+                key_value,
+                tg_ok=tg_ok,
+                yt_ok=True,
+                verification_kind='runtime',
+            )
             _invalidate_web_status_cache()
             _invalidate_key_status_cache()
             state['last_ok'] = time.time()

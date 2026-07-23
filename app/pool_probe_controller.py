@@ -55,7 +55,7 @@ class PoolProbeProgress:
 def pool_probe_progress_label(progress):
     scope = (progress or {}).get('scope')
     if scope == 'manual_all':
-        return 'Полная проверка всех ключей'
+        return 'Предварительная проверка всех ключей'
     if scope == 'protocol':
         return 'Проверка выбранного пула'
     return 'Фоновая проверка пула ключей'
@@ -234,6 +234,7 @@ def check_pool_key_through_proxy(
         tg_ok=tg_ok,
         yt_ok=yt_ok,
         allow_recent_success_downgrade=True,
+        verification_kind='screening',
         **quality_kwargs,
     )
     if custom_checks and not tg_ok and not yt_ok:
@@ -243,6 +244,7 @@ def check_pool_key_through_proxy(
             custom=failed_custom_probe_results(custom_checks),
             custom_checks=custom_checks,
             allow_recent_success_downgrade=True,
+            verification_kind='screening',
         )
         return
     if custom_checks:
@@ -252,6 +254,7 @@ def check_pool_key_through_proxy(
             custom=probe_custom_targets(proxy_url, custom_checks=custom_checks),
             custom_checks=custom_checks,
             allow_recent_success_downgrade=True,
+            verification_kind='screening',
         )
 
 

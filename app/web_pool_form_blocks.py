@@ -203,6 +203,7 @@ def render_pool_items(
         )
         custom_badges = custom_check_badges(probe, custom_checks)
         checked_at = html.escape(probe_checked_at(probe))
+        checked_display = checked_at
         quality_score = _probe_int(probe, 'yt_score', 0)
         quality_class = html.escape(_quality_class(probe), quote=True)
         quality_label = _quality_label(probe)
@@ -221,13 +222,13 @@ def render_pool_items(
                                 <button type="submit" class="pool-apply-btn" title="{quality_title}"><span class="pool-key-name">{display_name}</span>{quality_badge}</button>
                             </form>
                             <span class="pool-mobile-active" data-pool-key-meta data-pool-mobile-active>{active_text}</span>
-                            <span class="pool-mobile-checked" data-pool-mobile-checked>{checked_at}</span>
+                            <span class="pool-mobile-checked" data-pool-mobile-checked>{checked_display}</span>
                             <span class="pool-hash">{key_id}</span>
                         </td>
                         <td class="pool-service-cell" data-pool-tg>{tg_badge}</td>
                         <td class="pool-service-cell" data-pool-yt>{yt_badge}</td>
                         <td class="pool-custom-cell" data-pool-custom>{custom_badges}</td>
-                        <td class="pool-checked-cell" data-pool-checked>{checked_at}</td>
+                        <td class="pool-checked-cell" data-pool-checked>{checked_display}</td>
                         <td class="pool-actions-cell">
                             <form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула {safe_title}?">
                                 {csrf_input_html}

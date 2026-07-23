@@ -8,15 +8,12 @@ import threading
 import time
 from collections import deque
 
+from proxy_config_builder import socks_inbound, xray_base_config
+
+
 def pool_probe_socks_inbound(port, tag):
-    return {
-        'port': int(port),
-        'listen': '127.0.0.1',
-        'protocol': 'socks',
-        'settings': {'auth': 'noauth', 'udp': True, 'ip': '127.0.0.1'},
-        'sniffing': {'enabled': True, 'destOverride': ['http', 'tls']},
-        'tag': tag,
-    }
+    """Use the exact SOCKS inbound used by the persistent router Xray."""
+    return socks_inbound(port, tag)
 
 
 def pool_probe_outbound(proto, key_value, tag, proxy_outbound_from_key, email='pool-probe@local'):
@@ -24,23 +21,7 @@ def pool_probe_outbound(proto, key_value, tag, proxy_outbound_from_key, email='p
 
 
 def build_pool_probe_core_config_batch(probe_tasks, test_port, proxy_outbound_from_key):
-    config_json = {
-        'log': {
-            'access': '/dev/null',
-            'error': '/dev/null',
-            'loglevel': 'warning',
-        },
-        'dns': {
-            'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
-            'queryStrategy': 'UseIPv4',
-        },
-        'inbounds': [],
-        'outbounds': [],
-        'routing': {
-            'domainStrategy': 'IPIfNonMatch',
-            'rules': [],
-        },
-    }
+    config_json = xray_base_config(error_log_path='/dev/null')
     test_routes = []
     for offset, (proto, key_value) in enumerate(probe_tasks):
         port = str(int(test_port) + offset)
@@ -277,7 +258,14 @@ def find_pool_failover_candidate(
                 record_kwargs = dict(yt_metrics)
                 if service != 'youtube' and tg_ok is False:
                     record_kwargs['allow_recent_success_downgrade'] = True
-                record_key_probe(proto, key_value, tg_ok=tg_ok, yt_ok=yt_ok, **record_kwargs)
+                record_key_probe(
+                    proto,
+                    key_value,
+                    tg_ok=tg_ok,
+                    yt_ok=yt_ok,
+                    verification_kind='screening',
+                    **record_kwargs,
+                )
                 if primary_ok:
                     return proto, key_value, tg_ok, yt_ok
         except Exception as exc:
@@ -386,6 +374,7 @@ def run_pool_probe_worker(
         if result_is_ignored(proto, key_value):
             return
         kwargs.setdefault('allow_recent_success_downgrade', True)
+        kwargs.setdefault('verification_kind', 'screening')
         record_key_probe(proto, key_value, **kwargs)
 
     def run_check_pool_key(proto, key_value, checks, proxy_url):

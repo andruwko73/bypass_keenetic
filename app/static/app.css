@@ -1030,7 +1030,7 @@
             .pool-row-active .pool-apply-btn{color:#92fff2;}
             .pool-mobile-active{display:none;margin:2px 0 0 0;width:max-content;padding:1px 5px;border-radius:5px;background:rgba(48,191,181,.18);border:1px solid rgba(48,191,181,.35);color:#9ff7ef;font-size:8px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;line-height:1.2;}
             .pool-row-active .pool-mobile-active{display:inline-flex;}
-            .pool-mobile-checked{display:block;margin-top:2px;color:var(--muted);font-size:9px;line-height:1.15;white-space:nowrap;}
+        .pool-mobile-checked{display:block;margin-top:2px;color:var(--muted);font-size:9px;line-height:1.15;white-space:nowrap;}
             .pool-apply-btn{display:flex;width:100%;font-size:10.5px;line-height:1.18;text-align:left;justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;gap:4px;}
             .pool-quality-badge{height:14px;padding:0 4px;font-size:8px;}
             .pool-hash{display:none;}

@@ -1,3 +1,10 @@
+<a name="1.975"></a>
+# [1.975] - 23 Jul 2026
+
+- Made temporary pool screening use the same base DNS, routing, and SOCKS-inbound settings as the permanent Xray; the probe SOCKS inbound keeps sniffing disabled.
+- Kept preliminary screening and permanent-Xray confirmation separate in the key cache and technical logs, while pool rows continue to show only the newest result and time.
+- Made Telegram auto-failover confirm an applied candidate through the working Xray. A failed candidate is excluded and the same attempt tries up to three candidates; the previous configuration is restored only when none is confirmed and is not marked working.
+
 <a name="1.974"></a>
 # [1.974] - 22 Jul 2026
 

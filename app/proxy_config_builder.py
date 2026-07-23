@@ -6,6 +6,27 @@ from proxy_protocols import (
 from transparent_route_policy import normalize_protocol_set
 
 
+def xray_base_config(*, error_log_path, access_log_path='/dev/null', loglevel='warning'):
+    """Return the shared router-local Xray foundation used by runtime and probes."""
+    return {
+        'log': {
+            'access': access_log_path,
+            'error': error_log_path,
+            'loglevel': loglevel,
+        },
+        'dns': {
+            'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
+            'queryStrategy': 'UseIPv4',
+        },
+        'inbounds': [],
+        'outbounds': [],
+        'routing': {
+            'domainStrategy': 'IPIfNonMatch',
+            'rules': [],
+        },
+    }
+
+
 def socks_inbound(port, tag, listen='127.0.0.1'):
     return {
         'port': int(port),
@@ -181,23 +202,11 @@ def build_proxy_core_config(
     transparent_route_policies=None,
     bittorrent_direct_enabled=False,
 ):
-    config_data = {
-        'log': {
-            'access': access_log_path,
-            'error': error_log_path,
-            'loglevel': loglevel,
-        },
-        'dns': {
-            'servers': ['8.8.8.8', '1.1.1.1', 'localhost'],
-            'queryStrategy': 'UseIPv4',
-        },
-        'inbounds': [],
-        'outbounds': [],
-        'routing': {
-            'domainStrategy': 'IPIfNonMatch',
-            'rules': [],
-        },
-    }
+    config_data = xray_base_config(
+        error_log_path=error_log_path,
+        access_log_path=access_log_path,
+        loglevel=loglevel,
+    )
 
     route_only_transparent = normalize_protocol_set(route_only_transparent_protocols)
     route_only_tproxy = normalize_protocol_set(route_only_tproxy_protocols)
