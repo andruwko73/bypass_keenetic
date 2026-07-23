@@ -1,6 +1,6 @@
-*v1.975 (23 Jul 2026) -* main
+*v1.976 (23 Jul 2026) -* main
 
-*Makes pool screening match the working Xray foundation and confirms automatic failover candidates only after they work through the permanent Xray.*
+*В карточке обновления время «В среднем» теперь отображается отдельной строкой под «Прошло».*
 
 *Keeps pool rows compact: they show the latest result and its time, while the source of the result remains available internally and in technical logs.*
 

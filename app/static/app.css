@@ -127,6 +127,7 @@
                 .status-note{margin-top:6px;color:var(--text);font-size:14px;line-height:1.45;overflow-wrap:anywhere;word-break:break-word;}
                 .command-timer-block{margin:14px 0 10px;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.03);}
                 .command-timer-header{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--text);font-size:13px;font-weight:700;}
+                [data-command-progress-timer]{flex:0 0 auto;white-space:pre-line;text-align:right;line-height:1.35;}
                 .log-output{margin:0;white-space:pre-wrap;word-break:break-word;font:13px/1.45 Consolas,Monaco,monospace;color:var(--text);}
                 .eyebrow{display:inline-block;margin-bottom:10px;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#8b6f4a;}
                 .section-title{margin:0 0 6px;font-size:24px;color:var(--text);}

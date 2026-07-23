@@ -3088,9 +3088,9 @@
             if (expected > 0) {
                 const expectedWithRestart = expected + 5;
                 if (elapsed <= expectedWithRestart + 90) {
-                    return 'Прошло ' + formatCommandDuration(elapsed) + ' · в среднем ' + formatCommandDuration(expectedWithRestart);
+                    return 'Прошло ' + formatCommandDuration(elapsed) + '\nВ среднем ' + formatCommandDuration(expectedWithRestart);
                 }
-                return 'Прошло ' + formatCommandDuration(elapsed) + ' · дольше среднего ' + formatCommandDuration(expectedWithRestart);
+                return 'Прошло ' + formatCommandDuration(elapsed) + '\nДольше среднего ' + formatCommandDuration(expectedWithRestart);
             }
             return 'Прошло ' + formatCommandDuration(elapsed);
         }

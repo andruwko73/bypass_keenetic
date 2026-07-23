@@ -11985,10 +11985,11 @@ def test_web_template_scripts_helpers():
     assert "document.documentElement.classList.toggle('command-running', !!running);" in scripts
     assert 'function commandTimerText(state)' in scripts
     assert 'expected_seconds' in scripts
-    assert 'в среднем' in scripts
+    assert 'В среднем' in scripts
+    assert "'\\nВ среднем '" in scripts
     assert 'expectedWithRestart = expected + 5' in scripts
     assert 'обычно около' not in scripts
-    assert 'дольше среднего' in scripts
+    assert 'Дольше среднего' in scripts
     assert 'осталось около' not in scripts
     assert 'elapsed * (100 - progress) / progress' not in scripts
     assert 'data-command-progress-fill' not in scripts
