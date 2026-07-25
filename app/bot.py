@@ -10316,6 +10316,14 @@ def _invalidate_probe_status_caches():
     _invalidate_pool_data_cache()
 
 
+def _refresh_persisted_pool_summary_after_probe():
+    try:
+        return _pool_status_summary()
+    except Exception as exc:
+        _write_runtime_log(f'Failed to refresh pool summary after probe: {type(exc).__name__}')
+        return None
+
+
 def _delete_pool_probe_resume_file():
     try:
         os.remove(POOL_PROBE_RESUME_FILE)
@@ -10936,6 +10944,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             )
         finally:
             _invalidate_probe_status_caches()
+            _refresh_persisted_pool_summary_after_probe()
             # The child normally reaps its own temporary Xray.  A last, scoped
             # sweep protects the router if that child is killed before its
             # finally block runs; it only matches bypass_pool_probe_* runtime.
@@ -11191,6 +11200,8 @@ def _run_selected_pool_probe(
         _pool_probe_runner().cleanup_pool_probe_runtime(kill_processes=True)
         _cleanup_pool_probe_runtime_light(kill_processes=True)
         if not POOL_PROBE_WORKER_MODE:
+            _invalidate_probe_status_caches()
+            _refresh_persisted_pool_summary_after_probe()
             finished_rss_kb = int(_process_rss_kb() or 0)
             hwm_kb = int(_process_hwm_kb() or 0)
             _record_memory_timeline(

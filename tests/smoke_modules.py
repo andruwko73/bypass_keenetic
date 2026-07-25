@@ -4215,6 +4215,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_invalidate_pool_data_cache()' in subscription_add_block
     assert '_invalidate_pool_data_cache()' in probe_invalidate_block
     assert '_invalidate_key_status_cache()' not in probe_invalidate_block
+    assert 'def _refresh_persisted_pool_summary_after_probe' in source
+    assert process_monitor_block.count('_refresh_persisted_pool_summary_after_probe()') == 1
+    inline_probe_block = source.split('def _run_selected_pool_probe', 1)[1].split('def _queue_pool_key_probe', 1)[0]
+    assert inline_probe_block.count('_refresh_persisted_pool_summary_after_probe()') == 1
     assert 'import pool_probe_process_runner as runner' in source
     assert "_request_pool_probe_process_cancel(resume=False)" in source
     assert "'no-resume'" in source
