@@ -4274,7 +4274,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'https://raw.githubusercontent.com/andruwko73/bypass_keenetic/main/bootstrap/install.sh' in readme_source
     assert 'https://codeload.github.com/andruwko73/bypass_keenetic/tar.gz/refs/heads/main' in readme_source
     assert 'tmp/bypass-bootstrap-install' in readme_source
-    assert 'Прогрев YouTube выполняется отдельным коротким процессом для ускорения загрузки видео' in readme_source
+    assert '## Структура репозитория' not in readme_source
+    assert 'Прогрев YouTube выполняется отдельным коротким процессом для ускорения загрузки видео' not in readme_source
+    assert 'Тёмная и светлая темы' in readme_source
+    assert 'Собственный фон веб-интерфейса' in readme_source
     assert 'не увеличивает постоянный RSS Telegram-бота' not in readme_source
     bootstrap_source = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     assert 'prepare_repo_archive()' in bootstrap_source

@@ -191,6 +191,7 @@
             const root = document.documentElement;
             root.style.setProperty('--user-background-shade', String(shade / 100));
             root.style.setProperty('--user-background-panel-alpha', (0.96 - panelTransparency * 0.006).toFixed(3));
+            root.style.setProperty('--user-background-content-alpha', (0.96 - panelTransparency * 0.0088).toFixed(3));
             root.style.setProperty('--user-background-button-alpha', (0.28 - panelTransparency * 0.002).toFixed(3));
             if (enabled) {
                 root.style.setProperty('--user-background-image', cssBackgroundUrl(activeUrl));

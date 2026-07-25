@@ -1728,7 +1728,24 @@
         html[data-user-background="enabled"] .event-history-drawer,
         html[data-user-background="enabled"] .mobile-nav{
             background:rgba(17,25,35,var(--user-background-panel-alpha,.96));
+        }
+        html[data-user-background="enabled"] .topbar,
+        html[data-user-background="enabled"] .side-nav,
+        html[data-user-background="enabled"] .view-head,
+        html[data-user-background="enabled"] .confirm-card,
+        html[data-user-background="enabled"] .event-history-drawer,
+        html[data-user-background="enabled"] .mobile-nav{
             backdrop-filter:blur(14px) saturate(118%);
+        }
+        html[data-user-background="enabled"] .panel,
+        html[data-user-background="enabled"] .protocol-workspace,
+        html[data-user-background="enabled"] .list-workspace,
+        html[data-user-background="enabled"] .service-panel,
+        html[data-user-background="enabled"] .overview-key-panel,
+        html[data-user-background="enabled"] .status-card{
+            background:rgba(17,25,35,var(--user-background-content-alpha,.96));
+            backdrop-filter:none;
+            -webkit-backdrop-filter:none;
         }
         html[data-user-background="enabled"] button,
         html[data-user-background="enabled"] .mode-choice,
@@ -1736,6 +1753,11 @@
         html[data-user-background="enabled"] .mode-toggle,
         html[data-user-background="enabled"] .nav-item{
             background:rgba(34,67,73,var(--user-background-button-alpha,.28));
+        }
+        html[data-user-background="enabled"][data-theme="glass"] button{
+            background:
+                linear-gradient(145deg,rgba(255,255,255,.085),rgba(255,255,255,.024) 52%,rgba(156,238,231,.045)),
+                rgba(17,35,43,var(--user-background-button-alpha,.28));
         }
         html[data-user-background="enabled"] button.danger{background:rgba(94,36,42,var(--user-background-button-alpha,.34));}
         html[data-user-background="enabled"] input:not([type="range"]),
@@ -1753,6 +1775,12 @@
         html[data-user-background="enabled"][data-theme="light"] .confirm-card,
         html[data-user-background="enabled"][data-theme="light"] .event-history-drawer,
         html[data-user-background="enabled"][data-theme="light"] .mobile-nav{background:rgba(231,235,240,var(--user-background-panel-alpha,.94));}
+        html[data-user-background="enabled"][data-theme="light"] .panel,
+        html[data-user-background="enabled"][data-theme="light"] .protocol-workspace,
+        html[data-user-background="enabled"][data-theme="light"] .list-workspace,
+        html[data-user-background="enabled"][data-theme="light"] .service-panel,
+        html[data-user-background="enabled"][data-theme="light"] .overview-key-panel,
+        html[data-user-background="enabled"][data-theme="light"] .status-card{background:rgba(231,235,240,var(--user-background-content-alpha,.94));}
         html[data-user-background="enabled"] .topbar .hero-popover{
             background-color:#111923;
             background-image:linear-gradient(180deg,rgba(23,30,40,.98),rgba(20,31,43,.97));

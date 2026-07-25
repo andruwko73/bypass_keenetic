@@ -738,6 +738,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (await page.locator('html').evaluate((node) => node.style.getPropertyValue('--user-background-panel-alpha')) !== '0.576') {
       throw new Error(`${name}: background panel transparency preview was not applied`);
     }
+    if (await page.locator('html').evaluate((node) => node.style.getPropertyValue('--user-background-content-alpha')) !== '0.397') {
+      throw new Error(`${name}: background content transparency preview was not applied`);
+    }
     if (await page.locator('html[data-user-background="enabled"]').count() !== 1) {
       throw new Error(`${name}: pending background preview was removed by shade adjustment`);
     }
@@ -745,6 +748,72 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       node.value = '100';
       node.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    await page.waitForTimeout(500);
+    if (await page.locator('html').evaluate((node) => node.style.getPropertyValue('--user-background-content-alpha')) !== '0.080') {
+      throw new Error(`${name}: content surfaces must become fully translucent at 100%`);
+    }
+    const contentTransparency = await page.evaluate(() => {
+      const surfaceSelectors = [
+        '.protocol-workspace.active',
+        '.list-workspace.active',
+        '[data-view="status"] .status-card',
+      ];
+      const buttonSelectors = [
+        '.protocol-tabs .seg-tab:not(.active)',
+        '.protocol-workspace.active .subtab:not(.active)',
+        '.protocol-workspace.active .secondary-button',
+        '[data-view="status"] .service-panel button',
+        '.list-workspace.active button',
+      ];
+      const backdrop = (node) => {
+        const style = getComputedStyle(node);
+        return style.backdropFilter || style.webkitBackdropFilter || 'none';
+      };
+      return {
+        surfaceBackdrops: surfaceSelectors.map((selector) => {
+          const node = document.querySelector(selector);
+          return node ? backdrop(node) : 'missing';
+        }),
+        buttonBackgrounds: buttonSelectors.map((selector) => {
+          const node = document.querySelector(selector);
+          const style = node ? getComputedStyle(node) : null;
+          return node ? {
+            selector,
+            color: style.backgroundColor,
+            hovered: node.matches(':hover'),
+            liquidActive: node.classList.contains('liquid-active'),
+          } : null;
+        }),
+      };
+    });
+    if (contentTransparency.surfaceBackdrops.some((value) => value !== 'none')) {
+      throw new Error(`${name}: content surfaces must not blur the background behind buttons`);
+    }
+    const regularButtonBackgrounds = contentTransparency.buttonBackgrounds
+      .filter((value) => value && !value.hovered && !value.liquidActive && !value.selector.includes('.service-panel'))
+      .map((value) => value.color);
+    const regularButtonAlphas = regularButtonBackgrounds.map((color) => {
+      const match = color.match(/rgba\([^)]*,\s*(0?\.\d+)\s*\)$/);
+      return match ? Number(match[1]) : 1;
+    });
+    const statusButton = contentTransparency.buttonBackgrounds.find(
+      (value) => value && value.selector.includes('.service-panel'),
+    );
+    const statusButtonAlphaMatch = statusButton
+      ? statusButton.color.match(/rgba\([^)]*,\s*(0?\.\d+)\s*\)$/)
+      : null;
+    const statusButtonAlpha = statusButtonAlphaMatch ? Number(statusButtonAlphaMatch[1]) : 1;
+    if (
+      contentTransparency.buttonBackgrounds.includes(null) ||
+      !regularButtonBackgrounds.length ||
+      Math.max(...regularButtonAlphas) - Math.min(...regularButtonAlphas) > 0.02 ||
+      statusButtonAlpha > 0.35
+    ) {
+      throw new Error(
+        `${name}: buttons on status, keys, and lists must use one translucent background `
+        + JSON.stringify(contentTransparency.buttonBackgrounds),
+      );
+    }
     const pickerSurface = await page.locator('#theme-picker:not(.hidden)').evaluate((node) => {
       const style = getComputedStyle(node);
       const alphaValues = Array.from(style.backgroundImage.matchAll(/rgba?\([^)]*[,/]\s*(0?\.\d+)\s*\)/g))
