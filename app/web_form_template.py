@@ -146,7 +146,7 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool, 
 
     if not items:
         if enable_telegram:
-            text = 'Telegram API отвечает, память роутера в норме'
+            text = 'Память роутера в норме'
         elif enable_key_pool:
             text = 'Память роутера в норме'
         else:
@@ -179,7 +179,7 @@ def _topbar_status_item(status, router_health, pool_summary_note, enable_key_poo
     tone, title, text = _attention_items(status, router_health, pool_summary_note, enable_key_pool, enable_telegram)[0]
     if tone == 'ok' and enable_telegram:
         title = 'Telegram-бот работает' if bot_polling else 'Telegram API отвечает'
-        text = 'API отвечает, память роутера в норме'
+        text = 'Память роутера в норме'
     return tone, title, text
 
 

@@ -12167,6 +12167,9 @@ def test_web_form_template_smoke():
     assert 'telegram_call_learn' not in page
     assert 'status-attention-list' not in page
     assert 'topbar-status-icon-telegram' in page
+    assert 'Telegram-бот работает' in page
+    assert 'Память роутера в норме' in page
+    assert 'API отвечает, память роутера в норме' not in page
     assert '"botReady":true' in page
     assert '"botPolling":true' in page
     assert 'status-overview-head' in page

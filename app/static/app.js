@@ -2816,7 +2816,7 @@
                 return ['warn', 'В пуле есть ключи с ошибками', 'Откройте вкладку "Ключи" и включите быстрый фильтр "Есть проблемы"', botReady];
             }
             if (ENABLE_TELEGRAM) {
-                return ['ok', botReady ? 'Telegram-бот работает' : 'Telegram API отвечает', 'API отвечает, память роутера в норме', botReady];
+                return ['ok', botReady ? 'Telegram-бот работает' : 'Telegram API отвечает', 'Память роутера в норме', botReady];
             }
             return ['ok', 'Проблем не найдено', ENABLE_KEY_POOL ? 'Память роутера в норме' : 'Память роутера в норме, веб-интерфейс готов к работе', false];
         }
