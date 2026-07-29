@@ -1,3 +1,10 @@
+<a name="1.980"></a>
+# [1.980] - 29 Jul 2026
+
+- Keeps skipped, unchanged dnsmasq checks from advancing the timestamp of the last real ipset full refresh, so the six-hour forced refresh remains reachable.
+- Treats legacy scheduler state marked `skipped` as non-authoritative and repairs it with the next due full refresh without changing the three-line state format.
+- Adds deterministic regression coverage for repeated hourly skips, the six-hour boundary, signature changes, manual force, and legacy-state recovery.
+
 <a name="1.979"></a>
 # [1.979] - 27 Jul 2026
 

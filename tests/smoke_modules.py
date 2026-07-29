@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -3919,6 +3920,154 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert '-p tcp -m set --match-set unblockvless2priority dst -j REDIRECT --to-ports 10814' in redirect_script
     assert 'resolved to zero entries, preserving' in ipset_script
     assert '*/15 * * * * root /opt/etc/init.d/S99unblock tick >/dev/null 2>&1' in crontab
+
+
+def test_ipset_scheduler_skips_preserve_full_refresh_timestamp():
+    source = (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
+    run_refresh = source.split('run_refresh() {', 1)[1].split('\n}', 1)[0]
+    skip_branch = run_refresh.split('refresh_skip_allowed; then', 1)[1].split('\n    fi', 1)[0]
+    effective_updated_at = source.split('refresh_effective_updated_at() {', 1)[1].split('\n}', 1)[0]
+    skip_allowed = source.split('refresh_skip_allowed() {', 1)[1].split('\n}', 1)[0]
+
+    assert 'mark_refresh_state' not in skip_branch
+    assert 'mark_refresh_state "skipped"' not in source
+    assert 'mark_refresh_state "refreshed"' in run_refresh
+    assert run_refresh.index('/opt/bin/unblock_ipset.sh') < run_refresh.index('mark_refresh_state "refreshed"')
+    assert 'refresh_state_is_full_refresh' in effective_updated_at
+    assert 'refresh_state_is_full_refresh || return 1' in skip_allowed
+
+    bash = shutil.which('bash')
+    if not bash:
+        return
+
+    function_source = source.split('\ncase "$1" in\n', 1)[0]
+    function_source = function_source.replace('/opt/bin/unblock_ipset.sh', '"${TEST_UNBLOCK_IPSET_BIN}"')
+    harness = r'''
+detect_dns_backend() {
+    printf '%s\n' "${TEST_BACKEND:-dnsmasq}"
+}
+
+status_is_success() {
+    [ "${TEST_STATUS_OK:-1}" = "1" ]
+}
+
+status_updated_at() {
+    printf '%s\n' "${TEST_STATUS_AT:-0}"
+}
+
+refresh_current_signature() {
+    printf '%s\n' "${TEST_SIGNATURE:-fixture-signature}"
+}
+
+unblock_ipset_running() {
+    return 1
+}
+
+date() {
+    case "${1:-}" in
+        +%s) printf '%s\n' "${TEST_NOW:-0}" ;;
+        *) printf '%s\n' 'fixture-date' ;;
+    esac
+}
+
+state_line() {
+    sed -n "${1}p" "$REFRESH_STATE_FILE"
+}
+
+call_count() {
+    if [ -r "$TEST_FULL_COUNT_FILE" ]; then
+        sed -n '1p' "$TEST_FULL_COUNT_FILE"
+    else
+        printf '%s\n' 0
+    fi
+}
+
+assert_equal() {
+    if [ "$1" != "$2" ]; then
+        printf '%s: expected=%s actual=%s\n' "$3" "$1" "$2" >&2
+        exit 1
+    fi
+}
+
+TEST_TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_TMP_DIR"' EXIT
+REFRESH_STATE_FILE="$TEST_TMP_DIR/refresh.state"
+LOG_FILE="$TEST_TMP_DIR/refresh.log"
+DNSMASQ_FULL_REFRESH_FORCE_INTERVAL_SECONDS=21600
+TEST_FULL_COUNT_FILE="$TEST_TMP_DIR/full-refresh-count"
+TEST_UNBLOCK_IPSET_BIN="$TEST_TMP_DIR/unblock-ipset-stub.sh"
+export TEST_FULL_COUNT_FILE TEST_UNBLOCK_IPSET_BIN
+printf '%s\n' \
+    '#!/bin/sh' \
+    'count=0' \
+    '[ ! -r "$TEST_FULL_COUNT_FILE" ] || count="$(sed -n '\''1p'\'' "$TEST_FULL_COUNT_FILE")"' \
+    'printf '\''%s\n'\'' "$((count + 1))" > "$TEST_FULL_COUNT_FILE"' \
+    > "$TEST_UNBLOCK_IPSET_BIN"
+chmod 700 "$TEST_UNBLOCK_IPSET_BIN"
+
+TEST_SIGNATURE='fixture-signature'
+TEST_STATUS_AT=900
+TEST_NOW=1000
+export TEST_SIGNATURE TEST_STATUS_AT TEST_NOW
+mark_refresh_state refreshed
+assert_equal 1000 "$(state_line 2)" initial_timestamp
+assert_equal refreshed "$(state_line 3)" initial_action
+
+for TEST_NOW in 4600 8200 11800 15400 19000 22599; do
+    export TEST_NOW
+    run_refresh
+    assert_equal 1000 "$(state_line 2)" "skip_timestamp_${TEST_NOW}"
+    assert_equal refreshed "$(state_line 3)" "skip_action_${TEST_NOW}"
+    assert_equal 0 "$(call_count)" "skip_call_count_${TEST_NOW}"
+done
+
+TEST_NOW=22600
+export TEST_NOW
+run_refresh
+assert_equal 22600 "$(state_line 2)" forced_interval_timestamp
+assert_equal refreshed "$(state_line 3)" forced_interval_action
+assert_equal 1 "$(call_count)" forced_interval_call_count
+
+TEST_SIGNATURE='changed-signature'
+TEST_NOW=23000
+export TEST_SIGNATURE TEST_NOW
+run_refresh
+assert_equal changed-signature "$(state_line 1)" changed_signature
+assert_equal 23000 "$(state_line 2)" changed_signature_timestamp
+assert_equal 2 "$(call_count)" changed_signature_call_count
+
+TEST_NOW=23100
+export TEST_NOW
+run_refresh force
+assert_equal 23100 "$(state_line 2)" manual_force_timestamp
+assert_equal 3 "$(call_count)" manual_force_call_count
+
+printf '%s\n%s\n%s\n' "$TEST_SIGNATURE" 50000 skipped > "$REFRESH_STATE_FILE"
+TEST_STATUS_AT=1000
+TEST_NOW=50100
+export TEST_STATUS_AT TEST_NOW
+assert_equal 1000 "$(refresh_effective_updated_at)" legacy_effective_timestamp
+if refresh_skip_allowed; then
+    printf '%s\n' 'legacy skipped state was accepted as a full refresh' >&2
+    exit 1
+fi
+run_refresh
+assert_equal 50100 "$(state_line 2)" legacy_recovery_timestamp
+assert_equal refreshed "$(state_line 3)" legacy_recovery_action
+assert_equal 4 "$(call_count)" legacy_recovery_call_count
+'''
+
+    result = subprocess.run(
+        [bash],
+        cwd=ROOT,
+        input=(function_source + '\n' + harness).encode('utf-8'),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=30,
+        check=False,
+    )
+    detail = (result.stderr or result.stdout).decode('utf-8', errors='replace')
+    assert result.returncode == 0, detail
 
 
 def test_vless_tcp_redirect_keeps_mobile_push_connections_reliable():
@@ -13656,6 +13805,7 @@ def main():
     test_codex_version_matches_commit_count()
     test_ui_smoke_package_scripts_are_declared()
     test_ipset_refresh_is_backend_aware_and_atomic()
+    test_ipset_scheduler_skips_preserve_full_refresh_timestamp()
     test_runtime_startup_limits_router_flash_and_overhead()
     test_simple_mode_import_skips_advanced_modules()
     test_advanced_initial_web_context_skips_heavy_pool_modules()

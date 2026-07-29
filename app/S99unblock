@@ -93,7 +93,7 @@ run_refresh() {
     [ -x /opt/bin/unblock_ipset.sh ] || return 0
     unblock_ipset_running && return 0
     if [ "$force_refresh" != "force" ] && refresh_skip_allowed; then
-        mark_refresh_state "skipped"
+        # Keep the state timestamp anchored to the last real full refresh.
         mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
         printf '%s S99unblock: skipped unchanged dnsmasq full refresh\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)" >> "$LOG_FILE" 2>/dev/null || true
         return 0
@@ -342,12 +342,19 @@ refresh_state_action() {
     sed -n '3p' "$REFRESH_STATE_FILE" 2>/dev/null
 }
 
+refresh_state_is_full_refresh() {
+    [ "$(refresh_state_action)" = "refreshed" ]
+}
+
 refresh_effective_updated_at() {
     status_at="$(status_updated_at)"
     state_at="$(refresh_state_updated_at)"
     current_signature="$(refresh_current_signature)"
     state_signature="$(refresh_state_signature)"
-    if [ -n "$current_signature" ] && [ "$current_signature" = "$state_signature" ] && [ "$state_at" -gt "$status_at" ] 2>/dev/null; then
+    if refresh_state_is_full_refresh \
+        && [ -n "$current_signature" ] \
+        && [ "$current_signature" = "$state_signature" ] \
+        && [ "$state_at" -gt "$status_at" ] 2>/dev/null; then
         printf '%s\n' "$state_at"
         return
     fi
@@ -357,6 +364,7 @@ refresh_effective_updated_at() {
 refresh_skip_allowed() {
     [ "$(detect_dns_backend)" = "dnsmasq" ] || return 1
     status_is_success || return 1
+    refresh_state_is_full_refresh || return 1
     current_signature="$(refresh_current_signature)"
     state_signature="$(refresh_state_signature)"
     [ -n "$current_signature" ] && [ "$current_signature" = "$state_signature" ] || return 1

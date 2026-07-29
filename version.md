@@ -1,4 +1,6 @@
-*v1.979 (27 Jul 2026) -* main
+*v1.980 (29 Jul 2026) -* main
+
+*Keeps the six-hour dnsmasq/ipset full refresh deadline anchored to the last real refresh: unchanged hourly checks no longer postpone it, and legacy skipped state is repaired on the next due run.*
 
 *Убирает повтор «API отвечает» из нормального статуса работающего Telegram-бота: под заголовком остаётся только информация о памяти роутера.*
 
