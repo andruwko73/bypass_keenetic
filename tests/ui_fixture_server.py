@@ -95,8 +95,26 @@ ROUTE_SERVICE_IDS = {item["id"] for item in ROUTE_SERVICE_ITEMS}
 
 ROUTE_STATES = {
     "telegram": {"label": "Vless 1"},
-    "youtube": {"label": "Vless 2"},
-    "chatgpt_services": {"label": "частично: Vless 1 / Vless 2"},
+    "youtube": {
+        "label": "Vless 2",
+        "total": 185,
+        "complete_protocols": ["vless2"],
+        "partial_protocols": ["vless"],
+        "routes": {
+            "vless2": {"matched": 185, "total": 185},
+            "vless": {"matched": 1, "total": 185},
+        },
+    },
+    "chatgpt_services": {
+        "label": "Vless 1",
+        "total": 79,
+        "complete_protocols": ["vless"],
+        "partial_protocols": ["vless2"],
+        "routes": {
+            "vless": {"matched": 79, "total": 79},
+            "vless2": {"matched": 1, "total": 79},
+        },
+    },
 }
 
 APP_MODE_FIXTURES = {
@@ -294,10 +312,21 @@ def _route_tools_html(csrf_input_html):
             ),
             key_pool_web.web_route_intersections_html(
                 {
-                    "count": 1,
-                    "issues": [
+                    "count": 0,
+                    "file_count": 0,
+                    "allowed_shared_count": 1,
+                    "allowed_shared_entries": [
                         {
-                            "message": "chatgpt.com пересекается с api.chatgpt.com",
+                            "kind": "shared_exact",
+                            "entry_type": "domain",
+                            "entry": "accounts.google.com",
+                            "routes": ["vless", "vless-2"],
+                            "files": ["vless.txt", "vless-2.txt"],
+                            "route_entries": {
+                                "vless": ["accounts.google.com"],
+                                "vless-2": ["accounts.google.com"],
+                            },
+                            "services": ["ChatGPT / Codex", "YouTube"],
                         }
                     ],
                 },

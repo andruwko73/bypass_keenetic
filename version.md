@@ -1,4 +1,10 @@
-*v1.983 (30 Jul 2026) -* main
+*v1.984 (30 Jul 2026) -* main
+
+*Separates allowed shared service-catalog addresses from real route conflicts and shows the exact address, source files, original file lines, routes, and affected services without offering automatic deletion.*
+
+*Shows complete and partial service-route coverage as explicit matched/total counts, bounds shared-entry details to 120 rows, and keeps the existing cached worker model with no new process or dependency.*
+
+*Verifies the new route diagnostics in all three web modes across mobile, desktop, 2K, and 4K viewports while preserving the existing update, pool, bot, and clean-install behavior.*
 
 *Restores the latest pool-check counters immediately after keys are removed by keeping the light cache reader on schema 9 with compatibility for schemas 6–9.*
 

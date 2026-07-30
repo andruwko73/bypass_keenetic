@@ -7,6 +7,7 @@ from unblock_lists import DEFAULT_ORDER, UNBLOCK_DIR, UNBLOCK_UPDATE_SCRIPT, rea
 
 
 MAX_ISSUES = 120
+MAX_ALLOWED_SHARED_ENTRIES = 120
 IPSET_STATUS_FILE = '/opt/tmp/bypass_ipset_status.json'
 ROUTE_FILES = [name[:-4] for name in DEFAULT_ORDER]
 ROUTE_IPSET_SETS = {
@@ -195,6 +196,46 @@ def _annotate_issue_services(issue, service_index, *, max_labels=6, match_cache=
     return issue
 
 
+def _route_entry_type(entry):
+    network = _ip_network(entry)
+    if network:
+        return 'ip' if network.prefixlen == network.max_prefixlen else 'cidr'
+    if _domain_key(entry):
+        return 'domain'
+    return 'entry'
+
+
+def _shared_route_entry(kind, entry, route_entry_pairs, *, entries=None, message=''):
+    route_entries = {}
+    for route, raw_entry in route_entry_pairs:
+        route = str(route or '').strip()
+        raw_entry = str(raw_entry or '').strip()
+        if not route or not raw_entry:
+            continue
+        route_entries.setdefault(route, set()).add(raw_entry)
+    serialized_route_entries = {
+        route: sorted(values)
+        for route, values in sorted(route_entries.items())
+    }
+    routes = list(serialized_route_entries)
+    visible_entries = sorted({
+        str(value or '').strip()
+        for value in (entries or [entry])
+        if str(value or '').strip()
+    })
+    return {
+        'kind': kind,
+        'entry_type': _route_entry_type(entry),
+        'entry': str(entry or '').strip(),
+        'entries': visible_entries,
+        'routes': routes,
+        'files': [f'{route}.txt' for route in routes],
+        'route_entries': serialized_route_entries,
+        'message': message or str(entry or '').strip(),
+        'allowed_shared': True,
+    }
+
+
 def _command_text(args, *, run_command=subprocess.run, timeout=3):
     try:
         result = run_command(
@@ -344,7 +385,13 @@ def _network_overlap_samples(
     return samples, match_count
 
 
-def _domain_suffix_issues(entries_by_route, shared_entries, max_issues):
+def _domain_suffix_issues(
+    entries_by_route,
+    shared_entries,
+    max_issues,
+    *,
+    max_allowed_shared=MAX_ALLOWED_SHARED_ENTRIES,
+):
     domain_items = []
     domain_index = {}
     for route, entries in entries_by_route.items():
@@ -357,6 +404,8 @@ def _domain_suffix_issues(entries_by_route, shared_entries, max_issues):
             domain_index.setdefault(domain, []).append(item)
 
     issues = []
+    allowed_shared = []
+    allowed_shared_count = 0
     suffix_pairs = set()
     for domain, entry, route in domain_items:
         labels = domain.split('.')
@@ -367,15 +416,26 @@ def _domain_suffix_issues(entries_by_route, shared_entries, max_issues):
             for _other_domain, other_entry, other_route in domain_index.get(suffix, ()):
                 if route == other_route:
                     continue
-                if (
-                    _entry_key(entry) in shared_entries
-                    and _entry_key(other_entry) in shared_entries
-                ):
-                    continue
                 pair = tuple(sorted((entry, other_entry))) + tuple(sorted((route, other_route)))
                 if pair in suffix_pairs:
                     continue
                 suffix_pairs.add(pair)
+                if (
+                    _entry_key(entry) in shared_entries
+                    and _entry_key(other_entry) in shared_entries
+                ):
+                    allowed_shared_count += 1
+                    if len(allowed_shared) < max_allowed_shared:
+                        allowed_shared.append(_shared_route_entry(
+                            'shared_domain_suffix',
+                            _entry_key(other_entry),
+                            ((route, entry), (other_route, other_entry)),
+                            entries=(entry, other_entry),
+                            message=f'{entry} пересекается с {other_entry}',
+                        ))
+                    continue
+                if len(issues) >= max(0, int(max_issues or 0)):
+                    continue
                 issues.append({
                     'kind': 'domain_suffix',
                     'entry': other_entry,
@@ -383,9 +443,7 @@ def _domain_suffix_issues(entries_by_route, shared_entries, max_issues):
                     'routes': sorted({route, other_route}),
                     'message': f'{entry} пересекается с {other_entry}',
                 })
-                if len(issues) >= max_issues:
-                    return issues
-    return issues
+    return issues, allowed_shared, allowed_shared_count
 
 
 def _file_network_overlap_issues(entries_by_route, max_issues):
@@ -492,12 +550,16 @@ def analyze_route_intersections(
     *,
     unblock_dir=UNBLOCK_DIR,
     max_issues=MAX_ISSUES,
+    max_allowed_shared=MAX_ALLOWED_SHARED_ENTRIES,
     include_runtime=True,
     run_command=subprocess.run,
 ):
     entries_by_route = _read_all(unblock_dir)
     service_index = _service_match_index()
     issues = []
+    allowed_shared = []
+    allowed_shared_count = 0
+    max_allowed_shared = max(0, int(max_allowed_shared or 0))
     shared_entries = {
         normalize_route_entry(entry)
         for entry in shared_service_route_entries()
@@ -509,23 +571,54 @@ def analyze_route_intersections(
             key = _entry_key(entry)
             if not key:
                 continue
-            bucket = exact_seen.setdefault(key, {'routes': set(), 'entries': set(), 'display': _entry_value(entry)})
+            bucket = exact_seen.setdefault(key, {
+                'routes': set(),
+                'entries': set(),
+                'route_entries': {},
+                'display': _entry_value(entry),
+            })
             bucket['routes'].add(route)
             bucket['entries'].add(entry)
-    for key, bucket in exact_seen.items():
+            bucket['route_entries'].setdefault(route, set()).add(entry)
+    for key, bucket in sorted(exact_seen.items()):
         routes = sorted(bucket['routes'])
-        if len(routes) > 1 and key not in shared_entries:
-            display = bucket.get('display') or key
-            issues.append({
-                'kind': 'exact',
-                'entry': display,
-                'entries': sorted(bucket['entries']),
-                'routes': routes,
-                'message': f'{display}: точное совпадение в {", ".join(routes)}',
-            })
+        if len(routes) <= 1:
+            continue
+        display = bucket.get('display') or key
+        if key in shared_entries:
+            allowed_shared_count += 1
+            if len(allowed_shared) < max_allowed_shared:
+                route_entry_pairs = [
+                    (route, raw_entry)
+                    for route, raw_entries in bucket.get('route_entries', {}).items()
+                    for raw_entry in raw_entries
+                ]
+                allowed_shared.append(_shared_route_entry(
+                    'shared_exact',
+                    key,
+                    route_entry_pairs,
+                    entries=sorted(bucket['entries']),
+                    message=f'{display}: общая запись каталогов в {", ".join(routes)}',
+                ))
+            continue
+        issues.append({
+            'kind': 'exact',
+            'entry': display,
+            'entries': sorted(bucket['entries']),
+            'routes': routes,
+            'message': f'{display}: точное совпадение в {", ".join(routes)}',
+        })
 
-    if len(issues) < max_issues:
-        issues.extend(_domain_suffix_issues(entries_by_route, shared_entries, max_issues - len(issues)))
+    shared_slots = max(0, max_allowed_shared - len(allowed_shared))
+    domain_issues, domain_shared, domain_shared_count = _domain_suffix_issues(
+        entries_by_route,
+        shared_entries,
+        max_issues - len(issues),
+        max_allowed_shared=shared_slots,
+    )
+    issues.extend(domain_issues)
+    allowed_shared.extend(domain_shared)
+    allowed_shared_count += domain_shared_count
 
     if len(issues) < max_issues:
         issues.extend(_file_network_overlap_issues(entries_by_route, max_issues - len(issues)))
@@ -542,6 +635,8 @@ def analyze_route_intersections(
     match_cache = {}
     for issue in issues:
         _annotate_issue_services(issue, service_index, match_cache=match_cache)
+    for shared_entry in allowed_shared:
+        _annotate_issue_services(shared_entry, service_index, match_cache=match_cache)
 
     return {
         'issues': issues[:max_issues],
@@ -550,6 +645,9 @@ def analyze_route_intersections(
         'runtime_count': len(runtime_issues),
         'runtime_match_count': sum(int(item.get('match_count') or 0) for item in runtime_issues),
         'truncated': len(issues) > max_issues,
+        'allowed_shared_entries': allowed_shared,
+        'allowed_shared_count': allowed_shared_count,
+        'allowed_shared_truncated': allowed_shared_count > len(allowed_shared),
         'routes': {route: len(entries) for route, entries in entries_by_route.items()},
     }
 

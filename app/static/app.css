@@ -485,6 +485,17 @@
         .route-intersection-card strong{display:block;font-size:12px;color:#edf5fb;}
         .route-intersection-card small{display:block;margin-top:2px;color:#9fb0c8;font-size:11px;line-height:1.25;}
         .route-intersection-card ul{margin:6px 0 0 16px;padding:0;color:#9fb0c8;font-size:10.5px;line-height:1.25;}
+        .route-shared-card{grid-template-columns:minmax(0,1fr);align-items:start;}
+        .route-shared-details{margin-top:7px;min-width:0;}
+        .route-shared-details summary{cursor:pointer;color:#9ff8ef;font-size:11px;font-weight:700;}
+        .route-shared-details ul{display:grid;gap:7px;margin:7px 0 0;padding:0;list-style:none;}
+        .route-shared-entry{display:grid;gap:3px;min-width:0;padding:7px;border-radius:7px;border:1px solid rgba(91,124,150,.22);background:rgba(11,17,25,.24);}
+        .route-shared-address{display:flex;align-items:baseline;gap:5px;min-width:0;color:#9fb0c8;font-size:10.5px;}
+        .route-shared-entry code{min-width:0;padding:1px 4px;border-radius:4px;background:rgba(78,216,205,.08);color:#bdfbf5;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10.5px;overflow-wrap:anywhere;word-break:break-word;user-select:text;}
+        .route-shared-file-list{display:grid;gap:3px;min-width:0;margin-top:2px;}
+        .route-shared-file-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px;min-width:0;color:#9fb0c8;font-size:10px;}
+        .route-shared-file-row strong{font-size:10px;color:#c7d2df;}
+        .route-shared-truncated{margin-top:6px!important;color:#ffd38a!important;}
         .route-intersection-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;}
         .route-intersection-actions button{min-width:78px;min-height:30px;padding:5px 8px;font-size:10.5px;}
         .service-route-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:6px;align-items:start;}
@@ -498,7 +509,7 @@
         .service-route-title .service-route-core-icon,.service-route-title .preset-icon,.service-route-title .custom-service-badge{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;}
         .service-route-title span:last-child{display:grid;gap:1px;min-width:0;text-align:left;}
         .service-route-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#edf5fb;}
-        .service-route-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9fb0c8;font-size:10.5px;}
+        .service-route-title small{overflow-wrap:anywhere;white-space:normal;color:#9fb0c8;font-size:10.5px;line-height:1.2;}
         .service-route-caret{flex:0 0 auto;color:#9ff8ef;font-size:12px;font-weight:800;line-height:1;transition:transform .16s ease;}
         .service-route-menu[open] .service-route-caret{transform:rotate(180deg);}
         .service-route-menu-list{display:grid;gap:4px;padding:0 8px 8px;}
@@ -1169,6 +1180,8 @@
         [data-theme="light"] .route-section-head small,
         [data-theme="light"] .route-intersection-card small,
         [data-theme="light"] .route-intersection-card ul,
+        [data-theme="light"] .route-shared-address,
+        [data-theme="light"] .route-shared-file-row,
         [data-theme="light"] .service-route-title small,
         [data-theme="light"] .event-time,
         [data-theme="light"] .event-main small,
@@ -1236,6 +1249,11 @@
         [data-theme="light"] .route-intersection-card,
         [data-theme="light"] .service-route-card,
         [data-theme="light"] .event-history-item{background:rgba(225,230,236,.86);border-color:var(--border);}
+        [data-theme="light"] .route-shared-entry{background:rgba(255,255,255,.5);border-color:rgba(31,122,106,.18);}
+        [data-theme="light"] .route-shared-details summary,
+        [data-theme="light"] .route-shared-entry code{color:#1f6258;}
+        [data-theme="light"] .route-shared-entry code{background:rgba(31,122,106,.08);}
+        [data-theme="light"] .route-shared-file-row strong{color:#344255;}
         [data-theme="light"] .seg-tab,
         [data-theme="light"] .subtab,
         [data-theme="light"] .nav-item{color:#536274;}

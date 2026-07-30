@@ -13727,10 +13727,109 @@ def test_service_route_repair_preserves_shared_entries():
         assert shared_entry in vless2_entries
         assert service_routes.service_route_state('youtube', unblock_dir=str(tmp))['label'] == 'Vless 2'
         assert service_routes.service_route_state('chatgpt_services', unblock_dir=str(tmp))['label'] == 'Vless 1'
-        assert route_intersections.analyze_route_intersections(
+        report = route_intersections.analyze_route_intersections(
             unblock_dir=str(tmp),
             include_runtime=False,
-        )['count'] == 0
+        )
+        assert report['count'] == 0
+        assert report['file_count'] == 0
+        assert report['allowed_shared_count'] == 1
+        assert report['allowed_shared_truncated'] is False
+        shared = report['allowed_shared_entries'][0]
+        assert shared['kind'] == 'shared_exact'
+        assert shared['entry_type'] == 'domain'
+        assert shared['entry'] == shared_entry
+        assert shared['routes'] == ['vless', 'vless-2']
+        assert shared['files'] == ['vless.txt', 'vless-2.txt']
+        assert shared['route_entries'] == {
+            'vless': [shared_entry],
+            'vless-2': [shared_entry],
+        }
+        assert shared['service_keys'] == ['chatgpt_services', 'youtube']
+        assert shared['services'] == ['ChatGPT / Codex', 'YouTube']
+
+
+def test_route_intersections_preserve_shared_raw_file_entries():
+    shared_entry = 'accounts.google.com'
+    with tempfile.TemporaryDirectory() as tmp:
+        for route_file in ('vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+            (Path(tmp) / route_file).write_text('', encoding='utf-8')
+        (Path(tmp) / 'vless.txt').write_text(
+            '# общий адрес\ndomain:accounts.google.com # Vless 1\ndomain:accounts.google.com # Vless 1\n',
+            encoding='utf-8',
+        )
+        (Path(tmp) / 'vless-2.txt').write_text(
+            'full:accounts.google.com\n',
+            encoding='utf-8',
+        )
+
+        report = route_intersections.analyze_route_intersections(
+            unblock_dir=tmp,
+            include_runtime=False,
+        )
+
+        assert report['count'] == 0
+        assert report['file_count'] == 0
+        assert report['allowed_shared_count'] == 1
+        shared = report['allowed_shared_entries'][0]
+        assert shared['entry'] == shared_entry
+        assert shared['route_entries'] == {
+            'vless': ['domain:accounts.google.com # Vless 1'],
+            'vless-2': ['full:accounts.google.com'],
+        }
+        assert shared['services'] == ['ChatGPT / Codex', 'YouTube']
+
+
+def test_route_intersections_limit_shared_entry_details():
+    shared_entries = [f'shared-{index}.example.com' for index in range(125)]
+    original_shared_entries = route_intersections.shared_service_route_entries
+    route_intersections.shared_service_route_entries = lambda: shared_entries
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            for route_file in ('vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+                (Path(tmp) / route_file).write_text('', encoding='utf-8')
+            content = '\n'.join(shared_entries) + '\n'
+            (Path(tmp) / 'vless.txt').write_text(content, encoding='utf-8')
+            (Path(tmp) / 'vless-2.txt').write_text(content, encoding='utf-8')
+
+            report = route_intersections.analyze_route_intersections(
+                unblock_dir=tmp,
+                include_runtime=False,
+                max_allowed_shared=3,
+            )
+    finally:
+        route_intersections.shared_service_route_entries = original_shared_entries
+
+    assert report['count'] == 0
+    assert report['allowed_shared_count'] == 125
+    assert len(report['allowed_shared_entries']) == 3
+    assert report['allowed_shared_truncated'] is True
+
+
+def test_route_intersections_report_allowed_shared_domain_suffix():
+    shared_entries = ['example.com', 'api.example.com']
+    original_shared_entries = route_intersections.shared_service_route_entries
+    route_intersections.shared_service_route_entries = lambda: shared_entries
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            for route_file in ('vmess.txt', 'trojan.txt', 'shadowsocks.txt'):
+                (Path(tmp) / route_file).write_text('', encoding='utf-8')
+            (Path(tmp) / 'vless.txt').write_text('example.com\n', encoding='utf-8')
+            (Path(tmp) / 'vless-2.txt').write_text('api.example.com\n', encoding='utf-8')
+
+            report = route_intersections.analyze_route_intersections(
+                unblock_dir=tmp,
+                include_runtime=False,
+            )
+    finally:
+        route_intersections.shared_service_route_entries = original_shared_entries
+
+    assert report['count'] == 0
+    assert report['allowed_shared_count'] == 1
+    shared = report['allowed_shared_entries'][0]
+    assert shared['kind'] == 'shared_domain_suffix'
+    assert shared['entries'] == ['api.example.com', 'example.com']
+    assert shared['routes'] == ['vless', 'vless-2']
 
 
 def test_service_route_auto_resolves_known_service_intersections():
@@ -14068,6 +14167,16 @@ def test_service_route_ui_helpers():
     assert any(item['id'] == 'telegram' for item in service_items)
     assert any(item['id'] == 'youtube' for item in service_items)
     route_states = {item['id']: {'label': 'Vless 1', 'complete_protocols': ['vless']} for item in service_items[:2]}
+    route_states['youtube'] = {
+        'label': 'Vless 2',
+        'total': 185,
+        'complete_protocols': ['vless2'],
+        'partial_protocols': ['vless'],
+        'routes': {
+            'vless2': {'matched': 185, 'total': 185},
+            'vless': {'matched': 1, 'total': 185},
+        },
+    }
     route_items = service_items[:3]
     html_text = key_pool_web.web_service_route_tools_html(
         route_items,
@@ -14085,15 +14194,63 @@ def test_service_route_ui_helpers():
     assert 'service-route-menu-item active' in html_text
     assert 'service-route-telegram-icon' in html_text
     assert 'service-route-youtube-icon' in html_text
+    assert 'Vless 2 — полностью 185/185; Vless 1 — частично 1/185' in html_text
     assert 'service-route-choice' not in html_text
     assert '/custom_check_delete' in html_text
     assert '<select' not in html_text
     assert 'Перенести</button>' not in html_text
     intersections_html = key_pool_web.web_route_intersections_html({'count': 0}, service_routes.protocol_options())
     assert intersections_html
-    assert 'IP-сетей.</small>' not in intersections_html
+    assert 'Конфликтных пересечений и общих записей не найдено' in intersections_html
+    assert 'одинаковых доменов' not in intersections_html
+    shared_report = {
+        'count': 0,
+        'file_count': 0,
+        'allowed_shared_count': 1,
+        'allowed_shared_entries': [{
+            'kind': 'shared_exact',
+            'entry_type': 'domain',
+            'entry': 'accounts.google.com',
+            'routes': ['vless', 'vless-2'],
+            'files': ['vless.txt', 'vless-2.txt'],
+            'route_entries': {
+                'vless': ['domain:accounts.google.com # Vless 1'],
+                'vless-2': ['full:accounts.google.com'],
+            },
+            'services': ['ChatGPT / Codex', 'YouTube'],
+        }],
+    }
+    shared_html = key_pool_web.web_route_intersections_html(
+        shared_report,
+        service_routes.protocol_options(),
+    )
+    assert 'Конфликтных пересечений не найдено' in shared_html
+    assert 'accounts.google.com' in shared_html
+    assert 'vless.txt' in shared_html
+    assert 'vless-2.txt' in shared_html
+    assert 'domain:accounts.google.com # Vless 1' in shared_html
+    assert 'full:accounts.google.com' in shared_html
+    assert 'ChatGPT / Codex' in shared_html
+    assert 'YouTube' in shared_html
+    assert '<details class="route-shared-details" open>' in shared_html
+    assert 'Копировать' not in shared_html
+    hostile_report = {
+        **shared_report,
+        'allowed_shared_entries': [{
+            **shared_report['allowed_shared_entries'][0],
+            'entry': '<script>alert(1)</script>',
+            'route_entries': {'vless': ['<script>alert(1)</script>']},
+        }],
+    }
+    hostile_html = key_pool_web.web_route_intersections_html(
+        hostile_report,
+        service_routes.protocol_options(),
+    )
+    assert '<script>' not in hostile_html
+    assert '&lt;script&gt;alert(1)&lt;/script&gt;' in hostile_html
     intersections_warn_html = key_pool_web.web_route_intersections_html(
         {
+            **shared_report,
             'count': 1,
             'file_count': 1,
             'issues': [{
@@ -14107,9 +14264,13 @@ def test_service_route_ui_helpers():
     )
     assert 'Discord' in intersections_warn_html
     assert 'discord.com' in intersections_warn_html
+    assert 'accounts.google.com' in intersections_warn_html
+    assert 'Найдены конфликтные пересечения списков: 1' in intersections_warn_html
+    assert 'Разрешённые общие записи: 1' in intersections_warn_html
     assert '/route_intersections_resolve' in intersections_warn_html
     runtime_pending_html = key_pool_web.web_route_intersections_html(
         {
+            **shared_report,
             'count': 1,
             'file_count': 0,
             'runtime_count': 1,
@@ -14125,6 +14286,7 @@ def test_service_route_ui_helpers():
     )
     assert 'ipset' in runtime_pending_html
     assert '64.233.161.94' not in runtime_pending_html
+    assert 'accounts.google.com' in runtime_pending_html
     assert '/route_intersections_resolve' not in runtime_pending_html
     profiles_html = key_pool_web.web_route_profiles_html([{'id': 'all', 'label': 'Все сервисы', 'description': 'desc'}])
     assert 'из каталога.</small>' not in profiles_html

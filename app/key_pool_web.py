@@ -27,6 +27,35 @@ def pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
 
 
+def _route_list_label(route):
+    proto = 'vless2' if route == 'vless-2' else route
+    return pool_proto_label(proto)
+
+
+def _service_route_display_label(state):
+    state = state if isinstance(state, dict) else {}
+    routes = state.get('routes') if isinstance(state.get('routes'), dict) else {}
+    parts = []
+    for field, qualifier in (
+        ('complete_protocols', 'полностью'),
+        ('partial_protocols', 'частично'),
+    ):
+        protocols = state.get(field) if isinstance(state.get(field), list) else []
+        for proto in protocols:
+            route = routes.get(proto) if isinstance(routes.get(proto), dict) else {}
+            try:
+                matched = int(route.get('matched') or 0)
+                total = int(route.get('total') or state.get('total') or 0)
+            except (TypeError, ValueError):
+                matched = 0
+                total = 0
+            coverage = f' {matched}/{total}' if total > 0 else ''
+            parts.append(f'{pool_proto_label(proto)} — {qualifier}{coverage}')
+    if parts:
+        return '; '.join(parts)
+    return str(state.get('label') or 'не добавлен')
+
+
 def _compact_event_value(value):
     if isinstance(value, (list, tuple, set)):
         return ', '.join(str(item) for item in value)
@@ -471,7 +500,7 @@ def web_service_route_tools_html(
         safe_id = html.escape(service_id, quote=True)
         safe_label = html.escape(service.get('label') or service_id)
         state = route_states.get(service_id) or {}
-        route_label = html.escape(state.get('label') or 'не добавлен')
+        route_label = html.escape(_service_route_display_label(state))
         if service_id in core_icon_html:
             service_icon = (
                 f'<span class="service-route-core-icon service-route-{html.escape(service_id, quote=True)}-icon">'
@@ -572,14 +601,82 @@ def web_route_profiles_html(profiles, csrf_input_html=''):
     </div>'''
 
 
+def _allowed_shared_entries_html(report, *, clean=False):
+    report = report or {}
+    count = int(report.get('allowed_shared_count') or 0)
+    if count <= 0:
+        return ''
+    rows = []
+    for item in (report.get('allowed_shared_entries') or []):
+        entry = html.escape(str(item.get('entry') or ''))
+        entry_type = {
+            'domain': 'домен',
+            'ip': 'IP-адрес',
+            'cidr': 'IP-сеть',
+        }.get(str(item.get('entry_type') or ''), 'адрес')
+        routes = [str(route or '') for route in (item.get('routes') or []) if route]
+        files = [str(value or '') for value in (item.get('files') or []) if value]
+        if not files:
+            files = [f'{route}.txt' for route in routes]
+        services = [str(value or '') for value in (item.get('services') or []) if value]
+        route_entries = item.get('route_entries') if isinstance(item.get('route_entries'), dict) else {}
+        route_rows = []
+        for route in routes:
+            raw_entries = route_entries.get(route) if isinstance(route_entries.get(route), list) else []
+            if not raw_entries:
+                raw_entries = [item.get('entry') or '']
+            raw_html = ' · '.join(
+                f'<code>{html.escape(str(raw_entry or ""))}</code>'
+                for raw_entry in raw_entries
+                if str(raw_entry or '').strip()
+            )
+            if not raw_html:
+                continue
+            route_rows.append(
+                '<span class="route-shared-file-row">'
+                f'<strong>{html.escape(f"{route}.txt")}</strong>{raw_html}'
+                '</span>'
+            )
+        route_text = ', '.join(_route_list_label(route) for route in routes)
+        service_text = ', '.join(services) if services else 'сервис не распознан по каталогу'
+        rows.append(f'''<li class="route-shared-entry">
+            <span class="route-shared-address"><span>{html.escape(entry_type)}:</span><code>{entry}</code></span>
+            <small>Файлы: {html.escape(', '.join(files))}</small>
+            <small>Маршруты: {html.escape(route_text)} · Сервисы: {html.escape(service_text)}</small>
+            <span class="route-shared-file-list">{''.join(route_rows)}</span>
+        </li>''')
+    shown = len(rows)
+    truncated = bool(report.get('allowed_shared_truncated')) or count > shown
+    truncated_html = (
+        f'<small class="route-shared-truncated">Показаны первые {shown} из {count} общих записей</small>'
+        if truncated else ''
+    )
+    open_attr = ' open' if count <= 8 else ''
+    heading = 'Конфликтных пересечений не найдено' if clean else f'Разрешённые общие записи: {count}'
+    return f'''<div class="route-intersection-card route-intersection-ok route-shared-card">
+        <div>
+            <strong>{heading}</strong>
+            <small>Общие адреса каталогов могут находиться в нескольких файлах и не считаются конфликтом</small>
+            <details class="route-shared-details"{open_attr}>
+                <summary>Общие адреса: {count}</summary>
+                <ul>{''.join(rows)}</ul>
+                {truncated_html}
+            </details>
+        </div>
+    </div>'''
+
+
 def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
     report = report or {}
     count = int(report.get('count') or 0)
     file_count = int(report.get('file_count') if report.get('file_count') is not None else count)
+    shared_html = _allowed_shared_entries_html(report, clean=count <= 0)
     if count <= 0:
+        if shared_html:
+            return shared_html
         return '''<div class="route-intersection-card route-intersection-ok">
-            <strong>Пересечений в списках не найдено</strong>
-            <small>Файлы обхода не содержат одинаковых доменов, вложенных доменов или пересекающихся IP-сетей</small>
+            <strong>Конфликтных пересечений и общих записей не найдено</strong>
+            <small>Файлы обхода не содержат несовместимых доменов или пересекающихся IP-сетей</small>
         </div>'''
     examples = []
     for issue in (report.get('issues') or [])[:8]:
@@ -622,7 +719,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
                 <small>Файлы списков уже очищены, загруженные ipset обновляются в фоне. Пересечения исчезнут после завершения refresh.</small>
                 {auto_note}
             </div>
-        </div>'''
+        </div>{shared_html}'''
     buttons = []
     for item in ((protocol_options or []) if file_count else []):
         route_value = 'vless-2' if item['value'] == 'vless2' else item['value']
@@ -631,9 +728,9 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
             <input type="hidden" name="target_route" value="{html.escape(route_value, quote=True)}">
             <button type="submit" class="outline-button">{html.escape(item['label'])}</button>
         </form>''')
-    return f'''<div class="route-intersection-card route-intersection-warn">
+    conflict_html = f'''<div class="route-intersection-card route-intersection-warn">
         <div>
-            <strong>Найдены пересечения списков: {count}</strong>
+            <strong>Найдены конфликтные пересечения списков: {count}</strong>
             <small>Это может отправлять один сервис через разные ключи и вызывать обрывы</small>
             {runtime_note}
             {auto_note}
@@ -643,6 +740,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
             {''.join(buttons)}
         </div>
     </div>'''
+    return conflict_html + shared_html
 
 
 def web_pool_snapshot(

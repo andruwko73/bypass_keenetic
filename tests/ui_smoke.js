@@ -988,6 +988,34 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: service route fragment API failed`);
     }
     await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
+    await assertVisibleBox(page, '[data-protocol-panel].active .route-shared-card', `${name} allowed shared routes`);
+    const sharedRouteCard = page.locator('[data-protocol-panel].active .route-shared-card').first();
+    const sharedRouteText = await sharedRouteCard.innerText();
+    for (const expected of ['accounts.google.com', 'vless.txt', 'vless-2.txt', 'ChatGPT / Codex', 'YouTube']) {
+      if (!sharedRouteText.includes(expected)) {
+        throw new Error(`${name}: allowed shared route details omit ${expected}`);
+      }
+    }
+    const sharedDetailsOpen = await sharedRouteCard.locator('.route-shared-details').evaluate((node) => node.open);
+    if (!sharedDetailsOpen) {
+      throw new Error(`${name}: short allowed shared route list should be expanded`);
+    }
+    const sharedCopyControls = await sharedRouteCard.getByRole('button', { name: /Копировать/i }).count();
+    if (sharedCopyControls) {
+      throw new Error(`${name}: allowed shared route details unexpectedly contain a copy button`);
+    }
+    const sharedRouteTextFits = await sharedRouteCard.locator('.route-shared-entry').evaluateAll((nodes) => (
+      nodes.every((node) => node.scrollWidth <= node.clientWidth + 2)
+    ));
+    if (!sharedRouteTextFits) {
+      throw new Error(`${name}: allowed shared route details overflow`);
+    }
+    const serviceRouteText = await page.locator('[data-protocol-panel].active .service-route-tools').innerText();
+    for (const expected of ['185/185', '1/185', '79/79', '1/79']) {
+      if (!serviceRouteText.includes(expected)) {
+        throw new Error(`${name}: service route coverage omits ${expected}`);
+      }
+    }
     await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
     const routeTextFits = await page.locator('[data-protocol-panel].active .service-route-card').evaluateAll((nodes) => (
       nodes.every((node) => node.scrollWidth <= node.clientWidth + 2)
