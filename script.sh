@@ -234,6 +234,7 @@ recover_runtime_after_failed_update() {
 handle_cli_update_exit() {
   update_exit_code="$1"
   trap - EXIT
+  trap '' TERM INT HUP
   if [ "${cli_update_status_active:-0}" = "1" ] && [ "$update_exit_code" -ne 0 ]; then
     recover_runtime_after_failed_update
     write_cli_update_status update false 100 Error "CLI update failed; runtime recovery attempted"
@@ -1889,6 +1890,7 @@ if [ "$1" = "-update" ]; then
     write_cli_update_status update true 3 Preparing "CLI update started"
     update_runtime_quiesced=0
     trap 'handle_cli_update_exit "$?"' EXIT
+    trap 'exit 143' TERM INT HUP
   ensure_entware_dns
     opkg update > /dev/null 2>&1
     core_proxy_pkg=$(detect_core_proxy_package)
@@ -2137,7 +2139,7 @@ if [ "$1" = "-update" ]; then
     run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
     write_cli_update_status update false 100 Done "$update_completion_message"
     cli_update_status_active=0
-    trap - EXIT
+    trap - EXIT TERM INT HUP
     exit 0
 fi
 

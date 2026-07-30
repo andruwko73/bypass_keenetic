@@ -10848,6 +10848,7 @@ def test_repo_update_posix_timeout_runs_exit_recovery():
         script_path.write_text(
             '#!/bin/sh\n'
             'trap \'printf recovered > "$RECOVERY_MARKER"\' EXIT\n'
+            'trap \'exit 143\' TERM INT HUP\n'
             'printf ready\\n\n'
             'while :; do sleep 5; done\n',
             encoding='utf-8',
@@ -10878,6 +10879,11 @@ def test_repo_update_posix_timeout_runs_exit_recovery():
         assert 'нет активности' in output
         assert marker_path.read_text(encoding='utf-8') == 'recovered'
         assert spawned and spawned[0].poll() is not None
+
+    update_script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert "trap 'exit 143' TERM INT HUP" in update_script
+    assert "trap '' TERM INT HUP" in update_script
+    assert 'trap - EXIT TERM INT HUP' in update_script
 
 
 def test_web_background_helpers():

@@ -1,4 +1,6 @@
-*v1.981 (30 Jul 2026) -* main
+*v1.982 (30 Jul 2026) -* main
+
+*Preserves automatic rollback when the update watchdog sends TERM on POSIX shells by routing soft signals through the existing EXIT recovery trap.*
 
 *Makes updates lighter and safer without a new worker: live output is byte-bounded and debounced, quiet redirected stages count status-file activity, and stalled process groups receive a recovery grace period before forced termination.*
 
