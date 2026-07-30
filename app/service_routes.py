@@ -238,6 +238,30 @@ def service_route_summary(service_items, *, unblock_dir=UNBLOCK_DIR, route_entri
     return summary
 
 
+def compact_route_summary(route_states, *, max_services=64):
+    """Return the bounded, non-sensitive route assignment subset used by light status paths."""
+    result = {}
+    allowed_protocols = set(ROUTE_ORDER)
+    for service_id, state in (route_states or {}).items():
+        if len(result) >= max(1, int(max_services or 1)):
+            break
+        service_id = str(service_id or '').strip()
+        if not service_id or not isinstance(state, dict):
+            continue
+        compact = {}
+        for field in ('complete_protocols', 'partial_protocols'):
+            values = []
+            seen = set()
+            for protocol in state.get(field) or []:
+                protocol = str(protocol or '').strip()
+                if protocol in allowed_protocols and protocol not in seen:
+                    values.append(protocol)
+                    seen.add(protocol)
+            compact[field] = values
+        result[service_id] = compact
+    return result
+
+
 def apply_service_route(
     service_key,
     target_protocol,

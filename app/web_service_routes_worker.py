@@ -4,6 +4,7 @@ import re
 import sys
 
 import custom_checks_store
+import service_routes
 import web_route_tools_runtime
 
 
@@ -45,6 +46,7 @@ def build_payload():
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
     )
+    route_states = runtime.summary()
     return {
         'route_tools_html': runtime.tools_html(
             '',
@@ -52,6 +54,7 @@ def build_payload():
             include_intersections=True,
             include_runtime_intersections=False,
         ),
+        'route_states': service_routes.compact_route_summary(route_states),
     }
 
 

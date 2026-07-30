@@ -289,9 +289,13 @@ _service_catalog_module = None
 _update_maintenance_runtime_module = None
 
 _KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
-_KEY_PROBE_CACHE_SCHEMA_VERSION = 8
+_KEY_PROBE_CACHE_SCHEMA_VERSION = 9
+_KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7, 8, 9)
 _KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 _POOL_SUMMARY_LAST_PATH = '/opt/etc/bot/pool_summary_last.json'
+_SERVICE_ROUTE_STATE_PATH = '/opt/etc/bot/service_route_state.json'
+_SERVICE_ROUTE_STATE_SCHEMA_VERSION = 1
+_SERVICE_ROUTE_STATE_MAX_SERVICES = 64
 _YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
 _YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS = 1500
 _YOUTUBE_QUALITY_DEFAULT_1600P_MBPS = 25.0
@@ -559,11 +563,14 @@ def _load_light_key_probe_cache():
     cache = _read_json_file(_KEY_PROBE_CACHE_PATH, {}) or {}
     if not isinstance(cache, dict):
         return {}
-    return {
-        key_id: dict(entry)
-        for key_id, entry in cache.items()
-        if isinstance(entry, dict) and entry.get('schema') in (6, 7, _KEY_PROBE_CACHE_SCHEMA_VERSION)
-    }
+    result = {}
+    for key_id, entry in cache.items():
+        if not isinstance(entry, dict) or entry.get('schema') not in _KEY_PROBE_COMPAT_SCHEMA_VERSIONS:
+            continue
+        normalized = dict(entry)
+        normalized['schema'] = _KEY_PROBE_CACHE_SCHEMA_VERSION
+        result[key_id] = normalized
+    return result
 
 
 def _youtube_probe_state(entry):
@@ -2721,6 +2728,10 @@ web_service_routes_cache = {
     'signature': None,
     'payload': None,
 }
+light_service_route_state_cache = {
+    'signature': None,
+    'states': None,
+}
 WEB_SERVICE_ROUTES_CACHE_TTL_SECONDS = 20.0
 pool_summary_cache = {
     'signature': None,
@@ -2758,6 +2769,7 @@ web_pools_api_cache_lock = threading.Lock()
 web_pools_api_build_lock = threading.Lock()
 web_service_routes_cache_lock = threading.Lock()
 web_service_routes_build_lock = threading.Lock()
+light_service_route_state_cache_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
 event_history_api_cache_lock = threading.Lock()
 router_metrics_compact_cache_lock = threading.Lock()
@@ -7816,6 +7828,7 @@ def _web_service_routes_worker_payload():
     worker_path = os.path.join(BOT_DIR, 'web_service_routes_worker.py')
     if not os.path.isfile(worker_path):
         return None
+    route_signature = _web_service_routes_cache_signature()
     try:
         result = subprocess.run(
             [sys.executable or 'python3', worker_path],
@@ -7841,6 +7854,8 @@ def _web_service_routes_worker_payload():
         return None
     if not isinstance(payload, dict) or not isinstance(payload.get('route_tools_html'), str):
         return None
+    if route_signature == _web_service_routes_cache_signature():
+        _save_light_service_route_states(payload.get('route_states'), signature=route_signature)
     return payload
 
 
@@ -7849,14 +7864,18 @@ def _build_web_service_routes_payload():
     if worker_payload is not None:
         return worker_payload
     custom_checks = _load_custom_checks()
-    return {
+    route_states = _service_route_summary()
+    payload = {
         'route_tools_html': _route_tools_html(
             '',
             custom_checks,
             include_intersections=True,
             include_runtime_intersections=False,
         ),
+        'route_states': _sanitize_light_service_route_states(route_states),
     }
+    _save_light_service_route_states(payload['route_states'])
+    return payload
 
 
 def _web_service_routes_payload():
@@ -8027,6 +8046,96 @@ def _web_service_routes_cache_signature():
         tuple((name, _file_cache_signature(_unblock_list_path(name))) for name in route_names),
         _file_cache_signature(_CUSTOM_CHECKS_PATH),
     )
+
+
+def _service_route_signature_token(signature=None):
+    if signature is None:
+        signature = _web_service_routes_cache_signature()
+    try:
+        return json.dumps(signature, ensure_ascii=True, separators=(',', ':'))
+    except Exception:
+        return ''
+
+
+def _sanitize_light_service_route_states(route_states):
+    if not isinstance(route_states, dict):
+        return {}
+    result = {}
+    allowed_protocols = set(POOL_PROTOCOL_ORDER)
+    for service_id, state in route_states.items():
+        if len(result) >= _SERVICE_ROUTE_STATE_MAX_SERVICES:
+            break
+        service_id = str(service_id or '').strip()
+        if not service_id or not isinstance(state, dict):
+            continue
+        compact = {}
+        for field in ('complete_protocols', 'partial_protocols'):
+            values = []
+            seen = set()
+            for protocol in state.get(field) or []:
+                protocol = str(protocol or '').strip()
+                if protocol in allowed_protocols and protocol not in seen:
+                    values.append(protocol)
+                    seen.add(protocol)
+            compact[field] = values
+        result[service_id] = compact
+    return result
+
+
+def _save_light_service_route_states(route_states, *, signature=None):
+    states = _sanitize_light_service_route_states(route_states)
+    signature_token = _service_route_signature_token(signature)
+    if not states or not signature_token:
+        return False
+    with light_service_route_state_cache_lock:
+        if (
+            light_service_route_state_cache.get('signature') == signature_token and
+            light_service_route_state_cache.get('states') == states
+        ):
+            return False
+    payload = {
+        'schema': _SERVICE_ROUTE_STATE_SCHEMA_VERSION,
+        'signature': signature_token,
+        'states': states,
+    }
+    try:
+        _write_json_file(_SERVICE_ROUTE_STATE_PATH, payload)
+    except Exception as exc:
+        _write_runtime_log(f'Failed to persist light service route state: {type(exc).__name__}')
+        return False
+    with light_service_route_state_cache_lock:
+        light_service_route_state_cache['signature'] = signature_token
+        light_service_route_state_cache['states'] = states
+    return True
+
+
+def _load_light_service_route_states():
+    signature_token = _service_route_signature_token()
+    if not signature_token:
+        return None
+    with light_service_route_state_cache_lock:
+        if light_service_route_state_cache.get('signature') == signature_token:
+            cached = light_service_route_state_cache.get('states')
+            if isinstance(cached, dict):
+                return {service_id: dict(state) for service_id, state in cached.items()}
+            return None
+    payload = _read_json_file(_SERVICE_ROUTE_STATE_PATH, {}) or {}
+    if (
+        not isinstance(payload, dict) or
+        payload.get('schema') != _SERVICE_ROUTE_STATE_SCHEMA_VERSION or
+        payload.get('signature') != signature_token
+    ):
+        with light_service_route_state_cache_lock:
+            light_service_route_state_cache['signature'] = signature_token
+            light_service_route_state_cache['states'] = None
+        return None
+    states = _sanitize_light_service_route_states(payload.get('states'))
+    if not states:
+        return None
+    with light_service_route_state_cache_lock:
+        light_service_route_state_cache['signature'] = signature_token
+        light_service_route_state_cache['states'] = states
+    return {service_id: dict(state) for service_id, state in states.items()}
 
 
 def _pool_summary_cache_signature(current_keys, route_states=None):
@@ -8606,35 +8715,96 @@ def _light_youtube_route_protocol():
         return ''
 
 
-def _light_required_services_for_protocol(key_name, *, youtube_proto=None):
-    services = []
-    if _app_mode_telegram_enabled() and key_name == proxy_mode:
-        services.append('telegram')
+def _light_required_services_for_protocol(key_name, *, youtube_proto=None, route_states=None):
+    key_name = str(key_name or '').strip()
     if youtube_proto is None:
         youtube_proto = _light_youtube_route_protocol()
-    if key_name == youtube_proto:
-        services.append('youtube')
+    fallbacks = {
+        'telegram': bool(_app_mode_telegram_enabled() and key_name == proxy_mode),
+        'youtube': bool(key_name and key_name == youtube_proto),
+    }
+    if route_states is None:
+        route_states = _load_light_service_route_states()
+    services = []
+    for service_id in ('telegram', 'youtube'):
+        if service_id == 'telegram' and not _app_mode_telegram_enabled():
+            continue
+        state = route_states.get(service_id) if isinstance(route_states, dict) else None
+        if isinstance(state, dict):
+            required = key_name in set(state.get('complete_protocols') or [])
+        else:
+            required = fallbacks[service_id]
+        if required:
+            services.append(service_id)
     return tuple(services)
 
 
-def _light_cached_protocol_status_for_key(key_name, key_value, key_probe_cache=None, *, youtube_proto=None):
+def _light_protocol_custom_checks(custom_checks, route_states, key_name):
+    if not isinstance(route_states, dict):
+        return []
+    result = []
+    for check in custom_checks or []:
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get('id') or '').strip()
+        if not check_id:
+            continue
+        state = route_states.get(check_id)
+        if not isinstance(state, dict) or key_name not in set(state.get('complete_protocols') or []):
+            continue
+        result.append(check)
+    return result
+
+
+def _light_custom_probe_states(probe, custom_checks):
+    custom = probe.get('custom', {}) if isinstance(probe, dict) else {}
+    if not isinstance(custom, dict):
+        custom = {}
+    result = {}
+    for check in custom_checks or []:
+        check_id = str(check.get('id') or '').strip()
+        if not check_id:
+            continue
+        value = custom.get(check_id)
+        result[check_id] = 'unknown' if value is None else ('ok' if value else 'fail')
+    return result
+
+
+def _light_cached_protocol_status_for_key(
+    key_name,
+    key_value,
+    key_probe_cache=None,
+    *,
+    youtube_proto=None,
+    custom_checks=None,
+    route_states=None,
+):
     key_value = str(key_value or '').strip()
     if not key_value:
         return _status_empty_protocol_status()
-    required_services = _light_required_services_for_protocol(key_name, youtube_proto=youtube_proto)
+    if route_states is None:
+        route_states = _load_light_service_route_states()
+    required_services = _light_required_services_for_protocol(
+        key_name,
+        youtube_proto=youtube_proto,
+        route_states=route_states,
+    )
     api_required = 'telegram' in required_services
     probe = (key_probe_cache or {}).get(_hash_key(key_value), {})
+    probe = probe if isinstance(probe, dict) else {}
+    protocol_custom_checks = _light_protocol_custom_checks(custom_checks, route_states, key_name)
+    custom_states = _light_custom_probe_states(probe, protocol_custom_checks)
     return _status_cached_protocol_status(
         key_value,
-        probe if isinstance(probe, dict) else {},
-        (),
-        {},
+        probe,
+        protocol_custom_checks,
+        custom_states,
         api_required=api_required,
         required_services=required_services,
     )
 
 
-def _light_active_protocol_status_for_key(key_name, key_value, background_checks=False):
+def _light_active_protocol_status_for_key(key_name, key_value, background_checks=False, *, route_states=None):
     key_value = str(key_value or '').strip()
     if not key_value:
         return _status_empty_protocol_status()
@@ -8651,7 +8821,8 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
         return preflight
 
     proxy_url = proxy_settings.get(key_name)
-    api_required = bool(_app_mode_telegram_enabled() and key_name == proxy_mode)
+    required_services = _light_required_services_for_protocol(key_name, route_states=route_states)
+    api_required = 'telegram' in required_services
     if api_required:
         if background_checks:
             api_ok, api_message = _check_telegram_api_for_background(
@@ -8699,7 +8870,7 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
         custom_states={},
         custom_checks=(),
         api_required=api_required,
-        required_services=('telegram',) if api_required else (),
+        required_services=required_services,
     )
 
 
@@ -9206,10 +9377,9 @@ def _load_persisted_pool_summary():
 
 
 def _save_persisted_pool_summary(summary):
-    if (
-        _pool_summary_count(summary, 'checked_pool_count') <= 0 or
-        _pool_summary_count(summary, 'pool_total_count') <= 0
-    ):
+    checked_count = _pool_summary_count(summary, 'checked_pool_count')
+    total_count = _pool_summary_count(summary, 'pool_total_count')
+    if checked_count <= 0 or total_count <= 0 or checked_count != total_count:
         return
     payload = {
         'saved_at': time.time(),
@@ -9222,13 +9392,15 @@ def _save_persisted_pool_summary(summary):
 
 
 def _pool_summary_with_persisted_fallback(summary):
-    if _pool_summary_count(summary, 'checked_pool_count') > 0:
+    checked_count = _pool_summary_count(summary, 'checked_pool_count')
+    total_count = _pool_summary_count(summary, 'pool_total_count')
+    if checked_count > 0 and checked_count == total_count:
         _save_persisted_pool_summary(summary)
         return summary
     persisted = _load_persisted_pool_summary()
     if (
-        _pool_summary_count(persisted, 'checked_pool_count') > 0 and
-        _pool_summary_count(persisted, 'pool_total_count') == _pool_summary_count(summary, 'pool_total_count')
+        _pool_summary_count(persisted, 'checked_pool_count') > checked_count and
+        _pool_summary_count(persisted, 'pool_total_count') == total_count
     ):
         return persisted
     return summary
@@ -11666,6 +11838,7 @@ def _web_pool_snapshot_worker_payload(protocols=None, include_summary=False, inc
     worker_path = os.path.join(BOT_DIR, 'web_pool_snapshot_worker.py')
     if not os.path.isfile(worker_path):
         return None
+    route_signature = _web_service_routes_cache_signature()
     request = {
         'protocols': list(protocols or []),
         'include_summary': bool(include_summary),
@@ -11695,7 +11868,11 @@ def _web_pool_snapshot_worker_payload(protocols=None, include_summary=False, inc
     except Exception as exc:
         _write_runtime_log(f'Web pool snapshot worker returned invalid JSON: {type(exc).__name__}')
         return None
-    return payload if isinstance(payload, dict) and isinstance(payload.get('pools'), dict) else None
+    if not isinstance(payload, dict) or not isinstance(payload.get('pools'), dict):
+        return None
+    if route_signature == _web_service_routes_cache_signature():
+        _save_light_service_route_states(payload.get('route_states'), signature=route_signature)
+    return payload
 
 
 def _web_pools_light_payload(current_keys, key_pools, protocols=None, include_summary=False, include_custom_checks=False):
@@ -11972,7 +12149,7 @@ def _build_status_snapshot(current_keys, force_refresh=False, background_checks=
         return cached
 
     custom_checks = _load_custom_checks()
-    route_states = _service_route_summary() if custom_checks else None
+    route_states = _service_route_summary()
     key_probe_cache = _load_key_probe_cache()
     protocols = {}
     for key_name, key_value in _ordered_protocol_items(current_keys):
@@ -12030,10 +12207,10 @@ def _active_mode_status_snapshot_from_base(
         protocols = _placeholder_protocol_statuses(current_keys)
     if include_route_details:
         custom_checks = _load_custom_checks()
-        route_states = _service_route_summary() if custom_checks else None
+        route_states = _service_route_summary()
     else:
-        custom_checks = ()
-        route_states = None
+        custom_checks = _load_custom_checks()
+        route_states = _load_light_service_route_states()
     if not pool_locked and (include_route_details or cached is None):
         key_probe_cache = None
         light_key_probe_cache = None
@@ -12063,6 +12240,8 @@ def _active_mode_status_snapshot_from_base(
                         key_value,
                         key_probe_cache=light_key_probe_cache,
                         youtube_proto=light_youtube_proto,
+                        custom_checks=custom_checks,
+                        route_states=route_states,
                     )
             except Exception as exc:
                 _write_runtime_log(f'Ошибка восстановления кешированного статуса {key_name}: {exc}')
@@ -12080,6 +12259,7 @@ def _active_mode_status_snapshot_from_base(
                         required_services=_light_required_services_for_protocol(
                             proxy_mode,
                             youtube_proto=_light_youtube_route_protocol(),
+                            route_states=route_states,
                         ),
                     )
             elif pool_locked:
@@ -12097,6 +12277,8 @@ def _active_mode_status_snapshot_from_base(
                         current_keys.get(proxy_mode, ''),
                         key_probe_cache=_load_light_key_probe_cache(),
                         youtube_proto=_light_youtube_route_protocol(),
+                        custom_checks=custom_checks,
+                        route_states=route_states,
                     )
             else:
                 if include_route_details:
@@ -12112,6 +12294,7 @@ def _active_mode_status_snapshot_from_base(
                         proxy_mode,
                         current_keys.get(proxy_mode, ''),
                         background_checks=background_checks,
+                        route_states=route_states,
                     )
                 if not include_route_details:
                     previous_status = protocols.get(proxy_mode)
@@ -12123,6 +12306,7 @@ def _active_mode_status_snapshot_from_base(
                             required_services=_light_required_services_for_protocol(
                                 proxy_mode,
                                 youtube_proto=_light_youtube_route_protocol(),
+                                route_states=route_states,
                             ),
                         )
                 _store_active_mode_protocol_status(current_keys, active_status)
@@ -12237,7 +12421,7 @@ def _placeholder_status_snapshot(current_keys, include_pool_details=True):
     protocols = _placeholder_protocol_statuses(current_keys)
     key_probe_cache = _load_key_probe_cache()
     custom_checks = _load_custom_checks()
-    route_states = _service_route_summary() if custom_checks else None
+    route_states = _service_route_summary()
     for key_name, key_value in _ordered_protocol_items(current_keys):
         if not str(key_value or '').strip():
             continue

@@ -74,7 +74,7 @@ def _route_states(custom_checks, provided=None):
 
 def build_payload(protocols=None, include_summary=False, include_custom_checks=False, route_states=None, include_pools=True):
     custom_checks = custom_checks_store.load_custom_checks()
-    route_states = _route_states(custom_checks, route_states) if include_pools else None
+    route_states = _route_states(custom_checks, route_states)
     current_keys = _load_current_keys()
     key_pools = key_pool_store.load_key_pools(KEY_POOLS_PATH)
     key_pools, _changed = key_pool_store.ensure_current_keys_in_pools(key_pools, current_keys)
@@ -98,6 +98,7 @@ def build_payload(protocols=None, include_summary=False, include_custom_checks=F
         'pools': pools_payload,
         'pool_summary': None,
         'custom_checks': None,
+        'route_states': service_routes.compact_route_summary(route_states),
     }
     if include_summary:
         payload['pool_summary'] = key_pool_web.pool_status_summary(

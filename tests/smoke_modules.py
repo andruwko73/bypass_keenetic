@@ -1684,6 +1684,11 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
     assert payload['pool_summary']['pool_total_count'] == 2
     assert payload['pool_summary']['checked_pool_count'] == 2
     assert payload['custom_checks'] == []
+    assert {'telegram', 'youtube'} <= set(payload['route_states'])
+    assert all(
+        set(state) == {'complete_protocols', 'partial_protocols'}
+        for state in payload['route_states'].values()
+    )
     serialized = json.dumps(payload, ensure_ascii=False)
     assert 'vless://' not in serialized
     scoped_summary = payload['pool_summary']
@@ -1693,6 +1698,7 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
     assert summary_payload['pool_summary']['pool_total_count'] == 2
     assert summary_payload['pool_summary']['checked_pool_count'] == 2
     assert summary_payload['custom_checks'] is None
+    assert {'telegram', 'youtube'} <= set(summary_payload['route_states'])
     assert key_pool_web.web_probe_checked_at({'ts': 0}) == ''
     assert key_pool_web.web_probe_quality_label({'yt_quality': 'stable', 'yt_latency_ms': 800}) == ''
     history_html = key_pool_web.web_event_history_html([
@@ -1721,6 +1727,7 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
 def test_web_service_routes_worker_payload_contains_route_tools():
     payload = web_service_routes_worker.build_payload()
     html_text = payload.get('route_tools_html') or ''
+    route_states = payload.get('route_states') or {}
 
     assert 'service-route-tools' in html_text
     assert 'service-route-trigger' in html_text
@@ -1728,6 +1735,11 @@ def test_web_service_routes_worker_payload_contains_route_tools():
     assert 'service-route-youtube-icon' in html_text
     assert '/service_profile_apply' in html_text
     assert '/route_intersections_resolve' in html_text or 'route-intersection-ok' in html_text
+    assert {'telegram', 'youtube'} <= set(route_states)
+    assert all(
+        set(state) <= {'complete_protocols', 'partial_protocols'}
+        for state in route_states.values()
+    )
 
 
 def test_key_pool_subscription_helpers():
@@ -5013,7 +5025,7 @@ def test_light_pool_summary_rebuilds_when_pool_size_changes():
         f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
         f"bot._POOL_SUMMARY_LAST_PATH = {str(temp_path / 'pool_summary_last.json')!r}\n"
         "keys = ['vless://one', 'vless://two']\n"
-        "cache = {bot._hash_key(key): {'schema': 8, 'tg_ok': True, 'yt_ok': True} for key in keys}\n"
+        "cache = {bot._hash_key(key): {'schema': bot._KEY_PROBE_CACHE_SCHEMA_VERSION, 'tg_ok': True, 'yt_ok': True} for key in keys}\n"
         "with open(bot._KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as handle: json.dump(cache, handle)\n"
         "with open(bot._POOL_SUMMARY_LAST_PATH, 'w', encoding='utf-8') as handle: json.dump({'summary': {'pool_total_count': 1, 'checked_pool_count': 1}}, handle)\n"
         "pools = {proto: [] for proto in bot.POOL_PROTOCOL_ORDER}\n"
@@ -5038,6 +5050,300 @@ def test_light_pool_summary_rebuilds_when_pool_size_changes():
         assert summary['checked_pool_count'] == 2
         assert summary['services'][0] == {'count': 2, 'label': 'Telegram'}
         assert summary['services'][1] == {'count': 2, 'label': 'YouTube'}
+    finally:
+        temp_dir.cleanup()
+
+
+def test_light_probe_cache_schema_contract_matches_canonical_cache():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot, probe_cache\n"
+        f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
+        "keys = {schema: f'key-{schema}' for schema in range(5, 11)}\n"
+        "cache = {bot._hash_key(key): {'schema': schema, 'proto': 'vless', 'tg_ok': True, 'yt_ok': True, 'custom': {'discord': True}, 'ts': 100} for schema, key in keys.items()}\n"
+        "with open(bot._KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as handle: json.dump(cache, handle)\n"
+        "loaded = bot._load_light_key_probe_cache()\n"
+        "assert bot._KEY_PROBE_CACHE_SCHEMA_VERSION == probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION\n"
+        "assert bot._KEY_PROBE_COMPAT_SCHEMA_VERSIONS == probe_cache.KEY_PROBE_COMPAT_SCHEMA_VERSIONS\n"
+        "assert set(loaded) == {bot._hash_key(keys[schema]) for schema in (6, 7, 8, 9)}\n"
+        "assert {entry['schema'] for entry in loaded.values()} == {probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION}\n"
+        "key = keys[9]\n"
+        "assert bot._record_light_telegram_probe('vless', key, False, now=101) is False\n"
+        "assert bot._record_light_telegram_probe('vless', key, False, now=1000) is True\n"
+        "stored = json.load(open(bot._KEY_PROBE_CACHE_PATH, encoding='utf-8'))[bot._hash_key(key)]\n"
+        "assert stored['schema'] == probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION\n"
+        "assert stored['tg_ok'] is False and stored['yt_ok'] is True\n"
+        "assert stored['custom'] == {'discord': True}\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
+def test_light_pool_summary_recomputes_after_delete_and_keeps_complete_checkpoint():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
+        f"bot._POOL_SUMMARY_LAST_PATH = {str(temp_path / 'pool_summary_last.json')!r}\n"
+        "keys = ['vless://one', 'vless://two']\n"
+        "cache = {bot._hash_key(key): {'schema': 9, 'tg_ok': True, 'yt_ok': True} for key in keys}\n"
+        "with open(bot._KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as handle: json.dump(cache, handle)\n"
+        "pools = {proto: [] for proto in bot.POOL_PROTOCOL_ORDER}\n"
+        "pools['vless'] = list(keys)\n"
+        "full = bot._light_pool_status_summary({'vless': keys[0]}, pools, bot._load_light_key_probe_cache(), [])\n"
+        "bot._save_persisted_pool_summary(full)\n"
+        "pools['vless'] = [keys[0]]\n"
+        "summary = bot._light_pool_summary_with_cache_fallback({'vless': keys[0]}, pools, [])\n"
+        "persisted = json.load(open(bot._POOL_SUMMARY_LAST_PATH, encoding='utf-8'))['summary']\n"
+        "assert summary['pool_total_count'] == summary['checked_pool_count'] == 1\n"
+        "assert summary['services'][:2] == [{'label': 'Telegram', 'count': 1}, {'label': 'YouTube', 'count': 1}]\n"
+        "assert persisted['pool_total_count'] == persisted['checked_pool_count'] == 1\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
+def test_light_pool_summary_does_not_replace_full_checkpoint_with_partial_cache():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
+        f"bot._POOL_SUMMARY_LAST_PATH = {str(temp_path / 'pool_summary_last.json')!r}\n"
+        "keys = ['vless://one', 'vless://two', 'vless://untested']\n"
+        "cache = {bot._hash_key(key): {'schema': 9, 'tg_ok': True, 'yt_ok': True} for key in keys[:2]}\n"
+        "with open(bot._KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as handle: json.dump(cache, handle)\n"
+        "checkpoint = {'pool_total_count': 2, 'checked_pool_count': 2, 'services': [{'label': 'Telegram', 'count': 2}, {'label': 'YouTube', 'count': 2}]}\n"
+        "with open(bot._POOL_SUMMARY_LAST_PATH, 'w', encoding='utf-8') as handle: json.dump({'summary': checkpoint}, handle)\n"
+        "pools = {proto: [] for proto in bot.POOL_PROTOCOL_ORDER}\n"
+        "pools['vless'] = keys\n"
+        "summary = bot._light_pool_summary_with_cache_fallback({'vless': keys[0]}, pools, [])\n"
+        "persisted = json.load(open(bot._POOL_SUMMARY_LAST_PATH, encoding='utf-8'))['summary']\n"
+        "assert summary['pool_total_count'] == 3 and summary['checked_pool_count'] == 2\n"
+        "assert persisted == checkpoint\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
+def test_light_route_status_uses_complete_route_assignments_and_custom_results():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "bot.proxy_mode = 'none'\n"
+        "route_states = {\n"
+        "  'telegram': {'complete_protocols': ['vless'], 'partial_protocols': ['vless2']},\n"
+        "  'youtube': {'complete_protocols': ['vless2'], 'partial_protocols': ['vless']},\n"
+        "  'discord': {'complete_protocols': ['vless'], 'partial_protocols': []},\n"
+        "}\n"
+        "checks = [{'id': 'discord', 'label': 'Discord'}]\n"
+        "vless_probe = {'schema': 9, 'tg_ok': True, 'yt_ok': False, 'yt_stability': 'fail', 'custom': {'discord': True}}\n"
+        "vless2_probe = {'schema': 9, 'tg_ok': False, 'yt_ok': True, 'yt_stability': 'stable', 'custom': {'discord': False}}\n"
+        "cache = {bot._hash_key('vless-key'): vless_probe, bot._hash_key('vless2-key'): vless2_probe}\n"
+        "assert bot._light_required_services_for_protocol('vless', route_states=route_states) == ('telegram',)\n"
+        "assert bot._light_required_services_for_protocol('vless2', route_states=route_states) == ('youtube',)\n"
+        "vless = bot._light_cached_protocol_status_for_key('vless', 'vless-key', cache, custom_checks=checks, route_states=route_states)\n"
+        "vless2 = bot._light_cached_protocol_status_for_key('vless2', 'vless2-key', cache, custom_checks=checks, route_states=route_states)\n"
+        "full_vless = bot._cached_protocol_status_for_key('vless', 'vless-key', custom_checks=checks, key_probe_cache=cache, allow_youtube_confirm=False, route_states=route_states)\n"
+        "full_vless2 = bot._cached_protocol_status_for_key('vless2', 'vless2-key', custom_checks=checks, key_probe_cache=cache, allow_youtube_confirm=False, route_states=route_states)\n"
+        "assert vless['tone'] == 'ok' and vless['api_ok'] is True and vless['yt_state'] == 'fail', vless\n"
+        "assert vless['custom'] == {'discord': 'ok'}\n"
+        "assert vless2['tone'] == 'ok' and vless2['api_ok'] is False and vless2['yt_ok'] is True, vless2\n"
+        "assert vless2['custom'] == {}\n"
+        "fields = ('tone', 'label', 'api_ok', 'yt_ok', 'yt_state', 'custom')\n"
+        "assert {field: vless[field] for field in fields} == {field: full_vless[field] for field in fields}\n"
+        "assert {field: vless2[field] for field in fields} == {field: full_vless2[field] for field in fields}\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
+def test_light_route_state_checkpoint_is_bounded_and_invalidated_by_route_signature():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        f"bot._SERVICE_ROUTE_STATE_PATH = {str(temp_path / 'service_route_state.json')!r}\n"
+        "bot._web_service_routes_cache_signature = lambda: ('route-signature-1',)\n"
+        "states = {'telegram': {'complete_protocols': ['vless', 'unknown'], 'partial_protocols': ['vless2']}, 'youtube': {'complete_protocols': ['vless2'], 'partial_protocols': []}}\n"
+        "assert bot._save_light_service_route_states(states) is True\n"
+        "loaded = bot._load_light_service_route_states()\n"
+        "assert bot._save_light_service_route_states(states) is False\n"
+        "assert loaded['telegram'] == {'complete_protocols': ['vless'], 'partial_protocols': ['vless2']}\n"
+        "stored = json.load(open(bot._SERVICE_ROUTE_STATE_PATH, encoding='utf-8'))\n"
+        "assert set(stored) == {'schema', 'signature', 'states'}\n"
+        "assert all(set(state) == {'complete_protocols', 'partial_protocols'} for state in stored['states'].values())\n"
+        "bot._web_service_routes_cache_signature = lambda: ('route-signature-2',)\n"
+        "assert bot._load_light_service_route_states() is None\n"
+        "with open(bot._SERVICE_ROUTE_STATE_PATH, 'w', encoding='utf-8') as handle: handle.write('{broken')\n"
+        "with bot.light_service_route_state_cache_lock: bot.light_service_route_state_cache.update({'signature': None, 'states': None})\n"
+        "assert bot._load_light_service_route_states() is None\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
+def test_deleted_key_probe_is_kept_while_key_is_still_referenced():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "calls = []\n"
+        "bot._forget_key_probes = lambda values: calls.append(list(values)) or len(values)\n"
+        "bot._load_current_keys = lambda: {}\n"
+        "key = 'shared-key-placeholder'\n"
+        "assert bot._forget_unreferenced_key_probes([key], {'vless2': [key]}) == 0\n"
+        "assert calls == [[]]\n"
+        "assert bot._forget_unreferenced_key_probes([key], {'vless2': []}) == 1\n"
+        "assert calls[-1] == [key]\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
     finally:
         temp_dir.cleanup()
 
@@ -5076,9 +5382,11 @@ def test_active_status_refresh_skips_heavy_pool_modules():
         "bot._check_telegram_api_through_proxy = lambda *args, **kwargs: (True, 'ok')\n"
         "bot._key_requires_xray = lambda *args, **kwargs: False\n"
         f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
+        f"bot._SERVICE_ROUTE_STATE_PATH = {str(temp_path / 'service_route_state.json')!r}\n"
+        "with bot.light_service_route_state_cache_lock: bot.light_service_route_state_cache.update({'signature': None, 'states': None})\n"
         "current_keys = {'vless': 'active-key-placeholder', 'vless2': 'other-key-placeholder'}\n"
         "with open(bot._KEY_PROBE_CACHE_PATH, 'w', encoding='utf-8') as file:\n"
-        "    json.dump({bot._hash_key(current_keys['vless2']): {'schema': 8, 'proto': 'vless2', 'tg_ok': False, 'yt_ok': True, 'yt_stability': 'stable', 'ts': 123}}, file)\n"
+        "    json.dump({bot._hash_key(current_keys['vless2']): {'schema': bot._KEY_PROBE_CACHE_SCHEMA_VERSION, 'proto': 'vless2', 'tg_ok': False, 'yt_ok': True, 'yt_stability': 'stable', 'ts': 123}}, file)\n"
         "snapshot = bot._active_mode_status_snapshot(current_keys, background_checks=True)\n"
         "assert snapshot['protocols']['vless']['api_ok'] is True\n"
         "assert 'YouTube:' not in snapshot['protocols']['vless']['details']\n"
@@ -12205,26 +12513,39 @@ def test_probe_cache_ignores_stale_schema(tmp_path):
     old_path = probe_cache.KEY_PROBE_CACHE_PATH
     probe_cache.KEY_PROBE_CACHE_PATH = str(cache_path)
     try:
-        fresh_key = probe_cache.hash_key('fresh')
-        compat_key = probe_cache.hash_key('compat')
+        compatible_keys = {
+            schema: probe_cache.hash_key(f'compatible-{schema}')
+            for schema in probe_cache.KEY_PROBE_COMPAT_SCHEMA_VERSIONS
+        }
         stale_key = probe_cache.hash_key('stale')
+        future_key = probe_cache.hash_key('future')
         cache_path.write_text(
             json.dumps({
-                fresh_key: {
-                    'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+                **{
+                    key_id: {
+                        'schema': schema,
+                        'proto': 'vless',
+                        'tg_ok': True,
+                        'yt_ok': True,
+                        'ts': 100,
+                    }
+                    for schema, key_id in compatible_keys.items()
+                },
+                stale_key: {
+                    'schema': min(probe_cache.KEY_PROBE_COMPAT_SCHEMA_VERSIONS) - 1,
                     'proto': 'vless',
                     'tg_ok': True,
                     'yt_ok': True,
                     'ts': 100,
                 },
-                compat_key: {
-                    'schema': 6,
+                future_key: {
+                    'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION + 1,
                     'proto': 'vless2',
                     'tg_ok': True,
                     'yt_ok': True,
                     'ts': 100,
                 },
-                stale_key: {
+                probe_cache.hash_key('missing-schema'): {
                     'proto': 'vless',
                     'tg_ok': True,
                     'yt_ok': True,
@@ -12238,9 +12559,13 @@ def test_probe_cache_ignores_stale_schema(tmp_path):
     finally:
         probe_cache.KEY_PROBE_CACHE_PATH = old_path
 
-    assert fresh_key in loaded
-    assert loaded[compat_key]['schema'] == probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION
+    assert set(loaded) == set(compatible_keys.values())
+    assert all(
+        entry['schema'] == probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION
+        for entry in loaded.values()
+    )
     assert stale_key not in loaded
+    assert future_key not in loaded
     assert not probe_cache.key_probe_is_fresh({'ts': 100}, now=101)
     assert not probe_cache.key_probe_has_required_results({'tg_ok': True, 'yt_ok': True})
 

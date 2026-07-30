@@ -1,4 +1,10 @@
-*v1.982 (30 Jul 2026) -* main
+*v1.983 (30 Jul 2026) -* main
+
+*Restores the latest pool-check counters immediately after keys are removed by keeping the light cache reader on schema 9 with compatibility for schemas 6–9.*
+
+*Protects the last complete pool summary from transient partial or empty snapshots while still showing recomputed results for the current pool size.*
+
+*Uses a bounded, non-sensitive route-assignment snapshot from the existing web workers so Telegram, YouTube, and custom-service statuses follow their actual protocols even when the global proxy mode is disabled.*
 
 *Preserves automatic rollback when the update watchdog sends TERM on POSIX shells by routing soft signals through the existing EXIT recovery trap.*
 
