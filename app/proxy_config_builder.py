@@ -140,6 +140,42 @@ def _add_bittorrent_direct_route(config_data, inbound_tags):
     })
 
 
+def _add_cross_transparent_domain_routes(config_data, inbound_tags, domain_overrides):
+    """Correct an ipset overlap using the hostname sniffed by Xray."""
+    tags = [tag for tag in inbound_tags if tag]
+    if not tags:
+        return
+    available_outbounds = {
+        str(outbound.get('tag') or '')
+        for outbound in config_data.get('outbounds') or ()
+    }
+    outbound_tags = {
+        'shadowsocks': 'proxy-shadowsocks',
+        'vmess': 'proxy-vmess',
+        'vless': 'proxy-vless',
+        'vless2': 'proxy-vless2',
+        'trojan': 'proxy-trojan',
+    }
+    rules = []
+    for protocol in ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'):
+        policy = (domain_overrides or {}).get(protocol) or {}
+        domains = list(policy.get('domains') or ())
+        outbound_tag = outbound_tags[protocol]
+        if not domains or outbound_tag not in available_outbounds:
+            continue
+        rules.append({
+            'type': 'field',
+            'inboundTag': tags,
+            'network': 'tcp',
+            'domain': domains,
+            'outboundTag': outbound_tag,
+            'ruleTag': f'cross-route-domains-{protocol}',
+            'enabled': True,
+        })
+    if rules:
+        config_data['routing']['rules'][0:0] = rules
+
+
 def _add_socks_proxy(config_data, proto, key_value, socks_port, socks_tag, outbound_tag):
     if not key_value:
         return
@@ -200,6 +236,7 @@ def build_proxy_core_config(
     route_only_tproxy_protocols=(),
     strict_transparent_protocols=(),
     transparent_route_policies=None,
+    cross_route_domain_overrides=None,
     bittorrent_direct_enabled=False,
 ):
     config_data = xray_base_config(
@@ -322,6 +359,12 @@ def build_proxy_core_config(
         )
         if tproxy_tag:
             tproxy_tags.append(tproxy_tag)
+
+    _add_cross_transparent_domain_routes(
+        config_data,
+        transparent_tags,
+        cross_route_domain_overrides,
+    )
 
     if bittorrent_direct_enabled:
         _add_bittorrent_direct_route(config_data, [*transparent_tags, *tproxy_tags])

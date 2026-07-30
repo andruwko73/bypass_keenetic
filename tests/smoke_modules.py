@@ -613,7 +613,11 @@ def test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys():
         )
         original_read_unblock_list_entries = proxy_config_recovery.read_unblock_list_entries
         proxy_config_recovery.read_unblock_list_entries = lambda name, **_kwargs: {
-            'vless': ['api.telegram.org', '149.154.167.0/24'],
+            'vless': [
+                *service_catalog.CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
+                'api.telegram.org',
+                '149.154.167.0/24',
+            ],
         }.get(name, [])
         try:
             result_path = proxy_config_recovery.rebuild_proxy_core_config(
@@ -631,11 +635,19 @@ def test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys():
         assert any(outbound.get('tag') == 'proxy-vless' for outbound in rebuilt['outbounds'])
         assert any(inbound.get('port') == 10811 for inbound in rebuilt['inbounds'])
         assert any(rule.get('ruleTag') == 'bittorrent-direct' for rule in rebuilt['routing']['rules'])
+        crd_cross_rule = next(
+            rule for rule in rebuilt['routing']['rules']
+            if rule.get('ruleTag') == 'cross-route-domains-vless'
+        )
+        assert crd_cross_rule['network'] == 'tcp'
+        assert crd_cross_rule['outboundTag'] == 'proxy-vless'
+        assert 'domain:remotedesktop-pa.googleapis.com' in crd_cross_rule['domain']
+        assert '74.125.247.128/32' not in crd_cross_rule['domain']
         inbounds_by_tag = {inbound['tag']: inbound for inbound in rebuilt['inbounds']}
         assert inbounds_by_tag['in-vless-transparent']['sniffing']['routeOnly'] is True
         assert any(
             rule.get('inboundTag') == ['in-vless-transparent']
-            and rule.get('ip') == ['149.154.167.0/24']
+            and '149.154.167.0/24' in (rule.get('ip') or ())
             and rule.get('port') == '80,443,5222'
             for rule in rebuilt['routing']['rules']
         )
@@ -1405,6 +1417,67 @@ def test_transparent_route_policy_and_xray_strict_routes():
     inbounds_by_tag = {inbound['tag']: inbound for inbound in core_config['inbounds']}
     assert inbounds_by_tag['in-vless-transparent']['sniffing']['routeOnly'] is True
     assert inbounds_by_tag['in-vless-tproxy']['sniffing']['routeOnly'] is True
+
+
+def test_strict_cross_route_domains_recover_from_shared_ipset_owner():
+    crd_entries = [
+        'remotedesktop.google.com',
+        'remotedesktop-pa.googleapis.com',
+        'oauth2.googleapis.com',
+        '74.125.247.128',
+    ]
+    route_entries = {
+        'vless': list(crd_entries),
+        'vless2': ['oauth2.googleapis.com', 'youtube.com'],
+    }
+    overrides = transparent_route_policy.compile_unique_service_domain_override(
+        route_entries,
+        crd_entries,
+    )
+    assert overrides == {
+        'vless': {
+            'domains': (
+                'domain:remotedesktop.google.com',
+                'domain:remotedesktop-pa.googleapis.com',
+                'domain:oauth2.googleapis.com',
+            ),
+        },
+    }
+    assert transparent_route_policy.compile_unique_service_domain_override(
+        {**route_entries, 'vless2': list(crd_entries)},
+        crd_entries,
+    ) == {}
+
+    vless_key = 'vless://00000000-0000-0000-0000-000000000000@example.com:443?security=tls#vless'
+    vless2_key = 'vless://11111111-1111-1111-1111-111111111111@example.net:443?security=tls#vless2'
+    policies = transparent_route_policy.compile_protocol_policies(
+        route_entries,
+        ('vless', 'vless2'),
+    )
+    core_config = build_proxy_core_config(
+        vless_key=vless_key,
+        vless2_key=vless2_key,
+        ports=PORTS,
+        error_log_path='/tmp/xray-error.log',
+        connectivity_check_domains=['connectivitycheck.gstatic.com'],
+        strict_transparent_protocols=('vless', 'vless2'),
+        transparent_route_policies=policies,
+        cross_route_domain_overrides=overrides,
+    )
+    rules = core_config['routing']['rules']
+    cross_rule = next(rule for rule in rules if rule.get('ruleTag') == 'cross-route-domains-vless')
+    assert set(cross_rule['inboundTag']) == {'in-vless-transparent', 'in-vless2-transparent'}
+    assert cross_rule['network'] == 'tcp'
+    assert cross_rule['outboundTag'] == 'proxy-vless'
+    assert cross_rule['domain'] == list(overrides['vless']['domains'])
+    vless2_fallback = next(
+        rule for rule in rules
+        if rule.get('inboundTag') == ['in-vless2-transparent']
+        and rule.get('outboundTag') == 'direct'
+        and 'domain' not in rule and 'ip' not in rule
+    )
+    assert rules[0]['outboundTag'] == 'direct'
+    assert rules.index(cross_rule) < rules.index(vless2_fallback)
 
 
 def test_key_pool_web():

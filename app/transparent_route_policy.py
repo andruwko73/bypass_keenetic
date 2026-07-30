@@ -114,3 +114,38 @@ def compile_protocol_policies(entries_by_protocol, strict_protocols):
             policy['ip_ports'] = ip_ports
         result[protocol] = policy
     return result
+
+
+def compile_unique_service_domain_override(entries_by_protocol, service_entries):
+    """Route a service by sniffed domain when exactly one list fully owns it.
+
+    The ipset layer can legitimately see the same Google edge IP for several
+    domains.  A strict transparent inbound must therefore be able to recover
+    the intended service route from TLS/HTTP sniffing instead of falling
+    through to direct traffic merely because another ipset won the IP race.
+    Explicit IP entries are deliberately excluded: they carry no hostname and
+    remain under the existing ipset/TPROXY policy.
+    """
+    service_policy = compile_route_entries(service_entries)
+    service_domains = tuple(service_policy.get('domains') or ())
+    service_identities = {
+        *service_domains,
+        *(service_policy.get('ips') or ()),
+    }
+    if not service_domains or not service_identities:
+        return {}
+
+    source = entries_by_protocol or {}
+    complete_owners = []
+    for protocol in SUPPORTED_PROTOCOLS:
+        route_policy = compile_route_entries(source.get(protocol) or ())
+        route_identities = {
+            *(route_policy.get('domains') or ()),
+            *(route_policy.get('ips') or ()),
+        }
+        if service_identities <= route_identities:
+            complete_owners.append(protocol)
+
+    if len(complete_owners) != 1:
+        return {}
+    return {complete_owners[0]: {'domains': service_domains}}

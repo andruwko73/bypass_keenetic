@@ -4,8 +4,12 @@ import tempfile
 
 from proxy_config_builder import build_proxy_core_config
 from proxy_key_store import load_current_keys
-from service_catalog import CONNECTIVITY_CHECK_DOMAINS
-from transparent_route_policy import compile_protocol_policies, normalize_protocol_set
+from service_catalog import CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES, CONNECTIVITY_CHECK_DOMAINS
+from transparent_route_policy import (
+    compile_protocol_policies,
+    compile_unique_service_domain_override,
+    normalize_protocol_set,
+)
 from unblock_lists import UNBLOCK_DIR, read_unblock_list_entries
 
 
@@ -19,7 +23,13 @@ def _configured_protocols(config_module, name):
 
 
 def _transparent_route_entries(unblock_dir=UNBLOCK_DIR):
-    routes = {'vmess': 'vmess', 'vless': 'vless', 'vless2': 'vless-2'}
+    routes = {
+        'shadowsocks': 'shadowsocks',
+        'vmess': 'vmess',
+        'vless': 'vless',
+        'vless2': 'vless-2',
+        'trojan': 'trojan',
+    }
     result = {}
     for protocol, route_name in routes.items():
         try:
@@ -72,6 +82,7 @@ def rebuild_proxy_core_config(
         v2ray_config_dir,
     )
     strict_transparent_protocols = _configured_protocols(config_module, 'xray_strict_transparent_protocols')
+    route_entries = _transparent_route_entries()
     payload = build_proxy_core_config(
         vmess_key=keys.get('vmess') or '',
         vless_key=keys.get('vless') or '',
@@ -102,8 +113,16 @@ def rebuild_proxy_core_config(
         route_only_tproxy_protocols=_configured_protocols(config_module, 'xray_route_only_tproxy_protocols'),
         strict_transparent_protocols=strict_transparent_protocols,
         transparent_route_policies=compile_protocol_policies(
-            _transparent_route_entries(),
+            route_entries,
             strict_transparent_protocols,
+        ),
+        cross_route_domain_overrides=(
+            compile_unique_service_domain_override(
+                route_entries,
+                CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
+            )
+            if strict_transparent_protocols else
+            {}
         ),
         bittorrent_direct_enabled=bool(getattr(config_module, 'xray_bittorrent_direct_enabled', False)),
     )

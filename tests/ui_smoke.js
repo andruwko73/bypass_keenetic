@@ -752,6 +752,24 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (await page.locator('html').evaluate((node) => node.style.getPropertyValue('--user-background-content-alpha')) !== '0.080') {
       throw new Error(`${name}: content surfaces must become fully translucent at 100%`);
     }
+    await page.waitForFunction(() => {
+      const alpha = (node) => {
+        if (!node) return 1;
+        const match = getComputedStyle(node).backgroundColor.match(/rgba\([^)]*,\s*(0?\.\d+)\s*\)$/);
+        return match ? Number(match[1]) : 1;
+      };
+      const regularButtons = [
+        '.protocol-tabs .seg-tab:not(.active)',
+        '.protocol-workspace.active .subtab:not(.active)',
+        '.protocol-workspace.active .secondary-button',
+        '.list-workspace.active button',
+      ].map((selector) => document.querySelector(selector));
+      const regularAlphas = regularButtons.map(alpha);
+      const statusAlpha = alpha(document.querySelector('[data-view="status"] .service-panel button'));
+      return regularButtons.every(Boolean)
+        && Math.max(...regularAlphas) - Math.min(...regularAlphas) <= 0.02
+        && statusAlpha <= 0.35;
+    }, null, { timeout: 3000 });
     const contentTransparency = await page.evaluate(() => {
       const surfaceSelectors = [
         '.protocol-workspace.active',

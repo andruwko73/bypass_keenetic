@@ -1,4 +1,10 @@
-*v1.985 (30 Jul 2026) -* main
+*v1.986 (30 Jul 2026) -* main
+
+*Keeps Chrome Remote Desktop online when a shared Google edge IP is already owned by the priority YouTube/Vless 2 ipset: Xray now recovers TCP signaling by the sniffed service domain and sends it to the single route list that fully owns Chrome Remote Desktop.*
+
+*Creates the cross-inbound rule only for an unambiguous complete service assignment, reuses the existing Xray process and transparent inbounds, and leaves UDP/STUN, call routing, ipsets, and user-managed route files unchanged.*
+
+*Uses the same guarded policy during normal configuration builds and recovery after an update, with regressions for shared IP ownership, ambiguous ownership, and atomic config recovery.*
 
 *Restores Chrome Remote Desktop session setup by routing Google's documented `74.125.247.128:3478/udp` STUN endpoint through the existing protocol-specific Xray TPROXY inbound instead of the unreliable UDP REDIRECT path.*
 
