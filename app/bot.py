@@ -7297,7 +7297,21 @@ def _run_script_action(action, repo_owner=None, repo_name=None, progress_command
             progress_callback('\n'.join(logs))
         _repo_write_script(script_text)
 
-    return_code, output = _repo_run_script_and_collect(action, direct_env, logs, progress_callback)
+    activity_probe = None
+    if progress_command:
+        def activity_probe():
+            try:
+                return os.stat(update_status.UPDATE_STATUS_PATH).st_mtime_ns
+            except OSError:
+                return None
+
+    return_code, output = _repo_run_script_and_collect(
+        action,
+        direct_env,
+        logs,
+        progress_callback,
+        activity_probe=activity_probe,
+    )
     _record_event(
         'script_action_finish',
         f'{action}: return_code={return_code}',
@@ -8814,13 +8828,15 @@ def _estimate_web_command_progress(command, result_text):
 
 
 def _set_web_command_progress(command, result_text):
-    _set_command_progress_state(
+    changed = _set_command_progress_state(
         web_command_lock,
         web_command_state,
         command,
         result_text,
         _estimate_web_command_progress,
     )
+    if not changed:
+        return
     _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
     if command in WEB_UPDATE_COMMANDS:
         snapshot = _command_state_snapshot(web_command_lock, web_command_state)

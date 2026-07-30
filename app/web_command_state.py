@@ -55,11 +55,22 @@ def consume_command_state_for_render(lock, state, clear_finished_commands=()):
 def set_command_progress(lock, state, command, result_text, progress_estimator):
     progress, progress_label = progress_estimator(command, result_text)
     with lock:
+        current_progress = int(state.get('progress') or 0)
+        current_label = str(state.get('progress_label') or '')
+        if state.get('running') and state.get('command') == command and progress < current_progress:
+            progress = current_progress
+            progress_label = current_label
+        changed = (
+            state.get('result') != result_text or
+            current_progress != progress or
+            current_label != progress_label
+        )
         state['result'] = result_text
         state['progress'] = progress
         state['progress_label'] = progress_label
         if 'shown_after_finish' in state:
             state['shown_after_finish'] = False
+    return changed
 
 
 def set_flash_message(lock, state, message):

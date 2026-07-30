@@ -1,5 +1,5 @@
 from pathlib import Path
-from io import BytesIO
+from io import BytesIO, StringIO
 import base64
 import gzip
 import importlib
@@ -5228,6 +5228,9 @@ def test_runtime_modules_are_installed_by_update_scripts():
     script_modules = set(re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', script).group(1).split())
     bootstrap_modules = set(re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', bootstrap).group(1).split())
     assert script_modules == bootstrap_modules
+    assert {'repo_update.py', 'web_command_state.py', 'update_status.py'} <= script_modules
+    assert 'update_worker.py' not in script_modules
+    assert not (APP_ROOT / 'update_worker.py').exists()
     for module in script_modules:
         assert source_path(module).exists()
     for module in ('app_version.py', 'app_runtime_mode.py', 'router_health_runtime.py', 'router_metrics.py', 'telegram_call_learning.py', 'web_commands_runtime.py'):
@@ -10087,6 +10090,40 @@ def test_chrome_remote_desktop_routes_are_manual_only():
 def test_web_command_state_helpers():
     assert web_command_state.estimate_update_progress('noop', '', ('update',)) == (0, '')
     assert web_command_state.estimate_update_progress('update', 'Бэкап создан.') == (70, 'Резервная копия готова, идёт замена файлов')
+    lock = threading.Lock()
+    state = {
+        'running': True,
+        'command': 'update',
+        'result': 'Бэкап создан.',
+        'progress': 70,
+        'progress_label': 'Резервная копия готова',
+    }
+    changed = web_command_state.set_command_progress(
+        lock,
+        state,
+        'update',
+        'live tail without the old marker',
+        lambda _command, _text: (8, 'Обновление запущено'),
+    )
+    assert changed is True
+    assert state['progress'] == 70
+    assert state['progress_label'] == 'Резервная копия готова'
+    assert web_command_state.set_command_progress(
+        lock,
+        state,
+        'update',
+        'live tail without the old marker',
+        lambda _command, _text: (8, 'Обновление запущено'),
+    ) is False
+    assert web_command_state.set_command_progress(
+        lock,
+        state,
+        'update',
+        'new phase marker',
+        lambda _command, _text: (82, 'Новые файлы установлены'),
+    ) is True
+    assert state['progress'] == 82
+    assert state['progress_label'] == 'Новые файлы установлены'
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / 'events.jsonl'
         event_history.record_event(
@@ -10480,9 +10517,367 @@ def test_repo_update_helpers():
     bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     assert "direct_env['REPO_REF'] = repo_ref" in bot_source
     assert "direct_env['REPO_REF'] = branch" not in bot_source
+    assert 'activity_probe=activity_probe' in bot_source
+    assert 'os.stat(update_status.UPDATE_STATUS_PATH).st_mtime_ns' in bot_source
     assert repo_update.download_repo_script.__defaults__ == ('main',)
     assert telegram_jobs.start_background_command.__kwdefaults__['branch'] == 'main'
     assert repo_update.direct_fetch_env(('HTTP_PROXY',), {'HTTP_PROXY': 'x', 'keep': 'y'}) == {'keep': 'y'}
+
+
+def test_repo_update_progress_is_bounded_and_linear():
+    class _FakeProcess:
+        pid = 12345
+
+        def __init__(self, lines, return_code=0):
+            self.stdout = StringIO(''.join(lines))
+            self.returncode = return_code
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    original_popen = repo_update.subprocess.Popen
+    popen_calls = []
+    progress_payloads = []
+    line_count = 20000
+    process = _FakeProcess([
+        '\n',
+        'начало\n',
+        *[f'line-{index:05d} payload payload payload\n' for index in range(line_count)],
+        'конец\n',
+    ])
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return process
+
+    try:
+        repo_update.subprocess.Popen = fake_popen
+        started = time.perf_counter()
+        return_code, output = repo_update.run_script_and_collect(
+            '-update',
+            {},
+            ['prefix'],
+            progress_payloads.append,
+            progress_interval_seconds=3600,
+            progress_tail_bytes=512,
+            inactivity_timeout_seconds=5,
+            hard_timeout_seconds=10,
+        )
+        elapsed = time.perf_counter() - started
+    finally:
+        repo_update.subprocess.Popen = original_popen
+
+    assert return_code == 0
+    assert output.startswith('prefix\nначало\nline-00000')
+    assert output.endswith(f'line-{line_count - 1:05d} payload payload payload\nконец')
+    assert len(output.splitlines()) == line_count + 3
+    assert len(progress_payloads) == 2
+    assert all(len(payload.encode('utf-8')) <= 512 for payload in progress_payloads)
+    assert progress_payloads[-1].endswith('конец')
+    assert popen_calls[0][1]['start_new_session'] is True
+    assert elapsed < 2.0
+
+    nonzero = _FakeProcess(['failure\n'], return_code=7)
+    try:
+        repo_update.subprocess.Popen = lambda *_args, **_kwargs: nonzero
+        return_code, output = repo_update.run_script_and_collect(
+            '-update',
+            {},
+            [],
+            inactivity_timeout_seconds=5,
+            hard_timeout_seconds=10,
+        )
+    finally:
+        repo_update.subprocess.Popen = original_popen
+    assert return_code == 7
+    assert output.splitlines()[0] == 'failure'
+    assert output.endswith('7.')
+
+    unicode_process = _FakeProcess(['я' * 100 + '\n'])
+    unicode_payloads = []
+    try:
+        repo_update.subprocess.Popen = lambda *_args, **_kwargs: unicode_process
+        return_code, output = repo_update.run_script_and_collect(
+            '-update',
+            {},
+            [],
+            unicode_payloads.append,
+            progress_interval_seconds=3600,
+            progress_tail_bytes=31,
+            inactivity_timeout_seconds=5,
+            hard_timeout_seconds=10,
+        )
+    finally:
+        repo_update.subprocess.Popen = original_popen
+    assert return_code == 0
+    assert output == 'я' * 100
+    assert unicode_payloads
+    assert all(len(payload.encode('utf-8')) <= 31 for payload in unicode_payloads)
+
+
+def test_repo_update_progress_callback_failure_is_nonfatal():
+    class _FakeProcess:
+        pid = 12346
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = StringIO('first\nsecond\n')
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    original_popen = repo_update.subprocess.Popen
+    calls = []
+
+    def fail_callback(_text):
+        calls.append(1)
+        raise OSError('synthetic status failure')
+
+    try:
+        repo_update.subprocess.Popen = lambda *_args, **_kwargs: _FakeProcess()
+        return_code, output = repo_update.run_script_and_collect(
+            '-update',
+            {},
+            [],
+            fail_callback,
+            progress_interval_seconds=0,
+            inactivity_timeout_seconds=5,
+            hard_timeout_seconds=10,
+        )
+    finally:
+        repo_update.subprocess.Popen = original_popen
+    assert return_code == 0
+    assert calls == [1]
+    assert output.startswith('first\n')
+    assert 'Не удалось обновить промежуточный статус; выполнение продолжается.' in output
+    assert output.endswith('second')
+
+
+def test_repo_update_watchdog_terminates_process_groups():
+    class _BlockingOutput:
+        def __init__(self):
+            self.closed = threading.Event()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.closed.wait()
+            raise StopIteration
+
+        def close(self):
+            self.closed.set()
+
+    class _BlockingProcess:
+        pid = 12347
+
+        def __init__(self, ignore_term=False):
+            self.stdout = _BlockingOutput()
+            self.returncode = None
+            self.ignore_term = ignore_term
+            self.terminated = 0
+            self.killed = 0
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            if self.killed:
+                self.returncode = -9
+                return self.returncode
+            if self.terminated and not self.ignore_term:
+                self.returncode = -15
+                return self.returncode
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+
+        def terminate(self):
+            self.terminated += 1
+            if not self.ignore_term:
+                self.stdout.close()
+
+        def kill(self):
+            self.killed += 1
+            self.stdout.close()
+
+    original_popen = repo_update.subprocess.Popen
+    original_signal_group = repo_update._signal_process_group
+
+    def fake_signal_group(process, signal_value):
+        if signal_value == repo_update.signal.SIGTERM:
+            process.terminate()
+        else:
+            process.kill()
+
+    try:
+        repo_update._signal_process_group = fake_signal_group
+
+        inactive_process = _BlockingProcess()
+        repo_update.subprocess.Popen = lambda *_args, **_kwargs: inactive_process
+        return_code, output = repo_update.run_script_and_collect(
+            '-update',
+            {},
+            [],
+            inactivity_timeout_seconds=0.03,
+            hard_timeout_seconds=1,
+            terminate_grace_seconds=0.03,
+        )
+        assert return_code == repo_update.TIMEOUT_RETURN_CODE
+        assert 'нет активности' in output
+        assert inactive_process.terminated == 1
+        assert inactive_process.killed == 0
+
+        hard_process = _BlockingProcess(ignore_term=True)
+        repo_update.subprocess.Popen = lambda *_args, **_kwargs: hard_process
+        return_code, output = repo_update.run_script_and_collect(
+            '-update',
+            {},
+            [],
+            inactivity_timeout_seconds=0,
+            hard_timeout_seconds=0.03,
+            terminate_grace_seconds=0.01,
+        )
+        assert return_code == repo_update.TIMEOUT_RETURN_CODE
+        assert 'общий лимит' in output
+        assert hard_process.terminated == 1
+        assert hard_process.killed == 1
+        assert 'завершена принудительно' in output
+    finally:
+        repo_update.subprocess.Popen = original_popen
+        repo_update._signal_process_group = original_signal_group
+
+    assert not any(thread.name == 'repo-update-output' and thread.is_alive() for thread in threading.enumerate())
+
+
+def test_repo_update_activity_probe_defers_inactivity_timeout():
+    class _BlockingOutput:
+        def __init__(self):
+            self.closed = threading.Event()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.closed.wait()
+            raise StopIteration
+
+        def close(self):
+            self.closed.set()
+
+    class _BlockingProcess:
+        pid = 12348
+        returncode = None
+
+        def __init__(self):
+            self.stdout = _BlockingOutput()
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            if self.returncode is not None:
+                return self.returncode
+            raise subprocess.TimeoutExpired('synthetic', timeout)
+
+        def terminate(self):
+            self.returncode = -15
+            self.stdout.close()
+
+        def kill(self):
+            self.returncode = -9
+            self.stdout.close()
+
+    original_popen = repo_update.subprocess.Popen
+    original_signal_group = repo_update._signal_process_group
+    original_probe_interval = repo_update.ACTIVITY_PROBE_INTERVAL_SECONDS
+    process = _BlockingProcess()
+    probe_calls = [0]
+
+    def activity_probe():
+        probe_calls[0] += 1
+        return probe_calls[0]
+
+    def fake_signal_group(target, signal_value):
+        if signal_value == repo_update.signal.SIGTERM:
+            target.terminate()
+        else:
+            target.kill()
+
+    try:
+        repo_update.subprocess.Popen = lambda *_args, **_kwargs: process
+        repo_update._signal_process_group = fake_signal_group
+        repo_update.ACTIVITY_PROBE_INTERVAL_SECONDS = 0.005
+        return_code, output = repo_update.run_script_and_collect(
+            '-update',
+            {},
+            [],
+            inactivity_timeout_seconds=0.015,
+            hard_timeout_seconds=0.06,
+            terminate_grace_seconds=0.01,
+            activity_probe=activity_probe,
+        )
+    finally:
+        repo_update.subprocess.Popen = original_popen
+        repo_update._signal_process_group = original_signal_group
+        repo_update.ACTIVITY_PROBE_INTERVAL_SECONDS = original_probe_interval
+    assert return_code == repo_update.TIMEOUT_RETURN_CODE
+    assert 'общий лимит' in output
+    assert 'нет активности' not in output
+    assert probe_calls[0] > 1
+
+
+def test_repo_update_posix_timeout_runs_exit_recovery():
+    if os.name != 'posix':
+        return
+    original_popen = repo_update.subprocess.Popen
+    spawned = []
+    with tempfile.TemporaryDirectory() as tmp:
+        script_path = Path(tmp) / 'timeout-recovery.sh'
+        marker_path = Path(tmp) / 'recovered'
+        script_path.write_text(
+            '#!/bin/sh\n'
+            'trap \'printf recovered > "$RECOVERY_MARKER"\' EXIT\n'
+            'printf ready\\n\n'
+            'while :; do sleep 5; done\n',
+            encoding='utf-8',
+        )
+        script_path.chmod(0o700)
+        env = os.environ.copy()
+        env['RECOVERY_MARKER'] = str(marker_path)
+
+        def capture_popen(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        try:
+            repo_update.subprocess.Popen = capture_popen
+            return_code, output = repo_update.run_script_and_collect(
+                '-update',
+                env,
+                [],
+                script_path=str(script_path),
+                inactivity_timeout_seconds=0.15,
+                hard_timeout_seconds=5,
+                terminate_grace_seconds=2,
+            )
+        finally:
+            repo_update.subprocess.Popen = original_popen
+        assert return_code == repo_update.TIMEOUT_RETURN_CODE
+        assert 'нет активности' in output
+        assert marker_path.read_text(encoding='utf-8') == 'recovered'
+        assert spawned and spawned[0].poll() is not None
 
 
 def test_web_background_helpers():
@@ -13765,6 +14160,11 @@ def main():
     test_installer_common_helpers()
     test_installer_page_is_bot_setup_only()
     test_repo_update_helpers()
+    test_repo_update_progress_is_bounded_and_linear()
+    test_repo_update_progress_callback_failure_is_nonfatal()
+    test_repo_update_watchdog_terminates_process_groups()
+    test_repo_update_activity_probe_defers_inactivity_timeout()
+    test_repo_update_posix_timeout_runs_exit_recovery()
     test_key_pool_web()
     test_web_pool_snapshot_worker_payload_is_safe_and_complete()
     test_youtube_healthcheck_detects_first_load_instability()

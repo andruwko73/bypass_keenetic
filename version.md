@@ -1,4 +1,6 @@
-*v1.980 (29 Jul 2026) -* main
+*v1.981 (30 Jul 2026) -* main
+
+*Makes updates lighter and safer without a new worker: live output is byte-bounded and debounced, quiet redirected stages count status-file activity, and stalled process groups receive a recovery grace period before forced termination.*
 
 *Keeps the six-hour dnsmasq/ipset full refresh deadline anchored to the last real refresh: unchanged hourly checks no longer postpone it, and legacy skipped state is repaired on the next due run.*
 
