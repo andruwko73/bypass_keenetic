@@ -50,6 +50,9 @@ BYPASS_TELEGRAM_CALL_TPROXY_ENABLED="${BYPASS_TELEGRAM_CALL_TPROXY_ENABLED:-0}"
 BYPASS_TELEGRAM_CALL_TPROXY_MARK="${BYPASS_TELEGRAM_CALL_TPROXY_MARK:-0x71}"
 BYPASS_TELEGRAM_CALL_TPROXY_TABLE="${BYPASS_TELEGRAM_CALL_TPROXY_TABLE:-100}"
 BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY="${BYPASS_TELEGRAM_CALL_TPROXY_PRIORITY:-100}"
+BYPASS_CHROME_REMOTE_DESKTOP_TPROXY_ENABLED="${BYPASS_CHROME_REMOTE_DESKTOP_TPROXY_ENABLED:-1}"
+CHROME_REMOTE_DESKTOP_STUN_IP="${CHROME_REMOTE_DESKTOP_STUN_IP:-74.125.247.128}"
+CHROME_REMOTE_DESKTOP_STUN_PORT="${CHROME_REMOTE_DESKTOP_STUN_PORT:-3478}"
 BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED="${BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED:-0}"
 BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED="${BYPASS_TELEGRAM_CALL_CLIENT_UDP_ROUTE_ENABLED:-0}"
 BYPASS_MOBILE_PUSH_CONNTRACK_MIN_TIMEOUT="${BYPASS_MOBILE_PUSH_CONNTRACK_MIN_TIMEOUT:-3600}"
@@ -421,8 +424,7 @@ load_tproxy_module() {
 	return 1
 }
 
-ensure_telegram_call_tproxy_support() {
-	[ "$BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" != "0" ] || return 1
+ensure_udp_tproxy_support() {
 	grep -qx socket /proc/net/ip_tables_matches 2>/dev/null || load_tproxy_module xt_socket || return 1
 	grep -qx TPROXY /proc/net/ip_tables_targets 2>/dev/null || load_tproxy_module xt_TPROXY || return 1
 	grep -qx socket /proc/net/ip_tables_matches 2>/dev/null || return 1
@@ -437,6 +439,11 @@ ensure_telegram_call_tproxy_support() {
 	ip rule show 2>/dev/null | grep -q "fwmark $BYPASS_TELEGRAM_CALL_TPROXY_MARK .*lookup $BYPASS_TELEGRAM_CALL_TPROXY_TABLE" || return 1
 	ip route show table "$BYPASS_TELEGRAM_CALL_TPROXY_TABLE" 2>/dev/null | grep -q '^local default dev lo' || return 1
 	return 0
+}
+
+ensure_telegram_call_tproxy_support() {
+	[ "$BYPASS_TELEGRAM_CALL_TPROXY_ENABLED" != "0" ] || return 1
+	ensure_udp_tproxy_support
 }
 
 ensure_timeout_ipset() {
@@ -1069,6 +1076,69 @@ youtube_route_protocol() {
 	printf '%s\n' "${best_protocol:-vless}"
 }
 
+chrome_remote_desktop_route_protocol() {
+	chrome_remote_desktop_markers="remotedesktop.google.com remotedesktop-pa.googleapis.com instantmessaging-pa.googleapis.com $CHROME_REMOTE_DESKTOP_STUN_IP"
+	best_protocol=""
+	best_count=0
+	for route_spec in \
+		"shadowsocks:$UNBLOCK_DIR/shadowsocks.txt" \
+		"vmess:$UNBLOCK_DIR/vmess.txt" \
+		"vless:$UNBLOCK_DIR/vless.txt" \
+		"vless2:$UNBLOCK_DIR/vless-2.txt" \
+		"trojan:$UNBLOCK_DIR/trojan.txt"; do
+		protocol="${route_spec%%:*}"
+		route_file="${route_spec#*:}"
+		count="$(route_file_marker_count "$route_file" $chrome_remote_desktop_markers)"
+		case "$count" in ''|*[!0-9]*) count=0 ;; esac
+		if [ "$count" -gt "$best_count" ] 2>/dev/null; then
+			best_count="$count"
+			best_protocol="$protocol"
+		fi
+	done
+	[ "$best_count" -gt 0 ] 2>/dev/null && printf '%s\n' "$best_protocol"
+}
+
+remove_chrome_remote_desktop_tproxy_rules() {
+	for tproxy_port in \
+		"$TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS" \
+		"$TELEGRAM_CALL_TPROXY_PORT_VMESS" \
+		"$TELEGRAM_CALL_TPROXY_PORT_VLESS" \
+		"$TELEGRAM_CALL_TPROXY_PORT_VLESS2" \
+		"$TELEGRAM_CALL_TPROXY_PORT_TROJAN"; do
+		while iptables -t mangle -C PREROUTING -w -p udp -d "$CHROME_REMOTE_DESKTOP_STUN_IP" \
+			--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j TPROXY --on-port "$tproxy_port" \
+			--tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK" 2>/dev/null; do
+			iptables -t mangle -D PREROUTING -w -p udp -d "$CHROME_REMOTE_DESKTOP_STUN_IP" \
+				--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j TPROXY --on-port "$tproxy_port" \
+				--tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK"
+		done
+	done
+	while iptables -t nat -C PREROUTING -w -p udp -d "$CHROME_REMOTE_DESKTOP_STUN_IP" \
+		--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j RETURN 2>/dev/null; do
+		iptables -t nat -D PREROUTING -w -p udp -d "$CHROME_REMOTE_DESKTOP_STUN_IP" \
+			--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j RETURN
+	done
+}
+
+refresh_chrome_remote_desktop_tproxy() {
+	remove_chrome_remote_desktop_tproxy_rules
+	[ "$BYPASS_CHROME_REMOTE_DESKTOP_TPROXY_ENABLED" != "0" ] || return 0
+
+	chrome_remote_desktop_route="$(chrome_remote_desktop_route_protocol)"
+	[ -n "$chrome_remote_desktop_route" ] || return 0
+	tproxy_port="$(telegram_call_tproxy_port "$chrome_remote_desktop_route")"
+	[ -n "$tproxy_port" ] || return 0
+	ensure_udp_tproxy_support || return 0
+
+	iptables -t mangle -I PREROUTING 1 -w -p udp -d "$CHROME_REMOTE_DESKTOP_STUN_IP" \
+		--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j TPROXY --on-port "$tproxy_port" \
+		--tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK" || return 0
+	if ! iptables -t nat -I PREROUTING 1 -w -p udp -d "$CHROME_REMOTE_DESKTOP_STUN_IP" \
+		--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j RETURN; then
+		remove_chrome_remote_desktop_tproxy_rules
+	fi
+}
+
 refresh_vless_tcp_priority
 refresh_vless_priority_redirects
 
@@ -1131,5 +1201,10 @@ refresh_telegram_call_learning_rules
 # Install these last: direct APNs/FCM returns and Telegram 5222 ownership
 # rules must stay above every generic protocol redirect and call-chain jump.
 refresh_mobile_push_priority
+
+# REDIRECT loses returning STUN packets on the transparent Xray UDP path used
+# by router clients. Keep this exact CRD endpoint on the proven TPROXY path;
+# the narrowly scoped rules do not alter QUIC or other service traffic.
+refresh_chrome_remote_desktop_tproxy
 
 exit 0

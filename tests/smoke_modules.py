@@ -4160,6 +4160,26 @@ def test_vless_tcp_redirect_keeps_mobile_push_connections_reliable():
     assert "printf '%s\\n' 1082 10815 10812 10814 10829" in target_ports
 
 
+def test_chrome_remote_desktop_stun_uses_targeted_tproxy():
+    redirect_script = (APP_ROOT / '100-redirect.sh').read_text(encoding='utf-8')
+    assert 'BYPASS_CHROME_REMOTE_DESKTOP_TPROXY_ENABLED="${BYPASS_CHROME_REMOTE_DESKTOP_TPROXY_ENABLED:-1}"' in redirect_script
+    assert 'CHROME_REMOTE_DESKTOP_STUN_IP="${CHROME_REMOTE_DESKTOP_STUN_IP:-74.125.247.128}"' in redirect_script
+    assert 'CHROME_REMOTE_DESKTOP_STUN_PORT="${CHROME_REMOTE_DESKTOP_STUN_PORT:-3478}"' in redirect_script
+    assert 'ensure_udp_tproxy_support()' in redirect_script
+    assert 'ensure_telegram_call_tproxy_support()' in redirect_script
+    assert 'chrome_remote_desktop_route_protocol()' in redirect_script
+    refresh_block = redirect_script.split('refresh_chrome_remote_desktop_tproxy() {', 1)[1].split('\n}', 1)[0]
+    assert 'remove_chrome_remote_desktop_tproxy_rules' in refresh_block
+    assert 'chrome_remote_desktop_route="$(chrome_remote_desktop_route_protocol)"' in refresh_block
+    assert 'tproxy_port="$(telegram_call_tproxy_port "$chrome_remote_desktop_route")"' in refresh_block
+    assert 'ensure_udp_tproxy_support || return 0' in refresh_block
+    assert '-d "$CHROME_REMOTE_DESKTOP_STUN_IP"' in refresh_block
+    assert '--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j TPROXY --on-port "$tproxy_port"' in refresh_block
+    assert '--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j RETURN' in refresh_block
+    assert '--match-set unblockvless dst -j TPROXY' not in refresh_block
+    assert redirect_script.rindex('\nrefresh_chrome_remote_desktop_tproxy\n') > redirect_script.rindex('\nrefresh_mobile_push_priority\n')
+
+
 def test_runtime_startup_limits_router_flash_and_overhead():
     service = (APP_ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')

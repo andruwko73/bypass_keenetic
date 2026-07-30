@@ -1,4 +1,10 @@
-*v1.984 (30 Jul 2026) -* main
+*v1.985 (30 Jul 2026) -* main
+
+*Restores Chrome Remote Desktop session setup by routing Google's documented `74.125.247.128:3478/udp` STUN endpoint through the existing protocol-specific Xray TPROXY inbound instead of the unreliable UDP REDIRECT path.*
+
+*Selects the TPROXY inbound from the service's actual route assignment, removes stale exact rules before every refresh, and rolls back the narrow exception if policy-rule installation fails.*
+
+*Keeps the fix router-light: only one destination and UDP port receive exact iptables rules; TCP signaling, QUIC, YouTube, Telegram, and other service traffic retain their existing routes.*
 
 *Separates allowed shared service-catalog addresses from real route conflicts and shows the exact address, source files, original file lines, routes, and affected services without offering automatic deletion.*
 
