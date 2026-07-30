@@ -1,4 +1,8 @@
-*v1.986 (30 Jul 2026) -* main
+*v1.987 (30 Jul 2026) -* main
+
+*Routes each sniffed Chrome Remote Desktop domain to the one user-managed protocol list that owns that domain, so intentionally split Google/CRD catalogs keep working across shared edge IPs.*
+
+*Leaves ambiguous or unowned domains, explicit IP entries, UDP/STUN, call routing, and ipsets under the existing policy; adds split-catalog and per-domain ownership regressions after live-update verification.*
 
 *Keeps Chrome Remote Desktop online when a shared Google edge IP is already owned by the priority YouTube/Vless 2 ipset: Xray now recovers TCP signaling by the sniffed service domain and sends it to the single route list that fully owns Chrome Remote Desktop.*
 

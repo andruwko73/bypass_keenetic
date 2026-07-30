@@ -1424,13 +1424,14 @@ def test_strict_cross_route_domains_recover_from_shared_ipset_owner():
         'remotedesktop.google.com',
         'remotedesktop-pa.googleapis.com',
         'oauth2.googleapis.com',
+        'clients3.google.com',
         '74.125.247.128',
     ]
     route_entries = {
-        'vless': list(crd_entries),
-        'vless2': ['oauth2.googleapis.com', 'youtube.com'],
+        'vless': [entry for entry in crd_entries if entry != 'clients3.google.com'],
+        'vless2': ['oauth2.googleapis.com', 'clients3.google.com', 'youtube.com'],
     }
-    overrides = transparent_route_policy.compile_unique_service_domain_override(
+    overrides = transparent_route_policy.compile_service_domain_overrides(
         route_entries,
         crd_entries,
     )
@@ -1439,12 +1440,12 @@ def test_strict_cross_route_domains_recover_from_shared_ipset_owner():
             'domains': (
                 'domain:remotedesktop.google.com',
                 'domain:remotedesktop-pa.googleapis.com',
-                'domain:oauth2.googleapis.com',
             ),
         },
+        'vless2': {'domains': ('domain:clients3.google.com',)},
     }
-    assert transparent_route_policy.compile_unique_service_domain_override(
-        {**route_entries, 'vless2': list(crd_entries)},
+    assert transparent_route_policy.compile_service_domain_overrides(
+        {'vless': list(crd_entries), 'vless2': list(crd_entries)},
         crd_entries,
     ) == {}
 
@@ -1470,6 +1471,9 @@ def test_strict_cross_route_domains_recover_from_shared_ipset_owner():
     assert cross_rule['network'] == 'tcp'
     assert cross_rule['outboundTag'] == 'proxy-vless'
     assert cross_rule['domain'] == list(overrides['vless']['domains'])
+    cross_rule_vless2 = next(rule for rule in rules if rule.get('ruleTag') == 'cross-route-domains-vless2')
+    assert cross_rule_vless2['outboundTag'] == 'proxy-vless2'
+    assert cross_rule_vless2['domain'] == list(overrides['vless2']['domains'])
     vless2_fallback = next(
         rule for rule in rules
         if rule.get('inboundTag') == ['in-vless2-transparent']

@@ -65,7 +65,7 @@ from proxy_config_builder import (
 )
 from transparent_route_policy import (
     compile_protocol_policies as _compile_transparent_route_policies,
-    compile_unique_service_domain_override as _compile_transparent_service_override,
+    compile_service_domain_overrides as _compile_transparent_service_overrides,
     normalize_protocol_set as _normalize_transparent_protocol_set,
 )
 from proxy_apply_runtime import (
@@ -13804,7 +13804,7 @@ def _transparent_route_policies():
 def _transparent_cross_route_domain_overrides():
     if not XRAY_STRICT_TRANSPARENT_PROTOCOLS:
         return {}
-    return _compile_transparent_service_override(
+    return _compile_transparent_service_overrides(
         _transparent_route_entries_by_protocol(),
         _service_catalog().CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
     )

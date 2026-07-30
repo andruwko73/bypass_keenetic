@@ -7,7 +7,7 @@ from proxy_key_store import load_current_keys
 from service_catalog import CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES, CONNECTIVITY_CHECK_DOMAINS
 from transparent_route_policy import (
     compile_protocol_policies,
-    compile_unique_service_domain_override,
+    compile_service_domain_overrides,
     normalize_protocol_set,
 )
 from unblock_lists import UNBLOCK_DIR, read_unblock_list_entries
@@ -117,7 +117,7 @@ def rebuild_proxy_core_config(
             strict_transparent_protocols,
         ),
         cross_route_domain_overrides=(
-            compile_unique_service_domain_override(
+            compile_service_domain_overrides(
                 route_entries,
                 CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
             )

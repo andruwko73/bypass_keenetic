@@ -116,36 +116,45 @@ def compile_protocol_policies(entries_by_protocol, strict_protocols):
     return result
 
 
-def compile_unique_service_domain_override(entries_by_protocol, service_entries):
-    """Route a service by sniffed domain when exactly one list fully owns it.
+def compile_service_domain_overrides(entries_by_protocol, service_entries):
+    """Return the unique configured route owner of every service domain.
 
     The ipset layer can legitimately see the same Google edge IP for several
     domains.  A strict transparent inbound must therefore be able to recover
     the intended service route from TLS/HTTP sniffing instead of falling
     through to direct traffic merely because another ipset won the IP race.
-    Explicit IP entries are deliberately excluded: they carry no hostname and
-    remain under the existing ipset/TPROXY policy.
+    Each domain is handled independently so a user may intentionally split a
+    shared service catalog between protocols.  Ambiguous and unowned domains,
+    as well as explicit IP entries, remain under the existing ipset policy.
     """
     service_policy = compile_route_entries(service_entries)
     service_domains = tuple(service_policy.get('domains') or ())
-    service_identities = {
-        *service_domains,
-        *(service_policy.get('ips') or ()),
-    }
-    if not service_domains or not service_identities:
+    if not service_domains:
         return {}
 
     source = entries_by_protocol or {}
-    complete_owners = []
+    route_domains = {}
     for protocol in SUPPORTED_PROTOCOLS:
         route_policy = compile_route_entries(source.get(protocol) or ())
-        route_identities = {
-            *(route_policy.get('domains') or ()),
-            *(route_policy.get('ips') or ()),
-        }
-        if service_identities <= route_identities:
-            complete_owners.append(protocol)
+        route_domains[protocol] = set(route_policy.get('domains') or ())
 
-    if len(complete_owners) != 1:
-        return {}
-    return {complete_owners[0]: {'domains': service_domains}}
+    grouped = {protocol: [] for protocol in SUPPORTED_PROTOCOLS}
+    for domain in service_domains:
+        owners = [
+            protocol
+            for protocol in SUPPORTED_PROTOCOLS
+            if domain in route_domains[protocol]
+        ]
+        if len(owners) == 1:
+            grouped[owners[0]].append(domain)
+
+    return {
+        protocol: {'domains': tuple(grouped[protocol])}
+        for protocol in SUPPORTED_PROTOCOLS
+        if grouped[protocol]
+    }
+
+
+def compile_unique_service_domain_override(entries_by_protocol, service_entries):
+    """Backward-compatible alias for the per-domain ownership compiler."""
+    return compile_service_domain_overrides(entries_by_protocol, service_entries)
