@@ -83,13 +83,23 @@ CUSTOM_CHECKS = [
         "routes": ["chatgpt.com", "chat.openai.com"],
         "badge": "AI",
         "icon": "chatgpt",
-    }
+    },
+    {
+        "id": "meta",
+        "label": "Instagram / Facebook",
+        "url": "https://www.instagram.com/",
+        "urls": ["https://www.instagram.com/"],
+        "routes": ["instagram.com", "facebook.com"],
+        "badge": "IG",
+        "icon": "instagram",
+    },
 ]
 
 ROUTE_SERVICE_ITEMS = [
     {"id": "telegram", "label": "Telegram", "badge": "TG", "icon": ""},
     {"id": "youtube", "label": "YouTube", "badge": "YT", "icon": ""},
     {"id": "chatgpt_services", "label": "ChatGPT / Codex", "badge": "AI", "icon": "chatgpt"},
+    {"id": "meta", "label": "Instagram / Facebook", "badge": "IG", "icon": "instagram"},
 ]
 ROUTE_SERVICE_IDS = {item["id"] for item in ROUTE_SERVICE_ITEMS}
 
@@ -113,6 +123,15 @@ ROUTE_STATES = {
         "routes": {
             "vless": {"matched": 79, "total": 79},
             "vless2": {"matched": 1, "total": 79},
+        },
+    },
+    "meta": {
+        "label": "Vless 1",
+        "total": 23,
+        "complete_protocols": ["vless"],
+        "partial_protocols": [],
+        "routes": {
+            "vless": {"matched": 23, "total": 23},
         },
     },
 }
@@ -161,7 +180,7 @@ def _probe_cache():
             cache[_hash_key(key_value)] = {
                 "tg_ok": proto == "vless" or index == 0,
                 "yt_ok": proto == "vless2" or index == 0,
-                "custom": {"chatgpt_services": index == 0},
+                "custom": {"chatgpt_services": index == 0, "meta": index == 0},
                 "ts": now - (index * 60),
             }
     return cache

@@ -1485,7 +1485,7 @@ def test_strict_cross_route_domains_recover_from_shared_ipset_owner():
 
 
 def test_key_pool_web():
-    checks = [{'id': 'custom', 'label': 'Custom'}]
+    checks = [{'id': 'custom', 'label': 'Instagram / Facebook'}]
     current = {'vless': 'vless-key'}
     pools = {'vless': ['vless-key', 'unused-key'], 'vmess': ['vmess-key']}
     cache = {
@@ -1514,8 +1514,10 @@ def test_key_pool_web():
     assert summary['services'] == [
         {'label': 'Telegram', 'count': 2},
         {'label': 'YouTube', 'count': 1},
-        {'label': 'Custom', 'count': 2},
+        {'label': 'Instagram / Facebook', 'count': 2},
     ]
+    assert 'Instagram / Facebook: 2' in summary['note']
+    assert 'Facebo...' not in summary['note']
 
     snapshot = key_pool_web.web_pool_snapshot(
         current,

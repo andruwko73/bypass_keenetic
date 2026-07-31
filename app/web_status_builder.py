@@ -76,8 +76,6 @@ def pool_status_summary(
         if not check_id:
             continue
         label = str(check.get('label') or check_id).strip() or check_id
-        if len(label) > 18:
-            label = label[:18] + '...'
         services.append({'label': label, 'field': None, 'id': check_id, 'count': 0})
 
     total_count = 0

@@ -704,6 +704,15 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
   await assertNoHorizontalOverflow(page, name);
+  if (modeConfig.expectPool) {
+    const poolSummaryText = (await page.locator('#pool-summary-note').innerText()).trim();
+    if (!poolSummaryText.includes('Instagram / Facebook:')) {
+      throw new Error(`${name}: pool summary clipped the full Instagram / Facebook label: ${poolSummaryText}`);
+    }
+    if (poolSummaryText.includes('Facebo...')) {
+      throw new Error(`${name}: pool summary still contains the legacy shortened service label: ${poolSummaryText}`);
+    }
+  }
   if (isMobile) {
     await assertMobileStatusGaps(page, name);
   }

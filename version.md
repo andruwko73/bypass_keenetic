@@ -1,4 +1,10 @@
-*v1.995 (1 Aug 2026) -* main
+*v1.996 (1 Aug 2026) -* main
+
+*Показывает в сводке «Ключи и пул» полные названия всех дополнительных сервисов. `Instagram / Facebook` больше не превращается в `Instagram / Facebo...`; длинная строка безопасно переносится внутри карточки.*
+
+*Удаляет только устаревшее 18-символьное сокращение общего генератора сводки, который используют веб-интерфейс и Telegram-бот. Подсчёт ключей и сервисов, проверки пула, Xray, маршруты и фоновые процессы не меняются.*
+
+*Проверено отдельной Python-регрессией полного названия и браузерной матрицей режимов «Сложный», «Простой» и «Только веб» на мобильном, Full HD, 2K и 4K с соотношениями 16:9 и 16:10.*
 
 *Prevents a browser from retaining pre-update service artwork for up to 24 hours: every service icon URL now carries the installed application version, so an update automatically requests the matching PNG without a manual cache clear or hard reload.*
 
