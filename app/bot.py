@@ -183,6 +183,7 @@ import update_status
 from web_status_builder import (
     active_protocol_status as _status_active_protocol_status,
     cached_protocol_status as _status_cached_protocol_status,
+    confirmed_telegram_status as _status_confirmed_telegram_status,
     empty_protocol_status as _status_empty_protocol_status,
     merge_light_status_with_cached_services as _status_merge_light_status_with_cached_services,
 )
@@ -12371,15 +12372,46 @@ def _telegram_state_label():
     return 'polling активен' if bot_polling else ('ожидает запуска' if not bot_ready else 'процесс запущен, polling недоступен')
 
 
+def _active_status_with_polling_evidence(active_status, *, route_states=None):
+    if not (
+        isinstance(active_status, dict) and
+        _app_mode_telegram_enabled() and
+        bot_ready and
+        bot_polling
+    ):
+        return active_status
+    required_services = list(_light_required_services_for_protocol(proxy_mode, route_states=route_states))
+    if 'telegram' not in required_services:
+        return active_status
+    custom_states = active_status.get('custom')
+    custom_states = custom_states if isinstance(custom_states, dict) else {}
+    custom_checks = [
+        check for check in _load_custom_checks()
+        if isinstance(check, dict) and check.get('id') in custom_states
+    ]
+    return _status_confirmed_telegram_status(
+        active_status,
+        custom_checks,
+        required_services=required_services,
+    )
+
+
 def _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime_mode=None):
-    if not (_app_mode_telegram_enabled(app_runtime_mode) and bot_ready and not bot_polling):
+    if not (_app_mode_telegram_enabled(app_runtime_mode) and bot_ready):
         return status, protocol_statuses
     guarded_status = dict(status or {})
     guarded_status['state_label'] = _telegram_state_label()
-    guarded_status['api_status'] = web_status_runtime.telegram_api_refresh_message()
 
     guarded_protocols = dict(protocol_statuses or {})
     active_status = guarded_protocols.get(proxy_mode)
+    if bot_polling:
+        guarded_status['api_status'] = 'Telegram-бот получает обновления через активный ключ.'
+        confirmed_status = _active_status_with_polling_evidence(active_status)
+        if confirmed_status is not active_status:
+            guarded_protocols[proxy_mode] = confirmed_status
+        return guarded_status, guarded_protocols
+
+    guarded_status['api_status'] = web_status_runtime.telegram_api_refresh_message()
     if isinstance(active_status, dict) and active_status.get('api_ok') is True:
         active_status = dict(active_status)
         active_status['api_ok'] = False
@@ -12390,6 +12422,21 @@ def _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime
         active_status['details'] = guarded_status['api_status']
         guarded_protocols[proxy_mode] = active_status
     return guarded_status, guarded_protocols
+
+
+def _web_status_payload_with_polling_guard(payload):
+    if not isinstance(payload, dict):
+        return payload
+    guarded_payload = dict(payload)
+    guarded_status, guarded_protocols = _web_render_status_with_polling_guard(
+        guarded_payload.get('web'),
+        guarded_payload.get('protocols'),
+        _load_app_runtime_mode(),
+    )
+    guarded_payload['web'] = guarded_status
+    guarded_payload['protocols'] = guarded_protocols
+    guarded_payload['bot_polling'] = bool(bot_polling)
+    return guarded_payload
 
 
 def _build_web_status(current_keys, protocols=None):
@@ -12602,6 +12649,7 @@ def _active_mode_status_snapshot_from_base(
                             ),
                         )
                 _store_active_mode_protocol_status(current_keys, active_status)
+            active_status = _active_status_with_polling_evidence(active_status, route_states=route_states)
             protocols[proxy_mode] = active_status
         except Exception as exc:
             _write_runtime_log(f'Ошибка быстрой проверки активного режима {proxy_mode}: {exc}')
@@ -13184,6 +13232,7 @@ def _web_get_context(handler):
         'pool_probe_locked': pool_probe_lock.locked,
         'get_status_api_cache': _get_web_status_api_cache,
         'store_status_api_cache': _store_web_status_api_cache,
+        'guard_status_payload': _web_status_payload_with_polling_guard,
         'status_api_cache_ttl': WEB_STATUS_API_CACHE_TTL,
         'get_pools_api_cache': _get_web_pools_api_cache,
         'store_pools_api_cache': _store_web_pools_api_cache,

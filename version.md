@@ -1,22 +1,12 @@
-*v1.988 (31 Jul 2026) -* main
+*v1.989 (31 Jul 2026) -* main
 
-*Добавляет в Telegram-пул общую проверку всех ключей, безопасную остановку и одно итоговое сообщение со сводкой «Ключи и пул» по всем сервисам. Во время временной проверки статусы показывают последние сохранённые результаты и явно сообщают, что установленные ключи не переключаются.*
+*Исправляет расхождение статуса активного ключа во время проверки пула: если Telegram-бот реально получает обновления через Vless 1, веб-карточка больше не заменяет этот факт устаревшим `tg_ok=false` и не показывает ложное «Частично работает».*
 
-*Объединяет backend веб-интерфейса и Telegram для ручной установки ключей, смешанного импорта и subscription: доступны раздельные режимы одноразового импорта и синхронизации с HWID, а пауза и продолжение проверки пула защищены одним lock-сценарием.*
+*Подтверждение polling применяется к первоначальному HTML и `/api/status`, включая уже закэшированный ответ. Значок Telegram, подпись карточки и подробности остаются согласованными после обновления статуса, обновления пула и применения ключа.*
 
-*Готовые сервисы, включая Chrome Remote Desktop, теперь добавляются из веб-интерфейса и Telegram через единый route-aware механизм. После ручного изменения списков программа синхронизирует UDP и строгую Xray-политику, затем обновляет DNS/ipset без нового постоянного процесса.*
+*Исправление использует лёгкий снимок назначений сервисов, не запускает проверки ключей, не меняет Xray, маршруты и кэш пула и не загружает тяжёлые модули маршрутизации в быстром цикле веб-интерфейса.*
 
-*Проверено 227 Python-регрессиями, сканером секретов и браузерной матрицей всех трёх режимов на mobile, compact desktop, Full HD, 2K и 4K с соотношениями 16:9 и 16:10.*
-
-*Routes each sniffed Chrome Remote Desktop domain to the one user-managed protocol list that owns that domain, so intentionally split Google/CRD catalogs keep working across shared edge IPs.*
-
-*Leaves ambiguous or unowned domains, explicit IP entries, UDP/STUN, call routing, and ipsets under the existing policy; adds split-catalog and per-domain ownership regressions after live-update verification.*
-
-*Keeps Chrome Remote Desktop online when a shared Google edge IP is already owned by the priority YouTube/Vless 2 ipset: Xray now recovers TCP signaling by the sniffed service domain and sends it to the single route list that fully owns Chrome Remote Desktop.*
-
-*Creates the cross-inbound rule only for an unambiguous complete service assignment, reuses the existing Xray process and transparent inbounds, and leaves UDP/STUN, call routing, ipsets, and user-managed route files unchanged.*
-
-*Uses the same guarded policy during normal configuration builds and recovery after an update, with regressions for shared IP ownership, ambiguous ownership, and atomic config recovery.*
+*Проверено 227 Python-регрессиями, сканером секретов, синтаксическими проверками и браузерной матрицей режимов Сложный, Простой и Web only на mobile, compact desktop, Full HD, 2K и 4K с соотношениями 16:9 и 16:10.*
 
 *Restores Chrome Remote Desktop session setup by routing Google's documented `74.125.247.128:3478/udp` STUN endpoint through the existing protocol-specific Xray TPROXY inbound instead of the unreliable UDP REDIRECT path.*
 

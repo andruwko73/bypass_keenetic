@@ -281,6 +281,41 @@ def merge_light_status_with_cached_services(
     )
 
 
+def confirmed_telegram_status(
+    status,
+    custom_checks,
+    *,
+    required_services=None,
+    confirmation_message='Telegram-бот получает обновления через активный ключ.',
+):
+    """Overlay stronger live polling evidence onto a cached protocol status."""
+    current = dict(status or {})
+    required_services = _normalize_required_services(required_services)
+    if required_services is not None and 'telegram' not in required_services:
+        return current
+
+    custom_states = current.get('custom')
+    if not isinstance(custom_states, dict):
+        custom_states = {}
+    endpoint_message = str(current.get('endpoint_message') or '').strip() or confirmation_message
+    return active_protocol_status(
+        endpoint_ok=True,
+        endpoint_message=endpoint_message,
+        api_ok=True,
+        api_message=confirmation_message,
+        api_transient=False,
+        api_pending=False,
+        yt_ok=bool(current.get('yt_ok')),
+        yt_message=str(current.get('yt_message') or ''),
+        yt_pending=bool(current.get('yt_pending')),
+        yt_state=str(current.get('yt_state') or ''),
+        custom_states=dict(custom_states),
+        custom_checks=custom_checks or (),
+        api_required=True,
+        required_services=required_services,
+    )
+
+
 def cached_protocol_status(
     key_value,
     probe,

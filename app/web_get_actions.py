@@ -30,6 +30,17 @@ def _refresh_status_async(ctx, current_keys, active_only=False):
         return func(current_keys)
 
 
+def _guard_status_payload(ctx, payload):
+    guard = _ctx(ctx, 'guard_status_payload')
+    if not guard:
+        return payload
+    try:
+        guarded = guard(payload)
+    except Exception:
+        return payload
+    return guarded if isinstance(guarded, dict) else payload
+
+
 def _pool_probe_running(progress):
     try:
         total = int((progress or {}).get('total') or 0)
@@ -95,7 +106,7 @@ def _status_payload(ctx, query=''):
             cached.get('payload') is not None and
             now - float(cached.get('timestamp') or 0) < cache_ttl
         ):
-            return cached['payload']
+            return _guard_status_payload(ctx, cached['payload'])
 
     current_keys = _ctx(ctx, 'load_current_keys')()
     snapshot = _ctx(ctx, 'cached_status_snapshot')(current_keys)
@@ -156,7 +167,7 @@ def _status_payload(ctx, query=''):
             'pool_probe_paused': False,
             'pool_probe_progress': {},
         })
-        return payload
+        return _guard_status_payload(ctx, payload)
 
     payload.update({
         'pool_summary': None if compact else _ctx(ctx, 'pool_status_summary')(current_keys),
@@ -165,6 +176,7 @@ def _status_payload(ctx, query=''):
         'pool_probe_progress': progress,
         'timestamp': now,
     })
+    payload = _guard_status_payload(ctx, payload)
     cache_store = _ctx(ctx, 'store_status_api_cache')
     if cache_ttl > 0 and cache_store and not pool_probe_running and not pool_probe_paused:
         try:

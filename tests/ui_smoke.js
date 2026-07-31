@@ -478,6 +478,24 @@ async function assertProtocolServiceIconsStableAfterPoolRefresh(page, protocol, 
   }
 }
 
+async function assertActiveTelegramCardConsistent(page, protocol, label) {
+  await page.waitForFunction((proto) => {
+    const card = document.querySelector(`[data-protocol-card="${proto}"]`);
+    const icons = card ? card.querySelector('[data-protocol-status-icons]') : null;
+    return card && card.dataset.protocolLiveStatus === '1' && icons &&
+      Array.from(icons.querySelectorAll('img')).some((icon) => icon.getAttribute('alt') === 'Telegram');
+  }, protocol, { timeout: 10000 });
+  const state = await page.locator(`[data-protocol-card="${protocol}"]`).evaluate((card) => ({
+    live: card.dataset.protocolLiveStatus,
+    label: (card.querySelector('[data-protocol-status-label]') || { textContent: '' }).textContent.trim(),
+    telegramIcon: Array.from(card.querySelectorAll('[data-protocol-status-icons] img'))
+      .some((icon) => icon.getAttribute('alt') === 'Telegram'),
+  }));
+  if (state.live !== '1' || !state.telegramIcon || /Частично работает|Не работает/u.test(state.label)) {
+    throw new Error(`${label}: live Telegram evidence disagrees with the active card ${JSON.stringify(state)}`);
+  }
+}
+
 async function assertUnifiedImportLayout(page, label) {
   const layout = await page.evaluate(() => {
     const panel = document.querySelector('[data-protocol-panel="vless2"].active [data-subview="key"].active');
@@ -1050,8 +1068,11 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     await assertActivePoolRowPinned(page, 'vless', `${name} vless pool order`);
     await assertProtocolServiceIconsStableAfterIdleRefresh(page, 'vless', 3, `${name} vless status icons idle refresh`);
+    await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after idle refresh`);
     await assertProtocolServiceIconsStableAfterPoolRefresh(page, 'vless', 3, `${name} vless status icons pool refresh`);
+    await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after pool refresh`);
     await assertProtocolServiceIconsStableAfterLiveStatus(page, 'vless', 3, `${name} vless status icons apply refresh`);
+    await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after apply refresh`);
     await clickLazyProtocol(page, 'vless2', name);
     await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();
     await assertVisibleBox(page, '[data-protocol-panel="vless2"].active [data-pool-filter]', `${name} lazy pool filter`);

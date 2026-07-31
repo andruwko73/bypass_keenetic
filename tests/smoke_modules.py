@@ -4797,7 +4797,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _restore_telegram_polling_after_verified_recovery' in source
     assert '_restore_telegram_polling_after_verified_recovery()' in source
     assert 'not (active_telegram_required and not bot_polling)' in source
+    assert 'def _active_status_with_polling_evidence' in source
     assert 'def _web_render_status_with_polling_guard' in source
+    assert 'def _web_status_payload_with_polling_guard' in source
     assert "active_status['api_transient'] = True" in source
     assert 'bool(bot_ready)' in source
     assert 'bool(bot_polling)' in source
@@ -8185,6 +8187,38 @@ def test_telegram_bot_menu_button_smoke():
         }
         assert subscription_updates[0][0] == 'vless2'
         assert subscription_updates[0][1]['hwid_enabled'] is True
+
+        bot_module.proxy_mode = 'vless'
+        bot_module.bot_ready = True
+        bot_module.bot_polling = True
+        bot_module._load_app_runtime_mode = lambda: 'advanced'
+        bot_module._app_mode_telegram_enabled = lambda mode=None: True
+        bot_module._telegram_required_for_protocol = lambda proto: proto == 'vless'
+        bot_module._light_required_services_for_protocol = lambda proto, **kwargs: ('telegram',)
+        bot_module._load_custom_checks = lambda: [{'id': 'chat', 'label': 'Chat'}]
+        stale_active_status = {
+            'tone': 'warn',
+            'label': 'Частично работает',
+            'details': 'Показан последний результат проверки пула',
+            'endpoint_ok': None,
+            'api_ok': False,
+            'api_pending': False,
+            'yt_ok': True,
+            'yt_state': 'ok',
+            'custom': {'chat': 'ok'},
+        }
+        guarded_status = bot_module._active_status_with_polling_evidence(stale_active_status)
+        assert guarded_status['endpoint_ok'] is True
+        assert guarded_status['api_ok'] is True
+        assert guarded_status['label'] == 'Работает'
+        guarded_payload = bot_module._web_status_payload_with_polling_guard({
+            'web': {'proxy_mode': 'vless'},
+            'protocols': {'vless': stale_active_status},
+        })
+        assert guarded_payload['protocols']['vless']['api_ok'] is True
+        assert guarded_payload['protocols']['vless']['label'] == 'Работает'
+        assert guarded_payload['bot_polling'] is True
+        bot_module.bot_polling = False
 
         current_keys = {'vless': active_uri, 'vless2': inactive_uri}
         pending_snapshot = {
@@ -11704,6 +11738,7 @@ def test_web_get_actions_helpers():
     command_status = web_get_actions.dispatch(command_ctx, '/api/status')
     assert command_status['payload']['web'] == {'state': 'placeholder'}
     assert command_refreshed == []
+    guarded_cached_payloads = []
     cached_status_ctx = dict(ctx)
     cached_status_ctx.update({
         'get_pool_probe_progress': lambda: {'running': False, 'total': 0},
@@ -11713,10 +11748,12 @@ def test_web_get_actions_helpers():
             'payload': {'cached': cache_key},
         } if cache_key == 'compact' else None,
         'cached_status_snapshot': lambda keys: (_ for _ in ()).throw(AssertionError('cached compact status should not rebuild snapshot')),
+        'guard_status_payload': lambda payload: guarded_cached_payloads.append(dict(payload)) or {**payload, 'guarded': True},
         'time_provider': lambda: 123.0,
     })
     cached_compact_status = web_get_actions.dispatch(cached_status_ctx, '/api/status', 'compact=1')
-    assert cached_compact_status['payload'] == {'cached': 'compact'}
+    assert cached_compact_status['payload'] == {'cached': 'compact', 'guarded': True}
+    assert guarded_cached_payloads == [{'cached': 'compact'}]
     stored_status_payloads = []
     stored_status_ctx = dict(ctx)
     stored_status_ctx.update({
@@ -12401,6 +12438,33 @@ def test_web_status_builder_helpers():
     )
     assert active['tone'] == 'warn'
     assert active['api_pending'] is True
+    polling_confirmed = web_status_builder.confirmed_telegram_status(
+        {
+            'tone': 'warn',
+            'label': 'Частично работает',
+            'endpoint_ok': None,
+            'api_ok': False,
+            'api_pending': False,
+            'yt_ok': True,
+            'yt_state': 'ok',
+            'custom': {'chat': 'ok'},
+        },
+        [{'id': 'chat', 'label': 'Chat'}],
+        required_services=['telegram'],
+    )
+    assert polling_confirmed['endpoint_ok'] is True
+    assert polling_confirmed['api_ok'] is True
+    assert polling_confirmed['api_pending'] is False
+    assert polling_confirmed['tone'] == 'ok'
+    assert polling_confirmed['label'] == 'Работает'
+    assert polling_confirmed['custom'] == {'chat': 'ok'}
+    assert 'Telegram: работает' in polling_confirmed['details']
+    youtube_only_cached = {'tone': 'warn', 'label': 'Частично работает', 'api_ok': False}
+    assert web_status_builder.confirmed_telegram_status(
+        youtube_only_cached,
+        [],
+        required_services=['youtube'],
+    ) == youtube_only_cached
     cached = web_status_builder.cached_protocol_status(
         'key',
         {'tg_ok': False, 'yt_ok': True},
