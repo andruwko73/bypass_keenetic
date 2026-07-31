@@ -235,10 +235,16 @@ def _service_route_apply(ctx, data):
     success = True
     try:
         result_data = _ctx(ctx, 'apply_service_route')(service_key, target_protocol)
-        result = (
-            f"Сервис {result_data.get('service_label')} перенесён в {result_data.get('target_label')}. "
-            f"Адресов: {result_data.get('entries', 0)}."
-        )
+        if result_data.get('changed') is False:
+            result = (
+                f"Сервис {result_data.get('service_label')} уже полностью назначен на "
+                f"{result_data.get('target_label')}. Адресов: {result_data.get('entries', 0)}."
+            )
+        else:
+            result = (
+                f"Сервис {result_data.get('service_label')} перенесён в {result_data.get('target_label')}. "
+                f"Адресов: {result_data.get('entries', 0)}."
+            )
         if form_value(data, 'add_check') == '1':
             try:
                 _, check_result = _ctx(ctx, 'add_custom_check')(preset_id=service_key)

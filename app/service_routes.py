@@ -289,10 +289,12 @@ def apply_service_route(
             removed += size_before - len(values)
     route_entries[target_route].update(entries)
     added = len(route_entries[target_route] - before_target)
-    _write_routes(route_entries, unblock_dir)
-    if callable(before_update):
-        before_update()
-    _run_update(update_script)
+    changed = bool(added or removed)
+    if changed:
+        _write_routes(route_entries, unblock_dir)
+        if callable(before_update):
+            before_update()
+        _run_update(update_script)
     source = SERVICE_LIST_SOURCES.get(service_key) or {}
     return {
         'service_key': service_key,
@@ -302,6 +304,7 @@ def apply_service_route(
         'entries': len(entries),
         'added': added,
         'removed': removed,
+        'changed': changed,
     }
 
 

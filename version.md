@@ -1,4 +1,6 @@
-*v1.991 (31 Jul 2026) -* main
+*v1.992 (31 Jul 2026) -* main
+
+*Makes service-route assignment idempotent: selecting the protocol that already contains the complete service list no longer rewrites route files, restarts Xray, or runs the route updater. Adding an optional service check still refreshes only the installed active keys.*
 
 *Stops service-route and custom-check actions from launching a hidden full-pool probe; only the currently installed active keys receive a lightweight background refresh, while the explicit full-pool check remains manual.*
 

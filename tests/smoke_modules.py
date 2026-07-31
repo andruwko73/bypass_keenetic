@@ -2866,6 +2866,7 @@ def test_service_route_apply_can_add_check():
             'service_label': service_key,
             'target_label': proto,
             'entries': 5,
+            'changed': False,
         },
         'add_custom_check': lambda **kwargs: calls.append(('add', kwargs)) or ([], 'Проверка добавлена.'),
         'probe_all_pool_keys_async': lambda **kwargs: (_ for _ in ()).throw(AssertionError('full pool probe must stay manual')),
@@ -2886,6 +2887,7 @@ def test_service_route_apply_can_add_check():
     assert ('add', {'preset_id': 'gemini'}) in calls
     assert ('refresh', current_keys, {'active_only': True}) in calls
     assert 'Проверка добавлена' in result['result']
+    assert 'уже полностью назначен' in result['result']
     assert 'Активные ключи перепроверяются' in result['result']
     assert 'проверка пула' not in result['result'].lower()
     assert result['extra']['route_tools_html'] == '<div>routes</div>'
@@ -14018,11 +14020,23 @@ def test_service_routes_apply_and_profile():
             before_update=lambda: callbacks.append('route'),
         )
         assert result['target_label'] == 'Vless 1'
+        assert result['changed'] is True
         assert callbacks == ['route']
         vless_entries = (Path(tmp) / 'vless.txt').read_text(encoding='utf-8').splitlines()
         vless2_entries = (Path(tmp) / 'vless-2.txt').read_text(encoding='utf-8').splitlines()
         assert set(discord_entries) <= set(vless_entries)
         assert not (set(discord_entries) & set(vless2_entries))
+        repeated = service_routes.apply_service_route(
+            'discord',
+            'vless',
+            unblock_dir=tmp,
+            update_script='',
+            before_update=lambda: callbacks.append('repeated-route'),
+        )
+        assert repeated['changed'] is False
+        assert repeated['added'] == 0
+        assert repeated['removed'] == 0
+        assert callbacks == ['route']
         profile = service_routes.apply_service_profile(
             'youtube_vless2_rest_vless',
             service_items=[{'id': 'youtube'}, {'id': 'telegram'}, {'id': 'chrome_remote_desktop'}],
