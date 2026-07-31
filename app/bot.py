@@ -9460,28 +9460,67 @@ def _save_persisted_pool_summary(summary):
         _write_runtime_log(f'Failed to persist pool summary: {type(exc).__name__}')
 
 
+def _pool_summary_with_current_labels(summary, current_summary):
+    if not isinstance(summary, dict) or not isinstance(current_summary, dict):
+        return None
+    saved_services = summary.get('services')
+    current_services = current_summary.get('services')
+    if not isinstance(saved_services, list) or not isinstance(current_services, list):
+        return None
+    if len(saved_services) != len(current_services):
+        return None
+    services = []
+    for saved_service, current_service in zip(saved_services, current_services):
+        if not isinstance(saved_service, dict) or not isinstance(current_service, dict):
+            return None
+        service = dict(current_service)
+        service['count'] = _pool_summary_count(saved_service, 'count')
+        services.append(service)
+    migrated = dict(summary)
+    for field in ('active_key_count', 'protocol_count', 'active_text'):
+        if field in current_summary:
+            migrated[field] = current_summary[field]
+    migrated['services'] = services
+    note_parts = [
+        f'В пулах: {_pool_summary_count(migrated, "pool_total_count")}',
+        f'Проверено: {_pool_summary_count(migrated, "checked_pool_count")}',
+    ]
+    if services:
+        note_parts.append('; '.join(f'{service.get("label", "")}: {service["count"]}' for service in services))
+    migrated['note'] = '; '.join(note_parts)
+    return migrated
+
+
 def _pool_summary_with_persisted_fallback(summary):
     checked_count = _pool_summary_count(summary, 'checked_pool_count')
     total_count = _pool_summary_count(summary, 'pool_total_count')
     if checked_count > 0 and checked_count == total_count:
         _save_persisted_pool_summary(summary)
         return summary
-    persisted = _load_persisted_pool_summary()
+    saved_persisted = _load_persisted_pool_summary()
+    persisted = _pool_summary_with_current_labels(saved_persisted, summary)
     if (
+        persisted is not None and
         _pool_summary_count(persisted, 'checked_pool_count') > checked_count and
         _pool_summary_count(persisted, 'pool_total_count') == total_count
     ):
+        if persisted != saved_persisted:
+            _save_persisted_pool_summary(persisted)
         return persisted
     return summary
 
 
 def _light_pool_summary_with_cache_fallback(current_keys, key_pools, custom_checks=None):
     empty_summary = _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
-    persisted = _load_persisted_pool_summary()
+    saved_persisted = _load_persisted_pool_summary()
+    persisted = _pool_summary_with_current_labels(saved_persisted, empty_summary)
     if (
+        persisted is not None and
         _pool_summary_count(persisted, 'checked_pool_count') > 0 and
         _pool_summary_count(persisted, 'pool_total_count') == _pool_summary_count(empty_summary, 'pool_total_count')
     ):
+        if persisted != saved_persisted:
+            _save_persisted_pool_summary(persisted)
         return persisted
     light_cache = _load_light_key_probe_cache()
     if not light_cache:

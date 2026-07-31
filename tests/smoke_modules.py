@@ -5235,6 +5235,67 @@ def test_light_pool_summary_rebuilds_when_pool_size_changes():
         temp_dir.cleanup()
 
 
+def test_light_pool_summary_migrates_saved_service_labels_without_losing_counts():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        f"bot._KEY_PROBE_CACHE_PATH = {str(temp_path / 'key_probe_cache.json')!r}\n"
+        f"bot._POOL_SUMMARY_LAST_PATH = {str(temp_path / 'pool_summary_last.json')!r}\n"
+        "key = 'vless://one'\n"
+        "pools = {proto: [] for proto in bot.POOL_PROTOCOL_ORDER}\n"
+        "pools['vless'] = [key]\n"
+        "checks = [{'id': 'meta', 'label': 'Instagram / Facebook'}]\n"
+        "checkpoint = {'pool_total_count': 1, 'checked_pool_count': 1, 'active_key_count': 1, 'protocol_count': 5, 'active_text': '1 / 5 активных ключей', 'services': [{'label': 'Telegram', 'count': 1}, {'label': 'YouTube', 'count': 1}, {'label': 'Instagram / Facebo...', 'count': 1}]}\n"
+        "with open(bot._POOL_SUMMARY_LAST_PATH, 'w', encoding='utf-8') as handle: json.dump({'summary': checkpoint}, handle, ensure_ascii=False)\n"
+        "writes = []\n"
+        "original_write = bot._write_json_file\n"
+        "bot._write_json_file = lambda path, payload: (writes.append(path), original_write(path, payload))[1]\n"
+        "summary = bot._light_pool_summary_with_cache_fallback({'vless': key}, pools, checks)\n"
+        "persisted = json.load(open(bot._POOL_SUMMARY_LAST_PATH, encoding='utf-8'))['summary']\n"
+        "assert summary['services'][-1] == {'label': 'Instagram / Facebook', 'count': 1}\n"
+        "assert 'Instagram / Facebook: 1' in summary['note'] and 'Facebo...' not in summary['note']\n"
+        "assert persisted['services'][-1] == {'label': 'Instagram / Facebook', 'count': 1}\n"
+        "assert persisted['checked_pool_count'] == persisted['pool_total_count'] == 1\n"
+        "assert len(writes) == 1\n"
+        "repeat = bot._light_pool_summary_with_cache_fallback({'vless': key}, pools, checks)\n"
+        "assert repeat == summary and len(writes) == 1\n"
+        "incompatible = dict(checkpoint)\n"
+        "incompatible['services'] = incompatible['services'][:2]\n"
+        "with open(bot._POOL_SUMMARY_LAST_PATH, 'w', encoding='utf-8') as handle: json.dump({'summary': incompatible}, handle, ensure_ascii=False)\n"
+        "fresh = bot._light_pool_summary_with_cache_fallback({'vless': key}, pools, checks)\n"
+        "assert fresh['checked_pool_count'] == 0 and len(fresh['services']) == 3\n"
+        "assert fresh['services'][-1] == {'label': 'Instagram / Facebook', 'count': 0}\n"
+        "assert len(writes) == 1\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
 def test_light_probe_cache_schema_contract_matches_canonical_cache():
     temp_dir = tempfile.TemporaryDirectory()
     temp_path = Path(temp_dir.name)
@@ -15234,6 +15295,7 @@ def main():
     test_repo_update_activity_probe_defers_inactivity_timeout()
     test_repo_update_posix_timeout_runs_exit_recovery()
     test_key_pool_web()
+    test_light_pool_summary_migrates_saved_service_labels_without_losing_counts()
     test_web_pool_snapshot_worker_payload_is_safe_and_complete()
     test_youtube_healthcheck_detects_first_load_instability()
     test_youtube_healthcheck_requires_watch_page()
