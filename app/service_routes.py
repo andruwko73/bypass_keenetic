@@ -543,24 +543,6 @@ def _runtime_command_ok(args, *, run_command=subprocess.run, timeout=3):
         return False
 
 
-def _read_runtime_ipset_members(set_name, *, run_command=subprocess.run):
-    if not set_name:
-        return set()
-    text = _runtime_command_stdout(['ipset', 'list', set_name], run_command=run_command)
-    members = set()
-    in_members = False
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line == 'Members:':
-            in_members = True
-            continue
-        if in_members:
-            members.add(line.split()[0])
-    return members
-
-
 def _runtime_ip_network(value):
     value = str(value or '').strip().split()[0] if str(value or '').strip() else ''
     try:

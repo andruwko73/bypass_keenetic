@@ -45,7 +45,6 @@ from proxy_key_store import (
     load_current_keys as _store_load_current_keys,
     load_shadowsocks_key as _store_load_shadowsocks_key,
     load_trojan_key as _store_load_trojan_key,
-    proxy_config_snapshot_paths as _store_proxy_config_snapshot_paths,
     read_v2ray_key as _store_read_v2ray_key,
     remove_file_if_exists as _store_remove_file_if_exists,
     save_v2ray_key as _store_save_v2ray_key,
@@ -186,6 +185,8 @@ from web_status_builder import (
     confirmed_telegram_status as _status_confirmed_telegram_status,
     empty_protocol_status as _status_empty_protocol_status,
     merge_light_status_with_cached_services as _status_merge_light_status_with_cached_services,
+    pool_status_summary as _status_pool_status_summary,
+    youtube_probe_state as _youtube_probe_state,
 )
 
 import shutil
@@ -573,19 +574,6 @@ def _load_light_key_probe_cache():
         normalized['schema'] = _KEY_PROBE_CACHE_SCHEMA_VERSION
         result[key_id] = normalized
     return result
-
-
-def _youtube_probe_state(entry):
-    if not isinstance(entry, dict):
-        return 'unknown'
-    stability = str(entry.get('yt_stability') or '').strip().lower()
-    if entry.get('yt_ok') is True:
-        return 'ok'
-    if stability == 'unstable':
-        return 'warn'
-    if entry.get('yt_ok') is False:
-        return 'fail'
-    return 'unknown'
 
 
 def _repo_update():
@@ -2170,10 +2158,6 @@ def _attempt_youtube_failover():
     finally:
         _memory_cleanup('youtube failover finished', force=True, clear_status=True)
         state['in_progress'] = False
-
-
-def _attempt_youtube_vless2_failover():
-    return _attempt_youtube_route_failover()
 
 
 def _attempt_youtube_route_failover():
@@ -9507,78 +9491,14 @@ def _light_pool_summary_with_cache_fallback(current_keys, key_pools, custom_chec
 
 
 def _light_pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks=None):
-    current_keys = current_keys or {}
-    key_pools = key_pools or {}
-    key_probe_cache = key_probe_cache or {}
-    services = [
-        {'label': 'Telegram', 'field': 'tg_ok', 'id': None, 'count': 0},
-        {'label': 'YouTube', 'field': 'yt_ok', 'id': None, 'count': 0},
-    ]
-    for check in custom_checks or []:
-        if not isinstance(check, dict):
-            continue
-        check_id = str(check.get('id') or '').strip()
-        if not check_id:
-            continue
-        label = str(check.get('label') or check_id).strip() or check_id
-        if len(label) > 18:
-            label = label[:18] + '...'
-        services.append({'label': label, 'field': None, 'id': check_id, 'count': 0})
-
-    total_count = 0
-    checked_count = 0
-    all_services_count = 0
-    any_service_count = 0
-    for proto in POOL_PROTOCOL_ORDER:
-        for pool_key in key_pools.get(proto, []) or []:
-            total_count += 1
-            probe = key_probe_cache.get(_hash_key(pool_key), {})
-            if not isinstance(probe, dict):
-                probe = {}
-            custom = probe.get('custom', {})
-            if not isinstance(custom, dict):
-                custom = {}
-            results = []
-            for service in services:
-                if service['field'] == 'yt_ok':
-                    state = _youtube_probe_state(probe)
-                    if state == 'unknown':
-                        continue
-                    ok = state in ('ok', 'warn')
-                elif service['field']:
-                    if service['field'] not in probe or not isinstance(probe.get(service['field']), bool):
-                        continue
-                    ok = probe.get(service['field'])
-                else:
-                    if service['id'] not in custom or not isinstance(custom.get(service['id']), bool):
-                        continue
-                    ok = custom.get(service['id'])
-                results.append(ok)
-                if ok:
-                    service['count'] += 1
-            if results:
-                checked_count += 1
-                if any(results):
-                    any_service_count += 1
-                if all(results):
-                    all_services_count += 1
-
-    active_key_count = sum(1 for proto in POOL_PROTOCOL_ORDER if (current_keys.get(proto) or '').strip())
-    service_text = '; '.join(f"{service['label']}: {service['count']}" for service in services)
-    note_parts = [f'В пулах: {total_count}', f'Проверено: {checked_count}']
-    if service_text:
-        note_parts.append(service_text)
-    return {
-        'active_key_count': active_key_count,
-        'protocol_count': len(POOL_PROTOCOL_ORDER),
-        'active_text': f'{active_key_count} / {len(POOL_PROTOCOL_ORDER)} активных ключей',
-        'note': '; '.join(note_parts),
-        'pool_total_count': total_count,
-        'checked_pool_count': checked_count,
-        'all_services_count': all_services_count,
-        'any_service_count': any_service_count,
-        'services': [{'label': service['label'], 'count': service['count']} for service in services],
-    }
+    return _status_pool_status_summary(
+        current_keys,
+        key_pools,
+        key_probe_cache,
+        custom_checks,
+        _hash_key,
+        protocol_order=POOL_PROTOCOL_ORDER,
+    )
 
 
 def _pool_summary_can_keep_previous(previous_signature, current_signature):
@@ -10288,10 +10208,6 @@ def _clear_pool(proto):
     else:
         _invalidate_pool_data_cache()
     return len(removed_keys)
-
-
-def _proxy_config_snapshot_paths():
-    return _store_proxy_config_snapshot_paths(CORE_PROXY_CONFIG_PATH, VMESS_KEY_PATH, VLESS_KEY_PATH, VLESS2_KEY_PATH)
 
 
 def _restart_proxy_services_for_protocols(protocols):
@@ -12405,7 +12321,7 @@ def _web_render_status_with_polling_guard(status, protocol_statuses, app_runtime
     guarded_protocols = dict(protocol_statuses or {})
     active_status = guarded_protocols.get(proxy_mode)
     if bot_polling:
-        guarded_status['api_status'] = 'Telegram-бот получает обновления через активный ключ.'
+        guarded_status['api_status'] = 'Telegram-бот работает через активный ключ.'
         confirmed_status = _active_status_with_polling_evidence(active_status)
         if confirmed_status is not active_status:
             guarded_protocols[proxy_mode] = confirmed_status

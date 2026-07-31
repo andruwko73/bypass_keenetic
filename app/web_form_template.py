@@ -66,13 +66,6 @@ def _safe_percent(value):
         return 0
 
 
-def _attention_text_html(text):
-    safe_text = html.escape(text)
-    if str(text or '').startswith('Telegram API'):
-        return f'<span class="attention-telegram-icon" aria-hidden="true"></span>{safe_text}'
-    return safe_text
-
-
 def _display_note_text(text):
     return str(text or '').strip().rstrip('.')
 

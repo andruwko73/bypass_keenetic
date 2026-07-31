@@ -360,7 +360,6 @@
         .topbar-status-info{border-color:rgba(91,124,150,.42);background:rgba(17,25,35,.76);}
         .topbar-status-warn{border-color:rgba(211,165,87,.42);background:rgba(78,52,25,.32);}
         .topbar-status-danger{border-color:rgba(212,107,95,.46);background:rgba(84,35,39,.34);}
-        .attention-telegram-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;margin-right:6px;border-radius:6px;background-color:rgba(48,191,181,.14);background-image:url("/static/telegram.svg");background-repeat:no-repeat;background-position:center;background-size:13px 13px;vertical-align:-4px;flex:none;}
         .workspace-layout{grid-template-columns:138px minmax(0,1fr);gap:12px;}
         .side-nav{top:86px;padding:9px;gap:7px;}
         .nav-item{height:var(--control-height);min-height:var(--control-height);padding:0 10px;color:#c7d2df;}
@@ -707,7 +706,6 @@
             .app-caption strong{font-size:14px;line-height:1.16;}
             .app-branch{font-size:10px;line-height:1.18;}
             .api-pill{font-size:11px;line-height:1.18;padding:6px 8px;}
-            .attention-telegram-icon{width:16px;height:16px;background-size:12px 12px;}
             .mode-toggle,.theme-toggle{gap:5px;padding-left:7px;padding-right:7px;font-size:11px;}
             .version-badge{padding:2px 6px;font-size:9px;}
             .workspace-layout{grid-template-columns:126px minmax(0,1fr);gap:10px;}
@@ -1204,7 +1202,6 @@
         [data-theme="light"] .topbar-status-info{background:rgba(225,230,236,.9);border-color:var(--border);}
         [data-theme="light"] .topbar-status-warn{background:rgba(220,226,233,.9);border-color:rgba(115,128,145,.34);}
         [data-theme="light"] .topbar-status-danger{background:rgba(241,214,208,.72);border-color:rgba(168,68,47,.3);}
-        [data-theme="light"] .attention-telegram-icon,
         [data-theme="light"] .card-icon{background-color:rgba(31,122,106,.12);border-color:rgba(31,122,106,.24);color:#1f7a6a;}
         [data-theme="light"] .hero-popover{background:linear-gradient(180deg,rgba(229,234,240,.98),rgba(216,223,232,.96));border-color:var(--border);}
         [data-theme="light"] .mode-choice{background:rgba(31,122,106,.08);border-color:rgba(31,122,106,.28);color:#1f6258;}
@@ -1520,8 +1517,7 @@
         [data-theme="glass"] .field-label,
         [data-theme="glass"] .app-branch{color:#b6c9d9;}
         [data-theme="glass"] .eyebrow{color:#e6c47e;}
-        [data-theme="glass"] .card-icon,
-        [data-theme="glass"] .attention-telegram-icon{
+        [data-theme="glass"] .card-icon{
             background-color:rgba(156,238,231,.12);
             border-color:rgba(167,238,232,.24);
             box-shadow:inset 0 1px 0 rgba(255,255,255,.11);

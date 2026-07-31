@@ -691,6 +691,14 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: advanced header mode text changed: ${branchText}`);
     }
     await assertVisibleBox(page, '#web-api-pill.topbar-status', `${name} top header status`);
+    const topbarStatus = page.locator('#web-api-pill.topbar-status');
+    const topbarText = (await topbarStatus.innerText()).trim();
+    if (!topbarText.includes('Telegram-бот работает') || !topbarText.includes('Память роутера в норме')) {
+      throw new Error(`${name}: confirmed polling must render the normal working banner, got ${topbarText}`);
+    }
+    if (!(await topbarStatus.getAttribute('class') || '').includes('topbar-status-ok')) {
+      throw new Error(`${name}: confirmed polling banner must use the ok state`);
+    }
   }
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);

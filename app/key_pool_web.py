@@ -2,7 +2,10 @@ import html
 import time
 from urllib.parse import urlparse
 
-from probe_cache import youtube_probe_state
+from web_status_builder import (
+    pool_status_summary as build_pool_status_summary,
+    youtube_probe_state,
+)
 from web_form_blocks import render_event_history_html
 
 
@@ -17,12 +20,6 @@ POOL_PROTOCOL_LABELS = {
 _ACTIVE_KEYS_TEXT = '\u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043a\u043b\u044e\u0447\u0435\u0439'
 _POOL_TOTAL_TEXT = '\u0412 \u043f\u0443\u043b\u0430\u0445'
 _CHECKED_TEXT = '\u041f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043e'
-CORE_SERVICE_ROUTE_KEYS = {
-    'tg_ok': 'telegram',
-    'yt_ok': 'youtube',
-}
-
-
 def pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
 
@@ -56,46 +53,8 @@ def _service_route_display_label(state):
     return str(state.get('label') or 'не добавлен')
 
 
-def _compact_event_value(value):
-    if isinstance(value, (list, tuple, set)):
-        return ', '.join(str(item) for item in value)
-    if isinstance(value, dict):
-        return ', '.join(f'{key}={_compact_event_value(item)}' for key, item in value.items())
-    return '' if value is None else str(value)
-
-
-def _compact_event_details(details):
-    if not isinstance(details, dict) or not details:
-        return ''
-    parts = []
-    for key, value in details.items():
-        if value in (None, '', [], {}, ()):
-            continue
-        key_text = str(key or '').strip()
-        value_text = _compact_event_value(value).replace('\r', ' ').replace('\n', ' ').strip()
-        if key_text and value_text:
-            parts.append(f'{key_text}={value_text}')
-    return ' · '.join(parts)
-
-
 def web_event_history_html(events):
     return render_event_history_html(events)
-
-
-def _service_counter(custom_checks):
-    services = [
-        {'label': 'Telegram', 'field': 'tg_ok', 'id': None, 'count': 0},
-        {'label': 'YouTube', 'field': 'yt_ok', 'id': None, 'count': 0},
-    ]
-    for check in custom_checks or []:
-        check_id = str(check.get('id') or '').strip()
-        if not check_id:
-            continue
-        label = str(check.get('label') or check_id).strip() or check_id
-        if len(label) > 18:
-            label = label[:18] + '...'
-        services.append({'label': label, 'field': None, 'id': check_id, 'count': 0})
-    return services
 
 
 def service_applies_to_protocol(route_states, service_id, protocol):
@@ -125,84 +84,18 @@ def core_services_for_protocol(route_states, protocol):
     ]
 
 
-def core_probe_state(probe, key, route_states=None, protocol=''):
-    service_id = CORE_SERVICE_ROUTE_KEYS.get(key)
-    if service_id and not service_applies_to_protocol(route_states, service_id, protocol):
-        return 'na'
-    return web_probe_state(probe, key)
-
-
 def pool_status_summary(current_keys, key_pools, key_probe_cache, custom_checks, hash_key, route_states=None):
-    current_keys = current_keys or {}
-    key_pools = key_pools or {}
-    key_probe_cache = key_probe_cache or {}
-    services = _service_counter(custom_checks)
-
-    total_count = 0
-    checked_count = 0
-    all_services_count = 0
-    any_service_count = 0
-    for proto in POOL_PROTOCOL_ORDER:
-        for pool_key in key_pools.get(proto, []) or []:
-            total_count += 1
-            probe = key_probe_cache.get(hash_key(pool_key), {})
-            if not isinstance(probe, dict):
-                probe = {}
-            custom = probe.get('custom', {})
-            if not isinstance(custom, dict):
-                custom = {}
-            results = []
-            for service in services:
-                if service['field']:
-                    if service['field'] not in probe:
-                        continue
-                    raw_value = probe.get(service['field'])
-                    if service['field'] == 'yt_ok':
-                        state = youtube_probe_state(probe)
-                        if state == 'unknown':
-                            continue
-                        ok = state in ('ok', 'warn')
-                        results.append(ok)
-                        if ok:
-                            service['count'] += 1
-                        continue
-                else:
-                    if service['id'] not in custom:
-                        continue
-                    raw_value = custom.get(service['id'])
-                if not isinstance(raw_value, bool):
-                    continue
-                ok = raw_value
-                results.append(ok)
-                if ok:
-                    service['count'] += 1
-            if results and any(results):
-                any_service_count += 1
-            if results:
-                checked_count += 1
-            if results and all(results):
-                all_services_count += 1
-
-    active_key_count = sum(1 for proto in POOL_PROTOCOL_ORDER if (current_keys.get(proto) or '').strip())
-    service_text = '; '.join(f"{service['label']}: {service['count']}" for service in services)
-    note_parts = [
-        f'{_POOL_TOTAL_TEXT}: {total_count}',
-        f'{_CHECKED_TEXT}: {checked_count}',
-    ]
-    if service_text:
-        note_parts.append(service_text)
-    note = '; '.join(note_parts)
-    return {
-        'active_key_count': active_key_count,
-        'protocol_count': len(POOL_PROTOCOL_ORDER),
-        'active_text': f'{active_key_count} / {len(POOL_PROTOCOL_ORDER)} {_ACTIVE_KEYS_TEXT}',
-        'note': note,
-        'pool_total_count': total_count,
-        'checked_pool_count': checked_count,
-        'all_services_count': all_services_count,
-        'any_service_count': any_service_count,
-        'services': [{'label': service['label'], 'count': service['count']} for service in services],
-    }
+    return build_pool_status_summary(
+        current_keys,
+        key_pools,
+        key_probe_cache,
+        custom_checks,
+        hash_key,
+        protocol_order=POOL_PROTOCOL_ORDER,
+        active_keys_text=_ACTIVE_KEYS_TEXT,
+        pool_total_text=_POOL_TOTAL_TEXT,
+        checked_text=_CHECKED_TEXT,
+    )
 
 
 def web_custom_probe_states(probe, custom_checks):

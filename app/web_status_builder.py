@@ -48,6 +48,96 @@ def youtube_probe_state(entry):
     return 'unknown'
 
 
+def pool_status_summary(
+    current_keys,
+    key_pools,
+    key_probe_cache,
+    custom_checks,
+    hash_key,
+    *,
+    protocol_order=('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks'),
+    active_keys_text='активных ключей',
+    pool_total_text='В пулах',
+    checked_text='Проверено',
+):
+    """Build one consistent pool summary for light and full web snapshots."""
+    current_keys = current_keys or {}
+    key_pools = key_pools or {}
+    key_probe_cache = key_probe_cache or {}
+    protocol_order = tuple(protocol_order or ())
+    services = [
+        {'label': 'Telegram', 'field': 'tg_ok', 'id': None, 'count': 0},
+        {'label': 'YouTube', 'field': 'yt_ok', 'id': None, 'count': 0},
+    ]
+    for check in custom_checks or ():
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get('id') or '').strip()
+        if not check_id:
+            continue
+        label = str(check.get('label') or check_id).strip() or check_id
+        if len(label) > 18:
+            label = label[:18] + '...'
+        services.append({'label': label, 'field': None, 'id': check_id, 'count': 0})
+
+    total_count = 0
+    checked_count = 0
+    all_services_count = 0
+    any_service_count = 0
+    for proto in protocol_order:
+        for pool_key in key_pools.get(proto, ()) or ():
+            total_count += 1
+            probe = key_probe_cache.get(hash_key(pool_key), {})
+            if not isinstance(probe, dict):
+                probe = {}
+            custom = probe.get('custom', {})
+            if not isinstance(custom, dict):
+                custom = {}
+            results = []
+            for service in services:
+                field = service['field']
+                if field == 'yt_ok':
+                    state = youtube_probe_state(probe)
+                    if state == 'unknown':
+                        continue
+                    ok = state in ('ok', 'warn')
+                elif field:
+                    if field not in probe or not isinstance(probe.get(field), bool):
+                        continue
+                    ok = probe.get(field)
+                else:
+                    service_id = service['id']
+                    if service_id not in custom or not isinstance(custom.get(service_id), bool):
+                        continue
+                    ok = custom.get(service_id)
+                results.append(ok)
+                if ok:
+                    service['count'] += 1
+            if results:
+                checked_count += 1
+                if any(results):
+                    any_service_count += 1
+                if all(results):
+                    all_services_count += 1
+
+    active_key_count = sum(1 for proto in protocol_order if (current_keys.get(proto) or '').strip())
+    service_text = '; '.join(f"{service['label']}: {service['count']}" for service in services)
+    note_parts = [f'{pool_total_text}: {total_count}', f'{checked_text}: {checked_count}']
+    if service_text:
+        note_parts.append(service_text)
+    return {
+        'active_key_count': active_key_count,
+        'protocol_count': len(protocol_order),
+        'active_text': f'{active_key_count} / {len(protocol_order)} {active_keys_text}',
+        'note': '; '.join(note_parts),
+        'pool_total_count': total_count,
+        'checked_pool_count': checked_count,
+        'all_services_count': all_services_count,
+        'any_service_count': any_service_count,
+        'services': [{'label': service['label'], 'count': service['count']} for service in services],
+    }
+
+
 def service_status_parts(
     api_ok,
     yt_ok,
@@ -286,7 +376,7 @@ def confirmed_telegram_status(
     custom_checks,
     *,
     required_services=None,
-    confirmation_message='Telegram-бот получает обновления через активный ключ.',
+    confirmation_message='Telegram-бот работает через активный ключ.',
 ):
     """Overlay stronger live polling evidence onto a cached protocol status."""
     current = dict(status or {})

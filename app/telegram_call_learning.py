@@ -136,13 +136,6 @@ def address_in_networks(value, networks=TELEGRAM_NETWORKS):
     return any(address in network for network in networks)
 
 
-def _first_value(fields, name):
-    for field_name, value in fields:
-        if field_name == name:
-            return value
-    return ''
-
-
 def _conntrack_tuples(fields):
     tuples = []
     field_count = len(fields or [])

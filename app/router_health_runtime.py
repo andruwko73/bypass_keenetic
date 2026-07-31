@@ -631,13 +631,6 @@ def dns_health_note(dns_health):
     return '; '.join(part.rstrip('.') for part in details if part)
 
 
-def _current_load_text(load_text):
-    value = str(load_text or '').strip()
-    if not value:
-        return ''
-    return value.split('/', 1)[0].strip()
-
-
 def _normalize_cpu_percent(cpu_percent):
     if cpu_percent is None:
         return None

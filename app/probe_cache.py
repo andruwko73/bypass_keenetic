@@ -4,6 +4,8 @@ import os
 import threading
 import time
 
+from web_status_builder import youtube_probe_state
+
 
 KEY_PROBE_CACHE_PATH = '/opt/etc/bot/key_probe_cache.json'
 KEY_PROBE_CACHE_TTL = 3600
@@ -179,19 +181,6 @@ def youtube_quality_score(
     elif error_rate > 0:
         score = max(0, score - min(10, int(round(error_rate * 40))))
     return {'yt_score': score, 'yt_quality': quality, 'yt_stream_tier': stream_tier}
-
-
-def youtube_probe_state(entry):
-    if not isinstance(entry, dict):
-        return 'unknown'
-    stability = str(entry.get('yt_stability') or '').strip().lower()
-    if entry.get('yt_ok') is True:
-        return 'ok'
-    if stability == 'unstable':
-        return 'warn'
-    if entry.get('yt_ok') is False:
-        return 'fail'
-    return 'unknown'
 
 
 def probe_verification_kind(entry):

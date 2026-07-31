@@ -103,10 +103,6 @@ def _ip_network(entry):
         return None
 
 
-def _owners(entries_by_route, entry):
-    return [route for route, entries in entries_by_route.items() if entry in entries]
-
-
 def _service_match_index(service_sources=None):
     global _SERVICE_MATCH_INDEX_CACHE
     if service_sources is None and _SERVICE_MATCH_INDEX_CACHE is not None:
@@ -160,10 +156,6 @@ def _service_matches_for_entry(entry, service_index):
         {'key': service_key, 'label': matches[service_key]}
         for service_key in sorted(matches, key=lambda key: (matches[key], key))
     ]
-
-
-def _service_labels_for_entry(entry, service_index):
-    return [match['label'] for match in _service_matches_for_entry(entry, service_index)]
 
 
 def _annotate_issue_services(issue, service_index, *, max_labels=6, match_cache=None):

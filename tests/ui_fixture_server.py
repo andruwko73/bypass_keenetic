@@ -195,7 +195,7 @@ def _service_icon_html(icon, alt, opacity=1.0, size=18):
 
 def _status():
     return {
-        "api_status": "ok",
+        "api_status": "Telegram-бот работает через активный ключ.",
         "proxy_mode": "vless",
         "socks_details": "SOCKS fixture is reachable.",
         "fallback_reason": "",
@@ -567,6 +567,7 @@ def _page_html(mode="advanced"):
         enable_key_pool=enable_key_pool,
         enable_telegram=enable_telegram,
         bot_ready=enable_telegram,
+        bot_polling=enable_telegram,
     )
 
 
@@ -635,6 +636,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
                     "protocols": _live_protocol_statuses() if lite else _protocol_statuses(),
                     "router_health": _router_health(),
                     "bot_ready": True,
+                    "bot_polling": True,
                     "pool_summary": _pool_summary(),
                     "pool_probe_running": False,
                     "pool_probe_progress": {},

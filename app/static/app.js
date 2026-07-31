@@ -80,13 +80,6 @@
             }
         }
 
-        function toggleTheme() {
-            const currentTheme = normalizeTheme(document.documentElement.getAttribute('data-theme'));
-            const order = ['dark', 'light', 'glass'];
-            const nextTheme = order[(order.indexOf(currentTheme) + 1) % order.length];
-            setTheme(nextTheme);
-        }
-
         function toggleThemePicker() {
             const picker = document.getElementById('theme-picker');
             if (!picker) {
@@ -1721,16 +1714,6 @@
             return html;
         }
 
-        function poolPanelCoreServices(proto) {
-            const panel = document.querySelector('[data-protocol-panel="' + proto + '"]');
-            if (panel && panel.dataset.coreServicesLoaded === '1') {
-                return String(panel.dataset.coreServices || '').split(',').map(function(item) {
-                    return item.trim();
-                }).filter(Boolean);
-            }
-            return null;
-        }
-
         function updatePoolSortOptions(proto) {
             const menu = document.querySelector('[data-pool-sort-menu="' + proto + '"]');
             const input = document.querySelector('[data-pool-sort="' + proto + '"]');
@@ -1751,15 +1734,6 @@
                     }
                 }
             }
-        }
-
-        function customCheckById(id) {
-            for (let i = 0; i < customChecks.length; i += 1) {
-                if (customChecks[i].id === id) {
-                    return customChecks[i];
-                }
-            }
-            return null;
         }
 
         function customBadge(state, check) {

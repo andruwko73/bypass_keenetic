@@ -4504,7 +4504,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_memory_cleanup('pool probe process finished', force=True, clear_status=False, log=False)" in process_monitor_block
     assert 'def _forget_unreferenced_key_probes' in source
     delete_pool_block = source.split('def _delete_pool_key', 1)[1].split('def _clear_pool', 1)[0]
-    clear_pool_block = source.split('def _clear_pool', 1)[1].split('def _proxy_config_snapshot_paths', 1)[0]
+    clear_pool_block = source.split('def _clear_pool', 1)[1].split('def _restart_proxy_services_for_protocols', 1)[0]
     subscription_add_block = source.split('def _add_subscription_keys_to_pool', 1)[1].split('def _refresh_subscription_once', 1)[0]
     assert '_forget_unreferenced_key_probes([key_value], final_pools)' in delete_pool_block
     assert '_forget_key_probes([key_value])' not in delete_pool_block
@@ -4746,7 +4746,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "allow_youtube_confirm=True" in source
     assert "allow_youtube_confirm=False" in source
     assert "elif pool_locked:" in source
-    assert 'def _attempt_youtube_vless2_failover' in source
+    assert 'def _attempt_youtube_vless2_failover' not in source
     assert '_start_youtube_vless2_failover_thread()' not in source
     assert 'def _probe_applied_pool_key_services' in source
     assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
@@ -8217,6 +8217,7 @@ def test_telegram_bot_menu_button_smoke():
         })
         assert guarded_payload['protocols']['vless']['api_ok'] is True
         assert guarded_payload['protocols']['vless']['label'] == 'Работает'
+        assert guarded_payload['web']['api_status'] == 'Telegram-бот работает через активный ключ.'
         assert guarded_payload['bot_polling'] is True
         bot_module.bot_polling = False
 
@@ -12458,6 +12459,7 @@ def test_web_status_builder_helpers():
     assert polling_confirmed['tone'] == 'ok'
     assert polling_confirmed['label'] == 'Работает'
     assert polling_confirmed['custom'] == {'chat': 'ok'}
+    assert polling_confirmed['api_message'] == 'Telegram-бот работает через активный ключ.'
     assert 'Telegram: работает' in polling_confirmed['details']
     youtube_only_cached = {'tone': 'warn', 'label': 'Частично работает', 'api_ok': False}
     assert web_status_builder.confirmed_telegram_status(
@@ -12568,7 +12570,7 @@ def test_web_template_styles_helpers():
     assert '.topbar-status{justify-content:flex-start;gap:8px;text-align:left;overflow:hidden;white-space:normal;max-height:60px;}' in styles
     assert '.topbar-status-copy span{display:-webkit-box;min-width:0;color:#b9c6d3;font-size:11px;font-weight:700;line-height:1.22;max-height:calc(1.22em * 2);white-space:normal;overflow:hidden;text-overflow:ellipsis;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;word-break:normal;}' in styles
     assert '.topbar-status{white-space:normal;text-overflow:clip;}' in styles
-    assert '.attention-telegram-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;' in styles
+    assert '.attention-telegram-icon' not in styles
     assert '.attention-ok{grid-template-columns:minmax(0,1fr);}' in styles
     assert '.attention-ok .attention-dot{display:none;}' in styles
     assert '.attention-item > div > span{display:block;' in styles
@@ -13565,6 +13567,16 @@ def test_web_form_template_smoke():
     )
     assert warning_failure[0] == 'warn'
     assert warning_failure[1] == 'Telegram API требует внимания'
+    polling_ok = web_form_template._topbar_status_item(
+        {'api_status': 'Telegram-бот работает через активный ключ.'},
+        {'used_percent': 58},
+        '',
+        True,
+        enable_telegram=True,
+        bot_ready=True,
+        bot_polling=True,
+    )
+    assert polling_ok == ('ok', 'Telegram-бот работает', 'Память роутера в норме')
     running_page = web_form_template.render_web_form(
         APP_BRANCH_DESCRIPTION='test',
         APP_BRANCH_LABEL='codex/test',
