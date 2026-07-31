@@ -1397,6 +1397,36 @@ def _install_key_for_protocol(proto, key_value, verify=True):
         _write_runtime_log(f'Key apply: protocol={proto} verify={int(bool(verify))} duration_ms={duration_ms}')
 
 
+def _apply_manual_key_safely(proto, key, *, source='manual_install', verify=False):
+    if proto not in PROXY_KEY_INSTALLERS:
+        raise ValueError(f'Unsupported protocol: {proto}')
+    pool_enabled = _app_mode_pool_enabled()
+    acquired = False
+    should_resume_probe = False
+    if pool_enabled:
+        acquired = pool_apply_lock.acquire(blocking=False)
+        if not acquired:
+            raise RuntimeError('Уже выполняется применение ключа. Дождитесь результата и повторите попытку.')
+    try:
+        if pool_enabled:
+            should_resume_probe, _ = _pause_pool_probe_for_apply()
+        result = _install_key_for_protocol(proto, key, verify=verify)
+        if pool_enabled:
+            _set_active_key(proto, key)
+            _audit_key_switch(source, proto, key, 'manual install')
+            _schedule_youtube_key_apply_prefetch(proto)
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+    finally:
+        if acquired:
+            pool_apply_lock.release()
+        if should_resume_probe:
+            _resume_cancelled_pool_probe()
+    if pool_enabled:
+        _refresh_status_caches_async(_load_current_keys(), active_only=True)
+    return result
+
+
 def _auto_failover_event_details(extra=None):
     now = time.time()
     try:
@@ -2805,6 +2835,8 @@ pool_probe_process_state = {
 pool_probe_quality_sample_lock = threading.Lock()
 pool_probe_quality_sample_count = 0
 pool_probe_progress = _PoolProbeProgress()
+pool_probe_notification_lock = threading.Lock()
+pool_probe_completion_notification = {}
 process_started_at = time.time()
 memory_watchdog_lock = threading.Lock()
 memory_watchdog_restart_scheduled = False
@@ -6538,7 +6570,7 @@ def _apply_entries_to_unblock_list(list_name, entries, service_label, remove=Fal
         changed = len(current) - before
         action = 'добавлено'
     _write_unblock_list_entries(route_name, current)
-    _sync_udp_policy_config()
+    _sync_proxy_route_policy_config()
     subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
     label = _list_label(f'{route_name}.txt')
     return f'✅ {service_label}: {action} {changed} записей в {label}. Всего в списке: {len(current)}.'
@@ -6566,6 +6598,14 @@ def _unblock_route_for_key_type(key_type):
         'trojan': 'trojan',
     }
     return routes.get(key_type, key_type)
+
+
+def _key_type_for_unblock_route(list_name):
+    route_name = _normalize_unblock_route_name(list_name)
+    for key_type in POOL_PROTOCOL_ORDER:
+        if _unblock_route_for_key_type(key_type) == route_name:
+            return key_type
+    return ''
 
 
 def _custom_check_route_entries(custom_checks=None):
@@ -6722,7 +6762,7 @@ def _handle_unblock_list_state(message, level, bypass, set_menu_state, reply_mar
     bot.send_message(message.chat.id, "✅ Успешно удалено" if changed and level == 4 else
                      "✅ Успешно добавлено" if changed else "Не найдено в списке" if level == 4 else "Было добавлено ранее")
     set_menu_state(2)
-    _sync_udp_policy_config()
+    _sync_proxy_route_policy_config()
     subprocess.run(["/opt/bin/unblock_update.sh"], check=False)
     _send_unblock_list_menu(message, bypass)
     return True
@@ -6776,7 +6816,7 @@ def _append_entries_to_unblock_list(list_name, entries):
     before = len(existing)
     existing.update(entries)
     _write_unblock_list_entries(list_name, existing)
-    _sync_udp_policy_config()
+    _sync_proxy_route_policy_config()
     subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
     return len(existing) - before, len(existing)
 
@@ -6803,6 +6843,18 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
         return
 
     source = _service_catalog().SERVICE_LIST_SOURCES[service_key]
+    if _service_catalog().service_route_entries(service_key):
+        try:
+            result = _append_socialnet_list(route, service_key=service_key)
+        except Exception as exc:
+            bot.send_message(
+                message.chat.id,
+                f'⚠️ Не удалось применить список {source["label"]}: {exc}',
+                reply_markup=reply_markup,
+            )
+            return
+        bot.send_message(message.chat.id, result, reply_markup=reply_markup)
+        return
     requests = _requests_module()
     try:
         entries = _load_service_entries(service_key)
@@ -6826,7 +6878,7 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
 
 
 def _send_key_status_report(message, service_markup):
-    text_lines = ['<b>Статус доступа к Telegram по ключам (web):</b>']
+    text_lines = ['<b>Статус ключей:</b>']
     emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
     proto_labels = {
         'shadowsocks': 'Shadowsocks',
@@ -6842,6 +6894,16 @@ def _send_key_status_report(message, service_markup):
     except Exception as exc:
         statuses = {}
         text_lines.append(f'❌ Ошибка получения статуса: {html.escape(str(exc))}')
+    if pool_probe_lock.locked():
+        progress = _get_pool_probe_progress()
+        checked = max(0, int(progress.get('checked') or 0))
+        total = max(0, int(progress.get('total') or 0))
+        label = html.escape(_pool_probe_progress_label(progress))
+        text_lines.append(f'<b>⏳ {label}: {checked}/{total}</b>')
+        text_lines.append(
+            '<i>Показаны последние сохранённые результаты. '
+            'Пул проверяется временным Xray; установленные ключи не меняются.</i>'
+        )
     for proto in POOL_PROTOCOL_ORDER:
         st = statuses.get(proto, {}) if isinstance(statuses, dict) else {}
         mark = emoji.get(st.get('tone', 'empty'), '➖')
@@ -7270,8 +7332,12 @@ def _start_telegram_result_retry_worker():
 
 def _install_proxy_from_message(message, key_type, key_value, reply_markup):
     try:
-        PROXY_KEY_INSTALLERS[key_type](key_value)
-        result = _apply_installed_proxy(key_type, key_value)
+        result = _apply_manual_key_safely(
+            key_type,
+            key_value,
+            source='telegram_manual_install',
+            verify=False,
+        )
     except Exception as exc:
         result = f'Ошибка установки: {exc}'
 
@@ -7909,6 +7975,18 @@ def _web_service_routes_payload():
 
 
 def _append_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
+    resolved_key = _resolve_socialnet_service(service_key)
+    target_protocol = _key_type_for_unblock_route(list_name)
+    catalog_entries = (
+        _service_catalog().service_route_entries(resolved_key)
+        if resolved_key and resolved_key != SOCIALNET_ALL_KEY else []
+    )
+    if target_protocol and catalog_entries:
+        result = _apply_service_route(resolved_key, target_protocol)
+        return (
+            f'✅ {result.get("service_label")}: перенесено в {result.get("target_label")}. '
+            f'Адресов: {result.get("entries", 0)}.'
+        )
     return _apply_socialnet_list(list_name, service_key=service_key, remove=False)
 
 
@@ -9342,6 +9420,10 @@ def _pool_clear_confirm_markup():
     return _telegram_pool_ui().pool_clear_confirm_markup(types)
 def _pool_input_markup():
     return _telegram_pool_ui().pool_input_markup(types)
+
+
+def _pool_subscription_mode_markup():
+    return _telegram_pool_ui().pool_subscription_mode_markup(types)
 def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto=None, action='apply'):
     return _telegram_pool_ui().pool_key_button_label(
         index,
@@ -9629,6 +9711,15 @@ def _handle_pool_protocol_state(message, set_menu_state):
     if message.text == '🔙 В меню ключей':
         _return_to_key_menu_from_pool(message, set_menu_state)
         return True
+    pool_ui = _telegram_pool_ui()
+    if message.text == pool_ui.POOL_CHECK_ALL_TEXT:
+        _started, _queued, result = _pool_probe_all_start_result(message.chat.id)
+        bot.send_message(message.chat.id, result, reply_markup=_pool_protocol_markup())
+        return True
+    if message.text == pool_ui.POOL_STOP_PROBE_TEXT:
+        _cancelled, result = _cancel_pool_probe()
+        bot.send_message(message.chat.id, result, reply_markup=_pool_protocol_markup())
+        return True
     proto = _resolve_pool_protocol(message.text)
     if not proto:
         bot.send_message(message.chat.id, 'Выберите протокол кнопкой внизу', reply_markup=_pool_protocol_markup())
@@ -9653,6 +9744,20 @@ def _pool_probe_start_result(proto, *, mention_proto=True):
     if queued:
         return started, queued, 'Проверка пула уже выполняется. Дождитесь обновления статусов.'
     return started, queued, 'В пуле нет ключей для проверки.'
+
+
+def _pool_probe_all_start_result(chat_id):
+    started, queued = _probe_all_pool_keys_async(stale_only=False, scope='manual_all')
+    if started:
+        _register_pool_probe_completion_notification(chat_id, scope='manual_all')
+        return started, queued, (
+            f'⏳ Полная проверка всех ключей запущена. В очереди: {queued}.\n\n'
+            'Ключи проверяются временным Xray и не переключаются. '
+            'После завершения бот пришлёт итоговую сводку.'
+        )
+    if queued:
+        return started, queued, 'Проверка ключей уже выполняется. Дождитесь завершения текущего запуска.'
+    return started, queued, 'В пулах нет ключей для проверки.'
 
 
 def _handle_pool_action_button(message, proto, page, set_menu_state):
@@ -9736,7 +9841,11 @@ def _handle_pool_manage_state(message, bypass, set_menu_state):
         return True
     if message.text == '🔗 Загрузить subscription':
         set_menu_state(23)
-        _send_pool_input_prompt(message.chat.id, proto, 'Отправьте subscription URL для пула {proto_label}.')
+        bot.send_message(
+            message.chat.id,
+            f'Выберите режим subscription для пула {_pool_proto_label(proto)}.',
+            reply_markup=_pool_subscription_mode_markup(),
+        )
         return True
     if message.text == '✅ Применить ключ':
         bot.send_message(message.chat.id, 'Используйте нижние кнопки ✅ с номером нужного ключа.', reply_markup=_pool_action_markup(proto, page))
@@ -9760,6 +9869,10 @@ def _handle_pool_manage_state(message, bypass, set_menu_state):
         _started, _queued, prefix = _pool_probe_start_result(proto, mention_proto=True)
         _send_pool_page(message.chat.id, proto, page=page, prefix=prefix)
         return True
+    if message.text == _telegram_pool_ui().POOL_STOP_PROBE_TEXT:
+        _cancelled, result = _cancel_pool_probe()
+        _send_pool_page(message.chat.id, proto, page=page, prefix=result)
+        return True
     bot.send_message(message.chat.id, 'Выберите действие кнопкой внизу.', reply_markup=_pool_action_markup(proto, page))
     return True
 
@@ -9771,12 +9884,41 @@ def _handle_pool_add_state(message, bypass, set_menu_state):
     if message.text == '🔙 К пулу':
         _return_to_pool_page(message, set_menu_state, proto)
         return True
-    added = _add_keys_to_pool(proto, message.text)
-    _return_to_pool_page(message, set_menu_state, proto, prefix=f'Добавлено ключей в пул {_pool_proto_label(proto)}: {added}')
+    summary = _import_keys_to_pools(proto, message.text)
+    result = web_post_actions.format_key_import_result(summary)
+    _return_to_pool_page(message, set_menu_state, proto, prefix=result)
     return True
 
 
-def _handle_pool_subscription_state(message, bypass, set_menu_state):
+def _handle_pool_subscription_mode_state(message, bypass, set_menu_state):
+    proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
+    if not proto:
+        return True
+    if message.text == '🔙 К пулу':
+        _return_to_pool_page(message, set_menu_state, proto)
+        return True
+    pool_ui = _telegram_pool_ui()
+    if message.text == pool_ui.SUBSCRIPTION_ONCE_TEXT:
+        set_menu_state(27)
+        _send_pool_input_prompt(message.chat.id, proto, 'Отправьте subscription URL для одноразового импорта в пул {proto_label}.')
+        return True
+    if message.text == pool_ui.SUBSCRIPTION_HWID_TEXT:
+        set_menu_state(28)
+        _send_pool_input_prompt(
+            message.chat.id,
+            proto,
+            'Отправьте subscription URL для синхронизации пула {proto_label} с HWID роутера.',
+        )
+        return True
+    bot.send_message(
+        message.chat.id,
+        'Выберите одноразовый импорт или синхронизацию с HWID.',
+        reply_markup=_pool_subscription_mode_markup(),
+    )
+    return True
+
+
+def _handle_pool_subscription_state(message, bypass, set_menu_state, *, use_router_hwid=False):
     proto = _pool_state_proto_or_menu(message, bypass, set_menu_state)
     if not proto:
         return True
@@ -9784,14 +9926,15 @@ def _handle_pool_subscription_state(message, bypass, set_menu_state):
         _return_to_pool_page(message, set_menu_state, proto)
         return True
     try:
-        fetched, error = _fetch_keys_from_subscription(message.text.strip())
-        if error:
-            raise ValueError(error)
-        source_proto = 'vless' if proto == 'vless2' else proto
-        added = _add_keys_to_pool(proto, '\n'.join(fetched.get(source_proto, []) or []))
-        result = f'Загружено из subscription в пул {_pool_proto_label(proto)}: {added} новых ключей.'
+        summary = _import_pool_subscription(
+            proto,
+            message.text.strip(),
+            use_router_hwid=bool(use_router_hwid),
+        )
+        result = web_post_actions.format_subscription_import_result(proto, summary)
     except Exception as exc:
-        result = f'Ошибка загрузки subscription: {exc}'
+        _write_runtime_log(f'Telegram subscription import failed: {type(exc).__name__}')
+        result = 'Ошибка загрузки subscription. Проверьте адрес, доступность подписки и выбранный режим.'
     _return_to_pool_page(message, set_menu_state, proto, prefix=result)
     return True
 
@@ -9880,10 +10023,16 @@ def _handle_telegram_pool_state(message, level, bypass, set_menu_state):
         20: lambda: _handle_pool_protocol_state(message, set_menu_state),
         21: lambda: _handle_pool_manage_state(message, bypass, set_menu_state),
         22: lambda: _handle_pool_add_state(message, bypass, set_menu_state),
-        23: lambda: _handle_pool_subscription_state(message, bypass, set_menu_state),
+        23: lambda: _handle_pool_subscription_mode_state(message, bypass, set_menu_state),
         24: lambda: _handle_pool_apply_state(message, bypass, set_menu_state),
         25: lambda: _handle_pool_delete_state(message, bypass, set_menu_state),
         26: lambda: _handle_pool_clear_state(message, bypass, set_menu_state),
+        27: lambda: _handle_pool_subscription_state(
+            message, bypass, set_menu_state, use_router_hwid=False
+        ),
+        28: lambda: _handle_pool_subscription_state(
+            message, bypass, set_menu_state, use_router_hwid=True
+        ),
     }
     handler = handlers.get(level)
     return handler() if handler else False
@@ -10175,6 +10324,83 @@ def _pool_probe_progress_label(progress=None):
     if scope == 'protocol':
         return '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0433\u043e \u043f\u0443\u043b\u0430'
     return '\u0424\u043e\u043d\u043e\u0432\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u0443\u043b\u0430 \u043a\u043b\u044e\u0447\u0435\u0439'
+
+
+def _register_pool_probe_completion_notification(chat_id, scope='manual_all'):
+    progress = _get_pool_probe_progress()
+    payload = {
+        'chat_id': int(chat_id),
+        'scope': str(scope or ''),
+        'started_at': float(progress.get('started_at') or 0),
+    }
+    with pool_probe_notification_lock:
+        pool_probe_completion_notification.clear()
+        pool_probe_completion_notification.update(payload)
+    return dict(payload)
+
+
+def _clear_pool_probe_completion_notification():
+    with pool_probe_notification_lock:
+        payload = dict(pool_probe_completion_notification)
+        pool_probe_completion_notification.clear()
+    return payload
+
+
+def _format_pool_probe_completion_summary(summary, *, error=False):
+    summary = summary if isinstance(summary, dict) else {}
+    total_count = max(0, int(summary.get('pool_total_count') or 0))
+    checked_count = max(0, int(summary.get('checked_pool_count') or 0))
+    missing_count = max(0, total_count - checked_count)
+    complete = bool(total_count and checked_count >= total_count and not error)
+    title = '✅ Проверка всех ключей завершена' if complete else '⚠️ Проверка всех ключей завершена с предупреждением'
+    active_text = str(summary.get('active_text') or '').strip()
+    lines = [title, '', 'Ключи и пул']
+    if active_text:
+        lines.append(active_text)
+    lines.append(f'В пулах: {total_count}; Проверено: {checked_count}')
+    if missing_count:
+        lines.append(f'Без итогового результата: {missing_count}')
+    services = summary.get('services') if isinstance(summary.get('services'), list) else []
+    if services:
+        lines.extend(('', 'Работают по сервисам:'))
+        for service in services:
+            if not isinstance(service, dict):
+                continue
+            label = re.sub(r'\s+', ' ', str(service.get('label') or '')).strip()
+            if not label:
+                continue
+            label = label[:48]
+            lines.append(f'• {label}: {max(0, int(service.get("count") or 0))}')
+    return '\n'.join(lines)
+
+
+def _finalize_pool_probe_completion_notification(*, scope, started_at=0, summary=None, error=False):
+    if str(scope or '') != 'manual_all':
+        return False
+    if _has_pool_probe_resume_payload() or pool_probe_cancel_event.is_set():
+        return False
+    with pool_probe_notification_lock:
+        pending = dict(pool_probe_completion_notification)
+        if pending.get('scope') != 'manual_all':
+            return False
+        pending_started_at = float(pending.get('started_at') or 0)
+        if pending_started_at and started_at and abs(pending_started_at - float(started_at)) > 0.001:
+            return False
+        pool_probe_completion_notification.clear()
+    chat_id = pending.get('chat_id')
+    if chat_id is None:
+        return False
+    try:
+        final_summary = summary if isinstance(summary, dict) else _pool_status_summary()
+        message_text = _format_pool_probe_completion_summary(final_summary, error=bool(error))
+        if len(message_text) <= 3900:
+            bot.send_message(chat_id, message_text, reply_markup=_pool_protocol_markup())
+        else:
+            _send_telegram_chunks(chat_id, message_text, reply_markup=_pool_protocol_markup())
+        return True
+    except Exception as exc:
+        _write_runtime_log(f'Pool probe Telegram completion notification failed: {type(exc).__name__}')
+        return False
 
 
 def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
@@ -11084,6 +11310,8 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
 
     def monitor():
         result = {}
+        completion_summary = None
+        completion_error = False
         try:
             while process.poll() is None:
                 if pool_probe_cancel_event.is_set():
@@ -11108,6 +11336,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             note = ''
             if process.returncode != 0:
                 note = str(result.get('error') or f'pool probe worker exited with code {process.returncode}')
+                completion_error = True
                 _write_runtime_log(note)
             _set_pool_probe_progress(
                 running=False,
@@ -11131,9 +11360,12 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
                 },
                 force=True,
             )
+        except Exception as exc:
+            completion_error = True
+            _write_runtime_log(f'Pool probe process monitor failed: {type(exc).__name__}')
         finally:
             _invalidate_probe_status_caches()
-            _refresh_persisted_pool_summary_after_probe()
+            completion_summary = _refresh_persisted_pool_summary_after_probe()
             # The child normally reaps its own temporary Xray.  A last, scoped
             # sweep protects the router if that child is killed before its
             # finally block runs; it only matches bypass_pool_probe_* runtime.
@@ -11161,6 +11393,12 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
                 finished_rss_kb=finished_rss_kb,
                 bot_hwm_kb=int(_process_hwm_kb() or 0),
                 scope=scope,
+            )
+            _finalize_pool_probe_completion_notification(
+                scope=scope,
+                started_at=started_at,
+                summary=completion_summary,
+                error=completion_error,
             )
 
     threading.Thread(target=monitor, daemon=True).start()
@@ -11203,6 +11441,11 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_
         initial_checked=initial_checked,
         total_count=total_count,
         started_at=started_at,
+        on_finished=lambda result: _finalize_pool_probe_completion_notification(
+            scope=scope,
+            started_at=(result or {}).get('started_at') or started_at or 0,
+            error=bool((result or {}).get('error')),
+        ),
     )
 
 
@@ -11273,6 +11516,7 @@ def _pause_pool_probe_for_apply(timeout=12.0):
 
 def _cancel_pool_probe(timeout=2.0):
     global pool_probe_resume_after_cancel, pool_probe_resume_payload
+    _clear_pool_probe_completion_notification()
     if not pool_probe_lock.locked():
         had_resume_payload = _has_pool_probe_resume_payload()
         with pool_probe_resume_lock:
@@ -11601,6 +11845,38 @@ def _import_subscription_keys_to_pools(proto, fetched_keys, *, sync_subscription
         'managed_keys': managed_keys,
         'extra': extra_summary,
     }
+
+
+def _import_pool_subscription(proto, subscription_url, *, use_router_hwid=False):
+    if proto not in POOL_PROTOCOL_ORDER:
+        raise ValueError('Неизвестный протокол')
+    fetched, error = _fetch_keys_from_subscription(
+        str(subscription_url or '').strip(),
+        use_router_hwid=bool(use_router_hwid),
+    )
+    if error:
+        raise ValueError(error)
+    selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched)
+    if use_router_hwid and not selected_keys:
+        raise ValueError('subscription не вернула ключи для выбранного протокола')
+    previous_record = _subscription_record(proto) or {}
+    summary = _import_subscription_keys_to_pools(
+        proto,
+        fetched,
+        sync_subscription=bool(use_router_hwid and selected_keys),
+        previous_managed_keys=previous_record.get('managed_keys', []),
+    )
+    if selected_keys:
+        _update_subscription_record(
+            proto,
+            url=str(subscription_url or '').strip(),
+            hwid_enabled=bool(use_router_hwid),
+            last_attempt_at=time.time(),
+            last_success_at=time.time(),
+            last_error='',
+            managed_keys=summary.get('managed_keys', []) if use_router_hwid else [],
+        )
+    return summary
 
 
 def _refresh_subscription_once(proto, record, *, source='auto'):
@@ -12201,7 +12477,10 @@ def _active_mode_status_snapshot_from_base(
     include_route_details=False,
 ):
     pool_locked = pool_probe_lock.locked()
-    cached = base_snapshot if isinstance(base_snapshot, dict) else _cached_status_snapshot(current_keys)
+    cached = base_snapshot if isinstance(base_snapshot, dict) else _cached_status_snapshot(
+        current_keys,
+        allow_stale=pool_locked,
+    )
     if cached is not None and isinstance(cached, dict):
         protocols = dict(cached.get('protocols') or {})
     else:
@@ -12212,15 +12491,27 @@ def _active_mode_status_snapshot_from_base(
     else:
         custom_checks = _load_custom_checks()
         route_states = _load_light_service_route_states()
-    if not pool_locked and (include_route_details or cached is None):
+    rebuild_pending_locked = pool_locked and any(
+        isinstance(protocols.get(key_name), dict) and
+        protocols.get(key_name, {}).get('label') == 'Проверяется'
+        for key_name, _key_value in _ordered_protocol_items(current_keys)
+        if key_name != proxy_mode
+    )
+    if (not pool_locked and include_route_details) or cached is None or rebuild_pending_locked:
         key_probe_cache = None
         light_key_probe_cache = None
         light_youtube_proto = None
         for key_name, key_value in _ordered_protocol_items(current_keys):
             if key_name == proxy_mode:
                 continue
+            if (
+                pool_locked and
+                cached is not None and
+                protocols.get(key_name, {}).get('label') != 'Проверяется'
+            ):
+                continue
             try:
-                if include_route_details:
+                if include_route_details and not pool_locked:
                     if key_probe_cache is None:
                         key_probe_cache = _load_key_probe_cache()
                     protocols[key_name] = _cached_protocol_status_for_key(
@@ -12325,13 +12616,20 @@ def _active_mode_status_snapshot_from_base(
     }
 
 
-def _cached_status_snapshot(current_keys):
+def _cached_status_snapshot(current_keys, allow_stale=False):
     signature = _status_snapshot_signature(current_keys)
-    cached = _status_cached_snapshot(
-        status_snapshot_cache,
-        signature,
-        STATUS_CACHE_TTL,
-    )
+    if (
+        allow_stale and
+        status_snapshot_cache.get('data') is not None and
+        status_snapshot_cache.get('signature') == signature
+    ):
+        cached = status_snapshot_cache.get('data')
+    else:
+        cached = _status_cached_snapshot(
+            status_snapshot_cache,
+            signature,
+            STATUS_CACHE_TTL,
+        )
     if cached is not None and not _status_snapshot_has_custom_services(cached):
         try:
             if _load_custom_checks():
@@ -12645,7 +12943,11 @@ def _handle_pool_protocol_callback(call_id, action, data, chat_id, proto):
     if action == 'subscribe':
         _set_chat_menu_state(chat_id, level=23, bypass=proto)
         bot.answer_callback_query(call_id)
-        _send_pool_input_prompt(chat_id, proto, 'Отправьте subscription URL для пула {proto_label}.')
+        bot.send_message(
+            chat_id,
+            f'Выберите режим subscription для пула {_pool_proto_label(proto)}.',
+            reply_markup=_pool_subscription_mode_markup(),
+        )
         return True
 
     if action == 'probe':
@@ -12803,6 +13105,7 @@ def _web_action_context():
         socialnet_all_key=SOCIALNET_ALL_KEY,
         normalize_unblock_route_name=_normalize_unblock_route_name,
         install_key_for_protocol=_install_key_for_protocol,
+        apply_manual_key=_apply_manual_key_safely,
         apply_service_route=_apply_service_route,
         apply_service_profile=_apply_service_profile,
         resolve_route_intersections=_resolve_route_intersections,
@@ -12842,6 +13145,7 @@ def _web_action_context():
             add_subscription_keys_to_pool=_key_pool_store().add_subscription_keys_to_pool,
             add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
             import_subscription_keys_to_pools=_import_subscription_keys_to_pools,
+            import_pool_subscription=_import_pool_subscription,
             subscription_keys_for_protocol=_subscription_runtime().subscription_keys_for_protocol,
             subscription_record=_subscription_record,
             save_subscription_record=_update_subscription_record,

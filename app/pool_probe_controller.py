@@ -302,6 +302,7 @@ def start_pool_probe_worker(
     initial_checked=0,
     total_count=None,
     started_at=None,
+    on_finished=None,
 ):
     probe_tasks = list(probe_tasks or [])
     if not probe_tasks:
@@ -328,6 +329,7 @@ def start_pool_probe_worker(
     def worker():
         checked = 0
         total = len(probe_tasks)
+        worker_error = None
         try:
             worker_kwargs = {
                 'set_checked': lambda value: set_progress(checked=initial_checked + value),
@@ -336,15 +338,19 @@ def start_pool_probe_worker(
             if cancel_event is not None:
                 worker_kwargs['cancel_event'] = cancel_event
             checked, total = run_worker(probe_tasks, checks, **worker_kwargs)
+        except Exception as exc:
+            worker_error = exc
+            raise
         finally:
             invalidate_caches()
+            finished_at = time_provider()
             set_progress(
                 running=False,
                 checked=initial_checked + checked,
                 total=total_count,
                 scope=scope,
                 note='',
-                finished_at=time_provider(),
+                finished_at=finished_at,
             )
             try:
                 probe_tasks.clear()
@@ -352,6 +358,18 @@ def start_pool_probe_worker(
                 pass
             lock.release()
             collect_garbage()
+            if callable(on_finished):
+                try:
+                    on_finished({
+                        'checked': initial_checked + checked,
+                        'total': total_count,
+                        'scope': scope,
+                        'started_at': started_at,
+                        'finished_at': finished_at,
+                        'error': bool(worker_error),
+                    })
+                except Exception:
+                    pass
 
     try:
         thread_factory(target=worker, daemon=True).start()

@@ -2,6 +2,10 @@ import re
 
 
 POOL_PAGE_SIZE = 1000
+POOL_CHECK_ALL_TEXT = '\U0001f50d Проверить все ключи'
+POOL_STOP_PROBE_TEXT = '\u23f9 Остановить проверку'
+SUBSCRIPTION_ONCE_TEXT = 'Одноразовый импорт'
+SUBSCRIPTION_HWID_TEXT = 'Синхронизация с HWID'
 POOL_PROTOCOL_BUTTON_PREFIXES = {
     'shadowsocks': 'SS',
     'vmess': 'VM',
@@ -60,6 +64,7 @@ def pool_protocol_markup(types, protocol_labels):
     markup.row(buttons[0], buttons[1])
     markup.row(buttons[2], buttons[3])
     markup.row(buttons[4])
+    markup.row(_button(types, POOL_CHECK_ALL_TEXT), _button(types, POOL_STOP_PROBE_TEXT))
     markup.row(_button(types, _KEY_MENU), _button(types, _BACK))
     return markup
 
@@ -77,6 +82,7 @@ def pool_action_markup(types, key_labels, info):
         _button(types, '\U0001f50d \u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043f\u0443\u043b'),
         _button(types, '\U0001f9f9 \u041e\u0447\u0438\u0441\u0442\u0438\u0442\u044c \u043f\u0443\u043b'),
     )
+    markup.row(_button(types, POOL_STOP_PROBE_TEXT))
     markup.row(
         _button(types, '\U0001f5d1 \u0423\u0434\u0430\u043b\u0435\u043d\u0438\u0435'),
         _button(types, '\U0001f504 \u041e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u043f\u0443\u043b'),
@@ -107,6 +113,14 @@ def pool_clear_confirm_markup(types):
 
 def pool_input_markup(types):
     markup = _markup(types)
+    markup.row(_button(types, _BACK_TO_POOL), _button(types, _BACK))
+    return markup
+
+
+def pool_subscription_mode_markup(types):
+    markup = _markup(types)
+    markup.row(_button(types, SUBSCRIPTION_ONCE_TEXT))
+    markup.row(_button(types, SUBSCRIPTION_HWID_TEXT))
     markup.row(_button(types, _BACK_TO_POOL), _button(types, _BACK))
     return markup
 

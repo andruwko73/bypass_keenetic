@@ -2793,6 +2793,51 @@ def test_web_post_actions_helpers():
     install_result = web_post_actions.dispatch(pool_ctx, '/install', {'type': ['vless'], 'key': ['vless://one']})
     assert install_result['success'] is True
     assert 'key' not in install_result['extra']
+
+    manual_apply_calls = []
+    shared_install_uri = 'vless' + '://shared-install'
+    pool_ctx['apply_manual_key'] = lambda proto, key, **kwargs: (
+        manual_apply_calls.append((proto, key, kwargs)) or 'installed safely'
+    )
+    shared_install_result = web_post_actions.dispatch(
+        pool_ctx,
+        '/install',
+        {'type': ['vless2'], 'key': [shared_install_uri]},
+    )
+    assert shared_install_result['success'] is True
+    assert manual_apply_calls == [(
+        'vless2',
+        shared_install_uri,
+        {'source': 'web_manual_install', 'verify': True},
+    )]
+
+    shared_subscription_calls = []
+    pool_ctx['import_pool_subscription'] = lambda proto, url, **kwargs: (
+        shared_subscription_calls.append((proto, url, kwargs)) or {
+            'selected_added': 2,
+            'selected_duplicate_count': 1,
+            'removed_count': 0,
+            'retained_count': 0,
+            'managed_keys': [],
+            'extra': {'added_by_proto': {}, 'duplicate_count': 0, 'unrecognized_count': 0},
+        }
+    )
+    shared_subscription_result = web_post_actions.dispatch(
+        pool_ctx,
+        '/pool_subscribe',
+        {
+            'type': ['vless2'],
+            'url': ['https://subscription.example.test/shared'],
+            'send_router_hwid': ['1'],
+        },
+    )
+    assert shared_subscription_result['success'] is True
+    assert shared_subscription_calls == [(
+        'vless2',
+        'https://subscription.example.test/shared',
+        {'use_router_hwid': True},
+    )]
+    assert 'subscription.example.test' not in shared_subscription_result['result']
     assert web_post_actions.dispatch(ctx, '/telegram_call_learn', {}) is None
 
 
@@ -8012,6 +8057,164 @@ def test_telegram_bot_menu_button_smoke():
         bot_module._set_chat_menu_state(7001, level=8, bypass=None)
         bot_module.bot_message(message(telegram_key_ui.KEY_HELP_TEXT))
         assert recorder.messages[-1]['text'] == 'MARKDOWN:keys.md'
+
+        completion_summary = {
+            'active_text': '5 / 5 активных ключей',
+            'pool_total_count': 12,
+            'checked_pool_count': 12,
+            'services': [
+                {'label': 'Telegram', 'count': 10},
+                {'label': 'YouTube', 'count': 8},
+            ],
+        }
+        completion_text = bot_module._format_pool_probe_completion_summary(completion_summary)
+        assert completion_text.startswith('✅ Проверка всех ключей завершена')
+        assert 'В пулах: 12; Проверено: 12' in completion_text
+        assert '• Telegram: 10' in completion_text
+        assert '• YouTube: 8' in completion_text
+
+        bot_module._get_pool_probe_progress = lambda: {'started_at': 42.0}
+        bot_module._has_pool_probe_resume_payload = lambda: False
+        bot_module.pool_probe_cancel_event.clear()
+        bot_module._register_pool_probe_completion_notification(7001)
+        notification_count = len(recorder.messages)
+        assert bot_module._finalize_pool_probe_completion_notification(
+            scope='manual_all',
+            started_at=42.0,
+            summary=completion_summary,
+        ) is True
+        assert len(recorder.messages) == notification_count + 1
+        assert recorder.messages[-1]['text'] == completion_text
+        assert bot_module._finalize_pool_probe_completion_notification(
+            scope='manual_all',
+            started_at=42.0,
+            summary=completion_summary,
+        ) is False
+        assert len(recorder.messages) == notification_count + 1
+
+        bot_module._probe_all_pool_keys_async = lambda **kwargs: (True, 12)
+        bot_module._get_pool_probe_progress = lambda: {'started_at': 43.0}
+        bot_module._handle_pool_protocol_state(
+            message(telegram_pool_ui.POOL_CHECK_ALL_TEXT),
+            lambda *_args: None,
+        )
+        assert 'временным Xray' in recorder.messages[-1]['text']
+        assert 'итоговую сводку' in recorder.messages[-1]['text']
+        assert bot_module.pool_probe_completion_notification['chat_id'] == 7001
+        bot_module._clear_pool_probe_completion_notification()
+
+        manual_uri = 'vless' + '://manual'
+        subscription_uri = 'vless' + '://subscription'
+        old_subscription_uri = 'vless' + '://old'
+        active_uri = 'vless' + '://active'
+        inactive_uri = 'vless' + '://inactive'
+        apply_events = []
+        bot_module._app_mode_pool_enabled = lambda: True
+        bot_module.pool_apply_lock = threading.Lock()
+        bot_module._pause_pool_probe_for_apply = lambda: (apply_events.append('pause') or (True, 'paused'))
+        bot_module._install_key_for_protocol = lambda proto, key, verify=False: (
+            apply_events.append(('install', proto, key, verify)) or 'installed'
+        )
+        bot_module._set_active_key = lambda proto, key: apply_events.append(('active', proto, key))
+        bot_module._audit_key_switch = lambda *args: apply_events.append(('audit', args))
+        bot_module._schedule_youtube_key_apply_prefetch = lambda proto: apply_events.append(('prefetch', proto))
+        bot_module._invalidate_web_status_cache = lambda: apply_events.append('invalidate-web')
+        bot_module._invalidate_key_status_cache = lambda: apply_events.append('invalidate-key')
+        bot_module._resume_cancelled_pool_probe = lambda: apply_events.append('resume')
+        bot_module._load_current_keys = lambda: {'vless': manual_uri}
+        bot_module._refresh_status_caches_async = lambda keys, **kwargs: apply_events.append(('refresh', keys, kwargs))
+        assert bot_module._apply_manual_key_safely(
+            'vless',
+            manual_uri,
+            source='test_manual',
+            verify=False,
+        ) == 'installed'
+        assert apply_events[0] == 'pause'
+        assert apply_events[1] == ('install', 'vless', manual_uri, False)
+        assert ('active', 'vless', manual_uri) in apply_events
+        assert 'resume' in apply_events
+        assert bot_module.pool_apply_lock.locked() is False
+
+        bot_module._resolve_socialnet_service = lambda service_key: 'chrome_remote_desktop'
+        bot_module._key_type_for_unblock_route = lambda list_name: 'vless'
+        bot_module._service_catalog = lambda: py_types.SimpleNamespace(
+            service_route_entries=lambda service_key: ['remotedesktop.google.com']
+        )
+        route_calls = []
+        bot_module._apply_service_route = lambda service_key, proto: (
+            route_calls.append((service_key, proto)) or {
+                'service_label': 'Chrome Remote Desktop',
+                'target_label': 'Vless 1',
+                'entries': 7,
+            }
+        )
+        route_result = bot_module._append_socialnet_list('unblockvless', 'chrome_remote_desktop')
+        assert route_calls == [('chrome_remote_desktop', 'vless')]
+        assert 'Адресов: 7' in route_result
+
+        subscription_calls = []
+        subscription_updates = []
+        bot_module._fetch_keys_from_subscription = lambda url, **kwargs: (
+            {'vless': [subscription_uri]},
+            '',
+        )
+        bot_module._subscription_runtime = lambda: py_types.SimpleNamespace(
+            subscription_keys_for_protocol=lambda proto, fetched: fetched.get('vless', [])
+        )
+        bot_module._subscription_record = lambda proto: {'managed_keys': [old_subscription_uri]}
+        bot_module._import_subscription_keys_to_pools = lambda proto, fetched, **kwargs: (
+            subscription_calls.append((proto, fetched, kwargs)) or {
+                'selected_added': 1,
+                'selected_duplicate_count': 0,
+                'removed_count': 1,
+                'retained_count': 0,
+                'managed_keys': [subscription_uri],
+                'extra': {'added_by_proto': {}, 'duplicate_count': 0, 'unrecognized_count': 0},
+            }
+        )
+        bot_module._update_subscription_record = lambda proto, **kwargs: subscription_updates.append((proto, kwargs))
+        subscription_summary = bot_module._import_pool_subscription(
+            'vless2',
+            'https://subscription.example.test/private',
+            use_router_hwid=True,
+        )
+        assert subscription_summary['selected_added'] == 1
+        assert subscription_calls[0][2] == {
+            'sync_subscription': True,
+            'previous_managed_keys': [old_subscription_uri],
+        }
+        assert subscription_updates[0][0] == 'vless2'
+        assert subscription_updates[0][1]['hwid_enabled'] is True
+
+        current_keys = {'vless': active_uri, 'vless2': inactive_uri}
+        pending_snapshot = {
+            'web': {},
+            'protocols': {
+                'vless': {'tone': 'ok', 'label': 'Работает', 'details': 'saved active'},
+                'vless2': {'tone': 'warn', 'label': 'Проверяется', 'details': 'pending'},
+            },
+        }
+        bot_module.proxy_mode = 'vless'
+        bot_module.pool_probe_lock = threading.Lock()
+        bot_module.pool_probe_lock.acquire()
+        bot_module._load_custom_checks = lambda: []
+        bot_module._load_light_service_route_states = lambda: {}
+        bot_module._load_light_key_probe_cache = lambda: {}
+        bot_module._light_youtube_route_protocol = lambda: 'vless2'
+        bot_module._light_cached_protocol_status_for_key = lambda proto, key, **kwargs: {
+            'tone': 'ok',
+            'label': 'Последний результат',
+            'details': f'saved {proto}',
+        }
+        bot_module._cached_active_mode_protocol_status = lambda keys: pending_snapshot['protocols']['vless']
+        bot_module._build_web_status = lambda keys, protocols=None: {'protocols': protocols}
+        restored_snapshot = bot_module._active_mode_status_snapshot_from_base(
+            current_keys,
+            pending_snapshot,
+        )
+        assert restored_snapshot['protocols']['vless']['label'] == 'Работает'
+        assert restored_snapshot['protocols']['vless2']['label'] == 'Последний результат'
+        bot_module.pool_probe_lock.release()
     finally:
         sys.modules.pop('bot', None)
         if old_bot_module is not None:
@@ -8841,17 +9044,20 @@ def test_pool_probe_controller_helpers():
         invalidate_caches()
         return 1, len(tasks)
 
+    worker_lock = threading.Lock()
+    finished = []
     started, count = pool_probe_controller.start_pool_probe_worker(
         task_list,
         [{'id': 'custom'}],
         scope='manual_all',
-        lock=threading.Lock(),
+        lock=worker_lock,
         set_progress=set_progress,
         run_worker=run_worker,
         invalidate_caches=lambda: invalidated.append('cache'),
         time_provider=lambda: next(times),
         collect_garbage=lambda: collected.append(('gc', list(worker_task_ref['tasks']))),
         thread_factory=_InlineThread,
+        on_finished=lambda result: finished.append((result, worker_lock.locked())),
     )
     assert started is True
     assert count == 1
@@ -8863,6 +9069,14 @@ def test_pool_probe_controller_helpers():
     assert invalidated == ['cache', 'cache']
     assert task_list == [('vless', 'key')]
     assert collected == [('gc', [])]
+    assert finished == [({
+        'checked': 1,
+        'total': 1,
+        'scope': 'manual_all',
+        'started_at': 10.0,
+        'finished_at': 20.0,
+        'error': False,
+    }, False)]
 
     state = {}
     checked_updates = []
@@ -13391,7 +13605,25 @@ def test_telegram_pool_ui():
         ['Vmess', 'Trojan'],
         ['Shadowsocks'],
     ]
+    flattened = [button for row in markup.rows for button in row]
+    assert telegram_pool_ui.POOL_CHECK_ALL_TEXT in flattened
+    assert telegram_pool_ui.POOL_STOP_PROBE_TEXT in flattened
     assert markup.rows[-1][0].startswith('\U0001f519')
+
+    action_markup = telegram_pool_ui.pool_action_markup(
+        _FakeTypes,
+        [],
+        {'page': 0, 'total_pages': 1},
+    )
+    action_buttons = [button for row in action_markup.rows for button in row]
+    assert telegram_pool_ui.POOL_STOP_PROBE_TEXT in action_buttons
+
+    subscription_markup = telegram_pool_ui.pool_subscription_mode_markup(_FakeTypes)
+    assert subscription_markup.rows == [
+        [telegram_pool_ui.SUBSCRIPTION_ONCE_TEXT],
+        [telegram_pool_ui.SUBSCRIPTION_HWID_TEXT],
+        ['🔙 К пулу', '🔙 Назад'],
+    ]
 
     label = telegram_pool_ui.pool_key_button_label(
         1,

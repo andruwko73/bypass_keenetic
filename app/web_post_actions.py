@@ -11,6 +11,7 @@ def base_action_context(**values):
         'append_service_error': 'Ошибка добавления сервисов',
         'remove_service_error': 'Ошибка удаления сервисов',
         'install_key_for_protocol': None,
+        'apply_manual_key': None,
         'install_verify': True,
     }
     defaults.update(values)
@@ -22,6 +23,7 @@ def pool_action_context(**values):
         'custom_checks_enabled': True,
         'pool_actions_enabled': True,
         'cancel_pool_probe': None,
+        'import_pool_subscription': None,
     }
     defaults.update(values)
     return defaults
@@ -464,6 +466,14 @@ def _format_subscription_import_result(proto, summary):
     return 'Подписка загружена; ' + '; '.join(parts)
 
 
+def format_key_import_result(summary):
+    return _format_key_import_result(summary)
+
+
+def format_subscription_import_result(proto, summary):
+    return _format_subscription_import_result(proto, summary)
+
+
 def _pool_import(ctx, data):
     proto = form_value(data, 'type')
     success = True
@@ -477,6 +487,16 @@ def _pool_import(ctx, data):
         if len(non_empty_lines) == 1 and _is_subscription_input(non_empty_lines[0]):
             subscription_url = non_empty_lines[0]
             send_router_hwid = form_value(data, 'send_router_hwid').lower() in ('1', 'on', 'true', 'yes')
+            shared_import = _ctx(ctx, 'import_pool_subscription')
+            if callable(shared_import):
+                summary = shared_import(
+                    proto,
+                    subscription_url,
+                    use_router_hwid=send_router_hwid,
+                )
+                result = _format_subscription_import_result(proto, summary)
+                _invalidate_status(ctx)
+                return _result(result, success=True, extra=_pool_payload(ctx))
             fetched, error = _ctx(ctx, 'fetch_keys_from_subscription')(
                 subscription_url,
                 use_router_hwid=send_router_hwid,
@@ -634,6 +654,16 @@ def _pool_subscribe(ctx, data):
             raise ValueError('Неизвестный протокол')
         subscription_url = form_value(data, 'url')
         send_router_hwid = form_value(data, 'send_router_hwid').lower() in ('1', 'on', 'true', 'yes')
+        shared_import = _ctx(ctx, 'import_pool_subscription')
+        if callable(shared_import):
+            summary = shared_import(
+                proto,
+                subscription_url,
+                use_router_hwid=send_router_hwid,
+            )
+            result = _format_subscription_import_result(proto, summary)
+            _invalidate_status(ctx)
+            return _result(result, success=True, extra=_pool_payload(ctx))
         fetched, error = _ctx(ctx, 'fetch_keys_from_subscription')(
             subscription_url,
             use_router_hwid=send_router_hwid,
@@ -696,6 +726,18 @@ def _install(ctx, data):
     lock = None
     should_resume_probe = False
     try:
+        apply_manual_key = _ctx(ctx, 'apply_manual_key')
+        if callable(apply_manual_key) and key_type in PROXY_PROTOCOLS:
+            result = apply_manual_key(
+                key_type,
+                key_value,
+                source='web_manual_install',
+                verify=_ctx(ctx, 'install_verify', True),
+            )
+            _invalidate_status(ctx)
+            extra = {'protocol': key_type}
+            extra.update(_pool_payload(ctx))
+            return _result(result, success=True, extra=extra)
         lock = _acquire_pool_lock(ctx)
         pause_pool_probe = _ctx(ctx, 'pause_pool_probe_for_apply')
         if pause_pool_probe and key_type in PROXY_PROTOCOLS:
