@@ -10720,6 +10720,9 @@ def test_custom_check_service_sources_are_synced():
     assert '/static/service-icons/meta.png' not in rendered_meta_icon
     assert not (APP_ROOT / 'static' / 'service-icons' / 'meta.png').exists()
     assert not (APP_ROOT / 'static' / 'service-icons' / 'facebook.png').exists()
+    expected_chatgpt_icon = f'/static/service-icons/chatgpt.png?v={app_version.APP_VERSION_LABEL}'
+    assert "return f'/static/service-icons/{icon}.png?v={APP_VERSION_LABEL}'" in bot_source
+    assert web_service_routes_worker._service_icon_path('chatgpt') == expected_chatgpt_icon
     expected_icon_ids = {'telegram', 'youtube'} | {
         preset['icon'] for preset in service_catalog.CUSTOM_CHECK_PRESETS
     }
@@ -12615,7 +12618,8 @@ def test_web_template_styles_helpers():
     scripts = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert ':root{' in styles
     assert '.app-shell' in styles
-    assert 'url("/static/service-icons/telegram.png")' in styles
+    assert 'url("/static/service-icons/telegram.png")' not in styles
+    assert '.topbar-status-icon img{display:block;width:16px;height:16px;object-fit:contain;}' in styles
     assert 'tg-icon' not in styles
     assert '[data-theme="glass"]' in styles
     assert 'html[data-user-background="enabled"] .topbar .hero-popover{' in styles
@@ -12728,7 +12732,7 @@ def test_web_template_styles_helpers():
     assert '.pool-import-form button{grid-column:2;grid-row:3;justify-self:stretch;width:100%;align-self:start;}' in styles
     assert '.health-meter.warn span' in styles
     assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
-    assert '.topbar-status-icon-telegram{background-image:url("/static/service-icons/telegram.png");}' in styles
+    assert '.topbar-status-icon-telegram{background-image:' not in styles
     assert '.version-badge{grid-column:2;grid-row:1;justify-self:end;align-self:start;width:auto;min-width:48px;' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles
@@ -13251,6 +13255,10 @@ def test_web_template_scripts_helpers():
     assert "const delay = Date.now() < statusPollUntil ? STATUS_ACTIVE_POLL_MS : STATUS_IDLE_POLL_MS;" in scripts
     assert "scheduleStatusPolling(STATUS_IDLE_POLL_MS, STATUS_IDLE_POLL_MS);" in scripts
     assert 'const ENABLE_KEY_POOL = APP_CONFIG.enableKeyPool !== false;' in scripts
+    assert "const SERVICE_ICON_VERSION = encodeURIComponent(String(APP_CONFIG.assetVersion || '1'));" in scripts
+    assert "const SERVICE_ICON_SUFFIX = '?v=' + SERVICE_ICON_VERSION;" in scripts
+    assert "return safe ? SERVICE_ICON_BASE + safe + '.png' + SERVICE_ICON_SUFFIX : '';" in scripts
+    assert 'escapeHtml(TELEGRAM_ICON_SRC)' in scripts
     assert "const CSRF_TOKEN = String(APP_CONFIG.csrfToken || '');" in scripts
     assert '"token"' not in scripts
     assert "glass: 'Liquid Glass'" in scripts
@@ -13497,6 +13505,8 @@ def test_web_form_template_smoke():
     )
     assert '/static/app.css?v=' in page
     assert '/static/app.js?v=' in page
+    assert '"assetVersion":"1"' in page
+    assert '/static/service-icons/telegram.png?v=1' in page
     assert 'class="app-shell"' in page
     assert 'app-mode-toggle-button' in page
     assert 'active-mode-control' in page

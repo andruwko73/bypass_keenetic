@@ -11,9 +11,11 @@
         const POOL_PROBE_STATUS_POLL_MS = Math.max(5000, Number(APP_CONFIG.poolProbeStatusPollMs || 10000));
         const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));
         let botReady = APP_CONFIG.botReady === true;
-        const TELEGRAM_ICON_SRC = '/static/service-icons/telegram.png';
-        const YOUTUBE_ICON_SRC = '/static/service-icons/youtube.png';
         const SERVICE_ICON_BASE = '/static/service-icons/';
+        const SERVICE_ICON_VERSION = encodeURIComponent(String(APP_CONFIG.assetVersion || '1'));
+        const SERVICE_ICON_SUFFIX = '?v=' + SERVICE_ICON_VERSION;
+        const TELEGRAM_ICON_SRC = SERVICE_ICON_BASE + 'telegram.png' + SERVICE_ICON_SUFFIX;
+        const YOUTUBE_ICON_SRC = SERVICE_ICON_BASE + 'youtube.png' + SERVICE_ICON_SUFFIX;
         const CSRF_TOKEN = String(APP_CONFIG.csrfToken || '');
         let customChecks = ENABLE_CUSTOM_CHECKS && Array.isArray(APP_CONFIG.customChecks) ? APP_CONFIG.customChecks : [];
         const PROTOCOL_LABELS = {
@@ -1810,7 +1812,7 @@
 
         function serviceIconSrc(icon) {
             const safe = String(icon || '').replace(/[^a-z0-9_-]/gi, '').toLowerCase();
-            return safe ? SERVICE_ICON_BASE + safe + '.png' : '';
+            return safe ? SERVICE_ICON_BASE + safe + '.png' + SERVICE_ICON_SUFFIX : '';
         }
 
         function customIconHtml(check) {
@@ -2810,7 +2812,7 @@
             const showTelegramIcon = ENABLE_TELEGRAM && !!item[3];
             pill.className = 'api-pill topbar-status topbar-status-' + escapeHtml(tone);
             pill.setAttribute('data-bot-ready', showTelegramIcon ? 'true' : 'false');
-            pill.innerHTML = (showTelegramIcon ? '<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"></span>' : '') +
+            pill.innerHTML = (showTelegramIcon ? '<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"><img src="' + escapeHtml(TELEGRAM_ICON_SRC) + '" alt=""></span>' : '') +
                 '<span class="topbar-status-copy"><strong id="topbar-status-title">' + escapeHtml(item[1] || '') +
                 '</strong><span id="topbar-status-text">' + escapeHtml(item[2] || '') + '</span></span>';
         }

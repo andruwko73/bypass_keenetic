@@ -1,4 +1,10 @@
-*v1.994 (1 Aug 2026) -* main
+*v1.995 (1 Aug 2026) -* main
+
+*Prevents a browser from retaining pre-update service artwork for up to 24 hours: every service icon URL now carries the installed application version, so an update automatically requests the matching PNG without a manual cache clear or hard reload.*
+
+*Applies the same cache-busting rule to server-rendered pool rows, route tools, dynamically refreshed JavaScript status icons, and the Telegram topbar indicator. The existing one-day cache remains available within a version, keeping normal router and browser work unchanged.*
+
+*Adds regressions for Python and JavaScript icon URL generation, the initial page configuration, and the absence of an unversioned CSS background URL. No Xray, route, key, probe, worker, scheduler, or polling behavior changes.*
 
 *Replaces the mixed service badges with one professionally sourced set of twelve transparent 128×128 PNG logos used consistently by the web interface and its Telegram-managed views: Telegram, YouTube, ChatGPT, Discord, Instagram, Chrome Remote Desktop, Claude, Gemini, DeepSeek, Twitter for Grok, Perplexity, and Copilot.*
 

@@ -176,12 +176,20 @@ def _topbar_status_item(status, router_health, pool_summary_note, enable_key_poo
     return tone, title, text
 
 
-def _topbar_status_html(status_item, *, enable_telegram=True, bot_ready=False, bot_polling=False):
+def _topbar_status_html(
+    status_item,
+    *,
+    enable_telegram=True,
+    bot_ready=False,
+    bot_polling=False,
+    telegram_icon_src='',
+):
     tone, title, text = status_item
     safe_tone = html.escape(tone or 'info', quote=True)
+    safe_icon_src = html.escape(telegram_icon_src or '', quote=True)
     icon_html = (
-        '<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"></span>'
-        if enable_telegram and bot_polling else
+        f'<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"><img src="{safe_icon_src}" alt=""></span>'
+        if enable_telegram and bot_polling and safe_icon_src else
         ''
     )
     return f'''<span class="api-pill topbar-status topbar-status-{safe_tone}" id="web-api-pill" data-bot-ready="{str(bool(bot_ready)).lower()}" data-bot-polling="{str(bool(bot_polling)).lower()}">
@@ -350,13 +358,22 @@ def render_web_form(
         bot_polling=bot_polling,
         topbar_status_text=topbar_status_text,
     )
+    service_icon_version = str(APP_VERSION_LABEL or '1')
+    asset_version = f'{service_icon_version}-{ASSET_CACHE_REVISION}'
+    safe_asset_version = html.escape(asset_version, quote=True)
+    telegram_icon_src = f'/static/service-icons/telegram.png?v={service_icon_version}'
     telegram_topbar_block = (
-        _topbar_status_html(topbar_status_item, enable_telegram=enable_telegram, bot_ready=bot_ready, bot_polling=bot_polling)
+        _topbar_status_html(
+            topbar_status_item,
+            enable_telegram=enable_telegram,
+            bot_ready=bot_ready,
+            bot_polling=bot_polling,
+            telegram_icon_src=telegram_icon_src,
+        )
         if enable_telegram else
         ''
     )
     bot_mode_control_block = ''
-    asset_version = html.escape(f'{APP_VERSION_LABEL or "1"}-{ASSET_CACHE_REVISION}')
     try:
         custom_checks = json.loads(custom_checks_json or '[]') if enable_custom_checks else []
         if not isinstance(custom_checks, list):
@@ -401,6 +418,7 @@ def render_web_form(
         'enableTelegram': bool(enable_telegram),
         'botReady': bool(bot_ready),
         'botPolling': bool(bot_polling),
+        'assetVersion': service_icon_version,
     })
     topbar_actions_class = 'topbar-actions' + ('' if enable_telegram else ' topbar-actions-web-only')
     page_class = ' class="command-running"' if _script_bool(initial_command_running) else ''
@@ -411,9 +429,9 @@ def render_web_form(
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <link rel="icon" href="data:,">
   <title>Установка ключей прокси</title>
-    <link rel="stylesheet" href="/static/app.css?v={asset_version}">
+    <link rel="stylesheet" href="/static/app.css?v={safe_asset_version}">
     <script>window.BK_APP_CONFIG={app_config_json};</script>
-    <script src="/static/app.js?v={asset_version}" defer></script>
+    <script src="/static/app.js?v={safe_asset_version}" defer></script>
 </head>
 <body{page_class}>
     <div class="app-shell">

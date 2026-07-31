@@ -169,7 +169,7 @@ def _probe_cache():
 
 def _telegram_icon_html(opacity=1.0):
     return (
-        '<img class="service-icon-img" src="/static/service-icons/telegram.png" '
+        '<img class="service-icon-img" src="/static/service-icons/telegram.png?v=ui-smoke" '
         'width="16" height="16" alt="Telegram" '
         f'style="vertical-align:middle;opacity:{float(opacity):.2f}">'
     )
@@ -177,7 +177,7 @@ def _telegram_icon_html(opacity=1.0):
 
 def _youtube_icon_html(opacity=1.0):
     return (
-        '<img class="service-icon-img" src="/static/service-icons/youtube.png" '
+        '<img class="service-icon-img" src="/static/service-icons/youtube.png?v=ui-smoke" '
         'width="16" height="16" alt="YouTube" '
         f'style="vertical-align:middle;opacity:{float(opacity):.2f}">'
     )
@@ -185,7 +185,7 @@ def _youtube_icon_html(opacity=1.0):
 
 def _service_icon_html(icon, alt, opacity=1.0, size=18):
     return (
-        f'<img class="service-icon-img" src="/static/service-icons/{html.escape(str(icon))}.png" '
+        f'<img class="service-icon-img" src="/static/service-icons/{html.escape(str(icon))}.png?v=ui-smoke" '
         f'width="{int(size)}" height="{int(size)}" alt="{html.escape(str(alt or icon))}" '
         f'style="vertical-align:middle;opacity:{float(opacity):.2f}">'
     )

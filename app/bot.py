@@ -1188,7 +1188,7 @@ def _service_icon_path(icon):
     icon = re.sub(r'[^a-z0-9_-]+', '', (icon or '').lower())
     if not icon:
         return ''
-    return f'/static/service-icons/{icon}.png'
+    return f'/static/service-icons/{icon}.png?v={APP_VERSION_LABEL}'
 
 
 def _service_icon_html(icon, alt, opacity=1.0, size=18):
