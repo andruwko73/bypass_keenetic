@@ -296,9 +296,10 @@ static_asset_paths() {
   printf '%s\n' \
     app.css app.js telegram.svg youtube.svg \
     service-icons/chatgpt.png service-icons/claude.png service-icons/copilot.png \
-    service-icons/deepseek.png service-icons/discord.png service-icons/facebook.png \
+    service-icons/deepseek.png service-icons/discord.png \
     service-icons/gemini.png service-icons/grok.png service-icons/instagram.png \
-    service-icons/meta.png service-icons/perplexity.png
+    service-icons/perplexity.png service-icons/telegram.png \
+    service-icons/youtube.png service-icons/chrome_remote_desktop.png
 }
 
 activate_static_assets_dir() {

@@ -178,7 +178,7 @@ download_optional_file() {
 }
 
 download_static_assets() {
-    icons="chatgpt claude copilot deepseek discord facebook gemini grok instagram meta perplexity"
+    icons="chatgpt chrome_remote_desktop claude copilot deepseek discord gemini grok instagram perplexity telegram youtube"
     mkdir -p "$STATIC_DIR/service-icons"
     download_file "$(repo_file_url static/app.css)" "$STATIC_DIR/app.css" ':root{'
     download_file "$(repo_file_url static/app.js)" "$STATIC_DIR/app.js" 'const APP_CONFIG'

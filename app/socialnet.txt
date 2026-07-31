@@ -148,6 +148,7 @@ tellapart.com
 tg.dev
 tg.org
 tgram.org
+threads.com
 threads.net
 ton-connect.github.io
 bridge.tonapi.io

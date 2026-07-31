@@ -434,6 +434,7 @@ tg.dev
 tg.org
 tgram.org
 thepiratebay.org
+threads.com
 threads.net
 tik-tokapi.com
 tiktok.com

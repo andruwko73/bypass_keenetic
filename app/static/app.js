@@ -11,8 +11,8 @@
         const POOL_PROBE_STATUS_POLL_MS = Math.max(5000, Number(APP_CONFIG.poolProbeStatusPollMs || 10000));
         const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));
         let botReady = APP_CONFIG.botReady === true;
-        const TELEGRAM_ICON_SRC = '/static/telegram.svg';
-        const YOUTUBE_ICON_SRC = '/static/youtube.svg';
+        const TELEGRAM_ICON_SRC = '/static/service-icons/telegram.png';
+        const YOUTUBE_ICON_SRC = '/static/service-icons/youtube.png';
         const SERVICE_ICON_BASE = '/static/service-icons/';
         const CSRF_TOKEN = String(APP_CONFIG.csrfToken || '');
         let customChecks = ENABLE_CUSTOM_CHECKS && Array.isArray(APP_CONFIG.customChecks) ? APP_CONFIG.customChecks : [];

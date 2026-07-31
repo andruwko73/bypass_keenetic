@@ -4624,6 +4624,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/${archive_ref}' in bootstrap_source
     assert 'raw.githubusercontent.com unavailable for $(basename "$target"); using GitHub archive fallback.' in bootstrap_source
     assert 'download_optional_file "$(repo_file_url static/telegram.svg)"' in bootstrap_source
+    assert 'icons="chatgpt chrome_remote_desktop claude copilot deepseek discord gemini grok instagram perplexity telegram youtube"' in bootstrap_source
+    assert 'service-icons/facebook.png' not in bootstrap_source
+    assert 'service-icons/meta.png' not in bootstrap_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'migrate_runtime_config_defaults' in script_source
     assert 'memory_watchdog_idle_restart_rss_kb' not in script_source
@@ -10658,6 +10661,42 @@ def test_custom_check_service_sources_are_synced():
     assert service_catalog.SERVICE_LIST_SOURCES['telegram']['entries'] == service_catalog.TELEGRAM_UNBLOCK_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['meta']['entries'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['meta']['label'] == 'Instagram / Facebook'
+    expected_meta_domains = {
+        'instagram.com',
+        'ig.me',
+        'facebook.com',
+        'facebook.net',
+        'cdninstagram.com',
+        'fbcdn.net',
+        'fbsbx.com',
+        'internalfb.com',
+        'oculus.com',
+        'meta.com',
+        'threads.com',
+        'threads.net',
+        'fb.com',
+        'whatsapp.com',
+        'whatsapp.net',
+        'whatsapp.biz',
+        'wa.me',
+        'circlecrewpinkcrowd.com',
+    }
+    assert expected_meta_domains <= set(service_catalog.META_PLATFORM_ROUTE_ENTRIES)
+    instagram_hosts = {
+        'www.instagram.com',
+        'i.instagram.com',
+        'api.instagram.com',
+        'graph.instagram.com',
+        'l.instagram.com',
+        'static.cdninstagram.com',
+        'scontent.cdninstagram.com',
+        'scontent.example.fbcdn.net',
+    }
+    meta_domains = set(service_catalog.META_PLATFORM_ROUTE_ENTRIES)
+    assert all(
+        any(host == domain or host.endswith('.' + domain) for domain in meta_domains)
+        for host in instagram_hosts
+    )
     assert 'telegram' in button_keys
     assert 'meta' in button_keys
     assert 'grok' in button_keys
@@ -10671,6 +10710,24 @@ def test_custom_check_service_sources_are_synced():
         'https://www.facebook.com',
         'https://graph.facebook.com',
     ]
+    assert presets['meta']['icon'] == 'instagram'
+    assert presets['chrome_remote_desktop']['icon'] == 'chrome_remote_desktop'
+    rendered_meta_icon = key_pool_web.custom_check_icon_html(
+        presets['meta'],
+        lambda icon, label, opacity=1.0, size=18: f'/static/service-icons/{icon}.png',
+    )
+    assert '/static/service-icons/instagram.png' in rendered_meta_icon
+    assert '/static/service-icons/meta.png' not in rendered_meta_icon
+    assert not (APP_ROOT / 'static' / 'service-icons' / 'meta.png').exists()
+    assert not (APP_ROOT / 'static' / 'service-icons' / 'facebook.png').exists()
+    expected_icon_ids = {'telegram', 'youtube'} | {
+        preset['icon'] for preset in service_catalog.CUSTOM_CHECK_PRESETS
+    }
+    for icon_id in expected_icon_ids:
+        icon_data = (APP_ROOT / 'static' / 'service-icons' / f'{icon_id}.png').read_bytes()
+        assert icon_data.startswith(b'\x89PNG\r\n\x1a\n')
+        assert int.from_bytes(icon_data[16:20], 'big') == 128
+        assert int.from_bytes(icon_data[20:24], 'big') == 128
     assert presets['grok']['label'] == 'Grok / X / Twitter'
     assert "source.get('include_services')" in bot_source
     assert 'def _service_list_labels():' in bot_source
@@ -12558,7 +12615,7 @@ def test_web_template_styles_helpers():
     scripts = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert ':root{' in styles
     assert '.app-shell' in styles
-    assert 'url("/static/telegram.svg")' in styles
+    assert 'url("/static/service-icons/telegram.png")' in styles
     assert 'tg-icon' not in styles
     assert '[data-theme="glass"]' in styles
     assert 'html[data-user-background="enabled"] .topbar .hero-popover{' in styles
@@ -12671,7 +12728,7 @@ def test_web_template_styles_helpers():
     assert '.pool-import-form button{grid-column:2;grid-row:3;justify-self:stretch;width:100%;align-self:start;}' in styles
     assert '.health-meter.warn span' in styles
     assert '.status-overview-head{display:block;padding:12px 14px;}' in styles
-    assert '.topbar-status-icon-telegram{background-image:url("/static/telegram.svg");}' in styles
+    assert '.topbar-status-icon-telegram{background-image:url("/static/service-icons/telegram.png");}' in styles
     assert '.version-badge{grid-column:2;grid-row:1;justify-self:end;align-self:start;width:auto;min-width:48px;' in styles
     assert '@media (hover: none), (pointer: coarse)' in styles
     assert '[data-theme="glass"] [data-liquid]:not(.liquid-active):hover::before' in styles

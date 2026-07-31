@@ -463,7 +463,9 @@ META_PLATFORM_ROUTE_ENTRIES = [
     *META_AI_ROUTE_ENTRIES,
     *INSTAGRAM_ROUTE_ENTRIES,
     *FACEBOOK_ROUTE_ENTRIES,
+    'circlecrewpinkcrowd.com',
     'internalfb.com',
+    'threads.com',
     'threads.net',
     'wa.me',
     'whatsapp.biz',
@@ -659,6 +661,7 @@ CUSTOM_CHECK_PRESETS = [
         ],
         'routes': CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
         'badge': 'CRD',
+        'icon': 'chrome_remote_desktop',
     },
     {
         'id': 'meta',
@@ -672,7 +675,7 @@ CUSTOM_CHECK_PRESETS = [
         ],
         'routes': META_PLATFORM_ROUTE_ENTRIES,
         'badge': 'META',
-        'icon': 'meta',
+        'icon': 'instagram',
     },
 ]
 

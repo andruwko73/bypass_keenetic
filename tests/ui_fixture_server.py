@@ -82,14 +82,14 @@ CUSTOM_CHECKS = [
         "urls": ["https://chatgpt.com/backend-api/models"],
         "routes": ["chatgpt.com", "chat.openai.com"],
         "badge": "AI",
-        "icon": "",
+        "icon": "chatgpt",
     }
 ]
 
 ROUTE_SERVICE_ITEMS = [
     {"id": "telegram", "label": "Telegram", "badge": "TG", "icon": ""},
     {"id": "youtube", "label": "YouTube", "badge": "YT", "icon": ""},
-    {"id": "chatgpt_services", "label": "ChatGPT / Codex", "badge": "AI", "icon": ""},
+    {"id": "chatgpt_services", "label": "ChatGPT / Codex", "badge": "AI", "icon": "chatgpt"},
 ]
 ROUTE_SERVICE_IDS = {item["id"] for item in ROUTE_SERVICE_ITEMS}
 
@@ -169,27 +169,25 @@ def _probe_cache():
 
 def _telegram_icon_html(opacity=1.0):
     return (
-        '<img class="service-icon-img" src="data:image/svg+xml;base64,'
-        f'{TELEGRAM_SVG_B64}" width="16" height="16" alt="Telegram" '
+        '<img class="service-icon-img" src="/static/service-icons/telegram.png" '
+        'width="16" height="16" alt="Telegram" '
         f'style="vertical-align:middle;opacity:{float(opacity):.2f}">'
     )
 
 
 def _youtube_icon_html(opacity=1.0):
     return (
-        '<img class="service-icon-img" src="data:image/svg+xml;base64,'
-        f'{YOUTUBE_SVG_B64}" width="16" height="16" alt="YouTube" '
+        '<img class="service-icon-img" src="/static/service-icons/youtube.png" '
+        'width="16" height="16" alt="YouTube" '
         f'style="vertical-align:middle;opacity:{float(opacity):.2f}">'
     )
 
 
 def _service_icon_html(icon, alt, opacity=1.0, size=18):
-    label = (alt or icon or "WEB")[:3].upper()
     return (
-        f'<span class="custom-service-badge custom-service-neutral" '
-        f'title="{html.escape(str(alt or ""))}" '
-        f'style="opacity:{float(opacity):.2f};min-width:{int(size)}px">'
-        f'{html.escape(label)}</span>'
+        f'<img class="service-icon-img" src="/static/service-icons/{html.escape(str(icon))}.png" '
+        f'width="{int(size)}" height="{int(size)}" alt="{html.escape(str(alt or icon))}" '
+        f'style="vertical-align:middle;opacity:{float(opacity):.2f}">'
     )
 
 
@@ -606,11 +604,11 @@ class FixtureHandler(BaseHTTPRequestHandler):
             mode = (params.get("mode") or ["advanced"])[0]
             self._send(_page_html(mode), "text/html; charset=utf-8")
             return
-        if path in ("/static/telegram.svg", "/static/youtube.svg"):
-            asset_path = APP_ROOT / "static" / path.rsplit("/", 1)[-1]
+        if path in ("/static/telegram.svg", "/static/youtube.svg") or path.startswith("/static/service-icons/"):
+            asset_path = APP_ROOT / "static" / path.removeprefix("/static/")
             try:
                 body = asset_path.read_bytes()
-                content_type = "image/svg+xml" if body.lstrip().startswith(b"<svg") else "image/png"
+                content_type = "image/svg+xml" if asset_path.suffix == ".svg" else "image/png"
                 self._send(body, content_type)
             except OSError:
                 self._send("not found", "text/plain; charset=utf-8", status=404)

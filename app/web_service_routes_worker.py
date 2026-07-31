@@ -13,13 +13,11 @@ YOUTUBE_SVG_B64 = 'PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCA0NDMgM
 
 
 def _telegram_icon_html(opacity=1.0):
-    style = f'vertical-align:middle;opacity:{opacity:g}'
-    return f'<img src="data:image/svg+xml;base64,{TELEGRAM_SVG_B64}" width="16" height="16" alt="Telegram" style="{style}">'
+    return _service_icon_html('telegram', 'Telegram', opacity=opacity, size=16)
 
 
 def _youtube_icon_html(opacity=1.0):
-    style = f'vertical-align:middle;opacity:{opacity:g}'
-    return f'<img src="data:image/svg+xml;base64,{YOUTUBE_SVG_B64}" width="16" height="16" alt="YouTube" style="{style}">'
+    return _service_icon_html('youtube', 'YouTube', opacity=opacity, size=16)
 
 
 def _service_icon_path(icon):

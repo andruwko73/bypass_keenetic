@@ -1,4 +1,14 @@
-*v1.993 (31 Jul 2026) -* main
+*v1.994 (1 Aug 2026) -* main
+
+*Replaces the mixed service badges with one professionally sourced set of twelve transparent 128×128 PNG logos used consistently by the web interface and its Telegram-managed views: Telegram, YouTube, ChatGPT, Discord, Instagram, Chrome Remote Desktop, Claude, Gemini, DeepSeek, Twitter for Grok, Perplexity, and Copilot.*
+
+*Removes redundant Meta and Facebook image assets because the combined Instagram / Facebook preset now has one unambiguous Instagram identity; Chrome Remote Desktop uses the Chrome mark, Claude uses its product star, and Grok / X / Twitter uses the requested classic Twitter bird.*
+
+*Keeps clean installation and in-place updates in sync with the exact PNG manifest, so new and existing routers receive the same assets without adding a process, worker, dependency, polling cycle, or runtime network request.*
+
+*Synchronizes the Meta service route catalog with the current upstream roots `threads.com` and `circlecrewpinkcrowd.com`; existing suffix routing continues to cover the Instagram API, media, CDN, and regional subdomains without enumerating them individually.*
+
+*Verified by 230 Python regressions, Ruff, secret scanning, Python/JavaScript/Bash syntax checks, PNG integrity checks, and Playwright UI smoke in Advanced, Simple, and Web-only modes across the maintained mobile, desktop, 2K, and 4K 16:9/16:10 viewports.*
 
 *Prevents automatic post-update navigation to a gateway-generated 502 page: the existing interface now keeps polling the cache-busted root page, verifies the expected new version twice in succession, and reloads only after the replacement web server is stable.*
 
