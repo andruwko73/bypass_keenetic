@@ -1032,6 +1032,40 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: service route fragment API failed`);
     }
     if (modeConfig.mode === 'advanced' && viewportName === 'desktop') {
+      let updateReadyRequests = 0;
+      await page.route('**/?update_ready=*', async (route) => {
+        updateReadyRequests += 1;
+        if (updateReadyRequests === 1) {
+          await route.fulfill({ status: 502, contentType: 'text/html', body: '<h1>502 Bad Gateway</h1>' });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html; charset=utf-8',
+          body: '<div class="app-shell"><span class="version-badge">1.993</span></div>',
+        });
+      });
+      await page.evaluate(() => {
+        window.__updateReadyTestDone = false;
+        window.__bypassTestHooks.waitForUpdatedWebServerBeforeReload('v1.993', {
+          initialDelayMs: 0,
+          retryDelayMs: 25,
+          confirmationDelayMs: 25,
+          requiredConfirmations: 2,
+          onReady: () => { window.__updateReadyTestDone = true; },
+        });
+      });
+      await page.waitForFunction(() => window.__updateReadyTestDone === true, null, { timeout: 10000 });
+      if (updateReadyRequests < 3) {
+        throw new Error(`${name}: update reload readiness did not retry after 502`);
+      }
+      await page.unroute('**/?update_ready=*');
+      for (let index = failures.length - 1; index >= 0; index -= 1) {
+        if (failures[index].includes('502')) {
+          failures.splice(index, 1);
+        }
+      }
+
       let abortedRouteRequest = false;
       await page.route('**/service_route_apply', async (route) => {
         abortedRouteRequest = true;

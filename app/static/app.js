@@ -42,6 +42,8 @@
         let commandTimerState = null;
         let actionMessageTimer = null;
         let activeCommandName = '';
+        let activeCommandTargetVersion = '';
+        let updateReloadInProgress = false;
 
         const THEME_LABELS = {
             dark: 'Темная',
@@ -3184,6 +3186,9 @@
             }
             block.classList.remove('hidden');
             setCommandRunningLayout(!!state.running);
+            if (state.command === 'update' && state.target_version) {
+                activeCommandTargetVersion = String(state.target_version);
+            }
             const title = block.querySelector('strong');
             if (title) {
                 const targetVersion = state.running && state.command === 'update' && state.target_version ? ' ' + state.target_version : '';
@@ -3202,6 +3207,79 @@
             return !!state.running;
         }
 
+        function normalizedUpdateVersion(value) {
+            return String(value || '').trim().replace(/^v/i, '');
+        }
+
+        function updatedPageIsReady(html, expectedVersion) {
+            const source = String(html || '');
+            if (source.indexOf('class="app-shell"') === -1) {
+                return false;
+            }
+            const expected = normalizedUpdateVersion(expectedVersion);
+            if (!expected) {
+                return true;
+            }
+            return source.indexOf('>' + expected + '</span>') !== -1;
+        }
+
+        function waitForUpdatedWebServerBeforeReload(expectedVersion, options) {
+            if (updateReloadInProgress) {
+                return false;
+            }
+            updateReloadInProgress = true;
+            options = options || {};
+            const initialDelayMs = Math.max(0, Number(options.initialDelayMs === undefined ? 4000 : options.initialDelayMs));
+            const retryDelayMs = Math.max(25, Number(options.retryDelayMs === undefined ? 3000 : options.retryDelayMs));
+            const confirmationDelayMs = Math.max(25, Number(options.confirmationDelayMs === undefined ? 1500 : options.confirmationDelayMs));
+            const requiredConfirmations = Math.max(2, Number(options.requiredConfirmations || 2));
+            const customReadyHandler = typeof options.onReady === 'function' ? options.onReady : null;
+            let confirmations = 0;
+
+            showActionMessage('Обновление установлено. Ожидаю готовность веб-интерфейса…', true);
+
+            function scheduleProbe(delayMs) {
+                window.setTimeout(probe, delayMs);
+            }
+
+            function probe() {
+                fetch('/?update_ready=' + Date.now(), {
+                    credentials: 'same-origin',
+                    headers: {'Accept': 'text/html'},
+                    cache: 'no-store'
+                })
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('web server is not ready');
+                        }
+                        return response.text();
+                    })
+                    .then(function(html) {
+                        if (!updatedPageIsReady(html, expectedVersion)) {
+                            throw new Error('updated page is not ready');
+                        }
+                        confirmations += 1;
+                        if (confirmations < requiredConfirmations) {
+                            scheduleProbe(confirmationDelayMs);
+                            return;
+                        }
+                        if (customReadyHandler) {
+                            updateReloadInProgress = false;
+                            customReadyHandler();
+                            return;
+                        }
+                        window.location.reload();
+                    })
+                    .catch(function() {
+                        confirmations = 0;
+                        scheduleProbe(retryDelayMs);
+                    });
+            }
+
+            scheduleProbe(initialDelayMs);
+            return true;
+        }
+
         function maybeReloadAfterUpdateCommand(state) {
             const commandName = (state && state.command) || activeCommandName || '';
             if (commandName !== 'update') {
@@ -3210,10 +3288,10 @@
             if (state && state.running) {
                 return;
             }
+            const expectedVersion = (state && state.target_version) || activeCommandTargetVersion || '';
             activeCommandName = '';
-            window.setTimeout(function() {
-                window.location.reload();
-            }, 1500);
+            activeCommandTargetVersion = '';
+            waitForUpdatedWebServerBeforeReload(expectedVersion);
         }
 
         function pollCommandState() {
@@ -3862,7 +3940,9 @@
             if (['127.0.0.1', 'localhost', '::1'].indexOf(window.location.hostname) !== -1) {
                 window.__bypassTestHooks = Object.assign({}, window.__bypassTestHooks || {}, {
                     pollStatus: pollStatus,
-                    refreshPoolData: refreshPoolData
+                    refreshPoolData: refreshPoolData,
+                    updatedPageIsReady: updatedPageIsReady,
+                    waitForUpdatedWebServerBeforeReload: waitForUpdatedWebServerBeforeReload
                 });
             }
             scheduleRouterHealthRefresh(10000);

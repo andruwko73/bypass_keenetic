@@ -12608,6 +12608,11 @@ def test_web_template_styles_helpers():
     assert "['service-route', 'custom-check-add', 'custom-check-delete']" in scripts
     assert "window.sessionStorage.setItem('bypass-action-recovery-message', message)" in scripts
     assert 'restoreRouteActionRecoveryMessage();' in scripts
+    assert 'function waitForUpdatedWebServerBeforeReload(expectedVersion, options)' in scripts
+    assert "fetch('/?update_ready=' + Date.now()" in scripts
+    assert 'if (!response.ok)' in scripts
+    assert 'confirmations < requiredConfirmations' in scripts
+    assert 'waitForUpdatedWebServerBeforeReload(expectedVersion);' in scripts
     assert '.attention-ok{grid-template-columns:minmax(0,1fr);}' in styles
     assert '.attention-ok .attention-dot{display:none;}' in styles
     assert '.attention-item > div > span{display:block;' in styles
@@ -14125,6 +14130,15 @@ def test_every_ready_service_can_move_to_every_protocol():
                 assert result['target_protocol'] == protocol, (service_id, protocol)
                 assert result['entries'] == len(expected_entries), (service_id, protocol)
                 assert protocol in state['complete_protocols'], (service_id, protocol, state)
+                repeated = service_routes.apply_service_route(
+                    service_id,
+                    protocol,
+                    unblock_dir=tmp,
+                    update_script='',
+                )
+                assert repeated['changed'] is False, (service_id, protocol, repeated)
+                assert repeated['added'] == 0, (service_id, protocol, repeated)
+                assert repeated['removed'] == 0, (service_id, protocol, repeated)
 
 
 def test_every_custom_check_preset_can_be_added():

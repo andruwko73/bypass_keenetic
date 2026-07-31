@@ -146,12 +146,17 @@ def _write_routes(route_entries, unblock_dir):
         write_unblock_list_entries(route, entries, unblock_dir=unblock_dir)
 
 
-def _remove_global_route_excludes(route_entries):
+def _remove_global_route_excludes(route_entries, preserve_entries=None):
+    preserved = {
+        normalize_route_entry(value)
+        for value in preserve_entries or []
+        if str(value or '').strip()
+    }
     excluded = {
         normalize_route_entry(value)
         for value in global_route_exclude_entries()
         if str(value or '').strip()
-    }
+    } - preserved
     removed = 0
     for values in route_entries.values():
         stale = {entry for entry in values if normalize_route_entry(entry) in excluded}
@@ -278,7 +283,7 @@ def apply_service_route(
     route_entries = _read_all_routes(unblock_dir)
     shared_entries = _shared_service_entry_set()
     removable_entries = _removable_service_entries(entries, shared_entries)
-    removed = _remove_global_route_excludes(route_entries)
+    removed = _remove_global_route_excludes(route_entries, preserve_entries=entries)
     before_target = set(route_entries[target_route])
     if remove_from_others:
         for route, values in route_entries.items():

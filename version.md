@@ -1,4 +1,8 @@
-*v1.992 (31 Jul 2026) -* main
+*v1.993 (31 Jul 2026) -* main
+
+*Prevents automatic post-update navigation to a gateway-generated 502 page: the existing interface now keeps polling the cache-busted root page, verifies the expected new version twice in succession, and reloads only after the replacement web server is stable.*
+
+*Preserves service-scoped global-route exceptions during an individual route assignment so Meta and other permitted entries remain genuinely idempotent without changing catalog-repair behavior.*
 
 *Makes service-route assignment idempotent: selecting the protocol that already contains the complete service list no longer rewrites route files, restarts Xray, or runs the route updater. Adding an optional service check still refreshes only the installed active keys.*
 
