@@ -2859,6 +2859,7 @@ def test_web_action_feature_gates():
 
 def test_service_route_apply_can_add_check():
     calls = []
+    current_keys = {'vless': 'vless://example-active'}
     ctx = {
         'custom_checks_enabled': True,
         'apply_service_route': lambda service_key, proto: {
@@ -2867,7 +2868,9 @@ def test_service_route_apply_can_add_check():
             'entries': 5,
         },
         'add_custom_check': lambda **kwargs: calls.append(('add', kwargs)) or ([], 'Проверка добавлена.'),
-        'probe_all_pool_keys_async': lambda **kwargs: calls.append(('probe', kwargs)),
+        'probe_all_pool_keys_async': lambda **kwargs: (_ for _ in ()).throw(AssertionError('full pool probe must stay manual')),
+        'load_current_keys': lambda: current_keys,
+        'refresh_status_caches_async': lambda keys, **kwargs: calls.append(('refresh', keys, kwargs)),
         'record_event': lambda **kwargs: calls.append(('event', kwargs)),
         'invalidate_web_status_cache': lambda: calls.append(('invalidate-web', {})),
         'invalidate_key_status_cache': lambda: calls.append(('invalidate-key', {})),
@@ -2881,11 +2884,38 @@ def test_service_route_apply_can_add_check():
     )
     assert result['success'] is True
     assert ('add', {'preset_id': 'gemini'}) in calls
-    assert any(item[0] == 'probe' for item in calls)
+    assert ('refresh', current_keys, {'active_only': True}) in calls
     assert 'Проверка добавлена' in result['result']
+    assert 'Активные ключи перепроверяются' in result['result']
+    assert 'проверка пула' not in result['result'].lower()
     assert result['extra']['route_tools_html'] == '<div>routes</div>'
     assert result['extra']['custom_checks'] == [{'id': 'gemini'}]
     assert 'reload_after_ms' not in result['extra']
+
+
+def test_custom_check_add_only_refreshes_active_keys():
+    calls = []
+    current_keys = {'vless': 'vless://example-active', 'vless2': 'vless://example-active-2'}
+    ctx = {
+        'custom_checks_enabled': True,
+        'add_custom_check': lambda **kwargs: calls.append(('add', kwargs)) or ([], 'Проверка добавлена.'),
+        'probe_all_pool_keys_async': lambda **kwargs: (_ for _ in ()).throw(AssertionError('full pool probe must stay manual')),
+        'load_current_keys': lambda: current_keys,
+        'refresh_status_caches_async': lambda keys, **kwargs: calls.append(('refresh', keys, kwargs)),
+        'service_routes_payload': lambda: {'route_tools_html': '<div>routes</div>'},
+        'web_custom_checks': lambda: [{'id': 'meta'}],
+    }
+    result = web_post_actions.dispatch(ctx, '/custom_check_add', {'preset': ['meta']})
+    assert result['success'] is True
+    assert ('add', {'label': '', 'url': '', 'preset_id': 'meta'}) in calls
+    assert ('refresh', current_keys, {'active_only': True}) in calls
+    assert 'Активные ключи перепроверяются' in result['result']
+
+    calls.clear()
+    ctx['add_custom_check'] = lambda **kwargs: calls.append(('add', kwargs)) or ([], 'Проверка "Instagram / Facebook" уже есть в списке.')
+    duplicate = web_post_actions.dispatch(ctx, '/custom_check_add', {'preset': ['meta']})
+    assert duplicate['success'] is True
+    assert not any(item[0] == 'refresh' for item in calls)
 
 
 def _expected_codex_version_counter():
@@ -7366,7 +7396,7 @@ def test_light_status_keeps_confirmed_custom_services():
     assert 'Claude' in status['details']
 
 
-def test_internal_telegram_polling_exception_marks_failover_state():
+def test_internal_telegram_polling_exception_keeps_retry_loop_active():
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
         (root / 'bot_config.py').write_text(
@@ -7419,7 +7449,7 @@ def test_internal_telegram_polling_exception_marks_failover_state():
                 'invalidate-status',
             ],
             'first': False,
-            'polling_after_exception': False,
+            'polling_after_exception': True,
             'polling_after_recovery': True,
             'primed_last_ok': 0.0,
             'restored': True,
@@ -12523,6 +12553,7 @@ def test_web_status_builder_helpers():
 
 def test_web_template_styles_helpers():
     styles = (APP_ROOT / 'static' / 'app.css').read_text(encoding='utf-8')
+    scripts = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert ':root{' in styles
     assert '.app-shell' in styles
     assert 'url("/static/telegram.svg")' in styles
@@ -12571,6 +12602,10 @@ def test_web_template_styles_helpers():
     assert '.topbar-status-copy span{display:-webkit-box;min-width:0;color:#b9c6d3;font-size:11px;font-weight:700;line-height:1.22;max-height:calc(1.22em * 2);white-space:normal;overflow:hidden;text-overflow:ellipsis;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;word-break:normal;}' in styles
     assert '.topbar-status{white-space:normal;text-overflow:clip;}' in styles
     assert '.attention-telegram-icon' not in styles
+    assert 'function recoverRouteActionAfterConnectionLoss(action)' in scripts
+    assert "['service-route', 'custom-check-add', 'custom-check-delete']" in scripts
+    assert "window.sessionStorage.setItem('bypass-action-recovery-message', message)" in scripts
+    assert 'restoreRouteActionRecoveryMessage();' in scripts
     assert '.attention-ok{grid-template-columns:minmax(0,1fr);}' in styles
     assert '.attention-ok .attention-dot{display:none;}' in styles
     assert '.attention-item > div > span{display:block;' in styles
@@ -14055,6 +14090,44 @@ def test_service_routes_apply_and_profile():
             unblock_dir=str(drift_dir),
             include_runtime=False,
         )['count'] == 0
+
+
+def test_every_ready_service_can_move_to_every_protocol():
+    service_ids = [item['id'] for item in service_routes.route_service_items(include_core=True)]
+    assert {'telegram', 'youtube', 'meta', 'chrome_remote_desktop'} <= set(service_ids)
+    assert len(service_ids) == len(set(service_ids)) == len(service_catalog.CUSTOM_CHECK_PRESETS) + 2
+    for service_id in service_ids:
+        expected_entries = set(service_catalog.service_route_entries(service_id))
+        assert expected_entries, service_id
+        for protocol in service_routes.ROUTE_ORDER:
+            with tempfile.TemporaryDirectory() as tmp:
+                result = service_routes.apply_service_route(
+                    service_id,
+                    protocol,
+                    unblock_dir=tmp,
+                    update_script='',
+                )
+                state = service_routes.service_route_state(service_id, unblock_dir=tmp)
+                assert result['target_protocol'] == protocol, (service_id, protocol)
+                assert result['entries'] == len(expected_entries), (service_id, protocol)
+                assert protocol in state['complete_protocols'], (service_id, protocol, state)
+
+
+def test_every_custom_check_preset_can_be_added():
+    original_path = custom_checks_store.CUSTOM_CHECKS_PATH
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom_checks_store.CUSTOM_CHECKS_PATH = str(Path(tmp) / 'custom_checks.json')
+            messages = []
+            for preset in service_catalog.CUSTOM_CHECK_PRESETS:
+                checks, message = custom_checks_store.add_custom_check(preset_id=preset['id'])
+                messages.append(message)
+            assert {item['id'] for item in checks} == {
+                item['id'] for item in service_catalog.CUSTOM_CHECK_PRESETS
+            }
+            assert all('добавлена' in message for message in messages)
+    finally:
+        custom_checks_store.CUSTOM_CHECKS_PATH = original_path
 
 
 def test_route_intersections_helpers():

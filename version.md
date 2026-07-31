@@ -1,4 +1,12 @@
-*v1.990 (31 Jul 2026) -* main
+*v1.991 (31 Jul 2026) -* main
+
+*Stops service-route and custom-check actions from launching a hidden full-pool probe; only the currently installed active keys receive a lightweight background refresh, while the explicit full-pool check remains manual.*
+
+*Recovers the web interface when a route action is applied but its HTTP response is interrupted: the page reloads and shows the actual persisted result instead of leaving a misleading `TypeError: Failed to fetch` error.*
+
+*Keeps the Telegram polling lifecycle indicator active while TeleBot retries an internally handled transient connection error; failover tracking and active-key recovery continue independently.*
+
+*Verifies all 12 routable services against all five protocols, all 10 additional check presets, 230 Python tests, secret scanning, Python/JavaScript/Bash syntax, and all three web modes from mobile through 4K 16:9 and 16:10 viewports.*
 
 *Возвращает прежний понятный верхний статус исправного Telegram-бота: «Telegram-бот работает» и «Память роутера в норме». Технический long polling остаётся внутренним подтверждением работоспособности и больше не выглядит как затянувшееся обновление.*
 

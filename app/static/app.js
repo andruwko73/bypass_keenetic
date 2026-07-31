@@ -3136,6 +3136,39 @@
             }
         }
 
+        function recoverRouteActionAfterConnectionLoss(action) {
+            if (['service-route', 'custom-check-add', 'custom-check-delete'].indexOf(action) === -1) {
+                return false;
+            }
+            const message = 'Связь прервалась во время применения. Обновляю страницу, чтобы показать фактический результат.';
+            try {
+                window.sessionStorage.setItem('bypass-action-recovery-message', message);
+            } catch (_error) {
+                // Reload is still sufficient when browser storage is unavailable.
+            }
+            showActionMessage(message, true);
+            window.setTimeout(function() {
+                window.location.reload();
+            }, 1200);
+            return true;
+        }
+
+        function restoreRouteActionRecoveryMessage() {
+            let message = '';
+            try {
+                message = window.sessionStorage.getItem('bypass-action-recovery-message') || '';
+                window.sessionStorage.removeItem('bypass-action-recovery-message');
+            } catch (_error) {
+                message = '';
+            }
+            if (message) {
+                showActionMessage('Страница обновлена после применения. Проверьте отображаемый результат.', true, {
+                    autoHide: true,
+                    delayMs: 12000
+                });
+            }
+        }
+
         function showCommandState(state) {
             const block = document.getElementById('web-command-status');
             if (!block) {
@@ -3764,7 +3797,9 @@
                             }
                         })
                         .catch(function(error) {
-                            showActionMessage('Ошибка запроса: ' + error, false);
+                            if (!recoverRouteActionAfterConnectionLoss(action)) {
+                                showActionMessage('Ошибка запроса: ' + error, false);
+                            }
                         })
                         .finally(function() {
                             setButtonBusy(button, false);
@@ -3775,6 +3810,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            restoreRouteActionRecoveryMessage();
             const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
             updateThemeControls(currentTheme);
             document.addEventListener('click', function(event) {

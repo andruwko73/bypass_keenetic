@@ -242,8 +242,8 @@ def _service_route_apply(ctx, data):
         if form_value(data, 'add_check') == '1':
             try:
                 _, check_result = _ctx(ctx, 'add_custom_check')(preset_id=service_key)
-                _call(ctx, 'probe_all_pool_keys_async', stale_only=False)
-                result += f' {check_result} Фоновая проверка пула запущена.'
+                _refresh_pool_status(ctx, active_only=True)
+                result += f' {check_result} Активные ключи перепроверяются в фоне.'
             except Exception as exc:
                 result += f' Проверку добавить не удалось: {exc}'
         _call(
@@ -324,10 +324,9 @@ def _custom_check_add(ctx, data):
             url=form_value(data, 'url'),
             preset_id=form_value(data, 'preset'),
         )
-        _call(ctx, 'probe_all_pool_keys_async', stale_only=False)
-        _refresh_pool_status(ctx, active_only=True)
         if 'уже есть' not in result:
-            result += ' Фоновая проверка пула запущена.'
+            _refresh_pool_status(ctx, active_only=True)
+            result += ' Активные ключи перепроверяются в фоне.'
     except Exception as exc:
         success = False
         result = f'Ошибка добавления проверки: {exc}'

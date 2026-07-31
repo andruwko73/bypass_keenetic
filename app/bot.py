@@ -2256,7 +2256,10 @@ class _TelegramPollingExceptionHandler:
     def handle(self, exception):
         if not _is_telegram_connectivity_error(exception):
             return False
-        globals()['bot_polling'] = False
+        # TeleBot catches this exception inside infinity_polling and keeps the
+        # polling loop alive.  The failover state below records the transport
+        # failure independently, so do not leave the lifecycle indicator false
+        # while TeleBot is already retrying the next getUpdates request.
         now = time.monotonic()
         with self._lock:
             if (

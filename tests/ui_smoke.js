@@ -1031,6 +1031,30 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (!routeApi.ok || !routeApi.hasHtml) {
       throw new Error(`${name}: service route fragment API failed`);
     }
+    if (modeConfig.mode === 'advanced' && viewportName === 'desktop') {
+      let abortedRouteRequest = false;
+      await page.route('**/service_route_apply', async (route) => {
+        abortedRouteRequest = true;
+        await route.abort('connectionreset');
+      });
+      const routeAction = page.locator('[data-protocol-panel].active .service-route-menu[open] form[action="/service_route_apply"] button').first();
+      await routeAction.click();
+      await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(1800);
+      if (!abortedRouteRequest) {
+        throw new Error(`${name}: service route recovery test did not intercept the action`);
+      }
+      const recoveryText = await page.locator('#web-action-message').innerText();
+      if (!recoveryText.includes('Страница обновлена после применения')) {
+        throw new Error(`${name}: service route fetch recovery message is missing: ${recoveryText}`);
+      }
+      await page.unroute('**/service_route_apply');
+      failures.length = 0;
+      await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
+      await clickLazyProtocol(page, 'vless', `${name} route recovery`);
+      await page.locator('[data-protocol-panel="vless"].active [data-subview-target="check"]').click();
+      await assertVisibleBox(page, '[data-protocol-panel="vless"].active .service-route-trigger', `${name} recovered service routes`);
+    }
     await assertVisibleBox(page, '[data-protocol-panel].active .route-intersection-card', `${name} route intersections`);
     await assertVisibleBox(page, '[data-protocol-panel].active .route-shared-card', `${name} allowed shared routes`);
     const sharedRouteCard = page.locator('[data-protocol-panel].active .route-shared-card').first();
