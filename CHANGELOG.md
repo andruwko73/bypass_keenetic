@@ -1,3 +1,9 @@
+<a name="1.1002"></a>
+# [1.1002] - 1 Aug 2026
+
+- Fixed clean-install and in-place-update content validation after removal of the legacy pool renderer: both paths now validate the retained `render_protocol_check_content` entry point.
+- Added a regression that keeps bootstrap and update markers aligned with the shipped module; transactional failure continues to leave the installed release untouched.
+
 <a name="1.1001"></a>
 # [1.1001] - 1 Aug 2026
 

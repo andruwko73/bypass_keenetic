@@ -1937,7 +1937,7 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module web_background.py WebBackgroundStore || exit 1
     stage_runtime_module web_form_template.py render_web_form || exit 1
     stage_runtime_module web_form_blocks.py render_message_block || exit 1
-    stage_runtime_module web_pool_form_blocks.py render_protocol_panel || exit 1
+    stage_runtime_module web_pool_form_blocks.py render_protocol_check_content || exit 1
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
     stage_runtime_module web_get_actions.py dispatch || exit 1
     stage_runtime_module web_post_actions.py dispatch || exit 1

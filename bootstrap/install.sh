@@ -664,7 +664,7 @@ download_file "$(repo_file_url probe_cache.py)" "$TMP_DIR/probe_cache.py" 'recor
 download_file "$(repo_file_url custom_checks_store.py)" "$TMP_DIR/custom_checks_store.py" 'add_custom_check'
 download_file "$(repo_file_url web_form_template.py)" "$TMP_DIR/web_form_template.py" 'render_web_form'
 download_file "$(repo_file_url web_form_blocks.py)" "$TMP_DIR/web_form_blocks.py" 'render_message_block'
-download_file "$(repo_file_url web_pool_form_blocks.py)" "$TMP_DIR/web_pool_form_blocks.py" 'render_protocol_panel'
+download_file "$(repo_file_url web_pool_form_blocks.py)" "$TMP_DIR/web_pool_form_blocks.py" 'render_protocol_check_content'
 download_file "$(repo_file_url web_http_common.py)" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
 download_file "$(repo_file_url web_get_actions.py)" "$TMP_DIR/web_get_actions.py" 'dispatch'
 download_file "$(repo_file_url web_post_actions.py)" "$TMP_DIR/web_post_actions.py" 'dispatch'

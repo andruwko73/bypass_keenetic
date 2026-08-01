@@ -5881,6 +5881,13 @@ def test_runtime_modules_are_installed_by_update_scripts():
     assert 'youtube_edge_prefetch.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in bootstrap_modules
+    assert 'stage_runtime_module web_pool_form_blocks.py render_protocol_check_content || exit 1' in script
+    assert (
+        'download_file "$(repo_file_url web_pool_form_blocks.py)" '
+        '"$TMP_DIR/web_pool_form_blocks.py" \'render_protocol_check_content\''
+    ) in bootstrap
+    assert 'web_pool_form_blocks.py render_protocol_panel' not in script
+    assert "web_pool_form_blocks.py\" \'render_protocol_panel\'" not in bootstrap
 
 
 def test_youtube_edge_prefetch_runner_detects_current_youtube_route(tmp_path):

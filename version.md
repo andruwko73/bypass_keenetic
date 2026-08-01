@@ -1,4 +1,8 @@
-*v1.1001 (1 Aug 2026) -* main
+*v1.1002 (1 Aug 2026) -* main
+
+*Fixes clean installation and in-place update validation after the legacy pool renderer was removed: both installers now validate the retained `render_protocol_check_content` entry point instead of the deleted `render_protocol_panel` symbol.*
+
+*Adds a regression that keeps the bootstrap and update markers aligned with the shipped module, preventing a valid release from being rejected before files are activated. The failed 1.1001 router update remained transactional and left 1.1000 installed.*
 
 *Разделяет текущую полную проверку и последнюю завершённую проверку ключей. Прогресс нового запуска `0 из N` больше не подменяет сохранённый результат; состояние старых версий мигрирует без сброса сводки.*
 
