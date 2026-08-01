@@ -9450,18 +9450,25 @@ def _pool_summary_float(value, default=0.0):
         return float(default or 0.0)
 
 
-def _load_persisted_pool_summary():
+def _load_persisted_pool_state():
     with pool_summary_file_lock:
         payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
         summary = payload.get('summary') if isinstance(payload, dict) else None
-        return dict(summary) if isinstance(summary, dict) else None
+        latest_run = payload.get('latest_run') if isinstance(payload, dict) else None
+        return (
+            dict(summary) if isinstance(summary, dict) else None,
+            dict(latest_run) if isinstance(latest_run, dict) else {},
+        )
+
+
+def _load_persisted_pool_summary():
+    summary, _latest_run = _load_persisted_pool_state()
+    return summary
 
 
 def _load_persisted_pool_probe_run():
-    with pool_summary_file_lock:
-        payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
-        latest_run = payload.get('latest_run') if isinstance(payload, dict) else None
-        return dict(latest_run) if isinstance(latest_run, dict) else {}
+    _summary, latest_run = _load_persisted_pool_state()
+    return latest_run
 
 
 def _pool_probe_latest_run_text(latest_run):
@@ -9488,6 +9495,16 @@ def _pool_probe_latest_run_text(latest_run):
     if reason and status in ('paused', 'cancelled', 'failed'):
         text += f' · {reason}'
     return text
+
+
+def _pool_summary_with_latest_run(summary, latest_run=None):
+    result = dict(summary or {})
+    if latest_run is None:
+        latest_run = _load_persisted_pool_probe_run()
+    latest_run = dict(latest_run) if isinstance(latest_run, dict) else {}
+    result['latest_run'] = latest_run
+    result['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
+    return result
 
 
 def _save_persisted_pool_probe_run(latest_run):
@@ -9635,7 +9652,7 @@ def _pool_summary_with_persisted_fallback(summary):
 
 def _light_pool_summary_with_cache_fallback(current_keys, key_pools, custom_checks=None):
     empty_summary = _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
-    saved_persisted = _load_persisted_pool_summary()
+    saved_persisted, latest_run = _load_persisted_pool_state()
     persisted = _pool_summary_with_current_labels(saved_persisted, empty_summary)
     if (
         persisted is not None and
@@ -9644,12 +9661,15 @@ def _light_pool_summary_with_cache_fallback(current_keys, key_pools, custom_chec
     ):
         if persisted != saved_persisted:
             _save_persisted_pool_summary(persisted)
-        return persisted
+        return _pool_summary_with_latest_run(persisted, latest_run)
     light_cache = _load_light_key_probe_cache()
     if not light_cache:
-        return empty_summary
-    return _pool_summary_with_persisted_fallback(
-        _light_pool_status_summary(current_keys, key_pools, light_cache, custom_checks)
+        return _pool_summary_with_latest_run(empty_summary, latest_run)
+    return _pool_summary_with_latest_run(
+        _pool_summary_with_persisted_fallback(
+            _light_pool_status_summary(current_keys, key_pools, light_cache, custom_checks)
+        ),
+        latest_run,
     )
 
 
@@ -9689,10 +9709,7 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
             previous_summary = pool_summary_cache.get('summary')
             if pool_summary_cache.get('signature') == signature and pool_summary_cache.get('summary') is not None:
                 cached = dict(pool_summary_cache['summary'])
-                latest_run = _load_persisted_pool_probe_run()
-                cached['latest_run'] = latest_run
-                cached['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
-                return cached
+                return _pool_summary_with_latest_run(cached)
     resolved_key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
     resolved_key_probe_cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     resolved_custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
@@ -9713,10 +9730,7 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
     ):
         summary = previous_summary
     summary = _pool_summary_with_persisted_fallback(summary)
-    summary = dict(summary)
-    latest_run = _load_persisted_pool_probe_run()
-    summary['latest_run'] = latest_run
-    summary['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
+    summary = _pool_summary_with_latest_run(summary)
     if can_use_cache:
         with pool_summary_cache_lock:
             pool_summary_cache['signature'] = signature

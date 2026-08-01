@@ -1,3 +1,8 @@
+<a name="1.1000"></a>
+# [1.1000] - 1 Aug 2026
+
+- The lightweight initial dashboard now includes the persisted full-pool run status, so an explicit cancellation is shown immediately without loading the heavy pool cache.
+
 <a name="1.999"></a>
 # [1.999] - 1 Aug 2026
 
