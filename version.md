@@ -1,4 +1,10 @@
-*v1.1003 (1 Aug 2026) -* main
+*v1.1004 (1 Aug 2026) -* main
+
+*Stops ordinary page rendering and automatic refreshes from rewriting `web_command_state.json` when command state has not changed, reducing unnecessary writes to router storage.*
+
+*Keeps only render-time state persistence resilient to transient `EIO`, pauses repeated attempts for one minute, limits identical diagnostics, and preserves strict durable writes for real update, rollback, restart, and command transitions.*
+
+*Unexpected GET failures no longer expose `/opt` paths, random temporary names, or Python exception details. Xray, routes, key pools, TPROXY, Telegram, full-pool workers, clean installation, and the existing update mechanism are unchanged.*
 
 *Aligns the remaining `web_command_state.py` installer marker with its retained `command_state_snapshot` API and adds a general regression that checks every explicit update and bootstrap marker against the shipped file before release.*
 

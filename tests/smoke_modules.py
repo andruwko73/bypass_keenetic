@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO, StringIO
+import ast
 import base64
 import gzip
 import importlib
@@ -11376,6 +11377,185 @@ def test_web_command_state_helpers():
     assert consumed['label'] == 'Перезапустить сервисы'
     assert state['shown_after_finish'] is True
 
+    unchanged_state = {
+        'running': True,
+        'command': 'update',
+        'label': 'Обновление',
+        'finished_at': 0,
+        'shown_after_finish': False,
+    }
+    consumed, changed = web_command_state.consume_command_state_for_render(
+        lock,
+        unchanged_state,
+        clear_finished_commands=('update',),
+        return_changed=True,
+    )
+    assert consumed['running'] is True
+    assert changed is False
+
+
+def test_web_command_render_persistence_is_conditional_and_eio_safe():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in {
+            '_write_web_command_state_for_render',
+            '_consume_web_command_state_for_render',
+            '_get_web_command_state',
+        }
+    }
+    assert set(functions) == {
+        '_write_web_command_state_for_render',
+        '_consume_web_command_state_for_render',
+        '_get_web_command_state',
+    }
+
+    clock = [1000.0]
+    write_attempts = []
+    log_messages = []
+
+    def failing_writer(payload):
+        write_attempts.append(dict(payload))
+        raise OSError(5, 'Input/output error', '/opt/etc/bot/.private.tmp')
+
+    namespace = {
+        'time': py_types.SimpleNamespace(monotonic=lambda: clock[0]),
+        'web_command_render_write_lock': threading.Lock(),
+        'web_command_render_write_state': {'retry_at': 0.0, 'last_log_at': 0.0},
+        'WEB_COMMAND_RENDER_WRITE_RETRY_SECONDS': 60.0,
+        'WEB_COMMAND_RENDER_WRITE_LOG_INTERVAL_SECONDS': 300.0,
+        '_write_web_command_state_file': failing_writer,
+        '_web_error_log_label': web_http_common.unexpected_error_log_label,
+        '_write_runtime_log': log_messages.append,
+    }
+    exec(compile(
+        ast.Module(body=[functions['_write_web_command_state_for_render']], type_ignores=[]),
+        'bot.py',
+        'exec',
+    ), namespace)
+    safe_write = namespace['_write_web_command_state_for_render']
+    assert safe_write({'running': False}) is False
+    assert len(write_attempts) == 1
+    assert log_messages == ['Web render state persistence failed: OSError errno=5']
+    assert '/opt' not in log_messages[0]
+    assert '.tmp' not in log_messages[0]
+    assert safe_write({'running': False}) is False
+    assert len(write_attempts) == 1
+    clock[0] += 61.0
+    assert safe_write({'running': False}) is False
+    assert len(write_attempts) == 2
+    assert len(log_messages) == 1
+    successful_writes = []
+    namespace['_write_web_command_state_file'] = lambda payload: successful_writes.append(dict(payload))
+    clock[0] += 61.0
+    assert safe_write({'running': False}) is True
+    assert successful_writes == [{'running': False}]
+    assert namespace['web_command_render_write_state']['retry_at'] == 0.0
+    namespace['_write_web_command_state_file'] = failing_writer
+    namespace['web_command_render_write_state'].update({'retry_at': 0.0, 'last_log_at': 0.0})
+    clock[0] = 2000.0
+    attempts_before = len(write_attempts)
+    workers = [threading.Thread(target=safe_write, args=({'running': False},)) for _ in range(8)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    assert len(write_attempts) == attempts_before + 1
+
+    stale_repairs = []
+    stale_state = {}
+    stale_lock = threading.Lock()
+    stale_namespace = {
+        '_read_web_command_state_file': lambda: {
+            'running': True,
+            'command': 'restart',
+            'label': 'Перезапустить сервисы',
+            'result': '',
+            'progress_label': 'Запущено',
+            'finished_at': 0,
+        },
+        '_shared_command_job_running': lambda source='web': False,
+        '_write_web_command_state_for_render': lambda payload: stale_repairs.append(dict(payload)) or False,
+        '_attach_web_command_duration_estimate': lambda payload: dict(payload),
+        '_command_state_snapshot': web_command_state.command_state_snapshot,
+        'time': py_types.SimpleNamespace(time=lambda: 123.0),
+        'update_status': py_types.SimpleNamespace(read_update_status=lambda: {}),
+        'WEB_UPDATE_COMMANDS': ('update',),
+        'web_command_lock': stale_lock,
+        'web_command_state': stale_state,
+    }
+    exec(compile(
+        ast.Module(body=[functions['_get_web_command_state']], type_ignores=[]),
+        'bot.py',
+        'exec',
+    ), stale_namespace)
+    repaired = stale_namespace['_get_web_command_state']()
+    assert repaired['running'] is False
+    assert repaired['finished_at'] == 123.0
+    assert len(stale_repairs) == 1
+
+    render_writes = []
+    render_state = {
+        'running': False,
+        'command': '',
+        'label': '',
+        'result': '',
+        'progress': 0,
+        'progress_label': '',
+        'started_at': 0,
+        'finished_at': 0,
+        'shown_after_finish': False,
+    }
+    render_lock = threading.Lock()
+    render_namespace = {
+        '_get_web_command_state': lambda: dict(render_state),
+        '_consume_command_state_for_render_impl': web_command_state.consume_command_state_for_render,
+        '_command_state_snapshot': web_command_state.command_state_snapshot,
+        '_write_web_command_state_for_render': lambda payload: render_writes.append(dict(payload)),
+        'web_command_lock': render_lock,
+        'web_command_state': render_state,
+        'WEB_UPDATE_COMMANDS': ('update',),
+    }
+    exec(compile(
+        ast.Module(body=[functions['_consume_web_command_state_for_render']], type_ignores=[]),
+        'bot.py',
+        'exec',
+    ), render_namespace)
+    consume = render_namespace['_consume_web_command_state_for_render']
+    consume()
+    consume()
+    assert render_writes == []
+    render_state.update({
+        'command': 'restart',
+        'label': 'Перезапустить сервисы',
+        'result': 'done',
+        'progress': 100,
+        'started_at': 10,
+        'finished_at': 20,
+        'shown_after_finish': False,
+    })
+    consume()
+    assert len(render_writes) == 1
+    consume()
+    assert len(render_writes) == 2
+    handler = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == 'KeyInstallHTTPRequestHandler'
+    )
+    do_get = next(
+        node for node in handler.body
+        if isinstance(node, ast.FunctionDef) and node.name == 'do_GET'
+    )
+    do_get_source = ast.unparse(do_get)
+    assert "self._send_json({'error': str(exc)}" not in do_get_source
+    assert 'html.escape(str(exc))' not in do_get_source
+    assert '_safe_web_error_message(exc)' in do_get_source
+    consume()
+    assert len(render_writes) == 2
+
 
 def test_web_http_common_helpers():
     class _Config:
@@ -11393,6 +11573,14 @@ def test_web_http_common_helpers():
     assert web_http_common.config_web_auth_user(_Config) == 'root'
     _Config.web_auth_disabled = True
     assert web_http_common.config_web_auth_token(_Config) == ''
+    storage_error = OSError(5, 'Input/output error', '/opt/etc/bot/.secret.tmp')
+    message = web_http_common.safe_unexpected_error_message(storage_error)
+    label = web_http_common.unexpected_error_log_label(storage_error)
+    assert message == 'Временная ошибка доступа к хранилищу.'
+    assert label == 'OSError errno=5'
+    assert '/opt' not in message + label
+    assert '.tmp' not in message + label
+    assert web_http_common.safe_unexpected_error_message(RuntimeError('private detail')) == 'Временная ошибка обработки запроса.'
 
 
 def test_web_http_basic_auth_accepts_and_rejects_credentials():
@@ -15314,6 +15502,7 @@ def main():
     test_meta_custom_check_migration()
     test_chrome_remote_desktop_routes_are_manual_only()
     test_web_command_state_helpers()
+    test_web_command_render_persistence_is_conditional_and_eio_safe()
     test_web_http_common_helpers()
     test_web_http_basic_auth_accepts_and_rejects_credentials()
     test_installer_common_helpers()

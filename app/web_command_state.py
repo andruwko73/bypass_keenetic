@@ -23,9 +23,10 @@ def command_state_snapshot(lock, state):
         return dict(state)
 
 
-def consume_command_state_for_render(lock, state, clear_finished_commands=()):
+def consume_command_state_for_render(lock, state, clear_finished_commands=(), return_changed=False):
     with lock:
-        snapshot = dict(state)
+        before = dict(state)
+        snapshot = dict(before)
         clear_finished_commands = tuple(clear_finished_commands or ())
         if (snapshot.get('label') and not snapshot.get('running') and
                 snapshot.get('finished_at') and snapshot.get('command') in clear_finished_commands):
@@ -44,11 +45,16 @@ def consume_command_state_for_render(lock, state, clear_finished_commands=()):
                 'shown_after_finish': False,
             }
             state.update(cleared)
-            return cleared
-        if snapshot.get('label') and not snapshot.get('running') and snapshot.get('finished_at'):
-            if 'shown_after_finish' in state:
-                state['shown_after_finish'] = True
-        return snapshot
+            consumed = cleared
+        else:
+            if snapshot.get('label') and not snapshot.get('running') and snapshot.get('finished_at'):
+                if 'shown_after_finish' in state:
+                    state['shown_after_finish'] = True
+            consumed = snapshot
+        changed = state != before
+    if return_changed:
+        return consumed, changed
+    return consumed
 
 
 def set_command_progress(lock, state, command, result_text, progress_estimator):

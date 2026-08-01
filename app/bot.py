@@ -170,6 +170,8 @@ from web_http_common import (
     config_web_auth_user as _web_config_auth_user,
     is_local_web_client as _web_is_local_client,
     resolve_bind_host as _web_resolve_bind_host,
+    safe_unexpected_error_message as _safe_web_error_message,
+    unexpected_error_log_label as _web_error_log_label,
 )
 import web_form_blocks
 import web_get_actions
@@ -2888,6 +2890,13 @@ web_command_state = {
     'started_at': 0,
     'finished_at': 0,
     'shown_after_finish': False,
+}
+WEB_COMMAND_RENDER_WRITE_RETRY_SECONDS = 60.0
+WEB_COMMAND_RENDER_WRITE_LOG_INTERVAL_SECONDS = 300.0
+web_command_render_write_lock = threading.Lock()
+web_command_render_write_state = {
+    'retry_at': 0.0,
+    'last_log_at': 0.0,
 }
 web_flash_lock = threading.Lock()
 web_flash_state = {'message': ''}
@@ -8913,6 +8922,30 @@ def _write_web_command_state_file(state):
     _write_json_file(WEB_COMMAND_STATE_FILE, _normalize_web_command_state(state))
 
 
+def _write_web_command_state_for_render(state):
+    now = time.monotonic()
+    should_log = False
+    error_label = ''
+    with web_command_render_write_lock:
+        if now < float(web_command_render_write_state.get('retry_at') or 0.0):
+            return False
+        try:
+            _write_web_command_state_file(state)
+        except OSError as exc:
+            web_command_render_write_state['retry_at'] = now + WEB_COMMAND_RENDER_WRITE_RETRY_SECONDS
+            last_log_at = float(web_command_render_write_state.get('last_log_at') or 0.0)
+            if not last_log_at or now - last_log_at >= WEB_COMMAND_RENDER_WRITE_LOG_INTERVAL_SECONDS:
+                web_command_render_write_state['last_log_at'] = now
+                should_log = True
+                error_label = _web_error_log_label(exc)
+        else:
+            web_command_render_write_state['retry_at'] = 0.0
+            return True
+    if should_log:
+        _write_runtime_log(f'Web render state persistence failed: {error_label}')
+    return False
+
+
 def _attach_web_command_duration_estimate(state):
     state = dict(state or {})
     if state.get('command') not in WEB_UPDATE_COMMANDS:
@@ -8956,7 +8989,7 @@ def _get_web_command_state():
         state['result'] = state.get('result') or 'Команда прервана или сервис был перезапущен до записи результата.'
         state['progress_label'] = ''
         state['finished_at'] = time.time()
-        _write_web_command_state_file(state)
+        _write_web_command_state_for_render(state)
     state = _attach_web_command_duration_estimate(state)
     if state.get('running') and state.get('command') in WEB_UPDATE_COMMANDS:
         update_state = update_status.read_update_status()
@@ -8969,12 +9002,14 @@ def _get_web_command_state():
 
 def _consume_web_command_state_for_render():
     _get_web_command_state()
-    consumed = _consume_command_state_for_render_impl(
+    consumed, changed = _consume_command_state_for_render_impl(
         web_command_lock,
         web_command_state,
         clear_finished_commands=WEB_UPDATE_COMMANDS,
+        return_changed=True,
     )
-    _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
+    if changed:
+        _write_web_command_state_for_render(_command_state_snapshot(web_command_lock, web_command_state))
     return consumed
 
 
@@ -14076,10 +14111,15 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             try:
                 action = web_get_actions.dispatch(_web_get_context(self), path, parsed_url.query)
             except Exception as exc:
+                error_message = _safe_web_error_message(exc)
+                _write_runtime_log(f'Web GET {path} failed: {_web_error_log_label(exc)}')
                 if path.startswith('/api/'):
-                    self._send_json({'error': str(exc)}, status=500)
+                    self._send_json({'ok': False, 'error': error_message}, status=500)
                 else:
-                    self._send_html(f'<h1>500 Internal Server Error</h1><p>{html.escape(str(exc))}</p>', status=500)
+                    self._send_html(
+                        f'<h1>Временная ошибка</h1><p>{html.escape(error_message)}</p>',
+                        status=500,
+                    )
                 return
         finally:
             _update_maintenance_web_request_finished()

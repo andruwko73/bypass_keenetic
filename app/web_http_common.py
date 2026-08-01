@@ -41,6 +41,20 @@ def config_web_auth_user(config_module, default='admin'):
     return str(getattr(config_module, 'web_auth_user', default) or default)
 
 
+def safe_unexpected_error_message(exc):
+    if isinstance(exc, OSError):
+        return 'Временная ошибка доступа к хранилищу.'
+    return 'Временная ошибка обработки запроса.'
+
+
+def unexpected_error_log_label(exc):
+    label = type(exc).__name__
+    errno_value = getattr(exc, 'errno', None)
+    if isinstance(errno_value, int):
+        label += f' errno={errno_value}'
+    return label
+
+
 class WebRequestMixin:
     csrf_cookie_name = 'bk_csrf_token'
     csrf_token_re = re.compile(r'^[A-Za-z0-9_-]{32,256}$')

@@ -1,3 +1,11 @@
+<a name="1.1004"></a>
+# [1.1004] - 1 Aug 2026
+
+- Stops unchanged page renders and automatic refreshes from rewriting `web_command_state.json` on router storage.
+- Keeps render-only state persistence non-fatal during a transient storage `EIO`, rate-limits retries and diagnostics, and leaves mandatory update/restart state writes strict.
+- Replaces raw unexpected GET exception details with safe HTML/JSON messages that do not expose internal paths or temporary file names.
+- Adds regressions for unchanged, completed, concurrent, failed, throttled, and recovered render-state persistence without changing Xray, routing, key pools, TPROXY, or update workers.
+
 <a name="1.1003"></a>
 # [1.1003] - 1 Aug 2026
 
