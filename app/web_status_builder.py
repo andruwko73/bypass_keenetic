@@ -58,7 +58,7 @@ def pool_status_summary(
     protocol_order=('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks'),
     active_keys_text='активных ключей',
     pool_total_text='В пулах',
-    checked_text='Проверено',
+    checked_text='С результатом',
 ):
     """Build one consistent pool summary for light and full web snapshots."""
     current_keys = current_keys or {}

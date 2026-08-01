@@ -2490,6 +2490,12 @@
             }
             setOptionalText('pool-active-summary', poolSummary.active_text || '');
             setOptionalText('pool-summary-note', summaryNote);
+            const latestRunElement = document.getElementById('pool-latest-run-summary');
+            if (latestRunElement) {
+                const latestRunText = String(poolSummary.latest_run_text || '').trim();
+                latestRunElement.textContent = latestRunText;
+                latestRunElement.hidden = !latestRunText;
+            }
         }
 
         function updatePoolProbeControls(active, paused) {

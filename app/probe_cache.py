@@ -1,8 +1,10 @@
 import hashlib
 import json
 import os
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 
 from web_status_builder import youtube_probe_state
 
@@ -17,6 +19,10 @@ KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 KEY_PROBE_ERROR_TEXT_MAX_CHARS = 120
 PROBE_VERIFICATION_SCREENING = 'screening'
 PROBE_VERIFICATION_RUNTIME = 'runtime'
+KEY_PROBE_CACHE_LOCK_ROOT = ''
+KEY_PROBE_CACHE_LOCK_TIMEOUT_SECONDS = 15.0
+KEY_PROBE_CACHE_LOCK_POLL_SECONDS = 0.05
+KEY_PROBE_CACHE_LOCK_STALE_SECONDS = 120.0
 YOUTUBE_QUALITY_STABLE = 'stable'
 YOUTUBE_QUALITY_FAST = 'fast'
 YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
@@ -24,7 +30,136 @@ YOUTUBE_QUALITY_DEFAULT_FAST_LATENCY_MS = 1500
 YOUTUBE_QUALITY_DEFAULT_1600P_MBPS = 25.0
 YOUTUBE_QUALITY_DEFAULT_4K_MBPS = 45.0
 
-_cache_lock = threading.Lock()
+_cache_lock = threading.RLock()
+
+
+class KeyProbeCacheLockTimeout(TimeoutError):
+    """Raised instead of writing the cache without interprocess protection."""
+
+
+def _key_probe_cache_lock_root():
+    configured = str(KEY_PROBE_CACHE_LOCK_ROOT or '').strip()
+    if configured:
+        return configured
+    router_tmp = '/opt/tmp'
+    if os.path.isdir(router_tmp) and os.access(router_tmp, os.W_OK):
+        return router_tmp
+    return tempfile.gettempdir()
+
+
+def key_probe_cache_lock_path():
+    cache_path = os.path.abspath(str(KEY_PROBE_CACHE_PATH or 'key_probe_cache.json'))
+    digest = hashlib.sha1(cache_path.encode('utf-8', errors='ignore')).hexdigest()[:16]
+    return os.path.join(_key_probe_cache_lock_root(), f'bypass_key_probe_cache_{digest}.lock')
+
+
+def _key_probe_cache_lock_owner_path(lock_path):
+    return os.path.join(lock_path, 'owner.json')
+
+
+def _read_key_probe_cache_lock_owner(lock_path):
+    try:
+        with open(_key_probe_cache_lock_owner_path(lock_path), 'r', encoding='utf-8') as file:
+            value = json.load(file)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def _key_probe_cache_owner_is_alive(owner):
+    if os.name != 'posix':
+        return False
+    try:
+        pid = int((owner or {}).get('pid') or 0)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _key_probe_cache_lock_is_stale(lock_path, now=None):
+    try:
+        modified_at = os.path.getmtime(lock_path)
+    except OSError:
+        return False
+    now = time.time() if now is None else float(now)
+    if now - modified_at < max(1.0, float(KEY_PROBE_CACHE_LOCK_STALE_SECONDS or 0)):
+        return False
+    owner = _read_key_probe_cache_lock_owner(lock_path)
+    return not _key_probe_cache_owner_is_alive(owner)
+
+
+def _remove_key_probe_cache_lock(lock_path, *, token='', stale_only=False):
+    if stale_only and not _key_probe_cache_lock_is_stale(lock_path):
+        return False
+    owner = _read_key_probe_cache_lock_owner(lock_path)
+    if token and owner and str(owner.get('token') or '') != str(token):
+        return False
+    try:
+        os.remove(_key_probe_cache_lock_owner_path(lock_path))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    try:
+        os.rmdir(lock_path)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def _acquire_key_probe_cache_lock(timeout=None):
+    timeout = (
+        KEY_PROBE_CACHE_LOCK_TIMEOUT_SECONDS
+        if timeout is None else max(0.0, float(timeout or 0))
+    )
+    deadline = time.monotonic() + max(0.0, float(timeout or 0))
+    lock_path = key_probe_cache_lock_path()
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    token = f'{os.getpid()}:{threading.get_ident()}:{time.time_ns()}'
+    while True:
+        try:
+            os.mkdir(lock_path)
+            try:
+                with open(_key_probe_cache_lock_owner_path(lock_path), 'w', encoding='utf-8') as file:
+                    json.dump(
+                        {'pid': os.getpid(), 'created_at': time.time(), 'token': token},
+                        file,
+                        ensure_ascii=True,
+                        separators=(',', ':'),
+                    )
+            except Exception:
+                _remove_key_probe_cache_lock(lock_path, token=token)
+                raise
+            return lock_path, token
+        except FileExistsError:
+            if _remove_key_probe_cache_lock(lock_path, stale_only=True):
+                continue
+            if time.monotonic() >= deadline:
+                raise KeyProbeCacheLockTimeout('key probe cache transaction lock timed out')
+            time.sleep(max(0.01, float(KEY_PROBE_CACHE_LOCK_POLL_SECONDS or 0)))
+
+
+@contextmanager
+def key_probe_cache_transaction(timeout=None):
+    """Serialize one complete load-modify-save transaction across processes."""
+    with _cache_lock:
+        lock_path, token = _acquire_key_probe_cache_lock(timeout=timeout)
+        try:
+            yield
+        finally:
+            _remove_key_probe_cache_lock(lock_path, token=token)
 
 
 def hash_key(value):
@@ -51,15 +186,23 @@ def load_key_probe_cache():
 
 def save_key_probe_cache(cache):
     os.makedirs(os.path.dirname(KEY_PROBE_CACHE_PATH), exist_ok=True)
-    tmp_path = f'{KEY_PROBE_CACHE_PATH}.tmp'
-    with open(tmp_path, 'w', encoding='utf-8') as file:
-        json.dump(cache, file, ensure_ascii=False, separators=(',', ':'))
-        file.flush()
+    tmp_path = f'{KEY_PROBE_CACHE_PATH}.tmp.{os.getpid()}.{threading.get_ident()}'
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as file:
+            json.dump(cache, file, ensure_ascii=False, separators=(',', ':'))
+            file.flush()
+            try:
+                os.fsync(file.fileno())
+            except Exception:
+                pass
+        os.replace(tmp_path, KEY_PROBE_CACHE_PATH)
+    finally:
         try:
-            os.fsync(file.fileno())
-        except Exception:
+            os.remove(tmp_path)
+        except FileNotFoundError:
             pass
-    os.replace(tmp_path, KEY_PROBE_CACHE_PATH)
+        except OSError:
+            pass
 
 
 def _stored_probe_value(value):
@@ -571,7 +714,7 @@ class KeyProbeBatchRecorder:
             self._last_flush = time.time()
         if not pending:
             return False
-        with _cache_lock:
+        with key_probe_cache_transaction():
             cache = load_key_probe_cache()
             changed = False
             for proto, key_value, tg_ok, yt_ok, custom, custom_checks, timeout, timeout_reason, quality_kwargs, ts in pending:
@@ -596,7 +739,7 @@ class KeyProbeBatchRecorder:
 
 def forget_key_probes(key_values):
     removed = 0
-    with _cache_lock:
+    with key_probe_cache_transaction():
         cache = load_key_probe_cache()
         for key_value in key_values or []:
             key_id = hash_key(key_value)
@@ -622,7 +765,7 @@ def record_key_probe(
     allow_recent_success_downgrade=False,
     **quality_kwargs,
 ):
-    with _cache_lock:
+    with key_probe_cache_transaction():
         cache = load_key_probe_cache()
         changed = update_key_probe_cache_entry(
             cache,

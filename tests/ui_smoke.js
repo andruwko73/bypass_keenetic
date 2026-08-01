@@ -712,6 +712,11 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     if (poolSummaryText.includes('Facebo...')) {
       throw new Error(`${name}: pool summary still contains the legacy shortened service label: ${poolSummaryText}`);
     }
+    const latestRun = page.locator('#pool-latest-run-summary');
+    const latestRunText = (await latestRun.innerText()).trim();
+    if (!(await latestRun.isVisible()) || !latestRunText.includes('Последняя полная проверка: завершена')) {
+      throw new Error(`${name}: latest full pool run is not shown explicitly: ${latestRunText}`);
+    }
   }
   if (isMobile) {
     await assertMobileStatusGaps(page, name);

@@ -296,6 +296,9 @@ _KEY_PROBE_CACHE_SCHEMA_VERSION = 9
 _KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7, 8, 9)
 _KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 _POOL_SUMMARY_LAST_PATH = '/opt/etc/bot/pool_summary_last.json'
+_FULL_POOL_PROBE_SCOPES = frozenset(('manual_all', 'nightly_subscription'))
+_NIGHTLY_POOL_PROBE_MAX_ATTEMPTS = 3
+_NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS = 300.0
 _SERVICE_ROUTE_STATE_PATH = '/opt/etc/bot/service_route_state.json'
 _SERVICE_ROUTE_STATE_SCHEMA_VERSION = 1
 _SERVICE_ROUTE_STATE_MAX_SERVICES = 64
@@ -2788,6 +2791,7 @@ web_service_routes_cache_lock = threading.Lock()
 web_service_routes_build_lock = threading.Lock()
 light_service_route_state_cache_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
+pool_summary_file_lock = threading.RLock()
 event_history_api_cache_lock = threading.Lock()
 router_metrics_compact_cache_lock = threading.Lock()
 status_refresh_lock = threading.Lock()
@@ -9439,10 +9443,124 @@ def _pool_summary_count(summary, field):
         return 0
 
 
+def _pool_summary_float(value, default=0.0):
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        return float(default or 0.0)
+
+
 def _load_persisted_pool_summary():
-    payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
-    summary = payload.get('summary') if isinstance(payload, dict) else None
-    return summary if isinstance(summary, dict) else None
+    with pool_summary_file_lock:
+        payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
+        summary = payload.get('summary') if isinstance(payload, dict) else None
+        return dict(summary) if isinstance(summary, dict) else None
+
+
+def _load_persisted_pool_probe_run():
+    with pool_summary_file_lock:
+        payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
+        latest_run = payload.get('latest_run') if isinstance(payload, dict) else None
+        return dict(latest_run) if isinstance(latest_run, dict) else {}
+
+
+def _pool_probe_latest_run_text(latest_run):
+    latest_run = latest_run if isinstance(latest_run, dict) else {}
+    if not latest_run:
+        return ''
+    status = str(latest_run.get('status') or '').strip().lower()
+    labels = {
+        'running': 'выполняется',
+        'completed': 'завершена',
+        'paused': 'приостановлена',
+        'failed': 'ошибка',
+    }
+    label = labels.get(status, 'состояние неизвестно')
+    checked = max(0, _pool_summary_count(latest_run, 'checked'))
+    total = max(0, _pool_summary_count(latest_run, 'total'))
+    timestamp = _pool_summary_float(latest_run.get('finished_at') or latest_run.get('started_at'))
+    time_text = time.strftime('%d.%m %H:%M', time.localtime(timestamp)) if timestamp else ''
+    text = f'Последняя полная проверка: {label}, {checked}/{total} уникальных ключей'
+    if time_text:
+        text += f' · {time_text}'
+    reason = re.sub(r'\s+', ' ', str(latest_run.get('reason') or '')).strip()[:120]
+    if reason and status in ('paused', 'failed'):
+        text += f' · {reason}'
+    return text
+
+
+def _save_persisted_pool_probe_run(latest_run):
+    if not isinstance(latest_run, dict):
+        return {}
+    with pool_summary_file_lock:
+        payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        normalized = {
+            'status': str(latest_run.get('status') or '').strip().lower(),
+            'scope': str(latest_run.get('scope') or '').strip(),
+            'checked': max(0, _pool_summary_count(latest_run, 'checked')),
+            'total': max(0, _pool_summary_count(latest_run, 'total')),
+            'started_at': _pool_summary_float(latest_run.get('started_at')),
+            'finished_at': _pool_summary_float(latest_run.get('finished_at')),
+            'records_count': max(0, _pool_summary_count(latest_run, 'records_count')),
+            'applied_count': max(0, _pool_summary_count(latest_run, 'applied_count')),
+            'applied_unique_count': max(0, _pool_summary_count(latest_run, 'applied_unique_count')),
+            'reason': re.sub(r'\s+', ' ', str(latest_run.get('reason') or '')).strip()[:120],
+        }
+        if payload.get('latest_run') == normalized:
+            return normalized
+        payload['latest_run'] = normalized
+        _write_json_file(_POOL_SUMMARY_LAST_PATH, payload)
+        return normalized
+
+
+def _record_persisted_pool_probe_run(
+    *,
+    status,
+    scope,
+    checked,
+    total,
+    started_at,
+    finished_at=0,
+    reason='',
+    apply_result=None,
+):
+    scope = str(scope or '').strip()
+    if scope not in _FULL_POOL_PROBE_SCOPES:
+        return {}
+    with pool_summary_file_lock:
+        previous = _load_persisted_pool_probe_run()
+        previous_started_at = _pool_summary_float(previous.get('started_at'))
+        current_started_at = _pool_summary_float(started_at)
+        same_run = (
+            str(previous.get('scope') or '') == scope and
+            abs(previous_started_at - current_started_at) < 0.001
+        )
+        previous_unique = _pool_summary_count(previous, 'applied_unique_count') if same_run else 0
+        previous_records = _pool_summary_count(previous, 'records_count') if same_run else 0
+        previous_applied = _pool_summary_count(previous, 'applied_count') if same_run else 0
+        apply_result = apply_result if isinstance(apply_result, dict) else {}
+        if str(status or '') == 'running':
+            unique_count = previous_unique
+            records_count = previous_records
+            applied_count = previous_applied
+        else:
+            unique_count = previous_unique + max(0, _pool_summary_count(apply_result, 'unique_key_count'))
+            records_count = previous_records + max(0, _pool_summary_count(apply_result, 'records_count'))
+            applied_count = previous_applied + max(0, _pool_summary_count(apply_result, 'applied_count'))
+        return _save_persisted_pool_probe_run({
+            'status': status,
+            'scope': scope,
+            'checked': checked,
+            'total': total,
+            'started_at': current_started_at,
+            'finished_at': finished_at,
+            'records_count': records_count,
+            'applied_count': applied_count,
+            'applied_unique_count': unique_count,
+            'reason': reason,
+        })
 
 
 def _save_persisted_pool_summary(summary):
@@ -9450,14 +9568,18 @@ def _save_persisted_pool_summary(summary):
     total_count = _pool_summary_count(summary, 'pool_total_count')
     if checked_count <= 0 or total_count <= 0 or checked_count != total_count:
         return
-    payload = {
-        'saved_at': time.time(),
-        'summary': summary,
-    }
-    try:
-        _write_json_file(_POOL_SUMMARY_LAST_PATH, payload)
-    except Exception as exc:
-        _write_runtime_log(f'Failed to persist pool summary: {type(exc).__name__}')
+    with pool_summary_file_lock:
+        payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if payload.get('summary') == summary:
+            return
+        payload['saved_at'] = time.time()
+        payload['summary'] = summary
+        try:
+            _write_json_file(_POOL_SUMMARY_LAST_PATH, payload)
+        except Exception as exc:
+            _write_runtime_log(f'Failed to persist pool summary: {type(exc).__name__}')
 
 
 def _pool_summary_with_current_labels(summary, current_summary):
@@ -9483,7 +9605,7 @@ def _pool_summary_with_current_labels(summary, current_summary):
     migrated['services'] = services
     note_parts = [
         f'В пулах: {_pool_summary_count(migrated, "pool_total_count")}',
-        f'Проверено: {_pool_summary_count(migrated, "checked_pool_count")}',
+        f'С результатом: {_pool_summary_count(migrated, "checked_pool_count")}',
     ]
     if services:
         note_parts.append('; '.join(f'{service.get("label", "")}: {service["count"]}' for service in services))
@@ -9565,7 +9687,11 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
             previous_signature = pool_summary_cache.get('signature')
             previous_summary = pool_summary_cache.get('summary')
             if pool_summary_cache.get('signature') == signature and pool_summary_cache.get('summary') is not None:
-                return pool_summary_cache['summary']
+                cached = dict(pool_summary_cache['summary'])
+                latest_run = _load_persisted_pool_probe_run()
+                cached['latest_run'] = latest_run
+                cached['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
+                return cached
     resolved_key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
     resolved_key_probe_cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     resolved_custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
@@ -9586,6 +9712,10 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
     ):
         summary = previous_summary
     summary = _pool_summary_with_persisted_fallback(summary)
+    summary = dict(summary)
+    latest_run = _load_persisted_pool_probe_run()
+    summary['latest_run'] = latest_run
+    summary['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
     if can_use_cache:
         with pool_summary_cache_lock:
             pool_summary_cache['signature'] = signature
@@ -10307,16 +10437,24 @@ def _format_pool_probe_completion_summary(summary, *, error=False):
     summary = summary if isinstance(summary, dict) else {}
     total_count = max(0, int(summary.get('pool_total_count') or 0))
     checked_count = max(0, int(summary.get('checked_pool_count') or 0))
-    missing_count = max(0, total_count - checked_count)
-    complete = bool(total_count and checked_count >= total_count and not error)
+    latest_run = summary.get('latest_run') if isinstance(summary.get('latest_run'), dict) else {}
+    run_total = max(0, int(latest_run.get('total') or 0))
+    run_checked = max(0, int(latest_run.get('checked') or 0))
+    complete = bool(
+        latest_run.get('status') == 'completed' and
+        run_total and run_checked >= run_total and not error
+    )
     title = '✅ Проверка всех ключей завершена' if complete else '⚠️ Проверка всех ключей завершена с предупреждением'
     active_text = str(summary.get('active_text') or '').strip()
     lines = [title, '', 'Ключи и пул']
     if active_text:
         lines.append(active_text)
-    lines.append(f'В пулах: {total_count}; Проверено: {checked_count}')
-    if missing_count:
-        lines.append(f'Без итогового результата: {missing_count}')
+    if run_total:
+        lines.append(f'Последний запуск: {run_checked}/{run_total} уникальных ключей')
+    lines.append(f'В пулах: {total_count}; С результатом: {checked_count}')
+    reason = re.sub(r'\s+', ' ', str(latest_run.get('reason') or '')).strip()[:120]
+    if reason and not complete:
+        lines.append(f'Причина: {reason}')
     services = summary.get('services') if isinstance(summary.get('services'), list) else []
     if services:
         lines.extend(('', 'Работают по сервисам:'))
@@ -11106,7 +11244,14 @@ def _run_pool_probe_process_worker(input_path, progress_path, result_path, cance
 def _apply_pool_probe_records_in_worker(records_path):
     records_path = str(records_path or '')
     if not records_path:
-        return 0
+        return {
+            'ok': False,
+            'records_count': 0,
+            'applied_count': 0,
+            'changed_count': 0,
+            'unique_key_count': 0,
+            'error': 'missing records path',
+        }
     result_path = f'{records_path}.apply.json'
     _remove_file(result_path)
     env = dict(os.environ)
@@ -11125,7 +11270,14 @@ def _apply_pool_probe_records_in_worker(records_path):
         result = _read_json_file(result_path, {}) or {}
         if process.returncode != 0 or not result.get('ok'):
             raise RuntimeError(str(result.get('error') or 'cache apply worker failed'))
-        return max(0, int(result.get('applied') or 0))
+        return {
+            'ok': True,
+            'records_count': max(0, int(result.get('records_count') or 0)),
+            'applied_count': max(0, int(result.get('applied_count') or result.get('applied') or 0)),
+            'changed_count': max(0, int(result.get('changed_count') or 0)),
+            'unique_key_count': max(0, int(result.get('unique_key_count') or 0)),
+            'error': '',
+        }
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=3)
@@ -11264,11 +11416,35 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
         started_at=started_at,
         finished_at=0,
     )
+    try:
+        _record_persisted_pool_probe_run(
+            status='running',
+            scope=scope,
+            checked=initial_checked,
+            total=total_count,
+            started_at=started_at,
+        )
+    except Exception as exc:
+        _write_runtime_log(f'Failed to persist pool probe start state: {type(exc).__name__}')
 
     def monitor():
         result = {}
+        apply_result = {
+            'ok': False,
+            'records_count': 0,
+            'applied_count': 0,
+            'changed_count': 0,
+            'unique_key_count': 0,
+            'error': '',
+        }
         completion_summary = None
         completion_error = False
+        completion_reason = ''
+        final_checked = initial_checked
+        final_total = total_count
+        final_finished_at = 0.0
+        remaining = []
+        worker_ok = False
         try:
             while process.poll() is None:
                 if pool_probe_cancel_event.is_set():
@@ -11283,26 +11459,39 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
                 expected_records_path = f"{paths['result_path']}.records"
                 records_path = str(result.get('probe_records_path') or '')
                 if records_path == expected_records_path:
-                    _apply_pool_probe_records_in_worker(records_path)
+                    apply_result = _apply_pool_probe_records_in_worker(records_path)
+                elif int(result.get('absolute_checked') or initial_checked) > initial_checked:
+                    raise RuntimeError('pool probe records file is missing')
             except Exception as exc:
+                completion_error = True
+                completion_reason = 'Результаты проверки не удалось сохранить.'
                 _write_runtime_log(f'Pool probe cache apply failed: {type(exc).__name__}')
-            remaining = result.get('remaining') or []
+            remaining = list(result.get('remaining') or [])
             if remaining and bool(result.get('resume_allowed', True)):
                 _store_cancelled_pool_probe(remaining, custom_checks, scope)
             checked = int(result.get('absolute_checked') or progress.get('checked') or initial_checked)
+            total = max(total_count, int(result.get('total') or progress.get('total') or total_count))
+            final_checked = max(0, checked)
+            final_total = max(0, total)
+            final_finished_at = float(result.get('finished_at') or time.time())
+            worker_ok = bool(process.returncode == 0 and result.get('ok'))
             note = ''
             if process.returncode != 0:
                 note = str(result.get('error') or f'pool probe worker exited with code {process.returncode}')
                 completion_error = True
+                completion_reason = 'Процесс проверки завершился с ошибкой.'
                 _write_runtime_log(note)
+            elif final_checked > initial_checked and not apply_result.get('ok'):
+                note = completion_reason or 'Результаты проверки не сохранены.'
+                completion_error = True
             _set_pool_probe_progress(
                 running=False,
-                checked=max(0, checked),
-                total=max(total_count, int(result.get('total') or progress.get('total') or total_count)),
+                checked=final_checked,
+                total=final_total,
                 scope=scope,
                 note=note,
                 started_at=started_at,
-                finished_at=float(result.get('finished_at') or time.time()),
+                finished_at=final_finished_at,
             )
             _record_memory_timeline(
                 'pool probe process finished',
@@ -11319,8 +11508,65 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             )
         except Exception as exc:
             completion_error = True
+            completion_reason = 'Контроль завершения проверки завершился с ошибкой.'
             _write_runtime_log(f'Pool probe process monitor failed: {type(exc).__name__}')
         finally:
+            final_finished_at = final_finished_at or time.time()
+            has_resume = _has_pool_probe_resume_payload()
+            was_cancelled = bool(result.get('cancelled')) or pool_probe_cancel_event.is_set()
+            previous_run = _load_persisted_pool_probe_run()
+            previous_started_at = _pool_summary_float(previous_run.get('started_at'))
+            same_run = (
+                str(previous_run.get('scope') or '') == str(scope or '') and
+                abs(previous_started_at - float(started_at or 0)) < 0.001
+            )
+            previous_unique = _pool_summary_count(previous_run, 'applied_unique_count') if same_run else 0
+            projected_unique = previous_unique + _pool_summary_count(apply_result, 'unique_key_count')
+            completed = bool(
+                worker_ok and
+                apply_result.get('ok') and
+                final_total > 0 and
+                final_checked >= final_total and
+                projected_unique >= final_total and
+                not remaining and
+                not has_resume and
+                not was_cancelled and
+                not completion_error
+            )
+            if completed:
+                completion_status = 'completed'
+                completion_reason = ''
+            elif remaining or has_resume or was_cancelled:
+                completion_status = 'paused'
+                completion_reason = completion_reason or 'Проверка приостановлена и может быть продолжена.'
+            else:
+                completion_status = 'failed'
+                completion_reason = completion_reason or 'Проверка завершилась не полностью.'
+                completion_error = True
+            try:
+                latest_run = _record_persisted_pool_probe_run(
+                    status=completion_status,
+                    scope=scope,
+                    checked=final_checked,
+                    total=final_total,
+                    started_at=started_at,
+                    finished_at=final_finished_at,
+                    reason=completion_reason,
+                    apply_result=apply_result,
+                )
+                if str(scope or '') == 'nightly_subscription':
+                    _mark_nightly_subscription_pool_probe_finished(
+                        status=completion_status,
+                        checked=final_checked,
+                        total=final_total,
+                        started_at=started_at,
+                        finished_at=final_finished_at,
+                        reason=completion_reason,
+                        applied_unique_count=_pool_summary_count(latest_run, 'applied_unique_count'),
+                    )
+            except Exception as exc:
+                completion_error = True
+                _write_runtime_log(f'Failed to persist pool probe completion state: {type(exc).__name__}')
             _invalidate_probe_status_caches()
             completion_summary = _refresh_persisted_pool_summary_after_probe()
             # The child normally reaps its own temporary Xray.  A last, scoped
@@ -11362,6 +11608,61 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
     return True, queued_count
 
 
+def _handle_inprocess_pool_probe_finished(result):
+    result = result if isinstance(result, dict) else {}
+    scope = str(result.get('scope') or '')
+    checked = max(0, int(result.get('checked') or 0))
+    total = max(0, int(result.get('total') or 0))
+    started_at = _pool_summary_float(result.get('started_at'))
+    finished_at = _pool_summary_float(result.get('finished_at'), time.time())
+    previous = _load_persisted_pool_probe_run()
+    same_run = (
+        str(previous.get('scope') or '') == scope and
+        abs(_pool_summary_float(previous.get('started_at')) - started_at) < 0.001
+    )
+    previous_checked = _pool_summary_count(previous, 'checked') if same_run else 0
+    current_unique = max(0, checked - previous_checked)
+    paused = _has_pool_probe_resume_payload() or pool_probe_cancel_event.is_set()
+    complete = bool(total and checked >= total and not result.get('error') and not paused)
+    status = 'completed' if complete else ('paused' if paused else 'failed')
+    reason = '' if complete else (
+        'Проверка приостановлена и может быть продолжена.'
+        if paused else 'Проверка завершилась не полностью.'
+    )
+    latest_run = _record_persisted_pool_probe_run(
+        status=status,
+        scope=scope,
+        checked=checked,
+        total=total,
+        started_at=started_at,
+        finished_at=finished_at,
+        reason=reason,
+        apply_result={
+            'records_count': current_unique,
+            'applied_count': current_unique,
+            'unique_key_count': current_unique,
+        },
+    )
+    if scope == 'nightly_subscription':
+        _mark_nightly_subscription_pool_probe_finished(
+            status=status,
+            checked=checked,
+            total=total,
+            started_at=started_at,
+            finished_at=finished_at,
+            reason=reason,
+            applied_unique_count=_pool_summary_count(latest_run, 'applied_unique_count'),
+        )
+    _invalidate_probe_status_caches()
+    summary = _refresh_persisted_pool_summary_after_probe()
+    return _finalize_pool_probe_completion_notification(
+        scope=scope,
+        started_at=started_at,
+        summary=summary,
+        error=not complete,
+    )
+
+
 def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_checked=0, total_count=None, started_at=None):
     global pool_probe_resume_after_cancel
     pool_probe_resume_after_cancel = True
@@ -11379,7 +11680,8 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_
         if not POOL_PROBE_INPROCESS_FALLBACK_ENABLED:
             _write_runtime_log('Pool probe process worker is disabled; in-process pool probe fallback is disabled for router memory safety.')
             return False, len(selected or [])
-    return _pool_probe_controller().start_pool_probe_worker(
+    controller_started_at = time.time() if started_at is None else float(started_at or time.time())
+    started, queued = _pool_probe_controller().start_pool_probe_worker(
         selected,
         custom_checks,
         scope=scope,
@@ -11397,13 +11699,25 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_
         cancel_event=pool_probe_cancel_event,
         initial_checked=initial_checked,
         total_count=total_count,
-        started_at=started_at,
-        on_finished=lambda result: _finalize_pool_probe_completion_notification(
-            scope=scope,
-            started_at=(result or {}).get('started_at') or started_at or 0,
-            error=bool((result or {}).get('error')),
-        ),
+        started_at=controller_started_at,
+        on_finished=_handle_inprocess_pool_probe_finished,
     )
+    if started:
+        try:
+            _record_persisted_pool_probe_run(
+                status='running',
+                scope=scope,
+                checked=max(0, int(initial_checked or 0)),
+                total=(
+                    max(0, int(total_count or 0))
+                    if total_count is not None else
+                    max(0, int(initial_checked or 0)) + max(0, int(queued or 0))
+                ),
+                started_at=controller_started_at,
+            )
+        except Exception as exc:
+            _write_runtime_log(f'Failed to persist in-process pool probe start state: {type(exc).__name__}')
+    return started, queued
 
 
 def _resume_cancelled_pool_probe(reason='применения ключа'):
@@ -11902,16 +12216,76 @@ def _nightly_subscription_pool_probe_state():
     return payload if isinstance(payload, dict) else {}
 
 
-def _mark_nightly_subscription_pool_probe_started(window_date, now):
-    if not SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH or not window_date:
+def _write_nightly_subscription_pool_probe_state(payload):
+    if not SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH:
         return
     _write_json_file(
         SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH,
-        {
-            'window_date': str(window_date),
-            'started_at': float(now),
-        },
+        payload if isinstance(payload, dict) else {},
     )
+
+
+def _mark_nightly_subscription_pool_probe_started(window_date, now, queued=0, *, resumed=False):
+    if not SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH or not window_date:
+        return
+    previous = _nightly_subscription_pool_probe_state()
+    same_window = str(previous.get('window_date') or '') == str(window_date)
+    attempts = max(0, _pool_summary_count(previous, 'attempts')) + 1 if same_window else 1
+    started_at = float(previous.get('started_at') or now) if resumed and same_window else float(now)
+    checked = max(0, _pool_summary_count(previous, 'checked')) if resumed and same_window else 0
+    previous_total = max(0, _pool_summary_count(previous, 'total')) if resumed and same_window else 0
+    total = max(previous_total, checked + max(0, int(queued or 0)))
+    _write_nightly_subscription_pool_probe_state({
+        'schema': 2,
+        'window_date': str(window_date),
+        'status': 'running',
+        'started_at': started_at,
+        'finished_at': 0.0,
+        'checked': checked,
+        'total': total,
+        'applied_unique_count': (
+            max(0, _pool_summary_count(previous, 'applied_unique_count'))
+            if resumed and same_window else 0
+        ),
+        'attempts': attempts,
+        'next_retry_at': 0.0,
+        'reason': '',
+    })
+
+
+def _mark_nightly_subscription_pool_probe_finished(
+    *,
+    status,
+    checked,
+    total,
+    started_at,
+    finished_at,
+    reason='',
+    applied_unique_count=0,
+):
+    state = _nightly_subscription_pool_probe_state()
+    status = str(status or '').strip().lower()
+    if status not in ('completed', 'paused', 'failed'):
+        status = 'failed'
+    attempts = max(1, _pool_summary_count(state, 'attempts'))
+    next_retry_at = 0.0
+    if status != 'completed' and attempts < _NIGHTLY_POOL_PROBE_MAX_ATTEMPTS:
+        next_retry_at = float(finished_at or time.time()) + _NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS
+    payload = {
+        'schema': 2,
+        'window_date': str(state.get('window_date') or ''),
+        'status': status,
+        'started_at': float(started_at or state.get('started_at') or 0),
+        'finished_at': float(finished_at or time.time()),
+        'checked': max(0, int(checked or 0)),
+        'total': max(0, int(total or 0)),
+        'applied_unique_count': max(0, int(applied_unique_count or 0)),
+        'attempts': attempts,
+        'next_retry_at': next_retry_at,
+        'reason': re.sub(r'\s+', ' ', str(reason or '')).strip()[:120],
+    }
+    _write_nightly_subscription_pool_probe_state(payload)
+    return payload
 
 
 def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
@@ -11927,8 +12301,40 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
     if not window_date:
         return False
     state = _nightly_subscription_pool_probe_state()
-    if str(state.get('window_date') or '') == window_date:
+    same_window = str(state.get('window_date') or '') == window_date
+    status = str(state.get('status') or '').strip().lower()
+    if same_window and not status:
+        # Legacy {window_date, started_at} state remains a once-per-day marker.
         return False
+    if same_window and status == 'completed':
+        return False
+    if same_window and status == 'running':
+        if pool_probe_lock.locked():
+            return False
+        resume_available = _has_pool_probe_resume_payload()
+        interrupted = dict(state)
+        interrupted.update({
+            'schema': 2,
+            'status': 'paused' if resume_available else 'failed',
+            'finished_at': now,
+            'next_retry_at': now + _NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS,
+            'reason': (
+                'Предыдущая проверка была прервана и может быть продолжена.'
+                if resume_available else
+                'Предыдущий процесс проверки был прерван перезапуском.'
+            ),
+        })
+        _write_nightly_subscription_pool_probe_state(interrupted)
+        return False
+    if same_window:
+        if _pool_summary_count(state, 'attempts') >= _NIGHTLY_POOL_PROBE_MAX_ATTEMPTS:
+            return False
+        try:
+            next_retry_at = float(state.get('next_retry_at') or 0)
+        except (TypeError, ValueError):
+            next_retry_at = 0.0
+        if next_retry_at and now < next_retry_at:
+            return False
     refreshed_at = _subscription_runtime().latest_recent_subscription_success_at(
         subscription_state,
         now,
@@ -11939,24 +12345,39 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
     task_name = 'Nightly subscription pool probe'
     if not _background_task_allowed(task_name):
         return False
-    if pool_probe_lock.locked() or _has_pool_probe_resume_payload():
+    if pool_probe_lock.locked():
         background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
         background_task_skip_reason[task_name] = 'pool_probe'
         return False
+    resume_pending = bool(
+        same_window and
+        status in ('paused', 'failed') and
+        _has_pool_probe_resume_payload()
+    )
+    if _has_pool_probe_resume_payload() and not resume_pending:
+        background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
+        background_task_skip_reason[task_name] = 'pool_probe'
+        return False
+    if resume_pending:
+        def callback():
+            return _resume_cancelled_pool_probe('ночной проверки')
+    else:
+        def callback():
+            return _probe_all_pool_keys_async(
+                stale_only=False,
+                max_keys=None,
+                scope='nightly_subscription',
+            )
     coordinator_started, result = _run_coordinated_background_task(
         task_name,
-        lambda: _probe_all_pool_keys_async(
-            stale_only=False,
-            max_keys=None,
-            scope='nightly_subscription',
-        ),
+        callback,
     )
     if not coordinator_started or not isinstance(result, tuple):
         return False
     probe_started, queued = result
     if not probe_started:
         return False
-    _mark_nightly_subscription_pool_probe_started(window_date, now)
+    _mark_nightly_subscription_pool_probe_started(window_date, now, queued, resumed=resume_pending)
     _write_runtime_log(
         f'Nightly subscription pool probe started after refresh at {time.strftime("%H:%M", time.localtime(refreshed_at))}: '
         f'{int(queued or 0)} keys queued.'

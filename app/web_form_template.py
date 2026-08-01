@@ -297,6 +297,8 @@ def render_web_form(
         'Веб-интерфейс, состояние роутера и сервисные действия собраны в одном месте'
     )
     if enable_key_pool:
+        pool_latest_run_text = str(pool_summary.get('latest_run_text') or '').strip()
+        pool_latest_run_hidden = '' if pool_latest_run_text else ' hidden'
         key_pool_status_card = f'''
                         <div class="status-card key-pool-card">
                             <div class="status-card-top">
@@ -305,6 +307,7 @@ def render_web_form(
                                         <span class="status-label">Ключи и пул</span>
                                     <span class="status-value" id="pool-active-summary">{html.escape(pool_summary['active_text'])}</span>
                                     <p class="status-note" id="pool-summary-note">{html.escape(pool_summary_note)}</p>
+                                    <p class="status-note" id="pool-latest-run-summary"{pool_latest_run_hidden}>{html.escape(pool_latest_run_text)}</p>
                                     </div>
                                 </div>
                             <div class="status-card-actions key-pool-actions">

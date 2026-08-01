@@ -2139,14 +2139,115 @@ def test_subscription_nightly_pool_probe_dispatches_full_pool_once():
             "bot._has_pool_probe_resume_payload = lambda: False\n"
             "bot._run_coordinated_background_task = lambda _name, callback: (True, callback())\n"
             "bot._probe_all_pool_keys_async = lambda **kwargs: (calls.append(kwargs) or (True, 17))\n"
-            "bot._mark_nightly_subscription_pool_probe_started = lambda day, now: marks.append((day, now))\n"
+            "bot._mark_nightly_subscription_pool_probe_started = lambda day, now, queued=0, resumed=False: marks.append((day, now, queued, resumed))\n"
             "bot._write_runtime_log = lambda _message: None\n"
             "assert bot._maybe_start_nightly_subscription_pool_probe({}, now=456.0)\n"
             "assert calls == [{'stale_only': False, 'max_keys': None, 'scope': 'nightly_subscription'}]\n"
-            "assert marks == [('2026-07-19', 456.0)]\n"
+            "assert marks == [('2026-07-19', 456.0, 17, False)]\n"
             "bot._nightly_subscription_pool_probe_state = lambda: {'window_date': '2026-07-19'}\n"
             "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=457.0)\n"
             "assert len(calls) == 1\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+
+def test_subscription_nightly_pool_probe_lifecycle_resume_and_legacy_state():
+    with tempfile.TemporaryDirectory() as directory:
+        temp_path = Path(directory)
+        state_path = temp_path / 'nightly.json'
+        (temp_path / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import json, sys, threading\n"
+            f"sys.path.insert(0, {str(temp_path)!r})\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            "import bot\n"
+            f"bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH = {str(state_path)!r}\n"
+            "bot._mark_nightly_subscription_pool_probe_started('2026-07-19', 100.0, 5)\n"
+            "state = bot._nightly_subscription_pool_probe_state()\n"
+            "assert state['status'] == 'running' and state['attempts'] == 1 and state['total'] == 5\n"
+            "bot._mark_nightly_subscription_pool_probe_finished(status='paused', checked=2, total=5, started_at=100.0, finished_at=200.0, reason='pause', applied_unique_count=2)\n"
+            "class Runtime:\n"
+            "    def nightly_pool_probe_window_date(self, *_args, **_kwargs): return '2026-07-19'\n"
+            "    def latest_recent_subscription_success_at(self, *_args, **_kwargs): return 123.0\n"
+            "bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED = True\n"
+            "bot._app_mode_pool_enabled = lambda: True\n"
+            "bot._subscription_runtime = lambda: Runtime()\n"
+            "bot._background_task_allowed = lambda _name: True\n"
+            "bot.pool_probe_lock = threading.Lock()\n"
+            "bot._has_pool_probe_resume_payload = lambda: True\n"
+            "resumes = []\n"
+            "bot._resume_cancelled_pool_probe = lambda reason: (resumes.append(reason) or (True, 3))\n"
+            "bot._run_coordinated_background_task = lambda _name, callback: (True, callback())\n"
+            "bot._write_runtime_log = lambda _message: None\n"
+            "assert bot._maybe_start_nightly_subscription_pool_probe({}, now=501.0)\n"
+            "state = bot._nightly_subscription_pool_probe_state()\n"
+            "assert resumes == ['ночной проверки']\n"
+            "assert state['status'] == 'running' and state['attempts'] == 2\n"
+            "assert state['started_at'] == 100.0 and state['checked'] == 2 and state['total'] == 5\n"
+            "bot._mark_nightly_subscription_pool_probe_finished(status='completed', checked=5, total=5, started_at=100.0, finished_at=600.0, applied_unique_count=5)\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=601.0)\n"
+            f"json.dump({{'window_date': '2026-07-20', 'started_at': 700.0}}, open({str(state_path)!r}, 'w', encoding='utf-8'))\n"
+            "class LegacyRuntime(Runtime):\n"
+            "    def nightly_pool_probe_window_date(self, *_args, **_kwargs): return '2026-07-20'\n"
+            "bot._subscription_runtime = lambda: LegacyRuntime()\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=701.0)\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+
+def test_subscription_nightly_pool_probe_stale_running_becomes_retryable():
+    with tempfile.TemporaryDirectory() as directory:
+        temp_path = Path(directory)
+        state_path = temp_path / 'nightly.json'
+        (temp_path / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import json, sys, threading\n"
+            f"sys.path.insert(0, {str(temp_path)!r})\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            "import bot\n"
+            f"bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH = {str(state_path)!r}\n"
+            f"json.dump({{'schema': 2, 'window_date': '2026-07-19', 'status': 'running', 'started_at': 100.0, 'attempts': 1}}, open({str(state_path)!r}, 'w', encoding='utf-8'))\n"
+            "class Runtime:\n"
+            "    def nightly_pool_probe_window_date(self, *_args, **_kwargs): return '2026-07-19'\n"
+            "bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED = True\n"
+            "bot._app_mode_pool_enabled = lambda: True\n"
+            "bot._subscription_runtime = lambda: Runtime()\n"
+            "bot.pool_probe_lock = threading.Lock()\n"
+            "bot._has_pool_probe_resume_payload = lambda: False\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=1000.0)\n"
+            "state = bot._nightly_subscription_pool_probe_state()\n"
+            "assert state['status'] == 'failed' and state['next_retry_at'] == 1300.0\n"
+            f"json.dump({{'schema': 2, 'window_date': '2026-07-19', 'status': 'running', 'started_at': 100.0, 'attempts': 1}}, open({str(state_path)!r}, 'w', encoding='utf-8'))\n"
+            "bot._has_pool_probe_resume_payload = lambda: True\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=2000.0)\n"
+            "state = bot._nightly_subscription_pool_probe_state()\n"
+            "assert state['status'] == 'paused' and state['next_retry_at'] == 2300.0\n"
         )
         env = os.environ.copy()
         env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
@@ -4533,7 +4634,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     progress_label_block = source.split('def _pool_probe_progress_label', 1)[1].split('def _pool_probe_timeout_budget', 1)[0]
     assert '_pool_probe_controller().pool_probe_progress_label' not in progress_label_block
     assert "\\u041f\\u043e\\u043b\\u043d\\u0430\\u044f" in progress_label_block
-    process_monitor_block = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
+    process_monitor_block = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _handle_inprocess_pool_probe_finished', 1)[0]
     assert "_record_pool_probe_completion(" in process_monitor_block
     assert "_memory_cleanup('pool probe process finished', force=True, clear_status=False, log=False)" in process_monitor_block
     assert 'def _forget_unreferenced_key_probes' in source
@@ -7690,14 +7791,26 @@ def test_pool_probe_worker_streams_hashed_records_without_cache_import():
             {('vless', 'key'): 'hash-id'},
             str(records_path),
         )
-        recorder.record('vless', 'key', tg_ok=True, yt_ok=True, allow_recent_success_downgrade=True)
+        recorder.record(
+            'vless',
+            'key',
+            tg_ok=True,
+            yt_ok=True,
+            allow_recent_success_downgrade=True,
+            verification_kind='screening',
+        )
         recorder.record('vless', 'key', custom={'service': True}, custom_checks=[{'id': 'service'}])
         assert recorder.close() == str(records_path)
         records = [json.loads(line) for line in records_path.read_text(encoding='utf-8').splitlines()]
     assert records == [{
         'key_id': 'hash-id',
         'proto': 'vless',
-        'values': {'tg_ok': True, 'yt_ok': True, 'allow_recent_success_downgrade': True},
+        'values': {
+            'tg_ok': True,
+            'yt_ok': True,
+            'allow_recent_success_downgrade': True,
+            'verification_kind': 'screening',
+        },
     }, {
         'key_id': 'hash-id',
         'proto': 'vless',
@@ -7715,7 +7828,11 @@ def test_pool_probe_records_apply_in_disposable_worker(tmp_path, monkeypatch):
     result_path = tmp_path / 'apply.json'
     records_path.write_text(
         '\n'.join((
-            json.dumps({'key_id': 'hash-one', 'proto': 'vless', 'values': {'tg_ok': True}}),
+            json.dumps({
+                'key_id': 'hash-one',
+                'proto': 'vless',
+                'values': {'tg_ok': True, 'verification_kind': 'screening'},
+            }),
             json.dumps({'key_id': 'hash-two', 'proto': 'vless2', 'values': {'yt_ok': True, 'custom': {'chat': True}}}),
             '{invalid json}',
         )),
@@ -7735,10 +7852,184 @@ def test_pool_probe_records_apply_in_disposable_worker(tmp_path, monkeypatch):
         str(records_path), str(result_path)
     ) == 0
     result = json.loads(result_path.read_text(encoding='utf-8'))
-    assert result == {'ok': True, 'applied': 2, 'error': ''}
+    assert result == {
+        'ok': True,
+        'records_count': 2,
+        'applied': 2,
+        'applied_count': 2,
+        'changed_count': 2,
+        'unique_key_count': 2,
+        'error': '',
+    }
     assert cache[('vless', 'hash-one')]['tg_ok'] is True
+    assert cache[('vless', 'hash-one')]['verification_kind'] == 'screening'
     assert cache[('vless2', 'hash-two')]['custom'] == {'chat': True}
     assert len(saved) == 1
+
+
+def test_key_probe_cache_transaction_serializes_subprocess_writers(tmp_path):
+    cache_path = tmp_path / 'key_probe_cache.json'
+    lock_root = tmp_path / 'locks'
+    ready_path = tmp_path / 'bulk.ready'
+    release_path = tmp_path / 'bulk.release'
+    bulk_key = 'vless://bulk@example.test:443'
+    active_key = 'vless://active@example.test:443'
+    bulk_script = (
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        "import probe_cache\n"
+        f"probe_cache.KEY_PROBE_CACHE_PATH = {str(cache_path)!r}\n"
+        f"probe_cache.KEY_PROBE_CACHE_LOCK_ROOT = {str(lock_root)!r}\n"
+        "probe_cache.KEY_PROBE_CACHE_LOCK_TIMEOUT_SECONDS = 5.0\n"
+        "with probe_cache.key_probe_cache_transaction():\n"
+        "    cache = probe_cache.load_key_probe_cache()\n"
+        f"    open({str(ready_path)!r}, 'w', encoding='utf-8').write('ready')\n"
+        f"    deadline = time.time() + 5.0\n"
+        f"    while not __import__('os').path.exists({str(release_path)!r}) and time.time() < deadline: time.sleep(0.01)\n"
+        f"    assert __import__('os').path.exists({str(release_path)!r})\n"
+        f"    cache[probe_cache.hash_key({bulk_key!r})] = {{'schema': 9, 'proto': 'vless', 'tg_ok': True, 'ts': time.time()}}\n"
+        "    probe_cache.save_key_probe_cache(cache)\n"
+    )
+    active_script = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        "import probe_cache\n"
+        f"probe_cache.KEY_PROBE_CACHE_PATH = {str(cache_path)!r}\n"
+        f"probe_cache.KEY_PROBE_CACHE_LOCK_ROOT = {str(lock_root)!r}\n"
+        "probe_cache.KEY_PROBE_CACHE_LOCK_TIMEOUT_SECONDS = 5.0\n"
+        f"assert probe_cache.record_key_probe('vless', {active_key!r}, tg_ok=True, min_write_interval=0)\n"
+    )
+    bulk = subprocess.Popen(
+        [sys.executable, '-c', bulk_script],
+        cwd=str(ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.time() + 5.0
+    while not ready_path.exists() and time.time() < deadline:
+        time.sleep(0.01)
+    assert ready_path.exists()
+    active = subprocess.Popen(
+        [sys.executable, '-c', active_script],
+        cwd=str(ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    time.sleep(0.2)
+    assert active.poll() is None
+    release_path.write_text('release', encoding='utf-8')
+    bulk_stdout, bulk_stderr = bulk.communicate(timeout=10)
+    active_stdout, active_stderr = active.communicate(timeout=10)
+    assert bulk.returncode == 0, bulk_stdout + bulk_stderr
+    assert active.returncode == 0, active_stdout + active_stderr
+    cache = json.loads(cache_path.read_text(encoding='utf-8'))
+    assert probe_cache.hash_key(bulk_key) in cache
+    assert probe_cache.hash_key(active_key) in cache
+    assert not list(lock_root.glob('*.lock'))
+
+
+def test_key_probe_cache_transaction_recovers_stale_lock_and_cleans_exceptions(tmp_path, monkeypatch):
+    cache_path = tmp_path / 'key_probe_cache.json'
+    lock_root = tmp_path / 'locks'
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_PATH', str(cache_path))
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_LOCK_ROOT', str(lock_root))
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_LOCK_STALE_SECONDS', 1.0)
+    lock_path = Path(probe_cache.key_probe_cache_lock_path())
+    lock_path.mkdir(parents=True)
+    (lock_path / 'owner.json').write_text(
+        json.dumps({'pid': 999999999, 'created_at': time.time() - 10, 'token': 'stale'}),
+        encoding='utf-8',
+    )
+    old = time.time() - 10
+    os.utime(lock_path, (old, old))
+    assert probe_cache.record_key_probe('vless', 'vless://stale@example.test:443', tg_ok=True, min_write_interval=0)
+    assert not lock_path.exists()
+    try:
+        with probe_cache.key_probe_cache_transaction():
+            raise RuntimeError('test')
+    except RuntimeError:
+        pass
+    assert not lock_path.exists()
+
+
+def test_key_probe_cache_transaction_timeout_never_writes_unlocked(tmp_path, monkeypatch):
+    cache_path = tmp_path / 'key_probe_cache.json'
+    lock_root = tmp_path / 'locks'
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_PATH', str(cache_path))
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_LOCK_ROOT', str(lock_root))
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_LOCK_TIMEOUT_SECONDS', 0.05)
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_LOCK_POLL_SECONDS', 0.01)
+    lock_path = Path(probe_cache.key_probe_cache_lock_path())
+    lock_path.mkdir(parents=True)
+    (lock_path / 'owner.json').write_text(
+        json.dumps({'pid': os.getpid(), 'created_at': time.time(), 'token': 'busy'}),
+        encoding='utf-8',
+    )
+    raised = False
+    try:
+        probe_cache.record_key_probe('vless', 'vless://blocked@example.test:443', tg_ok=True, min_write_interval=0)
+    except probe_cache.KeyProbeCacheLockTimeout:
+        raised = True
+    assert raised
+    assert not cache_path.exists()
+    (lock_path / 'owner.json').unlink()
+    lock_path.rmdir()
+
+
+def test_persisted_full_pool_run_accumulates_resume_and_drives_completion_summary():
+    with tempfile.TemporaryDirectory() as directory:
+        temp_path = Path(directory)
+        summary_path = temp_path / 'pool_summary_last.json'
+        (temp_path / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import sys\n"
+            "from pathlib import Path\n"
+            "import json, threading\n"
+            f"sys.path.insert(0, {str(temp_path)!r})\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            "import bot\n"
+            f"bot._POOL_SUMMARY_LAST_PATH = {str(summary_path)!r}\n"
+            "bot._record_persisted_pool_probe_run(status='running', scope='manual_all', checked=0, total=5, started_at=100.0)\n"
+            "bot._record_persisted_pool_probe_run(status='paused', scope='manual_all', checked=2, total=5, started_at=100.0, finished_at=120.0, reason='pause', apply_result={'records_count': 2, 'applied_count': 2, 'unique_key_count': 2})\n"
+            "bot._record_persisted_pool_probe_run(status='running', scope='manual_all', checked=2, total=5, started_at=100.0)\n"
+            "latest = bot._record_persisted_pool_probe_run(status='completed', scope='manual_all', checked=5, total=5, started_at=100.0, finished_at=150.0, apply_result={'records_count': 3, 'applied_count': 3, 'unique_key_count': 3})\n"
+            "assert latest['status'] == 'completed' and latest['applied_unique_count'] == 5\n"
+            "Path(bot._POOL_SUMMARY_LAST_PATH).write_text('{\"latest_run\":{\"scope\":\"manual_all\",\"started_at\":\"broken\",\"finished_at\":\"broken\"}}', encoding='utf-8')\n"
+            "corrupt = bot._record_persisted_pool_probe_run(status='running', scope='manual_all', checked=0, total=1, started_at=200.0)\n"
+            "assert corrupt['started_at'] == 200.0\n"
+            "assert 'Последняя полная проверка' in bot._pool_probe_latest_run_text({'status': 'failed', 'started_at': 'broken'})\n"
+            "done = threading.Event()\n"
+            "saved_summary = {'pool_total_count': 1, 'checked_pool_count': 1, 'services': []}\n"
+            "with bot.pool_summary_file_lock:\n"
+            "    writer = threading.Thread(target=lambda: (bot._save_persisted_pool_summary(saved_summary), done.set()))\n"
+            "    writer.start()\n"
+            "    assert not done.wait(0.05)\n"
+            "assert done.wait(2)\n"
+            "writer.join(2)\n"
+            "persisted = json.loads(Path(bot._POOL_SUMMARY_LAST_PATH).read_text(encoding='utf-8'))\n"
+            "assert persisted['summary'] == saved_summary and persisted['latest_run']['started_at'] == 200.0\n"
+            "summary = {'active_text': '1 / 5', 'pool_total_count': 8, 'checked_pool_count': 8, 'services': [], 'latest_run': latest}\n"
+            "text = bot._format_pool_probe_completion_summary(summary)\n"
+            "assert 'Проверка всех ключей завершена' in text\n"
+            "assert 'Последний запуск: 5/5 уникальных ключей' in text\n"
+            "assert 'В пулах: 8; С результатом: 8' in text\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
 
 
 def test_pool_probe_completion_log_separates_bot_and_worker_hwm():
@@ -8162,6 +8453,11 @@ def test_telegram_bot_menu_button_smoke():
             'active_text': '5 / 5 активных ключей',
             'pool_total_count': 12,
             'checked_pool_count': 12,
+            'latest_run': {
+                'status': 'completed',
+                'checked': 12,
+                'total': 12,
+            },
             'services': [
                 {'label': 'Telegram', 'count': 10},
                 {'label': 'YouTube', 'count': 8},
@@ -8169,7 +8465,7 @@ def test_telegram_bot_menu_button_smoke():
         }
         completion_text = bot_module._format_pool_probe_completion_summary(completion_summary)
         assert completion_text.startswith('✅ Проверка всех ключей завершена')
-        assert 'В пулах: 12; Проверено: 12' in completion_text
+        assert 'В пулах: 12; С результатом: 12' in completion_text
         assert '• Telegram: 10' in completion_text
         assert '• YouTube: 8' in completion_text
 

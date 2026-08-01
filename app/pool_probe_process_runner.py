@@ -376,25 +376,33 @@ _PROBE_RECORD_ALLOWED_FIELDS = frozenset((
     'yt_error_rate', 'yt_last_error', 'yt_stability', 'yt_first_load_ms',
     'yt_throughput_mbps', 'yt_score', 'yt_quality', 'yt_stream_tier',
     'quality_error', 'stable_latency_ms', 'fast_latency_ms', 'min_1600p_mbps',
-    'min_4k_mbps', 'allow_recent_success_downgrade',
+    'min_4k_mbps', 'allow_recent_success_downgrade', 'verification_kind',
 ))
 
 
 def apply_pool_probe_records_file(path):
     """Apply streamed probe records outside the long-lived bot process."""
+    empty_result = {
+        'records_count': 0,
+        'applied_count': 0,
+        'changed_count': 0,
+        'unique_key_count': 0,
+    }
     try:
         size = os.path.getsize(path)
     except OSError:
-        return 0
+        return dict(empty_result)
     if size <= 0 or size > 4 * 1024 * 1024:
-        return 0
+        return dict(empty_result)
 
-    from probe_cache import load_key_probe_cache, save_key_probe_cache, update_key_probe_cache_entry
+    from probe_cache import (
+        key_probe_cache_transaction,
+        load_key_probe_cache,
+        save_key_probe_cache,
+        update_key_probe_cache_entry,
+    )
 
-    cache = load_key_probe_cache()
-    changed = False
-    applied = 0
-    now = time.time()
+    records = []
     try:
         with open(path, 'r', encoding='utf-8') as file:
             for index, line in enumerate(file):
@@ -418,28 +426,57 @@ def apply_pool_probe_records_file(path):
                 }
                 if not updates:
                     continue
-                changed = update_key_probe_cache_entry(
-                    cache,
-                    proto,
-                    '',
-                    key_id=key_id,
-                    now=now,
-                    min_write_interval=0,
-                    **updates,
-                ) or changed
-                applied += 1
+                records.append((key_id, proto, updates))
     except OSError:
-        return 0
-    if changed:
-        save_key_probe_cache(cache)
-    return applied
+        return dict(empty_result)
+    if not records:
+        return dict(empty_result)
+
+    changed_count = 0
+    now = time.time()
+    with key_probe_cache_transaction():
+        cache = load_key_probe_cache()
+        changed = False
+        for key_id, proto, updates in records:
+            entry_changed = update_key_probe_cache_entry(
+                cache,
+                proto,
+                '',
+                key_id=key_id,
+                now=now,
+                min_write_interval=0,
+                **updates,
+            )
+            changed = entry_changed or changed
+            if entry_changed:
+                changed_count += 1
+        if changed:
+            save_key_probe_cache(cache)
+    return {
+        'records_count': len(records),
+        'applied_count': len(records),
+        'changed_count': changed_count,
+        'unique_key_count': len({key_id for key_id, _proto, _updates in records}),
+    }
 
 
 def run_pool_probe_records_apply_worker(records_path, result_path):
-    result = {'ok': False, 'applied': 0, 'error': ''}
+    result = {
+        'ok': False,
+        'records_count': 0,
+        'applied': 0,
+        'applied_count': 0,
+        'changed_count': 0,
+        'unique_key_count': 0,
+        'error': '',
+    }
     exit_code = 1
     try:
-        result['applied'] = apply_pool_probe_records_file(records_path)
+        applied = apply_pool_probe_records_file(records_path)
+        if isinstance(applied, dict):
+            for field in ('records_count', 'applied_count', 'changed_count', 'unique_key_count'):
+                result[field] = max(0, int(applied.get(field) or 0))
+            result['applied'] = result['applied_count']
         result['ok'] = True
         exit_code = 0
     except Exception as exc:

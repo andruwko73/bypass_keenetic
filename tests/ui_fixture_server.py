@@ -296,13 +296,24 @@ def _router_health():
 
 
 def _pool_summary(cache=None):
-    return key_pool_web.pool_status_summary(
+    summary = key_pool_web.pool_status_summary(
         CURRENT_KEYS,
         POOLS,
         cache or _probe_cache(),
         CUSTOM_CHECKS,
         _hash_key,
     )
+    summary['latest_run'] = {
+        'status': 'completed',
+        'scope': 'manual_all',
+        'checked': summary.get('pool_total_count', 0),
+        'total': summary.get('pool_total_count', 0),
+    }
+    summary['latest_run_text'] = (
+        'Последняя полная проверка: завершена, '
+        f"{summary.get('pool_total_count', 0)}/{summary.get('pool_total_count', 0)} уникальных ключей"
+    )
+    return summary
 
 
 def _pool_snapshot(protocols=None):
