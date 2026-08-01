@@ -1,3 +1,9 @@
+<a name="1.999"></a>
+# [1.999] - 1 Aug 2026
+
+- Full pool checks cancelled explicitly by the user are now recorded as stopped instead of being reported as a resumable pause when no resume queue exists.
+- A cancelled nightly pool check remains cancelled for that window instead of being retried as a failed run.
+
 <a name="1.998"></a>
 # [1.998] - 1 Aug 2026
 

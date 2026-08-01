@@ -2197,6 +2197,10 @@ def test_subscription_nightly_pool_probe_lifecycle_resume_and_legacy_state():
             "assert resumes == ['ночной проверки']\n"
             "assert state['status'] == 'running' and state['attempts'] == 2\n"
             "assert state['started_at'] == 100.0 and state['checked'] == 2 and state['total'] == 5\n"
+            "bot._mark_nightly_subscription_pool_probe_finished(status='cancelled', checked=3, total=5, started_at=100.0, finished_at=550.0, reason='cancelled', applied_unique_count=3)\n"
+            "state = bot._nightly_subscription_pool_probe_state()\n"
+            "assert state['status'] == 'cancelled' and state['next_retry_at'] == 0.0\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=551.0)\n"
             "bot._mark_nightly_subscription_pool_probe_finished(status='completed', checked=5, total=5, started_at=100.0, finished_at=600.0, applied_unique_count=5)\n"
             "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=601.0)\n"
             f"json.dump({{'window_date': '2026-07-20', 'started_at': 700.0}}, open({str(state_path)!r}, 'w', encoding='utf-8'))\n"
@@ -8003,6 +8007,8 @@ def test_persisted_full_pool_run_accumulates_resume_and_drives_completion_summar
             "corrupt = bot._record_persisted_pool_probe_run(status='running', scope='manual_all', checked=0, total=1, started_at=200.0)\n"
             "assert corrupt['started_at'] == 200.0\n"
             "assert 'Последняя полная проверка' in bot._pool_probe_latest_run_text({'status': 'failed', 'started_at': 'broken'})\n"
+            "cancelled_text = bot._pool_probe_latest_run_text({'status': 'cancelled', 'checked': 2, 'total': 5, 'reason': 'Проверка остановлена пользователем.'})\n"
+            "assert 'остановлена, 2/5' in cancelled_text and 'остановлена пользователем' in cancelled_text\n"
             "done = threading.Event()\n"
             "saved_summary = {'pool_total_count': 1, 'checked_pool_count': 1, 'services': []}\n"
             "with bot.pool_summary_file_lock:\n"
@@ -8042,6 +8048,17 @@ def test_pool_probe_completion_log_separates_bot_and_worker_hwm():
     assert '_apply_pool_probe_records_in_worker(records_path)' in process_monitor
     assert "worker_hwm_kb=int(result.get('hwm_kb') or 0)" in process_monitor
     assert "bot_hwm_kb=int(_process_hwm_kb() or 0)" in process_monitor
+
+
+def test_explicit_pool_probe_cancel_is_not_reported_as_resumable_pause():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    process_monitor = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
+    assert "elif was_cancelled and not pool_probe_resume_after_cancel:" in process_monitor
+    assert "completion_status = 'cancelled'" in process_monitor
+    assert "Проверка остановлена пользователем." in process_monitor
+    inprocess_completion = source.split('def _handle_inprocess_pool_probe_finished', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
+    assert "explicit_cancel = bool(was_cancelled and not pool_probe_resume_after_cancel)" in inprocess_completion
+    assert "status = 'cancelled'" in inprocess_completion
 
 
 def test_web_assets_are_cached_once_without_request_icons():

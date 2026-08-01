@@ -9473,6 +9473,7 @@ def _pool_probe_latest_run_text(latest_run):
         'running': 'выполняется',
         'completed': 'завершена',
         'paused': 'приостановлена',
+        'cancelled': 'остановлена',
         'failed': 'ошибка',
     }
     label = labels.get(status, 'состояние неизвестно')
@@ -9484,7 +9485,7 @@ def _pool_probe_latest_run_text(latest_run):
     if time_text:
         text += f' · {time_text}'
     reason = re.sub(r'\s+', ' ', str(latest_run.get('reason') or '')).strip()[:120]
-    if reason and status in ('paused', 'failed'):
+    if reason and status in ('paused', 'cancelled', 'failed'):
         text += f' · {reason}'
     return text
 
@@ -11536,9 +11537,12 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             if completed:
                 completion_status = 'completed'
                 completion_reason = ''
-            elif remaining or has_resume or was_cancelled:
+            elif has_resume:
                 completion_status = 'paused'
                 completion_reason = completion_reason or 'Проверка приостановлена и может быть продолжена.'
+            elif was_cancelled and not pool_probe_resume_after_cancel:
+                completion_status = 'cancelled'
+                completion_reason = completion_reason or 'Проверка остановлена пользователем.'
             else:
                 completion_status = 'failed'
                 completion_reason = completion_reason or 'Проверка завершилась не полностью.'
@@ -11622,13 +11626,22 @@ def _handle_inprocess_pool_probe_finished(result):
     )
     previous_checked = _pool_summary_count(previous, 'checked') if same_run else 0
     current_unique = max(0, checked - previous_checked)
-    paused = _has_pool_probe_resume_payload() or pool_probe_cancel_event.is_set()
-    complete = bool(total and checked >= total and not result.get('error') and not paused)
-    status = 'completed' if complete else ('paused' if paused else 'failed')
-    reason = '' if complete else (
-        'Проверка приостановлена и может быть продолжена.'
-        if paused else 'Проверка завершилась не полностью.'
-    )
+    has_resume = _has_pool_probe_resume_payload()
+    was_cancelled = pool_probe_cancel_event.is_set()
+    explicit_cancel = bool(was_cancelled and not pool_probe_resume_after_cancel)
+    complete = bool(total and checked >= total and not result.get('error') and not has_resume and not was_cancelled)
+    if complete:
+        status = 'completed'
+        reason = ''
+    elif has_resume:
+        status = 'paused'
+        reason = 'Проверка приостановлена и может быть продолжена.'
+    elif explicit_cancel:
+        status = 'cancelled'
+        reason = 'Проверка остановлена пользователем.'
+    else:
+        status = 'failed'
+        reason = 'Проверка завершилась не полностью.'
     latest_run = _record_persisted_pool_probe_run(
         status=status,
         scope=scope,
@@ -12265,11 +12278,11 @@ def _mark_nightly_subscription_pool_probe_finished(
 ):
     state = _nightly_subscription_pool_probe_state()
     status = str(status or '').strip().lower()
-    if status not in ('completed', 'paused', 'failed'):
+    if status not in ('completed', 'paused', 'cancelled', 'failed'):
         status = 'failed'
     attempts = max(1, _pool_summary_count(state, 'attempts'))
     next_retry_at = 0.0
-    if status != 'completed' and attempts < _NIGHTLY_POOL_PROBE_MAX_ATTEMPTS:
+    if status not in ('completed', 'cancelled') and attempts < _NIGHTLY_POOL_PROBE_MAX_ATTEMPTS:
         next_retry_at = float(finished_at or time.time()) + _NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS
     payload = {
         'schema': 2,
@@ -12306,7 +12319,7 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
     if same_window and not status:
         # Legacy {window_date, started_at} state remains a once-per-day marker.
         return False
-    if same_window and status == 'completed':
+    if same_window and status in ('completed', 'cancelled'):
         return False
     if same_window and status == 'running':
         if pool_probe_lock.locked():
