@@ -1,4 +1,3 @@
-import threading
 import time
 
 
@@ -136,38 +135,3 @@ def finish_command(
         state['finished_at'] = time.time()
         if 'shown_after_finish' in state:
             state['shown_after_finish'] = False
-
-
-def start_command(
-    lock,
-    state,
-    command,
-    label_func,
-    execute_func,
-    update_commands=DEFAULT_UPDATE_COMMANDS,
-    initial_progress_label='',
-    already_running_message=None,
-    started_message=None,
-):
-    label = label_func(command)
-    with lock:
-        if state.get('running'):
-            current_label = state.get('label') or state.get('command')
-            if already_running_message:
-                return False, already_running_message(current_label)
-            return False, str(current_label)
-        state['running'] = True
-        state['command'] = command
-        state['label'] = label
-        state['result'] = ''
-        state['progress'] = 5 if command in update_commands else 0
-        state['progress_label'] = initial_progress_label if command in update_commands else ''
-        state['started_at'] = time.time()
-        state['finished_at'] = 0
-        if 'shown_after_finish' in state:
-            state['shown_after_finish'] = False
-    thread = threading.Thread(target=execute_func, args=(command,), daemon=True)
-    thread.start()
-    if started_message:
-        return True, started_message(label)
-    return True, label

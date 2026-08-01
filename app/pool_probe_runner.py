@@ -547,15 +547,15 @@ def run_pool_probe_worker(
                 if high_load_since is None:
                     high_load_since = time_provider()
                 note = (
-                    f'Pool probe waits for lower router load: load1 {float(high_load1):.2f}, '
-                    f'threshold {float(max_load1):.2f}.'
+                    f'Проверка ждёт снижения нагрузки роутера: load1 {float(high_load1):.2f}, '
+                    f'порог {float(max_load1):.2f}.'
                 )
                 update_note(note)
                 if (
                     max_high_load_wait_seconds and
                     time_provider() - high_load_since >= max_high_load_wait_seconds
                 ):
-                    log(note + ' Remaining keys are paused.')
+                    log(note + ' Оставшиеся ключи сохранены для продолжения.')
                     paused_remaining = True
                     break
                 sleep(max(1.0, float(high_load_delay_seconds or 1.0)))
@@ -758,7 +758,7 @@ def run_pool_probe_worker(
                 _finished, still_running = concurrent.futures.wait(unfinished, timeout=2.0)
                 if still_running:
                     paused_remaining = True
-                    note = 'Pool probe is waiting for the previous batch to finish; remaining keys were saved to resume.'
+                    note = 'Проверка ждёт завершения предыдущей пачки; оставшиеся ключи сохранены для продолжения.'
                     log(note)
                     update_note(note)
                     break

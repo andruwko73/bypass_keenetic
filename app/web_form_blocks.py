@@ -528,29 +528,7 @@ def render_form_basics(message, command_state, status, current_keys, current_mod
     return basics
 
 
-def render_select_mode_picker(active_mode, csrf_input_html, *, none_label='Без прокси (по умолчанию)'):
-    options = [
-        ('vless', 'Vless 1'),
-        ('vless2', 'Vless 2'),
-        ('vmess', 'Vmess'),
-        ('trojan', 'Trojan'),
-        ('shadowsocks', 'Shadowsocks'),
-        ('none', none_label),
-    ]
-    option_html = '\n'.join(
-        f'            <option value="{value}"{" selected" if active_mode == value else ""}>{html.escape(label)}</option>'
-        for value, label in options
-    )
-    return f'''<div id="mode-picker" class="hero-popover mode-picker hidden">
-    <form method="post" action="/set_proxy" class="mode-picker-form">
-        {csrf_input_html}
-        <label class="mode-picker-label" for="hero-proxy-type">Активный протокол</label>
-        <select id="hero-proxy-type" name="proxy_type">
-{option_html}
-        </select>
-        <button type="submit">Применить режим</button>
-    </form>
-</div>'''
+
 
 
 def render_button_mode_picker(active_mode, *, none_label='Без прокси', csrf_input_html=''):

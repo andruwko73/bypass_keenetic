@@ -222,17 +222,7 @@ def flow_matches_telegram_call(flow):
     return dport in TELEGRAM_SIGNAL_PORTS and address_in_networks(dst)
 
 
-def telegram_signal_clients_from_lines(lines, router_ip='', allowed_sources=None):
-    allowed_sources = {str(item or '').strip() for item in (allowed_sources or []) if str(item or '').strip()}
-    allowed_source_tokens = tuple(f'src={item}' for item in allowed_sources)
-    excluded_sources = {str(router_ip or '').strip()} if str(router_ip or '').strip() else set()
-    clients = set()
-    for line in lines or []:
-        text = str(line or '')
-        if allowed_source_tokens and not any(token in text for token in allowed_source_tokens):
-            continue
-        clients.update(_telegram_signal_clients_from_line(text, allowed_sources, excluded_sources))
-    return clients
+
 
 
 def _telegram_signal_clients_from_line(text, allowed_sources=None, excluded_sources=None):

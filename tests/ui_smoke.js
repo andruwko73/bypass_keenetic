@@ -714,8 +714,23 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     const latestRun = page.locator('#pool-latest-run-summary');
     const latestRunText = (await latestRun.innerText()).trim();
-    if (!(await latestRun.isVisible()) || !latestRunText.includes('Последняя полная проверка: завершена')) {
+    if (!(await latestRun.isVisible()) || !latestRunText.includes('Последняя проверка завершена')) {
       throw new Error(`${name}: latest full pool run is not shown explicitly: ${latestRunText}`);
+    }
+    if (latestRunText.includes('0 из')) {
+      throw new Error(`${name}: current zero progress leaked into the last finished run: ${latestRunText}`);
+    }
+    const persistedRunState = await page.evaluate(async () => {
+      const response = await fetch('/api/pools', {cache: 'no-store'});
+      return (await response.json()).pool_summary;
+    });
+    if (
+      !persistedRunState ||
+      persistedRunState.current_run?.status !== 'running' ||
+      persistedRunState.current_run?.checked !== 0 ||
+      persistedRunState.last_finished_run?.status !== 'completed'
+    ) {
+      throw new Error(`${name}: current and last finished pool runs are not separated`);
     }
   }
   if (isMobile) {

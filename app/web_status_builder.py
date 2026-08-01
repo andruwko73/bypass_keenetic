@@ -56,9 +56,9 @@ def pool_status_summary(
     hash_key,
     *,
     protocol_order=('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks'),
-    active_keys_text='активных ключей',
-    pool_total_text='В пулах',
-    checked_text='С результатом',
+    active_keys_text='протоколов с выбранным ключом',
+    pool_total_text='Записей в пулах',
+    checked_text='С сохранённым результатом',
 ):
     """Build one consistent pool summary for light and full web snapshots."""
     current_keys = current_keys or {}
@@ -126,7 +126,7 @@ def pool_status_summary(
     return {
         'active_key_count': active_key_count,
         'protocol_count': len(protocol_order),
-        'active_text': f'{active_key_count} / {len(protocol_order)} {active_keys_text}',
+        'active_text': f'{active_key_count} из {len(protocol_order)} {active_keys_text}',
         'note': '; '.join(note_parts),
         'pool_total_count': total_count,
         'checked_pool_count': checked_count,

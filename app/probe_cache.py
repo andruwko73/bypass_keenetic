@@ -818,23 +818,3 @@ def key_probe_is_fresh(entry, now=None, custom_checks=None):
             return False
         return all(check.get('id') in custom for check in custom_checks)
     return True
-
-
-def key_probe_has_required_results(entry, custom_checks=None):
-    if not isinstance(entry, dict):
-        return False
-    if entry.get('schema') != KEY_PROBE_CACHE_SCHEMA_VERSION:
-        return False
-    if entry.get('timeout'):
-        return False
-    if not isinstance(entry.get('tg_ok'), bool) or not isinstance(entry.get('yt_ok'), bool):
-        return False
-    custom_checks = custom_checks or []
-    if custom_checks:
-        custom = entry.get('custom', {})
-        if not isinstance(custom, dict):
-            return False
-        if entry.get('custom_sig') != custom_checks_signature(custom_checks):
-            return False
-        return all(isinstance(custom.get(check.get('id')), bool) for check in custom_checks)
-    return True

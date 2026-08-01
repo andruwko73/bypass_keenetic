@@ -3580,19 +3580,7 @@ def _trim_telegram_call_learning_seen(seen_addresses):
     return set(seen_list[-TELEGRAM_CALL_LEARNING_MAX_SEEN_ADDRESSES:])
 
 
-def _apply_telegram_call_learning_candidate(candidate, protocols, apply_entries=True):
-    apply_results = []
-    conntrack_deleted = False
-    for protocol in protocols or []:
-        apply_result = _telegram_call_learning().add_candidate_to_ipsets(
-            candidate,
-            protocol,
-            apply=apply_entries,
-        )
-        apply_results.append(apply_result)
-    if apply_entries and any(result.get('applied_sets') for result in apply_results):
-        conntrack_deleted = _telegram_call_learning().delete_conntrack_candidate(candidate)
-    return _telegram_call_learning_candidate_payload(candidate, apply_results, conntrack_deleted)
+
 
 
 def _telegram_call_learning_ipset_members(set_name, include_timeouts=False):
@@ -3975,83 +3963,10 @@ def _telegram_call_learning_worker(device_ip, protocol, apply_entries, duration_
             pass
 
 
-def _start_telegram_call_learning(device_ip, protocol='', apply_entries=None, duration_seconds=None):
-    if not TELEGRAM_CALL_LEARNING_ENABLED:
-        snapshot = _telegram_call_learning_snapshot()
-        return False, _telegram_call_learning_status_message(snapshot), snapshot
-    device_ip = str(device_ip or '').strip()
-    if not _telegram_call_learning().is_lan_ipv4(device_ip):
-        snapshot = _telegram_call_learning_snapshot()
-        return False, 'Укажите IPv4-адрес телефона или другого клиента в LAN.', snapshot
-    selected_protocol, route_protocols = _select_telegram_call_learning_protocol(protocol)
-    if not _telegram_call_learning().protocol_ipsets(selected_protocol):
-        snapshot = _telegram_call_learning_snapshot()
-        return False, 'Не удалось выбрать протокол для добавления IP в ipset.', snapshot
-    if apply_entries is None:
-        apply_entries = TELEGRAM_CALL_LEARNING_APPLY_BY_DEFAULT
-    try:
-        duration = int(float(duration_seconds or TELEGRAM_CALL_LEARNING_DEFAULT_DURATION_SECONDS))
-    except Exception:
-        duration = TELEGRAM_CALL_LEARNING_DEFAULT_DURATION_SECONDS
-    duration = min(TELEGRAM_CALL_LEARNING_MAX_DURATION_SECONDS, max(20, duration))
-    with telegram_call_learning_lock:
-        if telegram_call_learning_state.get('running'):
-            snapshot = dict(telegram_call_learning_state)
-            snapshot['candidates'] = list(snapshot.get('candidates') or [])
-            snapshot['added'] = list(snapshot.get('added') or [])
-            return False, 'Conntrack-learning уже выполняется.', snapshot
-        telegram_call_learning_cancel_event.clear()
-        telegram_call_learning_state.update({
-            'enabled': TELEGRAM_CALL_LEARNING_ENABLED,
-            'running': True,
-            'device_ip': device_ip,
-            'protocol': selected_protocol,
-            'route_protocols': route_protocols,
-            'apply': bool(apply_entries),
-            'duration_seconds': duration,
-            'started_at': time.time(),
-            'updated_at': time.time(),
-            'finished_at': 0.0,
-            'candidates': [],
-            'added': [],
-            'message': '',
-            'error': '',
-        })
-        snapshot = dict(telegram_call_learning_state)
-    _write_telegram_call_learning_state(snapshot)
-    thread = threading.Thread(
-        target=_telegram_call_learning_worker,
-        args=(device_ip, selected_protocol, bool(apply_entries), duration),
-        daemon=True,
-    )
-    thread.start()
-    message = (
-        f'Conntrack-learning запущен на {duration} сек. '
-        f'Протокол: {selected_protocol}. Режим: {"добавление в ipset" if apply_entries else "наблюдение"}.'
-    )
-    _set_telegram_call_learning_state(message=message)
-    _record_event(
-        'telegram_call_learning_start',
-        message,
-        source='web',
-        protocol=selected_protocol,
-        service='telegram',
-        details={'apply': bool(apply_entries), 'route_protocols': route_protocols, 'duration_seconds': duration},
-    )
-    try:
-        _invalidate_web_status_cache()
-    except Exception:
-        pass
-    return True, message, _telegram_call_learning_snapshot()
 
 
-def _cancel_telegram_call_learning():
-    snapshot = _telegram_call_learning_snapshot()
-    if not snapshot.get('running'):
-        return False, 'Conntrack-learning сейчас не выполняется.', snapshot
-    telegram_call_learning_cancel_event.set()
-    snapshot = _set_telegram_call_learning_state(message='Остановка conntrack-learning...')
-    return True, 'Остановка conntrack-learning запрошена.', snapshot
+
+
 
 
 def _udp_quic_block_enabled_for_protocol(proto, configured_enabled):
@@ -9454,21 +9369,30 @@ def _load_persisted_pool_state():
     with pool_summary_file_lock:
         payload = _read_json_file(_POOL_SUMMARY_LAST_PATH, {}) or {}
         summary = payload.get('summary') if isinstance(payload, dict) else None
-        latest_run = payload.get('latest_run') if isinstance(payload, dict) else None
+        current_run = payload.get('current_run') if isinstance(payload, dict) else None
+        last_finished_run = payload.get('last_finished_run') if isinstance(payload, dict) else None
+        legacy_run = payload.get('latest_run') if isinstance(payload, dict) else None
+        if isinstance(legacy_run, dict):
+            legacy_status = str(legacy_run.get('status') or '').strip().lower()
+            if not isinstance(current_run, dict) and legacy_status in ('running', 'paused'):
+                current_run = legacy_run
+            elif not isinstance(last_finished_run, dict) and legacy_status not in ('running', 'paused'):
+                last_finished_run = legacy_run
         return (
             dict(summary) if isinstance(summary, dict) else None,
-            dict(latest_run) if isinstance(latest_run, dict) else {},
+            dict(current_run) if isinstance(current_run, dict) else {},
+            dict(last_finished_run) if isinstance(last_finished_run, dict) else {},
         )
 
 
 def _load_persisted_pool_summary():
-    summary, _latest_run = _load_persisted_pool_state()
+    summary, _current_run, _last_finished_run = _load_persisted_pool_state()
     return summary
 
 
 def _load_persisted_pool_probe_run():
-    _summary, latest_run = _load_persisted_pool_state()
-    return latest_run
+    _summary, current_run, last_finished_run = _load_persisted_pool_state()
+    return current_run or last_finished_run
 
 
 def _pool_probe_latest_run_text(latest_run):
@@ -9476,19 +9400,22 @@ def _pool_probe_latest_run_text(latest_run):
     if not latest_run:
         return ''
     status = str(latest_run.get('status') or '').strip().lower()
-    labels = {
-        'running': 'выполняется',
-        'completed': 'завершена',
-        'paused': 'приостановлена',
-        'cancelled': 'остановлена',
-        'failed': 'ошибка',
-    }
-    label = labels.get(status, 'состояние неизвестно')
     checked = max(0, _pool_summary_count(latest_run, 'checked'))
     total = max(0, _pool_summary_count(latest_run, 'total'))
     timestamp = _pool_summary_float(latest_run.get('finished_at') or latest_run.get('started_at'))
     time_text = time.strftime('%d.%m %H:%M', time.localtime(timestamp)) if timestamp else ''
-    text = f'Последняя полная проверка: {label}, {checked}/{total} уникальных ключей'
+    if status == 'completed':
+        text = 'Последняя проверка завершена'
+    elif status == 'cancelled':
+        text = f'Последняя проверка остановлена: {checked} из {total}'
+    elif status == 'paused':
+        text = f'Проверка приостановлена: {checked} из {total}'
+    elif status == 'failed':
+        text = f'Последняя проверка завершилась с ошибкой: {checked} из {total}'
+    elif status == 'running':
+        text = f'Проверка выполняется: {checked} из {total}'
+    else:
+        text = 'Состояние последней проверки неизвестно'
     if time_text:
         text += f' · {time_text}'
     reason = re.sub(r'\s+', ' ', str(latest_run.get('reason') or '')).strip()[:120]
@@ -9497,11 +9424,20 @@ def _pool_probe_latest_run_text(latest_run):
     return text
 
 
-def _pool_summary_with_latest_run(summary, latest_run=None):
+def _pool_summary_with_latest_run(summary, latest_run=None, current_run=None):
     result = dict(summary or {})
-    if latest_run is None:
-        latest_run = _load_persisted_pool_probe_run()
+    if latest_run is None or current_run is None:
+        _saved_summary, saved_current_run, saved_last_finished_run = _load_persisted_pool_state()
+        if latest_run is None:
+            latest_run = saved_last_finished_run
+        if current_run is None:
+            current_run = saved_current_run
     latest_run = dict(latest_run) if isinstance(latest_run, dict) else {}
+    current_run = dict(current_run) if isinstance(current_run, dict) else {}
+    result['current_run'] = current_run
+    result['last_finished_run'] = latest_run
+    # Preserve the established API field as a rollback-compatible alias.  It
+    # now always means the last terminal run, never the newly started run.
     result['latest_run'] = latest_run
     result['latest_run_text'] = _pool_probe_latest_run_text(latest_run)
     return result
@@ -9526,9 +9462,24 @@ def _save_persisted_pool_probe_run(latest_run):
             'applied_unique_count': max(0, _pool_summary_count(latest_run, 'applied_unique_count')),
             'reason': re.sub(r'\s+', ' ', str(latest_run.get('reason') or '')).strip()[:120],
         }
-        if payload.get('latest_run') == normalized:
-            return normalized
-        payload['latest_run'] = normalized
+        status = normalized.get('status')
+        legacy_run = payload.get('latest_run')
+        if (
+            not isinstance(payload.get('last_finished_run'), dict) and
+            isinstance(legacy_run, dict) and
+            str(legacy_run.get('status') or '').strip().lower() not in ('running', 'paused')
+        ):
+            payload['last_finished_run'] = legacy_run
+        if status in ('running', 'paused'):
+            if payload.get('current_run') == normalized:
+                return normalized
+            payload['current_run'] = normalized
+        else:
+            if payload.get('last_finished_run') == normalized and not payload.get('current_run'):
+                return normalized
+            payload.pop('current_run', None)
+            payload['last_finished_run'] = normalized
+            payload['latest_run'] = normalized
         _write_json_file(_POOL_SUMMARY_LAST_PATH, payload)
         return normalized
 
@@ -9652,7 +9603,7 @@ def _pool_summary_with_persisted_fallback(summary):
 
 def _light_pool_summary_with_cache_fallback(current_keys, key_pools, custom_checks=None):
     empty_summary = _light_pool_status_summary(current_keys, key_pools, {}, custom_checks)
-    saved_persisted, latest_run = _load_persisted_pool_state()
+    saved_persisted, current_run, last_finished_run = _load_persisted_pool_state()
     persisted = _pool_summary_with_current_labels(saved_persisted, empty_summary)
     if (
         persisted is not None and
@@ -9661,15 +9612,16 @@ def _light_pool_summary_with_cache_fallback(current_keys, key_pools, custom_chec
     ):
         if persisted != saved_persisted:
             _save_persisted_pool_summary(persisted)
-        return _pool_summary_with_latest_run(persisted, latest_run)
+        return _pool_summary_with_latest_run(persisted, last_finished_run, current_run)
     light_cache = _load_light_key_probe_cache()
     if not light_cache:
-        return _pool_summary_with_latest_run(empty_summary, latest_run)
+        return _pool_summary_with_latest_run(empty_summary, last_finished_run, current_run)
     return _pool_summary_with_latest_run(
         _pool_summary_with_persisted_fallback(
             _light_pool_status_summary(current_keys, key_pools, light_cache, custom_checks)
         ),
-        latest_run,
+        last_finished_run,
+        current_run,
     )
 
 
@@ -9719,7 +9671,6 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
         resolved_key_probe_cache,
         resolved_custom_checks,
         _hash_key,
-        route_states=resolved_route_states,
     )
     if (
         can_use_cache and
@@ -10465,8 +10416,8 @@ def _format_pool_probe_completion_summary(summary, *, error=False):
     if active_text:
         lines.append(active_text)
     if run_total:
-        lines.append(f'Последний запуск: {run_checked}/{run_total} уникальных ключей')
-    lines.append(f'В пулах: {total_count}; С результатом: {checked_count}')
+        lines.append(f'Проверено ключей: {run_checked} из {run_total}')
+    lines.append(f'Записей в пулах: {total_count}; С сохранённым результатом: {checked_count}')
     reason = re.sub(r'\s+', ' ', str(latest_run.get('reason') or '')).strip()[:120]
     if reason and not complete:
         lines.append(f'Причина: {reason}')

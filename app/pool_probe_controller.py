@@ -52,13 +52,7 @@ class PoolProbeProgress:
             return dict(self._progress)
 
 
-def pool_probe_progress_label(progress):
-    scope = (progress or {}).get('scope')
-    if scope == 'manual_all':
-        return 'Предварительная проверка всех ключей'
-    if scope == 'protocol':
-        return 'Проверка выбранного пула'
-    return 'Фоновая проверка пула ключей'
+
 
 
 def failed_custom_probe_results(custom_checks):

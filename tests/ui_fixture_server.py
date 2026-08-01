@@ -309,10 +309,14 @@ def _pool_summary(cache=None):
         'checked': summary.get('pool_total_count', 0),
         'total': summary.get('pool_total_count', 0),
     }
-    summary['latest_run_text'] = (
-        'Последняя полная проверка: завершена, '
-        f"{summary.get('pool_total_count', 0)}/{summary.get('pool_total_count', 0)} уникальных ключей"
-    )
+    summary['last_finished_run'] = dict(summary['latest_run'])
+    summary['current_run'] = {
+        'status': 'running',
+        'scope': 'manual_all',
+        'checked': 0,
+        'total': summary.get('pool_total_count', 0),
+    }
+    summary['latest_run_text'] = 'Последняя проверка завершена · 01.08 03:00'
     return summary
 
 
@@ -381,43 +385,17 @@ def _protocol_panel(protocol):
     protocol_sections = [section for section in web_form_blocks.PROTOCOL_SECTIONS if section[0] == protocol]
     if not protocol_sections:
         raise ValueError("unknown protocol")
-    cache = _probe_cache()
     csrf_input_html = web_form_blocks.render_csrf_input("fixture-token")
-    custom_presets_html = ""
-    custom_checks_html = ""
-    route_tools_html = ""
-    table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
-    _tabs, panels = web_pool_form_blocks.render_protocol_tabs_and_panels(
+    _tabs, panels = web_form_blocks.render_light_protocol_tabs_and_panels(
         protocol_sections,
         CURRENT_KEYS,
         _protocol_statuses(),
         csrf_input_html,
         key_pools=POOLS,
-        key_probe_cache=cache,
-        custom_checks=CUSTOM_CHECKS,
-        key_display_name=_display_name,
-        hash_key=_hash_key,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
-        custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(
-            probe,
-            checks,
-            _service_icon_html,
-        ),
-        probe_checked_at=key_pool_web.web_probe_checked_at,
-        custom_probe_states=key_pool_web.web_custom_probe_states,
-        service_icon_html=_service_icon_html,
-        pool_table_class=table_class,
-        pool_custom_col_width=custom_width,
-        pool_mobile_custom_col_width=mobile_width,
-        custom_header_icons=key_pool_web.custom_check_header_icons(CUSTOM_CHECKS, _service_icon_html),
-        custom_presets_html=custom_presets_html,
-        custom_checks_html=custom_checks_html,
-        route_tools_html=route_tools_html,
         active_protocol=protocol,
         pool_probe_pending=False,
-        defer_pool_rows=True,
-        defer_check_content=True,
     )
     return panels
 
@@ -428,26 +406,22 @@ def _protocol_check_panel(protocol):
         raise ValueError("unknown protocol")
     _key_name, title, _rows, _placeholder = protocol_sections[0]
     csrf_input_html = web_form_blocks.render_csrf_input("fixture-token")
-    custom_presets_html = key_pool_web.web_custom_presets_html(
-        CUSTOM_CHECKS,
-        [],
-        _service_icon_html,
-        csrf_input_html,
-    )
     custom_checks_html = key_pool_web.web_custom_checks_html(
         [item for item in CUSTOM_CHECKS if item.get("id") not in ROUTE_SERVICE_IDS],
         _service_icon_html,
         csrf_input_html,
         empty_message="",
     )
-    route_tools_html = _route_tools_html(csrf_input_html)
     return web_pool_form_blocks.render_protocol_check_content(
         key_name=protocol,
         title=title,
         status_info=_protocol_statuses().get(protocol, {}),
-        custom_presets_html=custom_presets_html,
+        custom_presets_html="",
         custom_checks_html=custom_checks_html,
-        route_tools_html=route_tools_html,
+        route_tools_html=(
+            '<div class="route-intersection-card" data-route-tools-deferred="1">'
+            '<strong>Маршруты загружаются</strong></div>'
+        ),
         csrf_input_html=csrf_input_html,
         enable_key_pool=True,
         enable_custom_checks=True,
@@ -473,50 +447,18 @@ def _page_html(mode="advanced"):
         current_mode_label,
         live=True,
     )
-    if enable_custom_checks:
-        custom_presets_html = ""
-        custom_checks_html = ""
-        route_tools_html = ""
-        table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout(CUSTOM_CHECKS)
-    else:
-        custom_presets_html = ""
-        custom_checks_html = ""
-        route_tools_html = ""
-        table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout([])
-    protocol_tabs_html, protocol_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
+    protocol_tabs_html, protocol_panels_html = web_form_blocks.render_light_protocol_tabs_and_panels(
         web_form_blocks.PROTOCOL_SECTIONS,
         CURRENT_KEYS,
         _protocol_statuses(),
         csrf_input_html,
         key_pools=POOLS if enable_key_pool else None,
-        key_probe_cache=cache if enable_key_pool else None,
-        custom_checks=CUSTOM_CHECKS if enable_custom_checks else None,
-        key_display_name=_display_name,
-        hash_key=_hash_key,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
-        custom_check_badges=lambda probe, checks: key_pool_web.web_custom_check_badges(
-            probe,
-            checks,
-            _service_icon_html,
-        ),
-        probe_checked_at=key_pool_web.web_probe_checked_at,
-        custom_probe_states=key_pool_web.web_custom_probe_states,
-        service_icon_html=_service_icon_html,
-        pool_table_class=table_class,
-        pool_custom_col_width=custom_width,
-        pool_mobile_custom_col_width=mobile_width,
-        custom_header_icons=key_pool_web.custom_check_header_icons(CUSTOM_CHECKS, _service_icon_html) if enable_custom_checks else "",
-        custom_presets_html=custom_presets_html,
-        custom_checks_html=custom_checks_html,
-        route_tools_html=route_tools_html,
         active_protocol="vless",
-        lazy_protocol_panels=True,
         enable_key_pool=enable_key_pool,
         enable_custom_checks=enable_custom_checks,
         pool_probe_pending=False,
-        defer_pool_rows=enable_key_pool,
-        defer_check_content=enable_key_pool,
     )
     unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
         [

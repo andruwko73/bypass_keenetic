@@ -17,9 +17,9 @@ POOL_PROTOCOL_LABELS = {
     'trojan': 'Trojan',
     'shadowsocks': 'Shadowsocks',
 }
-_ACTIVE_KEYS_TEXT = '\u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043a\u043b\u044e\u0447\u0435\u0439'
-_POOL_TOTAL_TEXT = '\u0412 \u043f\u0443\u043b\u0430\u0445'
-_CHECKED_TEXT = '\u041f\u0440\u043e\u0432\u0435\u0440\u0435\u043d\u043e'
+_ACTIVE_KEYS_TEXT = '\u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b\u043e\u0432 \u0441 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u043c \u043a\u043b\u044e\u0447\u043e\u043c'
+_POOL_TOTAL_TEXT = '\u0417\u0430\u043f\u0438\u0441\u0435\u0439 \u0432 \u043f\u0443\u043b\u0430\u0445'
+_CHECKED_TEXT = '\u0421 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u043c \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u043e\u043c'
 def pool_proto_label(proto):
     return POOL_PROTOCOL_LABELS.get(proto, proto)
 
@@ -299,32 +299,10 @@ def custom_check_status_icon_html(check, state, service_icon_html):
     return '<span class="service-probe-mark service-probe-unknown">?</span>'
 
 
-def custom_check_header_icons(custom_checks, service_icon_html):
-    icons = []
-    for check in custom_checks or []:
-        label = check.get('label', 'Service')
-        safe_label = html.escape(label)
-        if check.get('icon'):
-            content = service_icon_html(check.get('icon'), label, opacity=1.0, size=16)
-        else:
-            content = f'<span class="custom-service-badge custom-service-neutral">{html.escape(check.get("badge", "WEB"))}</span>'
-        icons.append(f'<span class="custom-service-slot custom-service-header" title="{safe_label}">{content}</span>')
-    return ''.join(icons)
 
 
-def web_custom_check_badges(probe, custom_checks, service_icon_html):
-    if not custom_checks:
-        return ''
-    states = web_custom_probe_states(probe, custom_checks)
-    badges = []
-    for check in custom_checks:
-        state = states.get(check.get('id'), 'unknown')
-        safe_label = html.escape(check.get('label', '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430'))
-        safe_url = html.escape(custom_check_url_text(check))
-        badges.append(
-            f'<span class="custom-service-slot custom-service-{state}" title="{safe_label}: {safe_url}">{custom_check_status_icon_html(check, state, service_icon_html)}</span>'
-        )
-    return ''.join(badges)
+
+
 
 
 def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html='', empty_message='Дополнительные проверки пока не добавлены'):
@@ -349,27 +327,7 @@ def web_custom_checks_html(custom_checks, service_icon_html, csrf_input_html='',
     return ''.join(items)
 
 
-def web_custom_presets_html(custom_checks, presets, service_icon_html, csrf_input_html='', route_states=None):
-    active_ids = {check.get('id') for check in custom_checks or []}
-    route_states = route_states or {}
-    items = []
-    for preset in presets or []:
-        safe_id = html.escape(preset['id'])
-        safe_label = html.escape(preset['label'])
-        safe_url = html.escape(preset.get('url', ''))
-        disabled = ' disabled' if preset['id'] in active_ids else ''
-        title = '\u0423\u0436\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u043e' if disabled else f'\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 {safe_label}'
-        items.append(f'''<form method="post" action="/custom_check_add" data-async-action="custom-check-add">
-            {csrf_input_html}
-            <input type="hidden" name="preset" value="{safe_id}">
-            <input type="hidden" name="label" value="{safe_label}">
-            <input type="hidden" name="url" value="{safe_url}">
-            <button type="submit" class="service-preset-btn"{disabled} data-custom-preset="{safe_id}" title="{html.escape(title)}">
-                {custom_check_icon_html(preset, service_icon_html)}
-                <span>{safe_label}</span>
-            </button>
-        </form>''')
-    return ''.join(items)
+
 
 
 def web_service_route_tools_html(

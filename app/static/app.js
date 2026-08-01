@@ -9,7 +9,6 @@
         const STATUS_ACTIVE_POLL_MS = 8000;
         const STATUS_IDLE_POLL_MS = Math.max(30000, Number(APP_CONFIG.statusIdlePollMs || 60000));
         const POOL_PROBE_STATUS_POLL_MS = Math.max(5000, Number(APP_CONFIG.poolProbeStatusPollMs || 10000));
-        const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));
         let botReady = APP_CONFIG.botReady === true;
         const SERVICE_ICON_BASE = '/static/service-icons/';
         const SERVICE_ICON_VERSION = encodeURIComponent(String(APP_CONFIG.assetVersion || '1'));
@@ -2535,7 +2534,6 @@
                     pool_probe_progress: progress
                 });
                 schedulePoolProbePolling(POOL_PROBE_STATUS_POLL_MS);
-                refreshPoolData(POOL_PROBE_POOL_REFRESH_MS);
             }
         }
 
@@ -2721,7 +2719,7 @@
                 return 'Автопроверка непроверенных ключей';
             }
             if (scope === 'manual_all') {
-                return 'Предварительная проверка всех ключей';
+                return 'Проверка всех ключей';
             }
             if (scope === 'protocol') {
                 return 'Проверка выбранного пула';

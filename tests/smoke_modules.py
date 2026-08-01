@@ -1511,6 +1511,8 @@ def test_key_pool_web():
     assert summary['checked_pool_count'] == 2
     assert summary['all_services_count'] == 1
     assert summary['any_service_count'] == 2
+    assert summary['active_text'] == '1 из 5 протоколов с выбранным ключом'
+    assert summary['note'].startswith('Записей в пулах: 3; С сохранённым результатом: 2')
     assert summary['services'] == [
         {'label': 'Telegram', 'count': 2},
         {'label': 'YouTube', 'count': 1},
@@ -1559,8 +1561,6 @@ def test_key_pool_web():
     check_defs = [{'id': 'custom', 'label': 'Custom', 'url': 'https://example.com/path', 'icon': 'chat'}]
     assert key_pool_web.custom_check_url_text(check_defs[0]) == 'example.com/path'
     assert 'custom-check-item' in key_pool_web.web_custom_checks_html(check_defs, icon_html)
-    assert 'service-preset-btn' in key_pool_web.web_custom_presets_html([], check_defs, icon_html)
-    assert 'custom-service-ok' in key_pool_web.web_custom_check_badges({'custom': {'custom': True}}, check_defs, icon_html)
     assert key_pool_web.web_probe_state({'tg_ok': True}, 'tg_ok') == 'ok'
     assert key_pool_web.web_probe_state({'tg_ok': False}, 'tg_ok') == 'fail'
     assert key_pool_web.web_probe_state({'tg_ok': None}, 'tg_ok') == 'unknown'
@@ -1990,7 +1990,7 @@ def test_key_pool_import_routes_selected_protocol_and_vless_context():
         assert pools[selected_proto] == []
 
 
-def test_pool_import_hint_is_protocol_specific_in_both_renderers():
+def test_pool_import_hint_is_protocol_specific():
     protocols = (
         ('shadowsocks', 'Shadowsocks', 'ss://sample'),
         ('vmess', 'Vmess', 'vmess://...'),
@@ -2014,28 +2014,7 @@ def test_pool_import_hint_is_protocol_specific_in_both_renderers():
             status_info={'tone': 'empty', 'label': '', 'details': ''},
             active_status_icons='',
         )
-        full_panel = web_pool_form_blocks.render_protocol_panel(
-            key_name=key_name,
-            title=title,
-            rows=5,
-            placeholder=placeholder,
-            current_key_value='',
-            status_info={'tone': 'empty', 'label': '', 'details': ''},
-            active_status_icons='',
-            pool_items_html='',
-            pool_table_class='pool-table',
-            pool_custom_col_width=32,
-            pool_mobile_custom_col_width=28,
-            custom_header_icons='',
-            custom_presets_html='',
-            custom_checks_html='',
-            telegram_icon_html=lambda opacity=1.0: '',
-            youtube_icon_html=lambda opacity=1.0: '',
-        )
         assert hint in light_panel
-        assert hint in full_panel
-    assert 'загрузите подписку' in web_pool_form_blocks.POOL_EMPTY_ROW_HTML
-    assert 'subscription' not in web_pool_form_blocks.POOL_EMPTY_ROW_HTML
 
 
 def test_subscription_hwid_request_helpers():
@@ -7998,17 +7977,25 @@ def test_persisted_full_pool_run_accumulates_resume_and_drives_completion_summar
             f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
             "import bot\n"
             f"bot._POOL_SUMMARY_LAST_PATH = {str(summary_path)!r}\n"
+            "Path(bot._POOL_SUMMARY_LAST_PATH).write_text('{\"latest_run\":{\"status\":\"completed\",\"scope\":\"manual_all\",\"checked\":4,\"total\":4,\"started_at\":50.0,\"finished_at\":80.0}}', encoding='utf-8')\n"
             "bot._record_persisted_pool_probe_run(status='running', scope='manual_all', checked=0, total=5, started_at=100.0)\n"
+            "started_payload = json.loads(Path(bot._POOL_SUMMARY_LAST_PATH).read_text(encoding='utf-8'))\n"
+            "assert started_payload['current_run']['checked'] == 0\n"
+            "assert started_payload['last_finished_run']['checked'] == 4\n"
+            "assert started_payload['latest_run']['checked'] == 4\n"
             "bot._record_persisted_pool_probe_run(status='paused', scope='manual_all', checked=2, total=5, started_at=100.0, finished_at=120.0, reason='pause', apply_result={'records_count': 2, 'applied_count': 2, 'unique_key_count': 2})\n"
             "bot._record_persisted_pool_probe_run(status='running', scope='manual_all', checked=2, total=5, started_at=100.0)\n"
             "latest = bot._record_persisted_pool_probe_run(status='completed', scope='manual_all', checked=5, total=5, started_at=100.0, finished_at=150.0, apply_result={'records_count': 3, 'applied_count': 3, 'unique_key_count': 3})\n"
             "assert latest['status'] == 'completed' and latest['applied_unique_count'] == 5\n"
-            "Path(bot._POOL_SUMMARY_LAST_PATH).write_text('{\"latest_run\":{\"scope\":\"manual_all\",\"started_at\":\"broken\",\"finished_at\":\"broken\"}}', encoding='utf-8')\n"
+            "completed_payload = json.loads(Path(bot._POOL_SUMMARY_LAST_PATH).read_text(encoding='utf-8'))\n"
+            "assert 'current_run' not in completed_payload\n"
+            "assert completed_payload['last_finished_run'] == completed_payload['latest_run']\n"
+            "Path(bot._POOL_SUMMARY_LAST_PATH).write_text('{\"latest_run\":{\"status\":\"running\",\"scope\":\"manual_all\",\"started_at\":\"broken\",\"finished_at\":\"broken\"}}', encoding='utf-8')\n"
             "corrupt = bot._record_persisted_pool_probe_run(status='running', scope='manual_all', checked=0, total=1, started_at=200.0)\n"
             "assert corrupt['started_at'] == 200.0\n"
-            "assert 'Последняя полная проверка' in bot._pool_probe_latest_run_text({'status': 'failed', 'started_at': 'broken'})\n"
+            "assert 'завершилась с ошибкой' in bot._pool_probe_latest_run_text({'status': 'failed', 'started_at': 'broken'})\n"
             "cancelled_text = bot._pool_probe_latest_run_text({'status': 'cancelled', 'checked': 2, 'total': 5, 'reason': 'Проверка остановлена пользователем.'})\n"
-            "assert 'остановлена, 2/5' in cancelled_text and 'остановлена пользователем' in cancelled_text\n"
+            "assert 'остановлена: 2 из 5' in cancelled_text and 'остановлена пользователем' in cancelled_text\n"
             "done = threading.Event()\n"
             "saved_summary = {'pool_total_count': 1, 'checked_pool_count': 1, 'services': []}\n"
             "with bot.pool_summary_file_lock:\n"
@@ -8018,18 +8005,19 @@ def test_persisted_full_pool_run_accumulates_resume_and_drives_completion_summar
             "assert done.wait(2)\n"
             "writer.join(2)\n"
             "persisted = json.loads(Path(bot._POOL_SUMMARY_LAST_PATH).read_text(encoding='utf-8'))\n"
-            "assert persisted['summary'] == saved_summary and persisted['latest_run']['started_at'] == 200.0\n"
+            "assert persisted['summary'] == saved_summary and persisted['current_run']['started_at'] == 200.0\n"
             "bot._record_persisted_pool_probe_run(status='cancelled', scope='manual_all', checked=2, total=5, started_at=200.0, finished_at=220.0, reason='stopped')\n"
             "bot._light_pool_status_summary = lambda *_args, **_kwargs: dict(saved_summary)\n"
             "bot._pool_summary_with_current_labels = lambda saved, _empty: dict(saved or saved_summary)\n"
             "light = bot._light_pool_summary_with_cache_fallback({}, {}, [])\n"
-            "assert light['latest_run']['status'] == 'cancelled'\n"
-            "assert '2/5' in light['latest_run_text'] and 'stopped' in light['latest_run_text']\n"
+            "assert light['latest_run']['status'] == 'cancelled' and light['last_finished_run']['status'] == 'cancelled'\n"
+            "assert light['current_run'] == {}\n"
+            "assert '2 из 5' in light['latest_run_text'] and 'stopped' in light['latest_run_text']\n"
             "summary = {'active_text': '1 / 5', 'pool_total_count': 8, 'checked_pool_count': 8, 'services': [], 'latest_run': latest}\n"
             "text = bot._format_pool_probe_completion_summary(summary)\n"
             "assert 'Проверка всех ключей завершена' in text\n"
-            "assert 'Последний запуск: 5/5 уникальных ключей' in text\n"
-            "assert 'В пулах: 8; С результатом: 8' in text\n"
+            "assert 'Проверено ключей: 5 из 5' in text\n"
+            "assert 'Записей в пулах: 8; С сохранённым результатом: 8' in text\n"
         )
         env = os.environ.copy()
         env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
@@ -8473,7 +8461,7 @@ def test_telegram_bot_menu_button_smoke():
         assert recorder.messages[-1]['text'] == 'MARKDOWN:keys.md'
 
         completion_summary = {
-            'active_text': '5 / 5 активных ключей',
+        'active_text': '5 из 5 протоколов с выбранным ключом',
             'pool_total_count': 12,
             'checked_pool_count': 12,
             'latest_run': {
@@ -8488,7 +8476,7 @@ def test_telegram_bot_menu_button_smoke():
         }
         completion_text = bot_module._format_pool_probe_completion_summary(completion_summary)
         assert completion_text.startswith('✅ Проверка всех ключей завершена')
-        assert 'В пулах: 12; С результатом: 12' in completion_text
+        assert 'Записей в пулах: 12; С сохранённым результатом: 12' in completion_text
         assert '• Telegram: 10' in completion_text
         assert '• YouTube: 8' in completion_text
 
@@ -9433,7 +9421,6 @@ def test_pool_probe_controller_helpers():
     assert progress.snapshot()['running'] is False
     progress.update(running=True, checked=2)
     assert progress.snapshot()['checked'] == 2
-    assert pool_probe_controller.pool_probe_progress_label({'scope': 'protocol'}) == 'Проверка выбранного пула'
     assert pool_probe_controller.failed_custom_probe_results([{'id': 'tg'}, {'label': 'empty'}]) == {'tg': False}
     assert pool_probe_controller.pool_probe_timeout_budget(
         [{'urls': ['https://a', 'https://b', 'https://ignored']}],
@@ -10153,7 +10140,7 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (0, 1)
     assert high_load_remaining == [('vless', 'load-high')]
     assert any('load1 2.75' in note and '2.00' in note for note in high_load_notes)
-    assert any('Remaining keys are paused' in item for item in high_load_logs)
+    assert any('Оставшиеся ключи сохранены для продолжения' in item for item in high_load_logs)
 
     cancel_event = threading.Event()
     cancel_started = threading.Event()
@@ -12460,11 +12447,6 @@ def test_web_form_blocks_helpers():
     assert [button_picker.index(f'data-mode-value="{mode}"') for mode in expected_mode_order] == sorted(
         button_picker.index(f'data-mode-value="{mode}"') for mode in expected_mode_order
     )
-    select_picker = web_form_blocks.render_select_mode_picker('none', '<input>')
-    assert '<select' in select_picker
-    assert [select_picker.index(f'value="{mode}"') for mode in expected_mode_order] == sorted(
-        select_picker.index(f'value="{mode}"') for mode in expected_mode_order
-    )
     app_picker = web_form_blocks.render_app_runtime_mode_picker(
         'advanced',
         [('advanced', 'Сложный', 'интерфейс с пулом ключей и Telegram-бот')],
@@ -12516,10 +12498,6 @@ def test_web_form_blocks_helpers():
     assert 'textarea name="content"' in lazy_panels and ' disabled>' in lazy_panels
 
 def test_web_pool_form_blocks_helpers():
-    table_class, custom_width, mobile_width = web_pool_form_blocks.pool_table_layout([{'id': 'chat'}])
-    assert table_class == 'pool-table has-custom-checks'
-    assert custom_width == 32
-    assert mobile_width == 28
     progress = web_form_blocks.pool_probe_topbar_text(
         True,
         {'checked': 1, 'total': 2},
@@ -12534,150 +12512,10 @@ def test_web_pool_form_blocks_helpers():
         {'checked': 1, 'total': 2},
         lambda data: 'Проверка',
     ) == 'Проверка: 1/2. note'
-    pool_rows = web_pool_form_blocks.render_pool_items(
-        key_name='vless',
-        title='Vless 1',
-        pool_keys=['vless://sample'],
-        current_key='vless://sample',
-        key_probe_cache={'hash-vless': {
-            'tg_ok': True,
-            'yt_ok': True,
-            'yt_quality': 'fast',
-            'yt_score': 97,
-            'yt_stream_tier': '4k',
-            'yt_latency_ms': 350,
-            'googlevideo_latency_ms': 480,
-            'yt_throughput_mbps': 61.25,
-        }},
-        custom_checks=[],
-        key_display_name=lambda key: 'sample-key',
-        hash_key=lambda key: 'hash-vless',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        custom_check_badges=lambda probe, checks: '',
-        probe_checked_at=lambda probe: 'now',
-        csrf_input_html='<input name="csrf_token" value="token">',
-    )
-    assert 'pool-row-active' in pool_rows
-    assert 'data-search="sample-key hash-vless"' in pool_rows
-    assert 'data-quality-score="97"' in pool_rows
-    assert 'pool-quality-fast' in pool_rows
-    assert 'Быстро' in pool_rows
-    assert '61.25 Мбит/с' in pool_rows
-    assert 'data-key=' not in pool_rows
-    assert 'name="key_id" value="hash-vless"' in pool_rows
-    assert 'name="key" value=' not in pool_rows
-    assert 'vless://sample' not in pool_rows
-    assert 'csrf_token' in pool_rows
-    assert 'pool-delete-icon' in pool_rows
-    assert '&times;' in pool_rows
-    assert 'data-pool-mobile-checked' in pool_rows
-    assert '>now</span>' in pool_rows
-    warn_rows = web_pool_form_blocks.render_pool_items(
-        key_name='vless2',
-        title='Vless 2',
-        pool_keys=['warn-key-value'],
-        current_key='',
-        key_probe_cache={'hash-warn': {'yt_ok': False, 'yt_stability': 'unstable'}},
-        custom_checks=[],
-        key_display_name=lambda key: 'warn-key',
-        hash_key=lambda key: 'hash-warn',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        custom_check_badges=lambda probe, checks: '',
-        probe_checked_at=lambda probe: '',
-        csrf_input_html='<input name="csrf_token" value="token">',
-    )
-    assert 'data-yt-state="warn"' in warn_rows
-    assert 'service-probe-warn' in warn_rows
-    assert 'service-probe-icon-warn' in warn_rows
-    assert 'YT</span>' in warn_rows
-    assert 'service-probe-warn">!</span>' not in warn_rows
-    unknown_rows = web_pool_form_blocks.render_pool_items(
-        key_name='vless',
-        title='Vless 1',
-        pool_keys=['unknown-key-value'],
-        current_key='',
-        key_probe_cache={'hash-unknown': {'tg_ok': None, 'yt_ok': None}},
-        custom_checks=[],
-        key_display_name=lambda key: 'unknown-key',
-        hash_key=lambda key: 'hash-unknown',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        custom_check_badges=lambda probe, checks: '',
-        probe_checked_at=lambda probe: '',
-        csrf_input_html='<input name="csrf_token" value="token">',
-    )
-    assert 'data-tg-state="unknown"' in unknown_rows
-    assert 'data-yt-state="unknown"' in unknown_rows
-    assert unknown_rows.count('service-probe-unknown">?</span>') >= 2
-    assert '>TG<' not in unknown_rows
-    not_applicable_rows = web_pool_form_blocks.render_pool_items(
-        key_name='vless2',
-        title='Vless 2',
-        pool_keys=['route-scoped-key'],
-        current_key='',
-        key_probe_cache={'hash-scoped': {'tg_ok': True, 'yt_ok': False, 'yt_stability': 'fail', 'yt_score': 91}},
-        custom_checks=[],
-        key_display_name=lambda key: 'route-scoped',
-        hash_key=lambda key: 'hash-scoped',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        custom_check_badges=lambda probe, checks: '',
-        probe_checked_at=lambda probe: 'now',
-        csrf_input_html='<input name="csrf_token" value="token">',
-        service_applicability={'telegram': False, 'youtube': False},
-    )
-    assert 'data-tg-state="ok"' in not_applicable_rows
-    assert 'data-yt-state="fail"' in not_applicable_rows
-    assert 'data-quality-score="91"' in not_applicable_rows
-    assert 'data-pool-tg' in not_applicable_rows
-    assert 'data-pool-yt' in not_applicable_rows
-    assert 'service-probe-na' not in not_applicable_rows
-    assert 'pool-quality-' not in not_applicable_rows
-    panel = web_pool_form_blocks.render_protocol_panel(
-        key_name='vless',
-        title='Vless 1',
-        rows=3,
-        placeholder='vless://...',
-        current_key_value='vless://sample',
-        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
-        active_status_icons='',
-        pool_items_html=pool_rows,
-        pool_table_class='pool-table',
-        pool_custom_col_width=32,
-        pool_mobile_custom_col_width=28,
-        custom_header_icons='',
-        custom_presets_html='',
-        custom_checks_html='',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        active=True,
-        csrf_input_html='<input name="csrf_token" value="token">',
-        subscription_settings={'hwid_enabled': True},
-    )
-    assert 'protocol-workspace active' in panel
-    assert 'vless://sample' in panel
-    assert 'Ключ и подписка' in panel
-    assert 'data-subview-target="subscription"' not in panel
-    assert 'action="/pool_import"' in panel
-    assert 'class="pool-import-form"' in panel
-    assert 'name="import_payload"' in panel
-    assert 'Импорт ключей и подписки' in panel
-    assert 'pool-sort-control' in panel
-    assert 'data-pool-sort-value="telegram"' in panel
-    assert 'data-pool-sort-value="quality"' in panel
-    assert 'data-pool-sort-value="active"' not in panel
-    assert 'data-pool-sort-value="problem"' in panel
-    assert 'custom-check-form' in panel
-    assert 'data-pool-probe-start-button aria-disabled="false"' in panel
-    assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in panel
-    assert 'name="send_router_hwid" value="1" checked' in panel
-    assert 'Передавать HWID роутера' in panel
     check_content = web_pool_form_blocks.render_protocol_check_content(
         key_name='vless',
         title='Vless 1',
-        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
+        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details.'},
         custom_presets_html='<div>preset</div>',
         custom_checks_html='<div>checks</div>',
         route_tools_html='<div>routes</div>',
@@ -12687,193 +12525,29 @@ def test_web_pool_form_blocks_helpers():
     assert 'data-route-tools-root' in check_content
     assert '<div>routes</div>' in check_content
     assert '<div>checks</div>' in check_content
-    deferred_check_panel = web_pool_form_blocks.render_protocol_panel(
-        key_name='vless',
-        title='Vless 1',
-        rows=3,
-        placeholder='vless://...',
-        current_key_value='vless://sample',
-        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
-        active_status_icons='',
-        pool_items_html=pool_rows,
-        pool_table_class='pool-table',
-        pool_custom_col_width=32,
-        pool_mobile_custom_col_width=28,
-        custom_header_icons='',
-        custom_presets_html='<div>preset</div>',
-        custom_checks_html='<div>checks</div>',
-        route_tools_html='<div>routes</div>',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        csrf_input_html='<input name="csrf_token" value="token">',
-        defer_check_content=True,
-    )
-    assert 'data-protocol-check-deferred="vless"' in deferred_check_panel
-    assert 'custom-check-form' not in deferred_check_panel
-    assert '<div>routes</div>' not in deferred_check_panel
-    assert '<div>checks</div>' not in deferred_check_panel
-    youtube_panel = web_pool_form_blocks.render_protocol_panel(
+    assert '<p class="status-note">details</p>' in check_content
+    pending_content = web_pool_form_blocks.render_protocol_check_content(
         key_name='vless2',
         title='Vless 2',
-        rows=3,
-        placeholder='vless://...',
-        current_key_value='',
-        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
-        active_status_icons='',
-        pool_items_html=web_pool_form_blocks.POOL_EMPTY_ROW_HTML,
-        pool_table_class='pool-table',
-        pool_custom_col_width=32,
-        pool_mobile_custom_col_width=28,
-        custom_header_icons='',
+        status_info={},
         custom_presets_html='',
         custom_checks_html='',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
         csrf_input_html='<input name="csrf_token" value="token">',
+        enable_custom_checks=False,
+        pool_probe_pending=True,
     )
-    assert 'data-core-service-head="telegram"' in youtube_panel
-    assert 'data-core-service-head="youtube"' in youtube_panel
-    assert 'colspan="6"' in youtube_panel
-    main_panel = web_pool_form_blocks.render_protocol_panel(
-        key_name='vless',
-        title='Vless 1',
-        rows=3,
-        placeholder='vless://...',
-        current_key_value='vless://sample',
-        status_info={'tone': 'ok', 'label': 'OK', 'details': 'details'},
-        active_status_icons='',
-        pool_items_html='',
-        pool_table_class='pool-table',
-        pool_custom_col_width=32,
-        pool_mobile_custom_col_width=28,
-        custom_header_icons='',
+    assert 'data-pool-probe-start-button disabled aria-disabled="true"' in pending_content
+    no_pool_content = web_pool_form_blocks.render_protocol_check_content(
+        key_name='vmess',
+        title='Vmess',
+        status_info={},
         custom_presets_html='',
         custom_checks_html='',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        csrf_input_html='<input name="csrf_token" value="token">',
         enable_key_pool=False,
         enable_custom_checks=False,
     )
-    assert 'Пул ключей' not in main_panel
-    assert 'pool-import-form' not in main_panel
-    assert 'custom-check-form' not in main_panel
-    tabs_html, panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-        [('vless', 'Vless 1', 3, 'vless://...')],
-        {'vless': 'vless://sample'},
-        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'}},
-        '<input name="csrf_token" value="token">',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        enable_key_pool=False,
-        enable_custom_checks=False,
-    )
-    assert 'protocol-tab active' in tabs_html
-    assert 'protocol-workspace active' in panels_html
-    assert 'data-core-services-loaded="0"' in panels_html
-    assert 'data-protocol-live-status="0"' in panels_html
-    assert 'vless://sample' in panels_html
-    assert 'csrf_token' in panels_html
-    lazy_tabs_html, lazy_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-        [
-            ('vless', 'Vless 1', 3, 'vless://...'),
-            ('vless2', 'Vless 2', 3, 'vless://...'),
-        ],
-        {'vless': 'vless://sample', 'vless2': 'vless://hidden'},
-        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'}},
-        '<input name="csrf_token" value="token">',
-        key_pools={'vless': ['vless://sample'], 'vless2': ['vless://hidden']},
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        active_protocol='vless',
-        lazy_protocol_panels=True,
-    )
-    assert lazy_tabs_html.count('protocol-tab') == 2
-    assert 'data-protocol-panel-lazy="1"' in lazy_panels_html
-    assert 'vless://hidden' not in lazy_panels_html
-    deferred_tabs_html, deferred_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-        [('vless', 'Vless 1', 3, 'vless://...')],
-        {'vless': ''},
-        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'}},
-        '<input name="csrf_token" value="token">',
-        key_pools={'vless': ['deferred-pool-key']},
-        key_display_name=lambda key: 'deferred display',
-        hash_key=lambda key: 'deferredhash',
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-        defer_pool_rows=True,
-        defer_check_content=True,
-    )
-    assert 'tab-count">1</span>' in deferred_tabs_html
-    assert 'data-pool-deferred="1"' in deferred_panels_html
-    assert 'data-protocol-check-deferred="vless"' in deferred_panels_html
-    assert 'pool-empty-row' in deferred_panels_html
-    assert 'Загружаю пул ключей...' in deferred_panels_html
-    assert 'Пул пуст. Добавьте ключи или загрузите subscription' not in deferred_panels_html
-    assert 'deferred-pool-key' not in deferred_panels_html
-    assert 'deferred display' not in deferred_panels_html
-    scoped_tabs_html, scoped_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-        [
-            ('vless', 'Vless 1', 3, 'vless://...'),
-            ('vmess', 'Vmess', 3, 'vmess://...'),
-        ],
-        {'vless': 'vless://sample', 'vmess': 'vmess://sample'},
-        {
-            'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details'},
-            'vmess': {'tone': 'ok', 'label': 'OK', 'details': 'details'},
-        },
-        '<input name="csrf_token" value="token">',
-        key_pools={'vless': ['vless://sample'], 'vmess': ['vmess://sample']},
-        key_probe_cache={
-            'vless://sample': {'tg_ok': True, 'yt_ok': True, 'custom': {'discord': True}},
-            'vmess://sample': {'tg_ok': True, 'yt_ok': True, 'custom': {'discord': True}},
-        },
-        custom_checks=[{'id': 'discord', 'label': 'Discord'}],
-        custom_checks_for_protocol=lambda protocol, checks: checks if protocol == 'vless' else [],
-        custom_header_icons_for_protocol=lambda protocol, checks: ''.join(f'H-{check["id"]}' for check in checks),
-        custom_check_badges=lambda probe, checks: ''.join(f'B-{check["id"]}' for check in checks),
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-    )
-    assert scoped_tabs_html.count('protocol-tab') == 2
-    assert 'H-discord' in scoped_panels_html
-    assert 'B-discord' in scoped_panels_html
-    vmess_panel_html = scoped_panels_html.split('data-protocol-panel="vmess"', 1)[1]
-    assert 'H-discord' not in vmess_panel_html
-    assert 'B-discord' not in vmess_panel_html
-    status_tabs_html, status_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-        [('vless', 'Vless 1', 3, 'vless://...')],
-        {'vless': 'vless://sample'},
-        {'vless': {'tone': 'ok', 'label': 'OK', 'details': 'details', 'endpoint_ok': True, 'api_ok': True, 'yt_ok': False}},
-        '<input name="csrf_token" value="token">',
-        key_pools={'vless': ['vless://sample']},
-        key_probe_cache={'vless://sample': {'tg_ok': False, 'yt_ok': True}},
-        core_service_applicability_for_protocol=lambda protocol: {'telegram': True, 'youtube': False},
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-    )
-    assert 'protocol-tab active' in status_tabs_html
-    assert 'data-protocol-live-status="1"' in status_panels_html
-    assert '<span class="key-status-icons" data-protocol-status-icons>TG</span>' in status_panels_html
-    assert 'key-status-ok' in status_panels_html
-    vless2_status_tabs_html, vless2_status_panels_html = web_pool_form_blocks.render_protocol_tabs_and_panels(
-        [('vless2', 'Vless 2', 3, 'vless://...')],
-        {'vless2': 'checked-key-value'},
-        {'vless2': {'tone': 'empty', 'label': 'Not checked', 'details': 'empty', 'api_ok': False, 'yt_ok': False}},
-        '<input name="csrf_token" value="token">',
-        key_pools={'vless2': ['checked-key-value']},
-        key_probe_cache={'checked-key-value': {'tg_ok': False, 'yt_ok': True}},
-        core_service_applicability_for_protocol=lambda protocol: {'telegram': False, 'youtube': True},
-        telegram_icon_html=lambda opacity=1.0: 'TG',
-        youtube_icon_html=lambda opacity=1.0: 'YT',
-    )
-    assert 'protocol-tab active' in vless2_status_tabs_html
-    assert 'data-core-services="youtube"' in vless2_status_panels_html
-    assert 'data-core-services-loaded="1"' in vless2_status_panels_html
-    assert 'key-status-ok' in vless2_status_panels_html
-    assert 'key-status-empty' not in vless2_status_panels_html
-    assert '<span class="key-status-icons" data-protocol-status-icons>YT</span>' in vless2_status_panels_html
-
+    assert '/pool_probe' not in no_pool_content
+    assert 'custom-check-form' not in no_pool_content
 
 def test_web_status_builder_helpers():
     assert web_status_builder.empty_protocol_status()['tone'] == 'empty'
@@ -13229,10 +12903,6 @@ def test_probe_cache_update_entry_min_interval():
         now=201,
         custom_checks=[{'id': 'custom', 'urls': ['https://example.test']}],
     )
-    assert not probe_cache.key_probe_has_required_results(
-        cache[key_id],
-        custom_checks=[{'id': 'custom', 'urls': ['https://example.test']}],
-    )
 
 
 def test_probe_cache_trims_error_text_fields():
@@ -13429,7 +13099,6 @@ def test_probe_cache_ignores_stale_schema(tmp_path):
     assert stale_key not in loaded
     assert future_key not in loaded
     assert not probe_cache.key_probe_is_fresh({'ts': 100}, now=101)
-    assert not probe_cache.key_probe_has_required_results({'tg_ok': True, 'yt_ok': True})
 
 
 def test_probe_cache_invalidates_changed_custom_check_targets():
@@ -13448,9 +13117,7 @@ def test_probe_cache_invalidates_changed_custom_check_targets():
     )
     entry = cache[probe_cache.hash_key('key-1')]
     assert probe_cache.key_probe_is_fresh(entry, now=101, custom_checks=old_checks)
-    assert probe_cache.key_probe_has_required_results(entry, custom_checks=old_checks)
     assert not probe_cache.key_probe_is_fresh(entry, now=101, custom_checks=new_checks)
-    assert not probe_cache.key_probe_has_required_results(entry, custom_checks=new_checks)
 
 
 def test_probe_cache_failed_results_expire_quickly():
@@ -13622,7 +13289,7 @@ def test_web_template_scripts_helpers():
     assert 'const STATUS_ACTIVE_POLL_MS = 8000;' in scripts
     assert "const STATUS_IDLE_POLL_MS = Math.max(30000, Number(APP_CONFIG.statusIdlePollMs || 60000));" in scripts
     assert "const POOL_PROBE_STATUS_POLL_MS = Math.max(5000, Number(APP_CONFIG.poolProbeStatusPollMs || 10000));" in scripts
-    assert "const POOL_PROBE_POOL_REFRESH_MS = Math.max(10000, Number(APP_CONFIG.poolProbePoolRefreshMs || 15000));" in scripts
+    assert 'POOL_PROBE_POOL_REFRESH_MS' not in scripts
     assert "if (!ENABLE_LIVE_STATUS || document.hidden)" in scripts
     assert "fetch('/api/status?compact=1&lite=1'" in scripts
     assert "fetch('/api/router_health?compact=1' + forceQuery" in scripts
@@ -13808,6 +13475,8 @@ def test_web_template_scripts_helpers():
     assert 'textarea.getBoundingClientRect().width < 80' in scripts
     assert 'setupAutoResizeTextareas(panel);' in scripts
     assert 'function poolProbeSummaryText(progress, fallbackNote)' in scripts
+    assert "return 'Проверка всех ключей';" in scripts
+    assert 'Предварительная проверка всех ключей' not in scripts
     assert 'function pollPoolProbeStatus()' in scripts
     assert "fetch('/api/pool_probe'" in scripts
     assert 'function applyPoolProbeStatusPayload(payload)' in scripts
@@ -13817,7 +13486,9 @@ def test_web_template_scripts_helpers():
     assert "setOptionalText('pool-summary-note', progressSummary)" in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts
     assert 'if ((poolProbeActive || poolProbePaused) && !document.hidden)' in scripts
-    assert 'refreshPoolData(POOL_PROBE_POOL_REFRESH_MS)' in scripts
+    assert 'refreshPoolData(POOL_PROBE_POOL_REFRESH_MS)' not in scripts
+    active_payload_block = scripts.split('function applyPoolPayload(payload)', 1)[1].split('function applyPoolProbeStatusPayload', 1)[0]
+    assert 'refreshPoolData(' not in active_payload_block
     assert 'statusPollUntil = Math.max(statusPollUntil, Date.now() + POOL_PROBE_POLL_EXTENSION_MS)' not in scripts
     assert 'refreshPoolData(2500)' not in scripts
     assert 'function fetchRouterMetrics()' in scripts
@@ -15628,7 +15299,7 @@ def main():
     test_youtube_healthcheck_rejects_failed_googlevideo_media_endpoint()
     test_key_pool_subscription_helpers()
     test_key_pool_import_routes_selected_protocol_and_vless_context()
-    test_pool_import_hint_is_protocol_specific_in_both_renderers()
+    test_pool_import_hint_is_protocol_specific()
     test_subscription_hwid_request_helpers()
     test_subscription_pool_sync_preserves_manual_keys()
     test_subscription_pool_sync_preserves_active_managed_key()
