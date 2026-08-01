@@ -1,4 +1,8 @@
-*v1.1002 (1 Aug 2026) -* main
+*v1.1003 (1 Aug 2026) -* main
+
+*Aligns the remaining `web_command_state.py` installer marker with its retained `command_state_snapshot` API and adds a general regression that checks every explicit update and bootstrap marker against the shipped file before release.*
+
+*The rejected 1.1002 attempt remained transactional and kept router version 1.1000 active; no partial application files were accepted.*
 
 *Fixes clean installation and in-place update validation after the legacy pool renderer was removed: both installers now validate the retained `render_protocol_check_content` entry point instead of the deleted `render_protocol_panel` symbol.*
 

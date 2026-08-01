@@ -668,7 +668,7 @@ download_file "$(repo_file_url web_pool_form_blocks.py)" "$TMP_DIR/web_pool_form
 download_file "$(repo_file_url web_http_common.py)" "$TMP_DIR/web_http_common.py" 'WebRequestMixin'
 download_file "$(repo_file_url web_get_actions.py)" "$TMP_DIR/web_get_actions.py" 'dispatch'
 download_file "$(repo_file_url web_post_actions.py)" "$TMP_DIR/web_post_actions.py" 'dispatch'
-download_file "$(repo_file_url web_command_state.py)" "$TMP_DIR/web_command_state.py" 'start_command'
+download_file "$(repo_file_url web_command_state.py)" "$TMP_DIR/web_command_state.py" 'command_state_snapshot'
 download_file "$(repo_file_url web_commands_runtime.py)" "$TMP_DIR/web_commands_runtime.py" 'run_web_command'
 download_file "$(repo_file_url unblock_lists.py)" "$TMP_DIR/unblock_lists.py" 'save_unblock_list_file'
 download_file "$(repo_file_url proxy_key_store.py)" "$TMP_DIR/proxy_key_store.py" 'load_current_keys'

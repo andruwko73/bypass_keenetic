@@ -5890,6 +5890,39 @@ def test_runtime_modules_are_installed_by_update_scripts():
     assert "web_pool_form_blocks.py\" \'render_protocol_panel\'" not in bootstrap
 
 
+def test_update_and_bootstrap_validation_markers_match_shipped_files():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+
+    marker_specs = []
+    for match in re.finditer(
+        r'^\s*stage_runtime_module\s+([A-Za-z0-9_.-]+)\s+'
+        r'(?:"([^"]*)"|\'([^\']*)\'|([A-Za-z0-9_]+))\s+\|\|',
+        script,
+        flags=re.MULTILINE,
+    ):
+        marker_specs.append(('update', match.group(1), next(value for value in match.groups()[1:] if value)))
+    for match in re.finditer(
+        r'^download_file\s+"\$\(repo_file_url\s+([^\)]+)\)"\s+'
+        r'"\$TMP_DIR/[^"]+"\s+\'([^\']*)\'',
+        bootstrap,
+        flags=re.MULTILINE,
+    ):
+        marker_specs.append(('bootstrap', match.group(1).strip(), match.group(2)))
+
+    assert marker_specs
+    for flow, filename, marker in marker_specs:
+        path = APP_ROOT / filename
+        if not path.exists():
+            path = ROOT / filename
+        assert path.exists(), f'{flow}: missing shipped file {filename}'
+        source = path.read_text(encoding='utf-8')
+        # POSIX grep treats a dollar sign in the middle of a basic expression
+        # as a literal, while Python's regex engine treats it as an anchor.
+        python_marker = marker.replace('$', r'\$')
+        assert re.search(python_marker, source), f'{flow}: {filename} does not match validation marker {marker!r}'
+
+
 def test_youtube_edge_prefetch_runner_detects_current_youtube_route(tmp_path):
     unblock_dir = tmp_path / 'unblock'
     unblock_dir.mkdir()

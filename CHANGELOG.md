@@ -1,3 +1,9 @@
+<a name="1.1003"></a>
+# [1.1003] - 1 Aug 2026
+
+- Aligned the remaining `web_command_state.py` validation marker with the retained `command_state_snapshot` API.
+- Added a general regression that checks every explicit update and clean-install marker against the actual shipped file, preventing future stale-symbol release failures.
+
 <a name="1.1002"></a>
 # [1.1002] - 1 Aug 2026
 

@@ -1941,7 +1941,7 @@ if [ "$1" = "-update" ]; then
     stage_runtime_module web_http_common.py WebRequestMixin || exit 1
     stage_runtime_module web_get_actions.py dispatch || exit 1
     stage_runtime_module web_post_actions.py dispatch || exit 1
-    stage_runtime_module web_command_state.py start_command || exit 1
+    stage_runtime_module web_command_state.py command_state_snapshot || exit 1
     stage_runtime_module unblock_lists.py save_unblock_list_file || exit 1
     stage_runtime_module proxy_key_store.py load_current_keys || exit 1
     stage_runtime_module proxy_protocols.py proxy_outbound_from_key || exit 1
