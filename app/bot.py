@@ -7897,9 +7897,17 @@ def _append_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY):
     )
     if target_protocol and catalog_entries:
         result = _apply_service_route(resolved_key, target_protocol)
+        check_note = ''
+        if _app_mode_pool_enabled() and _custom_checks_store().custom_check_preset(resolved_key):
+            try:
+                _, check_result = _add_custom_check(preset_id=resolved_key)
+                _refresh_status_caches_async(_load_current_keys(), active_only=True)
+                check_note = f' {check_result} Активные ключи перепроверяются в фоне.'
+            except Exception as exc:
+                check_note = f' Проверку добавить не удалось: {exc}'
         return (
             f'✅ {result.get("service_label")}: перенесено в {result.get("target_label")}. '
-            f'Адресов: {result.get("entries", 0)}.'
+            f'Адресов: {result.get("entries", 0)}.{check_note}'
         )
     return _apply_socialnet_list(list_name, service_key=service_key, remove=False)
 

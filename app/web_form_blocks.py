@@ -214,17 +214,17 @@ def _light_protocol_panel_html(
                     </div>
                 </div>
             </div>
-            <div class="pool-table-wrap">
-                <table class="pool-table" style="--custom-col-mobile:28px">
+            <div class="pool-table-wrap" tabindex="0" aria-label="Таблица ключей пула; при необходимости прокручивается по горизонтали">
+                <table class="pool-table" style="--custom-col-count:0;--pool-table-min-width-desktop:436px;--pool-table-min-width-mobile:268px">
                     <colgroup>
                         <col class="pool-col-key">
                         <col class="pool-col-icon">
                         <col class="pool-col-icon">
-                        <col class="pool-col-custom" style="width:32px">
+                        <col class="pool-col-custom-anchor" data-custom-check-col-anchor>
                         <col class="pool-col-checked">
                         <col class="pool-col-actions">
                     </colgroup>
-                    <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head" data-core-service-head="telegram">{telegram_icon_html(opacity=1.0)}</th><th class="pool-icon-head" data-core-service-head="youtube">{youtube_icon_html(opacity=1.0)}</th><th class="pool-icon-head pool-custom-head" data-custom-check-head></th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
+                    <thead><tr><th class="pool-key-head">Ключ</th><th class="pool-icon-head" data-core-service-head="telegram">{telegram_icon_html(opacity=1.0)}</th><th class="pool-icon-head" data-core-service-head="youtube">{youtube_icon_html(opacity=1.0)}</th><th class="pool-custom-head-anchor" data-custom-check-head-anchor aria-hidden="true"></th><th class="pool-checked-head">Проверка</th><th class="pool-actions-head">Действия</th></tr></thead>
                     <tbody data-pool-body="{safe_key_name}" data-pool-deferred="1">{_pool_loading_row_html(6)}</tbody>
                 </table>
             </div>
@@ -239,8 +239,8 @@ def _light_protocol_panel_html(
                 <p class="status-note">{safe_details}</p>
             </div>
             <div class="protocol-check-loading" data-protocol-check-deferred="{safe_key_name}">
-                <span class="status-label">Checks</span>
-                <p class="status-note">Loading...</p>
+                <span class="status-label">Проверка</span>
+                <p class="status-note">Загружаю актуальное состояние...</p>
             </div>
         </div>'''
     return f'''<section class="protocol-workspace{active_class}" data-protocol-card="{safe_key_name}" data-protocol-panel="{safe_key_name}" data-protocol-live-status="{live_status}" data-core-services="" data-core-services-loaded="0">

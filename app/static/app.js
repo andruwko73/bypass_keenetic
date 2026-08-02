@@ -1701,8 +1701,10 @@
             return ['telegram', 'youtube'];
         }
 
-        function poolCoreColspan(coreServices) {
-            return 4 + (Array.isArray(coreServices) ? coreServices.length : 2);
+        function poolCoreColspan(coreServices, checks) {
+            const coreCount = Array.isArray(coreServices) ? coreServices.length : 2;
+            const customCount = Array.isArray(checks) ? checks.length : 0;
+            return 3 + coreCount + customCount;
         }
 
         function poolCoreServiceCells(row, coreServices) {
@@ -1755,17 +1757,18 @@
                 escapeHtml(label + (url ? ': ' + url : '')) + '">' + content + '</span>';
         }
 
-        function renderCustomBadges(states, checks) {
+        function renderCustomCells(states, checks) {
             const activeChecks = Array.isArray(checks) ? checks : customChecks;
             if (!activeChecks.length) {
                 return '';
             }
             const stateMap = states || {};
-            return activeChecks.filter(function(check) {
-                return Object.prototype.hasOwnProperty.call(stateMap, check.id);
-            }).map(function(check) {
+            return activeChecks.map(function(check) {
                 const state = stateMap[check.id] || 'unknown';
-                return customBadge(state, check);
+                const id = escapeHtml(check.id || '');
+                const label = escapeHtml(check.label || 'Проверка');
+                return '<td class="pool-custom-cell" data-pool-custom="' + id + '" title="' + label + '" aria-label="' + label + '">' +
+                    customBadge(state, check) + '</td>';
             }).join('');
         }
 
@@ -1816,30 +1819,34 @@
 
         function customIconHtml(check) {
             if (check && check.icon) {
-                return '<span class="preset-icon"><img src="' + serviceIconSrc(check.icon) + '" width="20" height="20" alt="' + escapeHtml(check.label || 'Service') + '"></span>';
+                return '<span class="preset-icon"><img src="' + serviceIconSrc(check.icon) + '" width="20" height="20" alt="' + escapeHtml(check.label || 'Сервис') + '"></span>';
             }
             return '<span class="custom-service-badge custom-service-neutral">' + escapeHtml((check && check.badge) || 'WEB') + '</span>';
         }
 
-        function customHeaderIcons(checks) {
+        function customCheckSignature(checks) {
             const activeChecks = Array.isArray(checks) ? checks : customChecks;
-            if (!activeChecks.length) {
-                return '';
-            }
             return activeChecks.map(function(check) {
-                const label = check.label || 'Service';
+                return String(check.id || '');
+            }).join('|');
+        }
+
+        function customHeaderCells(checks) {
+            const activeChecks = Array.isArray(checks) ? checks : customChecks;
+            return activeChecks.map(function(check) {
+                const label = check.label || 'Сервис';
                 const content = check.icon
                     ? serviceIcon(serviceIconSrc(check.icon), label, check.badge || '')
                     : '<span class="custom-service-badge custom-service-neutral">' + escapeHtml(check.badge || 'WEB') + '</span>';
-                return '<span class="custom-service-slot custom-service-header" title="' + escapeHtml(label) + '">' + content + '</span>';
+                return '<th class="pool-icon-head pool-custom-head" data-custom-check-head="' + escapeHtml(check.id || '') +
+                    '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '">' +
+                    '<span class="custom-service-slot custom-service-header">' + content + '</span></th>';
             }).join('');
         }
 
         function syncCustomCheckColumns(checks, root) {
             const activeChecks = Array.isArray(checks) ? checks : customChecks;
             const hasChecks = activeChecks.length > 0;
-            const mobileWidth = Math.max(28, 28 * activeChecks.length) + 'px';
-            const desktopWidth = (32 * Math.max(1, activeChecks.length)) + 'px';
             const scope = root && root.querySelectorAll ? root : document;
             const tables = [];
             if (scope.matches && scope.matches('.pool-table')) {
@@ -1850,10 +1857,22 @@
             });
             tables.forEach(function(table) {
                 table.classList.toggle('has-custom-checks', hasChecks);
-                table.style.setProperty('--custom-col-mobile', mobileWidth);
-                const customCol = table.querySelector('.pool-col-custom');
-                if (customCol) {
-                    customCol.style.width = desktopWidth;
+                table.dataset.customCheckSignature = customCheckSignature(activeChecks);
+                table.style.setProperty('--custom-col-count', String(activeChecks.length));
+                table.style.setProperty('--pool-table-min-width-desktop', String(436 + (32 * activeChecks.length)) + 'px');
+                table.style.setProperty('--pool-table-min-width-mobile', String(268 + (28 * activeChecks.length)) + 'px');
+
+                table.querySelectorAll('[data-custom-check-col]').forEach(function(item) { item.remove(); });
+                table.querySelectorAll('[data-custom-check-head]').forEach(function(item) { item.remove(); });
+                const colAnchor = table.querySelector('[data-custom-check-col-anchor]');
+                const headAnchor = table.querySelector('[data-custom-check-head-anchor]');
+                if (colAnchor) {
+                    colAnchor.insertAdjacentHTML('beforebegin', activeChecks.map(function(check) {
+                        return '<col class="pool-col-custom" data-custom-check-col="' + escapeHtml(check.id || '') + '">';
+                    }).join(''));
+                }
+                if (headAnchor) {
+                    headAnchor.insertAdjacentHTML('beforebegin', customHeaderCells(activeChecks));
                 }
             });
         }
@@ -1872,10 +1891,6 @@
                 return;
             }
             syncCustomCheckColumns(checks, table);
-            const head = table.querySelector('[data-custom-check-head]');
-            if (head) {
-                head.innerHTML = customHeaderIcons(checks);
-            }
         }
 
         function routeServiceIds() {
@@ -1889,9 +1904,9 @@
                 return;
             }
             customChecks = Array.isArray(checks) ? checks : [];
-            const routeIds = routeServiceIds();
+            const routeIds = new Set(routeServiceIds());
             const visibleChecks = customChecks.filter(function(check) {
-                return routeIds.indexOf(check.id || '') === -1;
+                return !routeIds.has(check.id || '');
             });
             const html = visibleChecks.length ? visibleChecks.map(function(check) {
                 return '<div class="custom-check-item">' +
@@ -2254,7 +2269,7 @@
             clearPoolDeferred(body);
             if (!rows.length) {
                 body.innerHTML = '<tr class="pool-row pool-empty-row"><td colspan="6">Пул пуст. Добавьте ключи или загрузите подписку.</td></tr>';
-                body.innerHTML = body.innerHTML.replace('colspan="6"', 'colspan="' + poolCoreColspan(coreServices) + '"');
+                body.innerHTML = body.innerHTML.replace('colspan="6"', 'colspan="' + poolCoreColspan(coreServices, checks) + '"');
                 body.dataset.poolAppliedSort = '';
                 setupPoolControls(body.closest('[data-protocol-panel]') || document);
                 return;
@@ -2279,7 +2294,7 @@
                         '<span class="pool-hash">' + escapeHtml(row.key_id) + '</span>' +
                     '</td>' +
                     coreCells +
-                    '<td class="pool-custom-cell" data-pool-custom>' + renderCustomBadges(row.custom, checks) + '</td>' +
+                    renderCustomCells(row.custom, checks) +
                     '<td class="pool-checked-cell" data-pool-checked>' + escapeHtml(row.checked_at) + '</td>' +
                     '<td class="pool-actions-cell">' +
                         '<form method="post" action="/pool_delete" class="pool-item-form" data-async-action="pool-delete" data-confirm-title="Удалить ключ?" data-confirm-message="Удалить ключ из пула?">' +
@@ -2359,10 +2374,15 @@
                 if (yt) {
                     yt.innerHTML = probeBadge(row.yt, 'yt');
                 }
-                const custom = item.querySelector('[data-pool-custom]');
-                if (custom) {
-                    custom.innerHTML = renderCustomBadges(row.custom, checks);
-                }
+                const customCells = new Map(Array.from(item.querySelectorAll('[data-pool-custom]')).map(function(cell) {
+                    return [cell.dataset.poolCustom || '', cell];
+                }));
+                checks.forEach(function(check) {
+                    const custom = customCells.get(String(check.id || ''));
+                    if (custom) {
+                        custom.innerHTML = customBadge((row.custom || {})[check.id] || 'unknown', check);
+                    }
+                });
                 const checked = item.querySelector('[data-pool-checked]');
                 if (checked) {
                     checked.textContent = row.checked_at || '';
@@ -2386,9 +2406,12 @@
             Object.keys(pools).forEach(function(proto) {
                 const rows = (pools[proto] && pools[proto].rows) || [];
                 const body = document.querySelector('[data-pool-body="' + proto + '"]');
+                const table = body ? body.closest('.pool-table') : null;
                 const currentRows = body ? Array.from(body.querySelectorAll('[data-pool-row]')) : [];
                 const currentIds = new Set(currentRows.map(function(item) { return String(item.dataset.keyId || ''); }));
-                const needsRender = rows.length === 0 || currentRows.length !== rows.length || rows.some(function(row) {
+                const expectedSignature = customCheckSignature(poolCustomChecks(pools[proto]));
+                const needsRender = !table || table.dataset.customCheckSignature !== expectedSignature ||
+                    rows.length === 0 || currentRows.length !== rows.length || rows.some(function(row) {
                     return !currentIds.has(String(row.key_id || ''));
                 });
                 if (needsRender) {

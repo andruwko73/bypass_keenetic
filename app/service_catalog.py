@@ -235,6 +235,7 @@ CHATGPT_ROUTE_ENTRIES = [
     'oaistatic.com',
     'cdn.oaistatic.com',
     'persistent.oaistatic.com',
+    'oaistatsig.com',
     'oaiusercontent.com',
     'files.oaiusercontent.com',
     'images.ctfassets.net',
@@ -361,20 +362,34 @@ GEMINI_ROUTE_ENTRIES = [
     'streetviewpixels-pa.googleapis.com',
 ]
 
-GROK_ROUTE_ENTRIES = [
-    'grok.com',
-    'x.ai',
-    'api.x.ai',
+TWITTER_ROUTE_ENTRIES = [
     'x.com',
     'api.x.com',
+    'ads-twitter.com',
     'twitter.com',
     'api.twitter.com',
+    'mobile.twitter.com',
+    'static.ads-twitter.com',
     't.co',
     'twimg.com',
     'pbs.twimg.com',
     'video.twimg.com',
     'abs.twimg.com',
     'ton.twimg.com',
+    'twitter.biz',
+    'twitter.jp',
+    'twittercommunity.com',
+    'twitterflightschool.com',
+    'twitterinc.com',
+    'twitteroauth.com',
+    'twitterstat.us',
+]
+
+GROK_ROUTE_ENTRIES = [
+    'grok.com',
+    'x.ai',
+    'api.x.ai',
+    *TWITTER_ROUTE_ENTRIES,
 ]
 
 COPILOT_ROUTE_ENTRIES = [
@@ -384,10 +399,18 @@ COPILOT_ROUTE_ENTRIES = [
     'edgeservices.bing.com',
     'sydney.bing.com',
     'login.microsoftonline.com',
+    'github.com',
+    'api.github.com',
+    'collector.github.com',
+    'githubassets.com',
+    'githubusercontent.com',
     'api.githubcopilot.com',
     'githubcopilot.com',
     'githubcopilotusercontent.com',
     'copilot-proxy.githubusercontent.com',
+    'origin-tracker.githubusercontent.com',
+    'copilot-telemetry.githubusercontent.com',
+    'default.exp-tas.com',
     'default.exp-external-v8.env.microsoft.com',
 ]
 
@@ -472,6 +495,25 @@ META_PLATFORM_ROUTE_ENTRIES = [
     'whatsapp.com',
     'whatsapp.net',
     'oculus.com',
+]
+
+TIKTOK_ROUTE_ENTRIES = [
+    'byteoversea.com',
+    'ibytedtos.com',
+    'muscdn.com',
+    'musical.ly',
+    'tik-tokapi.com',
+    'tiktok.com',
+    'tiktokcdn.com',
+    'tiktokcdn-eu.com',
+    'tiktokcdn-us.com',
+    'tiktokd.net',
+    'tiktokd.org',
+    'tiktokv.com',
+    'tiktokv.eu',
+    'tiktokv.us',
+    'tiktokw.us',
+    'ttwstatic.com',
 ]
 
 CHROME_REMOTE_DESKTOP_SIGNAL_IP_ENTRIES = [
@@ -676,6 +718,17 @@ CUSTOM_CHECK_PRESETS = [
         'routes': META_PLATFORM_ROUTE_ENTRIES,
         'badge': 'META',
         'icon': 'instagram',
+    },
+    {
+        'id': 'tiktok',
+        'label': 'TikTok',
+        'url': 'https://www.tiktok.com',
+        'urls': [
+            'https://www.tiktok.com',
+        ],
+        'routes': TIKTOK_ROUTE_ENTRIES,
+        'badge': 'TT',
+        'icon': 'tiktok',
     },
 ]
 
@@ -926,7 +979,6 @@ SERVICE_LIST_SOURCES = {
         'aliases': ['grok', 'xai', 'x ai', 'x', 'twitter', 'твиттер'],
         'url': '',
         'entries': GROK_ROUTE_ENTRIES,
-        'include_services': ['twitter'],
         'udp_quic': True,
     },
     'deepseek': {
@@ -985,11 +1037,15 @@ SERVICE_LIST_SOURCES = {
         'label': 'TikTok',
         'aliases': ['tiktok', 'tik-tok', 'тик ток', 'тикток'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/tiktok.lst',
+        'entries': TIKTOK_ROUTE_ENTRIES,
+        'udp_quic': True,
     },
     'twitter': {
         'label': 'X / Twitter',
         'aliases': ['twitter', 'x', 'твиттер'],
         'url': 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Services/twitter.lst',
+        'entries': TWITTER_ROUTE_ENTRIES,
+        'udp_quic': True,
     },
 }
 

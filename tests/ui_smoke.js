@@ -153,6 +153,64 @@ async function assertNoHorizontalOverflow(page, label) {
   }
 }
 
+async function assertPoolServiceColumns(page, label, expectHorizontalScroll) {
+  const layout = await page.evaluate(() => {
+    const panel = document.querySelector('[data-protocol-panel].active');
+    const wrapper = panel && panel.querySelector('.pool-table-wrap');
+    const table = wrapper && wrapper.querySelector('.pool-table');
+    const row = table && table.querySelector('[data-pool-row]');
+    if (!wrapper || !table || !row) {
+      return null;
+    }
+    const heads = Array.from(table.querySelectorAll('[data-custom-check-head]'));
+    const cells = Array.from(row.querySelectorAll('[data-pool-custom]'));
+    const headIds = heads.map((node) => node.dataset.customCheckHead || '');
+    const cellIds = cells.map((node) => node.dataset.poolCustom || '');
+    const expectedIds = String(table.dataset.customCheckSignature || '').split('|').filter(Boolean);
+    const wrapperRect = wrapper.getBoundingClientRect();
+    wrapper.scrollLeft = 0;
+    const firstRect = heads[0] ? heads[0].getBoundingClientRect() : null;
+    const firstVisibleAtStart = Boolean(firstRect && firstRect.right > wrapperRect.left && firstRect.left < wrapperRect.right);
+    wrapper.scrollLeft = wrapper.scrollWidth;
+    const lastRect = heads.length ? heads[heads.length - 1].getBoundingClientRect() : null;
+    const lastVisibleAtEnd = Boolean(lastRect && lastRect.right > wrapperRect.left && lastRect.left < wrapperRect.right);
+    const result = {
+      expectedIds,
+      headIds,
+      cellIds,
+      iconHeads: heads.filter((node) => node.querySelector('img')).length,
+      clientWidth: wrapper.clientWidth,
+      scrollWidth: wrapper.scrollWidth,
+      overflowX: getComputedStyle(wrapper).overflowX,
+      firstVisibleAtStart,
+      lastVisibleAtEnd,
+    };
+    wrapper.scrollLeft = 0;
+    return result;
+  });
+  if (!layout) {
+    throw new Error(`${label}: pool table is missing`);
+  }
+  if (layout.expectedIds.length < 10 || !layout.expectedIds.includes('tiktok')) {
+    throw new Error(`${label}: all service checks, including TikTok, were not rendered ${JSON.stringify(layout)}`);
+  }
+  if (JSON.stringify(layout.headIds) !== JSON.stringify(layout.expectedIds) || JSON.stringify(layout.cellIds) !== JSON.stringify(layout.expectedIds)) {
+    throw new Error(`${label}: pool service headers and row cells are not aligned ${JSON.stringify(layout)}`);
+  }
+  if (layout.iconHeads !== layout.expectedIds.length) {
+    throw new Error(`${label}: one or more pool service icons are missing ${JSON.stringify(layout)}`);
+  }
+  if (!['auto', 'scroll'].includes(layout.overflowX)) {
+    throw new Error(`${label}: pool horizontal scrolling is disabled ${JSON.stringify(layout)}`);
+  }
+  if (!layout.firstVisibleAtStart || !layout.lastVisibleAtEnd) {
+    throw new Error(`${label}: first or last service column cannot be reached ${JSON.stringify(layout)}`);
+  }
+  if (expectHorizontalScroll && layout.scrollWidth <= layout.clientWidth + 2) {
+    throw new Error(`${label}: all-service mobile pool should scroll horizontally ${JSON.stringify(layout)}`);
+  }
+}
+
 async function assertMobileStatusGaps(page, label) {
   const expected = 8;
   const gaps = await page.evaluate(() => {
@@ -1155,6 +1213,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: service route cards overflow`);
     }
     await page.locator('[data-protocol-panel].active [data-subview-target="pool"]').click();
+    await assertPoolServiceColumns(page, `${name} all-service pool`, isMobile);
     if (await page.locator('[data-pool-filter]').count()) {
       await assertVisibleBox(page, '[data-pool-filter]', `${name} pool filter`);
     }

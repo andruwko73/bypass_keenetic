@@ -32,6 +32,7 @@ BACKGROUND_STATE = {
 BACKGROUND_FIXTURE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL4JwAAAABJRU5ErkJggg=="
 
 import key_pool_web  # noqa: E402
+import service_catalog  # noqa: E402
 import service_routes  # noqa: E402
 import web_form_blocks  # noqa: E402
 import web_form_template  # noqa: E402
@@ -74,32 +75,20 @@ POOLS = {
     "shadowsocks": [],
 }
 
-CUSTOM_CHECKS = [
-    {
-        "id": "chatgpt_services",
-        "label": "ChatGPT / Codex",
-        "url": "https://chatgpt.com/backend-api/models",
-        "urls": ["https://chatgpt.com/backend-api/models"],
-        "routes": ["chatgpt.com", "chat.openai.com"],
-        "badge": "AI",
-        "icon": "chatgpt",
-    },
-    {
-        "id": "meta",
-        "label": "Instagram / Facebook",
-        "url": "https://www.instagram.com/",
-        "urls": ["https://www.instagram.com/"],
-        "routes": ["instagram.com", "facebook.com"],
-        "badge": "IG",
-        "icon": "instagram",
-    },
-]
+CUSTOM_CHECKS = [dict(item) for item in service_catalog.CUSTOM_CHECK_PRESETS]
 
 ROUTE_SERVICE_ITEMS = [
     {"id": "telegram", "label": "Telegram", "badge": "TG", "icon": ""},
     {"id": "youtube", "label": "YouTube", "badge": "YT", "icon": ""},
-    {"id": "chatgpt_services", "label": "ChatGPT / Codex", "badge": "AI", "icon": "chatgpt"},
-    {"id": "meta", "label": "Instagram / Facebook", "badge": "IG", "icon": "instagram"},
+    *[
+        {
+            "id": item["id"],
+            "label": item["label"],
+            "badge": item.get("badge", "WEB"),
+            "icon": item.get("icon", ""),
+        }
+        for item in CUSTOM_CHECKS
+    ],
 ]
 ROUTE_SERVICE_IDS = {item["id"] for item in ROUTE_SERVICE_ITEMS}
 
@@ -135,6 +124,19 @@ ROUTE_STATES = {
         },
     },
 }
+
+for _check in CUSTOM_CHECKS:
+    _route_count = len(_check.get("routes") or [])
+    ROUTE_STATES.setdefault(
+        _check["id"],
+        {
+            "label": "Vless 1",
+            "total": _route_count,
+            "complete_protocols": ["vless"],
+            "partial_protocols": [],
+            "routes": {"vless": {"matched": _route_count, "total": _route_count}},
+        },
+    )
 
 APP_MODE_FIXTURES = {
     "simple": {
@@ -180,7 +182,7 @@ def _probe_cache():
             cache[_hash_key(key_value)] = {
                 "tg_ok": proto == "vless" or index == 0,
                 "yt_ok": proto == "vless2" or index == 0,
-                "custom": {"chatgpt_services": index == 0, "meta": index == 0},
+                "custom": {item["id"]: index == 0 for item in CUSTOM_CHECKS},
                 "ts": now - (index * 60),
             }
     return cache

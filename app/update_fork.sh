@@ -6,16 +6,16 @@ cd "$repo_root"
 
 branch=${1:-main}
 
-echo "Fetching origin..."
+echo "Получаем изменения origin..."
 git fetch origin
 
-echo "Checking out $branch..."
+echo "Переключаемся на ветку $branch..."
 git checkout "$branch"
 
-echo "Merging origin/$branch..."
+echo "Объединяем изменения origin/$branch..."
 git merge --ff-only "origin/$branch"
 
-echo "Pushing $branch to userfork..."
+echo "Отправляем ветку $branch в userfork..."
 git push userfork "$branch"
 
-echo "Update complete: userfork/$branch is now synced with origin/$branch."
+echo "Обновление завершено: userfork/$branch синхронизирован с origin/$branch."

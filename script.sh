@@ -140,13 +140,13 @@ resume_application_after_cancelled_update() {
 
 prepare_application_for_update() {
   echo "Переводим программу в режим обслуживания; веб-интерфейс остаётся доступным."
-  write_cli_update_status update true 50 Maintenance "Pausing Telegram and background checks; web remains available"
+  write_cli_update_status update true 50 Обслуживание "Приостанавливаем Telegram и фоновые проверки; веб-интерфейс остаётся доступным"
 
   [ -x "$INSTALLER_SERVICE_PATH" ] && "$INSTALLER_SERVICE_PATH" stop >/dev/null 2>&1 || true
   cleanup_pool_probe_runtime
 
   if pgrep -f "/tmp/bypass_pool_probe_" >/dev/null 2>&1; then
-    echo "Error: pool probe worker is still running; update cancelled before file replacement"
+    echo "Ошибка: процесс проверки пула ещё работает; обновление отменено до замены файлов"
     return 1
   fi
 
@@ -165,7 +165,7 @@ prepare_application_for_update() {
     for bot_pid in $bot_pids; do
       kill -USR1 "$bot_pid" >/dev/null 2>&1 || {
         resume_application_after_cancelled_update
-        echo "Error: failed to request application maintenance mode"
+        echo "Ошибка: не удалось запросить режим обслуживания программы"
         return 1
       }
     done
@@ -176,7 +176,7 @@ prepare_application_for_update() {
     done
     if [ ! -f "$UPDATE_MAINTENANCE_READY_PATH" ]; then
       resume_application_after_cancelled_update
-      echo "Error: application did not confirm maintenance mode; update cancelled before file replacement"
+      echo "Ошибка: программа не подтвердила режим обслуживания; обновление отменено до замены файлов"
       return 1
     fi
   else
@@ -186,7 +186,7 @@ prepare_application_for_update() {
 
   if [ -z "$(main_application_pids)" ]; then
     clear_update_maintenance_files
-    echo "Error: application stopped while entering maintenance mode"
+    echo "Ошибка: программа остановилась при переходе в режим обслуживания"
     return 1
   fi
   update_application_maintenance_active=1
@@ -218,7 +218,7 @@ recover_runtime_after_failed_update() {
   echo "Обновление прервано в режиме обслуживания. Восстанавливаем рабочее состояние."
   if [ -n "${backup_dir:-}" ] && [ -x "$backup_dir/rollback.sh" ]; then
     /bin/sh "$backup_dir/rollback.sh" && return 0
-    echo "Warning: automatic rollback failed; trying to start the installed bot service."
+    echo "Предупреждение: автоматический откат не удался; пробуем запустить установленный сервис бота."
   fi
   if [ "${update_application_was_running:-0}" = "1" ] && [ -n "$(main_application_pids)" ]; then
     resume_application_after_cancelled_update
@@ -237,7 +237,7 @@ handle_cli_update_exit() {
   trap '' TERM INT HUP
   if [ "${cli_update_status_active:-0}" = "1" ] && [ "$update_exit_code" -ne 0 ]; then
     recover_runtime_after_failed_update
-    write_cli_update_status update false 100 Error "CLI update failed; runtime recovery attempted"
+    write_cli_update_status update false 100 Ошибка "Обновление не удалось; выполнена попытка восстановить рабочее состояние"
   fi
   exit "$update_exit_code"
 }
@@ -265,7 +265,7 @@ validate_xray_core_config() {
   if /opt/sbin/xray run -test -c /opt/etc/xray/config.json > "$log_path" 2>&1; then
     return 0
   fi
-  echo "Xray config validation failed:"
+  echo "Проверка конфигурации Xray завершилась ошибкой:"
   tail -n 12 "$log_path" 2>/dev/null || cat "$log_path" 2>/dev/null || true
   return 1
 }
@@ -298,7 +298,7 @@ static_asset_paths() {
     service-icons/chatgpt.png service-icons/claude.png service-icons/copilot.png \
     service-icons/deepseek.png service-icons/discord.png \
     service-icons/gemini.png service-icons/grok.png service-icons/instagram.png \
-    service-icons/perplexity.png service-icons/telegram.png \
+    service-icons/perplexity.png service-icons/telegram.png service-icons/tiktok.png \
     service-icons/youtube.png service-icons/chrome_remote_desktop.png
 }
 
@@ -367,9 +367,9 @@ start_telegram_installer() {
   [ -x "$BOT_SERVICE_PATH" ] && "$BOT_SERVICE_PATH" stop >/dev/null 2>&1 || true
   if [ -x "$INSTALLER_SERVICE_PATH" ]; then
     "$INSTALLER_SERVICE_PATH" restart >/dev/null 2>&1 || "$INSTALLER_SERVICE_PATH" start >/dev/null 2>&1 || true
-    echo "Telegram-настройки не заполнены. Откройте web-интерфейс на порту $(config_get 'browser_port' '8080') и заполните token и username."
+    echo "Настройки Telegram не заполнены. Откройте веб-интерфейс на порту $(config_get 'browser_port' '8080') и заполните токен и имя пользователя."
   else
-    echo "⚠️ Telegram-настройки не заполнены, но installer service не найден."
+    echo "⚠️ Настройки Telegram не заполнены, а служба установщика не найдена."
   fi
 }
 
@@ -425,12 +425,12 @@ start_preferred_core_service() {
       validate_xray_core_config || return 1
     fi
     "$preferred_core" restart > /dev/null 2>&1 || "$preferred_core" start > /dev/null 2>&1 || {
-      echo "Core proxy service failed to start: $preferred_core"
+      echo "Не удалось запустить основной прокси-сервис: $preferred_core"
       return 1
     }
     sleep 1
     "$preferred_core" status > /tmp/bypass-core-service-status.log 2>&1 || {
-      echo "Core proxy service status failed: $preferred_core"
+      echo "Не удалось подтвердить состояние основного прокси-сервиса: $preferred_core"
       cat /tmp/bypass-core-service-status.log 2>/dev/null || true
       return 1
     }
@@ -447,7 +447,7 @@ run_update_ipset_refresh() {
   elapsed=0
   while kill -0 "$refresh_pid" >/dev/null 2>&1; do
     if [ "$elapsed" -ge "$timeout_seconds" ] 2>/dev/null; then
-      echo "${label}: ipset refresh is still running after ${timeout_seconds}s; continuing update while refresh finishes in background."
+      echo "${label}: обновление ipset продолжается дольше ${timeout_seconds} с; основное обновление продолжится, а ipset завершится в фоне."
       return 0
     fi
     sleep 2
@@ -456,7 +456,7 @@ run_update_ipset_refresh() {
   wait "$refresh_pid" >/dev/null 2>&1
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "${label}: ipset refresh exited with code ${rc}; continuing update with preserved runtime sets."
+    echo "${label}: обновление ipset завершилось с кодом ${rc}; продолжаем с сохранёнными рабочими наборами."
   fi
   return 0
 }
@@ -512,7 +512,7 @@ install_unblock_ipset_cron_job() {
     return 0
   fi
   rm -f "$cron_tmp"
-  echo "Warning: failed to install active root crontab for unblock_ipset.sh."
+  echo "Предупреждение: не удалось установить активный root crontab для unblock_ipset.sh."
   return 1
 }
 
@@ -650,12 +650,12 @@ validate_update_file() {
 
   if [ ! -s "$target" ]; then
     rm -f "$target"
-    echo "Error: ${description} downloaded as empty file"
+    echo "Ошибка: ${description} скачан как пустой файл"
     return 1
   fi
   if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
     rm -f "$target"
-    echo "Error: ${description} failed content validation"
+    echo "Ошибка: ${description} не прошёл проверку содержимого"
     return 1
   fi
   return 0
@@ -668,7 +668,7 @@ download_raw_file_via_socks() {
   for port in ${GITHUB_RAW_SOCKS_PORTS:-10811 10813 10812 10814 10815}; do
     if curl -fsSL --socks5-hostname "127.0.0.1:${port}" --connect-timeout 6 --max-time 35 --retry 1 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1; then
       if [ "${RAW_GITHUB_SOCKS_NOTICE_SHOWN:-0}" != "1" ]; then
-        echo "Downloading GitHub files via local SOCKS port ${port}."
+        echo "Скачиваем файлы GitHub через локальный SOCKS-порт ${port}."
         RAW_GITHUB_SOCKS_NOTICE_SHOWN=1
         export RAW_GITHUB_SOCKS_NOTICE_SHOWN
       fi
@@ -707,7 +707,7 @@ prepare_update_archive() {
   UPDATE_ARCHIVE_ROOT=$(find "$archive_work" -mindepth 1 -maxdepth 1 -type d | head -n1)
   [ -n "$UPDATE_ARCHIVE_ROOT" ] && [ -d "$UPDATE_ARCHIVE_ROOT" ] || return 1
   export UPDATE_ARCHIVE_ROOT
-  echo "GitHub archive fallback is ready."
+  echo "Резервная загрузка через архив GitHub готова."
   return 0
 }
 
@@ -748,7 +748,7 @@ download_update_file() {
       rm -f "$target"
       RAW_GITHUB_USE_SOCKS=1
       export RAW_GITHUB_USE_SOCKS
-      echo "Direct GitHub archive/API and raw download failed for ${description}; trying local SOCKS."
+      echo "Прямая загрузка ${description} через архив/API GitHub и raw не удалась; пробуем локальный SOCKS."
       if download_raw_file_via_socks "$url" "$target"; then
         validate_update_file "$target" "$marker" "$description" || return 1
         return 0
@@ -756,7 +756,7 @@ download_update_file() {
     fi
   fi
 
-  echo "Error: failed to download ${description}"
+  echo "Ошибка: не удалось скачать ${description}"
   return 1
 }
 
@@ -937,7 +937,7 @@ install_unblock_ipset_cron_job() {
     return 0
   fi
   rm -f "\$cron_tmp"
-  echo "Warning: failed to install active root crontab for unblock_ipset.sh."
+  echo "Предупреждение: не удалось установить активный root crontab для unblock_ipset.sh."
   return 1
 }
 
@@ -1015,7 +1015,7 @@ install_unblock_ipset_cron_job || true
 rm -f "\$UPDATE_MAINTENANCE_PATH" "\$UPDATE_MAINTENANCE_READY_PATH" 2>/dev/null || true
 [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "\$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
 
-echo "Rollback restored files from \$BACKUP_DIR."
+echo "Откат восстановил файлы из \$BACKUP_DIR."
 EOF
   chmod 755 "$rollback_path"
   ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh 2>/dev/null || true
@@ -1888,7 +1888,7 @@ fi
 if [ "$1" = "-update" ]; then
     echo "Начинаем обновление."
     cli_update_status_active=1
-    write_cli_update_status update true 3 Preparing "CLI update started"
+    write_cli_update_status update true 3 Подготовка "Обновление запущено"
     update_runtime_quiesced=0
     trap 'handle_cli_update_exit "$?"' EXIT
     trap 'exit 143' TERM INT HUP
@@ -1910,7 +1910,7 @@ if [ "$1" = "-update" ]; then
     mkdir -p "$stage_dir"
 
     echo "Скачиваем обновления во временную папку и проверяем файлы."
-    write_cli_update_status update true 10 Downloading "Downloading update files"
+    write_cli_update_status update true 10 Загрузка "Скачиваем файлы обновления"
     download_update_file "$(repo_file_url script.sh)" "$stage_dir/script.sh" "#!/bin/sh" "script.sh" || exit 1
     download_update_file "$(repo_file_url 100-ipset.sh)" "$stage_dir/100-ipset.sh" "#!/bin/sh" "100-ipset.sh" || exit 1
     download_update_file "$(repo_file_url 100-redirect.sh)" "$stage_dir/100-redirect.sh" "iptables -I PREROUTING" "100-redirect.sh" || exit 1
@@ -1922,7 +1922,7 @@ if [ "$1" = "-update" ]; then
     download_update_file "$(repo_file_url S99unblock)" "$stage_dir/S99unblock" "bypass unblock scheduler" "S99unblock" || exit 1
     download_update_file "$(repo_file_url bot.py)" "$stage_dir/bot.py" "KeyInstallHTTPRequestHandler" "bot.py" || exit 1
     staged_runtime_modules=$(sed -n 's/^BOT_RUNTIME_MODULES="\([^\"]*\)"$/\1/p' "$stage_dir/script.sh" | head -n1)
-    [ -n "$staged_runtime_modules" ] || { echo "Error: staged script has no runtime module manifest"; exit 1; }
+    [ -n "$staged_runtime_modules" ] || { echo "Ошибка: во временном скрипте нет списка модулей программы"; exit 1; }
     BOT_RUNTIME_MODULES="$staged_runtime_modules"
     for module in $staged_runtime_modules; do
       stage_runtime_module "$module" "" || exit 1
@@ -1972,8 +1972,8 @@ if [ "$1" = "-update" ]; then
     sed -i "s/40508/${dnsoverhttpsport}/g" "$stage_dir/dnsmasq.conf"
     echo "Файлы успешно скачаны и подготовлены."
     target_release=$(sed -n 's/^\*v\([0-9][0-9A-Za-z._-]*\).*/v\1/p' "$stage_dir/version.md" | head -n1)
-    write_cli_update_status update true 40 Staged "Update files staged" "$target_release"
-    echo "Further update output is saved to $stage_dir/update.log."
+    write_cli_update_status update true 40 Подготовлено "Файлы обновления скачаны и проверены" "$target_release"
+    echo "Дальнейший журнал обновления сохраняется в $stage_dir/update.log."
     exec >> "$stage_dir/update.log" 2>&1
 
     update_runtime_quiesced=1
@@ -1987,7 +1987,7 @@ if [ "$1" = "-update" ]; then
     /opt/etc/init.d/S22trojan stop > /dev/null 2>&1
     /opt/etc/init.d/S99unblock stop > /dev/null 2>&1 || true
     echo "Сервисы остановлены."
-    write_cli_update_status update true 55 Backup "Services stopped, creating backup"
+    write_cli_update_status update true 55 "Резервная копия" "Сервисы остановлены; создаём резервную копию"
 
     mkdir -p "$backup_dir"
     [ -f /opt/bin/unblock_ipset.sh ] && mv /opt/bin/unblock_ipset.sh "$backup_dir"/unblock_ipset.sh
@@ -2020,7 +2020,7 @@ if [ "$1" = "-update" ]; then
     cleanup_removed_connection_artifacts
     chmod 755 "$backup_dir"/* 2>/dev/null
     echo "Бэкап создан."
-    write_cli_update_status update true 65 Installing "Installing staged files"
+    write_cli_update_status update true 65 Установка "Устанавливаем подготовленные файлы"
 
     touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts
     mv "$stage_dir/script.sh" /opt/root/script.sh
@@ -2076,7 +2076,7 @@ if [ "$1" = "-update" ]; then
     rmdir "$stage_dir" 2>/dev/null || true
     cleanup_update_artifacts 1
     echo "Обновления скачены, права настроены."
-    write_cli_update_status update true 85 Restarting "Restarting services"
+    write_cli_update_status update true 85 Перезапуск "Перезапускаем сервисы"
 
     /opt/etc/init.d/S10cron restart > /dev/null 2>&1 || /opt/etc/init.d/S10cron start > /dev/null 2>&1 || true
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1
@@ -2098,22 +2098,22 @@ if [ "$1" = "-update" ]; then
       echo "Версия бота обновлена."
     fi
     clear_runtime_update_env
-    update_completion_message="CLI update complete"
-    write_cli_update_status update true 88 Starting "Starting application and web interface"
+    update_completion_message="Обновление завершено"
+    write_cli_update_status update true 88 Запуск "Запускаем программу и веб-интерфейс"
     stop_application_for_final_restart || {
-      echo "Error: failed to stop maintenance process for the final restart"
+      echo "Ошибка: не удалось остановить процесс обслуживания перед итоговым перезапуском"
       exit 1
     }
     if ! telegram_config_complete; then
       start_telegram_installer
-      update_completion_message="CLI update complete; installer started"
+      update_completion_message="Обновление завершено; запущен установщик первичной настройки"
     elif [ -x "$BOT_SERVICE_PATH" ]; then
       "$BOT_SERVICE_PATH" start
       sleep 3
       if "$BOT_SERVICE_PATH" status | grep -q "Bot is running"; then
         echo "Бот запущен. Нажмите сюда: /start"
       else
-        echo "Error: failed to confirm bot restart through $BOT_SERVICE_PATH"
+        echo "Ошибка: не удалось подтвердить перезапуск бота через $BOT_SERVICE_PATH"
         exit 1
       fi
     else
@@ -2126,19 +2126,19 @@ if [ "$1" = "-update" ]; then
       if [ -n "${check_running}" ]; then
         echo "Бот запущен. Нажмите сюда: /start"
       else
-        echo "Error: failed to confirm bot restart"
+        echo "Ошибка: не удалось подтвердить перезапуск бота"
         exit 1
       fi
     fi
 
     update_runtime_quiesced=0
-    write_cli_update_status update true 90 Finalizing "Web interface is available; finalizing network lists"
+    write_cli_update_status update true 90 Завершение "Веб-интерфейс доступен; завершаем обновление сетевых списков"
     echo "Веб-интерфейс запущен. Завершаем обновление сетевых списков."
-    echo "Refreshing ipset after proxy core startup."
-    run_update_ipset_refresh "Post-update"
+    echo "Обновляем ipset после запуска основного прокси-сервиса."
+    run_update_ipset_refresh "После обновления"
     run_youtube_edge_prefetch_once "Post-update"
     run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
-    write_cli_update_status update false 100 Done "$update_completion_message"
+    write_cli_update_status update false 100 Готово "$update_completion_message"
     cli_update_status_active=0
     trap - EXIT TERM INT HUP
     exit 0
@@ -2154,18 +2154,18 @@ if [ "$1" = "-version" ]; then
 fi
 
 if [ "$1" = "-help" ]; then
-    echo "-install - use for install all needs for work"
-    echo "-remove - use for remove all files script"
-    echo "-update - use for get update files"
-    echo "-reinstall - use for reinstall all files script"
+    echo "-install — установить программу и необходимые компоненты"
+    echo "-remove — удалить файлы программы"
+    echo "-update — скачать и установить обновление"
+    echo "-reinstall — переустановить программу"
 fi
 
 if [ -z "$1" ]; then
     #echo not found "$1".
-    echo "-install - use for install all needs for work"
-    echo "-remove - use for remove all files script"
-    echo "-update - use for get update files"
-    echo "-reinstall - use for reinstall all files script"
+    echo "-install — установить программу и необходимые компоненты"
+    echo "-remove — удалить файлы программы"
+    echo "-update — скачать и установить обновление"
+    echo "-reinstall — переустановить программу"
 fi
 
 #if [ -n "$1" ]; then

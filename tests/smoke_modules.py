@@ -3023,6 +3023,21 @@ def test_codex_version_matches_commit_count():
     assert version_md.startswith(f'*v{expected} ')
     assert version_md.count('*v') == 1
     assert changelog.startswith(f'<a name="{expected}"></a>\n# [{expected}] - ')
+    assert not any(
+        heading in changelog
+        for heading in ("What's Changed", 'New Contributors', 'Full Changelog', 'Bug Fixes', 'Features')
+    )
+    for document_name, document_text in (('version.md', version_md), ('CHANGELOG.md', changelog)):
+        english_only_lines = []
+        for line_number, line in enumerate(document_text.splitlines(), 1):
+            visible_text = re.sub(
+                r'`[^`]*`|https?://\S+|<[^>]*>|\[[^]]*\]\([^)]*\)',
+                '',
+                line,
+            )
+            if len(re.findall(r'[A-Za-z]', visible_text)) >= 12 and not re.search(r'[\u0400-\u04ff]', visible_text):
+                english_only_lines.append((line_number, line))
+        assert not english_only_lines, f'{document_name} содержит английский пользовательский текст: {english_only_lines[:5]}'
     assert 'v{APP_VERSION_COUNTER}' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in installer
     assert 'from app_version import APP_VERSION_COUNTER' in bootstrap
@@ -3377,7 +3392,7 @@ def test_update_script_socks_download_notice_is_not_repeated():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     unblock_dnsmasq = (APP_ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
     assert 'Downloaded via local SOCKS port' not in script
-    assert 'Downloading GitHub files via local SOCKS port ${port}.' in script
+    assert 'Скачиваем файлы GitHub через локальный SOCKS-порт ${port}.' in script
     assert 'RAW_GITHUB_SOCKS_NOTICE_SHOWN=1' in script
     assert 'remove_path /opt/root/get-pip.py' in script
     assert 'chmod 777 /opt/root/get-pip.py || rm' not in script
@@ -3557,17 +3572,21 @@ def test_youtube_route_owner_supports_every_protocol_without_forced_fallback(tmp
 
 def test_direct_update_script_records_update_status():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    update_fork = (APP_ROOT / 'update_fork.sh').read_text(encoding='utf-8')
+    repo_update_source = (APP_ROOT / 'repo_update.py').read_text(encoding='utf-8')
     assert 'write_cli_update_status()' in script
     assert "path = '/opt/etc/bot/update_status.json'" in script
-    assert 'write_cli_update_status update true 3 Preparing "CLI update started"' in script
-    assert 'write_cli_update_status update true 10 Downloading "Downloading update files"' in script
+    assert 'write_cli_update_status update true 3 Подготовка "Обновление запущено"' in script
+    assert 'write_cli_update_status update true 10 Загрузка "Скачиваем файлы обновления"' in script
     assert 'download_update_file "$(repo_file_url script.sh)"' in script
     assert '"$stage_dir/script.sh" "#!/bin/sh" "script.sh"' in script
     assert 'staged_runtime_modules=$(sed -n' in script
     assert 'BOT_RUNTIME_MODULES="$staged_runtime_modules"' in script
     assert 'for module in $staged_runtime_modules; do' in script
     assert 'target_release=$(sed -n' in script
-    assert 'write_cli_update_status update true 40 Staged "Update files staged" "$target_release"' in script
+    assert 'write_cli_update_status update true 40 Подготовлено "Файлы обновления скачаны и проверены" "$target_release"' in script
+    assert 'write_cli_update_status update true 55 "Резервная копия" "Сервисы остановлены; создаём резервную копию"' in script
     assert 'prepare_application_for_update() {' in script
     assert 'stop_application_for_final_restart() {' in script
     assert 'recover_runtime_after_failed_update() {' in script
@@ -3576,9 +3595,9 @@ def test_direct_update_script_records_update_status():
     assert 'UPDATE_MAINTENANCE_PATH="/tmp/bypass_update_maintenance"' in script
     assert 'kill -USR1 "$bot_pid"' in script
     assert 'kill -USR2 "$bot_pid"' in script
-    assert 'application did not confirm maintenance mode; update cancelled before file replacement' in script
+    assert 'программа не подтвердила режим обслуживания; обновление отменено до замены файлов' in script
     assert 'cleanup_pool_probe_runtime' in script
-    assert 'Error: pool probe worker is still running; update cancelled before file replacement' in script
+    assert 'процесс проверки пула ещё работает; обновление отменено до замены файлов' in script
     assert 'proxy_config_recovery.py' in script
     update_log_index = script.index('exec >> "$stage_dir/update.log" 2>&1')
     quiesce_index = script.index('prepare_application_for_update || exit 1', update_log_index)
@@ -3596,28 +3615,65 @@ def test_direct_update_script_records_update_status():
     assert 'mv /opt/root/script.sh "$backup_dir"/script.sh' in script
     assert 'mv "$stage_dir/script.sh" /opt/root/script.sh' in script
     assert 'restore_file script.sh /opt/root/script.sh' in script
-    assert 'write_cli_update_status update true 85 Restarting "Restarting services"' in script
-    assert 'write_cli_update_status update true 88 Starting "Starting application and web interface"' in script
-    assert 'write_cli_update_status update true 90 Finalizing "Web interface is available; finalizing network lists"' in script
-    assert 'update_completion_message="CLI update complete; installer started"' in script
-    assert 'write_cli_update_status update false 100 Done "$update_completion_message"' in script
-    assert 'write_cli_update_status update false 100 Error "CLI update failed; runtime recovery attempted"' in script
+    assert 'write_cli_update_status update true 85 Перезапуск "Перезапускаем сервисы"' in script
+    assert 'write_cli_update_status update true 88 Запуск "Запускаем программу и веб-интерфейс"' in script
+    assert 'write_cli_update_status update true 90 Завершение "Веб-интерфейс доступен; завершаем обновление сетевых списков"' in script
+    assert 'update_completion_message="Обновление завершено; запущен установщик первичной настройки"' in script
+    assert 'write_cli_update_status update false 100 Готово "$update_completion_message"' in script
+    assert 'write_cli_update_status update false 100 Ошибка "Обновление не удалось; выполнена попытка восстановить рабочее состояние"' in script
     application_start_index = script.index(
-        'write_cli_update_status update true 88 Starting "Starting application and web interface"',
+        'write_cli_update_status update true 88 Запуск "Запускаем программу и веб-интерфейс"',
         files_replace_index,
     )
     static_install_index = script.index('install_staged_static_assets || exit 1', files_replace_index)
     final_stop_index = script.index('stop_application_for_final_restart || {', application_start_index)
     bot_restart_index = script.index('"$BOT_SERVICE_PATH" start', final_stop_index)
     web_available_index = script.index(
-        'write_cli_update_status update true 90 Finalizing "Web interface is available; finalizing network lists"',
+        'write_cli_update_status update true 90 Завершение "Веб-интерфейс доступен; завершаем обновление сетевых списков"',
         bot_restart_index,
     )
-    ipset_refresh_index = script.index('run_update_ipset_refresh "Post-update"', web_available_index)
+    ipset_refresh_index = script.index('run_update_ipset_refresh "После обновления"', web_available_index)
     assert files_replace_index < static_install_index < application_start_index < final_stop_index < bot_restart_index < web_available_index < ipset_refresh_index
     assert 'keep_count="${1:-1}"' in script
     assert 'cleanup_update_artifacts 1' in script
     assert 'cleanup_update_artifacts 3' not in script
+    for english_update_text in (
+        'CLI update',
+        'Downloading update files',
+        'Update files staged',
+        'Installing staged files',
+        'Restarting services',
+        'Starting application and web interface',
+        'Web interface is available; finalizing network lists',
+        'Further update output is saved',
+        'Refreshing ipset after proxy core startup',
+        'Downloading GitHub files via local SOCKS port',
+    ):
+        assert english_update_text not in script
+    for source_name, source_text in (
+        ('script.sh', script),
+        ('bootstrap/install.sh', bootstrap),
+        ('app/update_fork.sh', update_fork),
+    ):
+        english_only_messages = []
+        for line_number, line in enumerate(source_text.splitlines(), 1):
+            stripped = line.strip()
+            if (
+                stripped.startswith('#')
+                or re.match(r'^[A-Za-z0-9_]+\(\) \{$', stripped)
+                or not re.search(r'\becho\b|write_cli_update_status', stripped)
+            ):
+                continue
+            visible_text = re.sub(r'\$\{?[^ }"\']+\}?|https?://\S+|/[^ ]+', '', stripped)
+            if len(re.findall(r'[A-Za-z]', visible_text)) >= 12 and not re.search(r'[\u0400-\u04ff]', visible_text):
+                english_only_messages.append((line_number, stripped))
+        assert not english_only_messages, f'{source_name} содержит английские сообщения обновления: {english_only_messages}'
+    for english_error in (
+        'GitHub archive did not contain',
+        'GitHub contents API returned unexpected file payload',
+        'GitHub returned invalid script.sh',
+    ):
+        assert english_error not in repo_update_source
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     assert 'cleanup_bootstrap_backups()' in bootstrap
     assert 'cleanup_bootstrap_backups 1' in bootstrap
@@ -3653,7 +3709,7 @@ def test_update_static_assets_use_archive_fallback():
     update_archive_index = update_body.index('download_repo_file_from_archive "$url" "$target"')
     update_api_index = update_body.index('download_repo_file_via_api "$url" "$target"')
     update_raw_index = update_body.index('curl -fsSL --connect-timeout 5 --max-time 8')
-    update_socks_notice_index = update_body.index('Direct GitHub archive/API and raw download failed')
+    update_socks_notice_index = update_body.index('Прямая загрузка ${description} через архив/API GitHub и raw не удалась')
     assert update_archive_index < update_api_index < update_raw_index < update_socks_notice_index
     assert 'raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS.' not in update_body
     function_body = re.search(r'download_static_asset\(\) \{(?P<body>.*?)\n\}', script, re.S).group('body')
@@ -3878,8 +3934,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert post_priority_dedupe_call_idx < route_log_call_idx
     assert 'run_update_ipset_refresh()' in script
     assert 'UPDATE_IPSET_REFRESH_TIMEOUT_SECONDS:-75' in script
-    assert 'continuing update while refresh finishes in background' in script
-    assert 'run_update_ipset_refresh "Post-update"' in script
+    assert 'основное обновление продолжится, а ipset завершится в фоне' in script
+    assert 'run_update_ipset_refresh "После обновления"' in script
     assert 'run_youtube_edge_prefetch_once "Post-install"' in script
     assert 'run_youtube_edge_prefetch_once "Post-update"' in script
     assert 'youtube_edge_prefetch_skipped_reason()' in script
@@ -4709,9 +4765,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'prepare_repo_archive()' in bootstrap_source
     assert 'download_file_from_archive()' in bootstrap_source
     assert 'https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/${archive_ref}' in bootstrap_source
-    assert 'raw.githubusercontent.com unavailable for $(basename "$target"); using GitHub archive fallback.' in bootstrap_source
+    assert 'raw.githubusercontent.com недоступен для $(basename "$target"); используем резервную загрузку через архив GitHub.' in bootstrap_source
     assert 'download_optional_file "$(repo_file_url static/telegram.svg)"' in bootstrap_source
-    assert 'icons="chatgpt chrome_remote_desktop claude copilot deepseek discord gemini grok instagram perplexity telegram youtube"' in bootstrap_source
+    assert 'icons="chatgpt chrome_remote_desktop claude copilot deepseek discord gemini grok instagram perplexity telegram tiktok youtube"' in bootstrap_source
     assert 'service-icons/facebook.png' not in bootstrap_source
     assert 'service-icons/meta.png' not in bootstrap_source
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -4774,10 +4830,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'telegram_call_learning_address_timeout_seconds = 14400' in script_source
     assert 'telegram_call_tproxy_enabled = True' in script_source
     assert "localportvless_tproxy = '11812'" in script_source
-    assert 'Refreshing ipset after proxy core startup.' in script_source
-    assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Refreshing ipset after proxy core startup.')
+    assert 'Обновляем ipset после запуска основного прокси-сервиса.' in script_source
+    assert script_source.find('start_preferred_core_service || exit 1') < script_source.find('Обновляем ipset после запуска основного прокси-сервиса.')
     assert script_source.find('/opt/etc/init.d/S10cron restart') < script_source.find('start_preferred_core_service || exit 1')
-    assert script_source.find('run_update_ipset_refresh "Post-update"') > script_source.find('Refreshing ipset after proxy core startup.')
+    assert script_source.find('run_update_ipset_refresh "После обновления"') > script_source.find('Обновляем ipset после запуска основного прокси-сервиса.')
     assert 'write_update_rollback_script()' in script_source
     assert 'ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh' in script_source
     assert 'backup_runtime_state_files' in script_source
@@ -8596,9 +8652,30 @@ def test_telegram_bot_menu_button_smoke():
                 'entries': 7,
             }
         )
+        bot_module._custom_checks_store = lambda: py_types.SimpleNamespace(
+            custom_check_preset=lambda preset_id: {'id': preset_id}
+        )
+        bot_module._add_custom_check = lambda **kwargs: (
+            route_calls.append(('add-check', kwargs)) or ([], 'Проверка добавлена.')
+        )
+        bot_module._load_current_keys = lambda: {'vless': manual_uri}
+        bot_module._refresh_status_caches_async = lambda keys, **kwargs: route_calls.append(
+            ('refresh', keys, kwargs)
+        )
         route_result = bot_module._append_socialnet_list('unblockvless', 'chrome_remote_desktop')
-        assert route_calls == [('chrome_remote_desktop', 'vless')]
+        assert route_calls == [
+            ('chrome_remote_desktop', 'vless'),
+            ('add-check', {'preset_id': 'chrome_remote_desktop'}),
+            ('refresh', {'vless': manual_uri}, {'active_only': True}),
+        ]
         assert 'Адресов: 7' in route_result
+        assert 'Проверка добавлена' in route_result
+        assert 'Активные ключи перепроверяются' in route_result
+        route_calls.clear()
+        bot_module._app_mode_pool_enabled = lambda: False
+        simple_result = bot_module._append_socialnet_list('unblockvless', 'chrome_remote_desktop')
+        assert route_calls == [('chrome_remote_desktop', 'vless')]
+        assert 'Проверка добавлена' not in simple_result
 
         subscription_calls = []
         subscription_updates = []
@@ -10934,6 +11011,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert set(service_catalog.service_route_entries('chatgpt_services')) <= entries
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= entries
     assert {'ab.chatgpt.com', 'api.chatgpt.com', 'api.statsig.com', 'browser-intake-datadoghq.com'} <= entries
+    assert 'oaistatsig.com' in entries
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
     assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
     assert {'api.statsigcdn.com', 'cloudflare-dns.com', 'accounts.google.com'} <= entries
@@ -11066,7 +11144,10 @@ def test_custom_check_service_sources_are_synced():
     assert service_catalog.SERVICE_LIST_SOURCES['perplexity']['entries'] == service_catalog.PERPLEXITY_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['grok']['entries'] == service_catalog.GROK_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['grok']['label'] == 'Grok / X / Twitter'
-    assert service_catalog.SERVICE_LIST_SOURCES['grok']['include_services'] == ['twitter']
+    assert set(service_catalog.TWITTER_ROUTE_ENTRIES) <= set(service_catalog.GROK_ROUTE_ENTRIES)
+    assert service_catalog.SERVICE_LIST_SOURCES['twitter']['entries'] == service_catalog.TWITTER_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['tiktok']['entries'] == service_catalog.TIKTOK_ROUTE_ENTRIES
+    assert service_catalog.SERVICE_LIST_SOURCES['tiktok']['udp_quic'] is True
     assert service_catalog.SERVICE_LIST_SOURCES['deepseek']['entries'] == service_catalog.DEEPSEEK_ROUTE_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['telegram']['entries'] == service_catalog.TELEGRAM_UNBLOCK_ENTRIES
     assert service_catalog.SERVICE_LIST_SOURCES['meta']['entries'] == service_catalog.META_PLATFORM_ROUTE_ENTRIES
@@ -11110,6 +11191,7 @@ def test_custom_check_service_sources_are_synced():
     assert 'telegram' in button_keys
     assert 'meta' in button_keys
     assert 'grok' in button_keys
+    assert 'tiktok' in button_keys
     assert 'twitter' not in button_keys
     assert {'meta_ai', 'instagram', 'facebook'}.isdisjoint(button_keys)
     assert {'meta_ai', 'instagram', 'facebook'}.isdisjoint(preset_ids)
@@ -11122,6 +11204,30 @@ def test_custom_check_service_sources_are_synced():
     ]
     assert presets['meta']['icon'] == 'instagram'
     assert presets['chrome_remote_desktop']['icon'] == 'chrome_remote_desktop'
+    assert presets['tiktok']['icon'] == 'tiktok'
+    assert presets['tiktok']['routes'] == service_catalog.TIKTOK_ROUTE_ENTRIES
+    assert presets['tiktok']['urls'] == ['https://www.tiktok.com']
+    assert set(service_catalog.TIKTOK_ROUTE_ENTRIES) <= entries
+    social_entries = {
+        line.split('#', 1)[0].strip()
+        for line in (APP_ROOT / 'socialnet.txt').read_text(encoding='utf-8').splitlines()
+        if line.split('#', 1)[0].strip()
+    }
+    assert set(service_catalog.TIKTOK_ROUTE_ENTRIES) <= social_entries
+    official_copilot_entries = {
+        'github.com',
+        'api.github.com',
+        'collector.github.com',
+        'githubassets.com',
+        'githubusercontent.com',
+        'copilot-telemetry.githubusercontent.com',
+        'default.exp-tas.com',
+        'copilot-proxy.githubusercontent.com',
+        'origin-tracker.githubusercontent.com',
+        'githubcopilot.com',
+    }
+    assert official_copilot_entries <= set(service_catalog.COPILOT_ROUTE_ENTRIES)
+    assert official_copilot_entries <= entries
     rendered_meta_icon = key_pool_web.custom_check_icon_html(
         presets['meta'],
         lambda icon, label, opacity=1.0, size=18: f'/static/service-icons/{icon}.png',
@@ -13573,7 +13679,7 @@ def test_web_template_scripts_helpers():
     assert 'refreshPoolData(0, protocol)' in scripts
     assert 'function schedulePoolView(proto, delayMs)' in scripts
     assert 'const rowByKeyId = new Map();' in scripts
-    assert 'Object.prototype.hasOwnProperty.call(stateMap, check.id)' in scripts
+    assert "const state = stateMap[check.id] || 'unknown';" in scripts
     assert "fetch('/api/pools' + loadedPoolProtocolQuery(requestedProtocols.length ? requestedProtocols : null)" in scripts
     assert "setPoolBodyMessage(proto, 'Загружаю пул ключей...', true)" in scripts
     assert "refreshPoolData(3000, retryProtocols)" in scripts
@@ -13654,8 +13760,12 @@ def test_web_template_scripts_helpers():
     assert 'refreshPoolData: refreshPoolData' in scripts
     assert 'function poolCustomChecks(pool)' in scripts
     assert 'pool && Array.isArray(pool.custom_checks)' in scripts
-    assert 'renderCustomBadges(row.custom, checks)' in scripts
-    assert 'head.innerHTML = customHeaderIcons(checks)' in scripts
+    assert 'renderCustomCells(row.custom, checks)' in scripts
+    assert 'function customCheckSignature(checks)' in scripts
+    assert "table.dataset.customCheckSignature = customCheckSignature(activeChecks);" in scripts
+    assert "table.querySelectorAll('[data-custom-check-col]')" in scripts
+    assert "table.querySelectorAll('[data-custom-check-head]')" in scripts
+    assert "repeat(var(--custom-col-count),28px)" in (APP_ROOT / 'static' / 'app.css').read_text(encoding='utf-8')
     assert 'function maybeReloadAfterUpdateCommand(state)' in scripts
     assert 'actionMessageTimer' in scripts
     assert 'activeCommandName' in scripts
@@ -14461,7 +14571,7 @@ def test_service_routes_apply_and_profile():
 
 def test_every_ready_service_can_move_to_every_protocol():
     service_ids = [item['id'] for item in service_routes.route_service_items(include_core=True)]
-    assert {'telegram', 'youtube', 'meta', 'chrome_remote_desktop'} <= set(service_ids)
+    assert {'telegram', 'youtube', 'meta', 'chrome_remote_desktop', 'tiktok'} <= set(service_ids)
     assert len(service_ids) == len(set(service_ids)) == len(service_catalog.CUSTOM_CHECK_PRESETS) + 2
     for service_id in service_ids:
         expected_entries = set(service_catalog.service_route_entries(service_id))

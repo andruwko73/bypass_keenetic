@@ -230,6 +230,7 @@ console.anthropic.com
 content-autofill.googleapis.com
 contest.com
 copilot-proxy.githubusercontent.com
+copilot-telemetry.githubusercontent.com
 copilot.microsoft.com
 core.telegram.org
 csp.withgoogle.com
@@ -239,6 +240,7 @@ dc.services.visualstudio.com
 dedust.io
 deepseek.com
 default.exp-external-v8.env.microsoft.com
+default.exp-tas.com
 desktop.chat.openai.com
 dis.gd
 discord-activities.com
@@ -339,6 +341,7 @@ nicegram.app
 o207216.ingest.sentry.io
 o33249.ingest.sentry.io
 oaistatic.com
+oaistatsig.com
 oaiusercontent.com
 oauth.telegram.org
 oauth2.googleapis.com
@@ -356,6 +359,7 @@ pbs.twimg.com
 periscope.tv
 perplexity.ai
 persistent.oaistatic.com
+origin-tracker.githubusercontent.com
 platform.claude.com
 platform.deepseek.com
 platform.openai.com
@@ -367,6 +371,7 @@ queuev4.vk.ru
 quiz.directory
 r.stripe.com
 raw.githubusercontent.com
+collector.github.com
 rum.browser-intake-datadoghq.com
 rutor.info
 rutor.is

@@ -123,10 +123,15 @@ openmask.icu
 openaiassets.blob.core.windows.net
 periscope.tv
 persistent.oaistatic.com
+oaistatsig.com
+origin-tracker.githubusercontent.com
 pscp.tv
 quiz.directory
 queuev4.vk.ru
 raw.githubusercontent.com
+collector.github.com
+copilot-telemetry.githubusercontent.com
+default.exp-tas.com
 static.ads-twitter.com
 T.co
 t-bank-app.ru

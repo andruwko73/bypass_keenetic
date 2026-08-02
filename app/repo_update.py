@@ -151,7 +151,7 @@ def download_repo_file_from_archive(session, repo_owner, repo_name, repo_ref, pa
             continue
     if last_error is not None:
         raise last_error
-    raise ValueError(f'GitHub archive did not contain {path}')
+    raise ValueError(f'Архив GitHub не содержит {path}')
 
 
 def download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
@@ -179,7 +179,7 @@ def download_repo_file_text(session, repo_owner, repo_name, repo_ref, path):
     response.raise_for_status()
     payload = response.json()
     if payload.get('encoding') != 'base64' or 'content' not in payload:
-        raise ValueError('GitHub contents API returned unexpected file payload')
+        raise ValueError('GitHub Contents API вернул неожиданный формат файла')
     content = ''.join(str(payload.get('content', '')).split())
     return response.url, base64.b64decode(content).decode('utf-8')
 
@@ -203,7 +203,7 @@ def download_repo_script(repo_owner, repo_name, branch='main'):
     repo_ref = resolve_repo_ref(session, repo_owner, repo_name, branch)
     url, script_text = download_repo_file_text(session, repo_owner, repo_name, repo_ref, 'script.sh')
     if '#!/bin/sh' not in script_text:
-        raise ValueError('GitHub returned invalid script.sh')
+        raise ValueError('GitHub вернул некорректный script.sh')
     return url, script_text, repo_ref
 
 

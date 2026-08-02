@@ -43,7 +43,7 @@ cleanup_bootstrap_backups() {
 }
 
 fail() {
-    echo "ERROR: $1" >&2
+    echo "ОШИБКА: $1" >&2
     exit 1
 }
 
@@ -100,7 +100,7 @@ prepare_repo_archive() {
     REPO_ARCHIVE_ROOT=$(find "$archive_work" -mindepth 1 -maxdepth 1 -type d | head -n1)
     [ -n "$REPO_ARCHIVE_ROOT" ] && [ -d "$REPO_ARCHIVE_ROOT" ] || return 1
     export REPO_ARCHIVE_ROOT
-    echo "GitHub archive fallback is ready."
+    echo "Резервная загрузка через архив GitHub готова."
     return 0
 }
 
@@ -121,11 +121,11 @@ validate_downloaded_file() {
     url="$3"
 
     if [ ! -s "$target" ]; then
-        echo "Error: empty downloaded file: $url" >&2
+        echo "Ошибка: скачан пустой файл: $url" >&2
         return 1
     fi
     if [ -n "$marker" ] && ! grep -q "$marker" "$target"; then
-        echo "Error: downloaded file failed content validation: $url" >&2
+        echo "Ошибка: скачанный файл не прошёл проверку содержимого: $url" >&2
         return 1
     fi
     return 0
@@ -143,7 +143,7 @@ download_file() {
     fi
 
     rm -f "$target"
-    echo "raw.githubusercontent.com unavailable for $(basename "$target"); using GitHub archive fallback."
+    echo "raw.githubusercontent.com недоступен для $(basename "$target"); используем резервную загрузку через архив GitHub."
     if download_file_from_archive "$url" "$target" \
         && validate_downloaded_file "$target" "$marker" "$url"; then
         return 0
@@ -178,7 +178,7 @@ download_optional_file() {
 }
 
 download_static_assets() {
-    icons="chatgpt chrome_remote_desktop claude copilot deepseek discord gemini grok instagram perplexity telegram youtube"
+    icons="chatgpt chrome_remote_desktop claude copilot deepseek discord gemini grok instagram perplexity telegram tiktok youtube"
     mkdir -p "$STATIC_DIR/service-icons"
     download_file "$(repo_file_url static/app.css)" "$STATIC_DIR/app.css" ':root{'
     download_file "$(repo_file_url static/app.js)" "$STATIC_DIR/app.js" 'const APP_CONFIG'
@@ -457,7 +457,7 @@ install_unblock_ipset_cron_job() {
         return 0
     fi
     rm -f "\$cron_tmp"
-    echo "Warning: failed to install active root crontab for unblock_ipset.sh."
+    echo "Предупреждение: не удалось установить активный root crontab для unblock_ipset.sh."
     return 1
 }
 
@@ -526,9 +526,9 @@ fi
 sed -i '/allowInsecure/d' /opt/etc/xray/config.json /opt/etc/v2ray/config.json /opt/etc/bot/proxy_protocols.py 2>/dev/null || true
 if [ -x /opt/sbin/xray ] && [ -f /opt/etc/xray/config.json ]; then
     if /opt/sbin/xray run -test -c /opt/etc/xray/config.json >/tmp/bypass-xray-rollback-test.log 2>&1; then
-        echo "Xray config OK after rollback."
+        echo "После отката конфигурация Xray прошла проверку."
     else
-        echo "Warning: Xray config failed after rollback:"
+        echo "Предупреждение: после отката конфигурация Xray не прошла проверку:"
         tail -n 12 /tmp/bypass-xray-rollback-test.log 2>/dev/null || true
     fi
 fi
@@ -548,7 +548,7 @@ install_unblock_ipset_cron_job || true
 /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
 
-echo "Rollback completed from \$BACKUP_DIR"
+echo "Откат завершён из \$BACKUP_DIR"
 EOF
 
     chmod 700 "$ROLLBACK_SCRIPT"
