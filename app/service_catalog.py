@@ -208,6 +208,7 @@ YOUTUBE_UNBLOCK_ENTRIES = [
 
 CHATGPT_ROUTE_ENTRIES = [
     'chatgpt.com',
+    'chatgpt.site',
     'ab.chatgpt.com',
     'api.chatgpt.com',
     'chat.openai.com',

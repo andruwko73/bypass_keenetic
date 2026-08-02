@@ -212,6 +212,7 @@ challenges.cloudflare.com
 chat.deepseek.com
 chat.openai.com
 chatgpt.com
+chatgpt.site
 checkout.stripe.com
 circlecrewpinkcrowd.com
 claude.ai

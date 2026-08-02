@@ -75,25 +75,25 @@ refresh_dns_backend() {
 
 	case "$backend" in
 		dnsmasq)
-			echo "DNS backend: dnsmasq, restarting S56dnsmasq."
+			echo "DNS-служба: dnsmasq; перезапускаем S56dnsmasq."
 			[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart
 			;;
 		ndnproxy)
 			if dns_override_enabled; then
-				echo "DNS backend: ndnproxy, but DNS Override is configured. Reboot router to activate dnsmasq on port 53."
+				echo "DNS-служба: ndnproxy, но DNS Override уже настроен. Перезагрузите роутер, чтобы активировать dnsmasq на порту 53."
 			else
-				echo "DNS backend: ndnproxy. Use DNS Override ON button to make dnsmasq the primary DNS."
+				echo "DNS-служба: ndnproxy. Включите DNS Override, чтобы назначить dnsmasq основной DNS-службой."
 			fi
-			echo "Using Keenetic ndnproxy fallback, preloading ipset."
+			echo "Используем резервный ndnproxy Keenetic и предварительно заполняем ipset."
 			;;
 		none)
-			echo "DNS backend: none detected, trying S56dnsmasq."
+			echo "Активная DNS-служба не обнаружена; пробуем запустить S56dnsmasq."
 			if [ -x /opt/etc/init.d/S56dnsmasq ]; then
-				/opt/etc/init.d/S56dnsmasq restart || echo "S56dnsmasq restart failed; continuing with static ipset preload."
+				/opt/etc/init.d/S56dnsmasq restart || echo "Не удалось перезапустить S56dnsmasq; продолжаем со статическим заполнением ipset."
 			fi
 			;;
 		*)
-			echo "DNS backend: unknown, leaving current listener untouched."
+			echo "DNS-служба не распознана; текущий обработчик оставлен без изменений."
 			;;
 	esac
 }
@@ -115,9 +115,9 @@ generate_udp_quic_policy_file
 refresh_dns_backend "$backend"
 
 if /opt/bin/unblock_ipset.sh; then
-	echo "ipset refresh completed."
+	echo "Обновление ipset завершено."
 	exit 0
 fi
 
-echo "ipset refresh failed; previous ipset contents were preserved."
+echo "Не удалось обновить ipset; предыдущее рабочее содержимое сохранено."
 exit 1

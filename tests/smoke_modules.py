@@ -3574,6 +3574,7 @@ def test_direct_update_script_records_update_status():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     update_fork = (APP_ROOT / 'update_fork.sh').read_text(encoding='utf-8')
+    unblock_update = (APP_ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
     repo_update_source = (APP_ROOT / 'repo_update.py').read_text(encoding='utf-8')
     assert 'write_cli_update_status()' in script
     assert "path = '/opt/etc/bot/update_status.json'" in script
@@ -3654,6 +3655,7 @@ def test_direct_update_script_records_update_status():
         ('script.sh', script),
         ('bootstrap/install.sh', bootstrap),
         ('app/update_fork.sh', update_fork),
+        ('app/unblock_update.sh', unblock_update),
     ):
         english_only_messages = []
         for line_number, line in enumerate(source_text.splitlines(), 1):
@@ -3767,8 +3769,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     s99unblock = (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
 
     assert 'flush_set' not in update_script
-    assert 'Use DNS Override ON button to make dnsmasq the primary DNS' in update_script
-    assert 'Using Keenetic ndnproxy fallback, preloading ipset' in update_script
+    assert 'Включите DNS Override, чтобы назначить dnsmasq основной DNS-службой' in update_script
+    assert 'Используем резервный ndnproxy Keenetic и предварительно заполняем ipset' in update_script
     assert '/opt/bin/unblock_ipset.sh &' not in update_script
     assert 'download_update_file "$(repo_file_url crontab)"' in script
     assert '"$stage_dir/crontab" "S99unblock tick" "crontab"' in script
@@ -11011,6 +11013,7 @@ def test_chatgpt_codex_routes_are_synced():
     assert set(service_catalog.service_route_entries('chatgpt_services')) <= entries
     assert set(service_catalog.CHATGPT_EDGE_IP_ENTRIES) <= entries
     assert {'ab.chatgpt.com', 'api.chatgpt.com', 'api.statsig.com', 'browser-intake-datadoghq.com'} <= entries
+    assert 'chatgpt.site' in entries
     assert 'oaistatsig.com' in entries
     assert {'humb.apple.com', 'statsigapi.net', 'workos.imgix.net'} <= entries
     assert {'persistent.oaistatic.com', 'openaiassets.blob.core.windows.net', 'images.ctfassets.net'} <= entries
