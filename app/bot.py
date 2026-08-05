@@ -299,7 +299,6 @@ _KEY_PROBE_COMPAT_SCHEMA_VERSIONS = (6, 7, 8, 9)
 _KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 _POOL_SUMMARY_LAST_PATH = '/opt/etc/bot/pool_summary_last.json'
 _FULL_POOL_PROBE_SCOPES = frozenset(('manual_all', 'nightly_subscription'))
-_NIGHTLY_POOL_PROBE_MAX_ATTEMPTS = 3
 _NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS = 300.0
 _SERVICE_ROUTE_STATE_PATH = '/opt/etc/bot/service_route_state.json'
 _SERVICE_ROUTE_STATE_SCHEMA_VERSION = 1
@@ -774,7 +773,11 @@ SUBSCRIPTION_AUTO_REFRESH_CHECK_SECONDS = max(
 )
 SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB = max(
     0,
-    int(getattr(config, 'subscription_auto_refresh_max_bot_rss_kb', 70 * 1024)),
+    int(getattr(config, 'subscription_auto_refresh_max_bot_rss_kb', 80 * 1024)),
+)
+SUBSCRIPTION_AUTO_REFRESH_MAX_PROGRAM_RSS_KB = max(
+    0,
+    int(getattr(config, 'subscription_auto_refresh_max_program_rss_kb', 110 * 1024)),
 )
 SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB = max(
     0,
@@ -5031,18 +5034,48 @@ def _background_task_economy_mode():
     )
 
 
-def _background_task_allowed(task_name, *, allow_high_rss=False, task_class='normal'):
+def _background_task_allowed(
+    task_name,
+    *,
+    allow_high_rss=False,
+    task_class='normal',
+    max_bot_rss_kb=None,
+    max_program_rss_kb=None,
+    max_cpu_percent=None,
+):
     if _update_maintenance_active():
         return False
     now = time.time()
     skip_until = float(background_task_skip_until.get(task_name) or 0.0)
     skip_reason = str(background_task_skip_reason.get(task_name) or '')
-    bot_hard_limit_kb = _background_task_rss_limit('critical', allow_high_rss=True)
-    program_limit_kb = _background_task_program_rss_limit(task_class, allow_high_rss=allow_high_rss)
+    default_bot_hard_limit_kb = _background_task_rss_limit('critical', allow_high_rss=True)
+    default_program_limit_kb = _background_task_program_rss_limit(
+        task_class,
+        allow_high_rss=allow_high_rss,
+    )
+    bot_hard_limit_kb = (
+        default_bot_hard_limit_kb
+        if max_bot_rss_kb is None else
+        max(0, int(max_bot_rss_kb))
+    )
+    program_limit_kb = (
+        default_program_limit_kb
+        if max_program_rss_kb is None else
+        max(0, int(max_program_rss_kb))
+    )
+    cpu_limit_percent = (
+        BACKGROUND_TASK_MAX_CPU_PERCENT
+        if max_cpu_percent is None else
+        max(0.0, float(max_cpu_percent))
+    )
     can_bypass_rss_skip = (
-        skip_reason in ('rss', 'program_rss') and
-        program_limit_kb > 0 and
-        program_limit_kb > BACKGROUND_TASK_MAX_PROGRAM_RSS_KB
+        (
+            skip_reason == 'rss' and
+            bot_hard_limit_kb > default_bot_hard_limit_kb
+        ) or (
+            skip_reason == 'program_rss' and
+            program_limit_kb > default_program_limit_kb
+        )
     )
     if skip_until and now < skip_until and not can_bypass_rss_skip:
         return False
@@ -5105,7 +5138,7 @@ def _background_task_allowed(task_name, *, allow_high_rss=False, task_class='nor
                 f'program RSS {program_rss_kb} KB, limit {program_limit_kb} KB).'
             )
     cpu_busy = _background_cpu_busy_percent()
-    if cpu_busy is None or cpu_busy <= BACKGROUND_TASK_MAX_CPU_PERCENT:
+    if cpu_limit_percent <= 0 or cpu_busy is None or cpu_busy <= cpu_limit_percent:
         background_task_skip_until.pop(task_name, None)
         background_task_skip_reason.pop(task_name, None)
         return True
@@ -5116,7 +5149,7 @@ def _background_task_allowed(task_name, *, allow_high_rss=False, task_class='nor
         background_task_skip_log_at[task_name] = now
         _write_runtime_log(
             f'{task_name}: skipped background check because router CPU is busy '
-            f'({cpu_busy:.1f}% > {BACKGROUND_TASK_MAX_CPU_PERCENT:.1f}%).'
+            f'({cpu_busy:.1f}% > {cpu_limit_percent:.1f}%).'
         )
     return False
 
@@ -5154,27 +5187,19 @@ def _log_subscription_auto_refresh_skip(reason, detail):
 def _subscription_auto_refresh_allowed(proto):
     task_name = 'Subscription auto refresh'
     now = time.time()
-    skip_until = float(background_task_skip_until.get(task_name) or 0.0)
-    if skip_until and now < skip_until:
-        return False
-    if not _background_task_allowed(task_name, task_class='critical'):
-        _log_subscription_auto_refresh_skip('shared_guard', f'{proto}: shared background guard is busy')
+    if not _background_task_allowed(
+        task_name,
+        task_class='critical',
+        max_bot_rss_kb=SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB,
+        max_program_rss_kb=SUBSCRIPTION_AUTO_REFRESH_MAX_PROGRAM_RSS_KB,
+        max_cpu_percent=SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT,
+    ):
         return False
     if globals().get('pool_probe_lock') and pool_probe_lock.locked():
         background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
+        background_task_skip_reason[task_name] = 'pool_probe'
         _log_subscription_auto_refresh_skip('pool_probe', f'{proto}: pool probe is running')
         return False
-    rss_kb = int(_process_rss_kb() or 0)
-    if SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB > 0 and rss_kb >= SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB:
-        cleanup = _memory_cleanup('subscription auto refresh high RSS', clear_status=True, log=False)
-        rss_kb = int(cleanup.get('rss_after_kb') or _process_rss_kb() or rss_kb)
-        if rss_kb >= SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB:
-            background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
-            _log_subscription_auto_refresh_skip(
-                'rss',
-                f'{proto}: bot RSS {rss_kb} KB >= {SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB} KB',
-            )
-            return False
     available_kb = int(_mem_available_kb_light() or 0)
     if (
         SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB > 0 and
@@ -5182,6 +5207,7 @@ def _subscription_auto_refresh_allowed(proto):
         available_kb < SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB
     ):
         background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+        background_task_skip_reason[task_name] = 'memory'
         _log_subscription_auto_refresh_skip(
             'memory',
             f'{proto}: available memory {available_kb} KB < {SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB} KB',
@@ -5194,24 +5220,14 @@ def _subscription_auto_refresh_allowed(proto):
         load1 > SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1
     ):
         background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
+        background_task_skip_reason[task_name] = 'load'
         _log_subscription_auto_refresh_skip(
             'load',
             f'{proto}: load1 {load1:.2f} > {SUBSCRIPTION_AUTO_REFRESH_MAX_LOAD1:.2f}',
         )
         return False
-    cpu_busy = _background_cpu_busy_percent()
-    if (
-        SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT > 0 and
-        cpu_busy is not None and
-        cpu_busy > SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT
-    ):
-        background_task_skip_until[task_name] = now + BACKGROUND_TASK_BUSY_BACKOFF_SECONDS
-        _log_subscription_auto_refresh_skip(
-            'cpu',
-            f'{proto}: CPU {cpu_busy:.1f}% > {SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT:.1f}%',
-        )
-        return False
     background_task_skip_until.pop(task_name, None)
+    background_task_skip_reason.pop(task_name, None)
     return True
 
 
@@ -12257,9 +12273,10 @@ def _mark_nightly_subscription_pool_probe_started(window_date, now, queued=0, *,
     previous_total = max(0, _pool_summary_count(previous, 'total')) if resumed and same_window else 0
     total = max(previous_total, checked + max(0, int(queued or 0)))
     _write_nightly_subscription_pool_probe_state({
-        'schema': 2,
+        'schema': 3,
         'window_date': str(window_date),
         'status': 'running',
+        'pending_since': float(previous.get('pending_since') or now) if same_window else float(now),
         'started_at': started_at,
         'finished_at': 0.0,
         'checked': checked,
@@ -12272,6 +12289,51 @@ def _mark_nightly_subscription_pool_probe_started(window_date, now, queued=0, *,
         'next_retry_at': 0.0,
         'reason': '',
     })
+
+
+def _defer_nightly_subscription_pool_probe(window_date, now, reason, *, retry=True):
+    """Persist a due nightly run without consuming a launch attempt."""
+    previous = _nightly_subscription_pool_probe_state()
+    same_window = str(previous.get('window_date') or '') == str(window_date)
+    previous_status = str(previous.get('status') or '').strip().lower() if same_window else ''
+    status = previous_status if previous_status in ('paused', 'failed') else 'pending'
+    normalized_reason = re.sub(r'\s+', ' ', str(reason or '')).strip()[:120]
+    try:
+        last_deferred_at = float(previous.get('last_deferred_at') or 0) if same_window else 0.0
+    except (TypeError, ValueError):
+        last_deferred_at = 0.0
+    if (
+        retry and
+        same_window and
+        previous_status == status and
+        str(previous.get('reason') or '') == normalized_reason and
+        last_deferred_at and
+        float(now) - last_deferred_at < BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS
+    ):
+        return previous
+    payload = {
+        'schema': 3,
+        'window_date': str(window_date),
+        'status': status,
+        'pending_since': float(previous.get('pending_since') or now) if same_window else float(now),
+        'started_at': float(previous.get('started_at') or 0) if same_window else 0.0,
+        'finished_at': float(previous.get('finished_at') or 0) if same_window else 0.0,
+        'checked': max(0, _pool_summary_count(previous, 'checked')) if same_window else 0,
+        'total': max(0, _pool_summary_count(previous, 'total')) if same_window else 0,
+        'applied_unique_count': (
+            max(0, _pool_summary_count(previous, 'applied_unique_count'))
+            if same_window else 0
+        ),
+        'attempts': max(0, _pool_summary_count(previous, 'attempts')) if same_window else 0,
+        'next_retry_at': (
+            float(now) + _NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS
+            if retry else 0.0
+        ),
+        'last_deferred_at': float(now),
+        'reason': normalized_reason,
+    }
+    _write_nightly_subscription_pool_probe_state(payload)
+    return payload
 
 
 def _mark_nightly_subscription_pool_probe_finished(
@@ -12290,12 +12352,13 @@ def _mark_nightly_subscription_pool_probe_finished(
         status = 'failed'
     attempts = max(1, _pool_summary_count(state, 'attempts'))
     next_retry_at = 0.0
-    if status not in ('completed', 'cancelled') and attempts < _NIGHTLY_POOL_PROBE_MAX_ATTEMPTS:
+    if status not in ('completed', 'cancelled'):
         next_retry_at = float(finished_at or time.time()) + _NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS
     payload = {
-        'schema': 2,
+        'schema': 3,
         'window_date': str(state.get('window_date') or ''),
         'status': status,
+        'pending_since': float(state.get('pending_since') or started_at or finished_at or time.time()),
         'started_at': float(started_at or state.get('started_at') or 0),
         'finished_at': float(finished_at or time.time()),
         'checked': max(0, int(checked or 0)),
@@ -12310,18 +12373,31 @@ def _mark_nightly_subscription_pool_probe_finished(
 
 
 def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
-    """Queue one full pool probe after a recent successful nightly subscription refresh."""
+    """Persist and eventually start one full pool probe for each local day."""
     if not SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED or not _app_mode_pool_enabled():
         return False
     now = time.time() if now is None else float(now)
-    window_date = _subscription_runtime().nightly_pool_probe_window_date(
+    runtime = _subscription_runtime()
+    due_date_resolver = getattr(
+        runtime,
+        'nightly_pool_probe_due_date',
+        runtime.nightly_pool_probe_window_date,
+    )
+    due_date = due_date_resolver(
         now,
         start_hour=SUBSCRIPTION_NIGHTLY_POOL_PROBE_START_HOUR,
         end_hour=SUBSCRIPTION_NIGHTLY_POOL_PROBE_END_HOUR,
     )
+    state = _nightly_subscription_pool_probe_state()
+    stored_window_date = str(state.get('window_date') or '')
+    stored_status = str(state.get('status') or '').strip().lower()
+    unfinished_stored_run = bool(
+        stored_window_date and
+        stored_status in ('pending', 'running', 'paused', 'failed')
+    )
+    window_date = stored_window_date if unfinished_stored_run else due_date
     if not window_date:
         return False
-    state = _nightly_subscription_pool_probe_state()
     same_window = str(state.get('window_date') or '') == window_date
     status = str(state.get('status') or '').strip().lower()
     if same_window and not status:
@@ -12335,7 +12411,7 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
         resume_available = _has_pool_probe_resume_payload()
         interrupted = dict(state)
         interrupted.update({
-            'schema': 2,
+            'schema': 3,
             'status': 'paused' if resume_available else 'failed',
             'finished_at': now,
             'next_retry_at': now + _NIGHTLY_POOL_PROBE_RETRY_BACKOFF_SECONDS,
@@ -12348,27 +12424,51 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
         _write_nightly_subscription_pool_probe_state(interrupted)
         return False
     if same_window:
-        if _pool_summary_count(state, 'attempts') >= _NIGHTLY_POOL_PROBE_MAX_ATTEMPTS:
-            return False
         try:
             next_retry_at = float(state.get('next_retry_at') or 0)
         except (TypeError, ValueError):
             next_retry_at = 0.0
         if next_retry_at and now < next_retry_at:
             return False
-    refreshed_at = _subscription_runtime().latest_recent_subscription_success_at(
+    else:
+        state = _defer_nightly_subscription_pool_probe(
+            window_date,
+            now,
+            'Ночная полная проверка поставлена в очередь.',
+            retry=False,
+        )
+        same_window = True
+        status = 'pending'
+    refreshed_at = runtime.latest_recent_subscription_success_at(
         subscription_state,
         now,
         max_age_seconds=SUBSCRIPTION_NIGHTLY_POOL_PROBE_MAX_REFRESH_AGE_SECONDS,
     )
-    if not refreshed_at:
-        return False
     task_name = 'Nightly subscription pool probe'
-    if not _background_task_allowed(task_name):
+    if not _background_task_allowed(
+        task_name,
+        task_class='critical',
+        max_bot_rss_kb=SUBSCRIPTION_AUTO_REFRESH_MAX_BOT_RSS_KB,
+        max_program_rss_kb=SUBSCRIPTION_AUTO_REFRESH_MAX_PROGRAM_RSS_KB,
+        max_cpu_percent=SUBSCRIPTION_AUTO_REFRESH_MAX_CPU_PERCENT,
+    ):
+        guard_reason = str(background_task_skip_reason.get(task_name) or 'busy')
+        reason = {
+            'rss': 'Ожидание снижения RSS Telegram-бота.',
+            'program_rss': 'Ожидание снижения общего RSS программы.',
+            'cpu': 'Ожидание снижения нагрузки CPU роутера.',
+            'busy': 'Ожидание завершения другой операции.',
+        }.get(guard_reason, 'Ожидание безопасного состояния роутера.')
+        _defer_nightly_subscription_pool_probe(window_date, now, reason)
         return False
     if pool_probe_lock.locked():
         background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
         background_task_skip_reason[task_name] = 'pool_probe'
+        _defer_nightly_subscription_pool_probe(
+            window_date,
+            now,
+            'Ожидание завершения другой проверки пула.',
+        )
         return False
     resume_pending = bool(
         same_window and
@@ -12378,6 +12478,11 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
     if _has_pool_probe_resume_payload() and not resume_pending:
         background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
         background_task_skip_reason[task_name] = 'pool_probe'
+        _defer_nightly_subscription_pool_probe(
+            window_date,
+            now,
+            'Ожидание обработки сохранённой очереди проверки.',
+        )
         return False
     if resume_pending:
         def callback():
@@ -12394,14 +12499,28 @@ def _maybe_start_nightly_subscription_pool_probe(subscription_state, now=None):
         callback,
     )
     if not coordinator_started or not isinstance(result, tuple):
+        _defer_nightly_subscription_pool_probe(
+            window_date,
+            now,
+            'Ожидание освобождения фонового планировщика.',
+        )
         return False
     probe_started, queued = result
     if not probe_started:
+        _defer_nightly_subscription_pool_probe(
+            window_date,
+            now,
+            'Проверка пока не запущена; повтор через 5 минут.',
+        )
         return False
     _mark_nightly_subscription_pool_probe_started(window_date, now, queued, resumed=resume_pending)
+    if refreshed_at:
+        refresh_note = f'после обновления подписки в {time.strftime("%H:%M", time.localtime(refreshed_at))}'
+    else:
+        refresh_note = 'по сохранённым пулам без недавнего успешного обновления подписки'
     _write_runtime_log(
-        f'Nightly subscription pool probe started after refresh at {time.strftime("%H:%M", time.localtime(refreshed_at))}: '
-        f'{int(queued or 0)} keys queued.'
+        f'Ночная полная проверка запущена {refresh_note}: '
+        f'в очереди {int(queued or 0)} ключей.'
     )
     return True
 

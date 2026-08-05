@@ -2051,6 +2051,19 @@ def test_subscription_nightly_pool_probe_schedule_helpers():
         end_hour=6,
         localtime=lambda _timestamp: morning,
     ) == ''
+    assert subscription_runtime.nightly_pool_probe_due_date(
+        123,
+        start_hour=3,
+        end_hour=6,
+        localtime=lambda _timestamp: morning,
+    ) == '2026-07-19'
+    before_start = time.struct_time((2026, 7, 19, 2, 59, 0, 0, 200, -1))
+    assert subscription_runtime.nightly_pool_probe_due_date(
+        123,
+        start_hour=3,
+        end_hour=6,
+        localtime=lambda _timestamp: before_start,
+    ) == ''
     state = subscription_runtime.normalize_subscription_state({
         'vless': {
             'url': 'https://subscription.example.test/list',
@@ -2079,6 +2092,7 @@ def test_subscription_nightly_pool_probe_runtime_wiring():
     source = source_path('bot.py').read_text(encoding='utf-8')
     script_source = (ROOT / 'script.sh').read_text(encoding='utf-8')
     example = source_path('bot_config.example.py').read_text(encoding='utf-8')
+    installer = source_path('installer.py').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
 
     assert 'def _maybe_start_nightly_subscription_pool_probe' in source
@@ -2086,12 +2100,130 @@ def test_subscription_nightly_pool_probe_runtime_wiring():
     assert 'stale_only=False,' in source
     assert 'max_keys=None,' in source
     assert "getattr(config, 'subscription_nightly_pool_probe_enabled', True)" in source
-    for text in (example, bootstrap, script_source):
+    for text in (example, installer, bootstrap, script_source):
+        assert 'subscription_auto_refresh_max_bot_rss_kb = 81920' in text
+        assert 'subscription_auto_refresh_max_program_rss_kb = 112640' in text
         assert 'subscription_nightly_pool_probe_enabled = True' in text
         assert 'subscription_nightly_pool_probe_start_hour = 3' in text
         assert 'subscription_nightly_pool_probe_end_hour = 6' in text
         assert 'subscription_nightly_pool_probe_max_refresh_age_seconds = 28800' in text
     assert 'subscription_nightly_pool_probe.json' in script_source
+
+
+def test_subscription_nightly_pool_probe_pending_survives_window_and_missing_refresh():
+    with tempfile.TemporaryDirectory() as directory:
+        temp_path = Path(directory)
+        state_path = temp_path / 'nightly.json'
+        (temp_path / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import json, sys, threading\n"
+            f"sys.path.insert(0, {str(temp_path)!r})\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            "import bot\n"
+            f"bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_STATE_PATH = {str(state_path)!r}\n"
+            "class Runtime:\n"
+            "    def nightly_pool_probe_window_date(self, *_args, **_kwargs): return ''\n"
+            "    def nightly_pool_probe_due_date(self, *_args, **_kwargs): return '2026-07-19'\n"
+            "    def latest_recent_subscription_success_at(self, *_args, **_kwargs): return 0\n"
+            "bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED = True\n"
+            "bot._app_mode_pool_enabled = lambda: True\n"
+            "bot._subscription_runtime = lambda: Runtime()\n"
+            "guards, allowed = [], [False]\n"
+            "def guard(_name, **kwargs):\n"
+            "    guards.append(kwargs)\n"
+            "    return allowed[-1]\n"
+            "bot._background_task_allowed = guard\n"
+            "bot.pool_probe_lock = threading.Lock()\n"
+            "bot._has_pool_probe_resume_payload = lambda: False\n"
+            "bot._run_coordinated_background_task = lambda _name, callback: (True, callback())\n"
+            "calls = []\n"
+            "bot._probe_all_pool_keys_async = lambda **kwargs: (calls.append(kwargs) or (True, 9))\n"
+            "bot._write_runtime_log = lambda _message: None\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=456.0)\n"
+            "state = bot._nightly_subscription_pool_probe_state()\n"
+            "assert state['status'] == 'pending' and state['attempts'] == 0\n"
+            "assert state['window_date'] == '2026-07-19' and state['next_retry_at'] == 756.0\n"
+            "assert not bot._maybe_start_nightly_subscription_pool_probe({}, now=700.0)\n"
+            "assert len(guards) == 1 and not calls\n"
+            "allowed.append(True)\n"
+            "assert bot._maybe_start_nightly_subscription_pool_probe({}, now=757.0)\n"
+            "state = bot._nightly_subscription_pool_probe_state()\n"
+            "assert state['status'] == 'running' and state['attempts'] == 1\n"
+            "assert calls == [{'stale_only': False, 'max_keys': None, 'scope': 'nightly_subscription'}]\n"
+            "assert guards[-1]['max_bot_rss_kb'] == 81920\n"
+            "assert guards[-1]['max_program_rss_kb'] == 112640\n"
+            "assert guards[-1]['max_cpu_percent'] == 80.0\n"
+            f"json.dump({{'schema': 3, 'window_date': '2026-07-19', 'status': 'failed', 'attempts': 99, 'next_retry_at': 0}}, open({str(state_path)!r}, 'w', encoding='utf-8'))\n"
+            "calls.clear()\n"
+            "assert bot._maybe_start_nightly_subscription_pool_probe({}, now=800.0)\n"
+            "assert bot._nightly_subscription_pool_probe_state()['attempts'] == 100\n"
+            "assert len(calls) == 1\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+
+def test_subscription_resource_overrides_do_not_raise_other_background_limits():
+    with tempfile.TemporaryDirectory() as directory:
+        temp_path = Path(directory)
+        (temp_path / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import sys, threading\n"
+            f"sys.path.insert(0, {str(temp_path)!r})\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            "import bot\n"
+            "bot._update_maintenance_active = lambda: False\n"
+            "bot._memory_sensitive_operation_running = lambda **_kwargs: False\n"
+            "bot._process_rss_kb = lambda: 75000\n"
+            "bot._program_rss_kb = lambda: 105000\n"
+            "bot._memory_cleanup = lambda *_args, **_kwargs: {'rss_after_kb': 75000}\n"
+            "bot._background_cpu_busy_percent = lambda: 10.0\n"
+            "bot._write_runtime_log = lambda _message: None\n"
+            "bot.background_task_skip_until.clear()\n"
+            "bot.background_task_skip_reason.clear()\n"
+            "assert not bot._background_task_allowed('ordinary', task_class='critical')\n"
+            "bot.background_task_skip_until.clear()\n"
+            "bot.background_task_skip_reason.clear()\n"
+            "assert bot._background_task_allowed('subscription', task_class='critical', max_bot_rss_kb=81920, max_program_rss_kb=112640, max_cpu_percent=80.0)\n"
+            "captured = []\n"
+            "bot._background_task_allowed = lambda name, **kwargs: (captured.append((name, kwargs)) or True)\n"
+            "bot.pool_probe_lock = threading.Lock()\n"
+            "bot._mem_available_kb_light = lambda: 200000\n"
+            "bot._pool_probe_load_average = lambda: 0.2\n"
+            "bot._process_rss_kb = lambda: (_ for _ in ()).throw(AssertionError('duplicate RSS check'))\n"
+            "assert bot._subscription_auto_refresh_allowed('vless')\n"
+            "name, kwargs = captured[-1]\n"
+            "assert name == 'Subscription auto refresh'\n"
+            "assert kwargs['max_bot_rss_kb'] == 81920\n"
+            "assert kwargs['max_program_rss_kb'] == 112640\n"
+            "assert kwargs['max_cpu_percent'] == 80.0\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
 
 
 def test_subscription_nightly_pool_probe_dispatches_full_pool_once():
@@ -2114,7 +2246,7 @@ def test_subscription_nightly_pool_probe_dispatches_full_pool_once():
             "bot._app_mode_pool_enabled = lambda: True\n"
             "bot._subscription_runtime = lambda: Runtime()\n"
             "bot._nightly_subscription_pool_probe_state = lambda: {}\n"
-            "bot._background_task_allowed = lambda _name: True\n"
+            "bot._background_task_allowed = lambda _name, **_kwargs: True\n"
             "bot.pool_probe_lock = threading.Lock()\n"
             "bot._has_pool_probe_resume_payload = lambda: False\n"
             "bot._run_coordinated_background_task = lambda _name, callback: (True, callback())\n"
@@ -2165,7 +2297,7 @@ def test_subscription_nightly_pool_probe_lifecycle_resume_and_legacy_state():
             "bot.SUBSCRIPTION_NIGHTLY_POOL_PROBE_ENABLED = True\n"
             "bot._app_mode_pool_enabled = lambda: True\n"
             "bot._subscription_runtime = lambda: Runtime()\n"
-            "bot._background_task_allowed = lambda _name: True\n"
+            "bot._background_task_allowed = lambda _name, **_kwargs: True\n"
             "bot.pool_probe_lock = threading.Lock()\n"
             "bot._has_pool_probe_resume_payload = lambda: True\n"
             "resumes = []\n"
@@ -3122,6 +3254,12 @@ def test_codex_version_matches_commit_count():
     assert 'subscription_auto_refresh_check_seconds = 300' in example
     assert 'subscription_auto_refresh_check_seconds = 300' in installer
     assert 'subscription_auto_refresh_check_seconds = 300' in bootstrap
+    assert 'subscription_auto_refresh_max_bot_rss_kb = 81920' in example
+    assert 'subscription_auto_refresh_max_bot_rss_kb = 81920' in installer
+    assert 'subscription_auto_refresh_max_bot_rss_kb = 81920' in bootstrap
+    assert 'subscription_auto_refresh_max_program_rss_kb = 112640' in example
+    assert 'subscription_auto_refresh_max_program_rss_kb = 112640' in installer
+    assert 'subscription_auto_refresh_max_program_rss_kb = 112640' in bootstrap
     assert 'router_metrics_history_limit = 120' in example
     assert 'router_metrics_history_limit = 120' in installer
     assert 'router_metrics_history_limit = 120' in bootstrap
@@ -4804,6 +4942,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'subscription_auto_refresh_check_seconds = 300' in script_source
     assert "subscription_auto_refresh_check_seconds[[:space:]]*=[[:space:]]*3600" in script_source
     assert "getattr(config, 'subscription_auto_refresh_check_seconds', 300)" in source
+    assert 'subscription_auto_refresh_max_bot_rss_kb = 81920' in script_source
+    assert "subscription_auto_refresh_max_bot_rss_kb[[:space:]]*=[[:space:]]*71680" in script_source
+    assert 'subscription_auto_refresh_max_program_rss_kb = 112640' in script_source
     assert "telegram_udp_policy = 'auto'" in script_source
     assert 'youtube_edge_prefetch_enabled = True' in script_source
     assert 'youtube_edge_prefetch_max_rss_kb = 66560' in script_source

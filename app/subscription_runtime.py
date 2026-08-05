@@ -104,6 +104,24 @@ def nightly_pool_probe_window_date(timestamp, *, start_hour=3, end_hour=6, local
     return time.strftime('%Y-%m-%d', local)
 
 
+def nightly_pool_probe_due_date(timestamp, *, start_hour=3, end_hour=6, localtime=time.localtime):
+    """Return the local day whose nightly probe is already due.
+
+    Unlike :func:`nightly_pool_probe_window_date`, this remains valid after the
+    nominal window closes.  A scheduler can therefore persist a pending run and
+    safely retry it after a busy router, a subscription failure, or a restart.
+    """
+    try:
+        start_hour = max(0, min(23, int(start_hour)))
+        end_hour = max(start_hour + 1, min(24, int(end_hour)))
+        local = localtime(float(timestamp))
+    except Exception:
+        return ''
+    if int(local.tm_hour) < start_hour:
+        return ''
+    return time.strftime('%Y-%m-%d', local)
+
+
 def latest_recent_subscription_success_at(state, now, *, max_age_seconds):
     """Return the newest eligible subscription refresh in a bounded age window."""
     try:

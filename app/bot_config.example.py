@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.1006
+# ВЕРСИЯ СКРИПТА v1.1007
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -22,14 +22,15 @@ subscription_auto_refresh_enabled = True
 subscription_auto_refresh_interval_seconds = 21600  # четыре раза в день для подписок с включенным HWID
 subscription_auto_refresh_retry_seconds = 3600
 subscription_auto_refresh_check_seconds = 300  # быстро повторить отложенную guard'ом просроченную подписку
-subscription_auto_refresh_max_bot_rss_kb = 71680  # lightweight subscription refresh may run above the general background RSS guard, but not at the restart threshold
+subscription_auto_refresh_max_bot_rss_kb = 81920  # лёгкое обновление подписки допускается выше общего фонового порога, но ниже watchdog
+subscription_auto_refresh_max_program_rss_kb = 112640  # общий RSS бота и Xray; не меняет лимиты других фоновых задач
 subscription_auto_refresh_min_available_kb = 92160
 subscription_auto_refresh_max_cpu_percent = 80.0
 subscription_auto_refresh_max_load1 = 2.5
-subscription_nightly_pool_probe_enabled = True  # once per local calendar day, after a recent successful subscription refresh
-subscription_nightly_pool_probe_start_hour = 3  # local router time, inclusive
-subscription_nightly_pool_probe_end_hour = 6  # local router time, exclusive
-subscription_nightly_pool_probe_max_refresh_age_seconds = 28800  # require a successful subscription refresh within the last 8 hours
+subscription_nightly_pool_probe_enabled = True  # один полный запуск в локальные календарные сутки
+subscription_nightly_pool_probe_start_hour = 3  # локальное время роутера; после этого часа запуск становится обязательным
+subscription_nightly_pool_probe_end_hour = 6  # номинальный конец окна; ожидающий запуск и сама проверка продолжаются после него
+subscription_nightly_pool_probe_max_refresh_age_seconds = 28800  # свежесть обновления для журнала; при ошибке проверяются сохранённые пулы
 pool_probe_process_worker_enabled = True  # run full pool checks in a separate Python process so main bot RSS can return to baseline
 pool_probe_inprocess_fallback_enabled = False  # keep full pool checks out of the long-running bot process on routers
 pool_probe_process_worker_poll_seconds = 0.75
