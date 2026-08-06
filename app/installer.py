@@ -106,6 +106,7 @@ router_health_cache_ttl = 30.0
 router_health_related_process_cache_ttl = 45.0
 router_health_cpu_smoothing_factor = 0.35
 web_status_api_cache_ttl = 30.0
+web_http_max_request_threads = 16
 router_metrics_history_limit = 120
 router_metrics_warn_bot_rss_kb = 66560
 router_metrics_critical_bot_rss_kb = 87040

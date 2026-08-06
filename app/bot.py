@@ -14,7 +14,7 @@ import tempfile
 import gc
 import atexit
 from collections import deque
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qsl, urlencode, unquote, urlparse
 
 from app_version import APP_VERSION_LABEL
@@ -105,7 +105,6 @@ if _IMPORT_POOL_ENABLED:
     import subscription_runtime
 else:
     subscription_runtime = None
-import entware_dns_runtime
 import router_health_runtime
 import router_metrics
 try:
@@ -115,7 +114,6 @@ except Exception:
 if _IMPORT_TELEGRAM_ENABLED:
     from telegram_auth_state import build_authorized_identities as _build_authorized_identities
     import telegram_key_ui
-    import telegram_info_runtime
     from telegram_auth_state import (
         MENU_STATE_UNSET,
         authorize_message as _telegram_authorize_message,
@@ -125,7 +123,6 @@ if _IMPORT_TELEGRAM_ENABLED:
         unauthorized_message_text as _telegram_unauthorized_text,
     )
     from telegram_jobs import (
-        command_result_payload as _telegram_command_result_payload,
         final_message as _telegram_final_command_message,
         start_background_command as _telegram_start_background_command,
         start_result_retry_worker as _telegram_start_result_retry_worker,
@@ -160,11 +157,11 @@ from web_command_state import (
     consume_command_state_for_render as _consume_command_state_for_render_impl,
     consume_flash_message as _consume_flash_message_impl,
     estimate_update_progress as _estimate_update_progress,
-    finish_command as _finish_command_state,
     set_command_progress as _set_command_progress_state,
     set_flash_message as _set_flash_message_impl,
 )
 from web_http_common import (
+    BoundedThreadingHTTPServer,
     WebRequestMixin,
     config_web_auth_token as _web_config_auth_token,
     config_web_auth_user as _web_config_auth_user,
@@ -175,7 +172,6 @@ from web_http_common import (
 )
 import web_form_blocks
 import web_get_actions
-import web_post_actions
 import web_background
 import web_status_runtime
 import web_commands_runtime
@@ -277,6 +273,9 @@ _pool_probe_controller_module = None
 _probe_cache_module = None
 _key_pool_store_module = None
 _repo_update_module = None
+_system_command_runtime_module = None
+_telegram_info_runtime_module = None
+_web_post_actions_module = None
 _web_form_template_module = None
 _web_form_template_lock = threading.Lock()
 _web_route_tools_runtime = None
@@ -589,6 +588,33 @@ def _repo_update():
     return _repo_update_module
 
 
+def _system_command_runtime():
+    global _system_command_runtime_module
+    if _system_command_runtime_module is None:
+        import system_command_runtime as module
+
+        _system_command_runtime_module = module
+    return _system_command_runtime_module
+
+
+def _telegram_info_runtime():
+    global _telegram_info_runtime_module
+    if _telegram_info_runtime_module is None:
+        import telegram_info_runtime as module
+
+        _telegram_info_runtime_module = module
+    return _telegram_info_runtime_module
+
+
+def _web_post_actions():
+    global _web_post_actions_module
+    if _web_post_actions_module is None:
+        import web_post_actions as module
+
+        _web_post_actions_module = module
+    return _web_post_actions_module
+
+
 def _subscription_runtime():
     global _subscription_runtime_module
     if _subscription_runtime_module is None:
@@ -607,24 +633,8 @@ def _youtube_route_owner():
     return _youtube_route_owner_module
 
 
-def _repo_direct_fetch_env(*args, **kwargs):
-    return _repo_update().direct_fetch_env(*args, **kwargs)
-
-
-def _repo_download_script(*args, **kwargs):
-    return _repo_update().download_repo_script(*args, **kwargs)
-
-
 def _fetch_remote_text(*args, **kwargs):
     return _repo_update().fetch_remote_text(*args, **kwargs)
-
-
-def _repo_run_script_and_collect(*args, **kwargs):
-    return _repo_update().run_script_and_collect(*args, **kwargs)
-
-
-def _repo_write_script(*args, **kwargs):
-    return _repo_update().write_script(*args, **kwargs)
 
 
 def _web_form_template():
@@ -2328,6 +2338,7 @@ ACTIVE_MODE_STATUS_DURING_POOL_TTL = 30
 TELEGRAM_TRANSIENT_OK_CACHE_TTL = int(getattr(config, 'telegram_transient_ok_cache_ttl', 180))
 ACTIVE_STATUS_RECENT_SUCCESS_TTL = max(60, int(getattr(config, 'active_status_recent_success_ttl', 900)))
 WEB_STATUS_API_CACHE_TTL = float(getattr(config, 'web_status_api_cache_ttl', 30.0))
+WEB_HTTP_MAX_REQUEST_THREADS = max(4, min(32, int(getattr(config, 'web_http_max_request_threads', 16))))
 WEB_POOLS_API_CACHE_TTL = float(getattr(config, 'web_pools_api_cache_ttl', 45.0))
 WEB_POOLS_API_CACHE_MAX_ENTRIES = max(1, min(3, int(getattr(config, 'web_pools_api_cache_max_entries', 3))))
 WEB_POOL_SNAPSHOT_WORKER_ENABLED = bool(getattr(config, 'web_pool_snapshot_worker_enabled', True))
@@ -2584,7 +2595,9 @@ REALITY_ENDPOINT_OVERRIDES = {
     for host, endpoint in (_REALITY_ENDPOINT_OVERRIDES_RAW.items() if isinstance(_REALITY_ENDPOINT_OVERRIDES_RAW, dict) else [])
     if str(host or '').strip() and str(endpoint or '').strip()
 }
+REALITY_ENDPOINT_RUNTIME_OVERRIDES_MAX = 512
 reality_endpoint_runtime_overrides = {}
+reality_endpoint_runtime_lock = threading.Lock()
 UDP_QUIC_DRIFT_CHECK_ENABLED = bool(getattr(config, 'udp_quic_drift_check_enabled', True))
 UDP_QUIC_DRIFT_CHECK_INTERVAL_SECONDS = max(
     180,
@@ -2794,6 +2807,7 @@ web_pools_api_cache_lock = threading.Lock()
 web_pools_api_build_lock = threading.Lock()
 web_service_routes_cache_lock = threading.Lock()
 web_service_routes_build_lock = threading.Lock()
+service_route_mutation_lock = threading.Lock()
 light_service_route_state_cache_lock = threading.Lock()
 pool_summary_cache_lock = threading.Lock()
 pool_summary_file_lock = threading.RLock()
@@ -2903,25 +2917,12 @@ web_command_render_write_state = {
 }
 web_flash_lock = threading.Lock()
 web_flash_state = {'message': ''}
-DIRECT_FETCH_ENV_KEYS = [
-    'BYPASS_KEENETIC_COMMAND_WORKER',
-    'HTTPS_PROXY',
-    'HTTP_PROXY',
-    'https_proxy',
-    'http_proxy',
-    'ALL_PROXY',
-    'all_proxy',
-    'REPO_REF',
-    'UPDATE_ARCHIVE_ROOT',
-    'RAW_GITHUB_USE_SOCKS',
-    'RAW_GITHUB_BYPASS',
-    'RAW_GITHUB_SOCKS_NOTICE_SHOWN',
-]
 RUNTIME_ERROR_LOG_PATHS = [
     '/opt/etc/error.log',
     '/opt/etc/bot/error.log',
 ]
 chat_menu_state_lock = threading.Lock()
+CHAT_RUNTIME_STATE_MAX_ENTRIES = 128
 chat_menu_states = {}
 chat_pool_pages = {}
 
@@ -3053,11 +3054,23 @@ def _service_list_alias_map():
 
 
 def _get_chat_menu_state(chat_id):
-    return _get_chat_menu_state_impl(chat_menu_state_lock, chat_menu_states, chat_id)
+    return _get_chat_menu_state_impl(
+        chat_menu_state_lock,
+        chat_menu_states,
+        chat_id,
+        max_entries=CHAT_RUNTIME_STATE_MAX_ENTRIES,
+    )
 
 
 def _set_chat_menu_state(chat_id, level=MENU_STATE_UNSET, bypass=MENU_STATE_UNSET):
-    _set_chat_menu_state_impl(chat_menu_state_lock, chat_menu_states, chat_id, level=level, bypass=bypass)
+    _set_chat_menu_state_impl(
+        chat_menu_state_lock,
+        chat_menu_states,
+        chat_id,
+        level=level,
+        bypass=bypass,
+        max_entries=CHAT_RUNTIME_STATE_MAX_ENTRIES,
+    )
 
 
 def _get_pool_page(chat_id):
@@ -3071,7 +3084,10 @@ def _set_pool_page(chat_id, page):
     except (TypeError, ValueError):
         page = 0
     with chat_menu_state_lock:
+        chat_pool_pages.pop(chat_id, None)
         chat_pool_pages[chat_id] = max(0, page)
+        while len(chat_pool_pages) > CHAT_RUNTIME_STATE_MAX_ENTRIES:
+            chat_pool_pages.pop(next(iter(chat_pool_pages)), None)
 
 
 def _clear_pool_page(chat_id):
@@ -3080,7 +3096,7 @@ def _clear_pool_page(chat_id):
 
 
 def _telegram_info_text_from_readme():
-    return telegram_info_runtime.telegram_info_text_from_readme(
+    return _telegram_info_runtime().telegram_info_text_from_readme(
         _fetch_remote_text,
         _raw_github_url,
         _read_text_file,
@@ -3434,28 +3450,6 @@ def _telegram_call_learning_route_protocols():
         'protocols': list(protocols),
     })
     return protocols
-
-
-def _select_telegram_call_learning_protocol(requested=''):
-    requested = str(requested or '').strip().lower()
-    if requested in _TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS:
-        return requested, []
-    route_protocols = _telegram_call_learning_route_protocols()
-    active = ''
-    try:
-        active = _load_proxy_mode()
-    except Exception:
-        active = str(proxy_mode or '')
-    notes = []
-    if active in route_protocols:
-        return active, route_protocols
-    if route_protocols:
-        return route_protocols[0], route_protocols
-    if active in _TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS:
-        notes.append('telegram_route_not_found')
-        return active, route_protocols
-    notes.append('telegram_route_not_found')
-    return 'vless', route_protocols
 
 
 def _telegram_call_learning_target_protocols(requested=''):
@@ -3868,7 +3862,10 @@ def _telegram_call_learning_auto_worker():
 
 def _start_telegram_call_learning_auto_thread():
     global telegram_call_learning_auto_thread
-    message = 'Автообучение Telegram-звонков выполняется правилами iptables/ipset без фонового сканирования.'
+    message = (
+        'Автообучение Telegram-звонков работает в фоновом режиме '
+        'и анализирует conntrack только при обнаружении активности.'
+    )
     _set_telegram_call_learning_state(
         watching=False,
         running=False,
@@ -3888,97 +3885,6 @@ def _start_telegram_call_learning_auto_thread():
         daemon=True,
     )
     telegram_call_learning_auto_thread.start()
-
-
-def _telegram_call_learning_worker(device_ip, protocol, apply_entries, duration_seconds):
-    baseline = _telegram_call_learning().read_conntrack_flows(device_ip)
-    seen_addresses = set()
-    candidates_payload = []
-    added_payload = []
-    deadline = time.time() + duration_seconds
-    error = ''
-    try:
-        while not telegram_call_learning_cancel_event.is_set():
-            current = _telegram_call_learning().read_conntrack_flows(device_ip)
-            candidates = _telegram_call_learning().learn_candidates(
-                baseline,
-                current,
-                seen_addresses=seen_addresses,
-                min_score=TELEGRAM_CALL_LEARNING_MIN_SCORE,
-                min_packets=TELEGRAM_CALL_LEARNING_MIN_PACKETS,
-                min_bytes=TELEGRAM_CALL_LEARNING_MIN_BYTES,
-                max_candidates=TELEGRAM_CALL_LEARNING_MAX_CANDIDATES,
-            )
-            for candidate in candidates:
-                address = str(candidate.get('address') or '')
-                if not address:
-                    continue
-                seen_addresses.add(address)
-                apply_result = _telegram_call_learning().add_candidate_to_ipsets(
-                    candidate,
-                    protocol,
-                    apply=apply_entries,
-                )
-                conntrack_deleted = False
-                if apply_entries and apply_result.get('applied_sets'):
-                    conntrack_deleted = _telegram_call_learning().delete_conntrack_candidate(candidate)
-                payload = _telegram_call_learning_candidate_payload(candidate, apply_result, conntrack_deleted)
-                candidates_payload.append(payload)
-                if payload.get('applied_sets') or not payload.get('errors'):
-                    added_payload.append(payload)
-            _set_telegram_call_learning_state(
-                candidates=candidates_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
-                added=added_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
-                message=_telegram_call_learning_status_message({
-                    'running': True,
-                    'apply': apply_entries,
-                    'added': added_payload,
-                }),
-            )
-            if time.time() >= deadline:
-                break
-            telegram_call_learning_cancel_event.wait(TELEGRAM_CALL_LEARNING_POLL_INTERVAL_SECONDS)
-    except Exception as exc:
-        error = str(exc)
-        _write_runtime_log(f'Ошибка conntrack-learning Telegram calls: {exc}')
-    finally:
-        cancelled = telegram_call_learning_cancel_event.is_set()
-        snapshot = _set_telegram_call_learning_state(
-            running=False,
-            finished_at=time.time(),
-            candidates=candidates_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
-            added=added_payload[-TELEGRAM_CALL_LEARNING_MAX_CANDIDATES:],
-            error=error,
-            message=('Conntrack-learning остановлен.' if cancelled else ''),
-        )
-        _set_telegram_call_learning_state(message=_telegram_call_learning_status_message(snapshot))
-        _record_event(
-            'telegram_call_learning_finish',
-            _telegram_call_learning_status_message(snapshot),
-            source='web',
-            protocol=protocol,
-            service='telegram',
-            details={
-                'apply': bool(apply_entries),
-                'added_count': len(added_payload),
-                'error': error,
-                'cancelled': cancelled,
-            },
-        )
-        try:
-            _invalidate_web_status_cache()
-        except Exception:
-            pass
-        try:
-            _memory_cleanup('telegram call learning finished', clear_status=True)
-        except Exception:
-            pass
-
-
-
-
-
-
 
 
 def _udp_quic_block_enabled_for_protocol(proto, configured_enabled):
@@ -6334,42 +6240,6 @@ def _save_bot_autostart(enabled):
         pass
 
 
-def _prepare_entware_dns():
-    return entware_dns_runtime.prepare_entware_dns()
-
-
-def _ensure_legacy_bot_paths():
-    mappings = [
-        ('/opt/etc/bot/bot_config.py', '/opt/etc/bot_config.py', False),
-        ('/opt/etc/bot/main.py', '/opt/etc/bot.py', False),
-        ('/opt/etc/bot/main.py', '/opt/etc/bot/bot.py', True),
-    ]
-    notes = []
-    for source_path, legacy_path, replace_existing in mappings:
-        try:
-            if not os.path.exists(source_path):
-                continue
-            if os.path.islink(legacy_path):
-                if os.path.realpath(legacy_path) == os.path.realpath(source_path):
-                    continue
-                os.remove(legacy_path)
-            elif os.path.exists(legacy_path):
-                if not replace_existing:
-                    continue
-                os.remove(legacy_path)
-            os.symlink(source_path, legacy_path)
-            notes.append(f'{legacy_path} -> {source_path}')
-        except Exception:
-            try:
-                shutil.copyfile(source_path, legacy_path)
-                notes.append(f'{legacy_path} скопирован из {source_path}')
-            except Exception:
-                notes.append(f'не удалось подготовить {legacy_path}')
-    if not notes:
-        return 'Legacy-пути уже доступны.'
-    return 'Подготовка legacy-путей: ' + ', '.join(notes)
-
-
 def _chunk_text(text, limit=3500):
     if not text or not text.strip():
         return []
@@ -6977,9 +6847,21 @@ def _execute_confirmed_telegram_action(chat_id, action, reply_markup):
         )
         return
     if action == 'restart_services':
-        bot.send_message(chat_id, '🔄 Выполняется перезагрузка сервисов!', reply_markup=reply_markup)
-        _restart_router_services()
-        _send_message_after_service_restart(chat_id, '✅ Сервисы перезагружены!', reply_markup=reply_markup)
+        started, status_message = _start_telegram_background_command(
+            'restart_services',
+            fork_repo_owner,
+            fork_repo_name,
+            chat_id,
+            'service',
+        )
+        if not started:
+            bot.send_message(chat_id, status_message, reply_markup=reply_markup)
+            return
+        bot.send_message(
+            chat_id,
+            '🔄 Перезапуск сервисов выполняется в фоне. Бот пришлёт итог после завершения.',
+            reply_markup=reply_markup,
+        )
         return
     if action == 'reboot':
         bot.send_message(chat_id, '🔄 Роутер перезагружается. Это займёт около 2 минут.', reply_markup=reply_markup)
@@ -7139,35 +7021,6 @@ def _telegram_command_markup(menu_name):
     return _build_service_menu_markup() if menu_name == 'service' else _build_main_menu_markup()
 
 
-def _run_telegram_command_worker(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
-    is_rollback = action == 'rollback_update'
-    if is_rollback:
-        update_status.write_update_status(
-            command='rollback_update',
-            running=True,
-            progress=5,
-            progress_label='Подготовка отката',
-            message='Восстанавливается последняя резервная копия.',
-        )
-    try:
-        if is_rollback:
-            output = _rollback_last_update()
-            return_code = 0 if output.startswith('Откат выполнен') else 1
-        else:
-            return_code, output = _run_script_action(action, repo_owner, repo_name, branch=branch)
-    except Exception as exc:
-        return_code = 1
-        output = f'Ошибка запуска фоновой команды: {exc}'
-    if is_rollback:
-        update_status.finish_update_status('rollback_update', output, progress=100)
-    _write_json_file(
-        TELEGRAM_COMMAND_RESULT_FILE,
-        _telegram_command_result_payload(action, chat_id, menu_name, return_code, output),
-    )
-    _remove_file(TELEGRAM_COMMAND_JOB_FILE)
-    _memory_cleanup('telegram command finished', force=True, clear_status=True)
-
-
 def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, menu_name, branch='main'):
     return _telegram_start_background_command(
         job_file=TELEGRAM_COMMAND_JOB_FILE,
@@ -7181,6 +7034,8 @@ def _start_telegram_background_command(action, repo_owner, repo_name, chat_id, m
         sys_executable=sys.executable,
         read_json_file=_read_json_file,
         write_json_file=_write_json_file,
+        result_file=TELEGRAM_COMMAND_RESULT_FILE,
+        web_state_file=WEB_COMMAND_STATE_FILE,
         stale_after=COMMAND_JOB_STALE_AFTER,
     )
 
@@ -7242,9 +7097,15 @@ def _deliver_pending_telegram_command_result():
     output = (result.get('output') or '').strip()
 
     try:
-        if output:
-            _send_telegram_chunks(chat_id, output, reply_markup=markup)
-        bot.send_message(chat_id, _telegram_final_command_message(action, return_code), reply_markup=markup)
+        final_message = _telegram_final_command_message(action, return_code)
+        if action == 'restart_services':
+            combined_message = '\n\n'.join(part for part in (output, final_message) if part)
+            if not _send_message_after_service_restart(chat_id, combined_message, reply_markup=markup):
+                raise RuntimeError('Не удалось доставить результат перезапуска сервисов')
+        else:
+            if output:
+                _send_telegram_chunks(chat_id, output, reply_markup=markup)
+            bot.send_message(chat_id, final_message, reply_markup=markup)
         _remove_file(TELEGRAM_COMMAND_RESULT_FILE)
     except Exception as exc:
         _write_runtime_log(f'Не удалось доставить результат фоновой Telegram-команды: {exc}')
@@ -7287,62 +7148,17 @@ def _install_proxy_from_message(message, key_type, key_value, reply_markup):
 
 
 def _run_script_action(action, repo_owner=None, repo_name=None, progress_command=None, branch='main'):
-    logs = [_prepare_entware_dns(), _ensure_legacy_bot_paths()]
-    _record_event('script_action_start', f'{action} {repo_owner or ""}/{repo_name or ""}'.strip(), source='update', protocol='system')
-    direct_env = _repo_direct_fetch_env(DIRECT_FETCH_ENV_KEYS)
     progress_callback = None
     if progress_command:
         def progress_callback(text):
             _set_web_command_progress(progress_command, text)
-        progress_callback('\n'.join(logs))
-    if repo_owner and repo_name:
-        url, script_text, repo_ref = _repo_download_script(repo_owner, repo_name, branch=branch)
-        direct_env['REPO_REF'] = repo_ref
-        logs.append(f'Скрипт загружен из {url}')
-        logs.append(f'Коммит обновления: {repo_ref[:12]}')
-        if repo_owner == fork_repo_owner and 'BOT_CONFIG_PATH' not in script_text:
-            logs.append('⚠️ GitHub отдал старую версию script.sh, но legacy-пути уже подготовлены на роутере.')
-        if progress_callback:
-            progress_callback('\n'.join(logs))
-        _repo_write_script(script_text)
-
-    activity_probe = None
-    if progress_command:
-        def activity_probe():
-            try:
-                return os.stat(update_status.UPDATE_STATUS_PATH).st_mtime_ns
-            except OSError:
-                return None
-
-    return_code, output = _repo_run_script_and_collect(
+    return _system_command_runtime().run_script_action(
         action,
-        direct_env,
-        logs,
-        progress_callback,
-        activity_probe=activity_probe,
+        repo_owner,
+        repo_name,
+        progress_callback=progress_callback,
+        branch=branch,
     )
-    _record_event(
-        'script_action_finish',
-        f'{action}: return_code={return_code}',
-        level='info' if return_code == 0 else 'warn',
-        source='update',
-        protocol='system',
-    )
-    return return_code, output
-
-
-def _restart_router_services():
-    _sync_udp_policy_config()
-    commands = [
-        '/opt/bin/unblock_update.sh',
-        '/opt/etc/init.d/S22shadowsocks restart',
-        CORE_PROXY_SERVICE_SCRIPT + ' restart',
-        '/opt/etc/init.d/S22trojan restart',
-    ]
-    for command in commands:
-        os.system(command)
-    _invalidate_web_status_cache()
-    return '✅ Сервисы перезагружены.'
 
 
 def _send_message_after_service_restart(chat_id, text, reply_markup=None):
@@ -7382,94 +7198,17 @@ def _send_message_after_service_restart(chat_id, text, reply_markup=None):
 
 
 def _schedule_router_reboot(delay_seconds=5):
-    delay = max(1, int(delay_seconds))
-    subprocess.Popen(
-        ['/bin/sh', '-c', f'sleep {delay}; ndmc -c "system reboot" >/dev/null 2>&1'],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        close_fds=True,
-        start_new_session=True,
-    )
-
-
-def _refresh_dns_override_runtime(restart_dnsmasq=False):
-    if restart_dnsmasq:
-        subprocess.run(
-            ['/opt/etc/init.d/S56dnsmasq', 'restart'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-    subprocess.run(
-        ['/opt/bin/unblock_update.sh'],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    return _system_command_runtime().schedule_router_reboot(delay_seconds)
 
 
 def _set_dns_override(enabled):
-    _save_bot_autostart(True)
-    if enabled:
-        if _dns_override_enabled():
-            _refresh_dns_override_runtime(restart_dnsmasq=True)
-            return 'DNS Override уже включён. dnsmasq перезапущен, списки и ipset обновлены.'
-        os.system("ndmc -c 'opkg dns-override'")
-        time.sleep(2)
-        os.system("ndmc -c 'system configuration save'")
-        _refresh_dns_override_runtime(restart_dnsmasq=True)
-        _schedule_router_reboot()
-        return '✅ DNS Override включен. Роутер будет автоматически перезагружен через несколько секунд.'
-    if not _dns_override_enabled():
-        return 'DNS Override уже выключен.'
-    os.system("ndmc -c 'no opkg dns-override'")
-    time.sleep(2)
-    os.system("ndmc -c 'system configuration save'")
-    _refresh_dns_override_runtime(restart_dnsmasq=False)
-    _schedule_router_reboot()
-    return '✅ DNS Override выключен. Роутер будет автоматически перезагружен через несколько секунд.'
+    result = _system_command_runtime().set_dns_override(enabled)
+    _invalidate_web_status_cache()
+    return result
 
 
 def _dns_override_enabled():
-    try:
-        result = subprocess.run(
-            ['ndmc', '-c', 'show running-config'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-        )
-        return 'opkg dns-override' in (result.stdout or '')
-    except Exception:
-        return False
-
-
-def _latest_update_backup_dir(root='/opt/root'):
-    try:
-        candidates = [
-            os.path.join(root, name)
-            for name in os.listdir(root)
-            if name.startswith('backup-') and os.path.isdir(os.path.join(root, name))
-        ]
-    except Exception:
-        return ''
-    if not candidates:
-        return ''
-    return max(candidates, key=lambda path: (os.path.getmtime(path), path))
-
-
-def _restore_backup_file(source, target, mode=None):
-    if not os.path.isfile(source):
-        return False
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    shutil.copy2(source, target)
-    if mode is not None:
-        try:
-            os.chmod(target, mode)
-        except Exception:
-            pass
-    return True
+    return _system_command_runtime().dns_override_enabled()
 
 
 def _sanitize_xray26_compat_files():
@@ -7589,109 +7328,6 @@ def _restart_core_proxy_after_validation():
     return bool(health.get('ok')), note
 
 
-def _rollback_last_update():
-    backup_dir = _latest_update_backup_dir()
-    if not backup_dir:
-        return 'Резервная копия обновления не найдена в /opt/root/backup-* .'
-    restored = []
-    main_source = os.path.join(backup_dir, 'bot.py')
-    if _restore_backup_file(main_source, BOT_SOURCE_PATH, 0o755):
-        restored.append('main.py')
-    for name in os.listdir(backup_dir):
-        if not name.endswith('.py') or name == 'bot.py':
-            continue
-        if _restore_backup_file(os.path.join(backup_dir, name), os.path.join(BOT_DIR, name), 0o644):
-            restored.append(name)
-    for name in ('version.md', 'README.md'):
-        if _restore_backup_file(os.path.join(backup_dir, name), os.path.join(BOT_DIR, name), 0o644):
-            restored.append(name)
-    static_source = os.path.join(backup_dir, 'static')
-    static_target = os.path.join(BOT_DIR, 'static')
-    static_absent_marker = os.path.join(backup_dir, '.static-absent')
-    try:
-        if os.path.isdir(static_source):
-            if os.path.exists(static_target) or os.path.islink(static_target):
-                if os.path.islink(static_target) or os.path.isfile(static_target):
-                    os.unlink(static_target)
-                else:
-                    shutil.rmtree(static_target)
-            shutil.copytree(static_source, static_target)
-            restored.append('static')
-        elif os.path.exists(static_absent_marker) and (os.path.exists(static_target) or os.path.islink(static_target)):
-            if os.path.islink(static_target) or os.path.isfile(static_target):
-                os.unlink(static_target)
-            else:
-                shutil.rmtree(static_target)
-            restored.append('static')
-    except Exception as exc:
-        return f'Backup найден ({backup_dir}), но static assets не удалось восстановить: {exc}'
-    fixed_targets = {
-        'bot_app_mode': (APP_RUNTIME_MODE_FILE, 0o644),
-        'bot_proxy_mode': (PROXY_MODE_FILE, 0o644),
-        'bot_autostart': (BOT_AUTOSTART_FILE, 0o644),
-        'bot_config.py': (os.path.join(BOT_DIR, 'bot_config.py'), 0o644),
-        'key_pools.json': (os.path.join(BOT_DIR, 'key_pools.json'), 0o644),
-        'subscriptions.json': (os.path.join(BOT_DIR, 'subscriptions.json'), 0o644),
-        'custom_checks.json': (os.path.join(BOT_DIR, 'custom_checks.json'), 0o644),
-        'vmess.key': (VMESS_KEY_PATH, 0o600),
-        'vless.key': (VLESS_KEY_PATH, 0o600),
-        'vless2.key': (VLESS2_KEY_PATH, 0o600),
-        'xray_config.json': ('/opt/etc/xray/config.json', 0o644),
-        'v2ray_config.json': ('/opt/etc/v2ray/config.json', 0o644),
-        'shadowsocks.json': ('/opt/etc/shadowsocks.json', 0o644),
-        'trojan_config.json': ('/opt/etc/trojan/config.json', 0o644),
-        'unblock_shadowsocks.txt': ('/opt/etc/unblock/shadowsocks.txt', 0o644),
-        'unblock_trojan.txt': ('/opt/etc/unblock/trojan.txt', 0o644),
-        'unblock_vmess.txt': ('/opt/etc/unblock/vmess.txt', 0o644),
-        'unblock_vless.txt': ('/opt/etc/unblock/vless.txt', 0o644),
-        'unblock_vless2.txt': ('/opt/etc/unblock/vless-2.txt', 0o644),
-        'installer.py': ('/opt/etc/bot/installer.py', 0o755),
-        'S98telegram_bot_installer': ('/opt/etc/init.d/S98telegram_bot_installer', 0o755),
-        'S99telegram_bot': ('/opt/etc/init.d/S99telegram_bot', 0o755),
-        'unblock_ipset.sh': ('/opt/bin/unblock_ipset.sh', 0o755),
-        'unblock_dnsmasq.sh': ('/opt/bin/unblock_dnsmasq.sh', 0o755),
-        'unblock_update.sh': ('/opt/bin/unblock_update.sh', 0o755),
-        'dnsmasq.conf': ('/opt/etc/dnsmasq.conf', 0o644),
-        'crontab': ('/opt/etc/crontab', 0o644),
-        'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755),
-        '100-ipset.sh': ('/opt/etc/ndm/fs.d/100-ipset.sh', 0o755),
-        '100-redirect.sh': ('/opt/etc/ndm/netfilter.d/100-redirect.sh', 0o755),
-        'script.sh': ('/opt/root/script.sh', 0o755),
-    }
-    for name, (target, mode) in fixed_targets.items():
-        if _restore_backup_file(os.path.join(backup_dir, name), target, mode):
-            restored.append(name)
-    bot_config_backup = os.path.join(backup_dir, 'bot_config.py')
-    if os.path.exists(bot_config_backup) and _restore_backup_file(bot_config_backup, '/opt/etc/bot_config.py', 0o644):
-        restored.append('bot_config.py legacy')
-    restored.extend(_sanitize_xray26_compat_files())
-    core_ok, core_message = _restart_core_proxy_after_validation()
-    if not restored:
-        return f'Backup найден ({backup_dir}), но в нём нет файлов для восстановления.'
-    _invalidate_web_status_cache()
-    _schedule_app_service_restart()
-    core_tail = f' Core proxy: {core_message}'
-    if not core_ok:
-        core_tail = f' Внимание: {core_message}'
-    return (
-        f'Откат выполнен из {backup_dir}. Восстановлено файлов: {len(restored)}. '
-        'Сервис бота будет перезапущен через несколько секунд.'
-        f'{core_tail}'
-    )
-
-
-def _run_web_command(command):
-    return web_commands_runtime.run_web_command(
-        command,
-        run_script_action=_run_script_action,
-        fork_repo_owner=fork_repo_owner,
-        fork_repo_name=fork_repo_name,
-        rollback_last_update=_rollback_last_update,
-        restart_router_services=_restart_router_services,
-        set_dns_override=_set_dns_override,
-    )
-
-
 def _read_text_file(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
@@ -7753,14 +7389,30 @@ def _route_intersections_snapshot():
 
 
 def _apply_service_route(service_key, target_protocol):
+    worker_result = _service_route_worker_mutation(
+        'apply_service_route',
+        service_key=service_key,
+        target_protocol=target_protocol,
+    )
+    if worker_result is not None:
+        return worker_result
     return _route_tools_runtime().apply_service_route(service_key, target_protocol)
 
 
 def _apply_service_profile(profile_id):
+    worker_result = _service_route_worker_mutation('apply_service_profile', profile_id=profile_id)
+    if worker_result is not None:
+        return worker_result
     return _route_tools_runtime().apply_service_profile(profile_id)
 
 
 def _resolve_route_intersections(target_route):
+    worker_result = _service_route_worker_mutation(
+        'resolve_route_intersections',
+        target_route=target_route,
+    )
+    if worker_result is not None:
+        return worker_result
     return _route_tools_runtime().resolve_route_intersections(target_route)
 
 
@@ -7819,17 +7471,16 @@ def _deferred_route_tools_html():
             </div>'''
 
 
-def _web_service_routes_worker_payload():
+def _web_service_routes_worker_request(request):
     if not WEB_SERVICE_ROUTES_WORKER_ENABLED:
         return None
     worker_path = os.path.join(BOT_DIR, 'web_service_routes_worker.py')
     if not os.path.isfile(worker_path):
         return None
-    route_signature = _web_service_routes_cache_signature()
     try:
         result = subprocess.run(
             [sys.executable or 'python3', worker_path],
-            input='{}',
+            input=json.dumps(request if isinstance(request, dict) else {}, ensure_ascii=False),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -7849,11 +7500,38 @@ def _web_service_routes_worker_payload():
     except Exception as exc:
         _write_runtime_log(f'Web service routes worker returned invalid JSON: {type(exc).__name__}')
         return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _web_service_routes_worker_payload():
+    route_signature = _web_service_routes_cache_signature()
+    payload = _web_service_routes_worker_request({'action': 'snapshot'})
     if not isinstance(payload, dict) or not isinstance(payload.get('route_tools_html'), str):
         return None
     if route_signature == _web_service_routes_cache_signature():
         _save_light_service_route_states(payload.get('route_states'), signature=route_signature)
     return payload
+
+
+def _service_route_worker_mutation(action, **values):
+    with service_route_mutation_lock:
+        payload = _web_service_routes_worker_request({'action': action, **values})
+        if payload is None:
+            return None
+        if payload.get('ok') is not True:
+            raise ValueError(str(payload.get('error') or 'Worker маршрутов не выполнил действие'))
+        result = payload.get('result')
+        if not isinstance(result, dict):
+            raise RuntimeError('Worker маршрутов вернул некорректный результат')
+        if payload.get('apply_required'):
+            _sync_proxy_route_policy_config()
+            subprocess.run(['/opt/bin/unblock_update.sh'], check=False)
+        if _web_route_tools_runtime is not None:
+            _web_route_tools_runtime.invalidate_intersections_cache()
+        _invalidate_web_status_cache()
+        return result
 
 
 def _build_web_service_routes_payload():
@@ -8993,16 +8671,14 @@ def _shared_command_job_running(state=None, source=None):
 
 
 def _web_background_command_code(command):
-    module_name = os.path.splitext(os.path.basename(BOT_SOURCE_PATH))[0]
     module_dir = os.path.dirname(BOT_SOURCE_PATH)
-    start_delay = 1.0 if command == 'rollback_update' else 0.0
     return (
-        'import os, sys, time; '
+        'import os, sys; '
         'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"; '
-        f'time.sleep({start_delay!r}); '
         f"sys.path.insert(0, {module_dir!r}); "
-        f'import {module_name} as bot_module; '
-        f'bot_module._run_web_command_worker({command!r})'
+        'import system_command_runtime as command_runtime; '
+        f'raise SystemExit(command_runtime.run_worker({TELEGRAM_COMMAND_JOB_FILE!r}, '
+        f'{TELEGRAM_COMMAND_RESULT_FILE!r}, {WEB_COMMAND_STATE_FILE!r}))'
     )
 
 
@@ -9071,62 +8747,6 @@ def _consume_web_flash_message():
     return _consume_flash_message_impl(web_flash_lock, web_flash_state)
 
 
-def _finish_web_command(command, result):
-    _finish_command_state(
-        web_command_lock,
-        web_command_state,
-        command,
-        result,
-        _web_command_label,
-        update_commands=WEB_UPDATE_COMMANDS,
-        finished_progress_label='Завершено',
-    )
-    _write_web_command_state_file(_command_state_snapshot(web_command_lock, web_command_state))
-    if command in WEB_UPDATE_COMMANDS:
-        snapshot = _command_state_snapshot(web_command_lock, web_command_state)
-        update_status.finish_update_status(command, result, progress=snapshot.get('progress', 100))
-        _record_event(
-            'web_command_finish',
-            result,
-            level='info',
-            source='web',
-            protocol='system',
-            service=command,
-        )
-    job_state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
-    if job_state.get('source') == 'web':
-        _remove_file(TELEGRAM_COMMAND_JOB_FILE)
-
-
-def _execute_web_command(command):
-    try:
-        result = _run_web_command(command)
-    except Exception as exc:
-        result = f'Ошибка выполнения команды: {exc}'
-    _finish_web_command(command, result)
-
-
-def _run_web_command_worker(command):
-    with web_command_lock:
-        web_command_state.update(_read_web_command_state_file())
-    _record_memory_timeline(
-        f'web command started: {command}',
-        marker='web_command_start',
-        extra={'command': str(command or '')},
-        force=True,
-    )
-    try:
-        _execute_web_command(command)
-    finally:
-        _memory_cleanup('web command finished', force=True, clear_status=True)
-        _record_memory_timeline(
-            f'web command finished: {command}',
-            marker='web_command_finish',
-            extra={'command': str(command or '')},
-            force=True,
-        )
-
-
 def _start_web_command(command):
     label = _web_command_label(command)
     job_state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
@@ -9162,6 +8782,9 @@ def _start_web_command(command):
         'running': True,
         'source': 'web',
         'command': command,
+        'repo_owner': fork_repo_owner,
+        'repo_name': fork_repo_name,
+        'branch': 'main',
         'started_at': state['started_at'],
     })
     subprocess.Popen(
@@ -10001,7 +9624,7 @@ def _handle_pool_add_state(message, bypass, set_menu_state):
         _return_to_pool_page(message, set_menu_state, proto)
         return True
     summary = _import_keys_to_pools(proto, message.text)
-    result = web_post_actions.format_key_import_result(summary)
+    result = _web_post_actions().format_key_import_result(summary)
     _return_to_pool_page(message, set_menu_state, proto, prefix=result)
     return True
 
@@ -10047,7 +9670,7 @@ def _handle_pool_subscription_state(message, bypass, set_menu_state, *, use_rout
             message.text.strip(),
             use_router_hwid=bool(use_router_hwid),
         )
-        result = web_post_actions.format_subscription_import_result(proto, summary)
+        result = _web_post_actions().format_subscription_import_result(proto, summary)
     except Exception as exc:
         _write_runtime_log(f'Telegram subscription import failed: {type(exc).__name__}')
         result = 'Ошибка загрузки subscription. Проверьте адрес, доступность подписки и выбранный режим.'
@@ -13651,7 +13274,7 @@ def _start_web_bot_action():
 
 def _web_action_context():
     pool_enabled = _app_mode_pool_enabled()
-    context = web_post_actions.base_action_context(
+    context = _web_post_actions().base_action_context(
         app_mode_label=APP_MODE_LABEL,
         set_app_runtime_mode=_set_app_runtime_mode,
         update_proxy=update_proxy,
@@ -13679,7 +13302,7 @@ def _web_action_context():
         install_verify=False,
     )
     if pool_enabled:
-        context.update(web_post_actions.pool_action_context(
+        context.update(_web_post_actions().pool_action_context(
             append_custom_checks_to_unblock_list=_append_custom_checks_to_unblock_list,
             unblock_route_for_key_type=_unblock_route_for_key_type,
             add_custom_check=_add_custom_check,
@@ -13720,7 +13343,7 @@ def _web_action_context():
             pool_actions_enabled=True,
         ))
     else:
-        context.update(web_post_actions.pool_action_context(
+        context.update(_web_post_actions().pool_action_context(
             custom_checks_enabled=False,
             pool_actions_enabled=False,
         ))
@@ -14308,7 +13931,7 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
                 return
             if not self._ensure_csrf_allowed(data):
                 return
-            action = web_post_actions.dispatch(_web_action_context(), path, data)
+            action = _web_post_actions().dispatch(_web_action_context(), path, data)
             if action is None:
                 self._send_html('<h1>404 Not Found</h1>', status=404)
                 return
@@ -14324,15 +13947,12 @@ def start_http_server():
     global web_httpd
     try:
         bind_host = _web_resolve_bind_host(routerip)
-        class ReusableThreadingHTTPServer(ThreadingHTTPServer):
-            allow_reuse_address = True
-            # Several panels are loaded together; keep the kernel accept queue from
-            # dropping an otherwise valid burst of browser requests.
-            request_queue_size = 128
-
         server_address = (bind_host, int(browser_port))
-        httpd = ReusableThreadingHTTPServer(server_address, KeyInstallHTTPRequestHandler)
-        httpd.daemon_threads = True
+        httpd = BoundedThreadingHTTPServer(
+            server_address,
+            KeyInstallHTTPRequestHandler,
+            max_request_threads=WEB_HTTP_MAX_REQUEST_THREADS,
+        )
         web_httpd = httpd
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
@@ -14366,7 +13986,7 @@ def _parse_vless_key(key):
 
 def _apply_reality_endpoint_override(key):
     key = str(key or '').strip()
-    if not key or not REALITY_ENDPOINT_OVERRIDES:
+    if not key:
         return key
     try:
         data = _parse_vless_key(key)
@@ -14375,7 +13995,11 @@ def _apply_reality_endpoint_override(key):
     if str(data.get('security') or '').lower() != 'reality':
         return key
     address = str(data.get('address') or '').strip()
-    override = REALITY_ENDPOINT_OVERRIDES.get(address.lower()) or reality_endpoint_runtime_overrides.get(address.lower())
+    address_key = address.lower()
+    override = REALITY_ENDPOINT_OVERRIDES.get(address_key)
+    if not override:
+        with reality_endpoint_runtime_lock:
+            override = reality_endpoint_runtime_overrides.get(address_key)
     if not override:
         return key
     try:
@@ -14434,10 +14058,14 @@ def _set_reality_runtime_endpoint(address, endpoint):
     endpoint = str(endpoint or '').strip()
     if not address:
         return
-    if endpoint and endpoint.lower() != address:
-        reality_endpoint_runtime_overrides[address] = endpoint
-    else:
-        reality_endpoint_runtime_overrides.pop(address, None)
+    with reality_endpoint_runtime_lock:
+        if endpoint and endpoint.lower() != address:
+            reality_endpoint_runtime_overrides.pop(address, None)
+            reality_endpoint_runtime_overrides[address] = endpoint
+            while len(reality_endpoint_runtime_overrides) > REALITY_ENDPOINT_RUNTIME_OVERRIDES_MAX:
+                reality_endpoint_runtime_overrides.pop(next(iter(reality_endpoint_runtime_overrides)), None)
+        else:
+            reality_endpoint_runtime_overrides.pop(address, None)
 
 
 def _current_core_proxy_endpoint(outbound_tag):

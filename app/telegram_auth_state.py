@@ -45,21 +45,29 @@ def build_authorized_identities(raw_values):
     return normalized_usernames, numeric_ids
 
 
-def get_chat_menu_state(lock, states, chat_id):
+def _trim_oldest_states(states, max_entries):
+    max_entries = max(0, int(max_entries or 0))
+    while max_entries and len(states) > max_entries:
+        states.pop(next(iter(states)), None)
+
+
+def get_chat_menu_state(lock, states, chat_id, max_entries=0):
     with lock:
         state = states.get(chat_id)
         if state is None:
             state = {'level': 0, 'bypass': None}
             states[chat_id] = state
+            _trim_oldest_states(states, max_entries)
         return dict(state)
 
 
-def set_chat_menu_state(lock, states, chat_id, level=MENU_STATE_UNSET, bypass=MENU_STATE_UNSET):
+def set_chat_menu_state(lock, states, chat_id, level=MENU_STATE_UNSET, bypass=MENU_STATE_UNSET, max_entries=0):
     with lock:
         state = states.get(chat_id)
         if state is None:
             state = {'level': 0, 'bypass': None}
             states[chat_id] = state
+            _trim_oldest_states(states, max_entries)
         if level is not MENU_STATE_UNSET:
             state['level'] = level
         if bypass is not MENU_STATE_UNSET:

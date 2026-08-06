@@ -7,7 +7,40 @@ import re
 import secrets
 import threading
 from http.cookies import SimpleCookie
+from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+    request_queue_size = 128
+
+    def __init__(
+        self,
+        server_address,
+        request_handler_class,
+        bind_and_activate=True,
+        *,
+        max_request_threads=16,
+    ):
+        self.max_request_threads = max(1, int(max_request_threads or 1))
+        self._request_slots = threading.BoundedSemaphore(self.max_request_threads)
+        super().__init__(server_address, request_handler_class, bind_and_activate=bind_and_activate)
+
+    def process_request(self, request, client_address):
+        self._request_slots.acquire()
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 def is_local_web_client(address):

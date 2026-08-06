@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.1007
+# ВЕРСИЯ СКРИПТА v1.1008
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -69,6 +69,7 @@ router_health_ndmc_cache_ttl = 30.0  # ndmc show system тяжелее /proc, д
 router_health_related_process_cache_ttl = 45.0  # не сканировать все /proc на каждый веб-статус в простое
 router_health_cpu_smoothing_factor = 0.35  # сглаживать короткие CPU-пики в блоке Роутер
 web_status_api_cache_ttl = 30.0
+web_http_max_request_threads = 16  # ограничивает одновременные HTTP-потоки и пиковую RAM
 router_metrics_history_limit = 120
 router_metrics_warn_bot_rss_kb = 66560
 router_metrics_critical_bot_rss_kb = 87040

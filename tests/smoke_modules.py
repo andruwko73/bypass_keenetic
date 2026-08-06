@@ -44,6 +44,7 @@ import web_commands_runtime
 import web_form_blocks
 import web_form_template
 import web_http_common
+import system_command_runtime
 import web_pool_form_blocks
 import web_pool_snapshot_worker
 import web_route_tools_runtime
@@ -1201,9 +1202,9 @@ def test_web_commands_runtime_dispatch():
     assert web_commands_runtime.web_command_label('dns_on') == 'DNS Override ВКЛ'
     assert web_commands_runtime.web_command_label('custom') == 'custom'
     assert web_commands_runtime.WEB_UPDATE_COMMANDS == ('update', 'rollback_update')
-    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
-    assert "start_delay = 1.0 if command == 'rollback_update' else 0.0" in bot_source
-    assert 'time.sleep({start_delay!r}); ' in bot_source
+    command_source = (APP_ROOT / 'system_command_runtime.py').read_text(encoding='utf-8')
+    assert "if command == 'rollback_update':" in command_source
+    assert 'time.sleep(1.0)' in command_source
     assert web_commands_runtime.run_web_command(
         'update_no_bot',
         run_script_action=run_script,
@@ -1820,6 +1821,63 @@ def test_web_service_routes_worker_payload_contains_route_tools():
         set(state) <= {'complete_protocols', 'partial_protocols'}
         for state in route_states.values()
     )
+
+
+def test_web_service_routes_worker_mutations_defer_runtime_apply_to_parent():
+    original_apply_route = web_service_routes_worker.service_routes.apply_service_route
+    original_apply_profile = web_service_routes_worker.service_routes.apply_service_profile
+    original_resolve = web_service_routes_worker.route_intersections.resolve_route_intersections
+    original_runtime = web_service_routes_worker._runtime
+    calls = []
+
+    class FakeRuntime:
+        @staticmethod
+        def service_items():
+            return [{'id': 'telegram'}]
+
+    def fake_apply_route(service_key, protocol, **kwargs):
+        calls.append(('route', service_key, protocol, kwargs))
+        return {'changed': True, 'service_key': service_key, 'target_protocol': protocol}
+
+    def fake_apply_profile(profile_id, **kwargs):
+        calls.append(('profile', profile_id, kwargs))
+        return {'profile_id': profile_id}
+
+    def fake_resolve(target_route, **kwargs):
+        calls.append(('resolve', target_route, kwargs))
+        return {'target_route': target_route, 'moved': 2}
+
+    web_service_routes_worker.service_routes.apply_service_route = fake_apply_route
+    web_service_routes_worker.service_routes.apply_service_profile = fake_apply_profile
+    web_service_routes_worker.route_intersections.resolve_route_intersections = fake_resolve
+    web_service_routes_worker._runtime = lambda: FakeRuntime()
+    try:
+        route_payload = web_service_routes_worker.execute_request({
+            'action': 'apply_service_route',
+            'service_key': 'telegram',
+            'target_protocol': 'vless',
+        })
+        profile_payload = web_service_routes_worker.execute_request({
+            'action': 'apply_service_profile',
+            'profile_id': 'all_vless',
+        })
+        resolve_payload = web_service_routes_worker.execute_request({
+            'action': 'resolve_route_intersections',
+            'target_route': 'vless',
+        })
+    finally:
+        web_service_routes_worker.service_routes.apply_service_route = original_apply_route
+        web_service_routes_worker.service_routes.apply_service_profile = original_apply_profile
+        web_service_routes_worker.route_intersections.resolve_route_intersections = original_resolve
+        web_service_routes_worker._runtime = original_runtime
+
+    assert route_payload['apply_required'] is True
+    assert profile_payload['apply_required'] is True
+    assert resolve_payload['apply_required'] is True
+    assert calls[0][3]['update_script'] == ''
+    assert calls[1][2]['update_script'] == ''
+    assert calls[1][2]['service_items'] == [{'id': 'telegram'}]
+    assert calls[2][2]['update_script'] == ''
 
 
 def test_key_pool_subscription_helpers():
@@ -3242,6 +3300,9 @@ def test_codex_version_matches_commit_count():
     assert 'web_status_api_cache_ttl = 30.0' in example
     assert 'web_status_api_cache_ttl = 30.0' in installer
     assert 'web_status_api_cache_ttl = 30.0' in bootstrap
+    assert 'web_http_max_request_threads = 16' in example
+    assert 'web_http_max_request_threads = 16' in installer
+    assert 'web_http_max_request_threads = 16' in bootstrap
     assert 'auto_failover_recent_success_ttl = 900' in example
     assert 'auto_failover_recent_success_ttl = 900' in installer
     assert 'auto_failover_recent_success_ttl = 900' in bootstrap
@@ -3897,6 +3958,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    command_source = (APP_ROOT / 'system_command_runtime.py').read_text(encoding='utf-8')
     installer_source = (APP_ROOT / 'installer.py').read_text(encoding='utf-8')
     update_script = (APP_ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
     unblock_dnsmasq = (APP_ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
@@ -4090,12 +4152,12 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'YOUTUBE_EDGE_PREFETCH_RUNNER} --trigger "{safe_trigger}"' in installer_source
     assert '/opt/bin/unblock_update.sh >/dev/null 2>&1 || true' in bootstrap
     assert "'/opt/bin/unblock_update.sh'" in bot_source
-    assert 'def _refresh_dns_override_runtime(restart_dnsmasq=False)' in bot_source
-    assert "['/opt/etc/init.d/S56dnsmasq', 'restart']" in bot_source
-    assert bot_source.count('_refresh_dns_override_runtime(restart_dnsmasq=True)') == 2
-    assert bot_source.count('_refresh_dns_override_runtime(restart_dnsmasq=False)') == 2
-    assert bot_source.find("ndmc -c 'opkg dns-override'") < bot_source.find('_refresh_dns_override_runtime(restart_dnsmasq=True)', bot_source.find("ndmc -c 'opkg dns-override'"))
-    assert bot_source.find("ndmc -c 'no opkg dns-override'") < bot_source.find('_refresh_dns_override_runtime(restart_dnsmasq=False)', bot_source.find("ndmc -c 'no opkg dns-override'"))
+    assert 'def _refresh_dns_override_runtime(restart_dnsmasq=False)' in command_source
+    assert "['/opt/etc/init.d/S56dnsmasq', 'restart']" in command_source
+    assert command_source.count('_refresh_dns_override_runtime(restart_dnsmasq=True)') == 2
+    assert command_source.count('_refresh_dns_override_runtime(restart_dnsmasq=False)') == 2
+    assert command_source.find("ndmc -c 'opkg dns-override'") < command_source.find('_refresh_dns_override_runtime(restart_dnsmasq=True)', command_source.find("ndmc -c 'opkg dns-override'"))
+    assert command_source.find("ndmc -c 'no opkg dns-override'") < command_source.find('_refresh_dns_override_runtime(restart_dnsmasq=False)', command_source.find("ndmc -c 'no opkg dns-override'"))
     reboot_block = script.split('if [ "$1" = "-reboot" ]; then', 1)[1].split('fi', 1)[0]
     assert "opkg dns-override" not in reboot_block
     assert 'detect_ipset_type()' in script
@@ -4620,6 +4682,7 @@ def test_chrome_remote_desktop_stun_uses_targeted_tproxy():
 def test_runtime_startup_limits_router_flash_and_overhead():
     service = (APP_ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    command_source = (APP_ROOT / 'system_command_runtime.py').read_text(encoding='utf-8')
     pool_controller_source = (APP_ROOT / 'pool_probe_controller.py').read_text(encoding='utf-8')
     pool_runner_source = (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
     proxy_apply_source = (APP_ROOT / 'proxy_apply_runtime.py').read_text(encoding='utf-8')
@@ -4961,13 +5024,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'TELEGRAM_CALL_TPROXY_PORT_VLESS={localportvless_tproxy}' in source
     assert 'def _start_telegram_call_learning_auto_thread' in source
     assert '_start_telegram_call_learning_auto_thread()' in source
-    auto_start = source.split('def _start_telegram_call_learning_auto_thread', 1)[1].split('def _telegram_call_learning_worker', 1)[0]
+    auto_start = source.split('def _start_telegram_call_learning_auto_thread', 1)[1].split('def _udp_quic_block_enabled_for_protocol', 1)[0]
     assert 'threading.Thread' in auto_start
     assert '_telegram_call_learning_auto_worker' in auto_start
+    assert 'def _telegram_call_learning_worker' not in source
     assert 'read_lan_conntrack_flows' in source
     assert 'TELEGRAM_CALL_LEARNING_CLIENT_IPSET' in source
     assert 'add_candidate_to_call_ipset' in source
-    assert 'iptables/ipset без фонового сканирования' in auto_start
+    assert 'работает в фоновом режиме' in auto_start
+    assert 'анализирует conntrack только при обнаружении активности' in auto_start
     assert 'telegram_call_learning_apply_by_default = True' in script_source
     assert 'telegram_call_learning_client_timeout_seconds = 900' in script_source
     assert 'telegram_call_learning_address_timeout_seconds = 14400' in script_source
@@ -5022,11 +5087,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'if [ -s /opt/etc/trojan/config.json ]; then' in script_source
     assert 'pip_cmd="python3 -m pip"' in script_source
     assert '$pip_cmd install pyTelegramBotAPI pysocks' in script_source
-    assert "for name in ('version.md', 'README.md')" in source
-    assert "'crontab': ('/opt/etc/crontab', 0o644)" in source
-    assert "'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755)" in source
-    assert "'script.sh': ('/opt/root/script.sh', 0o755)" in source
-    assert "_restore_backup_file(bot_config_backup, '/opt/etc/bot_config.py', 0o644)" in source
+    assert "for name in ('version.md', 'README.md')" in command_source
+    assert "'crontab': ('/opt/etc/crontab', 0o644)" in command_source
+    assert "'S99unblock': ('/opt/etc/init.d/S99unblock', 0o755)" in command_source
+    assert "'script.sh': ('/opt/root/script.sh', 0o755)" in command_source
+    assert "_restore_backup_file(os.path.join(backup_dir, 'bot_config.py'), '/opt/etc/bot_config.py', 0o644)" in command_source
     assert 'def _placeholder_status_snapshot' in source
     assert "'placeholder_status_snapshot': _placeholder_status_snapshot" in source
     assert 'for key_name, key_value in _ordered_protocol_items(current_keys):' in source
@@ -5236,7 +5301,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "_reset_telegram_http_session('send_message retry')" in source
     assert 'redact_text=_redact_sensitive_text' in source
     assert "_memory_cleanup('pool probe finished'" not in source
-    assert "_memory_cleanup('web command finished'" in source
+    assert 'system_command_runtime as command_runtime' in source
+    assert 'def _run_web_command_worker' not in source
+    assert 'def _run_telegram_command_worker' not in source
     assert 'os.environ["BYPASS_KEENETIC_COMMAND_WORKER"] = "1"' in source
     assert 'from pool_probe_runner import' not in source
     assert 'from repo_update import' not in source
@@ -5944,6 +6011,62 @@ def test_active_status_refresh_skips_heavy_pool_modules():
         temp_dir.cleanup()
 
 
+def test_runtime_state_bounds_and_reality_override_precedence():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "key = 'vless://00000000-0000-0000-0000-000000000001@origin.example:443?security=reality&type=tcp'\n"
+        "bot.REALITY_ENDPOINT_OVERRIDES.clear()\n"
+        "bot._set_reality_runtime_endpoint('origin.example', '203.0.113.10')\n"
+        "runtime_key = bot._apply_reality_endpoint_override(key)\n"
+        "assert '@203.0.113.10:443' in runtime_key\n"
+        "assert 'sni=origin.example' in runtime_key\n"
+        "bot.REALITY_ENDPOINT_OVERRIDES['origin.example'] = '198.51.100.20'\n"
+        "assert '@198.51.100.20:443' in bot._apply_reality_endpoint_override(key)\n"
+        "assert bot._apply_reality_endpoint_override('not-a-key') == 'not-a-key'\n"
+        "plain = key.replace('security=reality', 'security=tls')\n"
+        "assert bot._apply_reality_endpoint_override(plain) == plain\n"
+        "bot.REALITY_ENDPOINT_OVERRIDES.clear()\n"
+        "for index in range(bot.REALITY_ENDPOINT_RUNTIME_OVERRIDES_MAX + 2):\n"
+        "    bot._set_reality_runtime_endpoint(f'host-{index}.example', f'203.0.113.{index % 255}')\n"
+        "assert len(bot.reality_endpoint_runtime_overrides) == bot.REALITY_ENDPOINT_RUNTIME_OVERRIDES_MAX\n"
+        "assert 'host-0.example' not in bot.reality_endpoint_runtime_overrides\n"
+        "for index in range(bot.CHAT_RUNTIME_STATE_MAX_ENTRIES + 2):\n"
+        "    bot._set_chat_menu_state(index, level=1)\n"
+        "    bot._set_pool_page(index, index)\n"
+        "assert len(bot.chat_menu_states) == bot.CHAT_RUNTIME_STATE_MAX_ENTRIES\n"
+        "assert len(bot.chat_pool_pages) == bot.CHAT_RUNTIME_STATE_MAX_ENTRIES\n"
+        "assert 0 not in bot.chat_menu_states and 0 not in bot.chat_pool_pages\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
 def test_light_protocol_panel_skips_heavy_pool_modules():
     temp_dir = tempfile.TemporaryDirectory()
     temp_path = Path(temp_dir.name)
@@ -6121,6 +6244,153 @@ def test_update_and_bootstrap_validation_markers_match_shipped_files():
         # as a literal, while Python's regex engine treats it as an anchor.
         python_marker = marker.replace('$', r'\$')
         assert re.search(python_marker, source), f'{flow}: {filename} does not match validation marker {marker!r}'
+
+
+def test_clean_install_fixture_builds_complete_importable_runtime(tmp_path):
+    form = {
+        'token': 'test-token',
+        'username': 'test-user',
+        'routerip': '192.0.2.1',
+        'browser_port': '8080',
+        'web_auth_user': 'admin',
+        'web_auth_token': 'test-web-token',
+        'default_proxy_mode': 'none',
+        'app_runtime_mode': 'advanced',
+    }
+    config_source = installer.build_config(form)
+    config_namespace = {}
+    exec(compile(config_source, 'bot_config.py', 'exec'), config_namespace)
+    assert config_namespace['token'] == 'test-token'
+    assert config_namespace['usernames'] == ['test-user']
+    assert config_namespace['routerip'] == '192.0.2.1'
+    assert config_namespace['browser_port'] == '8080'
+    assert config_namespace['app_runtime_mode'] == 'advanced'
+    assert config_namespace['web_http_max_request_threads'] == 16
+    assert config_namespace['pool_probe_process_worker_enabled'] is True
+    assert config_namespace['pool_probe_inprocess_fallback_enabled'] is False
+    assert config_namespace['subscription_nightly_pool_probe_enabled'] is True
+
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    update_modules = re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', script).group(1).split()
+    clean_modules = re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', bootstrap).group(1).split()
+    assert update_modules == clean_modules
+    assert 'system_command_runtime.py' in clean_modules
+    assert len(clean_modules) == len(set(clean_modules))
+
+    staged = tmp_path / 'clean-runtime'
+    staged.mkdir()
+    (staged / 'bot_config.py').write_text(config_source, encoding='utf-8')
+    for module in clean_modules:
+        source = source_path(module)
+        assert source.is_file(), f'clean install module is missing: {module}'
+        target = staged / module
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        if target.suffix == '.py':
+            compile(target.read_text(encoding='utf-8'), module, 'exec')
+
+
+def test_legacy_update_fixture_preserves_state_and_migrates_config_idempotently(tmp_path):
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    backup_body = re.search(
+        r'backup_runtime_state_files\(\) \{(?P<body>.*?)\n\}',
+        script,
+        flags=re.S,
+    ).group('body')
+    restore_body = re.search(
+        r'restore_runtime_state_files_after_update\(\) \{(?P<body>.*?)\n\}',
+        script,
+        flags=re.S,
+    ).group('body')
+    backed_up = set(re.findall(r'backup_runtime_state_file\s+\S+\s+([A-Za-z0-9_.-]+)', backup_body))
+    restored = set(re.findall(r'restore_runtime_state_file_after_update\s+([A-Za-z0-9_.-]+)', restore_body))
+    preserved_state = {
+        'bot_app_mode', 'bot_proxy_mode', 'bot_autostart', 'key_pools.json',
+        'subscriptions.json', 'subscription_nightly_pool_probe.json', 'custom_checks.json',
+        'vmess.key', 'vless.key', 'vless2.key', 'xray_config.json', 'v2ray_config.json',
+        'shadowsocks.json', 'trojan_config.json', 'unblock_shadowsocks.txt',
+        'unblock_trojan.txt', 'unblock_vmess.txt', 'unblock_vless.txt',
+        'unblock_vless2.txt', 'web_ui_background.webp', 'web_ui_background.json',
+    }
+    assert preserved_state <= backed_up
+    assert preserved_state <= restored
+    assert 'bot_config.py' in backed_up
+    assert 'restore_file bot_config.py "\\$BOT_CONFIG_PATH"' in script
+    assert 'if [ -f "/opt/etc/bot/bot_config.py" ]; then' in script
+
+    function_match = re.search(
+        r'migrate_runtime_config_defaults\(\) \{(?P<body>.*?)\n\}',
+        script,
+        flags=re.S,
+    )
+    assert function_match
+    bash_candidates = [shutil.which('bash')]
+    if os.name == 'nt':
+        bash_candidates = [
+            r'C:\Program Files\Git\bin\bash.exe',
+            r'C:\Program Files\Git\usr\bin\bash.exe',
+            *bash_candidates,
+        ]
+    bash = next(
+        (
+            candidate for candidate in bash_candidates
+            if candidate and Path(candidate).is_file() and 'WindowsApps' not in candidate
+        ),
+        None,
+    )
+    assert bash, 'bash is required for the isolated legacy-update fixture'
+    old_config = tmp_path / 'legacy_bot_config.py'
+    old_config.write_text(
+        "token = 'legacy-token'\n"
+        "usernames = ['legacy-user']\n"
+        "custom_user_setting = 'keep-me'\n"
+        "web_http_max_request_threads = 9\n"
+        "memory_timeline_enabled = True\n"
+        "subscription_auto_refresh_interval_seconds = 86400\n",
+        encoding='utf-8',
+    )
+    harness = tmp_path / 'run_config_migration.sh'
+    harness.write_text(
+        '#!/bin/sh\nset -eu\nBOT_CONFIG_PATH="$1"\n'
+        + 'migrate_runtime_config_defaults() {'
+        + function_match.group('body')
+        + '\n}\nmigrate_runtime_config_defaults\n',
+        encoding='utf-8',
+    )
+    bash_config = str(old_config).replace('\\', '/')
+    bash_harness = str(harness).replace('\\', '/')
+    first = subprocess.run(
+        [bash, bash_harness, bash_config],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert first.returncode == 0, first.stdout
+    migrated_source = old_config.read_text(encoding='utf-8')
+    migrated = {}
+    exec(compile(migrated_source, str(old_config), 'exec'), migrated)
+    assert migrated['token'] == 'legacy-token'
+    assert migrated['usernames'] == ['legacy-user']
+    assert migrated['custom_user_setting'] == 'keep-me'
+    assert migrated['web_http_max_request_threads'] == 9
+    assert migrated['memory_timeline_enabled'] is False
+    assert migrated['subscription_auto_refresh_interval_seconds'] == 21600
+    assert migrated['background_task_max_bot_rss_kb'] == 66560
+    assert migrated['subscription_nightly_pool_probe_enabled'] is True
+    before_second_run = old_config.read_bytes()
+    second = subprocess.run(
+        [bash, bash_harness, bash_config],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert second.returncode == 0, second.stdout
+    assert old_config.read_bytes() == before_second_run
 
 
 def test_youtube_edge_prefetch_runner_detects_current_youtube_route(tmp_path):
@@ -7677,7 +7947,7 @@ def test_telegram_call_learning_idle_backoff_source():
         'def _telegram_call_learning_route_protocols', 1
     )[0]
     route_cache = source.split('def _telegram_call_learning_route_protocols', 1)[1].split(
-        'def _select_telegram_call_learning_protocol', 1
+        'def _telegram_call_learning_target_protocols', 1
     )[0]
     assert 'stat.st_mtime_ns' in route_signature
     assert 'time.time()' not in route_cache
@@ -8320,7 +8590,12 @@ def test_telegram_confirm_state_source():
     for action in ('update_main', 'rollback_update', 'remove'):
         assert f"'{action}'" in install_source
     assert "_start_telegram_background_command(\n            'rollback_update'" in source
-    assert 'output = _rollback_last_update()' in source
+    assert "_start_telegram_background_command(\n            'restart_services'" in source
+    web_command_body = source.split('def _start_web_command(command):', 1)[1].split('\ndef ', 1)[0]
+    assert '_sync_udp_policy_config()' not in web_command_body
+    command_source = (APP_ROOT / 'system_command_runtime.py').read_text(encoding='utf-8')
+    assert 'output = rollback_last_update()' in command_source
+    assert '_sync_udp_policy_for_service_restart()' in command_source
 
 
 def test_telegram_confirm_helpers():
@@ -8392,15 +8667,19 @@ def test_telegram_jobs_helpers():
     assert telegram_jobs.final_message('-remove', 1).startswith('⚠️ Команда')
     assert telegram_jobs.final_message('rollback_update', 0).startswith('✅ Откат обновления')
     assert telegram_jobs.final_message('rollback_update', 1).startswith('⚠️ Откат обновления')
+    assert telegram_jobs.final_message('restart_services', 0) == '✅ Перезапуск сервисов завершён.'
+    assert telegram_jobs.final_message('restart_services', 1).startswith('⚠️ Перезапуск сервисов')
     code = telegram_jobs.background_command_code('/opt/etc/bot/main.py', '-update', 'owner', 'repo', 42, 'service', 'branch')
     assert 'sys.path.insert' in code
     assert 'BYPASS_KEENETIC_COMMAND_WORKER' in code
-    assert 'branch=' in code
+    assert 'system_command_runtime' in code
+    assert 'owner' not in code
+    assert '42' not in code
     rollback_code = telegram_jobs.background_command_code(
         '/opt/etc/bot/main.py', 'rollback_update', 'owner', 'repo', 42, 'main', 'main'
     )
-    assert 'time.sleep(1.0)' in rollback_code
-    assert 'rollback_update' in rollback_code
+    assert 'system_command_runtime' in rollback_code
+    assert 'rollback_update' not in rollback_code
 
     written = []
     popen_calls = []
@@ -8420,7 +8699,133 @@ def test_telegram_jobs_helpers():
     )
     assert started is True and message == ''
     assert written[0][1]['started_at'] == 10.0
+    assert written[0][1]['repo_owner'] == 'owner'
+    assert written[0][1]['repo_name'] == 'repo'
+    assert written[0][1]['branch'] == 'main'
     assert popen_calls
+
+
+def test_system_command_restart_services_syncs_policy_in_worker():
+    calls = []
+    original_sync = system_command_runtime._sync_udp_policy_for_service_restart
+    original_core_paths = system_command_runtime._core_paths
+    original_system = system_command_runtime.os.system
+    system_command_runtime._sync_udp_policy_for_service_restart = lambda: calls.append('sync')
+    system_command_runtime._core_paths = lambda: ('/opt/etc/init.d/S24xray', '', '')
+    system_command_runtime.os.system = lambda command: calls.append(command) or 0
+    try:
+        result = system_command_runtime.restart_router_services()
+    finally:
+        system_command_runtime._sync_udp_policy_for_service_restart = original_sync
+        system_command_runtime._core_paths = original_core_paths
+        system_command_runtime.os.system = original_system
+
+    assert calls == [
+        'sync',
+        '/opt/bin/unblock_update.sh',
+        '/opt/etc/init.d/S22shadowsocks restart',
+        '/opt/etc/init.d/S24xray restart',
+        '/opt/etc/init.d/S22trojan restart',
+    ]
+    assert result == '✅ Сервисы перезагружены.'
+
+
+def test_system_command_worker_reads_private_job_data_from_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        job_file = tmp_path / 'job.json'
+        result_file = tmp_path / 'result.json'
+        web_state_file = tmp_path / 'web.json'
+        job_file.write_text(json.dumps({
+            'running': True,
+            'source': 'telegram',
+            'action': '-update',
+            'repo_owner': 'private-owner',
+            'repo_name': 'private-repo',
+            'branch': 'private-branch',
+            'chat_id': 42,
+            'menu_name': 'service',
+        }), encoding='utf-8')
+        captured = []
+
+        def execute(command, job, progress_callback=None):
+            captured.append((command, dict(job), progress_callback))
+            return 0, 'готово'
+
+        return_code = system_command_runtime.run_worker(
+            str(job_file),
+            str(result_file),
+            str(web_state_file),
+            execute=execute,
+        )
+        assert return_code == 0
+        assert not job_file.exists()
+        result = json.loads(result_file.read_text(encoding='utf-8'))
+        assert result['chat_id'] == 42
+        assert result['output'] == 'готово'
+        assert captured[0][0] == '-update'
+        assert captured[0][1]['repo_owner'] == 'private-owner'
+        worker_code = telegram_jobs.background_command_code(
+            '/opt/etc/bot/main.py',
+            '-update',
+            'private-owner',
+            'private-repo',
+            42,
+            'service',
+            'private-branch',
+        )
+        assert 'private-owner' not in worker_code
+        assert 'private-repo' not in worker_code
+        assert 'private-branch' not in worker_code
+        assert '42' not in worker_code
+        assert 'import bot' not in worker_code
+
+
+def test_system_command_worker_finishes_web_update_state():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        job_file = tmp_path / 'job.json'
+        result_file = tmp_path / 'result.json'
+        web_state_file = tmp_path / 'web.json'
+        job_file.write_text(json.dumps({
+            'running': True,
+            'source': 'web',
+            'command': 'update',
+            'repo_owner': 'owner',
+            'repo_name': 'repo',
+            'branch': 'main',
+        }), encoding='utf-8')
+        web_state_file.write_text(json.dumps({
+            'running': True,
+            'command': 'update',
+            'progress': 5,
+        }), encoding='utf-8')
+        finished = []
+        original_finish = update_status.finish_update_status
+        original_record_event = system_command_runtime._record_event
+        update_status.finish_update_status = lambda command, result, progress=100: finished.append(
+            (command, result, progress)
+        )
+        system_command_runtime._record_event = lambda *_args, **_kwargs: None
+        try:
+            return_code = system_command_runtime.run_worker(
+                str(job_file),
+                str(result_file),
+                str(web_state_file),
+                execute=lambda command, job, progress_callback=None: (0, 'готово'),
+            )
+        finally:
+            update_status.finish_update_status = original_finish
+            system_command_runtime._record_event = original_record_event
+
+        state = json.loads(web_state_file.read_text(encoding='utf-8'))
+        assert return_code == 0
+        assert not job_file.exists()
+        assert not result_file.exists()
+        assert state['running'] is False
+        assert state['progress'] == 100
+        assert state['result'] == 'готово'
+        assert finished == [('update', 'готово', 100)]
 
 
 def test_telegram_install_ui_helpers():
@@ -11833,6 +12238,71 @@ def test_web_http_common_helpers():
     assert web_http_common.safe_unexpected_error_message(RuntimeError('private detail')) == 'Временная ошибка обработки запроса.'
 
 
+def test_web_http_server_caps_request_threads():
+    from http.server import BaseHTTPRequestHandler
+    from urllib.request import urlopen
+
+    release = threading.Event()
+    state_lock = threading.Lock()
+    state = {'active': 0, 'maximum': 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, _format, *_args):
+            return
+
+        def do_GET(self):
+            with state_lock:
+                state['active'] += 1
+                state['maximum'] = max(state['maximum'], state['active'])
+            try:
+                release.wait(5)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'ok')
+            finally:
+                with state_lock:
+                    state['active'] -= 1
+
+    server = web_http_common.BoundedThreadingHTTPServer(
+        ('127.0.0.1', 0),
+        Handler,
+        max_request_threads=4,
+    )
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    errors = []
+
+    def request():
+        try:
+            with urlopen(f'http://127.0.0.1:{server.server_port}/', timeout=10) as response:
+                assert response.read() == b'ok'
+        except Exception as exc:
+            errors.append(exc)
+
+    clients = [threading.Thread(target=request) for _ in range(12)]
+    try:
+        for client in clients:
+            client.start()
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            with state_lock:
+                if state['maximum'] >= 4:
+                    break
+            time.sleep(0.01)
+        with state_lock:
+            assert state['maximum'] == 4
+        release.set()
+        for client in clients:
+            client.join(timeout=10)
+        assert not errors
+        assert not any(client.is_alive() for client in clients)
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+
 def test_web_http_basic_auth_accepts_and_rejects_credentials():
     class _Request(web_http_common.WebRequestMixin):
         web_auth_token_getter = staticmethod(lambda: 'secret')
@@ -12107,11 +12577,11 @@ def test_repo_update_helpers():
     assert '/abc123def456/script.sh' in script_url
     assert script_session.trust_env is False
 
-    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
-    assert "direct_env['REPO_REF'] = repo_ref" in bot_source
-    assert "direct_env['REPO_REF'] = branch" not in bot_source
-    assert 'activity_probe=activity_probe' in bot_source
-    assert 'os.stat(update_status.UPDATE_STATUS_PATH).st_mtime_ns' in bot_source
+    command_source = (APP_ROOT / 'system_command_runtime.py').read_text(encoding='utf-8')
+    assert "direct_env['REPO_REF'] = repo_ref" in command_source
+    assert "direct_env['REPO_REF'] = branch" not in command_source
+    assert 'activity_probe=activity_probe' in command_source
+    assert 'os.stat(update_status.UPDATE_STATUS_PATH).st_mtime_ns' in command_source
     assert repo_update.download_repo_script.__defaults__ == ('main',)
     assert telegram_jobs.start_background_command.__kwdefaults__['branch'] == 'main'
     assert repo_update.direct_fetch_env(('HTTP_PROXY',), {'HTTP_PROXY': 'x', 'keep': 'y'}) == {'keep': 'y'}
@@ -15758,6 +16228,7 @@ def main():
     test_web_command_state_helpers()
     test_web_command_render_persistence_is_conditional_and_eio_safe()
     test_web_http_common_helpers()
+    test_web_http_server_caps_request_threads()
     test_web_http_basic_auth_accepts_and_rejects_credentials()
     test_installer_common_helpers()
     test_installer_page_is_bot_setup_only()
@@ -15811,6 +16282,7 @@ def main():
     test_ipset_scheduler_skips_preserve_full_refresh_timestamp()
     test_runtime_startup_limits_router_flash_and_overhead()
     test_simple_mode_import_skips_advanced_modules()
+    test_runtime_state_bounds_and_reality_override_precedence()
     test_advanced_initial_web_context_skips_heavy_pool_modules()
     test_web_response_body_ignores_client_disconnect()
     test_youtube_edge_prefetch_cache_is_bounded_and_public_only()
@@ -15848,6 +16320,8 @@ def main():
     test_telegram_auth_state_helpers()
     test_telegram_message_flow_helpers()
     test_telegram_jobs_helpers()
+    test_system_command_restart_services_syncs_policy_in_worker()
+    test_system_command_worker_reads_private_job_data_from_file()
     test_telegram_install_ui_helpers()
     test_telegram_key_ui_helpers()
     test_proxy_diagnostics_redact_credential_ids()

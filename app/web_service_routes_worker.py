@@ -4,6 +4,7 @@ import re
 import sys
 
 import custom_checks_store
+import route_intersections
 import service_routes
 import web_route_tools_runtime
 from app_version import APP_VERSION_LABEL
@@ -37,16 +38,21 @@ def _service_icon_html(icon, alt, opacity=1.0, size=18):
     return f'<img class="service-icon-img" src="{src}" width="{int(size)}" height="{int(size)}" alt="{safe_alt}" style="{style}">'
 
 
-def build_payload():
-    custom_checks = custom_checks_store.load_custom_checks()
-    runtime = web_route_tools_runtime.ServiceRouteToolsRuntime(
+def _runtime():
+    return web_route_tools_runtime.ServiceRouteToolsRuntime(
         custom_check_presets_getter=custom_checks_store.custom_check_presets,
         service_icon_html=_service_icon_html,
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
     )
+
+
+def build_payload(runtime=None):
+    custom_checks = custom_checks_store.load_custom_checks()
+    runtime = runtime or _runtime()
     route_states = runtime.summary()
     return {
+        'ok': True,
         'route_tools_html': runtime.tools_html(
             '',
             custom_checks,
@@ -57,17 +63,52 @@ def build_payload():
     }
 
 
+def execute_request(request):
+    request = request if isinstance(request, dict) else {}
+    action = str(request.get('action') or 'snapshot').strip().lower()
+    if action == 'snapshot':
+        return build_payload()
+    if action == 'apply_service_route':
+        result = service_routes.apply_service_route(
+            str(request.get('service_key') or ''),
+            str(request.get('target_protocol') or ''),
+            update_script='',
+        )
+        return {'ok': True, 'result': result, 'apply_required': bool(result.get('changed'))}
+    if action == 'apply_service_profile':
+        runtime = _runtime()
+        result = service_routes.apply_service_profile(
+            str(request.get('profile_id') or ''),
+            service_items=runtime.service_items(),
+            update_script='',
+        )
+        return {'ok': True, 'result': result, 'apply_required': True}
+    if action == 'resolve_route_intersections':
+        result = route_intersections.resolve_route_intersections(
+            str(request.get('target_route') or ''),
+            update_script='',
+        )
+        return {'ok': True, 'result': result, 'apply_required': True}
+    raise ValueError('Неизвестное действие worker маршрутов')
+
+
 def main():
     try:
-        json.load(sys.stdin)
+        request = json.load(sys.stdin)
     except Exception:
-        pass
+        request = {}
     try:
-        sys.stdout.write(json.dumps(build_payload(), ensure_ascii=False, separators=(',', ':')))
+        payload = execute_request(request)
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
         return 0
     except Exception as exc:
-        sys.stderr.write(f'{type(exc).__name__}: {exc}\n')
-        return 1
+        payload = {
+            'ok': False,
+            'error': str(exc),
+            'error_type': type(exc).__name__,
+        }
+        sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
+        return 0
 
 
 if __name__ == '__main__':
