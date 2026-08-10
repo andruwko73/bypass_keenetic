@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.1009
+# ВЕРСИЯ СКРИПТА v1.1010
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -223,16 +223,26 @@ reality_endpoint_repair_max_candidates = 6
 reality_endpoint_repair_dns_servers = ('1.1.1.1', '8.8.8.8', '9.9.9.9')
 auto_failover_startup_hold_seconds = 180  # после рестарта бот не переключает Telegram-ключи, пока Xray и маршруты стабилизируются
 auto_failover_idle_log_interval_seconds = 900  # log healthy idle Telegram failover gate rarely; confirmed failures still trigger immediately
-youtube_route_failover_enabled = True  # если ключ текущего маршрута YouTube перестал отвечать, бот подберёт другой ключ только из пула этого протокола
-auto_failover_consecutive_failures = 3  # switch Telegram key only after repeated confirmed failures
-auto_failover_traffic_guard_bypass_failures = 3  # allow Telegram failover through traffic guard after repeated confirmed failures
-youtube_route_failover_grace_seconds = 180
-youtube_route_failover_poll_seconds = 120
+youtube_route_failover_enabled = True  # запасной ключ выбирается только из пула текущего протокола маршрута YouTube
+auto_failover_consecutive_failures = 3  # Telegram переключается только после повторно подтверждённого отказа
+auto_failover_traffic_guard_bypass_failures = 3  # после повторных отказов Telegram может обойти защиту активного трафика
+youtube_route_failover_grace_seconds = 5
+youtube_route_failover_poll_seconds = 60
 youtube_route_failover_switch_cooldown_seconds = 300
-youtube_route_failover_check_connect_timeout = 6
-youtube_route_failover_check_read_timeout = 10
-youtube_route_failover_confirm_retries = 3
-youtube_route_failover_confirm_delay_seconds = 8.0
+youtube_route_failover_check_connect_timeout = 3
+youtube_route_failover_check_read_timeout = 5
+youtube_route_failover_confirm_retries = 2
+youtube_route_failover_confirm_delay_seconds = 3.0
+youtube_route_failover_max_candidates = 2
+youtube_route_quality_failover_enabled = True
+youtube_route_quality_min_duration_seconds = 300
+youtube_route_quality_consecutive_checks = 3
+youtube_route_quality_score_threshold = 55
+youtube_route_quality_candidate_min_score = 70
+youtube_route_quality_min_improvement = 15
+youtube_route_quality_error_rate = 0.2
+youtube_route_quality_latency_ms = 2500
+youtube_route_quality_switch_cooldown_seconds = 900
 active_status_recent_success_ttl = 900
 auto_failover_recent_success_ttl = 900
 youtube_route_failover_recent_success_ttl = 900

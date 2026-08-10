@@ -246,6 +246,7 @@ def render_web_form(
     enable_telegram=True,
     bot_ready=False,
     bot_polling=False,
+    youtube_failover=None,
 ):
     start_form_async_attr = ' data-async-action="start"' if enable_async_forms else ''
     quick_install_async_attr = ' data-async-action="install"' if enable_async_forms else ''
@@ -274,6 +275,9 @@ def render_web_form(
     router_dns_note = html.escape(_display_note_text(router_health.get('dns_note') or ''))
     router_core_proxy_note = html.escape(_display_note_text(router_health.get('core_proxy_note') or ''))
     router_telegram_call_note = html.escape(_display_note_text(router_health.get('telegram_call_note') or ''))
+    youtube_failover = youtube_failover or {}
+    youtube_failover_note = html.escape(_display_note_text(youtube_failover.get('label') or ''))
+    youtube_failover_hidden = '' if youtube_failover_note else ' hidden'
     router_memory_percent = _safe_percent(router_health.get('used_percent'))
     router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
     keys_view_subtitle = (
@@ -527,6 +531,7 @@ def render_web_form(
                                         <p class="status-note" id="router-health-note">{router_health_note}</p>
                                         <p class="status-note" id="router-core-proxy-note">{router_core_proxy_note}</p>
                                         <p class="status-note" id="router-telegram-call-note">{router_telegram_call_note}</p>
+                                        <p class="status-note{youtube_failover_hidden}" id="youtube-failover-note">{youtube_failover_note}</p>
                                     </div>
                                 </div>
                                 <div class="status-card-actions router-health-actions">

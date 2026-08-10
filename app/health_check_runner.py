@@ -148,6 +148,38 @@ def _youtube_http_check(proxy_url, *, session, requests):
     return check
 
 
+def _measure_youtube_quality(payload, proxy_url, metrics):
+    if not payload.get('quality_enabled'):
+        return
+    from pool_probe_curl import measure_download
+    from probe_cache import youtube_quality_score
+
+    settings = {
+        'quality_url': str(payload.get('quality_url') or ''),
+        'quality_bytes': max(0, int(payload.get('quality_bytes') or 0)),
+        'quality_connect': float(payload.get('quality_connect_timeout') or 6),
+        'quality_read': float(payload.get('quality_read_timeout') or 10),
+    }
+    throughput, error = measure_download(proxy_url, settings)
+    if throughput is not None:
+        metrics['yt_throughput_mbps'] = throughput
+    elif error:
+        metrics['yt_quality_error'] = _redact(error)
+    metrics.update(youtube_quality_score(
+        yt_ok=True,
+        yt_latency_ms=metrics.get('yt_latency_ms'),
+        googlevideo_latency_ms=metrics.get('googlevideo_latency_ms'),
+        googlevideo_ok=metrics.get('googlevideo_ok'),
+        yt_error_rate=metrics.get('yt_error_rate'),
+        yt_stability=str(metrics.get('yt_stability') or ''),
+        yt_throughput_mbps=throughput,
+        stable_latency_ms=payload.get('quality_stable_latency_ms'),
+        fast_latency_ms=payload.get('quality_fast_latency_ms'),
+        min_1600p_mbps=payload.get('quality_1600p_min_mbps'),
+        min_4k_mbps=payload.get('quality_4k_min_mbps'),
+    ))
+
+
 def _check_youtube(payload):
     from youtube_healthcheck import check_youtube_through_proxy
 
@@ -156,17 +188,26 @@ def _check_youtube(payload):
         connect_timeout = float(payload.get('connect_timeout') or 6)
         read_timeout = float(payload.get('read_timeout') or 10)
         metrics = {}
+        raw_urls = tuple(payload.get('urls') or ())
+        raw_min_ok = payload.get('min_ok')
         ok, message = check_youtube_through_proxy(
             _youtube_http_check(str(payload.get('proxy_url') or '').strip(), session=session, requests=requests),
             str(payload.get('proxy_url') or '').strip() or None,
-            urls=tuple(payload.get('urls') or ()),
-            min_ok=int(payload.get('min_ok') or 1),
+            urls=raw_urls or None,
+            min_ok=int(raw_min_ok) if raw_min_ok is not None else None,
+            profile=str(payload.get('profile') or 'full'),
             http_timeouts=(connect_timeout, read_timeout),
             http_retry_timeouts=(connect_timeout, read_timeout),
             retry_delay_seconds=float(payload.get('retry_delay_seconds') or 0),
             metrics=metrics,
             sleep=time.sleep,
         )
+        if ok:
+            _measure_youtube_quality(
+                payload,
+                str(payload.get('proxy_url') or '').strip() or None,
+                metrics,
+            )
         return bool(ok), _redact(message), {
             str(key): value
             for key, value in metrics.items()

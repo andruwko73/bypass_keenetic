@@ -1350,6 +1350,40 @@ PYCFG
   grep -Eq '^youtube_edge_prefetch_unblock_lock_stale_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_prefetch_unblock_lock_stale_seconds = 600\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^active_status_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'active_status_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^auto_failover_recent_success_ttl[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'auto_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
+  if grep -Eq '^youtube_route_failover_grace_seconds[[:space:]]*=[[:space:]]*180([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_route_failover_grace_seconds[[:space:]]*=.*/youtube_route_failover_grace_seconds = 5/' "$BOT_CONFIG_PATH" || true
+  fi
+  if grep -Eq '^youtube_route_failover_poll_seconds[[:space:]]*=[[:space:]]*120([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_route_failover_poll_seconds[[:space:]]*=.*/youtube_route_failover_poll_seconds = 60/' "$BOT_CONFIG_PATH" || true
+  fi
+  if grep -Eq '^youtube_route_failover_confirm_retries[[:space:]]*=[[:space:]]*3([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_route_failover_confirm_retries[[:space:]]*=.*/youtube_route_failover_confirm_retries = 2/' "$BOT_CONFIG_PATH" || true
+  fi
+  if grep -Eq '^youtube_route_failover_confirm_delay_seconds[[:space:]]*=[[:space:]]*8(\.0)?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_route_failover_confirm_delay_seconds[[:space:]]*=.*/youtube_route_failover_confirm_delay_seconds = 3.0/' "$BOT_CONFIG_PATH" || true
+  fi
+  if grep -Eq '^youtube_route_failover_check_connect_timeout[[:space:]]*=[[:space:]]*6(\.0)?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_route_failover_check_connect_timeout[[:space:]]*=.*/youtube_route_failover_check_connect_timeout = 3/' "$BOT_CONFIG_PATH" || true
+  fi
+  if grep -Eq '^youtube_route_failover_check_read_timeout[[:space:]]*=[[:space:]]*10(\.0)?([[:space:]#]|$)' "$BOT_CONFIG_PATH"; then
+    sed -i 's/^youtube_route_failover_check_read_timeout[[:space:]]*=.*/youtube_route_failover_check_read_timeout = 5/' "$BOT_CONFIG_PATH" || true
+  fi
+  grep -Eq '^youtube_route_failover_grace_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_grace_seconds = 5\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_failover_poll_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_poll_seconds = 60\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_failover_confirm_retries[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_confirm_retries = 2\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_failover_check_connect_timeout[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_check_connect_timeout = 3\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_failover_check_read_timeout[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_check_read_timeout = 5\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_failover_confirm_delay_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_confirm_delay_seconds = 3.0\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_failover_max_candidates[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_max_candidates = 2\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_failover_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_failover_enabled = True\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_min_duration_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_min_duration_seconds = 300\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_consecutive_checks[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_consecutive_checks = 3\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_score_threshold[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_score_threshold = 55\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_candidate_min_score[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_candidate_min_score = 70\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_min_improvement[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_min_improvement = 15\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_error_rate[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_error_rate = 0.2\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_latency_ms[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_latency_ms = 2500\n' >> "$BOT_CONFIG_PATH"
+  grep -Eq '^youtube_route_quality_switch_cooldown_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_quality_switch_cooldown_seconds = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^(youtube_route_failover_recent_success_ttl|youtube_vless2_failover_recent_success_ttl)[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_route_failover_recent_success_ttl = 900\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^event_history_duplicate_window_seconds[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'event_history_duplicate_window_seconds = 300\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^youtube_edge_watch_warm_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'youtube_edge_watch_warm_enabled = True\n' >> "$BOT_CONFIG_PATH"

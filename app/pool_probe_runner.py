@@ -187,6 +187,7 @@ def find_pool_failover_candidate(
     log,
     telegram_timeouts,
     http_timeouts,
+    youtube_quality_settings=None,
     validate_outbound=pool_probe_outbound,
     build_config_batch=build_pool_probe_core_config_batch,
     start_xray=start_pool_probe_xray,
@@ -241,6 +242,38 @@ def find_pool_failover_candidate(
                         metrics=yt_metrics,
                         profile='confirm',
                     )
+                    quality_settings = youtube_quality_settings if isinstance(youtube_quality_settings, dict) else {}
+                    if primary_ok and quality_settings.get('enabled'):
+                        from pool_probe_curl import measure_download
+                        from probe_cache import youtube_quality_score
+
+                        throughput, quality_error = measure_download(proxy_url, quality_settings)
+                        if throughput is not None:
+                            yt_metrics['yt_throughput_mbps'] = throughput
+                        elif quality_error:
+                            yt_metrics['yt_quality_error'] = str(quality_error).splitlines()[0][:120]
+                        yt_metrics.update(youtube_quality_score(
+                            yt_ok=True,
+                            yt_latency_ms=yt_metrics.get('yt_latency_ms'),
+                            googlevideo_latency_ms=yt_metrics.get('googlevideo_latency_ms'),
+                            googlevideo_ok=yt_metrics.get('googlevideo_ok'),
+                            yt_error_rate=yt_metrics.get('yt_error_rate'),
+                            yt_stability=str(yt_metrics.get('yt_stability') or ''),
+                            yt_throughput_mbps=throughput,
+                            stable_latency_ms=int(quality_settings.get('stable_latency_ms') or 2500),
+                            fast_latency_ms=int(quality_settings.get('fast_latency_ms') or 1500),
+                            min_1600p_mbps=float(quality_settings.get('min_1600p_mbps') or 25.0),
+                            min_4k_mbps=float(quality_settings.get('min_4k_mbps') or 45.0),
+                        ))
+                        try:
+                            quality_score = int(yt_metrics.get('yt_score') or 0)
+                        except (TypeError, ValueError):
+                            quality_score = 0
+                        primary_ok = bool(
+                            throughput is not None and
+                            quality_score >= max(0, int(quality_settings.get('min_score') or 0)) and
+                            str(yt_metrics.get('yt_stability') or '').strip().lower() != 'unstable'
+                        )
                     tg_ok = None
                     yt_ok = primary_ok
                 else:

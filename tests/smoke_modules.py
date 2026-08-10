@@ -2469,6 +2469,130 @@ def test_subscription_pool_sync_preserves_active_managed_key():
     assert pools['vless2'] == [active_key, new_key]
 
 
+def test_youtube_health_state_distinguishes_outage_and_degradation():
+    pulse_urls, pulse_min_ok, pulse_max_failures = youtube_healthcheck.youtube_healthcheck_profile('pulse')
+    assert len(pulse_urls) == 3
+    assert pulse_min_ok == 3
+    assert pulse_max_failures == 0
+    assert youtube_healthcheck.youtube_health_state(None, {})[0] == 'unknown'
+    assert youtube_healthcheck.youtube_health_state(False, {'yt_stability': 'fail'})[0] == 'failed'
+    assert youtube_healthcheck.youtube_health_state(
+        True,
+        {'yt_stability': 'stable', 'yt_score': 82, 'yt_latency_ms': 400, 'googlevideo_ok': True},
+    )[0] == 'healthy'
+    degraded_state, degraded_reason = youtube_healthcheck.youtube_health_state(
+        True,
+        {'yt_stability': 'unstable', 'yt_score': 55, 'yt_error_rate': 0.25, 'googlevideo_ok': True},
+    )
+    assert degraded_state == 'degraded'
+    assert 'нестабиль' in degraded_reason
+    assert youtube_healthcheck.youtube_health_state(
+        True,
+        {'yt_stability': 'stable', 'yt_score': 80, 'yt_latency_ms': 4000, 'googlevideo_ok': True},
+    )[0] == 'degraded'
+
+
+def test_youtube_route_failover_fast_and_quality_paths_are_wired():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    template = (APP_ROOT / 'web_form_template.py').read_text(encoding='utf-8')
+    script = (APP_ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
+    assert "profile='pulse'" in source
+    assert "'pulse': (YOUTUBE_HEALTHCHECK_PULSE_URLS, 3, 0)" in (APP_ROOT / 'youtube_healthcheck.py').read_text(encoding='utf-8')
+    assert 'youtube_route_failover_poll_seconds' in source
+    assert 'measure_youtube_quality=trigger == \'degraded\'' in source
+    assert 'YOUTUBE_ROUTE_FAILOVER_MAX_CANDIDATES' in source
+    assert "guarded_payload['youtube_failover']" in source
+    assert 'youtube-failover-note' in template
+    assert 'snapshot.youtube_failover' in script
+
+
+def test_youtube_route_failover_state_machine_switches_after_fast_confirmation():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_attempt_youtube_failover'
+    )
+    now = [100.0]
+    state = {
+        'last_ok': 99.0,
+        'last_fail': 0.0,
+        'last_attempt': 0.0,
+        'last_trigger': '',
+        'consecutive_failures': 0,
+        'degraded_since': 0.0,
+        'degraded_checks': 0,
+        'last_health_state': 'healthy',
+        'last_health_reason': '',
+        'last_quality_score': 0,
+        'last_candidate_score': 0,
+        'deferred_reason': '',
+        'in_progress': False,
+    }
+    calls = []
+
+    class Unlocked:
+        @staticmethod
+        def locked():
+            return False
+
+    def reset_quality(target, *, health_state='healthy', reason='', now=None):
+        target['degraded_since'] = 0.0
+        target['degraded_checks'] = 0
+        target['last_health_state'] = health_state
+        target['last_health_reason'] = reason
+        target['last_quality_score'] = 0
+        target['last_candidate_score'] = 0
+        target['deferred_reason'] = ''
+
+    namespace = {
+        'time': py_types.SimpleNamespace(time=lambda: now[0]),
+        'YOUTUBE_ROUTE_PROTOCOLS': ('vless2',),
+        'YOUTUBE_VLESS2_FAILOVER_ENABLED': True,
+        'YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS': 5,
+        'YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES': 3,
+        'YOUTUBE_ROUTE_QUALITY_FAILOVER_ENABLED': True,
+        'YOUTUBE_ROUTE_QUALITY_CONSECUTIVE_CHECKS': 3,
+        'YOUTUBE_ROUTE_QUALITY_MIN_DURATION_SECONDS': 300,
+        'YOUTUBE_ROUTE_QUALITY_SCORE_THRESHOLD': 55,
+        'YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS': 45,
+        'pool_probe_lock': Unlocked(),
+        '_youtube_route_protocol': lambda: 'vless2',
+        '_youtube_failover_state': lambda _proto: state,
+        '_load_current_keys': lambda: {'vless2': 'active'},
+        '_reset_youtube_quality_state': reset_quality,
+        '_check_youtube_protocol_for_background': (
+            lambda proto, metrics=None, profile='full': calls.append(('live', profile)) or (False, 'outage')
+        ),
+        '_youtube_health_state': lambda ok, metrics=None: ('failed', 'полный отказ', dict(metrics or {})),
+        '_record_key_probe': lambda proto, key, **kwargs: calls.append(('probe', kwargs)),
+        '_write_runtime_log': lambda message: calls.append(('log', message)),
+        '_pool_proto_label': lambda proto: 'Vless 2',
+        '_confirm_youtube_key_detailed': (
+            lambda proto: calls.append(('confirm', proto)) or (False, 'confirmed outage', 2, {})
+        ),
+        '_recover_current_youtube_route_after_hard_failure': lambda *args: False,
+        '_invalidate_key_status_cache': lambda: None,
+        '_switch_youtube_to_verified_candidate': (
+            lambda *args, **kwargs: calls.append(('switch', kwargs.get('trigger'))) or True
+        ),
+        '_youtube_quality_settings': lambda: {'enabled': True},
+        '_vless_traffic_guard_active': lambda *args, **kwargs: False,
+        '_youtube_stream_guard_active': lambda *args, **kwargs: False,
+        'shutdown_requested': py_types.SimpleNamespace(
+            wait=lambda seconds: now.__setitem__(0, now[0] + seconds) or False,
+        ),
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    attempt = namespace['_attempt_youtube_failover']
+
+    assert attempt() is True
+    assert state['consecutive_failures'] >= 3
+    assert ('live', 'pulse') in calls
+    assert ('confirm', 'vless2') in calls
+    assert ('switch', 'failed') in calls
+
+
 def test_youtube_healthcheck_detects_first_load_instability():
     calls = []
 
@@ -3498,6 +3622,26 @@ def test_codex_version_matches_commit_count():
     assert 'active_status_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'auto_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'youtube_route_failover_recent_success_ttl = 900' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    for config_line in (
+        'youtube_route_failover_grace_seconds = 5',
+        'youtube_route_failover_poll_seconds = 60',
+        'youtube_route_failover_confirm_retries = 2',
+        'youtube_route_failover_confirm_delay_seconds = 3.0',
+        'youtube_route_failover_max_candidates = 2',
+        'youtube_route_quality_failover_enabled = True',
+        'youtube_route_quality_min_duration_seconds = 300',
+        'youtube_route_quality_consecutive_checks = 3',
+        'youtube_route_quality_score_threshold = 55',
+        'youtube_route_quality_candidate_min_score = 70',
+        'youtube_route_quality_min_improvement = 15',
+        'youtube_route_quality_error_rate = 0.2',
+        'youtube_route_quality_latency_ms = 2500',
+        'youtube_route_quality_switch_cooldown_seconds = 900',
+    ):
+        assert config_line in example
+        assert config_line in installer
+        assert config_line in bootstrap
+        assert config_line in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'event_history_duplicate_window_seconds = 300' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'jfKfPfyJRdk' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     for config_line in (
@@ -3550,12 +3694,12 @@ def test_codex_version_matches_commit_count():
     assert 'youtube_route_failover_enabled = True' in example
     assert 'youtube_route_failover_enabled = True' in installer
     assert 'youtube_route_failover_enabled = True' in bootstrap
-    assert 'youtube_route_failover_check_connect_timeout = 6' in example
-    assert 'youtube_route_failover_check_connect_timeout = 6' in installer
-    assert 'youtube_route_failover_check_connect_timeout = 6' in bootstrap
-    assert 'youtube_route_failover_check_read_timeout = 10' in example
-    assert 'youtube_route_failover_check_read_timeout = 10' in installer
-    assert 'youtube_route_failover_check_read_timeout = 10' in bootstrap
+    assert 'youtube_route_failover_check_connect_timeout = 3' in example
+    assert 'youtube_route_failover_check_connect_timeout = 3' in installer
+    assert 'youtube_route_failover_check_connect_timeout = 3' in bootstrap
+    assert 'youtube_route_failover_check_read_timeout = 5' in example
+    assert 'youtube_route_failover_check_read_timeout = 5' in installer
+    assert 'youtube_route_failover_check_read_timeout = 5' in bootstrap
     for config_line in (
         'youtube_edge_dns_quality_enabled = True',
         "youtube_edge_dns_quality_hosts = ('i.ytimg.com',)",
@@ -4763,7 +4907,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _repair_active_reality_endpoint' in source
     assert 'def _probe_reality_endpoint_with_temp_xray' in source
     assert 'repair_active_proxy=_repair_active_reality_endpoint' in source
-    assert "_repair_active_reality_endpoint(route_proto, confirm_message, service='youtube')" in source
+    assert '_recover_current_youtube_route_after_hard_failure(route_proto, active_key, confirm_message)' in source
+    assert "service='youtube',\n                ignore_recent_success=True" in source
+    assert 'if not ignore_recent_success and _recent_probe_ok(active_probe, probe_field, recent_ttl):' in source
     assert "_probe_reality_endpoint_with_temp_xray(proto, key, endpoint, service=service)" in source
     assert "proto not in ('vless', 'vless2')" in source
     assert 'active_telegram_required = bool(_app_mode_telegram_enabled() and _telegram_required_for_protocol(key_name))' in source
@@ -4921,7 +5067,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'POOL_FAILOVER_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE' in source
     assert 'POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE' in source
     assert 'check_telegram_api=_check_telegram_api_for_background' in source
-    assert '_check_youtube_protocol_for_background(route_proto, metrics=yt_metrics)' in source
+    assert 'metrics=yt_metrics' in source
+    assert "profile='pulse'" in source
     candidate_parent_block = source.split('def _find_pool_failover_candidate_in_process', 1)[1].split(
         'def _find_pool_failover_candidate', 1
     )[0]
@@ -5202,14 +5349,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "if proxy_mode not in YOUTUBE_STREAM_GUARD_PROTOCOLS" in source
     assert "_vless_traffic_guard_active(\n        'Telegram auto-failover'" in source
     assert "_vless_traffic_guard_active(\n        f'{_pool_proto_label(route_proto)} core restart recheck'" in source
-    assert "_vless_traffic_guard_active(\n            f'{_pool_proto_label(route_proto)} endpoint repair'" in source
+    assert "_vless_traffic_guard_active(\n        f'{_pool_proto_label(route_proto)} endpoint repair'" in source
     assert "exclude_proto=route_proto" in source
-    assert 'another Vless route has active traffic' in source
+    assert "state['deferred_reason'] = 'активен другой Vless-маршрут'" in source
     assert "_youtube_stream_guard_active(\n                route_proto,\n                f'{_pool_proto_label(route_proto)} key switch'" in source
-    assert 'allow_guard_bypass = bool(' in source
-    assert 'bypassing stream guard for candidate' in source
+    assert "youtube_traffic_active and trigger != 'failed'" in source
+    assert 'bypassing YouTube stream guard for candidate' in source
     assert "proxy_mode == route_proto" in source
-    assert 'Telegram is required because bot mode is' in source
+    assert 'Telegram is required' in source
+    assert 'because bot mode is' in source
     assert 'YOUTUBE_VLESS2_HEALTHCHECK_URLS' in source
     assert "youtube_stream_guard_failover_hold_seconds" in source
     assert "youtube_stream_guard_scan_cache_seconds" in source
@@ -5253,7 +5401,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'avoid rendering full probe details twice' in source
     assert 'event_history_api_cache[\'payload\'] = payload' not in source
     assert "last_scan_count" in source
-    assert "cached_fail_since or now" in source
+    assert "state['last_fail'] = now" in source
     assert "'youtube_route_failover_check_connect_timeout'," in source
     assert "'youtube_route_failover_check_read_timeout'," in source
     assert 'YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS' in source
@@ -5265,7 +5413,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "['dig', '+time=2', '+tries=1', '+short', 'A'" in source
     assert "['nslookup', str(domain), str(dns_server)]" in source
     assert 'def _recover_current_youtube_route_after_hard_failure' in source
-    assert source.find("_recent_probe_ok(cached_active_probe, 'yt_ok'") < source.find('ok, message = _check_youtube_protocol_for_background(route_proto')
+    assert "_recent_probe_ok(cached_active_probe, 'yt_ok'" not in source
+    assert "profile='pulse'" in source
     assert 'Required YouTube endpoint did not respond through this key: ' in youtube_health_source
     assert 'youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)' in source
     assert 'http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT)' in source
@@ -10706,6 +10855,50 @@ def test_pool_probe_runner_failover_candidate():
     assert youtube_records[0][2]['yt_ok'] is True
     assert youtube_records[0][2]['yt_stability'] == 'stable'
     assert youtube_records[0][2]['verification_kind'] == 'screening'
+
+    import pool_probe_curl
+    original_measure_download = pool_probe_curl.measure_download
+    quality_records = []
+    try:
+        pool_probe_curl.measure_download = lambda proxy, settings: (50.0, '')
+        quality_result = pool_probe_runner.find_pool_failover_candidate(
+            [('vless2', 'yt-quality')],
+            service='youtube',
+            batch_size=1,
+            test_port='1350',
+            proxy_outbound_from_key=lambda *args, **kwargs: {},
+            wait_for_socks5=lambda port, timeout=6: True,
+            check_telegram_api=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('telegram is not required')),
+            check_http=lambda proxy, **kwargs: (True, 'yt ok'),
+            record_key_probe=lambda proto, key, **kwargs: quality_records.append((proto, key, kwargs)),
+            proto_label=lambda proto: proto,
+            log=logs.append,
+            telegram_timeouts=(1, 2),
+            http_timeouts=(3, 4),
+            youtube_quality_settings={
+                'enabled': True,
+                'quality_url': 'https://example.test/file',
+                'quality_bytes': 524288,
+                'quality_connect': 3,
+                'quality_read': 4,
+                'stable_latency_ms': 2500,
+                'fast_latency_ms': 1500,
+                'min_1600p_mbps': 25,
+                'min_4k_mbps': 45,
+                'min_score': 70,
+            },
+            validate_outbound=validate_outbound,
+            build_config_batch=lambda valid_batch, test_port, proxy_outbound_from_key: {'valid': valid_batch},
+            start_xray=lambda config: ('quality-process', 'quality-config.json'),
+            stop_xray=lambda process, config_path: None,
+            cleanup_runtime=lambda kill_processes=False: None,
+            collect_garbage=lambda: None,
+        )
+    finally:
+        pool_probe_curl.measure_download = original_measure_download
+    assert quality_result == ('vless2', 'yt-quality', None, True)
+    assert quality_records[0][2]['yt_throughput_mbps'] == 50.0
+    assert quality_records[0][2]['yt_score'] >= 70
 
     cancel_event = threading.Event()
     cancel_event.set()
@@ -16241,6 +16434,9 @@ def main():
     test_key_pool_web()
     test_light_pool_summary_migrates_saved_service_labels_without_losing_counts()
     test_web_pool_snapshot_worker_payload_is_safe_and_complete()
+    test_youtube_health_state_distinguishes_outage_and_degradation()
+    test_youtube_route_failover_fast_and_quality_paths_are_wired()
+    test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
     test_youtube_healthcheck_detects_first_load_instability()
     test_youtube_healthcheck_requires_watch_page()
     test_youtube_healthcheck_retries_transient_watch_page()

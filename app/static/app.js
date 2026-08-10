@@ -2958,6 +2958,12 @@
             const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || null) : null;
             updatePoolSummaryBlock(poolSummary, progress, poolProbeActive, poolProbePaused);
             updateRouterHealth(snapshot.router_health);
+            const youtubeFailover = snapshot.youtube_failover || {};
+            const youtubeFailoverNote = document.getElementById('youtube-failover-note');
+            if (youtubeFailoverNote) {
+                youtubeFailoverNote.textContent = cleanStatusText(youtubeFailover.label || '');
+                youtubeFailoverNote.classList.toggle('hidden', !youtubeFailoverNote.textContent);
+            }
             renderStatusAttention(snapshot);
             if (ENABLE_KEY_POOL && snapshot.pools) {
                 updatePoolStatus(snapshot.pools);

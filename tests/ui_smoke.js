@@ -761,6 +761,14 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
+  await page.waitForFunction(() => {
+    const note = document.getElementById('youtube-failover-note');
+    return Boolean(note && note.textContent && note.textContent.trim());
+  }, {timeout: 10000});
+  const youtubeFailoverText = (await page.locator('#youtube-failover-note').innerText()).trim();
+  if (!youtubeFailoverText.includes('YouTube: маршрут Vless 2 исправен')) {
+    throw new Error(`${name}: YouTube automatic failover status is missing: ${youtubeFailoverText}`);
+  }
   await assertNoHorizontalOverflow(page, name);
   if (modeConfig.expectPool) {
     const poolSummaryText = (await page.locator('#pool-summary-note').innerText()).trim();

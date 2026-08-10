@@ -26,6 +26,11 @@ YOUTUBE_HEALTHCHECK_QUICK_URLS = (
     YOUTUBE_SHORT_URL,
     YOUTUBE_GOOGLEVIDEO_URL,
 )
+YOUTUBE_HEALTHCHECK_PULSE_URLS = (
+    YOUTUBE_PRIMARY_URL,
+    YOUTUBE_HOME_URL,
+    YOUTUBE_GOOGLEVIDEO_URL,
+)
 YOUTUBE_HEALTHCHECK_CONFIRM_URLS = (
     YOUTUBE_PRIMARY_URL,
     YOUTUBE_HOME_URL,
@@ -34,6 +39,7 @@ YOUTUBE_HEALTHCHECK_CONFIRM_URLS = (
     YOUTUBE_GOOGLEVIDEO_URL,
 )
 YOUTUBE_HEALTHCHECK_PROFILES = {
+    'pulse': (YOUTUBE_HEALTHCHECK_PULSE_URLS, 3, 0),
     'quick': (YOUTUBE_HEALTHCHECK_QUICK_URLS, 4, 0),
     'confirm': (YOUTUBE_HEALTHCHECK_CONFIRM_URLS, 5, 0),
     'full': (YOUTUBE_HEALTHCHECK_URLS, YOUTUBE_HEALTHCHECK_MIN_OK, 0),
@@ -115,6 +121,56 @@ def _short_error(host, message):
     return f'{host}: {text}' if host else text
 
 
+def youtube_health_state(
+    ok,
+    metrics=None,
+    *,
+    degraded_score_threshold=55,
+    degraded_latency_ms=2500,
+    degraded_error_rate=0.2,
+):
+    """Classify a probe without turning a usable but poor route into success."""
+    metrics = metrics if isinstance(metrics, dict) else {}
+    stability = str(metrics.get('yt_stability') or '').strip().lower()
+    if ok is None:
+        return 'unknown', 'результат проверки недоступен'
+    if ok is False or stability == 'fail':
+        return 'failed', 'обязательные адреса YouTube не отвечают'
+
+    try:
+        score = int(str(metrics.get('yt_score')))
+    except (TypeError, ValueError):
+        score = None
+    try:
+        error_rate = float(metrics.get('yt_error_rate') or 0.0)
+    except (TypeError, ValueError):
+        error_rate = 0.0
+    latencies = []
+    for field in ('yt_first_load_ms', 'yt_latency_ms', 'googlevideo_latency_ms'):
+        try:
+            value = int(str(metrics.get(field)))
+        except (TypeError, ValueError):
+            continue
+        if value >= 0:
+            latencies.append(value)
+    max_latency = max(latencies) if latencies else 0
+
+    degraded_reasons = []
+    if stability == 'unstable':
+        degraded_reasons.append('нестабильные ответы')
+    if score is not None and score <= max(0, int(degraded_score_threshold or 0)):
+        degraded_reasons.append(f'оценка {score}')
+    if error_rate >= max(0.0, float(degraded_error_rate or 0.0)):
+        degraded_reasons.append(f'ошибки {int(round(error_rate * 100))}%')
+    if max_latency > max(1, int(degraded_latency_ms or 1)):
+        degraded_reasons.append(f'задержка {max_latency} мс')
+    if metrics.get('googlevideo_ok') is False:
+        degraded_reasons.append('медиасервер не отвечает')
+    if degraded_reasons:
+        return 'degraded', ', '.join(degraded_reasons)
+    return 'healthy', 'проверка стабильна'
+
+
 def youtube_healthcheck_profile(profile):
     return YOUTUBE_HEALTHCHECK_PROFILES.get(str(profile or 'full').strip().lower(), YOUTUBE_HEALTHCHECK_PROFILES['full'])
 
@@ -128,7 +184,7 @@ def check_youtube_through_proxy(
     min_ok=None,
     profile='full',
     http_retry_timeouts=None,
-    retry_delay_seconds=0,
+    retry_delay_seconds=0.0,
     metrics=None,
     sleep=time.sleep,
     max_failures=None,
