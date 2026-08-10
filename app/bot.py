@@ -270,6 +270,7 @@ def _route_entries_from_values(values):
 
 _pool_probe_runner_module = None
 _pool_probe_controller_module = None
+_pool_probe_resume_module = None
 _probe_cache_module = None
 _key_pool_store_module = None
 _repo_update_module = None
@@ -288,6 +289,7 @@ _youtube_edge_prefetch_module = None
 _youtube_healthcheck_module = None
 _subscription_runtime_module = subscription_runtime
 _youtube_route_owner_module = None
+_youtube_failover_transaction_module = None
 _custom_checks_store_module = None
 _service_catalog_module = None
 _update_maintenance_runtime_module = None
@@ -388,6 +390,24 @@ def _pool_probe_controller():
 
         _pool_probe_controller_module = module
     return _pool_probe_controller_module
+
+
+def _pool_probe_resume():
+    global _pool_probe_resume_module
+    if _pool_probe_resume_module is None:
+        import pool_probe_resume as module
+
+        _pool_probe_resume_module = module
+    return _pool_probe_resume_module
+
+
+def _youtube_failover_transaction():
+    global _youtube_failover_transaction_module
+    if _youtube_failover_transaction_module is None:
+        import youtube_failover_transaction as module
+
+        _youtube_failover_transaction_module = module
+    return _youtube_failover_transaction_module
 
 
 def _update_maintenance_runtime():
@@ -1177,6 +1197,9 @@ def _new_youtube_failover_state():
         'last_health_reason': '',
         'last_quality_score': 0,
         'last_candidate_score': 0,
+        'last_checked_at': 0.0,
+        'phase': '',
+        'recovery_failed': False,
         'deferred_reason': '',
         'in_progress': False,
     }
@@ -1745,9 +1768,23 @@ def _youtube_failover_status_payload():
     deferred = str(state.get('deferred_reason') or '').strip()
     checks = max(0, int(state.get('degraded_checks') or 0))
     failures = max(0, int(state.get('consecutive_failures') or 0))
+    phase = str(state.get('phase') or '').strip()
+    recovery_failed = bool(state.get('recovery_failed'))
+    last_checked_at = max(0.0, float(state.get('last_checked_at') or 0.0))
+    checked_age = max(0, int(time.time() - last_checked_at)) if last_checked_at else 0
     protocol_label = _pool_proto_label(route_proto)
     if not YOUTUBE_ROUTE_FAILOVER_ENABLED:
         label, tone = 'Автопереключение YouTube отключено', 'warn'
+    elif recovery_failed:
+        label, tone = 'YouTube: не удалось безопасно восстановить исходный ключ', 'fail'
+    elif phase == 'pool_pausing':
+        label, tone = 'YouTube: проверка пула безопасно приостанавливается', 'warn'
+    elif phase == 'transaction_recovery':
+        label, tone = 'YouTube: восстанавливается прерванное переключение ключа', 'warn'
+    elif phase == 'current_key_repair':
+        label, tone = f'YouTube: восстанавливается текущий ключ {protocol_label}', 'warn'
+    elif phase == 'candidate_selection':
+        label, tone = f'YouTube: подбирается запасной ключ {protocol_label}', 'warn'
     elif state.get('in_progress'):
         label, tone = f'YouTube: подбирается запасной ключ {protocol_label}', 'warn'
     elif health_state == 'healthy':
@@ -1767,6 +1804,9 @@ def _youtube_failover_status_payload():
     details = deferred or reason
     if details:
         label = f'{label} — {details}'
+    if last_checked_at:
+        age_label = f'{checked_age} с' if checked_age < 60 else f'{checked_age // 60} мин'
+        label = f'{label} · проверено {age_label} назад'
     return {
         'enabled': bool(YOUTUBE_ROUTE_FAILOVER_ENABLED),
         'state': health_state,
@@ -1780,6 +1820,10 @@ def _youtube_failover_status_payload():
         'failure_checks': failures,
         'quality_score': max(0, int(state.get('last_quality_score') or 0)),
         'candidate_score': max(0, int(state.get('last_candidate_score') or 0)),
+        'phase': phase,
+        'recovery_failed': recovery_failed,
+        'last_checked_at': last_checked_at,
+        'checked_age_seconds': checked_age,
     }
 
 
@@ -1843,6 +1887,8 @@ def _reset_youtube_quality_state(state, *, health_state='healthy', reason='', no
     state['last_candidate_score'] = 0
     state['deferred_reason'] = ''
     if health_state == 'healthy':
+        state['phase'] = ''
+        state['recovery_failed'] = False
         state['last_ok'] = float(time.time() if now is None else now)
 
 
@@ -1929,17 +1975,65 @@ def _confirm_youtube_key(proto):
     return ok, message
 
 
+def _youtube_failover_key_by_id(proto, key_id):
+    key_id = str(key_id or '').strip().lower()
+    if len(key_id) != 40:
+        return ''
+    candidates = []
+    current_key = str(_load_current_keys().get(proto) or '').strip()
+    if current_key:
+        candidates.append(current_key)
+    pools = _load_key_pools()
+    candidates.extend(pools.get(proto) or [])
+    for key_value in candidates:
+        key_value = str(key_value or '').strip()
+        if key_value and _hash_key(key_value) == key_id:
+            return key_value
+    return ''
+
+
+def _begin_youtube_failover_transaction(proto, original_key, candidate_key, trigger):
+    return _youtube_failover_transaction().begin_transaction(
+        YOUTUBE_FAILOVER_TRANSACTION_FILE,
+        proto,
+        _hash_key(original_key),
+        _hash_key(candidate_key),
+        trigger=trigger,
+    )
+
+
+def _update_youtube_failover_transaction(phase):
+    return _youtube_failover_transaction().update_phase(YOUTUBE_FAILOVER_TRANSACTION_FILE, phase)
+
+
+def _clear_youtube_failover_transaction():
+    return _youtube_failover_transaction().clear_transaction(YOUTUBE_FAILOVER_TRANSACTION_FILE)
+
+
 def _restore_youtube_key_after_failed_failover(proto, original_key):
     current_key = (_load_current_keys().get(proto) or '').strip()
     if not original_key or current_key == original_key:
-        return
+        _clear_youtube_failover_transaction()
+        return bool(original_key and current_key == original_key)
+    _update_youtube_failover_transaction('restore_started')
     try:
         _install_key_for_protocol(proto, original_key, verify=False)
+        restored_key = (_load_current_keys().get(proto) or '').strip()
+        if restored_key != original_key:
+            raise RuntimeError('исходный ключ не подтверждён после восстановления')
         _record_key_probe(proto, original_key, yt_ok=False)
         _audit_key_switch('youtube_failover_restore', proto, original_key, 'failed candidates')
         _write_runtime_log(f'YouTube failover: restored previous {_pool_proto_label(proto)} key after failed candidates.')
+        _clear_youtube_failover_transaction()
+        return True
     except Exception as exc:
+        _update_youtube_failover_transaction('restore_failed')
+        state = _youtube_failover_state(proto)
+        state['recovery_failed'] = True
+        state['phase'] = 'recovery_failed'
+        state['deferred_reason'] = 'исходный ключ не удалось восстановить; автоматические переключения остановлены'
         _write_runtime_log(f'YouTube failover: failed to restore previous {_pool_proto_label(proto)} key: {exc}')
+        return False
 
 
 def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_message=''):
@@ -1953,6 +2047,7 @@ def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_me
         f'{_pool_proto_label(route_proto)} core restart recheck',
         log=True,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+        exclude_proto=route_proto,
     ):
         return False
     youtube_core_restart_state['last_restart'] = now
@@ -2042,17 +2137,18 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
     last_attempt = float(youtube_hard_failure_recovery_state.get('last_attempt') or 0.0)
     if last_attempt and now - last_attempt < YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS:
         return False
+    if _vless_traffic_guard_active(
+        f'{_pool_proto_label(route_proto)} endpoint repair',
+        log=True,
+        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+        exclude_proto=route_proto,
+    ):
+        return False
     youtube_hard_failure_recovery_state['last_attempt'] = now
     _write_runtime_log(
         f'YouTube recovery: {_pool_proto_label(route_proto)} hard proxy failure detected; '
         f'repairing current key without failover. Last failure: {message}'
     )
-    if _vless_traffic_guard_active(
-        f'{_pool_proto_label(route_proto)} endpoint repair',
-        log=True,
-        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-    ):
-        return False
 
     recovered = False
     if route_proto in ('vless', 'vless2'):
@@ -2062,6 +2158,7 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
                 message,
                 service='youtube',
                 ignore_recent_success=True,
+                traffic_guard_exclude_proto=route_proto,
             )
         except Exception as exc:
             repaired = False
@@ -2117,6 +2214,112 @@ def _youtube_switch_cooldown_remaining(state, trigger, now):
     return max(0, int(round(cooldown - (now - last_attempt))))
 
 
+def _recover_interrupted_youtube_failover_transaction():
+    transaction = _youtube_failover_transaction().load_transaction(YOUTUBE_FAILOVER_TRANSACTION_FILE)
+    if not transaction:
+        if os.path.exists(YOUTUBE_FAILOVER_TRANSACTION_FILE):
+            route_proto = _youtube_route_protocol()
+            if route_proto in YOUTUBE_ROUTE_PROTOCOLS:
+                state = _youtube_failover_state(route_proto)
+                state['recovery_failed'] = True
+                state['phase'] = 'recovery_failed'
+                state['deferred_reason'] = 'файл незавершённого переключения повреждён'
+            _write_runtime_log('YouTube failover: invalid recovery transaction; automatic switching is blocked.')
+            return False
+        return None
+
+    proto = transaction['proto']
+    state = _youtube_failover_state(proto)
+    state['phase'] = 'transaction_recovery'
+    state['deferred_reason'] = 'проверяется незавершённое переключение ключа'
+    pause_owner = 'youtube_transaction_recovery'
+    pause_generation = 0
+    try:
+        if pool_probe_lock.locked():
+            try:
+                pause_generation, _pause_note = _pause_pool_probe_operation(
+                    pause_owner,
+                    'Проверка пула приостанавливается для восстановления переключения YouTube.',
+                    timeout=15.0,
+                )
+            except Exception as exc:
+                state['deferred_reason'] = str(exc)
+                return False
+
+        original_key = _youtube_failover_key_by_id(proto, transaction['original_id'])
+        candidate_key = _youtube_failover_key_by_id(proto, transaction['candidate_id'])
+        current_key = str(_load_current_keys().get(proto) or '').strip()
+        current_id = _hash_key(current_key) if current_key else ''
+
+        if transaction['phase'] == 'candidate_verified' and candidate_key and current_id == transaction['candidate_id']:
+            confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_detailed(proto)
+            tg_ok = None
+            if confirm_ok and proxy_mode == proto:
+                tg_ok, _tg_message = _check_telegram_api_for_background(
+                    proxy_settings.get(proto),
+                    connect_timeout=AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT,
+                    read_timeout=AUTO_FAILOVER_CHECK_READ_TIMEOUT,
+                )
+                confirm_ok = bool(tg_ok)
+            if confirm_ok:
+                _set_active_key(proto, candidate_key)
+                _clear_youtube_failover_transaction()
+                _audit_key_switch(
+                    'youtube_auto_failover_recovery',
+                    proto,
+                    candidate_key,
+                    confirm_message,
+                )
+                _record_key_probe(
+                    proto,
+                    candidate_key,
+                    tg_ok=tg_ok,
+                    yt_ok=True,
+                    verification_kind='runtime',
+                    **confirm_metrics,
+                )
+                _invalidate_web_status_cache()
+                _invalidate_key_status_cache()
+                _reset_youtube_quality_state(
+                    state,
+                    health_state='healthy',
+                    reason='прерванное переключение успешно восстановлено',
+                    now=time.time(),
+                )
+                _write_runtime_log('YouTube failover: interrupted verified candidate was confirmed and committed.')
+                return True
+            _write_runtime_log(f'YouTube failover: interrupted candidate confirmation failed: {confirm_message}')
+
+        if original_key and current_key == original_key:
+            _clear_youtube_failover_transaction()
+            state['phase'] = ''
+            state['recovery_failed'] = False
+            state['deferred_reason'] = ''
+            return False
+        if not original_key:
+            _update_youtube_failover_transaction('restore_failed')
+            state['recovery_failed'] = True
+            state['phase'] = 'recovery_failed'
+            state['deferred_reason'] = 'исходный ключ отсутствует в пуле; требуется ручная проверка'
+            _write_runtime_log('YouTube failover: original key for interrupted transaction is unavailable.')
+            return False
+        restored = _restore_youtube_key_after_failed_failover(proto, original_key)
+        if restored:
+            state['phase'] = ''
+            state['recovery_failed'] = False
+            state['deferred_reason'] = ''
+        return False
+    finally:
+        if pause_generation:
+            started, _queued = _resume_cancelled_pool_probe(
+                'восстановления незавершённого переключения YouTube',
+                owner=pause_owner,
+                generation=pause_generation,
+            )
+            if not started and _has_pool_probe_resume_payload():
+                _schedule_low_memory_pool_probe_resume()
+
+
 def _switch_youtube_to_verified_candidate(
     route_proto,
     active_key,
@@ -2152,7 +2355,6 @@ def _switch_youtube_to_verified_candidate(
         return False
 
     state['in_progress'] = True
-    state['last_attempt'] = now
     state['last_trigger'] = trigger
     state['deferred_reason'] = ''
     original_key = active_key
@@ -2230,6 +2432,11 @@ def _switch_youtube_to_verified_candidate(
                     'because the current key has a confirmed complete failure.'
                 )
 
+            state['last_attempt'] = time.time()
+            if not _begin_youtube_failover_transaction(route_proto, original_key, key_value, trigger):
+                state['deferred_reason'] = 'не удалось сохранить безопасную точку переключения'
+                _write_runtime_log('YouTube failover: transaction checkpoint could not be persisted; switch aborted.')
+                return False
             try:
                 result = _install_key_for_protocol(route_proto, key_value, verify=False)
             except Exception as exc:
@@ -2241,19 +2448,27 @@ def _switch_youtube_to_verified_candidate(
                     verification_kind='runtime',
                 )
                 _write_runtime_log(f'YouTube failover: failed to install candidate {key_hash}: {exc}')
+                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                    return False
                 continue
+            if not _update_youtube_failover_transaction('candidate_installed'):
+                state['deferred_reason'] = 'не удалось подтвердить установку запасного ключа'
+                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                return False
 
             confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_detailed(
                 route_proto,
                 measure_quality=trigger == 'degraded',
             )
             if confirm_ok is None:
-                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                    return False
                 state['deferred_reason'] = 'проверка постоянного порта недоступна'
                 return False
             if not confirm_ok:
                 _record_key_probe(route_proto, key_value, tg_ok=tg_ok, yt_ok=False)
-                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                    return False
                 _write_runtime_log(
                     f'YouTube failover: candidate {key_hash} passed temporary check '
                     f'but failed on permanent port: {confirm_message}'
@@ -2268,7 +2483,8 @@ def _switch_youtube_to_verified_candidate(
                 candidate_score < YOUTUBE_ROUTE_QUALITY_CANDIDATE_MIN_SCORE or
                 candidate_score - current_score < YOUTUBE_ROUTE_QUALITY_MIN_IMPROVEMENT
             ):
-                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                    return False
                 _write_runtime_log(
                     f'YouTube failover: candidate {key_hash} did not confirm a quality improvement '
                     f'({confirm_reason}, score {candidate_score}); original key restored.'
@@ -2282,7 +2498,8 @@ def _switch_youtube_to_verified_candidate(
                     read_timeout=AUTO_FAILOVER_CHECK_READ_TIMEOUT,
                 )
                 if tg_ok is None:
-                    _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                    if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                        return False
                     state['deferred_reason'] = 'проверка Telegram недоступна'
                     return False
                 if not tg_ok:
@@ -2293,14 +2510,20 @@ def _switch_youtube_to_verified_candidate(
                         yt_ok=True,
                         verification_kind='runtime',
                     )
-                    _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                    if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                        return False
                     _write_runtime_log(
                         f'YouTube failover: candidate {key_hash} has YouTube. Telegram is required '
                         f'because bot mode is {_pool_proto_label(route_proto)}: {tg_message}'
                     )
                     continue
 
+            if not _update_youtube_failover_transaction('candidate_verified'):
+                state['deferred_reason'] = 'не удалось сохранить результат проверки запасного ключа'
+                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                return False
             _set_active_key(route_proto, key_value)
+            _clear_youtube_failover_transaction()
             _audit_key_switch('youtube_auto_failover', route_proto, key_value, confirm_message)
             _record_key_probe(
                 route_proto,
@@ -2326,7 +2549,8 @@ def _switch_youtube_to_verified_candidate(
             )
             return True
 
-        _restore_youtube_key_after_failed_failover(route_proto, original_key)
+        if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+            return False
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
         return False
@@ -2335,18 +2559,90 @@ def _switch_youtube_to_verified_candidate(
         state['in_progress'] = False
 
 
+def _handle_confirmed_youtube_hard_failure(
+    route_proto,
+    active_key,
+    current_keys,
+    state,
+    *,
+    confirm_message,
+    confirm_attempts,
+    confirm_metrics,
+    health_reason,
+):
+    state['consecutive_failures'] = int(state.get('consecutive_failures') or 0) + max(1, confirm_attempts)
+    pause_generation = 0
+    pause_owner = 'youtube_hard_failure'
+    try:
+        if pool_probe_lock.locked():
+            state['phase'] = 'pool_pausing'
+            state['deferred_reason'] = 'проверка пула безопасно приостанавливается'
+            try:
+                pause_generation, _pause_note = _pause_pool_probe_operation(
+                    pause_owner,
+                    'Проверка пула приостанавливается для аварийного восстановления YouTube.',
+                    timeout=15.0,
+                )
+            except Exception as exc:
+                state['phase'] = 'pool_pause_failed'
+                state['deferred_reason'] = str(exc)
+                return False
+            if not pause_generation and pool_probe_lock.locked():
+                state['phase'] = 'pool_pause_failed'
+                state['deferred_reason'] = 'проверка пула не успела безопасно остановиться'
+                return False
+
+        state['phase'] = 'current_key_repair'
+        if _recover_current_youtube_route_after_hard_failure(route_proto, active_key, confirm_message):
+            state['phase'] = ''
+            state['recovery_failed'] = False
+            return False
+        if state['consecutive_failures'] < YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES:
+            state['phase'] = 'confirming_failure'
+            state['deferred_reason'] = (
+                f'подтверждение полного отказа '
+                f'{state["consecutive_failures"]}/{YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES}'
+            )
+            return False
+
+        state['phase'] = 'candidate_selection'
+        _record_key_probe(route_proto, active_key, yt_ok=False, **confirm_metrics)
+        _invalidate_key_status_cache()
+        switched = _switch_youtube_to_verified_candidate(
+            route_proto,
+            active_key,
+            current_keys,
+            state,
+            trigger='failed',
+            reason=confirm_message or health_reason,
+        )
+        if not state.get('recovery_failed'):
+            state['phase'] = '' if switched else 'waiting_retry'
+        return switched
+    finally:
+        if pause_generation:
+            started, _queued = _resume_cancelled_pool_probe(
+                'аварийного восстановления YouTube',
+                owner=pause_owner,
+                generation=pause_generation,
+            )
+            if not started and _has_pool_probe_resume_payload():
+                _schedule_low_memory_pool_probe_resume()
+
+
 def _attempt_youtube_failover():
     route_proto = _youtube_route_protocol()
     if route_proto not in YOUTUBE_ROUTE_PROTOCOLS:
         return False
     state = _youtube_failover_state(route_proto)
+    recovery_result = _recover_interrupted_youtube_failover_transaction()
+    if recovery_result is not None:
+        return bool(recovery_result)
+    if state.get('recovery_failed'):
+        return False
     now = time.time()
     if not YOUTUBE_VLESS2_FAILOVER_ENABLED or state['in_progress']:
         return False
-    if globals().get('pool_probe_lock') and pool_probe_lock.locked():
-        state['deferred_reason'] = 'выполняется проверка пула'
-        return False
-
     current_keys = _load_current_keys()
     active_key = (current_keys.get(route_proto) or '').strip()
     if not active_key:
@@ -2360,11 +2656,13 @@ def _attempt_youtube_failover():
         return False
 
     yt_metrics = {}
-    ok, message = _check_youtube_protocol_for_background(
-        route_proto,
-        metrics=yt_metrics,
-        profile='pulse',
+    pool_running = bool(globals().get('pool_probe_lock') and pool_probe_lock.locked())
+    youtube_check = (
+        _check_youtube_protocol_once
+        if pool_running else
+        _check_youtube_protocol_for_background
     )
+    ok, message = youtube_check(route_proto, metrics=yt_metrics, profile='pulse')
     if ok is None:
         state['last_health_state'] = 'unknown'
         state['last_health_reason'] = 'фоновая проверка недоступна'
@@ -2374,6 +2672,7 @@ def _attempt_youtube_failover():
             'key switch deferred.'
         )
         return False
+    state['last_checked_at'] = time.time()
 
     previous_health_state = str(state.get('last_health_state') or 'unknown')
     health_state, health_reason, yt_metrics = _youtube_health_state(ok, yt_metrics)
@@ -2397,6 +2696,8 @@ def _attempt_youtube_failover():
     if health_state == 'degraded':
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
+        state['phase'] = ''
+        state['recovery_failed'] = False
         _record_key_probe(route_proto, active_key, yt_ok=True, **yt_metrics)
         if previous_health_state != 'degraded' or not state.get('degraded_since'):
             state['degraded_since'] = now
@@ -2419,6 +2720,9 @@ def _attempt_youtube_failover():
                 f'подтверждение снижения качества '
                 f'{state["degraded_checks"]}/{YOUTUBE_ROUTE_QUALITY_CONSECUTIVE_CHECKS}'
             )
+            return False
+        if pool_probe_lock.locked():
+            state['deferred_reason'] = 'сравнение качества отложено до завершения проверки пула'
             return False
         if not _youtube_quality_settings().get('enabled'):
             state['deferred_reason'] = 'измерение качества отложено из-за доступной памяти'
@@ -2497,58 +2801,75 @@ def _attempt_youtube_failover():
             shutdown_requested.wait(YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS)
         ):
             return False
-        if globals().get('pool_probe_lock') and pool_probe_lock.locked():
-            state['deferred_reason'] = 'проверка пула началась во время подтверждения отказа'
-            return False
         now = time.time()
     if now - state['last_fail'] < YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS:
         state['deferred_reason'] = 'ожидается короткое подтверждение полного отказа'
         return False
 
-    confirm_ok, confirm_message, confirm_attempts, confirm_metrics = _confirm_youtube_key_detailed(route_proto)
-    if confirm_ok is None:
-        state['deferred_reason'] = 'подтверждение полного отказа недоступно'
-        return False
-    if confirm_ok:
-        confirm_state, confirm_reason, confirm_metrics = _youtube_health_state(True, confirm_metrics)
-        state['last_fail'] = 0.0
-        state['consecutive_failures'] = 0
-        _record_key_probe(route_proto, active_key, yt_ok=True, **confirm_metrics)
-        if confirm_state == 'degraded':
-            state['degraded_since'] = time.time()
-            state['degraded_checks'] = 1
-            state['last_health_state'] = 'degraded'
-            state['last_health_reason'] = confirm_reason
-            state['deferred_reason'] = 'полный отказ не подтвердился; наблюдается качество'
-        else:
-            _reset_youtube_quality_state(
-                state,
-                health_state='healthy',
-                reason='полный отказ не подтвердился',
-                now=time.time(),
-            )
-        return False
+    pause_generation = 0
+    pause_owner = 'youtube_hard_failure'
+    try:
+        if pool_probe_lock.locked():
+            state['phase'] = 'pool_pausing'
+            state['deferred_reason'] = 'проверка пула безопасно приостанавливается'
+            try:
+                pause_generation, _pause_note = _pause_pool_probe_operation(
+                    pause_owner,
+                    'Проверка пула приостанавливается для подтверждения отказа YouTube.',
+                    timeout=15.0,
+                )
+            except Exception as exc:
+                state['phase'] = 'pool_pause_failed'
+                state['deferred_reason'] = str(exc)
+                return False
+            if not pause_generation and pool_probe_lock.locked():
+                state['phase'] = 'pool_pause_failed'
+                state['deferred_reason'] = 'проверка пула не успела безопасно остановиться'
+                return False
 
-    state['consecutive_failures'] = int(state.get('consecutive_failures') or 0) + max(1, confirm_attempts)
-    if _recover_current_youtube_route_after_hard_failure(route_proto, active_key, confirm_message):
-        return False
-    if state['consecutive_failures'] < YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES:
-        state['deferred_reason'] = (
-            f'подтверждение полного отказа '
-            f'{state["consecutive_failures"]}/{YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES}'
+        confirm_ok, confirm_message, confirm_attempts, confirm_metrics = _confirm_youtube_key_detailed(route_proto)
+        if confirm_ok is None:
+            state['deferred_reason'] = 'подтверждение полного отказа недоступно'
+            return False
+        if confirm_ok:
+            confirm_state, confirm_reason, confirm_metrics = _youtube_health_state(True, confirm_metrics)
+            state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
+            _record_key_probe(route_proto, active_key, yt_ok=True, **confirm_metrics)
+            if confirm_state == 'degraded':
+                state['degraded_since'] = time.time()
+                state['degraded_checks'] = 1
+                state['last_health_state'] = 'degraded'
+                state['last_health_reason'] = confirm_reason
+                state['deferred_reason'] = 'полный отказ не подтвердился; наблюдается качество'
+            else:
+                _reset_youtube_quality_state(
+                    state,
+                    health_state='healthy',
+                    reason='полный отказ не подтвердился',
+                    now=time.time(),
+                )
+            return False
+
+        return _handle_confirmed_youtube_hard_failure(
+            route_proto,
+            active_key,
+            current_keys,
+            state,
+            confirm_message=confirm_message,
+            confirm_attempts=confirm_attempts,
+            confirm_metrics=confirm_metrics,
+            health_reason=health_reason,
         )
-        return False
-
-    _record_key_probe(route_proto, active_key, yt_ok=False, **confirm_metrics)
-    _invalidate_key_status_cache()
-    return _switch_youtube_to_verified_candidate(
-        route_proto,
-        active_key,
-        current_keys,
-        state,
-        trigger='failed',
-        reason=confirm_message or health_reason,
-    )
+    finally:
+        if pause_generation:
+            started, _queued = _resume_cancelled_pool_probe(
+                'подтверждения отказа YouTube',
+                owner=pause_owner,
+                generation=pause_generation,
+            )
+            if not started and _has_pool_probe_resume_payload():
+                _schedule_low_memory_pool_probe_resume()
 
 
 def _attempt_youtube_route_failover():
@@ -2576,12 +2897,57 @@ def _run_auto_failover_cycle():
             _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
 
 
+def _youtube_pool_pulse_allowed():
+    """Allow only the low-cost YouTube pulse while a pool probe owns its resources."""
+    task_name = 'YouTube failover'
+    if _update_maintenance_active():
+        return False
+    try:
+        if _memory_sensitive_operation_running(ignore_pool_probe=True):
+            return False
+    except Exception:
+        pass
+
+    available_kb = int(_mem_available_kb_light() or 0)
+    if (
+        POOL_PROBE_PAUSE_AVAILABLE_KB > 0 and
+        available_kb > 0 and
+        available_kb < POOL_PROBE_PAUSE_AVAILABLE_KB
+    ):
+        background_task_skip_until[task_name] = time.time() + min(
+            60.0,
+            BACKGROUND_TASK_BUSY_BACKOFF_SECONDS,
+        )
+        background_task_skip_reason[task_name] = 'memory'
+        return False
+
+    cpu_busy = _background_cpu_busy_percent()
+    max_cpu_percent = max(85.0, BACKGROUND_TASK_MAX_CPU_PERCENT)
+    if cpu_busy is not None and cpu_busy > max_cpu_percent:
+        background_task_skip_until[task_name] = time.time() + min(
+            60.0,
+            BACKGROUND_TASK_BUSY_BACKOFF_SECONDS,
+        )
+        background_task_skip_reason[task_name] = 'cpu'
+        return False
+
+    background_task_skip_until.pop(task_name, None)
+    background_task_skip_reason.pop(task_name, None)
+    return True
+
+
 def _run_youtube_failover_cycle():
     if not YOUTUBE_ROUTE_FAILOVER_ENABLED or not _app_mode_pool_enabled():
         return
     ran = False
     try:
-        if _background_task_allowed('YouTube failover', task_class='critical'):
+        pool_running = bool(globals().get('pool_probe_lock') and pool_probe_lock.locked())
+        allowed = (
+            _youtube_pool_pulse_allowed()
+            if pool_running else
+            _background_task_allowed('YouTube failover', task_class='critical')
+        )
+        if allowed:
             ran, _result = _run_coordinated_background_task(
                 'YouTube failover',
                 _attempt_youtube_route_failover,
@@ -2695,6 +3061,8 @@ TELEGRAM_COMMAND_JOB_FILE = '/opt/etc/bot/telegram_command_job.json'
 TELEGRAM_COMMAND_RESULT_FILE = '/opt/etc/bot/telegram_command_result.json'
 WEB_COMMAND_STATE_FILE = '/opt/etc/bot/web_command_state.json'
 POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'
+POOL_PROBE_ACTIVE_FILE = '/opt/etc/bot/pool_probe_active.json'
+YOUTUBE_FAILOVER_TRANSACTION_FILE = '/opt/etc/bot/youtube_failover_transaction.json'
 COMMAND_JOB_STALE_AFTER = 1800
 TELEGRAM_RESULT_RETRY_INTERVAL = 30
 
@@ -3207,6 +3575,10 @@ youtube_cache_confirm_lock = threading.Lock()
 vless2_youtube_cache_confirm_lock = youtube_cache_confirm_lock
 pool_probe_resume_payload = None
 pool_probe_resume_after_cancel = True
+pool_probe_pause_coordinator = (
+    _pool_probe_controller().PoolProbePauseCoordinator()
+    if _IMPORT_POOL_ENABLED else None
+)
 pool_probe_low_memory_resume_scheduled = False
 pool_probe_process_state = {
     'process': None,
@@ -3214,6 +3586,7 @@ pool_probe_process_state = {
     'progress_path': '',
     'result_path': '',
     'cancel_path': '',
+    'checkpoint_path': '',
     'progress_signature': None,
 }
 pool_probe_quality_sample_lock = threading.Lock()
@@ -5323,6 +5696,7 @@ def _background_task_allowed(
     max_bot_rss_kb=None,
     max_program_rss_kb=None,
     max_cpu_percent=None,
+    allow_pool_probe=False,
 ):
     if _update_maintenance_active():
         return False
@@ -5361,7 +5735,10 @@ def _background_task_allowed(
     if skip_until and now < skip_until and not can_bypass_rss_skip:
         return False
     try:
-        if _memory_sensitive_operation_running(ignore_status_refresh=(task_name == 'status refresh')):
+        if _memory_sensitive_operation_running(
+            ignore_status_refresh=(task_name == 'status refresh'),
+            ignore_pool_probe=allow_pool_probe,
+        ):
             background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
             background_task_skip_reason[task_name] = 'busy'
             last_log = float(background_task_skip_log_at.get(task_name) or 0.0)
@@ -6074,9 +6451,9 @@ def _memory_cleanup(reason='', force=False, clear_status=False, log=True):
     }
 
 
-def _memory_sensitive_operation_running(ignore_status_refresh=False):
+def _memory_sensitive_operation_running(ignore_status_refresh=False, ignore_pool_probe=False):
     try:
-        if pool_probe_lock.locked() or pool_apply_lock.locked():
+        if (not ignore_pool_probe and pool_probe_lock.locked()) or pool_apply_lock.locked():
             return True
     except Exception:
         pass
@@ -10898,6 +11275,17 @@ def _refresh_persisted_pool_summary_after_probe():
         return None
 
 
+def _pool_probe_pause_snapshot():
+    return pool_probe_pause_coordinator.snapshot()
+
+
+def _pool_probe_cancel_should_resume(owner='', generation=0):
+    snapshot = _pool_probe_pause_snapshot()
+    if snapshot.get('owner'):
+        return pool_probe_pause_coordinator.should_resume(owner, generation)
+    return bool(pool_probe_resume_after_cancel)
+
+
 def _delete_pool_probe_resume_file():
     try:
         os.remove(POOL_PROBE_RESUME_FILE)
@@ -10908,91 +11296,30 @@ def _delete_pool_probe_resume_file():
 
 
 def _pool_probe_resume_task_id(proto, key_or_id):
-    proto = str(proto or '').strip()
-    key_or_id = str(key_or_id or '').strip()
-    if proto not in POOL_PROTOCOL_ORDER or not key_or_id:
-        return None
-    if len(key_or_id) == 40 and all(char in '0123456789abcdefABCDEF' for char in key_or_id):
-        return proto, key_or_id.lower()
-    return proto, _hash_key(key_or_id)
+    return _pool_probe_resume().task_id(
+        proto,
+        key_or_id,
+        protocols=POOL_PROTOCOL_ORDER,
+        hash_key=_hash_key,
+    )
 
 
 def _normalize_pool_probe_resume_payload(payload):
-    if not isinstance(payload, dict):
-        return None
-    tasks = []
-    for item in payload.get('tasks') or []:
-        if isinstance(item, dict):
-            task_id = _pool_probe_resume_task_id(
-                item.get('proto') or item.get('protocol'),
-                item.get('key_id') or item.get('hash') or item.get('key'),
-            )
-        elif isinstance(item, (list, tuple)) and len(item) >= 2:
-            task_id = _pool_probe_resume_task_id(item[0], item[1])
-        else:
-            continue
-        if not task_id:
-            continue
-        tasks.append(task_id)
-    if not tasks:
-        return None
-
-    checks = []
-    for check in payload.get('checks') or []:
-        if isinstance(check, dict):
-            checks.append(dict(check))
-    try:
-        checked = int(payload.get('checked') or 0)
-    except Exception:
-        checked = 0
-    try:
-        total = int(payload.get('total') or 0)
-    except Exception:
-        total = 0
-    checked = max(0, checked)
-    total = max(total, checked + len(tasks), len(tasks))
-    checked = min(checked, total)
-    try:
-        started_at = float(payload.get('started_at') or 0)
-    except Exception:
-        started_at = 0.0
-    if started_at <= 0:
-        started_at = time.time()
-    return {
-        'tasks': tasks,
-        'checks': checks,
-        'scope': str(payload.get('scope') or 'manual'),
-        'checked': checked,
-        'total': total,
-        'started_at': started_at,
-    }
+    return _pool_probe_resume().normalize_payload(
+        payload,
+        protocols=POOL_PROTOCOL_ORDER,
+        hash_key=_hash_key,
+    )
 
 
 def _resolve_pool_probe_resume_tasks(payload):
-    payload = _normalize_pool_probe_resume_payload(payload)
-    if not payload:
-        return None
     pools = _ensure_current_keys_in_pools(_load_current_keys())
-    lookup = {}
-    for proto in POOL_PROTOCOL_ORDER:
-        for key_value in pools.get(proto, []) or []:
-            key_value = str(key_value or '').strip()
-            if key_value:
-                lookup[(proto, _hash_key(key_value))] = key_value
-    resolved = []
-    for proto, key_id in payload.get('tasks') or []:
-        key_value = lookup.get((proto, key_id))
-        if key_value:
-            resolved.append((proto, key_value))
-    if not resolved:
-        return None
-    resolved_payload = dict(payload)
-    resolved_payload['tasks'] = resolved
-    resolved_payload['total'] = max(
-        int(resolved_payload.get('total') or 0),
-        int(resolved_payload.get('checked') or 0) + len(resolved),
+    return _pool_probe_resume().resolve_payload(
+        payload,
+        pools,
+        protocols=POOL_PROTOCOL_ORDER,
+        hash_key=_hash_key,
     )
-    return resolved_payload
 
 
 def _persist_pool_probe_resume_payload(payload):
@@ -11000,20 +11327,18 @@ def _persist_pool_probe_resume_payload(payload):
     if not normalized:
         _delete_pool_probe_resume_file()
         return None
-    serializable = dict(normalized)
-    serializable['task_ref'] = 'key_hash'
-    serializable['tasks'] = [
-        {'proto': proto, 'key_id': key_id}
-        for proto, key_id in normalized['tasks']
-    ]
+    serializable = _pool_probe_resume().serializable_payload(normalized)
+    write_ok = False
     try:
         _write_json_file(POOL_PROBE_RESUME_FILE, serializable)
         try:
             os.chmod(POOL_PROBE_RESUME_FILE, 0o600)
         except Exception:
             pass
+        write_ok = True
     except Exception as exc:
         _write_runtime_log(f'Failed to persist pool probe resume queue: {exc}')
+    normalized['_durable'] = write_ok
     return normalized
 
 
@@ -11021,9 +11346,9 @@ def _store_cancelled_pool_probe(probe_tasks, checks, scope):
     global pool_probe_resume_payload
     remaining = list(probe_tasks or [])
     if not remaining:
-        return
-    if not pool_probe_resume_after_cancel:
-        return
+        return None
+    if not _pool_probe_cancel_should_resume():
+        return None
     progress = _get_pool_probe_progress()
     try:
         original_total = int(progress.get('total') or 0)
@@ -11045,11 +11370,12 @@ def _store_cancelled_pool_probe(probe_tasks, checks, scope):
         'started_at': float(progress.get('started_at') or 0) or time.time(),
     })
     if not payload:
-        return
+        return None
     with pool_probe_resume_lock:
         pool_probe_resume_payload = payload
     if not pool_probe_cancel_event.is_set():
         _schedule_low_memory_pool_probe_resume()
+    return payload
 
 
 def _take_cancelled_pool_probe():
@@ -11082,12 +11408,73 @@ def _restore_pool_probe_resume_payload(payload):
             pool_probe_resume_payload = payload
 
 
+def _delete_pool_probe_active_file():
+    try:
+        os.remove(POOL_PROBE_ACTIVE_FILE)
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        _write_runtime_log(f'Failed to remove active pool probe manifest: {exc}')
+
+
+def _persist_active_pool_probe_manifest(tasks, checks, scope, *, checked=0, total=0, started_at=0.0):
+    task_ids = []
+    for proto, key_value in tasks or []:
+        task_id = _pool_probe_resume_task_id(proto, key_value)
+        if task_id:
+            task_ids.append(task_id)
+    payload = _normalize_pool_probe_resume_payload({
+        'tasks': task_ids,
+        'checks': list(checks or []),
+        'scope': scope or 'manual',
+        'checked': max(0, int(checked or 0)),
+        'total': max(0, int(total or 0)),
+        'started_at': float(started_at or time.time()),
+    })
+    if not payload:
+        return False
+    serializable = _pool_probe_resume().serializable_payload(payload)
+    serializable['schema'] = 1
+    serializable['status'] = 'running'
+    try:
+        _write_json_file(POOL_PROBE_ACTIVE_FILE, serializable)
+        os.chmod(POOL_PROBE_ACTIVE_FILE, 0o600)
+        return True
+    except Exception as exc:
+        _write_runtime_log(f'Failed to persist active pool probe manifest: {exc}')
+        return False
+
+
+def _recover_interrupted_pool_probe_manifest():
+    if _has_pool_probe_resume_payload():
+        _delete_pool_probe_active_file()
+        return False
+    payload = _normalize_pool_probe_resume_payload(_read_json_file(POOL_PROBE_ACTIVE_FILE, {}))
+    _delete_pool_probe_active_file()
+    if not payload:
+        return False
+    payload['checked'] = 0
+    payload['total'] = len(payload.get('tasks') or [])
+    restored = _persist_pool_probe_resume_payload(payload)
+    if not restored:
+        return False
+    global pool_probe_resume_payload
+    with pool_probe_resume_lock:
+        pool_probe_resume_payload = restored
+    _write_runtime_log('Interrupted pool probe restored from its private task manifest.')
+    return True
+
+
 def _load_persisted_pool_probe_resume():
     global pool_probe_resume_payload
     payload = _normalize_pool_probe_resume_payload(_read_json_file(POOL_PROBE_RESUME_FILE, {}))
     if not payload:
         _delete_pool_probe_resume_file()
-        return False
+        if not _recover_interrupted_pool_probe_manifest():
+            return False
+        payload = _normalize_pool_probe_resume_payload(_read_json_file(POOL_PROBE_RESUME_FILE, {}))
+        if not payload:
+            return False
     with pool_probe_resume_lock:
         if not pool_probe_resume_payload:
             pool_probe_resume_payload = payload
@@ -11183,6 +11570,7 @@ def _pool_probe_process_paths():
         'progress_path': base + '.progress.json',
         'result_path': base + '.result.json',
         'cancel_path': base + '.cancel',
+        'checkpoint_path': base + '.result.json.checkpoint',
     }
 
 
@@ -11352,7 +11740,7 @@ def _apply_pool_probe_records_in_worker(records_path):
 
 def _cleanup_pool_probe_process_files(state=None):
     state = state or pool_probe_process_state
-    for key in ('input_path', 'progress_path', 'result_path', 'cancel_path'):
+    for key in ('input_path', 'progress_path', 'result_path', 'cancel_path', 'checkpoint_path'):
         path = state.get(key) if isinstance(state, dict) else ''
         if path:
             _remove_file(path)
@@ -11361,12 +11749,37 @@ def _cleanup_pool_probe_process_files(state=None):
                 _remove_file(f'{path}.records.apply.json')
 
 
+def _load_pool_probe_cancel_checkpoint():
+    with pool_probe_resume_lock:
+        checkpoint_path = str(pool_probe_process_state.get('checkpoint_path') or '')
+    if not checkpoint_path:
+        return None
+    payload = _read_json_file(checkpoint_path, {})
+    if not isinstance(payload, dict) or not payload.get('ready'):
+        return None
+    return payload
+
+
+def _store_pool_probe_cancel_checkpoint(payload):
+    global pool_probe_resume_payload
+    normalized = _persist_pool_probe_resume_payload(payload)
+    if not normalized:
+        return None
+    with pool_probe_resume_lock:
+        pool_probe_resume_payload = normalized
+    return normalized
+
+
 def _request_pool_probe_process_cancel(resume=True):
     with pool_probe_resume_lock:
         cancel_path = pool_probe_process_state.get('cancel_path')
     if not cancel_path:
         return False
     try:
+        if os.path.exists(cancel_path):
+            existing = _read_text_file(cancel_path).strip().lower()
+            if resume or existing.startswith('no-resume'):
+                return True
         with open(cancel_path, 'w', encoding='utf-8') as file:
             file.write(('resume' if resume else 'no-resume') + f' {time.time()}')
         try:
@@ -11428,6 +11841,17 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
         'telegram_authenticated': bool(_app_mode_telegram_enabled()),
         'telegram_required_protocol': _telegram_route_protocol(),
     }
+    manifest_ready = _persist_active_pool_probe_manifest(
+        selected,
+        custom_checks,
+        scope,
+        checked=initial_checked,
+        total=total_count,
+        started_at=started_at,
+    )
+    if not manifest_ready:
+        pool_probe_lock.release()
+        raise RuntimeError('Не удалось безопасно сохранить очередь проверки пула.')
     try:
         _write_json_file_private(paths['input_path'], payload)
         _pool_probe_write_progress(
@@ -11458,6 +11882,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
         )
     except Exception:
         _cleanup_pool_probe_process_files(paths)
+        _delete_pool_probe_active_file()
         pool_probe_lock.release()
         raise
     finally:
@@ -11603,7 +12028,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             elif has_resume:
                 completion_status = 'paused'
                 completion_reason = completion_reason or 'Проверка приостановлена и может быть продолжена.'
-            elif was_cancelled and not pool_probe_resume_after_cancel:
+            elif was_cancelled and not _pool_probe_cancel_should_resume():
                 completion_status = 'cancelled'
                 completion_reason = completion_reason or 'Проверка остановлена пользователем.'
             else:
@@ -11641,6 +12066,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             # finally block runs; it only matches bypass_pool_probe_* runtime.
             _cleanup_pool_probe_runtime_light(kill_processes=True)
             _cleanup_pool_probe_process_files(paths)
+            _delete_pool_probe_active_file()
             with pool_probe_resume_lock:
                 if pool_probe_process_state.get('process') is process:
                     pool_probe_process_state.update({
@@ -11649,6 +12075,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
                         'progress_path': '',
                         'result_path': '',
                         'cancel_path': '',
+                        'checkpoint_path': '',
                         'progress_signature': None,
                     })
             try:
@@ -11691,7 +12118,7 @@ def _handle_inprocess_pool_probe_finished(result):
     current_unique = max(0, checked - previous_checked)
     has_resume = _has_pool_probe_resume_payload()
     was_cancelled = pool_probe_cancel_event.is_set()
-    explicit_cancel = bool(was_cancelled and not pool_probe_resume_after_cancel)
+    explicit_cancel = bool(was_cancelled and not _pool_probe_cancel_should_resume())
     complete = bool(total and checked >= total and not result.get('error') and not has_resume and not was_cancelled)
     if complete:
         status = 'completed'
@@ -11796,7 +12223,12 @@ def _start_selected_pool_probe_tasks(selected, custom_checks, scope, *, initial_
     return started, queued
 
 
-def _resume_cancelled_pool_probe(reason='применения ключа'):
+def _resume_cancelled_pool_probe(reason='применения ключа', *, owner='', generation=0):
+    if owner and generation and not pool_probe_pause_coordinator.should_resume(owner, generation):
+        return False, 0
+    pause_snapshot = _pool_probe_pause_snapshot()
+    if pause_snapshot.get('owner') and not _pool_probe_cancel_should_resume(owner, generation):
+        return False, 0
     payload = _take_cancelled_pool_probe()
     if not payload:
         if pool_probe_cancel_event.is_set():
@@ -11804,10 +12236,15 @@ def _resume_cancelled_pool_probe(reason='применения ключа'):
                 deadline = time.time() + 60
                 while pool_probe_lock.locked() and time.time() < deadline:
                     time.sleep(0.5)
+                if owner and generation and not pool_probe_pause_coordinator.should_resume(owner, generation):
+                    return
+                current_pause = _pool_probe_pause_snapshot()
+                if current_pause.get('owner') and not _pool_probe_cancel_should_resume(owner, generation):
+                    return
                 delayed_payload = _take_cancelled_pool_probe()
                 delayed_payload = _resolve_pool_probe_resume_tasks(delayed_payload)
-                if delayed_payload:
-                    _start_selected_pool_probe_tasks(
+                if delayed_payload and delayed_payload.get('tasks'):
+                    started, _queued = _start_selected_pool_probe_tasks(
                         delayed_payload.get('tasks') or [],
                         delayed_payload.get('checks') or [],
                         delayed_payload.get('scope') or 'manual',
@@ -11815,13 +12252,46 @@ def _resume_cancelled_pool_probe(reason='применения ключа'):
                         total_count=delayed_payload.get('total'),
                         started_at=delayed_payload.get('started_at') or None,
                     )
+                    if started:
+                        if owner and generation:
+                            pool_probe_pause_coordinator.finish(owner, generation)
+                        elif current_pause.get('owner'):
+                            pool_probe_pause_coordinator.finish(
+                                current_pause.get('owner'),
+                                current_pause.get('generation'),
+                            )
+                    else:
+                        _restore_pool_probe_resume_payload(delayed_payload)
                 elif not pool_probe_lock.locked():
                     pool_probe_cancel_event.clear()
+                    if owner and generation:
+                        pool_probe_pause_coordinator.finish(owner, generation)
+                    elif current_pause.get('owner'):
+                        pool_probe_pause_coordinator.finish(
+                            current_pause.get('owner'),
+                            current_pause.get('generation'),
+                        )
 
             threading.Thread(target=delayed_resume, daemon=True).start()
         return False, 0
     resolved_payload = _resolve_pool_probe_resume_tasks(payload)
-    if not resolved_payload:
+    if not resolved_payload or not resolved_payload.get('tasks'):
+        if resolved_payload:
+            _set_pool_probe_progress(
+                running=False,
+                checked=int(resolved_payload.get('checked') or 0),
+                total=int(resolved_payload.get('total') or 0),
+                note='Оставшиеся ключи удалены из пула; продолжение не требуется.',
+                finished_at=time.time(),
+            )
+        pool_probe_cancel_event.clear()
+        if owner and generation:
+            pool_probe_pause_coordinator.finish(owner, generation)
+        elif pause_snapshot.get('owner'):
+            pool_probe_pause_coordinator.finish(
+                pause_snapshot.get('owner'),
+                pause_snapshot.get('generation'),
+            )
         return False, 0
     started, queued = _start_selected_pool_probe_tasks(
         resolved_payload.get('tasks') or [],
@@ -11834,36 +12304,76 @@ def _resume_cancelled_pool_probe(reason='применения ключа'):
     if not started:
         _restore_pool_probe_resume_payload(payload)
     if started:
+        if owner and generation:
+            pool_probe_pause_coordinator.finish(owner, generation)
+        elif pause_snapshot.get('owner'):
+            pool_probe_pause_coordinator.finish(
+                pause_snapshot.get('owner'),
+                pause_snapshot.get('generation'),
+            )
         _write_runtime_log(f'Проверка пула продолжена после {reason}. Осталось в очереди: {queued}.')
     return started, queued
 
 
-def _pause_pool_probe_for_apply(timeout=12.0):
+def _pause_pool_probe_operation(owner, reason, timeout=15.0):
     global pool_probe_resume_after_cancel
     if not pool_probe_lock.locked():
-        return False, ''
+        return 0, ''
+    generation = pool_probe_pause_coordinator.begin(
+        owner,
+        reason,
+        resume=True,
+        now=time.time(),
+    )
     pool_probe_resume_after_cancel = True
     pool_probe_cancel_event.set()
     _request_pool_probe_process_cancel()
-    _set_pool_probe_progress(note='Проверка пула приостанавливается для применения выбранного ключа.')
+    _set_pool_probe_progress(note=str(reason or 'Проверка пула приостанавливается.'))
     deadline = time.time() + max(0.5, float(timeout or 0))
+    durable_checkpoint = False
     while pool_probe_lock.locked() and time.time() < deadline:
+        checkpoint = _load_pool_probe_cancel_checkpoint()
+        if checkpoint and not durable_checkpoint:
+            stored = _store_pool_probe_cancel_checkpoint(checkpoint)
+            durable_checkpoint = bool(stored and stored.get('_durable'))
+            if durable_checkpoint:
+                pool_probe_pause_coordinator.mark_checkpoint(owner, generation)
         time.sleep(0.2)
     if pool_probe_lock.locked():
-        _cleanup_pool_probe_runtime_light(kill_processes=True)
-        _terminate_pool_probe_process_worker()
-        force_deadline = time.time() + 5.0
-        while pool_probe_lock.locked() and time.time() < force_deadline:
-            time.sleep(0.2)
+        checkpoint = _load_pool_probe_cancel_checkpoint()
+        if checkpoint and not durable_checkpoint:
+            stored = _store_pool_probe_cancel_checkpoint(checkpoint)
+            durable_checkpoint = bool(stored and stored.get('_durable'))
+            if durable_checkpoint:
+                pool_probe_pause_coordinator.mark_checkpoint(owner, generation)
+        if durable_checkpoint:
+            _cleanup_pool_probe_runtime_light(kill_processes=True)
+            _terminate_pool_probe_process_worker()
+            force_deadline = time.time() + 5.0
+            while pool_probe_lock.locked() and time.time() < force_deadline:
+                time.sleep(0.2)
     if pool_probe_lock.locked():
-        _resume_cancelled_pool_probe('неудачной паузы проверки пула')
-        raise RuntimeError('Проверка пула ещё останавливается. Ключ не применён, чтобы не перезапускать основной Xray поверх активной проверки. Повторите применение через несколько секунд.')
-    return True, 'Проверка пула приостановлена; после применения ключа она продолжится.'
+        _resume_cancelled_pool_probe('неудачной паузы проверки пула', owner=owner, generation=generation)
+        raise RuntimeError(
+            'Проверка пула ещё останавливается. Основной Xray не изменён; '
+            'операция будет повторена после безопасного сохранения очереди.'
+        )
+    return generation, 'Проверка пула безопасно приостановлена и будет продолжена.'
+
+
+def _pause_pool_probe_for_apply(timeout=15.0):
+    generation, note = _pause_pool_probe_operation(
+        'manual_apply',
+        'Проверка пула приостанавливается для применения выбранного ключа.',
+        timeout=timeout,
+    )
+    return bool(generation), note
 
 
 def _cancel_pool_probe(timeout=2.0):
     global pool_probe_resume_after_cancel, pool_probe_resume_payload
     _clear_pool_probe_completion_notification()
+    pool_probe_pause_coordinator.user_cancel(now=time.time())
     if not pool_probe_lock.locked():
         had_resume_payload = _has_pool_probe_resume_payload()
         with pool_probe_resume_lock:
@@ -12014,6 +12524,8 @@ def _queue_pool_key_probe(tasks, max_keys=None, stale_only=False, scope='manual'
     )
     if POOL_PROBE_ACTIVE_ONLY:
         selected = _pool_probe_controller().filter_active_probe_tasks(selected, _load_current_keys())
+    if selected and not pool_probe_lock.locked():
+        pool_probe_pause_coordinator.reset_for_start()
     return _start_selected_pool_probe_tasks(selected, custom_checks, scope)
 
 
@@ -12306,7 +12818,8 @@ def _mark_nightly_subscription_pool_probe_started(window_date, now, queued=0, *,
         return
     previous = _nightly_subscription_pool_probe_state()
     same_window = str(previous.get('window_date') or '') == str(window_date)
-    attempts = max(0, _pool_summary_count(previous, 'attempts')) + 1 if same_window else 1
+    previous_attempts = max(0, _pool_summary_count(previous, 'attempts')) if same_window else 0
+    attempts = previous_attempts if resumed and same_window else previous_attempts + 1
     started_at = float(previous.get('started_at') or now) if resumed and same_window else float(now)
     checked = max(0, _pool_summary_count(previous, 'checked')) if resumed and same_window else 0
     previous_total = max(0, _pool_summary_count(previous, 'total')) if resumed and same_window else 0
@@ -14641,6 +15154,7 @@ def _repair_active_reality_endpoint(
     failure_message='',
     service='telegram',
     ignore_recent_success=False,
+    traffic_guard_exclude_proto='',
 ):
     if not REALITY_ENDPOINT_REPAIR_ENABLED or proto not in ('vless', 'vless2'):
         return False
@@ -14680,6 +15194,7 @@ def _repair_active_reality_endpoint(
         f'{_pool_proto_label(proto)} endpoint repair',
         log=True,
         hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+        exclude_proto=traffic_guard_exclude_proto,
     ):
         return False
     _write_runtime_log(

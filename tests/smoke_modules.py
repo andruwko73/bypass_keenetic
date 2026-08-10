@@ -64,6 +64,7 @@ import telegram_healthcheck
 import pool_probe_controller
 import pool_probe_curl
 import pool_probe_process_runner
+import pool_probe_resume
 import pool_probe_runner
 import probe_cache
 import auto_failover_runtime
@@ -90,6 +91,7 @@ import update_status
 import youtube_healthcheck
 import youtube_edge_prefetch
 import youtube_edge_prefetch_runner
+import youtube_failover_transaction
 import youtube_route_owner
 from proxy_config_builder import (
     build_proxy_core_config,
@@ -2304,6 +2306,7 @@ def test_subscription_nightly_pool_probe_dispatches_full_pool_once():
             "bot._app_mode_pool_enabled = lambda: True\n"
             "bot._subscription_runtime = lambda: Runtime()\n"
             "bot._nightly_subscription_pool_probe_state = lambda: {}\n"
+            "bot._write_nightly_subscription_pool_probe_state = lambda _payload: None\n"
             "bot._background_task_allowed = lambda _name, **_kwargs: True\n"
             "bot.pool_probe_lock = threading.Lock()\n"
             "bot._has_pool_probe_resume_payload = lambda: False\n"
@@ -2365,7 +2368,7 @@ def test_subscription_nightly_pool_probe_lifecycle_resume_and_legacy_state():
             "assert bot._maybe_start_nightly_subscription_pool_probe({}, now=501.0)\n"
             "state = bot._nightly_subscription_pool_probe_state()\n"
             "assert resumes == ['ночной проверки']\n"
-            "assert state['status'] == 'running' and state['attempts'] == 2\n"
+            "assert state['status'] == 'running' and state['attempts'] == 1\n"
             "assert state['started_at'] == 100.0 and state['checked'] == 2 and state['total'] == 5\n"
             "bot._mark_nightly_subscription_pool_probe_finished(status='cancelled', checked=3, total=5, started_at=100.0, finished_at=550.0, reason='cancelled', applied_unique_count=3)\n"
             "state = bot._nightly_subscription_pool_probe_state()\n"
@@ -2559,6 +2562,7 @@ def test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
         'pool_probe_lock': Unlocked(),
         '_youtube_route_protocol': lambda: 'vless2',
         '_youtube_failover_state': lambda _proto: state,
+        '_recover_interrupted_youtube_failover_transaction': lambda: None,
         '_load_current_keys': lambda: {'vless2': 'active'},
         '_reset_youtube_quality_state': reset_quality,
         '_check_youtube_protocol_for_background': (
@@ -2576,6 +2580,21 @@ def test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
         '_switch_youtube_to_verified_candidate': (
             lambda *args, **kwargs: calls.append(('switch', kwargs.get('trigger'))) or True
         ),
+        '_handle_confirmed_youtube_hard_failure': (
+            lambda _proto, _key, _keys, target, **kwargs: (
+                target.__setitem__(
+                    'consecutive_failures',
+                    int(target.get('consecutive_failures') or 0) + int(kwargs.get('confirm_attempts') or 1),
+                ) or namespace['_switch_youtube_to_verified_candidate'](
+                    _proto,
+                    _key,
+                    _keys,
+                    target,
+                    trigger='failed',
+                    reason=kwargs.get('confirm_message') or '',
+                )
+            )
+        ),
         '_youtube_quality_settings': lambda: {'enabled': True},
         '_vless_traffic_guard_active': lambda *args, **kwargs: False,
         '_youtube_stream_guard_active': lambda *args, **kwargs: False,
@@ -2591,6 +2610,290 @@ def test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
     assert ('live', 'pulse') in calls
     assert ('confirm', 'vless2') in calls
     assert ('switch', 'failed') in calls
+
+    class MutablePoolLock:
+        active = True
+
+        @classmethod
+        def locked(cls):
+            return cls.active
+
+    state = {
+        'last_ok': 99.0,
+        'last_fail': 0.0,
+        'last_attempt': 0.0,
+        'last_trigger': '',
+        'consecutive_failures': 0,
+        'degraded_since': 0.0,
+        'degraded_checks': 0,
+        'last_health_state': 'healthy',
+        'last_health_reason': '',
+        'last_quality_score': 0,
+        'last_candidate_score': 0,
+        'deferred_reason': '',
+        'in_progress': False,
+    }
+    calls.clear()
+    namespace['pool_probe_lock'] = MutablePoolLock()
+    namespace['_check_youtube_protocol_once'] = (
+        lambda proto, metrics=None, profile='full': calls.append(('direct', profile)) or (False, 'outage')
+    )
+    namespace['_check_youtube_protocol_for_background'] = (
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('pulse spawned a health worker'))
+    )
+
+    def pause_pool(*_args, **_kwargs):
+        calls.append('pause')
+        MutablePoolLock.active = False
+        return 7, 'ok'
+
+    def confirm_after_pause(_proto):
+        assert MutablePoolLock.active is False
+        calls.append('confirm_after_pause')
+        return False, 'confirmed outage', 2, {}
+
+    namespace['_pause_pool_probe_operation'] = pause_pool
+    namespace['_confirm_youtube_key_detailed'] = confirm_after_pause
+    namespace['_handle_confirmed_youtube_hard_failure'] = (
+        lambda *_args, **_kwargs: calls.append('handle_failure') or True
+    )
+    namespace['_resume_cancelled_pool_probe'] = (
+        lambda *_args, **_kwargs: calls.append('resume') or (True, 4)
+    )
+    namespace['_has_pool_probe_resume_payload'] = lambda: False
+    namespace['_schedule_low_memory_pool_probe_resume'] = lambda: calls.append('schedule_resume')
+
+    assert attempt() is True
+    assert calls == [
+        ('direct', 'pulse'),
+        ('log', 'YouTube failover: Vless 2 complete failure detected; a fast confirmation is scheduled.'),
+        'pause',
+        'confirm_after_pause',
+        'handle_failure',
+        'resume',
+    ]
+
+
+def test_confirmed_youtube_failure_pauses_and_resumes_pool_once():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_handle_confirmed_youtube_hard_failure'
+    )
+    calls = []
+    state = {'consecutive_failures': 1, 'phase': '', 'recovery_failed': False}
+    namespace = {
+        'pool_probe_lock': py_types.SimpleNamespace(locked=lambda: True),
+        '_pause_pool_probe_operation': lambda *args, **kwargs: calls.append('pause') or (7, 'ok'),
+        '_recover_current_youtube_route_after_hard_failure': lambda *args: calls.append('repair') or False,
+        'YOUTUBE_VLESS2_FAILOVER_CONSECUTIVE_FAILURES': 3,
+        '_record_key_probe': lambda *args, **kwargs: calls.append('record'),
+        '_invalidate_key_status_cache': lambda: calls.append('invalidate'),
+        '_switch_youtube_to_verified_candidate': lambda *args, **kwargs: calls.append('switch') or True,
+        '_resume_cancelled_pool_probe': lambda *args, **kwargs: calls.append('resume') or (True, 4),
+        '_has_pool_probe_resume_payload': lambda: False,
+        '_schedule_low_memory_pool_probe_resume': lambda: calls.append('schedule'),
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    assert namespace['_handle_confirmed_youtube_hard_failure'](
+        'vless2',
+        'active',
+        {'vless2': 'active'},
+        state,
+        confirm_message='outage',
+        confirm_attempts=2,
+        confirm_metrics={},
+        health_reason='failed',
+    ) is True
+    assert calls == ['pause', 'repair', 'record', 'invalidate', 'switch', 'resume']
+    assert state['phase'] == ''
+
+
+def test_youtube_pool_pulse_guard_keeps_only_emergency_limits():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_youtube_pool_pulse_allowed'
+    )
+    now = [100.0]
+    available = [160000]
+    cpu = [55.0]
+    skip_until = {'YouTube failover': 999.0}
+    skip_reason = {'YouTube failover': 'program_rss'}
+    namespace = {
+        'time': py_types.SimpleNamespace(time=lambda: now[0]),
+        '_update_maintenance_active': lambda: False,
+        '_memory_sensitive_operation_running': lambda **kwargs: kwargs.get('ignore_pool_probe') is not True,
+        '_mem_available_kb_light': lambda: available[0],
+        '_background_cpu_busy_percent': lambda: cpu[0],
+        'POOL_PROBE_PAUSE_AVAILABLE_KB': 125000,
+        'BACKGROUND_TASK_MAX_CPU_PERCENT': 45.0,
+        'BACKGROUND_TASK_BUSY_BACKOFF_SECONDS': 120.0,
+        'background_task_skip_until': skip_until,
+        'background_task_skip_reason': skip_reason,
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    allowed = namespace['_youtube_pool_pulse_allowed']
+
+    assert allowed() is True
+    assert 'YouTube failover' not in skip_until
+    assert 'YouTube failover' not in skip_reason
+
+    available[0] = 100000
+    assert allowed() is False
+    assert skip_reason['YouTube failover'] == 'memory'
+
+    available[0] = 160000
+    cpu[0] = 90.0
+    assert allowed() is False
+    assert skip_reason['YouTube failover'] == 'cpu'
+
+
+def test_youtube_cycle_uses_pool_pulse_guard_instead_of_generic_rss_guard():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_run_youtube_failover_cycle'
+    )
+    calls = []
+    namespace = {
+        'YOUTUBE_ROUTE_FAILOVER_ENABLED': True,
+        '_app_mode_pool_enabled': lambda: True,
+        'pool_probe_lock': py_types.SimpleNamespace(locked=lambda: True),
+        '_youtube_pool_pulse_allowed': lambda: calls.append('pool_guard') or True,
+        '_background_task_allowed': (
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('generic RSS guard used'))
+        ),
+        '_attempt_youtube_route_failover': lambda: calls.append('pulse') or False,
+        '_run_coordinated_background_task': (
+            lambda _name, callback: (True, callback())
+        ),
+        '_write_runtime_log': lambda message: calls.append(('log', message)),
+        '_memory_cleanup': lambda *args, **kwargs: calls.append('cleanup'),
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    namespace['_run_youtube_failover_cycle']()
+    assert calls == ['pool_guard', 'pulse', 'cleanup']
+
+
+def test_youtube_success_clears_stale_failover_phase():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_reset_youtube_quality_state'
+    )
+    namespace = {'time': py_types.SimpleNamespace(time=lambda: 123.0)}
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    state = {
+        'phase': 'waiting_retry',
+        'recovery_failed': True,
+        'deferred_reason': 'старое сообщение',
+    }
+    namespace['_reset_youtube_quality_state'](
+        state,
+        health_state='healthy',
+        reason='маршрут восстановлен',
+    )
+    assert state['phase'] == ''
+    assert state['recovery_failed'] is False
+    assert state['deferred_reason'] == ''
+    assert state['last_ok'] == 123.0
+
+
+def test_youtube_transaction_recovery_refreshes_runtime_state():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_recover_interrupted_youtube_failover_transaction'
+    )
+    calls = []
+    state = {'phase': '', 'recovery_failed': False, 'deferred_reason': ''}
+    transaction = {
+        'proto': 'vless2',
+        'original_id': 'a' * 40,
+        'candidate_id': 'b' * 40,
+        'phase': 'candidate_verified',
+    }
+
+    def reset_quality(target, **kwargs):
+        calls.append(('reset', kwargs.get('health_state')))
+        target['phase'] = ''
+        target['recovery_failed'] = False
+        target['deferred_reason'] = ''
+
+    namespace = {
+        'YOUTUBE_FAILOVER_TRANSACTION_FILE': 'transaction.json',
+        '_youtube_failover_transaction': lambda: py_types.SimpleNamespace(
+            load_transaction=lambda _path: transaction,
+        ),
+        '_youtube_failover_state': lambda _proto: state,
+        'pool_probe_lock': py_types.SimpleNamespace(locked=lambda: False),
+        '_youtube_failover_key_by_id': (
+            lambda _proto, key_id: 'candidate' if key_id == 'b' * 40 else 'original'
+        ),
+        '_load_current_keys': lambda: {'vless2': 'candidate'},
+        '_hash_key': lambda key: 'b' * 40 if key == 'candidate' else 'a' * 40,
+        '_confirm_youtube_key_detailed': lambda _proto: (True, 'ok', 1, {'yt_score': 90}),
+        'proxy_mode': 'vless2',
+        'proxy_settings': {'vless2': 'socks'},
+        'AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT': 2,
+        'AUTO_FAILOVER_CHECK_READ_TIMEOUT': 3,
+        '_check_telegram_api_for_background': lambda *args, **kwargs: (True, 'ok'),
+        '_set_active_key': lambda *args: calls.append(('active', args[0])),
+        '_clear_youtube_failover_transaction': lambda: calls.append(('clear',)) or True,
+        '_audit_key_switch': lambda *args: calls.append(('audit', args[0])),
+        '_record_key_probe': lambda *args, **kwargs: calls.append(('probe', kwargs.get('yt_ok'))),
+        '_invalidate_web_status_cache': lambda: calls.append(('web_cache',)),
+        '_invalidate_key_status_cache': lambda: calls.append(('key_cache',)),
+        '_reset_youtube_quality_state': reset_quality,
+        '_write_runtime_log': lambda message: calls.append(('log', message)),
+        '_update_youtube_failover_transaction': lambda _phase: True,
+        '_restore_youtube_key_after_failed_failover': lambda *_args: False,
+        '_resume_cancelled_pool_probe': lambda *args, **kwargs: (False, 0),
+        '_has_pool_probe_resume_payload': lambda: False,
+        '_schedule_low_memory_pool_probe_resume': lambda: None,
+        'time': py_types.SimpleNamespace(time=lambda: 123.0),
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    assert namespace['_recover_interrupted_youtube_failover_transaction']() is True
+    assert ('active', 'vless2') in calls
+    assert ('audit', 'youtube_auto_failover_recovery') in calls
+    assert ('probe', True) in calls
+    assert ('web_cache',) in calls and ('key_cache',) in calls
+    assert ('reset', 'healthy') in calls
+
+
+def test_youtube_failed_candidate_escalates_restore_failure():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_restore_youtube_key_after_failed_failover'
+    )
+    state = {'recovery_failed': False, 'phase': '', 'deferred_reason': ''}
+    phases = []
+    logs = []
+    namespace = {
+        '_load_current_keys': lambda: {'vless2': 'candidate'},
+        '_clear_youtube_failover_transaction': lambda: True,
+        '_update_youtube_failover_transaction': lambda phase: phases.append(phase) or True,
+        '_install_key_for_protocol': lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError('flash I/O')),
+        '_record_key_probe': lambda *args, **kwargs: None,
+        '_audit_key_switch': lambda *args, **kwargs: None,
+        '_pool_proto_label': lambda _proto: 'Vless 2',
+        '_youtube_failover_state': lambda _proto: state,
+        '_write_runtime_log': logs.append,
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    assert namespace['_restore_youtube_key_after_failed_failover']('vless2', 'original') is False
+    assert phases == ['restore_started', 'restore_failed']
+    assert state['recovery_failed'] is True and state['phase'] == 'recovery_failed'
+    assert any('failed to restore' in item for item in logs)
 
 
 def test_youtube_healthcheck_detects_first_load_instability():
@@ -4973,6 +5276,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "background_task_skip_reason[task_name] = 'program_rss'" in source
     assert "background_task_skip_reason[task_name] = 'cpu'" in source
     assert "'status refresh skipped high RSS'" in source
+    assert 'def _youtube_pool_pulse_allowed():' in source
+    assert "_check_youtube_protocol_once\n        if pool_running" in source
     assert "_background_task_allowed('YouTube failover', task_class='critical')" in source
     assert 'background_task_coordinator_lock = threading.Lock()' in source
     assert 'def _run_coordinated_background_task(task_name, callback):' in source
@@ -5248,7 +5553,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _record_pool_probe_completion' in source
     assert "POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'" in source
     assert 'def _persist_pool_probe_resume_payload' in source
-    assert "serializable['task_ref'] = 'key_hash'" in source
+    assert "payload['task_ref'] = 'key_hash'" in (APP_ROOT / 'pool_probe_resume.py').read_text(encoding='utf-8')
     assert 'def _resolve_pool_probe_resume_tasks' in source
     assert 'def _load_persisted_pool_probe_resume' in source
     assert '_load_persisted_pool_probe_resume()' in source
@@ -5483,6 +5788,7 @@ def test_simple_mode_import_skips_advanced_modules():
     advanced_modules = (
         'custom_checks_store',
         'pool_probe_controller',
+        'pool_probe_resume',
         'probe_cache',
         'key_pool_web',
         'telegram_pool_ui',
@@ -5490,6 +5796,7 @@ def test_simple_mode_import_skips_advanced_modules():
         'auto_failover_runtime',
         'telegram_call_learning',
         'youtube_edge_prefetch',
+        'youtube_failover_transaction',
         'subscription_runtime',
         'service_catalog',
     )
@@ -10231,6 +10538,209 @@ def test_auto_failover_tries_next_candidate_after_permanent_failure():
     )
 
 
+def test_youtube_failover_transaction_is_private_and_recoverable():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        path = Path(temp_dir) / 'youtube-transaction.json'
+        original_id = 'a' * 40
+        candidate_id = 'b' * 40
+        assert youtube_failover_transaction.begin_transaction(
+            str(path),
+            'vless2',
+            original_id,
+            candidate_id,
+            trigger='failed',
+            now=10,
+        )
+        payload = youtube_failover_transaction.load_transaction(str(path))
+        assert payload['phase'] == 'prepared'
+        assert payload['original_id'] == original_id
+        assert payload['candidate_id'] == candidate_id
+        assert 'vless://' not in path.read_text(encoding='utf-8')
+        assert youtube_failover_transaction.update_phase(str(path), 'candidate_installed', now=20)
+        assert youtube_failover_transaction.load_transaction(str(path))['phase'] == 'candidate_installed'
+        assert youtube_failover_transaction.update_phase(str(path), 'candidate_verified', now=30)
+        assert youtube_failover_transaction.clear_transaction(str(path))
+        assert not path.exists()
+        assert youtube_failover_transaction.normalize_transaction({
+            'proto': 'vless2',
+            'original_id': 'z' * 40,
+            'candidate_id': candidate_id,
+            'phase': 'prepared',
+        }) is None
+        blocked_parent = Path(temp_dir) / 'not-a-directory'
+        blocked_parent.write_text('blocked', encoding='utf-8')
+        assert not youtube_failover_transaction.begin_transaction(
+            str(blocked_parent / 'transaction.json'),
+            'vless2',
+            original_id,
+            candidate_id,
+        )
+
+
+def test_pool_probe_pause_coordinator_rejects_stale_resume():
+    coordinator = pool_probe_controller.PoolProbePauseCoordinator()
+    generation = coordinator.begin('youtube', 'hard failure', now=10)
+    assert coordinator.should_resume('youtube', generation)
+    assert coordinator.mark_checkpoint('youtube', generation)
+    assert coordinator.snapshot()['checkpoint_ready'] is True
+    try:
+        coordinator.begin('manual_apply', 'second owner', now=10.5)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('a second automatic pause owner must be rejected')
+    coordinator.user_cancel(now=11)
+    assert not coordinator.should_resume('youtube', generation)
+    assert not coordinator.finish('youtube', generation)
+    assert coordinator.snapshot()['user_cancelled'] is True
+    coordinator.reset_for_start()
+    assert coordinator.snapshot()['owner'] == ''
+
+
+def test_pool_probe_resume_recalculates_total_after_pool_edits():
+    ids = {'key-a': 'a' * 40, 'key-b': 'b' * 40}
+    hash_key = lambda value: ids.get(value, value)
+    payload = {
+        'tasks': [
+            {'proto': 'vless', 'key_id': ids['key-a']},
+            {'proto': 'vless', 'key_id': ids['key-b']},
+        ],
+        'checks': [{'id': 'youtube'}],
+        'scope': 'manual_all',
+        'checked': 3,
+        'total': 5,
+        'started_at': 10,
+    }
+    resolved = pool_probe_resume.resolve_payload(
+        payload,
+        {'vless': ['key-a']},
+        protocols=('vless',),
+        hash_key=hash_key,
+        now=20,
+    )
+    assert resolved['tasks'] == [('vless', 'key-a')]
+    assert resolved['checked'] == 3 and resolved['total'] == 4
+    assert resolved['skipped_missing'] == 1
+    serialized = pool_probe_resume.serializable_payload(
+        pool_probe_resume.normalize_payload(
+            {'tasks': [('vless', 'key-a')], 'checked': 0, 'total': 1},
+            protocols=('vless',),
+            hash_key=hash_key,
+            now=20,
+        )
+    )
+    assert serialized['tasks'] == [{'proto': 'vless', 'key_id': ids['key-a']}]
+    assert 'key-a' not in json.dumps(serialized)
+
+
+def test_pool_probe_process_cancel_checkpoint_preserves_remaining_queue():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        input_path = root / 'input.json'
+        progress_path = root / 'progress.json'
+        result_path = root / 'result.json'
+        cancel_path = root / 'cancel'
+        input_path.write_text(json.dumps({
+            'tasks': [['vless', 'checkpoint-key']],
+            'task_key_ids': ['a' * 40],
+            'checks': [],
+            'scope': 'manual_all',
+            'initial_checked': 0,
+            'total_count': 1,
+            'started_at': 10,
+        }), encoding='utf-8')
+        cancel_path.write_text('resume', encoding='utf-8')
+        assert pool_probe_process_runner.run_pool_probe_process_worker(
+            str(input_path),
+            str(progress_path),
+            str(result_path),
+            str(cancel_path),
+        ) == 0
+        checkpoint = json.loads(Path(str(result_path) + '.checkpoint').read_text(encoding='utf-8'))
+        result = json.loads(result_path.read_text(encoding='utf-8'))
+        assert checkpoint['ready'] is True
+        assert checkpoint['tasks'] == [['vless', 'checkpoint-key']]
+        assert result['cancelled'] is True and result['checkpoint_ready'] is True
+        assert result['remaining'] == checkpoint['tasks']
+
+
+def test_pool_probe_pause_never_forces_worker_without_durable_checkpoint():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_pause_pool_probe_operation'
+    )
+
+    class MutableLock:
+        def __init__(self):
+            self.active = True
+
+        def locked(self):
+            return self.active
+
+    class Clock:
+        def __init__(self):
+            self.value = 0.0
+
+        def time(self):
+            self.value += 0.3
+            return self.value
+
+        @staticmethod
+        def sleep(_seconds):
+            return None
+
+    lock = MutableLock()
+    calls = []
+    namespace = {
+        'pool_probe_resume_after_cancel': True,
+        'pool_probe_lock': lock,
+        'pool_probe_pause_coordinator': pool_probe_controller.PoolProbePauseCoordinator(),
+        'pool_probe_cancel_event': py_types.SimpleNamespace(set=lambda: calls.append('cancel')),
+        '_request_pool_probe_process_cancel': lambda: calls.append('request') or True,
+        '_set_pool_probe_progress': lambda **kwargs: calls.append(('progress', kwargs)),
+        '_load_pool_probe_cancel_checkpoint': lambda: {'ready': True},
+        '_store_pool_probe_cancel_checkpoint': lambda _payload: {'_durable': False},
+        '_cleanup_pool_probe_runtime_light': lambda **kwargs: calls.append('cleanup'),
+        '_terminate_pool_probe_process_worker': lambda: calls.append('terminate'),
+        '_resume_cancelled_pool_probe': lambda *args, **kwargs: calls.append('resume') or (False, 0),
+        'time': Clock(),
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    try:
+        namespace['_pause_pool_probe_operation']('youtube', 'pause', timeout=0.5)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('pause without a durable checkpoint must defer the key change')
+    assert 'resume' in calls
+    assert 'terminate' not in calls and 'cleanup' not in calls
+
+    lock = MutableLock()
+    calls = []
+    coordinator = pool_probe_controller.PoolProbePauseCoordinator()
+
+    def terminate():
+        calls.append('terminate')
+        lock.active = False
+        return True
+
+    namespace.update({
+        'pool_probe_lock': lock,
+        'pool_probe_pause_coordinator': coordinator,
+        'pool_probe_cancel_event': py_types.SimpleNamespace(set=lambda: calls.append('cancel')),
+        '_store_pool_probe_cancel_checkpoint': lambda _payload: {'_durable': True},
+        '_cleanup_pool_probe_runtime_light': lambda **kwargs: calls.append('cleanup'),
+        '_terminate_pool_probe_process_worker': terminate,
+        'time': Clock(),
+    })
+    generation, _note = namespace['_pause_pool_probe_operation']('youtube', 'pause', timeout=0.5)
+    assert generation > 0
+    assert 'terminate' in calls and 'cleanup' in calls
+    assert coordinator.snapshot()['checkpoint_ready'] is True
+
+
 def test_pool_probe_controller_helpers():
     progress = pool_probe_controller.PoolProbeProgress()
     assert progress.snapshot()['running'] is False
@@ -10903,6 +11413,7 @@ def test_pool_probe_runner_failover_candidate():
     cancel_event = threading.Event()
     cancel_event.set()
     remaining = []
+    checkpoints = []
     checked, total = pool_probe_runner.run_pool_probe_worker(
         [('vless', 'left')],
         [],
@@ -10928,9 +11439,11 @@ def test_pool_probe_runner_failover_candidate():
         invalidate_caches=lambda: None,
         cancel_event=cancel_event,
         on_cancelled_remaining=remaining.extend,
+        on_cancel_checkpoint=lambda tasks: checkpoints.append(list(tasks)),
     )
     assert (checked, total) == (0, 1)
     assert remaining == [('vless', 'left')]
+    assert checkpoints == [[('vless', 'left')]]
 
     startup_errors = []
     checked, total = pool_probe_runner.run_pool_probe_worker(
@@ -16437,6 +16950,12 @@ def main():
     test_youtube_health_state_distinguishes_outage_and_degradation()
     test_youtube_route_failover_fast_and_quality_paths_are_wired()
     test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
+    test_confirmed_youtube_failure_pauses_and_resumes_pool_once()
+    test_youtube_pool_pulse_guard_keeps_only_emergency_limits()
+    test_youtube_cycle_uses_pool_pulse_guard_instead_of_generic_rss_guard()
+    test_youtube_success_clears_stale_failover_phase()
+    test_youtube_transaction_recovery_refreshes_runtime_state()
+    test_youtube_failed_candidate_escalates_restore_failure()
     test_youtube_healthcheck_detects_first_load_instability()
     test_youtube_healthcheck_requires_watch_page()
     test_youtube_healthcheck_retries_transient_watch_page()
@@ -16527,6 +17046,11 @@ def main():
     test_auto_failover_restores_candidate_that_fails_permanent_proxy()
     test_auto_failover_tries_next_candidate_after_permanent_failure()
     test_proxy_apply_runtime_helpers()
+    test_youtube_failover_transaction_is_private_and_recoverable()
+    test_pool_probe_pause_coordinator_rejects_stale_resume()
+    test_pool_probe_resume_recalculates_total_after_pool_edits()
+    test_pool_probe_process_cancel_checkpoint_preserves_remaining_queue()
+    test_pool_probe_pause_never_forces_worker_without_durable_checkpoint()
     test_pool_probe_controller_helpers()
     test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port()
     test_event_history_helpers()

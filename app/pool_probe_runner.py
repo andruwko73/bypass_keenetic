@@ -337,6 +337,8 @@ def run_pool_probe_worker(
     invalidate_caches,
     cancel_event=None,
     on_cancelled_remaining=None,
+    on_cancel_checkpoint=None,
+    cancel_note='Проверка пула приостановлена.',
     set_note=None,
     cpu_busy_percent=None,
     max_cpu_percent=0,
@@ -428,6 +430,7 @@ def run_pool_probe_worker(
     high_cpu_since = None
     high_load_since = None
     paused_remaining = False
+    cancel_checkpoint_emitted = False
     rss_cleanup_attempts = 0
     executor = None
     executor_workers = max(1, int(concurrency or 1))
@@ -438,6 +441,16 @@ def run_pool_probe_worker(
                 set_note(text)
             except Exception:
                 pass
+
+    def emit_cancel_checkpoint():
+        nonlocal cancel_checkpoint_emitted
+        if cancel_checkpoint_emitted or not callable(on_cancel_checkpoint):
+            return
+        cancel_checkpoint_emitted = True
+        try:
+            on_cancel_checkpoint(list(pending_tasks))
+        except Exception as exc:
+            log(f'Не удалось сохранить контрольную точку проверки пула: {exc}')
 
     def run_memory_cleanup(reason, *, force=False, clear_status=False):
         if not memory_cleanup:
@@ -530,7 +543,9 @@ def run_pool_probe_worker(
     try:
         while pending_tasks:
             if cancel_requested():
-                log('Проверка пула приостановлена для применения выбранного ключа.')
+                emit_cancel_checkpoint()
+                log(str(cancel_note or 'Проверка пула приостановлена.'))
+                update_note(str(cancel_note or 'Проверка пула приостановлена.'))
                 break
             high_rss_kb = rss_above_limit()
             if high_rss_kb is not None:
@@ -736,7 +751,8 @@ def run_pool_probe_worker(
                             ignore_late_result(proto, key_value)
                             remaining_current_batch.append((proto, key_value))
                         pending_tasks.extendleft(reversed(remaining_current_batch))
-                        update_note('Проверка пула приостановлена для применения выбранного ключа.')
+                        update_note(str(cancel_note or 'Проверка пула приостановлена.'))
+                        emit_cancel_checkpoint()
                     for future in list(pending):
                         if cancel_requested():
                             continue
@@ -806,6 +822,8 @@ def run_pool_probe_worker(
                 executor.shutdown(wait=True, cancel_futures=True)
             except TypeError:
                 executor.shutdown(wait=True)
+        if cancel_requested() and pending_tasks:
+            emit_cancel_checkpoint()
         if (cancel_requested() or paused_remaining) and pending_tasks and on_cancelled_remaining:
             try:
                 on_cancelled_remaining(list(pending_tasks))

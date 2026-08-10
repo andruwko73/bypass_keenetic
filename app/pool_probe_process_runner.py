@@ -289,7 +289,9 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
     progress = {'running': True, 'checked': initial_checked, 'total': total, 'scope': scope, 'note': '', 'started_at': started_at, 'finished_at': 0}
     _write_json(progress_path, progress)
     records_path = f'{result_path}.records'
+    checkpoint_path = f'{result_path}.checkpoint'
     _remove(records_path)
+    _remove(checkpoint_path)
     result = {'ok': False, 'checked': 0, 'absolute_checked': initial_checked, 'total': total, 'scope': scope, 'started_at': started_at, 'finished_at': 0, 'rss_before_kb': _status_value('VmRSS'), 'rss_after_kb': 0, 'hwm_kb': 0, 'cancelled': False, 'resume_allowed': True, 'remaining': [], 'probe_records_path': '', 'error': ''}
     recorder = _WorkerProbeRecorder(task_key_ids, records_path)
     quality_samples = {'count': 0}
@@ -297,6 +299,22 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
     def write_progress(**updates):
         progress.update(updates)
         _write_json(progress_path, progress)
+
+    def write_cancel_checkpoint(remaining):
+        remaining = list(remaining or [])
+        if not remaining:
+            return
+        _write_json(checkpoint_path, {
+            'schema': 1,
+            'ready': True,
+            'tasks': remaining,
+            'checks': checks,
+            'scope': scope,
+            'checked': max(initial_checked, int(progress.get('checked') or initial_checked)),
+            'total': total,
+            'started_at': started_at,
+            'created_at': time.time(),
+        })
 
     def telegram_check(proxy_url, *, connect_timeout, read_timeout):
         return curl_check_telegram(bool(payload.get('telegram_authenticated')), proxy_url, connect_timeout, read_timeout)
@@ -349,6 +367,8 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
             tasks, checks, batch_size=batch_size, concurrency=concurrency, delay_seconds=settings['delay_seconds'], min_available_kb=settings['min_available_kb'], test_port=settings['test_port'], available_memory_kb=available_memory_kb,
             log=lambda _message: None, proto_label=lambda proto: str(proto or ''), hash_key=task_hash, set_checked=lambda value: write_progress(checked=initial_checked + int(value or 0)), validate_outbound=lambda proto, key_value: proxy_outbound_from_key(proto, key_value, 'proxy-pool-probe-validate'), failed_custom_results=failed_custom_probe_results, record_key_probe=recorder.record,
             start_xray_for_batch=lambda valid_batch: start_pool_probe_xray(build_pool_probe_core_config_batch(valid_batch, settings['test_port'], proxy_outbound_from_key)), wait_for_socks5=wait_for_socks5_handshake, check_pool_key=check_pool_key, timeout_budget=timeout_budget, stop_xray=stop_pool_probe_xray, cleanup_runtime=cleanup_pool_probe_runtime, invalidate_caches=lambda: None, cancel_event=_FileCancelEvent(cancel_path), on_cancelled_remaining=lambda remaining: result.update(remaining=list(remaining or [])), set_note=lambda note: write_progress(note=str(note or '')), cpu_busy_percent=_cpu_busy_percent if settings['cpu_guard'] else None, max_cpu_percent=settings['max_cpu_percent'], high_cpu_delay_seconds=settings['high_cpu_delay_seconds'], max_high_cpu_wait_seconds=settings['max_high_cpu_wait_seconds'], load_average=_load_average, max_load1=settings['max_load1'], high_load_delay_seconds=settings['high_load_delay_seconds'], max_high_load_wait_seconds=settings['max_high_load_wait_seconds'], low_memory_delay_seconds=settings['low_memory_delay_seconds'], max_low_memory_wait_seconds=settings['max_low_memory_wait_seconds'], slow_available_kb=settings['slow_available_kb'], slow_memory_delay_seconds=settings['slow_memory_delay_seconds'], process_rss_kb=None, max_process_rss_kb=0, memory_cleanup=None,
+            on_cancel_checkpoint=write_cancel_checkpoint,
+            cancel_note='Проверка пула приостанавливается; оставшиеся ключи сохраняются.',
         )
         result.update({'ok': True, 'checked': int(checked or 0), 'absolute_checked': initial_checked + int(checked or 0), 'total': max(total, int(reported_total or 0)), 'cancelled': _FileCancelEvent(cancel_path).is_set(), 'resume_allowed': _cancel_allows_resume(cancel_path)})
         exit_code = 0
@@ -360,6 +380,7 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
         result['rss_after_kb'] = _status_value('VmRSS')
         result['hwm_kb'] = _status_value('VmHWM')
         result['probe_records_path'] = recorder.close()
+        result['checkpoint_ready'] = bool(os.path.exists(checkpoint_path))
         write_progress(running=False, checked=int(result.get('absolute_checked') or initial_checked), total=int(result.get('total') or total), note=str(result.get('error') or progress.get('note') or ''), finished_at=result['finished_at'])
         try:
             _write_json(result_path, result)

@@ -21,6 +21,7 @@ __all__ = (
     'YOUTUBE_HEALTHCHECK_URLS',
     'TELEGRAM_HEALTHCHECK_MIN_OK',
     'TELEGRAM_HEALTHCHECK_URLS',
+    'PoolProbePauseCoordinator',
     'initial_pool_probe_progress',
     'start_pool_probe_worker',
 )
@@ -52,8 +53,102 @@ class PoolProbeProgress:
             return dict(self._progress)
 
 
+class PoolProbePauseCoordinator:
+    """Own one resumable pause and reject stale automatic resume requests."""
 
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._state = {
+            'generation': 0,
+            'owner': '',
+            'reason': '',
+            'resume': False,
+            'requested_at': 0.0,
+            'checkpoint_ready': False,
+            'user_cancelled': False,
+        }
 
+    def snapshot(self):
+        with self._lock:
+            return dict(self._state)
+
+    def begin(self, owner, reason, *, resume=True, now=0.0):
+        owner = str(owner or '').strip()
+        if not owner:
+            raise ValueError('Не указан владелец паузы проверки пула')
+        with self._lock:
+            active_owner = str(self._state.get('owner') or '')
+            if active_owner:
+                raise RuntimeError('Проверка пула уже приостанавливается другой операцией')
+            self._state.update({
+                'generation': int(self._state['generation']) + 1,
+                'owner': owner,
+                'reason': str(reason or '').strip(),
+                'resume': bool(resume),
+                'requested_at': float(now or 0.0),
+                'checkpoint_ready': False,
+                'user_cancelled': False,
+            })
+            return int(self._state['generation'])
+
+    def mark_checkpoint(self, owner, generation):
+        with self._lock:
+            if not self._owns_unlocked(owner, generation):
+                return False
+            self._state['checkpoint_ready'] = True
+            return True
+
+    def user_cancel(self, *, now=0.0):
+        with self._lock:
+            self._state.update({
+                'generation': int(self._state['generation']) + 1,
+                'owner': 'user_cancel',
+                'reason': 'Проверка остановлена пользователем.',
+                'resume': False,
+                'requested_at': float(now or 0.0),
+                'checkpoint_ready': False,
+                'user_cancelled': True,
+            })
+            return int(self._state['generation'])
+
+    def owns(self, owner, generation):
+        with self._lock:
+            return self._owns_unlocked(owner, generation)
+
+    def should_resume(self, owner='', generation=0):
+        with self._lock:
+            if owner and generation and not self._owns_unlocked(owner, generation):
+                return False
+            return bool(self._state['resume'] and not self._state['user_cancelled'])
+
+    def finish(self, owner, generation):
+        with self._lock:
+            if not self._owns_unlocked(owner, generation):
+                return False
+            self._clear_unlocked(increment=False)
+            return True
+
+    def reset_for_start(self):
+        with self._lock:
+            self._clear_unlocked(increment=True)
+
+    def _owns_unlocked(self, owner, generation):
+        return bool(
+            str(self._state['owner']) == str(owner or '') and
+            int(self._state['generation']) == int(generation or 0)
+        )
+
+    def _clear_unlocked(self, *, increment):
+        generation = int(self._state['generation']) + (1 if increment else 0)
+        self._state.update({
+            'generation': generation,
+            'owner': '',
+            'reason': '',
+            'resume': False,
+            'requested_at': 0.0,
+            'checkpoint_ready': False,
+            'user_cancelled': False,
+        })
 
 def failed_custom_probe_results(custom_checks):
     return {check.get('id'): False for check in (custom_checks or []) if check.get('id')}
