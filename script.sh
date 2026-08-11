@@ -388,6 +388,94 @@ dnsoverhttpsport=$(config_get "dnsoverhttpsport" "40508")
 keen_os_full=$(curl -s localhost:79/rci/show/version/title | tr -d \",)
 keen_os_short=$(printf '%s' "$keen_os_full" | grep -Eo '[0-9]+' | head -n1)
 
+dns_local_udp_listener_available() {
+  dns_port="$1"
+  [ -n "$dns_port" ] || return 1
+  netstat -lnu 2>/dev/null | grep -Eq "127\\.0\\.0\\.1:${dns_port}[[:space:]]"
+}
+
+configure_dnsmasq_upstreams() {
+  dnsmasq_path="$1"
+  [ -f "$dnsmasq_path" ] || return 1
+
+  if ! grep -q '^# BYPASS_DNS_UPSTREAMS_BEGIN$' "$dnsmasq_path" || \
+     ! grep -q '^# BYPASS_DNS_UPSTREAMS_END$' "$dnsmasq_path"; then
+    dnsmasq_legacy_tmp="${dnsmasq_path}.legacy.$$"
+    awk \
+      -v tls_line="server=127.0.0.1#${dnsovertlsport}" \
+      -v https_line="server=127.0.0.1#${dnsoverhttpsport}" '
+        $0 == "strict-order" { next }
+        $0 == tls_line { next }
+        $0 == https_line { next }
+        $0 == "server=8.8.8.8" { next }
+        $0 == "server=1.1.1.1" { next }
+        { print }
+        END {
+          print ""
+          print "# BYPASS_DNS_UPSTREAMS_BEGIN"
+          print "strict-order"
+          print "# BYPASS_DNS_UPSTREAMS_END"
+        }
+      ' "$dnsmasq_path" > "$dnsmasq_legacy_tmp" || {
+        rm -f "$dnsmasq_legacy_tmp"
+        return 1
+      }
+    mv "$dnsmasq_legacy_tmp" "$dnsmasq_path" || return 1
+  fi
+
+  dns_tls_ready=0
+  dns_https_ready=0
+  dns_local_udp_listener_available "$dnsovertlsport" && dns_tls_ready=1
+  dns_local_udp_listener_available "$dnsoverhttpsport" && dns_https_ready=1
+  dnsmasq_tmp="${dnsmasq_path}.upstreams.$$"
+
+  awk \
+    -v tls_port="$dnsovertlsport" \
+    -v https_port="$dnsoverhttpsport" \
+    -v tls_ready="$dns_tls_ready" \
+    -v https_ready="$dns_https_ready" '
+      /^# BYPASS_DNS_UPSTREAMS_BEGIN$/ {
+        print
+        print "strict-order"
+        if (tls_ready == 1) print "server=127.0.0.1#" tls_port
+        if (https_ready == 1) print "server=127.0.0.1#" https_port
+        if (tls_ready != 1 && https_ready != 1) {
+          print "server=8.8.8.8"
+          print "server=1.1.1.1"
+        }
+        replacing = 1
+        next
+      }
+      /^# BYPASS_DNS_UPSTREAMS_END$/ {
+        replacing = 0
+        print
+        next
+      }
+      replacing != 1 { print }
+    ' "$dnsmasq_path" > "$dnsmasq_tmp" || {
+      rm -f "$dnsmasq_tmp"
+      return 1
+    }
+  mv "$dnsmasq_tmp" "$dnsmasq_path" || return 1
+
+  if [ "$dns_tls_ready" -eq 1 ] || [ "$dns_https_ready" -eq 1 ]; then
+    echo "DNS: используются доступные защищённые локальные прокси Keenetic."
+  else
+    echo "DNS: локальные DNS-прокси Keenetic не найдены; включены совместимые внешние DNS-серверы."
+  fi
+}
+
+repair_legacy_dnsmasq_backup() {
+  dnsmasq_backup_path="$1"
+  [ -f "$dnsmasq_backup_path" ] || return 0
+  grep -q '^# BYPASS_DNS_UPSTREAMS_BEGIN$' "$dnsmasq_backup_path" && return 0
+  dns_local_udp_listener_available "$dnsovertlsport" && return 0
+  dns_local_udp_listener_available "$dnsoverhttpsport" && return 0
+  if grep -Eq "^server=127\\.0\\.0\\.1#(${dnsovertlsport}|${dnsoverhttpsport})$" "$dnsmasq_backup_path"; then
+    configure_dnsmasq_upstreams "$dnsmasq_backup_path"
+  fi
+}
+
 detect_core_proxy_package() {
   for candidate in xray-core xray v2ray; do
     if opkg list 2>/dev/null | awk '{print $1}' | grep -qx "$candidate"; then
@@ -892,6 +980,7 @@ BOT_RUNTIME_DIR="$BOT_RUNTIME_DIR"
 BOT_SERVICE_PATH="$BOT_SERVICE_PATH"
 INSTALLER_MAIN_PATH="$INSTALLER_MAIN_PATH"
 INSTALLER_SERVICE_PATH="$INSTALLER_SERVICE_PATH"
+BOT_CONFIG_PATH="$BOT_CONFIG_PATH"
 UPDATE_MAINTENANCE_PATH="$UPDATE_MAINTENANCE_PATH"
 UPDATE_MAINTENANCE_READY_PATH="$UPDATE_MAINTENANCE_READY_PATH"
 ROLLBACK_MODULES="$BOT_RUNTIME_MODULES CHANGELOG.md"
@@ -951,6 +1040,7 @@ restore_file unblock_ipset.sh /opt/bin/unblock_ipset.sh
 restore_file unblock_dnsmasq.sh /opt/bin/unblock_dnsmasq.sh
 restore_file unblock_update.sh /opt/bin/unblock_update.sh
 restore_file dnsmasq.conf /opt/etc/dnsmasq.conf
+[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || true
 restore_file crontab /opt/etc/crontab
 restore_file S99unblock /opt/etc/init.d/S99unblock
 restore_file 100-ipset.sh /opt/etc/ndm/fs.d/100-ipset.sh
@@ -1880,6 +1970,10 @@ PY
     sed -i "s/192.168.1.1/${lanip}/g" /opt/etc/dnsmasq.conf
     sed -i "s/40500/${dnsovertlsport}/g" /opt/etc/dnsmasq.conf
     sed -i "s/40508/${dnsoverhttpsport}/g" /opt/etc/dnsmasq.conf
+    configure_dnsmasq_upstreams /opt/etc/dnsmasq.conf || {
+      echo "Не удалось выбрать рабочие DNS-серверы."
+      exit 1
+    }
     echo "Установлена настройка dnsmasq и подключение дополнительного конфигурационного файла к dnsmasq"
 
     # cron file
@@ -2013,6 +2107,7 @@ if [ "$1" = "-update" ]; then
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/dnsmasq.conf"
     sed -i "s/40500/${dnsovertlsport}/g" "$stage_dir/dnsmasq.conf"
     sed -i "s/40508/${dnsoverhttpsport}/g" "$stage_dir/dnsmasq.conf"
+    configure_dnsmasq_upstreams "$stage_dir/dnsmasq.conf" || exit 1
     echo "Файлы успешно скачаны и подготовлены."
     target_release=$(sed -n 's/^\*v\([0-9][0-9A-Za-z._-]*\).*/v\1/p' "$stage_dir/version.md" | head -n1)
     write_cli_update_status update true 40 Подготовлено "Файлы обновления скачаны и проверены" "$target_release"
@@ -2037,6 +2132,7 @@ if [ "$1" = "-update" ]; then
     [ -f /opt/bin/unblock_dnsmasq.sh ] && mv /opt/bin/unblock_dnsmasq.sh "$backup_dir"/unblock_dnsmasq.sh
     [ -f /opt/bin/unblock_update.sh ] && mv /opt/bin/unblock_update.sh "$backup_dir"/unblock_update.sh
     [ -f /opt/etc/dnsmasq.conf ] && mv /opt/etc/dnsmasq.conf "$backup_dir"/dnsmasq.conf
+    repair_legacy_dnsmasq_backup "$backup_dir/dnsmasq.conf" || exit 1
     [ -f /opt/etc/crontab ] && mv /opt/etc/crontab "$backup_dir"/crontab
     [ -f /opt/etc/init.d/S99unblock ] && mv /opt/etc/init.d/S99unblock "$backup_dir"/S99unblock
     [ -f /opt/etc/ndm/fs.d/100-ipset.sh ] && mv /opt/etc/ndm/fs.d/100-ipset.sh "$backup_dir"/100-ipset.sh

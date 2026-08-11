@@ -4110,13 +4110,96 @@ def test_codex_version_matches_commit_count():
     assert 'strict-order' in dnsmasq_config
     assert 'server=127.0.0.1#40500' in dnsmasq_config
     assert 'server=127.0.0.1#40508' in dnsmasq_config
+    assert '# BYPASS_DNS_UPSTREAMS_BEGIN' in dnsmasq_config
+    assert '# BYPASS_DNS_UPSTREAMS_END' in dnsmasq_config
     assert 'server=8.8.8.8' not in dnsmasq_config
     assert 'server=1.1.1.1' not in dnsmasq_config
     assert 'run_youtube_edge_cdn_quality_if_due()' in (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
     assert 'YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS="${YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS:-1800}"' in (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
     assert 'youtube_edge_cdn_quality_interval_seconds = 1800' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert '/opt/etc/init.d/S56dnsmasq restart' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'configure_dnsmasq_upstreams /opt/etc/dnsmasq.conf' in (ROOT / 'script.sh').read_text(encoding='utf-8')
+    assert 'configure_dnsmasq_upstreams "$stage_dir/dnsmasq.conf"' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert f'# ВЕРСИЯ СКРИПТА v{expected}' in example
+
+
+def test_dnsmasq_upstream_selection_uses_only_available_local_proxies(tmp_path):
+    bootstrap = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    start = bootstrap.index('dns_local_udp_listener_available()')
+    end = bootstrap.index('\ndetect_core_proxy_package()', start)
+    functions = bootstrap[start:end].replace('\r', '')
+
+    def shell_path(path):
+        value = str(Path(path).resolve()).replace('\\', '/')
+        if re.match(r'^[A-Za-z]:/', value):
+            return f'/mnt/{value[0].lower()}{value[2:]}'
+        return value
+
+    template = (APP_ROOT / 'dnsmasq.conf').read_text(encoding='utf-8')
+    cases = (
+        ('both', '40500,40508', ('server=127.0.0.1#40500', 'server=127.0.0.1#40508'), ('server=8.8.8.8', 'server=1.1.1.1')),
+        ('tls', '40500', ('server=127.0.0.1#40500',), ('server=127.0.0.1#40508', 'server=8.8.8.8')),
+        ('none', '', ('server=8.8.8.8', 'server=1.1.1.1'), ('server=127.0.0.1#40500', 'server=127.0.0.1#40508')),
+    )
+    for name, ready_ports, expected_lines, forbidden_lines in cases:
+        target = tmp_path / f'dnsmasq-{name}.conf'
+        target.write_bytes(template.replace('\r', '').encode('utf-8'))
+        command = f'''{functions}
+dnsovertlsport=40500
+dnsoverhttpsport=40508
+READY_PORTS='{ready_ports}'
+dns_local_udp_listener_available() {{
+  [ "$1" = "40500" ] && [ -n "$READY_PORTS" ] && return 0
+  [ "$1" = "40508" ] && [ "$READY_PORTS" = "40500,40508" ] && return 0
+  return 1
+}}
+configure_dnsmasq_upstreams "{shell_path(target)}" >/dev/null
+'''.replace('\r', '')
+        completed = subprocess.run(
+            ['bash', '-s'],
+            input=command.encode('utf-8'),
+            check=False,
+            cwd=ROOT,
+            env=os.environ,
+            capture_output=True,
+        )
+        assert completed.returncode == 0, completed.stderr.decode('utf-8', errors='replace')
+        rendered = target.read_text(encoding='utf-8')
+        assert rendered.count('strict-order') == 1
+        for line in expected_lines:
+            assert line in rendered
+        for line in forbidden_lines:
+            assert line not in rendered
+
+    legacy_target = tmp_path / 'dnsmasq-legacy-1016.conf'
+    legacy_target.write_bytes(
+        template.replace('# BYPASS_DNS_UPSTREAMS_BEGIN\n', '')
+        .replace('# BYPASS_DNS_UPSTREAMS_END\n', '')
+        .replace('\r', '')
+        .encode('utf-8')
+    )
+    legacy_command = f'''{functions}
+dnsovertlsport=40500
+dnsoverhttpsport=40508
+dns_local_udp_listener_available() {{ return 1; }}
+configure_dnsmasq_upstreams "{shell_path(legacy_target)}" >/dev/null
+'''.replace('\r', '')
+    completed = subprocess.run(
+        ['bash', '-s'],
+        input=legacy_command.encode('utf-8'),
+        check=False,
+        cwd=ROOT,
+        env=os.environ,
+        capture_output=True,
+    )
+    assert completed.returncode == 0, completed.stderr.decode('utf-8', errors='replace')
+    repaired = legacy_target.read_text(encoding='utf-8')
+    assert repaired.count('# BYPASS_DNS_UPSTREAMS_BEGIN') == 1
+    assert repaired.count('strict-order') == 1
+    assert 'server=8.8.8.8' in repaired
+    assert 'server=1.1.1.1' in repaired
+    assert 'server=127.0.0.1#40500' not in repaired
+    assert 'server=127.0.0.1#40508' not in repaired
 
 
 def test_ui_smoke_package_scripts_are_declared():
@@ -5594,6 +5677,12 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert script_source.find('run_update_ipset_refresh "После обновления"') > script_source.find('Обновляем ipset после запуска основного прокси-сервиса.')
     assert 'write_update_rollback_script()' in script_source
     assert 'ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh' in script_source
+    rollback_source = script_source.split('write_update_rollback_script() {', 1)[1].split('\nEOF', 1)[0]
+    assert 'BOT_CONFIG_PATH="$BOT_CONFIG_PATH"' in rollback_source
+    assert 'restore_file dnsmasq.conf /opt/etc/dnsmasq.conf' in rollback_source
+    assert '[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart' in rollback_source
+    assert rollback_source.find('restore_file dnsmasq.conf') < rollback_source.find('/opt/etc/init.d/S56dnsmasq restart')
+    assert 'repair_legacy_dnsmasq_backup "$backup_dir/dnsmasq.conf" || exit 1' in script_source
     assert 'backup_runtime_state_files' in script_source
     assert 'backup_runtime_state_file /opt/etc/xray/vless2.key vless2.key' in script_source
     assert 'backup_runtime_state_file /opt/etc/shadowsocks.json shadowsocks.json' in script_source
@@ -6620,7 +6709,14 @@ def test_active_status_refresh_skips_heavy_pool_modules():
             check=True,
         )
         loaded = json.loads(result.stdout.strip())
-        assert loaded == {name: False for name in heavy_modules}
+        assert loaded == {
+            'probe_cache': True,
+            'key_pool_web': True,
+            'web_pool_form_blocks': False,
+            'web_route_tools_runtime': False,
+            'route_intersections': False,
+            'service_routes': False,
+        }
     finally:
         temp_dir.cleanup()
 
