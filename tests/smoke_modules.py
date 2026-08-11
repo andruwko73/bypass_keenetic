@@ -6176,7 +6176,7 @@ def test_stale_status_snapshot_refreshes_probe_ages_during_pool_check():
         "import app_runtime_mode\n"
         f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
         "import bot\n"
-        "keys = {'vless': 'vless://active'}\n"
+        "keys = {'vless': 'fixture-active-key'}\n"
         "signature = bot._status_snapshot_signature(keys)\n"
         "old_snapshot = {'web': {'state': 'old'}, 'protocols': {'vless': {'label': 'Частично работает'}}}\n"
         "bot.status_snapshot_cache.update({'timestamp': 1.0, 'signature': signature, 'data': old_snapshot})\n"
