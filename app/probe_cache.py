@@ -42,7 +42,7 @@ def _key_probe_cache_lock_root():
     if configured:
         return configured
     router_tmp = '/opt/tmp'
-    if os.path.isdir(router_tmp) and os.access(router_tmp, os.W_OK):
+    if os.name == 'posix' and os.path.isdir(router_tmp) and os.access(router_tmp, os.W_OK):
         return router_tmp
     return tempfile.gettempdir()
 
@@ -379,6 +379,25 @@ def _entry_timestamp(entry):
         return float((entry or {}).get('ts', 0))
     except (TypeError, ValueError):
         return 0
+
+
+def key_probe_age_seconds(entry, now=None):
+    timestamp = _entry_timestamp(entry)
+    if not timestamp:
+        return None
+    return max(0, int((time.time() if now is None else now) - timestamp))
+
+
+def probe_result_state(entry, value, now=None):
+    value = _stored_probe_value(value)
+    if value is None:
+        return 'unknown'
+    age = key_probe_age_seconds(entry, now=now)
+    if age is None or age >= KEY_PROBE_CACHE_TTL:
+        return 'stale'
+    if value is False and age >= KEY_PROBE_FAILURE_TTL:
+        return 'stale'
+    return 'ok' if value else 'fail'
 
 
 def _skip_recent_success_downgrade(entry, field, value, now, previous_ts):

@@ -164,8 +164,14 @@ def service_status_parts(
     for check in custom_checks or []:
         check_id = check.get('id')
         state = custom_states.get(check_id)
-        if state in ('ok', 'fail'):
-            parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
+        state_text = {
+            'ok': 'работает',
+            'fail': 'не работает',
+            'stale': 'результат устарел',
+            'unknown': 'не проверено',
+        }.get(state)
+        if state_text:
+            parts.append(f'{check.get("label", "Сервис")}: {state_text}')
     return parts
 
 
@@ -176,6 +182,22 @@ def _normalize_required_services(required_services):
     return tuple(service for service in ('telegram', 'youtube') if service in selected)
 
 
+def _probe_age_text(age_seconds):
+    if age_seconds is None:
+        return ''
+    try:
+        age_seconds = max(0, int(age_seconds))
+    except (TypeError, ValueError):
+        return ''
+    if age_seconds < 10:
+        return 'только что'
+    if age_seconds < 60:
+        return f'{age_seconds} сек. назад'
+    if age_seconds < 3600:
+        return f'{age_seconds // 60} мин назад'
+    return f'{age_seconds // 3600} ч назад'
+
+
 def tone_label(
     api_ok,
     yt_ok,
@@ -184,10 +206,14 @@ def tone_label(
     api_required=True,
     required_services=None,
     pending=False,
+    verification_pending=False,
 ):
     if pending:
         return 'warn', 'Статус обновляется'
     required_services = _normalize_required_services(required_services)
+    custom_fail = any(state == 'fail' for state in custom_states.values())
+    if verification_pending and not custom_fail:
+        return 'warn', 'Требуется повторная проверка'
     if required_services:
         states = []
         if 'telegram' in required_services:
@@ -195,18 +221,17 @@ def tone_label(
         if 'youtube' in required_services:
             states.append(bool(yt_ok))
         custom_ok = any(state == 'ok' for state in custom_states.values())
-        custom_fail = any(state == 'fail' for state in custom_states.values())
         if states and all(states) and not custom_fail:
             return 'ok', 'Работает'
         if any(states) or custom_ok:
             return 'warn', 'Частично работает'
         return 'fail', 'Не работает'
     any_ok = api_ok or yt_ok or any(state == 'ok' for state in custom_states.values())
-    if not api_required and any_ok:
+    if not api_required and any_ok and not custom_fail:
         return 'ok', 'Работает'
     return (
-        'ok' if api_ok else ('warn' if any_ok else 'fail'),
-        'Работает' if api_ok else ('Частично работает' if any_ok else 'Не работает'),
+        'ok' if api_ok and not custom_fail else ('warn' if any_ok else 'fail'),
+        'Работает' if api_ok and not custom_fail else ('Частично работает' if any_ok else 'Не работает'),
     )
 
 
@@ -236,6 +261,11 @@ def active_protocol_status(
         bool(api_required)
     )
     pending = bool(api_pending or yt_pending or (api_transient and telegram_required))
+    verification_pending = any(
+        custom_states.get(check.get('id')) in ('unknown', 'stale')
+        for check in custom_checks or []
+        if check.get('id')
+    )
     if endpoint_ok and pending:
         service_parts = service_status_parts(
             api_ok,
@@ -262,6 +292,7 @@ def active_protocol_status(
             'endpoint_ok': endpoint_ok,
             'endpoint_message': endpoint_message,
             'api_ok': api_ok,
+            'api_state': 'pending' if api_pending else ('ok' if api_ok else 'fail'),
             'api_message': api_message,
             'api_pending': True,
             'yt_ok': yt_ok,
@@ -289,6 +320,7 @@ def active_protocol_status(
         api_required=api_required,
         required_services=required_services,
         pending=pending,
+        verification_pending=verification_pending,
     )
     if yt_state == 'warn' and tone == 'ok' and required_services is None:
         tone = 'warn'
@@ -306,6 +338,7 @@ def active_protocol_status(
         'endpoint_ok': endpoint_ok,
         'endpoint_message': endpoint_message,
         'api_ok': api_ok,
+        'api_state': 'pending' if api_pending else ('ok' if api_ok else 'fail'),
         'api_message': api_message,
         'api_pending': bool(api_pending),
         'yt_ok': yt_ok,
@@ -412,16 +445,20 @@ def cached_protocol_status(
     *,
     api_required=True,
     required_services=None,
+    api_state=None,
+    probe_yt_state=None,
+    checked_age_seconds=None,
 ):
     if not str(key_value or '').strip():
         return empty_protocol_status()
     required_services = _normalize_required_services(required_services)
     if required_services == () and not custom_checks:
         return unused_protocol_status()
-    has_probe_result = (
-        'tg_ok' in probe or
-        'yt_ok' in probe or
-        any(state in ('ok', 'fail') for state in custom_states.values())
+    api_state = api_state or ('ok' if probe.get('tg_ok') is True else 'fail' if probe.get('tg_ok') is False else 'unknown')
+    probe_yt_state = probe_yt_state or youtube_probe_state(probe)
+    has_probe_result = any(
+        state in ('ok', 'warn', 'fail', 'stale')
+        for state in (api_state, probe_yt_state, *custom_states.values())
     )
     if not has_probe_result:
         return {
@@ -431,38 +468,65 @@ def cached_protocol_status(
             'endpoint_ok': None,
             'endpoint_message': '',
             'api_ok': False,
+            'api_state': 'unknown',
             'api_message': '',
             'yt_ok': False,
+            'yt_state': 'unknown',
             'yt_message': '',
             'custom': custom_states,
         }
-    api_ok = bool(probe.get('tg_ok')) if 'tg_ok' in probe else False
-    yt_state = youtube_probe_state(probe)
-    yt_ok = yt_state in ('ok', 'warn') if 'yt_ok' in probe or probe.get('yt_stability') else False
+    api_ok = api_state == 'ok'
+    yt_ok = probe_yt_state in ('ok', 'warn')
     service_parts = []
-    if 'tg_ok' in probe:
-        telegram_state = 'работает' if api_ok else ('не работает' if api_required else 'не требуется для текущего режима')
+    if api_state != 'unknown':
+        if api_state == 'stale':
+            telegram_state = 'результат устарел'
+        else:
+            telegram_state = 'работает' if api_ok else ('не работает' if api_required else 'не требуется для текущего режима')
         service_parts.append(f'Telegram: {telegram_state}')
-    if 'yt_ok' in probe:
-        service_parts.append(f'YouTube: {_youtube_state_text(yt_ok, yt_state)}')
+    if probe_yt_state != 'unknown':
+        youtube_state_text = 'результат устарел' if probe_yt_state == 'stale' else _youtube_state_text(yt_ok, probe_yt_state)
+        service_parts.append(f'YouTube: {youtube_state_text}')
     for check in custom_checks or []:
         check_id = check.get('id')
         state = custom_states.get(check_id)
-        if state in ('ok', 'fail'):
-            service_parts.append(f'{check.get("label", "Сервис")}: {"работает" if state == "ok" else "не работает"}')
-    details = 'Показан последний результат проверки пула'
-    if service_parts:
-        details += '; ' + ', '.join(service_parts)
+        state_text = {
+            'ok': 'работает',
+            'fail': 'не работает',
+            'stale': 'результат устарел',
+            'unknown': 'не проверено',
+        }.get(state)
+        if state_text:
+            service_parts.append(f'{check.get("label", "Сервис")}: {state_text}')
+    verification_pending = (
+        ((required_services is None or 'telegram' in required_services) and api_state in ('unknown', 'stale')) or
+        ((required_services is None or 'youtube' in required_services) and probe_yt_state in ('unknown', 'stale')) or
+        any(custom_states.get(check.get('id')) in ('unknown', 'stale') for check in custom_checks or [])
+    )
     tone, label = tone_label(
         api_ok,
         yt_ok,
         custom_states,
         api_required=api_required,
         required_services=required_services,
+        verification_pending=verification_pending,
     )
-    if yt_state == 'warn' and tone == 'ok' and required_services is None:
+    if probe_yt_state == 'warn' and tone == 'ok' and required_services is None:
         tone = 'warn'
         label = 'Частично работает'
+    if label == 'Требуется повторная проверка':
+        details = (
+            'Последний результат проверки пула устарел'
+            if 'stale' in (api_state, probe_yt_state, *custom_states.values()) else
+            'Проверка пула ещё не содержит результаты для всех назначенных сервисов'
+        )
+    else:
+        details = 'Показан последний результат проверки пула'
+    age_text = _probe_age_text(checked_age_seconds)
+    if age_text:
+        details += f' ({age_text})'
+    if service_parts:
+        details += '; ' + ', '.join(service_parts)
     return {
         'tone': tone,
         'label': label,
@@ -470,9 +534,11 @@ def cached_protocol_status(
         'endpoint_ok': None,
         'endpoint_message': '',
         'api_ok': api_ok,
+        'api_state': api_state,
         'api_message': '',
         'yt_ok': yt_ok,
-        'yt_state': yt_state,
+        'yt_state': probe_yt_state,
         'yt_message': '',
         'custom': custom_states,
+        'checked_age_seconds': checked_age_seconds,
     }

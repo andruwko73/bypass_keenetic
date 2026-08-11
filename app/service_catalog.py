@@ -618,6 +618,7 @@ CUSTOM_CHECK_PRESETS = [
         'url': 'https://chatgpt.com',
         'urls': [
             'https://api.openai.com/v1/models',
+            'https://chatgpt.com',
         ],
         'routes': CHATGPT_ROUTE_ENTRIES,
         'badge': 'GPT',

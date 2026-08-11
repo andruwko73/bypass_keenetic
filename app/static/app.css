@@ -149,6 +149,9 @@
                 .key-status-fail{background:rgba(168,68,47,.14);border-color:rgba(168,68,47,.28);color:#ffbeb2;}
                 .key-status-warn{background:rgba(201,111,50,.14);border-color:rgba(201,111,50,.28);color:#f6c892;}
                 .key-status-empty{background:rgba(159,176,200,.1);border-color:rgba(159,176,200,.18);color:var(--muted);}
+                .card-icon img{display:block;width:24px;height:24px;object-fit:contain;}
+                .youtube-route-card{transition:border-color .16s ease,background-color .16s ease;}
+                .youtube-route-card .status-note{margin-top:3px;}
                 .key-status-note{margin:-4px 0 4px;color:var(--muted);font-size:14px;line-height:1.45;overflow-wrap:anywhere;}
         .protocol-card{min-width:0;}
         .pool-details{margin-top:12px;border-top:1px solid var(--border);padding-top:12px;cursor:pointer;}
@@ -455,6 +458,11 @@
         .service-icon-img{width:18px!important;height:18px!important;object-fit:contain;border-radius:5px;vertical-align:middle;}
         .custom-service-slot .service-icon-img{width:18px!important;height:18px!important;}
         .key-status-icons .service-icon-img{width:20px!important;height:20px!important;}
+        .service-state-icon{position:relative;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 auto;}
+        .service-state-icon .service-icon-img,.service-state-icon .custom-service-badge{opacity:.45!important;filter:saturate(.45);}
+        .service-state-marker{position:absolute;inset-inline-end:-3px;inset-block-end:-3px;display:inline-flex;align-items:center;justify-content:center;width:10px;height:10px;border-radius:50%;border:1px solid rgba(10,17,26,.9);background:#536477;color:#fff;font-size:8px;font-weight:900;line-height:1;}
+        .service-state-fail .service-state-marker{background:#a8442f;}
+        .service-state-pending .service-state-marker{background:#9b6a2b;}
         .service-probe-mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;border:1px solid rgba(91,124,150,.34);font-size:11px;font-weight:800;line-height:1;}
         .service-probe-fail{color:var(--muted);background:transparent;border-color:transparent;}
         .service-probe-warn{color:#ffd38a;background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.38);}

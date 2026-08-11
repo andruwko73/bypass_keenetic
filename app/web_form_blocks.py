@@ -236,7 +236,7 @@ def _light_protocol_panel_html(
             <div class="status-card">
                 <span class="status-label">Состояние ключа</span>
                 <span class="status-value">{safe_label}</span>
-                <p class="status-note">{safe_details}</p>
+                <p class="status-note" role="status" aria-live="polite">{safe_details}</p>
             </div>
             <div class="protocol-check-loading" data-protocol-check-deferred="{safe_key_name}">
                 <span class="status-label">Проверка</span>
@@ -247,7 +247,7 @@ def _light_protocol_panel_html(
         <div class="workspace-head">
             <div>
                 <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
-                <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
+                <p class="key-status-note" data-protocol-status-details role="status" aria-live="polite">{safe_details}</p>
             </div>
             <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons>{active_status_icons}</span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>
         </div>

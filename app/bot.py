@@ -9036,6 +9036,7 @@ def _protocol_status_for_key(
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     cached_probe = cache.get(_hash_key(key_value), {})
     custom_states = _key_pool_web().web_custom_probe_states(cached_probe, protocol_custom_checks)
+    cached_api_state, cached_youtube_state = _key_pool_web().web_core_probe_states(cached_probe)
     active_telegram_required = bool(_app_mode_telegram_enabled() and _telegram_required_for_protocol(key_name))
     if (
         _active_status_can_use_recent_probe(cached_probe, required_services) and
@@ -9048,6 +9049,9 @@ def _protocol_status_for_key(
             custom_states,
             api_required='telegram' in required_services,
             required_services=required_services,
+            api_state=cached_api_state,
+            probe_yt_state=cached_youtube_state,
+            checked_age_seconds=_probe_cache().key_probe_age_seconds(cached_probe),
         )
 
     proxy_url = proxy_settings.get(key_name)
@@ -9143,6 +9147,7 @@ def _cached_protocol_status_for_key(
     ):
         _schedule_youtube_cache_confirm(key_name, key_value)
     custom_states = _key_pool_web().web_custom_probe_states(probe, protocol_custom_checks)
+    cached_api_state, cached_youtube_state = _key_pool_web().web_core_probe_states(probe)
     return _status_cached_protocol_status(
         key_value,
         probe,
@@ -9150,6 +9155,9 @@ def _cached_protocol_status_for_key(
         custom_states,
         api_required='telegram' in required_services,
         required_services=required_services,
+        api_state=cached_api_state,
+        probe_yt_state=cached_youtube_state,
+        checked_age_seconds=_probe_cache().key_probe_age_seconds(probe),
     )
 
 
@@ -14524,7 +14532,7 @@ def _web_simple_form_context(current_keys, protocol_statuses, csrf_input_html, s
         <div class="workspace-head">
             <div>
                 <h2 class="inline-page-title"><span class="title-kicker">Ключи</span><span>{safe_title}</span></h2>
-                <p class="key-status-note" data-protocol-status-details>{safe_details}</p>
+                <p class="key-status-note" data-protocol-status-details role="status" aria-live="polite">{safe_details}</p>
             </div>
             <span class="key-status-wrap"><span class="key-status-icons" data-protocol-status-icons></span><span class="key-status-badge key-status-{safe_tone}" data-protocol-status-label>{safe_label}</span></span>
         </div>

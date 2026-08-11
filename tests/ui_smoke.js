@@ -761,13 +761,24 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
-  await page.waitForFunction(() => {
-    const note = document.getElementById('youtube-failover-note');
-    return Boolean(note && note.textContent && note.textContent.trim());
-  }, {timeout: 10000});
-  const youtubeFailoverText = (await page.locator('#youtube-failover-note').innerText()).trim();
-  if (!youtubeFailoverText.includes('YouTube: маршрут Vless 2 исправен')) {
-    throw new Error(`${name}: YouTube automatic failover status is missing: ${youtubeFailoverText}`);
+  if (modeConfig.expectPool) {
+    await page.waitForFunction(() => {
+      const note = document.getElementById('youtube-failover-note');
+      return Boolean(note && note.textContent && note.textContent.trim());
+    }, {timeout: 10000});
+    const youtubeFailoverNote = page.locator('#youtube-failover-note');
+    const youtubeFailoverText = (await youtubeFailoverNote.innerText()).trim();
+    if (!youtubeFailoverText.includes('YouTube: маршрут Vless 2 исправен')) {
+      throw new Error(`${name}: YouTube automatic failover status is missing: ${youtubeFailoverText}`);
+    }
+    if (await youtubeFailoverNote.locator('xpath=ancestor::*[@data-youtube-failover-card]').count() !== 1) {
+      throw new Error(`${name}: YouTube automatic failover status is not in its own card`);
+    }
+    if (await youtubeFailoverNote.locator('xpath=ancestor::*[contains(@class,"router-health-card")]').count() !== 0) {
+      throw new Error(`${name}: YouTube automatic failover status still leaks into the router card`);
+    }
+  } else if (await page.locator('#youtube-failover-note').count() !== 0) {
+    throw new Error(`${name}: simple mode unexpectedly renders the YouTube automatic failover card`);
   }
   await assertNoHorizontalOverflow(page, name);
   if (modeConfig.expectPool) {

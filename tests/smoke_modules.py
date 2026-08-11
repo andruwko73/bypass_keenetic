@@ -1492,9 +1492,10 @@ def test_key_pool_web():
     checks = [{'id': 'custom', 'label': 'Instagram / Facebook'}]
     current = {'vless': 'vless-key'}
     pools = {'vless': ['vless-key', 'unused-key'], 'vmess': ['vmess-key']}
+    checked_at = time.time()
     cache = {
-        _hash_key('vless-key'): {'tg_ok': True, 'yt_ok': False, 'custom': {'custom': True}, 'ts': 1},
-        _hash_key('unused-key'): {'tg_ok': None, 'yt_ok': None, 'custom': {'custom': None}, 'timeout': True, 'ts': 3},
+        _hash_key('vless-key'): {'tg_ok': True, 'yt_ok': False, 'custom': {'custom': True}, 'ts': checked_at},
+        _hash_key('unused-key'): {'tg_ok': None, 'yt_ok': None, 'custom': {'custom': None}, 'timeout': True, 'ts': checked_at},
         _hash_key('vmess-key'): {
             'tg_ok': True,
             'yt_ok': True,
@@ -1505,7 +1506,7 @@ def test_key_pool_web():
             'yt_latency_ms': 410,
             'googlevideo_latency_ms': 520,
             'yt_throughput_mbps': 58.5,
-            'ts': 2,
+            'ts': checked_at,
         },
     }
 
@@ -1614,11 +1615,11 @@ def test_key_pool_web():
         {'vmess': ['vmess-key']},
         {
             _hash_key('vmess-key'): {
-                'tg_ok': True,
-                'yt_ok': True,
-                'custom': {'discord': True, 'claude': True, 'manual': True},
-                'ts': 4,
-            },
+                    'tg_ok': True,
+                    'yt_ok': True,
+                    'custom': {'discord': True, 'claude': True, 'manual': True},
+                    'ts': checked_at,
+                },
         },
         scoped_checks,
         include_keys=False,
@@ -2506,6 +2507,8 @@ def test_youtube_route_failover_fast_and_quality_paths_are_wired():
     assert 'YOUTUBE_ROUTE_FAILOVER_MAX_CANDIDATES' in source
     assert "guarded_payload['youtube_failover']" in source
     assert 'youtube-failover-note' in template
+    assert 'data-youtube-failover-card' in template
+    assert 'id="youtube-failover-note" role="status" aria-live="polite"' in template
     assert 'snapshot.youtube_failover' in script
 
 
@@ -6262,7 +6265,7 @@ def test_light_route_status_uses_complete_route_assignments_and_custom_results()
         encoding='utf-8',
     )
     script = (
-        "import os, sys\n"
+        "import os, sys, time\n"
         f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
         f"sys.path.insert(0, {str(ROOT)!r})\n"
         f"sys.path.insert(0, {str(temp_path)!r})\n"
@@ -6276,8 +6279,8 @@ def test_light_route_status_uses_complete_route_assignments_and_custom_results()
         "  'discord': {'complete_protocols': ['vless'], 'partial_protocols': []},\n"
         "}\n"
         "checks = [{'id': 'discord', 'label': 'Discord'}]\n"
-        "vless_probe = {'schema': 9, 'tg_ok': True, 'yt_ok': False, 'yt_stability': 'fail', 'custom': {'discord': True}}\n"
-        "vless2_probe = {'schema': 9, 'tg_ok': False, 'yt_ok': True, 'yt_stability': 'stable', 'custom': {'discord': False}}\n"
+        "vless_probe = {'schema': 9, 'tg_ok': True, 'yt_ok': False, 'yt_stability': 'fail', 'custom': {'discord': True}, 'ts': time.time()}\n"
+        "vless2_probe = {'schema': 9, 'tg_ok': False, 'yt_ok': True, 'yt_stability': 'stable', 'custom': {'discord': False}, 'ts': time.time()}\n"
         "cache = {bot._hash_key('vless-key'): vless_probe, bot._hash_key('vless2-key'): vless2_probe}\n"
         "assert bot._light_required_services_for_protocol('vless', route_states=route_states) == ('telegram',)\n"
         "assert bot._light_required_services_for_protocol('vless2', route_states=route_states) == ('youtube',)\n"
@@ -8439,6 +8442,47 @@ def test_cached_protocol_status_description_has_no_static_trailing_period():
     assert 'YouTube:' in warn_status['details']
 
 
+def test_cached_protocol_status_distinguishes_fresh_failure_from_stale_result():
+    checks = [{'id': 'chatgpt_services', 'label': 'ChatGPT / Codex'}]
+    fresh_failure = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': True},
+        checks,
+        {'chatgpt_services': 'fail'},
+        required_services=['telegram'],
+        api_state='ok',
+        probe_yt_state='ok',
+        checked_age_seconds=120,
+    )
+    assert fresh_failure['label'] == 'Частично работает'
+    assert 'ChatGPT / Codex: не работает' in fresh_failure['details']
+    stale_result = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': True},
+        checks,
+        {'chatgpt_services': 'stale'},
+        required_services=['telegram'],
+        api_state='ok',
+        probe_yt_state='ok',
+        checked_age_seconds=301,
+    )
+    assert stale_result['label'] == 'Требуется повторная проверка'
+    assert stale_result['tone'] == 'warn'
+    assert 'результат устарел' in stale_result['details']
+    assert '5 мин назад' in stale_result['details']
+    unknown_result = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': True},
+        checks,
+        {'chatgpt_services': 'unknown'},
+        required_services=['telegram'],
+        api_state='ok',
+        probe_yt_state='ok',
+    )
+    assert unknown_result['label'] == 'Требуется повторная проверка'
+    assert 'не проверено' in unknown_result['details']
+
+
 def test_active_protocol_status_description_has_no_trailing_period():
     status = web_status_builder.active_protocol_status(
         endpoint_ok=True,
@@ -9016,11 +9060,11 @@ def test_pool_probe_completion_log_separates_bot_and_worker_hwm():
 def test_explicit_pool_probe_cancel_is_not_reported_as_resumable_pause():
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     process_monitor = source.split('def _start_selected_pool_probe_process', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
-    assert "elif was_cancelled and not pool_probe_resume_after_cancel:" in process_monitor
+    assert "elif was_cancelled and not _pool_probe_cancel_should_resume():" in process_monitor
     assert "completion_status = 'cancelled'" in process_monitor
     assert "Проверка остановлена пользователем." in process_monitor
     inprocess_completion = source.split('def _handle_inprocess_pool_probe_finished', 1)[1].split('def _start_selected_pool_probe_tasks', 1)[0]
-    assert "explicit_cancel = bool(was_cancelled and not pool_probe_resume_after_cancel)" in inprocess_completion
+    assert "explicit_cancel = bool(was_cancelled and not _pool_probe_cancel_should_resume())" in inprocess_completion
     assert "status = 'cancelled'" in inprocess_completion
 
 
@@ -12028,6 +12072,36 @@ def test_proxy_status_runtime_helpers():
         read_timeout=1,
     )
     assert custom_results == {'custom': True}
+    ordered_calls = []
+    custom_results = proxy_status.probe_custom_targets(
+        'proxy',
+        [{'id': 'chatgpt_services', 'urls': ['api', 'web']}],
+        lambda proxy, target, **kwargs: (ordered_calls.append(target) or target == 'api', ''),
+        connect_timeout=1,
+        read_timeout=1,
+    )
+    assert custom_results == {'chatgpt_services': True}
+    assert ordered_calls == ['api']
+    ordered_calls.clear()
+    custom_results = proxy_status.probe_custom_targets(
+        'proxy',
+        [{'id': 'chatgpt_services', 'urls': ['api', 'web']}],
+        lambda proxy, target, **kwargs: (ordered_calls.append(target) or target == 'web', ''),
+        connect_timeout=1,
+        read_timeout=1,
+    )
+    assert custom_results == {'chatgpt_services': True}
+    assert ordered_calls == ['api', 'web']
+    ordered_calls.clear()
+    custom_results = proxy_status.probe_custom_targets(
+        'proxy',
+        [{'id': 'chatgpt_services', 'urls': ['api', 'web']}],
+        lambda proxy, target, **kwargs: (ordered_calls.append(target) or False, ''),
+        connect_timeout=1,
+        read_timeout=1,
+    )
+    assert custom_results == {'chatgpt_services': False}
+    assert ordered_calls == ['api', 'web']
     retry_calls = []
 
     def custom_retry_checker(proxy, target, **kwargs):
@@ -12283,7 +12357,10 @@ def test_chatgpt_codex_routes_are_synced():
     assert 'chatgpt_services' in presets
     assert 'openai_codex' not in presets
     assert presets['chatgpt_services']['label'] == 'ChatGPT / Codex'
-    assert presets['chatgpt_services']['urls'] == ['https://api.openai.com/v1/models']
+    assert presets['chatgpt_services']['urls'] == [
+        'https://api.openai.com/v1/models',
+        'https://chatgpt.com',
+    ]
     assert presets['chatgpt_services']['routes'] == service_catalog.CHATGPT_ROUTE_ENTRIES
     source = service_catalog.SERVICE_LIST_SOURCES['chatgpt_services']
     assert source['label'] == 'ChatGPT / Codex'
@@ -12557,7 +12634,10 @@ def test_chatgpt_codex_custom_check_migration():
     assert [item['id'] for item in checks] == ['chatgpt_services', 'discord']
     assert checks[0]['label'] == 'ChatGPT / Codex'
     assert checks[0]['url'] == 'https://api.openai.com/v1/models'
-    assert 'urls' not in checks[0]
+    assert checks[0]['urls'] == [
+        'https://api.openai.com/v1/models',
+        'https://chatgpt.com',
+    ]
 
 
 def test_preset_custom_checks_are_hydrated_from_catalog():
@@ -14798,6 +14878,32 @@ def test_probe_cache_failed_results_expire_quickly():
         now=100 + probe_cache.KEY_PROBE_FAILURE_TTL,
         custom_checks=checks,
     )
+
+
+def test_probe_result_state_obeys_success_and_failure_ttl_boundaries():
+    failed = {'ts': 100}
+    assert probe_cache.probe_result_state(
+        failed,
+        False,
+        now=100 + probe_cache.KEY_PROBE_FAILURE_TTL - 1,
+    ) == 'fail'
+    assert probe_cache.probe_result_state(
+        failed,
+        False,
+        now=100 + probe_cache.KEY_PROBE_FAILURE_TTL,
+    ) == 'stale'
+    succeeded = {'ts': 100}
+    assert probe_cache.probe_result_state(
+        succeeded,
+        True,
+        now=100 + probe_cache.KEY_PROBE_CACHE_TTL - 1,
+    ) == 'ok'
+    assert probe_cache.probe_result_state(
+        succeeded,
+        True,
+        now=100 + probe_cache.KEY_PROBE_CACHE_TTL,
+    ) == 'stale'
+    assert probe_cache.probe_result_state({}, None, now=100) == 'unknown'
 
 
 def test_probe_cache_keeps_recent_success_on_transient_downgrade():

@@ -1491,22 +1491,46 @@
             if (!cleanSrc) {
                 return serviceTextBadge(alt, badge);
             }
+            const altText = alt === '' ? '' : (alt || 'Service');
             return '<img class="service-icon-img" src="' + escapeHtml(cleanSrc) + '" width="16" height="16" alt="' +
-                escapeHtml(alt || 'Service') + '" style="vertical-align:middle;opacity:1">';
+                escapeHtml(altText) + '" style="vertical-align:middle;opacity:1">';
+        }
+
+        function serviceStatusIcon(src, label, badge, state) {
+            const stateText = {
+                fail: 'не работает',
+                stale: 'результат устарел',
+                unknown: 'не проверено',
+                pending: 'проверяется'
+            }[state];
+            if (!stateText) {
+                return serviceIcon(src, label, badge);
+            }
+            const marker = state === 'fail' ? '×' : '?';
+            const accessibleLabel = String(label || 'Сервис') + ': ' + stateText;
+            return '<span class="service-state-icon service-state-' + escapeHtml(state) + '" role="img" aria-label="' +
+                escapeHtml(accessibleLabel) + '" title="' + escapeHtml(accessibleLabel) + '">' +
+                serviceIcon(src, '', badge) + '<span class="service-state-marker" aria-hidden="true">' + marker + '</span></span>';
         }
 
         function protocolIcons(status) {
-            let html = '';
-            if (status && status.api_ok) {
-                html += serviceIcon(TELEGRAM_ICON_SRC, 'Telegram');
+            if (!status || status.tone === 'empty') {
+                return '';
             }
-            if (status && status.yt_ok) {
-                html += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');
+            let html = '';
+            const apiState = status && status.api_state ? status.api_state : (status && status.api_ok ? 'ok' : '');
+            const youtubeState = status && status.yt_state ? status.yt_state : (status && status.yt_ok ? 'ok' : '');
+            if (apiState && apiState !== 'unused') {
+                html += serviceStatusIcon(TELEGRAM_ICON_SRC, 'Telegram', '', apiState);
+            }
+            if (youtubeState && youtubeState !== 'unused') {
+                html += serviceStatusIcon(YOUTUBE_ICON_SRC, 'YouTube', '', youtubeState);
             }
             if (status && status.custom) {
                 customChecks.forEach(function(check) {
-                    if (status.custom[check.id] === 'ok') {
-                        html += serviceIcon(serviceIconSrc(check.icon), check.label || 'Service', check.badge || '');
+                    const state = status.custom[check.id];
+                    if (state) {
+                        html += serviceStatusIcon(serviceIconSrc(check.icon), check.label || 'Service', check.badge || '', state);
                     }
                 });
             }
@@ -2722,7 +2746,7 @@
             card.dataset.protocolLiveStatus = isLiveStatus ? '1' : '0';
             if (badge) {
                 badge.className = 'key-status-badge key-status-' + (status.tone || 'warn');
-                badge.innerHTML = status.label || 'Проверяется';
+                badge.textContent = status.label || 'Проверяется';
             }
             const details = card.querySelector('[data-protocol-status-details]');
             if (details) {
@@ -2960,9 +2984,14 @@
             updateRouterHealth(snapshot.router_health);
             const youtubeFailover = snapshot.youtube_failover || {};
             const youtubeFailoverNote = document.getElementById('youtube-failover-note');
+            const youtubeFailoverCard = document.querySelector('[data-youtube-failover-card]');
             if (youtubeFailoverNote) {
                 youtubeFailoverNote.textContent = cleanStatusText(youtubeFailover.label || '');
-                youtubeFailoverNote.classList.toggle('hidden', !youtubeFailoverNote.textContent);
+            }
+            if (youtubeFailoverCard) {
+                youtubeFailoverCard.classList.remove('key-status-ok', 'key-status-warn', 'key-status-fail');
+                youtubeFailoverCard.classList.add('key-status-' + (youtubeFailover.tone || 'warn'));
+                youtubeFailoverCard.classList.toggle('hidden', !youtubeFailover.enabled || !youtubeFailoverNote || !youtubeFailoverNote.textContent);
             }
             renderStatusAttention(snapshot);
             if (ENABLE_KEY_POOL && snapshot.pools) {

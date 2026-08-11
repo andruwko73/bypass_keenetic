@@ -2,6 +2,7 @@ import html
 import time
 from urllib.parse import urlparse
 
+from probe_cache import probe_result_state
 from web_status_builder import (
     pool_status_summary as build_pool_status_summary,
     youtube_probe_state,
@@ -108,14 +109,18 @@ def web_custom_probe_states(probe, custom_checks):
         if not check_id:
             continue
         if check_id in custom:
-            value = custom.get(check_id)
-            if value is None:
-                result[check_id] = 'unknown'
-            else:
-                result[check_id] = 'ok' if value else 'fail'
+            result[check_id] = probe_result_state(probe, custom.get(check_id))
         else:
             result[check_id] = 'unknown'
     return result
+
+
+def web_core_probe_states(probe):
+    telegram_state = probe_result_state(probe, (probe or {}).get('tg_ok'))
+    youtube_state = probe_result_state(probe, (probe or {}).get('yt_ok'))
+    if youtube_state == 'ok' and youtube_probe_state(probe) == 'warn':
+        youtube_state = 'warn'
+    return telegram_state, youtube_state
 
 def custom_check_applies_to_protocol(route_states, check_id, protocol):
     if not isinstance(route_states, dict):

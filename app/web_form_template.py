@@ -277,7 +277,7 @@ def render_web_form(
     router_telegram_call_note = html.escape(_display_note_text(router_health.get('telegram_call_note') or ''))
     youtube_failover = youtube_failover or {}
     youtube_failover_note = html.escape(_display_note_text(youtube_failover.get('label') or ''))
-    youtube_failover_hidden = '' if youtube_failover_note else ' hidden'
+    youtube_failover_tone = html.escape(str(youtube_failover.get('tone') or 'warn'), quote=True)
     router_memory_percent = _safe_percent(router_health.get('used_percent'))
     router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
     keys_view_subtitle = (
@@ -348,12 +348,25 @@ def render_web_form(
                                     </div>
                                 </div>
                             </div>'''
+    youtube_route_status_card = ''
+    if enable_key_pool and youtube_failover.get('enabled'):
+        youtube_route_status_card = f'''
+                            <div class="status-card youtube-route-card key-status-{youtube_failover_tone}" data-youtube-failover-card>
+                                <div class="status-card-top">
+                                    <span class="card-icon"><img src="/static/service-icons/youtube.png?v={html.escape(str(APP_VERSION_LABEL or '1'), quote=True)}" alt="" aria-hidden="true"></span>
+                                    <div class="status-copy">
+                                        <span class="status-label">Автопереключение YouTube</span>
+                                        <p class="status-note" id="youtube-failover-note" role="status" aria-live="polite">{youtube_failover_note}</p>
+                                    </div>
+                                </div>
+                            </div>'''
     secondary_status_column = ''
-    if active_mode_card or key_pool_status_card:
+    if active_mode_card or key_pool_status_card or youtube_route_status_card:
         secondary_status_column = f'''
                         <div class="status-dashboard-column status-dashboard-column-secondary">
                             {active_mode_card}
                             {key_pool_status_card}
+                            {youtube_route_status_card}
                         </div>'''
     topbar_status_item = _topbar_status_item(
         status,
@@ -531,7 +544,6 @@ def render_web_form(
                                         <p class="status-note" id="router-health-note">{router_health_note}</p>
                                         <p class="status-note" id="router-core-proxy-note">{router_core_proxy_note}</p>
                                         <p class="status-note" id="router-telegram-call-note">{router_telegram_call_note}</p>
-                                        <p class="status-note{youtube_failover_hidden}" id="youtube-failover-note">{youtube_failover_note}</p>
                                     </div>
                                 </div>
                                 <div class="status-card-actions router-health-actions">
