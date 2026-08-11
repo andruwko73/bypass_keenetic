@@ -2656,13 +2656,11 @@ def _attempt_youtube_failover():
         return False
 
     yt_metrics = {}
-    pool_running = bool(globals().get('pool_probe_lock') and pool_probe_lock.locked())
-    youtube_check = (
-        _check_youtube_protocol_once
-        if pool_running else
-        _check_youtube_protocol_for_background
+    ok, message = _check_youtube_protocol_once(
+        route_proto,
+        metrics=yt_metrics,
+        profile='pulse',
     )
-    ok, message = youtube_check(route_proto, metrics=yt_metrics, profile='pulse')
     if ok is None:
         state['last_health_state'] = 'unknown'
         state['last_health_reason'] = 'фоновая проверка недоступна'
@@ -2897,8 +2895,8 @@ def _run_auto_failover_cycle():
             _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
 
 
-def _youtube_pool_pulse_allowed():
-    """Allow only the low-cost YouTube pulse while a pool probe owns its resources."""
+def _youtube_failover_pulse_allowed():
+    """Run the low-cost pulse unless an actual emergency guard is active."""
     task_name = 'YouTube failover'
     if _update_maintenance_active():
         return False
@@ -2941,13 +2939,7 @@ def _run_youtube_failover_cycle():
         return
     ran = False
     try:
-        pool_running = bool(globals().get('pool_probe_lock') and pool_probe_lock.locked())
-        allowed = (
-            _youtube_pool_pulse_allowed()
-            if pool_running else
-            _background_task_allowed('YouTube failover', task_class='critical')
-        )
-        if allowed:
+        if _youtube_failover_pulse_allowed():
             ran, _result = _run_coordinated_background_task(
                 'YouTube failover',
                 _attempt_youtube_route_failover,

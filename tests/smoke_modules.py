@@ -2565,8 +2565,11 @@ def test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
         '_recover_interrupted_youtube_failover_transaction': lambda: None,
         '_load_current_keys': lambda: {'vless2': 'active'},
         '_reset_youtube_quality_state': reset_quality,
-        '_check_youtube_protocol_for_background': (
+        '_check_youtube_protocol_once': (
             lambda proto, metrics=None, profile='full': calls.append(('live', profile)) or (False, 'outage')
+        ),
+        '_check_youtube_protocol_for_background': (
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('pulse spawned a health worker'))
         ),
         '_youtube_health_state': lambda ok, metrics=None: ('failed', 'полный отказ', dict(metrics or {})),
         '_record_key_probe': lambda proto, key, **kwargs: calls.append(('probe', kwargs)),
@@ -2710,12 +2713,12 @@ def test_confirmed_youtube_failure_pauses_and_resumes_pool_once():
     assert state['phase'] == ''
 
 
-def test_youtube_pool_pulse_guard_keeps_only_emergency_limits():
+def test_youtube_failover_pulse_guard_keeps_only_emergency_limits():
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     tree = ast.parse(source)
     function_node = next(
         node for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == '_youtube_pool_pulse_allowed'
+        if isinstance(node, ast.FunctionDef) and node.name == '_youtube_failover_pulse_allowed'
     )
     now = [100.0]
     available = [160000]
@@ -2735,7 +2738,7 @@ def test_youtube_pool_pulse_guard_keeps_only_emergency_limits():
         'background_task_skip_reason': skip_reason,
     }
     exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
-    allowed = namespace['_youtube_pool_pulse_allowed']
+    allowed = namespace['_youtube_failover_pulse_allowed']
 
     assert allowed() is True
     assert 'YouTube failover' not in skip_until
@@ -2751,7 +2754,7 @@ def test_youtube_pool_pulse_guard_keeps_only_emergency_limits():
     assert skip_reason['YouTube failover'] == 'cpu'
 
 
-def test_youtube_cycle_uses_pool_pulse_guard_instead_of_generic_rss_guard():
+def test_youtube_cycle_uses_pulse_guard_instead_of_generic_rss_guard():
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     tree = ast.parse(source)
     function_node = next(
@@ -2763,7 +2766,7 @@ def test_youtube_cycle_uses_pool_pulse_guard_instead_of_generic_rss_guard():
         'YOUTUBE_ROUTE_FAILOVER_ENABLED': True,
         '_app_mode_pool_enabled': lambda: True,
         'pool_probe_lock': py_types.SimpleNamespace(locked=lambda: True),
-        '_youtube_pool_pulse_allowed': lambda: calls.append('pool_guard') or True,
+        '_youtube_failover_pulse_allowed': lambda: calls.append('pulse_guard') or True,
         '_background_task_allowed': (
             lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('generic RSS guard used'))
         ),
@@ -2776,7 +2779,7 @@ def test_youtube_cycle_uses_pool_pulse_guard_instead_of_generic_rss_guard():
     }
     exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
     namespace['_run_youtube_failover_cycle']()
-    assert calls == ['pool_guard', 'pulse', 'cleanup']
+    assert calls == ['pulse_guard', 'pulse', 'cleanup']
 
 
 def test_youtube_success_clears_stale_failover_phase():
@@ -5276,9 +5279,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "background_task_skip_reason[task_name] = 'program_rss'" in source
     assert "background_task_skip_reason[task_name] = 'cpu'" in source
     assert "'status refresh skipped high RSS'" in source
-    assert 'def _youtube_pool_pulse_allowed():' in source
-    assert "_check_youtube_protocol_once\n        if pool_running" in source
-    assert "_background_task_allowed('YouTube failover', task_class='critical')" in source
+    assert 'def _youtube_failover_pulse_allowed():' in source
+    assert "ok, message = _check_youtube_protocol_once(\n        route_proto" in source
+    assert "_background_task_allowed('YouTube failover', task_class='critical')" not in source
     assert 'background_task_coordinator_lock = threading.Lock()' in source
     assert 'def _run_coordinated_background_task(task_name, callback):' in source
     assert "_run_coordinated_background_task(\n                'Telegram auto-failover'" in source
@@ -16951,8 +16954,8 @@ def main():
     test_youtube_route_failover_fast_and_quality_paths_are_wired()
     test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
     test_confirmed_youtube_failure_pauses_and_resumes_pool_once()
-    test_youtube_pool_pulse_guard_keeps_only_emergency_limits()
-    test_youtube_cycle_uses_pool_pulse_guard_instead_of_generic_rss_guard()
+    test_youtube_failover_pulse_guard_keeps_only_emergency_limits()
+    test_youtube_cycle_uses_pulse_guard_instead_of_generic_rss_guard()
     test_youtube_success_clears_stale_failover_phase()
     test_youtube_transaction_recovery_refreshes_runtime_state()
     test_youtube_failed_candidate_escalates_restore_failure()
