@@ -388,16 +388,50 @@ def key_probe_age_seconds(entry, now=None):
     return max(0, int((time.time() if now is None else now) - timestamp))
 
 
-def probe_result_state(entry, value, now=None):
+def _probe_result_state_at(value, checked_at, now=None):
     value = _stored_probe_value(value)
     if value is None:
         return 'unknown'
-    age = key_probe_age_seconds(entry, now=now)
+    try:
+        checked_at = float(checked_at or 0)
+    except (TypeError, ValueError):
+        checked_at = 0.0
+    age = None if not checked_at else max(0, int((time.time() if now is None else now) - checked_at))
     if age is None or age >= KEY_PROBE_CACHE_TTL:
         return 'stale'
     if value is False and age >= KEY_PROBE_FAILURE_TTL:
         return 'stale'
     return 'ok' if value else 'fail'
+
+
+def probe_result_state(entry, value, now=None):
+    return _probe_result_state_at(value, _entry_timestamp(entry), now=now)
+
+
+def custom_probe_result_state(entry, value, now=None):
+    """Return a custom-service state without borrowing a newer core-probe timestamp."""
+    entry = entry if isinstance(entry, dict) else {}
+    checked_at = entry.get('custom_ts')
+    if checked_at is None:
+        checked_at = _entry_timestamp(entry)
+    return _probe_result_state_at(value, checked_at, now=now)
+
+
+def custom_probe_is_fresh(entry, custom_checks, now=None):
+    checks = [check for check in (custom_checks or []) if isinstance(check, dict) and check.get('id')]
+    if not checks:
+        return True
+    if not isinstance(entry, dict):
+        return False
+    custom = entry.get('custom')
+    if not isinstance(custom, dict):
+        return False
+    if entry.get('custom_sig') != custom_checks_signature(checks):
+        return False
+    return all(
+        check['id'] in custom and custom_probe_result_state(entry, custom.get(check['id']), now=now) in ('ok', 'fail')
+        for check in checks
+    )
 
 
 def _skip_recent_success_downgrade(entry, field, value, now, previous_ts):
@@ -628,6 +662,7 @@ def update_key_probe_cache_entry(
         elif has_probe_value and entry.get('quality_error'):
             entry.pop('quality_error', None)
             changed = True
+    custom_downgrade_skipped = False
     if custom is not None:
         existing_custom = entry.get('custom', {})
         if not isinstance(existing_custom, dict):
@@ -645,12 +680,16 @@ def update_key_probe_cache_entry(
                 existing_custom.get(check_key) is True
             ):
                 skipped_downgrade = True
+                custom_downgrade_skipped = True
                 continue
             if check_key not in existing_custom or existing_custom.get(check_key) is not value:
                 existing_custom[check_key] = value
                 changed = True
         if entry.get('custom') != existing_custom:
             entry['custom'] = existing_custom
+            changed = True
+        if not custom_downgrade_skipped and entry.get('custom_ts') != now:
+            entry['custom_ts'] = now
             changed = True
         if custom_checks is not None:
             signature = custom_checks_signature(custom_checks)

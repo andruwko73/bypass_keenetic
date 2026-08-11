@@ -229,7 +229,7 @@ def _protocol_statuses():
             "details": "Telegram and service checks pass on Vless 1.",
             "api_ok": True,
             "yt_ok": False,
-            "custom": {"chatgpt_services": "ok"},
+            "custom": {item["id"]: "ok" for item in CUSTOM_CHECKS},
         },
         "vless2": {
             "tone": "ok",
@@ -540,13 +540,6 @@ def _page_html(mode="advanced"):
         enable_telegram=enable_telegram,
         bot_ready=enable_telegram,
         bot_polling=enable_telegram,
-        youtube_failover={
-            "enabled": True,
-            "state": "healthy",
-            "tone": "ok",
-            "protocol": "vless2",
-            "label": "YouTube: маршрут Vless 2 исправен",
-        },
     )
 
 
@@ -614,13 +607,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
                     "web": _status(),
                     "protocols": _live_protocol_statuses() if lite else _protocol_statuses(),
                     "router_health": _router_health(),
-                    "youtube_failover": {
-                        "enabled": True,
-                        "state": "healthy",
-                        "tone": "ok",
-                        "protocol": "vless2",
-                        "label": "YouTube: маршрут Vless 2 исправен",
-                    },
                     "bot_ready": True,
                     "bot_polling": True,
                     "pool_summary": _pool_summary(),

@@ -9035,7 +9035,22 @@ def _protocol_status_for_key(
     protocol_custom_checks = _key_pool_web().protocol_custom_checks(custom_checks, route_states, key_name)
     cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     cached_probe = cache.get(_hash_key(key_value), {})
-    custom_states = _key_pool_web().web_custom_probe_states(cached_probe, protocol_custom_checks)
+    proxy_url = proxy_settings.get(key_name)
+    try:
+        custom_states, protocol_custom_checks = _key_pool_web().active_custom_probe_states(
+            key_name,
+            key_value,
+            proxy_url,
+            protocol_custom_checks,
+            cache,
+            _hash_key,
+            _probe_custom_targets_for_pool,
+            _record_key_probe,
+            background_checks=background_checks,
+        )
+    except Exception as exc:
+        _write_runtime_log(f'Ошибка обновления дополнительных проверок активного ключа {key_name}: {exc}')
+        custom_states = _key_pool_web().web_custom_probe_states(cached_probe, protocol_custom_checks)
     cached_api_state, cached_youtube_state = _key_pool_web().web_core_probe_states(cached_probe)
     active_telegram_required = bool(_app_mode_telegram_enabled() and _telegram_required_for_protocol(key_name))
     if (
@@ -9054,7 +9069,6 @@ def _protocol_status_for_key(
             checked_age_seconds=_probe_cache().key_probe_age_seconds(cached_probe),
         )
 
-    proxy_url = proxy_settings.get(key_name)
     if background_checks:
         api_ok, api_message = _check_telegram_api_for_background(
             proxy_url,
@@ -9257,7 +9271,15 @@ def _light_cached_protocol_status_for_key(
     )
 
 
-def _light_active_protocol_status_for_key(key_name, key_value, background_checks=False, *, route_states=None):
+def _light_active_protocol_status_for_key(
+    key_name,
+    key_value,
+    background_checks=False,
+    *,
+    route_states=None,
+    custom_checks=None,
+    key_probe_cache=None,
+):
     key_value = str(key_value or '').strip()
     if not key_value:
         return _status_empty_protocol_status()
@@ -9274,7 +9296,28 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
         return preflight
 
     proxy_url = proxy_settings.get(key_name)
+    if route_states is None:
+        route_states = _load_light_service_route_states()
     required_services = _light_required_services_for_protocol(key_name, route_states=route_states)
+    custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
+    protocol_custom_checks = _light_protocol_custom_checks(custom_checks, route_states, key_name)
+    cache = key_probe_cache if key_probe_cache is not None else _load_light_key_probe_cache()
+    probe = cache.get(_hash_key(key_value), {}) if isinstance(cache, dict) else {}
+    try:
+        custom_states, protocol_custom_checks = _key_pool_web().active_custom_probe_states(
+            key_name,
+            key_value,
+            proxy_url,
+            protocol_custom_checks,
+            cache,
+            _hash_key,
+            _probe_custom_targets_for_pool,
+            _record_key_probe,
+            background_checks=background_checks,
+        )
+    except Exception as exc:
+        _write_runtime_log(f'Ошибка обновления дополнительных проверок активного ключа {key_name}: {exc}')
+        custom_states = _light_custom_probe_states(probe, protocol_custom_checks)
     api_required = 'telegram' in required_services
     if api_required:
         if background_checks:
@@ -9320,8 +9363,8 @@ def _light_active_protocol_status_for_key(key_name, key_value, background_checks
         yt_message='',
         yt_pending=False,
         yt_state='',
-        custom_states={},
-        custom_checks=(),
+        custom_states=custom_states,
+        custom_checks=protocol_custom_checks,
         api_required=api_required,
         required_services=required_services,
     )
@@ -13505,7 +13548,6 @@ def _web_status_payload_with_polling_guard(payload):
     guarded_payload['web'] = guarded_status
     guarded_payload['protocols'] = guarded_protocols
     guarded_payload['bot_polling'] = bool(bot_polling)
-    guarded_payload['youtube_failover'] = _youtube_failover_status_payload()
     return guarded_payload
 
 
@@ -13704,6 +13746,12 @@ def _active_mode_status_snapshot_from_base(
                         current_keys.get(proxy_mode, ''),
                         background_checks=background_checks,
                         route_states=route_states,
+                        custom_checks=custom_checks,
+                        key_probe_cache=(
+                            light_key_probe_cache
+                            if light_key_probe_cache is not None
+                            else _load_light_key_probe_cache()
+                        ),
                     )
                 if not include_route_details:
                     previous_status = protocols.get(proxy_mode)
@@ -14741,7 +14789,6 @@ class KeyInstallHTTPRequestHandler(WebRequestMixin, BaseHTTPRequestHandler):
             enable_telegram=telegram_enabled,
             bot_ready=bool(bot_ready),
             bot_polling=bool(bot_polling),
-            youtube_failover=_youtube_failover_status_payload(),
         )
 
     def _build_protocol_panel(self, protocol):

@@ -1587,6 +1587,91 @@ def test_key_pool_web():
     assert warn_summary['services'][1] == {'label': 'YouTube', 'count': 1}
     assert warn_summary['any_service_count'] == 1
     assert key_pool_web.web_custom_probe_states({'custom': {'custom': None}}, checks)['custom'] == 'unknown'
+    timestamp = time.time()
+    custom_entry = {
+        'ts': timestamp,
+        'custom_ts': timestamp - probe_cache.KEY_PROBE_CACHE_TTL - 1,
+        'custom': {'custom': True},
+    }
+    assert probe_cache.probe_result_state(custom_entry, True, now=timestamp) == 'ok'
+    assert probe_cache.custom_probe_result_state(custom_entry, True, now=timestamp) == 'stale'
+
+    active_checks = [
+        {'id': 'chatgpt_services', 'label': 'ChatGPT'},
+        {'id': 'discord', 'label': 'Discord'},
+    ]
+    active_key = 'active-key'
+    active_key_id = _hash_key(active_key)
+    stale_cache = {
+        active_key_id: {
+            'ts': timestamp,
+            'custom_ts': timestamp - probe_cache.KEY_PROBE_CACHE_TTL - 1,
+            'custom': {'chatgpt_services': True, 'discord': True},
+            'custom_sig': probe_cache.custom_checks_signature(active_checks),
+        },
+    }
+    active_calls = []
+
+    states, returned_checks = key_pool_web.active_custom_probe_states(
+        'vless',
+        active_key,
+        'socks5://active',
+        active_checks,
+        stale_cache,
+        _hash_key,
+        lambda proxy_url, selected: active_calls.append(('probe', proxy_url, selected)) or {
+            'chatgpt_services': True,
+            'discord': False,
+        },
+        lambda proto, key, **kwargs: active_calls.append(('record', proto, key, kwargs)),
+        background_checks=False,
+    )
+    assert states == {'chatgpt_services': 'stale', 'discord': 'stale'}
+    assert returned_checks == active_checks
+    assert active_calls == []
+
+    states, returned_checks = key_pool_web.active_custom_probe_states(
+        'vless',
+        active_key,
+        'socks5://active',
+        active_checks,
+        stale_cache,
+        _hash_key,
+        lambda proxy_url, selected: active_calls.append(('probe', proxy_url, selected)) or {
+            'chatgpt_services': True,
+            'discord': False,
+        },
+        lambda proto, key, **kwargs: active_calls.append(('record', proto, key, kwargs)),
+        background_checks=True,
+    )
+    assert states == {'chatgpt_services': 'ok', 'discord': 'fail'}
+    assert returned_checks == active_checks
+    assert active_calls[0] == ('probe', 'socks5://active', active_checks)
+    assert active_calls[1][0:3] == ('record', 'vless', active_key)
+    assert active_calls[1][3]['custom_checks'] == active_checks
+
+    fresh_cache = {
+        active_key_id: {
+            'ts': timestamp,
+            'custom_ts': timestamp,
+            'custom': {'chatgpt_services': True, 'discord': False},
+            'custom_sig': probe_cache.custom_checks_signature(active_checks),
+        },
+    }
+    fresh_calls = []
+    states, _ = key_pool_web.active_custom_probe_states(
+        'vless',
+        active_key,
+        'socks5://active',
+        active_checks,
+        fresh_cache,
+        _hash_key,
+        lambda *_args: fresh_calls.append('probe') or {},
+        lambda *_args, **_kwargs: fresh_calls.append('record'),
+        background_checks=True,
+    )
+    assert states == {'chatgpt_services': 'ok', 'discord': 'fail'}
+    assert fresh_calls == []
     scoped_checks = [
         {'id': 'discord', 'label': 'Discord'},
         {'id': 'claude', 'label': 'Claude'},
@@ -2505,11 +2590,10 @@ def test_youtube_route_failover_fast_and_quality_paths_are_wired():
     assert 'youtube_route_failover_poll_seconds' in source
     assert 'measure_youtube_quality=trigger == \'degraded\'' in source
     assert 'YOUTUBE_ROUTE_FAILOVER_MAX_CANDIDATES' in source
-    assert "guarded_payload['youtube_failover']" in source
-    assert 'youtube-failover-note' in template
-    assert 'data-youtube-failover-card' in template
-    assert 'id="youtube-failover-note" role="status" aria-live="polite"' in template
-    assert 'snapshot.youtube_failover' in script
+    assert "guarded_payload['youtube_failover']" not in source
+    assert 'youtube-failover-note' not in template
+    assert 'data-youtube-failover-card' not in template
+    assert 'snapshot.youtube_failover' not in script
 
 
 def test_youtube_route_failover_state_machine_switches_after_fast_confirmation():
@@ -4021,7 +4105,13 @@ def test_codex_version_matches_commit_count():
         assert config_line in example
         assert config_line in installer
         assert config_line in bootstrap
-    assert 'addn-hosts=/opt/etc/bot/youtube_edge_quality.hosts' in (APP_ROOT / 'dnsmasq.conf').read_text(encoding='utf-8')
+    dnsmasq_config = (APP_ROOT / 'dnsmasq.conf').read_text(encoding='utf-8')
+    assert 'addn-hosts=/opt/etc/bot/youtube_edge_quality.hosts' in dnsmasq_config
+    assert 'strict-order' in dnsmasq_config
+    assert 'server=127.0.0.1#40500' in dnsmasq_config
+    assert 'server=127.0.0.1#40508' in dnsmasq_config
+    assert 'server=8.8.8.8' not in dnsmasq_config
+    assert 'server=1.1.1.1' not in dnsmasq_config
     assert 'run_youtube_edge_cdn_quality_if_due()' in (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
     assert 'YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS="${YOUTUBE_EDGE_CDN_QUALITY_INTERVAL_SECONDS:-1800}"' in (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
     assert 'youtube_edge_cdn_quality_interval_seconds = 1800' in (ROOT / 'script.sh').read_text(encoding='utf-8')
@@ -4066,6 +4156,7 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert 'udp_quic_domain()' in unblock_dnsmasq
     assert 'call_signal_domain()' in unblock_dnsmasq
     assert 'append_dnsmasq_domain "$line" "$main_set" "$udp_set" "$call_signal_set"' in unblock_dnsmasq
+    assert 'echo "server=/$domain/8.8.8.8"' not in unblock_dnsmasq
     assert 'write_route_domain shadowsocks "$line" unblocksh unblockshudp bypass_call_signal_sh 1' in unblock_dnsmasq
     assert 'write_route_domain vmess "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess 0' in unblock_dnsmasq
     assert 'write_route_domain vless "$line" unblockvless unblockvlessudp bypass_call_signal_vless 0' in unblock_dnsmasq
@@ -4119,6 +4210,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
         stderr=subprocess.DEVNULL,
     )
     dnsmasq_text = output.read_text(encoding='utf-8')
+    assert 'server=/' not in dnsmasq_text
     assert 'ipset=/youtube.com/unblockvless2' in dnsmasq_text
 
     assert 'ipset=/www.youtube.com/unblockvless2' in dnsmasq_text
@@ -8502,7 +8594,7 @@ def test_cached_protocol_status_description_has_no_static_trailing_period():
     assert 'YouTube:' in warn_status['details']
 
 
-def test_cached_protocol_status_distinguishes_fresh_failure_from_stale_result():
+def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health():
     checks = [{'id': 'chatgpt_services', 'label': 'ChatGPT / Codex'}]
     fresh_failure = web_status_builder.cached_protocol_status(
         'vless://sample',
@@ -8526,8 +8618,8 @@ def test_cached_protocol_status_distinguishes_fresh_failure_from_stale_result():
         probe_yt_state='ok',
         checked_age_seconds=301,
     )
-    assert stale_result['label'] == 'Требуется повторная проверка'
-    assert stale_result['tone'] == 'warn'
+    assert stale_result['label'] == 'Работает'
+    assert stale_result['tone'] == 'ok'
     assert 'результат устарел' in stale_result['details']
     assert '5 мин назад' in stale_result['details']
     unknown_result = web_status_builder.cached_protocol_status(
@@ -8539,8 +8631,35 @@ def test_cached_protocol_status_distinguishes_fresh_failure_from_stale_result():
         api_state='ok',
         probe_yt_state='ok',
     )
-    assert unknown_result['label'] == 'Требуется повторная проверка'
+    assert unknown_result['label'] == 'Работает'
+    assert unknown_result['tone'] == 'ok'
     assert 'не проверено' in unknown_result['details']
+    required_stale_result = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': True},
+        checks,
+        {'chatgpt_services': 'ok'},
+        required_services=['telegram'],
+        api_state='stale',
+        probe_yt_state='ok',
+    )
+    assert required_stale_result['label'] == 'Требуется повторная проверка'
+    assert required_stale_result['tone'] == 'warn'
+
+    live_unknown = web_status_builder.active_protocol_status(
+        endpoint_ok=True,
+        endpoint_message='SOCKS ok.',
+        api_ok=True,
+        api_message='Telegram ok.',
+        api_transient=False,
+        yt_ok=True,
+        yt_message='YouTube ok.',
+        custom_states={'chatgpt_services': 'unknown'},
+        custom_checks=checks,
+        required_services=('telegram',),
+    )
+    assert live_unknown['tone'] == 'ok'
+    assert 'ChatGPT / Codex' in live_unknown['details']
 
 
 def test_active_protocol_status_description_has_no_trailing_period():

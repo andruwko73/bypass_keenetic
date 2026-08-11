@@ -261,11 +261,6 @@ def active_protocol_status(
         bool(api_required)
     )
     pending = bool(api_pending or yt_pending or (api_transient and telegram_required))
-    verification_pending = any(
-        custom_states.get(check.get('id')) in ('unknown', 'stale')
-        for check in custom_checks or []
-        if check.get('id')
-    )
     if endpoint_ok and pending:
         service_parts = service_status_parts(
             api_ok,
@@ -320,7 +315,6 @@ def active_protocol_status(
         api_required=api_required,
         required_services=required_services,
         pending=pending,
-        verification_pending=verification_pending,
     )
     if yt_state == 'warn' and tone == 'ok' and required_services is None:
         tone = 'warn'
@@ -500,8 +494,7 @@ def cached_protocol_status(
             service_parts.append(f'{check.get("label", "Сервис")}: {state_text}')
     verification_pending = (
         ((required_services is None or 'telegram' in required_services) and api_state in ('unknown', 'stale')) or
-        ((required_services is None or 'youtube' in required_services) and probe_yt_state in ('unknown', 'stale')) or
-        any(custom_states.get(check.get('id')) in ('unknown', 'stale') for check in custom_checks or [])
+        ((required_services is None or 'youtube' in required_services) and probe_yt_state in ('unknown', 'stale'))
     )
     tone, label = tone_label(
         api_ok,

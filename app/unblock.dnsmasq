@@ -191,8 +191,8 @@ append_dnsmasq_domain() {
   udp_set="$3"
   call_signal_set="$4"
   [ -n "$domain" ] || return 0
+  # Keep global upstream selection; per-domain servers can yield unstable NXDOMAIN responses.
   echo "ipset=/$domain/$(ipset_targets "$domain" "$main_set" "$udp_set" "$call_signal_set")" >> "$DNSMASQ_OUTPUT_FILE"
-  echo "server=/$domain/8.8.8.8" >> "$DNSMASQ_OUTPUT_FILE"
 }
 
 write_route_domain() {

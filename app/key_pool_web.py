@@ -2,7 +2,7 @@ import html
 import time
 from urllib.parse import urlparse
 
-from probe_cache import probe_result_state
+from probe_cache import custom_probe_is_fresh, custom_probe_result_state, probe_result_state
 from web_status_builder import (
     pool_status_summary as build_pool_status_summary,
     youtube_probe_state,
@@ -109,7 +109,7 @@ def web_custom_probe_states(probe, custom_checks):
         if not check_id:
             continue
         if check_id in custom:
-            result[check_id] = probe_result_state(probe, custom.get(check_id))
+            result[check_id] = custom_probe_result_state(probe, custom.get(check_id))
         else:
             result[check_id] = 'unknown'
     return result
@@ -148,6 +148,44 @@ def protocol_custom_checks(custom_checks, route_states, protocol):
         if custom_check_applies_to_protocol(route_states, check_id, protocol):
             result.append(check)
     return result
+
+
+def active_custom_probe_states(
+    protocol,
+    key_value,
+    proxy_url,
+    custom_checks,
+    key_probe_cache,
+    hash_key,
+    probe_targets,
+    record_probe,
+    *,
+    background_checks=False,
+):
+    """Refresh selected service checks only for the active key when their own cache is stale."""
+    checks = [check for check in (custom_checks or []) if isinstance(check, dict) and check.get('id')]
+    cache = key_probe_cache if isinstance(key_probe_cache, dict) else {}
+    probe = cache.get(hash_key(key_value), {})
+    probe = probe if isinstance(probe, dict) else {}
+    states = web_custom_probe_states(probe, checks)
+    if not background_checks or custom_probe_is_fresh(probe, checks):
+        return states, checks
+
+    results = probe_targets(proxy_url, checks)
+    if not isinstance(results, dict) or not results:
+        return states, checks
+    record_probe(
+        protocol,
+        key_value,
+        custom=results,
+        custom_checks=checks,
+    )
+    for check in checks:
+        check_id = check.get('id')
+        if check_id not in results or results.get(check_id) is None:
+            continue
+        states[check_id] = 'ok' if results.get(check_id) else 'fail'
+    return states, checks
 
 
 def web_probe_state(probe, key):

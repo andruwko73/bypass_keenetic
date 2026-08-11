@@ -761,24 +761,12 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
-  if (modeConfig.expectPool) {
-    await page.waitForFunction(() => {
-      const note = document.getElementById('youtube-failover-note');
-      return Boolean(note && note.textContent && note.textContent.trim());
-    }, {timeout: 10000});
-    const youtubeFailoverNote = page.locator('#youtube-failover-note');
-    const youtubeFailoverText = (await youtubeFailoverNote.innerText()).trim();
-    if (!youtubeFailoverText.includes('YouTube: маршрут Vless 2 исправен')) {
-      throw new Error(`${name}: YouTube automatic failover status is missing: ${youtubeFailoverText}`);
-    }
-    if (await youtubeFailoverNote.locator('xpath=ancestor::*[@data-youtube-failover-card]').count() !== 1) {
-      throw new Error(`${name}: YouTube automatic failover status is not in its own card`);
-    }
-    if (await youtubeFailoverNote.locator('xpath=ancestor::*[contains(@class,"router-health-card")]').count() !== 0) {
-      throw new Error(`${name}: YouTube automatic failover status still leaks into the router card`);
-    }
-  } else if (await page.locator('#youtube-failover-note').count() !== 0) {
-    throw new Error(`${name}: simple mode unexpectedly renders the YouTube automatic failover card`);
+  if (await page.locator('#youtube-failover-note, [data-youtube-failover-card]').count() !== 0) {
+    throw new Error(`${name}: automatic failover diagnostics must not be rendered in the web interface`);
+  }
+  const overviewText = (await page.locator('[data-view="status"].active').innerText()).trim();
+  if (overviewText.includes('Автопереключение YouTube') || overviewText.includes('Автопереключение Telegram')) {
+    throw new Error(`${name}: automatic failover labels leaked into the web interface`);
   }
   await assertNoHorizontalOverflow(page, name);
   if (modeConfig.expectPool) {
@@ -1240,11 +1228,11 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       await assertVisibleBox(page, '[data-protocol-panel].active [data-pool-body] tr:first-child .pool-delete-btn', `${name} delete button`);
     }
     await assertActivePoolRowPinned(page, 'vless', `${name} vless pool order`);
-    await assertProtocolServiceIconsStableAfterIdleRefresh(page, 'vless', 3, `${name} vless status icons idle refresh`);
+    await assertProtocolServiceIconsStableAfterIdleRefresh(page, 'vless', 5, `${name} vless status icons idle refresh`);
     await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after idle refresh`);
-    await assertProtocolServiceIconsStableAfterPoolRefresh(page, 'vless', 3, `${name} vless status icons pool refresh`);
+    await assertProtocolServiceIconsStableAfterPoolRefresh(page, 'vless', 5, `${name} vless status icons pool refresh`);
     await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after pool refresh`);
-    await assertProtocolServiceIconsStableAfterLiveStatus(page, 'vless', 3, `${name} vless status icons apply refresh`);
+    await assertProtocolServiceIconsStableAfterLiveStatus(page, 'vless', 5, `${name} vless status icons apply refresh`);
     await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after apply refresh`);
     await clickLazyProtocol(page, 'vless2', name);
     await page.locator('[data-protocol-panel="vless2"].active [data-subview-target="pool"]').click();

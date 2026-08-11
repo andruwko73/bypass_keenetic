@@ -2982,17 +2982,6 @@
             const poolSummary = ENABLE_KEY_POOL ? (snapshot.pool_summary || null) : null;
             updatePoolSummaryBlock(poolSummary, progress, poolProbeActive, poolProbePaused);
             updateRouterHealth(snapshot.router_health);
-            const youtubeFailover = snapshot.youtube_failover || {};
-            const youtubeFailoverNote = document.getElementById('youtube-failover-note');
-            const youtubeFailoverCard = document.querySelector('[data-youtube-failover-card]');
-            if (youtubeFailoverNote) {
-                youtubeFailoverNote.textContent = cleanStatusText(youtubeFailover.label || '');
-            }
-            if (youtubeFailoverCard) {
-                youtubeFailoverCard.classList.remove('key-status-ok', 'key-status-warn', 'key-status-fail');
-                youtubeFailoverCard.classList.add('key-status-' + (youtubeFailover.tone || 'warn'));
-                youtubeFailoverCard.classList.toggle('hidden', !youtubeFailover.enabled || !youtubeFailoverNote || !youtubeFailoverNote.textContent);
-            }
             renderStatusAttention(snapshot);
             if (ENABLE_KEY_POOL && snapshot.pools) {
                 updatePoolStatus(snapshot.pools);
