@@ -13769,6 +13769,20 @@ def _stale_status_snapshot(current_keys):
     if status_snapshot_cache.get('signature') != signature:
         return None
     snapshot = status_snapshot_cache.get('data')
+    if (
+        isinstance(snapshot, dict) and
+        (pool_probe_lock.locked() or _has_pool_probe_resume_payload())
+    ):
+        try:
+            snapshot = _placeholder_status_snapshot(current_keys, include_pool_details=True)
+            return _status_store_snapshot(
+                status_snapshot_cache,
+                signature,
+                snapshot,
+                now=time.time(),
+            )
+        except Exception as exc:
+            _write_runtime_log(f'Unable to refresh cached probe ages during pool check: {exc}')
     return snapshot if isinstance(snapshot, dict) else None
 
 

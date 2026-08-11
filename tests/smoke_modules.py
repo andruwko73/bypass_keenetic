@@ -6159,6 +6159,66 @@ def test_light_probe_cache_schema_contract_matches_canonical_cache():
         temp_dir.cleanup()
 
 
+def test_stale_status_snapshot_refreshes_probe_ages_during_pool_check():
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_path = Path(temp_dir.name)
+    mode_file = temp_path / 'bot_app_mode'
+    mode_file.write_text('advanced\n', encoding='utf-8')
+    (temp_path / 'bot_config.py').write_text(
+        (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+        encoding='utf-8',
+    )
+    script = (
+        "import os, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        f"sys.path.insert(0, {str(temp_path)!r})\n"
+        "import app_runtime_mode\n"
+        f"app_runtime_mode.APP_RUNTIME_MODE_FILE = {str(mode_file)!r}\n"
+        "import bot\n"
+        "keys = {'vless': 'vless://active'}\n"
+        "signature = bot._status_snapshot_signature(keys)\n"
+        "old_snapshot = {'web': {'state': 'old'}, 'protocols': {'vless': {'label': 'Частично работает'}}}\n"
+        "bot.status_snapshot_cache.update({'timestamp': 1.0, 'signature': signature, 'data': old_snapshot})\n"
+        "calls = []\n"
+        "fresh_snapshot = {'web': {'state': 'fresh'}, 'protocols': {'vless': {'label': 'Требуется повторная проверка'}}}\n"
+        "bot._placeholder_status_snapshot = lambda current_keys, include_pool_details=True: calls.append((current_keys, include_pool_details)) or fresh_snapshot\n"
+        "bot.pool_probe_lock.acquire()\n"
+        "try:\n"
+        "    result = bot._stale_status_snapshot(keys)\n"
+        "finally:\n"
+        "    bot.pool_probe_lock.release()\n"
+        "assert result == fresh_snapshot\n"
+        "assert calls == [(keys, True)]\n"
+        "assert bot.status_snapshot_cache['data'] == fresh_snapshot\n"
+        "assert bot.status_snapshot_cache['timestamp'] > 1.0\n"
+        "calls.clear()\n"
+        "bot.status_snapshot_cache.update({'timestamp': 1.0, 'signature': signature, 'data': old_snapshot})\n"
+        "bot._has_pool_probe_resume_payload = lambda: True\n"
+        "assert bot._stale_status_snapshot(keys) == fresh_snapshot\n"
+        "assert calls == [(keys, True)]\n"
+        "calls.clear()\n"
+        "bot.status_snapshot_cache.update({'timestamp': 1.0, 'signature': signature, 'data': old_snapshot})\n"
+        "bot._has_pool_probe_resume_payload = lambda: False\n"
+        "assert bot._stale_status_snapshot(keys) == old_snapshot\n"
+        "assert calls == []\n"
+    )
+    env = os.environ.copy()
+    env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+    try:
+        subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    finally:
+        temp_dir.cleanup()
+
+
 def test_light_pool_summary_recomputes_after_delete_and_keeps_complete_checkpoint():
     temp_dir = tempfile.TemporaryDirectory()
     temp_path = Path(temp_dir.name)
