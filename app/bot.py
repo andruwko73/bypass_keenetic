@@ -585,6 +585,22 @@ def _record_light_telegram_probe(key_name, key_value, tg_ok, *, now=None):
     return True
 
 
+def _confirm_active_telegram_probe_from_polling():
+    """Persist successful polling evidence for the active Telegram key."""
+    if not (_app_mode_telegram_enabled() and bot_ready and bot_polling):
+        return False
+    route_proto = _telegram_route_protocol() or proxy_mode
+    if route_proto not in POOL_PROTOCOL_ORDER:
+        return False
+    key_value = str(_load_current_keys().get(route_proto, '') or '').strip()
+    if not key_value:
+        return False
+    key_id = _hash_key(key_value)
+    if (_load_light_key_probe_cache().get(key_id) or {}).get('tg_ok') is True:
+        return False
+    return _record_key_probe(route_proto, key_value, tg_ok=True)
+
+
 def _load_light_key_probe_cache():
     cache = _read_json_file(_KEY_PROBE_CACHE_PATH, {}) or {}
     if not isinstance(cache, dict):
@@ -12092,6 +12108,7 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
             except Exception as exc:
                 completion_error = True
                 _write_runtime_log(f'Failed to persist pool probe completion state: {type(exc).__name__}')
+            _confirm_active_telegram_probe_from_polling()
             _invalidate_probe_status_caches()
             completion_summary = _refresh_persisted_pool_summary_after_probe()
             # The child normally reaps its own temporary Xray.  A last, scoped
@@ -12189,6 +12206,7 @@ def _handle_inprocess_pool_probe_finished(result):
             reason=reason,
             applied_unique_count=_pool_summary_count(latest_run, 'applied_unique_count'),
         )
+    _confirm_active_telegram_probe_from_polling()
     _invalidate_probe_status_caches()
     summary = _refresh_persisted_pool_summary_after_probe()
     return _finalize_pool_probe_completion_notification(
@@ -15476,6 +15494,7 @@ def _run_telegram_polling_loop():
                     shutdown_requested.wait(10)
                     continue
             bot_polling = True
+            _confirm_active_telegram_probe_from_polling()
             bot.infinity_polling(timeout=60, long_polling_timeout=50)
         except Exception as err:
             bot_polling = False
