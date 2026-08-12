@@ -414,7 +414,13 @@ def custom_probe_result_state(entry, value, now=None):
     checked_at = entry.get('custom_ts')
     if checked_at is None:
         checked_at = _entry_timestamp(entry)
-    return _probe_result_state_at(value, checked_at, now=now)
+    state = _probe_result_state_at(value, checked_at, now=now)
+    if state != 'stale':
+        return state
+    stored_value = _stored_probe_value(value)
+    if stored_value is None:
+        return 'unknown'
+    return 'stale_ok' if stored_value else 'stale_fail'
 
 
 def custom_probe_is_fresh(entry, custom_checks, now=None):

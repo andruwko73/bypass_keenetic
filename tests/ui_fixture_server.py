@@ -32,6 +32,7 @@ BACKGROUND_STATE = {
 BACKGROUND_FIXTURE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL4JwAAAABJRU5ErkJggg=="
 
 import key_pool_web  # noqa: E402
+import probe_cache  # noqa: E402
 import service_catalog  # noqa: E402
 import service_routes  # noqa: E402
 import web_form_blocks  # noqa: E402
@@ -183,6 +184,7 @@ def _probe_cache():
                 "tg_ok": proto == "vless" or index == 0,
                 "yt_ok": proto == "vless2" or index == 0,
                 "custom": {item["id"]: index == 0 for item in CUSTOM_CHECKS},
+                "custom_ts": now - probe_cache.KEY_PROBE_CACHE_TTL - 60,
                 "ts": now - (index * 60),
             }
     return cache

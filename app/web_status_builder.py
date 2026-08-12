@@ -167,7 +167,9 @@ def service_status_parts(
         state_text = {
             'ok': 'работает',
             'fail': 'не работает',
-            'stale': 'результат устарел',
+            'stale_ok': 'последняя проверка: работало; результат устарел',
+            'stale_fail': 'последняя проверка: не работало; результат устарел',
+            'stale': 'последний результат устарел',
             'unknown': 'не проверено',
         }.get(state)
         if state_text:
@@ -211,7 +213,7 @@ def tone_label(
     if pending:
         return 'warn', 'Статус обновляется'
     required_services = _normalize_required_services(required_services)
-    custom_fail = any(state == 'fail' for state in custom_states.values())
+    custom_fail = any(state in ('fail', 'stale_fail') for state in custom_states.values())
     if verification_pending and not custom_fail:
         return 'warn', 'Требуется повторная проверка'
     if required_services:
@@ -220,13 +222,13 @@ def tone_label(
             states.append(bool(api_ok))
         if 'youtube' in required_services:
             states.append(bool(yt_ok))
-        custom_ok = any(state == 'ok' for state in custom_states.values())
+        custom_ok = any(state in ('ok', 'stale_ok') for state in custom_states.values())
         if states and all(states) and not custom_fail:
             return 'ok', 'Работает'
         if any(states) or custom_ok:
             return 'warn', 'Частично работает'
         return 'fail', 'Не работает'
-    any_ok = api_ok or yt_ok or any(state == 'ok' for state in custom_states.values())
+    any_ok = api_ok or yt_ok or any(state in ('ok', 'stale_ok') for state in custom_states.values())
     if not api_required and any_ok and not custom_fail:
         return 'ok', 'Работает'
     return (
@@ -451,7 +453,7 @@ def cached_protocol_status(
     api_state = api_state or ('ok' if probe.get('tg_ok') is True else 'fail' if probe.get('tg_ok') is False else 'unknown')
     probe_yt_state = probe_yt_state or youtube_probe_state(probe)
     has_probe_result = any(
-        state in ('ok', 'warn', 'fail', 'stale')
+        state in ('ok', 'warn', 'fail', 'stale', 'stale_ok', 'stale_fail')
         for state in (api_state, probe_yt_state, *custom_states.values())
     )
     if not has_probe_result:
@@ -487,7 +489,9 @@ def cached_protocol_status(
         state_text = {
             'ok': 'работает',
             'fail': 'не работает',
-            'stale': 'результат устарел',
+            'stale_ok': 'последняя проверка: работало; результат устарел',
+            'stale_fail': 'последняя проверка: не работало; результат устарел',
+            'stale': 'последний результат устарел',
             'unknown': 'не проверено',
         }.get(state)
         if state_text:

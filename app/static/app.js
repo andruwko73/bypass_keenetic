@@ -1499,16 +1499,19 @@
         function serviceStatusIcon(src, label, badge, state) {
             const stateText = {
                 fail: 'не работает',
-                stale: 'результат устарел',
+                stale_ok: 'последняя проверка: работало; результат устарел',
+                stale_fail: 'последняя проверка: не работало; результат устарел',
+                stale: 'последний результат устарел',
                 unknown: 'не проверено',
                 pending: 'проверяется'
             }[state];
             if (!stateText) {
                 return serviceIcon(src, label, badge);
             }
-            const marker = state === 'fail' ? '×' : '?';
+            const marker = state === 'fail' || state === 'stale_fail' ? '×' : (state === 'stale_ok' ? '↻' : '?');
             const accessibleLabel = String(label || 'Сервис') + ': ' + stateText;
-            return '<span class="service-state-icon service-state-' + escapeHtml(state) + '" role="img" aria-label="' +
+            const stateClass = String(state || 'unknown').replace(/_/g, '-');
+            return '<span class="service-state-icon service-state-' + escapeHtml(stateClass) + '" role="img" aria-label="' +
                 escapeHtml(accessibleLabel) + '" title="' + escapeHtml(accessibleLabel) + '">' +
                 serviceIcon(src, '', badge) + '<span class="service-state-marker" aria-hidden="true">' + marker + '</span></span>';
         }
@@ -1542,7 +1545,7 @@
             if (!text) {
                 return 0;
             }
-            const imgCount = (text.match(/<img/gi) || []).length;
+            const imgCount = (text.match(/<img\b/gi) || []).length;
             const badgeCount = (text.match(/custom-service-badge/gi) || []).length;
             return imgCount + badgeCount;
         }
@@ -1623,8 +1626,18 @@
             const includeYoutube = coreServices.indexOf('youtube') !== -1;
             const tgState = row.dataset.tgState || 'unknown';
             const ytState = row.dataset.ytState || 'unknown';
-            const customOk = Array.from(row.querySelectorAll('[data-pool-custom] .custom-service-ok'));
-            const customFail = Array.from(row.querySelectorAll('[data-pool-custom] .custom-service-fail'));
+            const customResults = Array.from(row.querySelectorAll('[data-pool-custom]')).map(function(cell) {
+                const stateNode = cell.querySelector('[data-service-state]');
+                const checkId = cell.getAttribute('data-pool-custom') || '';
+                const check = customChecks.find(function(item) { return item.id === checkId; });
+                return {
+                    state: stateNode ? (stateNode.getAttribute('data-service-state') || 'unknown') : 'unknown',
+                    check: check
+                };
+            }).filter(function(item) { return Boolean(item.check); });
+            const customKnown = customResults.filter(function(item) { return item.state !== 'unknown'; });
+            const customOk = customKnown.filter(function(item) { return item.state === 'ok' || item.state === 'stale_ok'; });
+            const customFail = customKnown.filter(function(item) { return item.state === 'fail' || item.state === 'stale_fail'; });
             const hasCoreState = (includeTelegram && ['ok', 'warn', 'fail'].indexOf(tgState) !== -1) ||
                 (includeYoutube && ['ok', 'warn', 'fail'].indexOf(ytState) !== -1);
             if (!hasCoreState && !customOk.length && !customFail.length) {
@@ -1649,8 +1662,24 @@
             if (ytState === 'ok' || ytState === 'warn') {
                 icons += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');
             }
-            customOk.forEach(function(item) {
-                icons += item.innerHTML;
+            customResults.forEach(function(item) {
+                const check = item.check;
+                icons += serviceStatusIcon(
+                    serviceIconSrc(check.icon),
+                    check.label || 'Сервис',
+                    check.badge || '',
+                    item.state
+                );
+                const stateText = {
+                    ok: 'работает',
+                    fail: 'не работает',
+                    stale_ok: 'последняя проверка: работало; результат устарел',
+                    stale_fail: 'последняя проверка: не работало; результат устарел',
+                    unknown: 'не проверено'
+                }[item.state];
+                if (stateText) {
+                    parts.push((check.label || 'Сервис') + ': ' + stateText);
+                }
             });
             const anyOk = states.some(Boolean) || customOk.length > 0;
             const anyFail = states.some(function(value) { return !value; }) || customFail.length > 0;
@@ -1770,15 +1799,25 @@
             const label = check ? check.label : 'Проверка';
             const url = check ? check.url : '';
             let content = '?';
+            let stateText = 'не проверено';
             if (status === 'ok' && check) {
                 content = serviceIcon(serviceIconSrc(check.icon), label, check.badge || '');
+                stateText = 'работает';
             } else if (status === 'fail') {
                 content = '<span class="service-probe-mark service-probe-fail">✕</span>';
+                stateText = 'не работает';
+            } else if ((status === 'stale_ok' || status === 'stale_fail') && check) {
+                content = serviceStatusIcon(serviceIconSrc(check.icon), label, check.badge || '', status);
+                stateText = status === 'stale_ok'
+                    ? 'последняя проверка: работало; результат устарел'
+                    : 'последняя проверка: не работало; результат устарел';
             } else {
                 content = '<span class="service-probe-mark service-probe-unknown">?</span>';
             }
-            return '<span class="custom-service-slot custom-service-' + status + '" title="' +
-                escapeHtml(label + (url ? ': ' + url : '')) + '">' + content + '</span>';
+            const statusClass = String(status).replace(/_/g, '-');
+            const title = label + ': ' + stateText + (url ? '; ' + url : '');
+            return '<span class="custom-service-slot custom-service-' + escapeHtml(statusClass) + '" data-service-state="' +
+                escapeHtml(status) + '" title="' + escapeHtml(title) + '" aria-label="' + escapeHtml(title) + '">' + content + '</span>';
         }
 
         function renderCustomCells(states, checks) {

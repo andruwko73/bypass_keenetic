@@ -1594,7 +1594,8 @@ def test_key_pool_web():
         'custom': {'custom': True},
     }
     assert probe_cache.probe_result_state(custom_entry, True, now=timestamp) == 'ok'
-    assert probe_cache.custom_probe_result_state(custom_entry, True, now=timestamp) == 'stale'
+    assert probe_cache.custom_probe_result_state(custom_entry, True, now=timestamp) == 'stale_ok'
+    assert probe_cache.custom_probe_result_state(custom_entry, False, now=timestamp) == 'stale_fail'
 
     active_checks = [
         {'id': 'chatgpt_services', 'label': 'ChatGPT'},
@@ -1606,7 +1607,7 @@ def test_key_pool_web():
         active_key_id: {
             'ts': timestamp,
             'custom_ts': timestamp - probe_cache.KEY_PROBE_CACHE_TTL - 1,
-            'custom': {'chatgpt_services': True, 'discord': True},
+            'custom': {'chatgpt_services': True, 'discord': False},
             'custom_sig': probe_cache.custom_checks_signature(active_checks),
         },
     }
@@ -1626,7 +1627,7 @@ def test_key_pool_web():
         lambda proto, key, **kwargs: active_calls.append(('record', proto, key, kwargs)),
         background_checks=False,
     )
-    assert states == {'chatgpt_services': 'stale', 'discord': 'stale'}
+    assert states == {'chatgpt_services': 'stale_ok', 'discord': 'stale_fail'}
     assert returned_checks == active_checks
     assert active_calls == []
 
@@ -8718,6 +8719,30 @@ def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health(
     assert stale_result['tone'] == 'ok'
     assert 'результат устарел' in stale_result['details']
     assert '5 мин назад' in stale_result['details']
+    stale_ok_result = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': True},
+        checks,
+        {'chatgpt_services': 'stale_ok'},
+        required_services=['telegram'],
+        api_state='ok',
+        probe_yt_state='ok',
+    )
+    assert stale_ok_result['label'] == 'Работает'
+    assert stale_ok_result['tone'] == 'ok'
+    assert 'последняя проверка: работало; результат устарел' in stale_ok_result['details']
+    stale_fail_result = web_status_builder.cached_protocol_status(
+        'vless://sample',
+        {'tg_ok': True, 'yt_ok': True},
+        checks,
+        {'chatgpt_services': 'stale_fail'},
+        required_services=['telegram'],
+        api_state='ok',
+        probe_yt_state='ok',
+    )
+    assert stale_fail_result['label'] == 'Частично работает'
+    assert stale_fail_result['tone'] == 'warn'
+    assert 'последняя проверка: не работало; результат устарел' in stale_fail_result['details']
     unknown_result = web_status_builder.cached_protocol_status(
         'vless://sample',
         {'tg_ok': True, 'yt_ok': True},

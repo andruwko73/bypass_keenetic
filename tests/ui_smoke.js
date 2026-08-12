@@ -445,6 +445,55 @@ async function protocolHeaderIconSnapshot(page, protocol) {
   }, protocol);
 }
 
+async function assertPersistedCustomResultsRemainVisible(page, protocol, label) {
+  const snapshot = await page.evaluate(async (proto) => {
+    const row = document.querySelector(`[data-pool-row][data-protocol="${proto}"][data-active="1"]`);
+    const slots = row ? Array.from(row.querySelectorAll('[data-pool-custom] [data-service-state]')) : [];
+    const failedRow = document.querySelector(`[data-pool-row][data-protocol="${proto}"]:not([data-active="1"])`);
+    const failedSlots = failedRow ? Array.from(failedRow.querySelectorAll('[data-pool-custom] [data-service-state]')) : [];
+    const header = document.querySelector(`[data-protocol-card="${proto}"] [data-protocol-status-icons]`);
+    const response = await fetch(`/api/pools?protocols=${encodeURIComponent(proto)}`, {cache: 'no-store'});
+    const payload = await response.json();
+    const section = payload && payload.pools ? payload.pools[proto] : null;
+    const rows = Array.isArray(section) ? section : (section && Array.isArray(section.rows) ? section.rows : []);
+    const active = rows.find((item) => item && item.active) || null;
+    return {
+      slotCount: slots.length,
+      states: slots.map((node) => node.getAttribute('data-service-state') || ''),
+      iconCount: slots.filter((node) => node.querySelector('img')).length,
+      titles: slots.map((node) => node.getAttribute('title') || ''),
+      failedStates: failedSlots.map((node) => node.getAttribute('data-service-state') || ''),
+      failedIconCount: failedSlots.filter((node) => node.querySelector('img')).length,
+      failedTitles: failedSlots.map((node) => node.getAttribute('title') || ''),
+      headerStaleCount: header ? header.querySelectorAll('.service-state-stale-ok, .service-state-stale-fail').length : 0,
+      apiStates: active && active.custom ? Object.values(active.custom) : [],
+    };
+  }, protocol);
+  if (!snapshot.slotCount) {
+    throw new Error(`${label}: selected service columns are missing`);
+  }
+  if (snapshot.states.some((state) => state !== 'stale_ok')) {
+    throw new Error(`${label}: saved successful results were replaced with unknown states ${JSON.stringify(snapshot)}`);
+  }
+  if (snapshot.iconCount !== snapshot.slotCount || snapshot.headerStaleCount < snapshot.slotCount) {
+    throw new Error(`${label}: stale service icons are missing in the pool or protocol header ${JSON.stringify(snapshot)}`);
+  }
+  if (snapshot.titles.some((title) => !title.includes('результат устарел'))) {
+    throw new Error(`${label}: stale result explanation is missing ${JSON.stringify(snapshot.titles)}`);
+  }
+  if (
+    !snapshot.failedStates.length ||
+    snapshot.failedStates.some((state) => state !== 'stale_fail') ||
+    snapshot.failedIconCount !== snapshot.failedStates.length ||
+    snapshot.failedTitles.some((title) => !title.includes('не работало; результат устарел'))
+  ) {
+    throw new Error(`${label}: saved failed results are not represented accurately ${JSON.stringify(snapshot)}`);
+  }
+  if (snapshot.apiStates.length !== snapshot.slotCount || snapshot.apiStates.some((state) => state !== 'stale_ok')) {
+    throw new Error(`${label}: API lost the saved custom-service result ${JSON.stringify(snapshot.apiStates)}`);
+  }
+}
+
 async function assertProtocolServiceIconsStableAfterLiveStatus(page, protocol, minCount, label) {
   await page.waitForFunction(({ proto, expected }) => {
     const container = document.querySelector(`[data-protocol-card="${proto}"] [data-protocol-status-icons]`);
@@ -1228,6 +1277,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       await assertVisibleBox(page, '[data-protocol-panel].active [data-pool-body] tr:first-child .pool-delete-btn', `${name} delete button`);
     }
     await assertActivePoolRowPinned(page, 'vless', `${name} vless pool order`);
+    await assertPersistedCustomResultsRemainVisible(page, 'vless', `${name} saved custom results`);
     await assertProtocolServiceIconsStableAfterIdleRefresh(page, 'vless', 5, `${name} vless status icons idle refresh`);
     await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after idle refresh`);
     await assertProtocolServiceIconsStableAfterPoolRefresh(page, 'vless', 5, `${name} vless status icons pool refresh`);
