@@ -458,13 +458,6 @@
         .service-icon-img{width:18px!important;height:18px!important;object-fit:contain;border-radius:5px;vertical-align:middle;}
         .custom-service-slot .service-icon-img{width:18px!important;height:18px!important;}
         .key-status-icons .service-icon-img{width:20px!important;height:20px!important;}
-        .service-state-icon{position:relative;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;flex:0 0 auto;}
-        .service-state-icon .service-icon-img,.service-state-icon .custom-service-badge{opacity:.45!important;filter:saturate(.45);}
-        .service-state-marker{position:absolute;inset-inline-end:-3px;inset-block-end:-3px;display:inline-flex;align-items:center;justify-content:center;width:10px;height:10px;border-radius:50%;border:1px solid rgba(10,17,26,.9);background:#536477;color:#fff;font-size:8px;font-weight:900;line-height:1;}
-        .service-state-fail .service-state-marker{background:#a8442f;}
-        .service-state-stale-ok .service-state-marker{background:#9b6a2b;}
-        .service-state-stale-fail .service-state-marker{background:#a8442f;}
-        .service-state-pending .service-state-marker{background:#9b6a2b;}
         .service-probe-mark{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;border:1px solid rgba(91,124,150,.34);font-size:11px;font-weight:800;line-height:1;}
         .service-probe-fail{color:var(--muted);background:transparent;border-color:transparent;}
         .service-probe-warn{color:#ffd38a;background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.38);}
@@ -474,9 +467,6 @@
         .service-probe-na{color:#6f7d8f;background:transparent;border-color:rgba(91,124,150,.18);}
         .custom-service-ok{background:rgba(31,122,106,.18);border-color:rgba(78,216,205,.38);color:#95f3ec;}
         .custom-service-fail{background:transparent;border-color:transparent;color:var(--muted);}
-        .custom-service-stale-ok,.custom-service-stale-fail{background:transparent;border-color:transparent;color:var(--muted);}
-        .custom-service-slot .service-state-icon{width:18px;height:18px;}
-        .custom-service-slot .service-state-marker{inset-inline-end:-2px;inset-block-end:-2px;width:9px;height:9px;font-size:7px;}
         .custom-service-unknown,.custom-service-neutral{background:rgba(91,124,150,.14);border-color:rgba(91,124,150,.34);color:#c7d2df;}
         .pool-custom-cell .custom-service-slot{background:transparent!important;border-color:transparent!important;}
         .custom-check-card{display:grid;gap:8px;padding:9px;border-radius:9px;border:1px solid rgba(91,124,150,.34);background:rgba(11,17,25,.36);}

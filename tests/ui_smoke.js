@@ -464,32 +464,34 @@ async function assertPersistedCustomResultsRemainVisible(page, protocol, label) 
       titles: slots.map((node) => node.getAttribute('title') || ''),
       failedStates: failedSlots.map((node) => node.getAttribute('data-service-state') || ''),
       failedIconCount: failedSlots.filter((node) => node.querySelector('img')).length,
+      failedCrossCount: failedSlots.filter((node) => node.querySelector('.service-probe-fail')).length,
       failedTitles: failedSlots.map((node) => node.getAttribute('title') || ''),
-      headerStaleCount: header ? header.querySelectorAll('.service-state-stale-ok, .service-state-stale-fail').length : 0,
+      headerMarkerCount: header ? header.querySelectorAll('.service-state-marker').length : 0,
       apiStates: active && active.custom ? Object.values(active.custom) : [],
     };
   }, protocol);
   if (!snapshot.slotCount) {
     throw new Error(`${label}: selected service columns are missing`);
   }
-  if (snapshot.states.some((state) => state !== 'stale_ok')) {
+  if (snapshot.states.some((state) => state !== 'ok')) {
     throw new Error(`${label}: saved successful results were replaced with unknown states ${JSON.stringify(snapshot)}`);
   }
-  if (snapshot.iconCount !== snapshot.slotCount || snapshot.headerStaleCount < snapshot.slotCount) {
-    throw new Error(`${label}: stale service icons are missing in the pool or protocol header ${JSON.stringify(snapshot)}`);
+  if (snapshot.iconCount !== snapshot.slotCount || snapshot.headerMarkerCount !== 0) {
+    throw new Error(`${label}: successful services must use plain icons without age markers ${JSON.stringify(snapshot)}`);
   }
-  if (snapshot.titles.some((title) => !title.includes('результат устарел'))) {
-    throw new Error(`${label}: stale result explanation is missing ${JSON.stringify(snapshot.titles)}`);
+  if (snapshot.titles.some((title) => !title.includes('работает') || title.includes('устарел'))) {
+    throw new Error(`${label}: successful result title is incorrect ${JSON.stringify(snapshot.titles)}`);
   }
   if (
     !snapshot.failedStates.length ||
-    snapshot.failedStates.some((state) => state !== 'stale_fail') ||
-    snapshot.failedIconCount !== snapshot.failedStates.length ||
-    snapshot.failedTitles.some((title) => !title.includes('не работало; результат устарел'))
+    snapshot.failedStates.some((state) => state !== 'fail') ||
+    snapshot.failedIconCount !== 0 ||
+    snapshot.failedCrossCount !== snapshot.failedStates.length ||
+    snapshot.failedTitles.some((title) => !title.includes('не работает') || title.includes('устарел'))
   ) {
     throw new Error(`${label}: saved failed results are not represented accurately ${JSON.stringify(snapshot)}`);
   }
-  if (snapshot.apiStates.length !== snapshot.slotCount || snapshot.apiStates.some((state) => state !== 'stale_ok')) {
+  if (snapshot.apiStates.length !== snapshot.slotCount || snapshot.apiStates.some((state) => state !== 'ok')) {
     throw new Error(`${label}: API lost the saved custom-service result ${JSON.stringify(snapshot.apiStates)}`);
   }
 }

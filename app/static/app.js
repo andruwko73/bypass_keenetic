@@ -1480,6 +1480,20 @@
             return String(text || '').replace(/\s*\.+\s*$/u, '');
         }
 
+        function lastResultState(state) {
+            const value = String(state || '').trim().toLowerCase();
+            if (value === 'stale_ok') {
+                return 'ok';
+            }
+            if (value === 'stale_fail') {
+                return 'fail';
+            }
+            if (value === 'stale') {
+                return 'unknown';
+            }
+            return value || 'unknown';
+        }
+
         function serviceTextBadge(label, badge) {
             const text = String(badge || label || 'WEB').trim().slice(0, 4).toUpperCase() || 'WEB';
             return '<span class="custom-service-badge custom-service-neutral" title="' +
@@ -1497,23 +1511,23 @@
         }
 
         function serviceStatusIcon(src, label, badge, state) {
+            state = lastResultState(state);
+            if (state === 'ok') {
+                return serviceIcon(src, label, badge);
+            }
             const stateText = {
                 fail: 'не работает',
-                stale_ok: 'последняя проверка: работало; результат устарел',
-                stale_fail: 'последняя проверка: не работало; результат устарел',
-                stale: 'последний результат устарел',
                 unknown: 'не проверено',
                 pending: 'проверяется'
             }[state];
             if (!stateText) {
                 return serviceIcon(src, label, badge);
             }
-            const marker = state === 'fail' || state === 'stale_fail' ? '×' : (state === 'stale_ok' ? '↻' : '?');
             const accessibleLabel = String(label || 'Сервис') + ': ' + stateText;
-            const stateClass = String(state || 'unknown').replace(/_/g, '-');
-            return '<span class="service-state-icon service-state-' + escapeHtml(stateClass) + '" role="img" aria-label="' +
-                escapeHtml(accessibleLabel) + '" title="' + escapeHtml(accessibleLabel) + '">' +
-                serviceIcon(src, '', badge) + '<span class="service-state-marker" aria-hidden="true">' + marker + '</span></span>';
+            const stateClass = state === 'fail' ? 'fail' : 'unknown';
+            const marker = state === 'fail' ? '✕' : '?';
+            return '<span class="service-probe-mark service-probe-' + stateClass + '" role="img" aria-label="' +
+                escapeHtml(accessibleLabel) + '" title="' + escapeHtml(accessibleLabel) + '">' + marker + '</span>';
         }
 
         function protocolIcons(status) {
@@ -1624,20 +1638,20 @@
             }
             const includeTelegram = coreServices.indexOf('telegram') !== -1;
             const includeYoutube = coreServices.indexOf('youtube') !== -1;
-            const tgState = row.dataset.tgState || 'unknown';
-            const ytState = row.dataset.ytState || 'unknown';
+            const tgState = lastResultState(row.dataset.tgState || 'unknown');
+            const ytState = lastResultState(row.dataset.ytState || 'unknown');
             const customResults = Array.from(row.querySelectorAll('[data-pool-custom]')).map(function(cell) {
                 const stateNode = cell.querySelector('[data-service-state]');
                 const checkId = cell.getAttribute('data-pool-custom') || '';
                 const check = customChecks.find(function(item) { return item.id === checkId; });
                 return {
-                    state: stateNode ? (stateNode.getAttribute('data-service-state') || 'unknown') : 'unknown',
+                    state: lastResultState(stateNode ? (stateNode.getAttribute('data-service-state') || 'unknown') : 'unknown'),
                     check: check
                 };
             }).filter(function(item) { return Boolean(item.check); });
             const customKnown = customResults.filter(function(item) { return item.state !== 'unknown'; });
-            const customOk = customKnown.filter(function(item) { return item.state === 'ok' || item.state === 'stale_ok'; });
-            const customFail = customKnown.filter(function(item) { return item.state === 'fail' || item.state === 'stale_fail'; });
+            const customOk = customKnown.filter(function(item) { return item.state === 'ok'; });
+            const customFail = customKnown.filter(function(item) { return item.state === 'fail'; });
             const hasCoreState = (includeTelegram && ['ok', 'warn', 'fail'].indexOf(tgState) !== -1) ||
                 (includeYoutube && ['ok', 'warn', 'fail'].indexOf(ytState) !== -1);
             if (!hasCoreState && !customOk.length && !customFail.length) {
@@ -1673,8 +1687,6 @@
                 const stateText = {
                     ok: 'работает',
                     fail: 'не работает',
-                    stale_ok: 'последняя проверка: работало; результат устарел',
-                    stale_fail: 'последняя проверка: не работало; результат устарел',
                     unknown: 'не проверено'
                 }[item.state];
                 if (stateText) {
@@ -1795,7 +1807,7 @@
         }
 
         function customBadge(state, check) {
-            const status = state || 'unknown';
+            const status = lastResultState(state);
             const label = check ? check.label : 'Проверка';
             const url = check ? check.url : '';
             let content = '?';
@@ -1806,11 +1818,6 @@
             } else if (status === 'fail') {
                 content = '<span class="service-probe-mark service-probe-fail">✕</span>';
                 stateText = 'не работает';
-            } else if ((status === 'stale_ok' || status === 'stale_fail') && check) {
-                content = serviceStatusIcon(serviceIconSrc(check.icon), label, check.badge || '', status);
-                stateText = status === 'stale_ok'
-                    ? 'последняя проверка: работало; результат устарел'
-                    : 'последняя проверка: не работало; результат устарел';
             } else {
                 content = '<span class="service-probe-mark service-probe-unknown">?</span>';
             }

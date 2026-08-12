@@ -1594,9 +1594,8 @@ def test_key_pool_web():
         'custom': {'custom': True},
     }
     assert probe_cache.probe_result_state(custom_entry, True, now=timestamp) == 'ok'
-    assert probe_cache.custom_probe_result_state(custom_entry, True, now=timestamp) == 'stale_ok'
-    assert probe_cache.custom_probe_result_state(custom_entry, False, now=timestamp) == 'stale_fail'
-
+    assert probe_cache.custom_probe_result_state(custom_entry, True, now=timestamp) == 'ok'
+    assert probe_cache.custom_probe_result_state(custom_entry, False, now=timestamp) == 'fail'
     active_checks = [
         {'id': 'chatgpt_services', 'label': 'ChatGPT'},
         {'id': 'discord', 'label': 'Discord'},
@@ -1611,45 +1610,14 @@ def test_key_pool_web():
             'custom_sig': probe_cache.custom_checks_signature(active_checks),
         },
     }
-    active_calls = []
-
     states, returned_checks = key_pool_web.active_custom_probe_states(
-        'vless',
         active_key,
-        'socks5://active',
         active_checks,
         stale_cache,
         _hash_key,
-        lambda proxy_url, selected: active_calls.append(('probe', proxy_url, selected)) or {
-            'chatgpt_services': True,
-            'discord': False,
-        },
-        lambda proto, key, **kwargs: active_calls.append(('record', proto, key, kwargs)),
-        background_checks=False,
-    )
-    assert states == {'chatgpt_services': 'stale_ok', 'discord': 'stale_fail'}
-    assert returned_checks == active_checks
-    assert active_calls == []
-
-    states, returned_checks = key_pool_web.active_custom_probe_states(
-        'vless',
-        active_key,
-        'socks5://active',
-        active_checks,
-        stale_cache,
-        _hash_key,
-        lambda proxy_url, selected: active_calls.append(('probe', proxy_url, selected)) or {
-            'chatgpt_services': True,
-            'discord': False,
-        },
-        lambda proto, key, **kwargs: active_calls.append(('record', proto, key, kwargs)),
-        background_checks=True,
     )
     assert states == {'chatgpt_services': 'ok', 'discord': 'fail'}
     assert returned_checks == active_checks
-    assert active_calls[0] == ('probe', 'socks5://active', active_checks)
-    assert active_calls[1][0:3] == ('record', 'vless', active_key)
-    assert active_calls[1][3]['custom_checks'] == active_checks
 
     fresh_cache = {
         active_key_id: {
@@ -1659,20 +1627,13 @@ def test_key_pool_web():
             'custom_sig': probe_cache.custom_checks_signature(active_checks),
         },
     }
-    fresh_calls = []
     states, _ = key_pool_web.active_custom_probe_states(
-        'vless',
         active_key,
-        'socks5://active',
         active_checks,
         fresh_cache,
         _hash_key,
-        lambda *_args: fresh_calls.append('probe') or {},
-        lambda *_args, **_kwargs: fresh_calls.append('record'),
-        background_checks=True,
     )
     assert states == {'chatgpt_services': 'ok', 'discord': 'fail'}
-    assert fresh_calls == []
     scoped_checks = [
         {'id': 'discord', 'label': 'Discord'},
         {'id': 'claude', 'label': 'Claude'},
@@ -5775,6 +5736,9 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'def _attempt_youtube_vless2_failover' not in source
     assert '_start_youtube_vless2_failover_thread()' not in source
     assert 'def _probe_applied_pool_key_services' in source
+    applied_probe_body = source.split('def _schedule_applied_pool_key_probe', 1)[1].split('\ndef ', 1)[0]
+    assert 'stale_only=False' in applied_probe_body
+    assert "scope='applied'" in applied_probe_body
     assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
     assert "'probe_applied_pool_key_services'" not in (APP_ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
@@ -8717,9 +8681,10 @@ def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health(
     )
     assert stale_result['label'] == 'Работает'
     assert stale_result['tone'] == 'ok'
-    assert 'результат устарел' in stale_result['details']
+    assert 'Telegram: работает' in stale_result['details']
+    assert 'устарел' not in stale_result['details']
     assert '5 мин назад' in stale_result['details']
-    stale_ok_result = web_status_builder.cached_protocol_status(
+    legacy_stale_ok_result = web_status_builder.cached_protocol_status(
         'vless://sample',
         {'tg_ok': True, 'yt_ok': True},
         checks,
@@ -8728,10 +8693,11 @@ def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health(
         api_state='ok',
         probe_yt_state='ok',
     )
-    assert stale_ok_result['label'] == 'Работает'
-    assert stale_ok_result['tone'] == 'ok'
-    assert 'последняя проверка: работало; результат устарел' in stale_ok_result['details']
-    stale_fail_result = web_status_builder.cached_protocol_status(
+    assert legacy_stale_ok_result['label'] == 'Работает'
+    assert legacy_stale_ok_result['tone'] == 'ok'
+    assert 'ChatGPT: работает' in legacy_stale_ok_result['details']
+    assert 'устарел' not in legacy_stale_ok_result['details']
+    legacy_stale_fail_result = web_status_builder.cached_protocol_status(
         'vless://sample',
         {'tg_ok': True, 'yt_ok': True},
         checks,
@@ -8740,9 +8706,10 @@ def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health(
         api_state='ok',
         probe_yt_state='ok',
     )
-    assert stale_fail_result['label'] == 'Частично работает'
-    assert stale_fail_result['tone'] == 'warn'
-    assert 'последняя проверка: не работало; результат устарел' in stale_fail_result['details']
+    assert legacy_stale_fail_result['label'] == 'Частично работает'
+    assert legacy_stale_fail_result['tone'] == 'warn'
+    assert 'ChatGPT: не работает' in legacy_stale_fail_result['details']
+    assert 'устарел' not in legacy_stale_fail_result['details']
     unknown_result = web_status_builder.cached_protocol_status(
         'vless://sample',
         {'tg_ok': True, 'yt_ok': True},
@@ -15180,7 +15147,7 @@ def test_probe_cache_failed_results_expire_quickly():
     )
 
 
-def test_probe_result_state_obeys_success_and_failure_ttl_boundaries():
+def test_probe_result_state_persists_across_freshness_ttl_boundaries():
     failed = {'ts': 100}
     assert probe_cache.probe_result_state(
         failed,
@@ -15191,7 +15158,7 @@ def test_probe_result_state_obeys_success_and_failure_ttl_boundaries():
         failed,
         False,
         now=100 + probe_cache.KEY_PROBE_FAILURE_TTL,
-    ) == 'stale'
+    ) == 'fail'
     succeeded = {'ts': 100}
     assert probe_cache.probe_result_state(
         succeeded,
@@ -15202,7 +15169,7 @@ def test_probe_result_state_obeys_success_and_failure_ttl_boundaries():
         succeeded,
         True,
         now=100 + probe_cache.KEY_PROBE_CACHE_TTL,
-    ) == 'stale'
+    ) == 'ok'
     assert probe_cache.probe_result_state({}, None, now=100) == 'unknown'
 
 
@@ -17392,6 +17359,7 @@ def main():
     test_probe_cache_quality_metrics()
     test_probe_cache_invalidates_changed_custom_check_targets()
     test_probe_cache_failed_results_expire_quickly()
+    test_probe_result_state_persists_across_freshness_ttl_boundaries()
     test_probe_cache_keeps_recent_success_on_transient_downgrade()
     test_probe_cache_keeps_runtime_confirmation_after_screening()
     test_telegram_call_learning_helpers()

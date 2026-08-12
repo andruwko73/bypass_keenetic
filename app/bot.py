@@ -9038,15 +9038,10 @@ def _protocol_status_for_key(
     proxy_url = proxy_settings.get(key_name)
     try:
         custom_states, protocol_custom_checks = _key_pool_web().active_custom_probe_states(
-            key_name,
             key_value,
-            proxy_url,
             protocol_custom_checks,
             cache,
             _hash_key,
-            _probe_custom_targets_for_pool,
-            _record_key_probe,
-            background_checks=background_checks,
         )
     except Exception as exc:
         _write_runtime_log(f'Ошибка обновления дополнительных проверок активного ключа {key_name}: {exc}')
@@ -9305,15 +9300,10 @@ def _light_active_protocol_status_for_key(
     probe = cache.get(_hash_key(key_value), {}) if isinstance(cache, dict) else {}
     try:
         custom_states, protocol_custom_checks = _key_pool_web().active_custom_probe_states(
-            key_name,
             key_value,
-            proxy_url,
             protocol_custom_checks,
             cache,
             _hash_key,
-            _probe_custom_targets_for_pool,
-            _record_key_probe,
-            background_checks=background_checks,
         )
     except Exception as exc:
         _write_runtime_log(f'Ошибка обновления дополнительных проверок активного ключа {key_name}: {exc}')

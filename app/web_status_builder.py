@@ -26,6 +26,22 @@ def _strip_status_period(text):
     return str(text or '').strip().rstrip('.')
 
 
+def _last_result_state(state):
+    """Normalize legacy age-qualified states to their last completed result."""
+    return {
+        'stale_ok': 'ok',
+        'stale_fail': 'fail',
+        'stale': 'unknown',
+    }.get(str(state or '').strip().lower(), str(state or '').strip().lower())
+
+
+def _last_custom_states(custom_states):
+    return {
+        check_id: _last_result_state(state)
+        for check_id, state in (custom_states or {}).items()
+    }
+
+
 def _youtube_state_text(yt_ok, yt_state=''):
     yt_state = str(yt_state or '').strip().lower()
     if yt_state == 'pending':
@@ -150,6 +166,7 @@ def service_status_parts(
     required_services=None,
 ):
     required_services = _normalize_required_services(required_services)
+    custom_states = _last_custom_states(custom_states)
     parts = []
     if api_pending:
         telegram_state = 'статус обновляется'
@@ -167,9 +184,6 @@ def service_status_parts(
         state_text = {
             'ok': 'работает',
             'fail': 'не работает',
-            'stale_ok': 'последняя проверка: работало; результат устарел',
-            'stale_fail': 'последняя проверка: не работало; результат устарел',
-            'stale': 'последний результат устарел',
             'unknown': 'не проверено',
         }.get(state)
         if state_text:
@@ -213,7 +227,8 @@ def tone_label(
     if pending:
         return 'warn', 'Статус обновляется'
     required_services = _normalize_required_services(required_services)
-    custom_fail = any(state in ('fail', 'stale_fail') for state in custom_states.values())
+    custom_states = _last_custom_states(custom_states)
+    custom_fail = any(state == 'fail' for state in custom_states.values())
     if verification_pending and not custom_fail:
         return 'warn', 'Требуется повторная проверка'
     if required_services:
@@ -222,13 +237,13 @@ def tone_label(
             states.append(bool(api_ok))
         if 'youtube' in required_services:
             states.append(bool(yt_ok))
-        custom_ok = any(state in ('ok', 'stale_ok') for state in custom_states.values())
+        custom_ok = any(state == 'ok' for state in custom_states.values())
         if states and all(states) and not custom_fail:
             return 'ok', 'Работает'
         if any(states) or custom_ok:
             return 'warn', 'Частично работает'
         return 'fail', 'Не работает'
-    any_ok = api_ok or yt_ok or any(state in ('ok', 'stale_ok') for state in custom_states.values())
+    any_ok = api_ok or yt_ok or any(state == 'ok' for state in custom_states.values())
     if not api_required and any_ok and not custom_fail:
         return 'ok', 'Работает'
     return (
@@ -452,8 +467,13 @@ def cached_protocol_status(
         return unused_protocol_status()
     api_state = api_state or ('ok' if probe.get('tg_ok') is True else 'fail' if probe.get('tg_ok') is False else 'unknown')
     probe_yt_state = probe_yt_state or youtube_probe_state(probe)
+    if api_state == 'stale':
+        api_state = 'ok' if probe.get('tg_ok') is True else 'fail' if probe.get('tg_ok') is False else 'unknown'
+    if probe_yt_state == 'stale':
+        probe_yt_state = youtube_probe_state(probe)
+    custom_states = _last_custom_states(custom_states)
     has_probe_result = any(
-        state in ('ok', 'warn', 'fail', 'stale', 'stale_ok', 'stale_fail')
+        state in ('ok', 'warn', 'fail')
         for state in (api_state, probe_yt_state, *custom_states.values())
     )
     if not has_probe_result:
@@ -475,13 +495,10 @@ def cached_protocol_status(
     yt_ok = probe_yt_state in ('ok', 'warn')
     service_parts = []
     if api_state != 'unknown':
-        if api_state == 'stale':
-            telegram_state = 'результат устарел'
-        else:
-            telegram_state = 'работает' if api_ok else ('не работает' if api_required else 'не требуется для текущего режима')
+        telegram_state = 'работает' if api_ok else ('не работает' if api_required else 'не требуется для текущего режима')
         service_parts.append(f'Telegram: {telegram_state}')
     if probe_yt_state != 'unknown':
-        youtube_state_text = 'результат устарел' if probe_yt_state == 'stale' else _youtube_state_text(yt_ok, probe_yt_state)
+        youtube_state_text = _youtube_state_text(yt_ok, probe_yt_state)
         service_parts.append(f'YouTube: {youtube_state_text}')
     for check in custom_checks or []:
         check_id = check.get('id')
@@ -489,16 +506,13 @@ def cached_protocol_status(
         state_text = {
             'ok': 'работает',
             'fail': 'не работает',
-            'stale_ok': 'последняя проверка: работало; результат устарел',
-            'stale_fail': 'последняя проверка: не работало; результат устарел',
-            'stale': 'последний результат устарел',
             'unknown': 'не проверено',
         }.get(state)
         if state_text:
             service_parts.append(f'{check.get("label", "Сервис")}: {state_text}')
     verification_pending = (
-        ((required_services is None or 'telegram' in required_services) and api_state in ('unknown', 'stale')) or
-        ((required_services is None or 'youtube' in required_services) and probe_yt_state in ('unknown', 'stale'))
+        ((required_services is None or 'telegram' in required_services) and api_state == 'unknown') or
+        ((required_services is None or 'youtube' in required_services) and probe_yt_state == 'unknown')
     )
     tone, label = tone_label(
         api_ok,
@@ -512,11 +526,7 @@ def cached_protocol_status(
         tone = 'warn'
         label = 'Частично работает'
     if label == 'Требуется повторная проверка':
-        details = (
-            'Последний результат проверки пула устарел'
-            if 'stale' in (api_state, probe_yt_state, *custom_states.values()) else
-            'Проверка пула ещё не содержит результаты для всех назначенных сервисов'
-        )
+        details = 'Проверка пула ещё не содержит результаты для всех назначенных сервисов'
     else:
         details = 'Показан последний результат проверки пула'
     age_text = _probe_age_text(checked_age_seconds)

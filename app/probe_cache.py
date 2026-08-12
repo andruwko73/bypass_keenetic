@@ -388,56 +388,21 @@ def key_probe_age_seconds(entry, now=None):
     return max(0, int((time.time() if now is None else now) - timestamp))
 
 
-def _probe_result_state_at(value, checked_at, now=None):
+def _last_probe_result_state(value):
     value = _stored_probe_value(value)
     if value is None:
         return 'unknown'
-    try:
-        checked_at = float(checked_at or 0)
-    except (TypeError, ValueError):
-        checked_at = 0.0
-    age = None if not checked_at else max(0, int((time.time() if now is None else now) - checked_at))
-    if age is None or age >= KEY_PROBE_CACHE_TTL:
-        return 'stale'
-    if value is False and age >= KEY_PROBE_FAILURE_TTL:
-        return 'stale'
     return 'ok' if value else 'fail'
 
 
 def probe_result_state(entry, value, now=None):
-    return _probe_result_state_at(value, _entry_timestamp(entry), now=now)
+    """Return the last completed result; its age is scheduler-only metadata."""
+    return _last_probe_result_state(value)
 
 
 def custom_probe_result_state(entry, value, now=None):
-    """Return a custom-service state without borrowing a newer core-probe timestamp."""
-    entry = entry if isinstance(entry, dict) else {}
-    checked_at = entry.get('custom_ts')
-    if checked_at is None:
-        checked_at = _entry_timestamp(entry)
-    state = _probe_result_state_at(value, checked_at, now=now)
-    if state != 'stale':
-        return state
-    stored_value = _stored_probe_value(value)
-    if stored_value is None:
-        return 'unknown'
-    return 'stale_ok' if stored_value else 'stale_fail'
-
-
-def custom_probe_is_fresh(entry, custom_checks, now=None):
-    checks = [check for check in (custom_checks or []) if isinstance(check, dict) and check.get('id')]
-    if not checks:
-        return True
-    if not isinstance(entry, dict):
-        return False
-    custom = entry.get('custom')
-    if not isinstance(custom, dict):
-        return False
-    if entry.get('custom_sig') != custom_checks_signature(checks):
-        return False
-    return all(
-        check['id'] in custom and custom_probe_result_state(entry, custom.get(check['id']), now=now) in ('ok', 'fail')
-        for check in checks
-    )
+    """Return the last completed custom-service result until the next check."""
+    return _last_probe_result_state(value)
 
 
 def _skip_recent_success_downgrade(entry, field, value, now, previous_ts):
