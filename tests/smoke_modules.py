@@ -2520,6 +2520,73 @@ def test_subscription_pool_sync_preserves_active_managed_key():
     assert pools['vless2'] == [active_key, new_key]
 
 
+def test_automatic_subscription_sync_rejects_catastrophic_shrink():
+    previous_keys = [f'vless://old-{index}@example.com:443' for index in range(89)]
+    assert subscription_runtime.subscription_sync_shrink_is_suspicious(
+        previous_keys,
+        previous_keys[:2],
+    )
+    assert not subscription_runtime.subscription_sync_shrink_is_suspicious(
+        previous_keys,
+        previous_keys[:30],
+    )
+    assert not subscription_runtime.subscription_sync_shrink_is_suspicious(
+        previous_keys[:10],
+        previous_keys[:2],
+    )
+    record = {'last_success_at': 100.0, 'last_attempt_at': 700.0}
+    assert not subscription_runtime.subscription_refresh_is_due(
+        record,
+        900.0,
+        interval_seconds=3600,
+        retry_seconds=600,
+    )
+    assert subscription_runtime.subscription_refresh_is_due(
+        record,
+        1300.0,
+        interval_seconds=3600,
+        retry_seconds=600,
+    )
+
+
+def test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink():
+    with tempfile.TemporaryDirectory() as directory:
+        temp_path = Path(directory)
+        (temp_path / 'bot_config.py').write_text(
+            (APP_ROOT / 'bot_config.example.py').read_text(encoding='utf-8'),
+            encoding='utf-8',
+        )
+        script = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(temp_path)!r})\n"
+            f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+            "import bot\n"
+            "old_keys = [f'vless://old-{i}@example.com:443' for i in range(89)]\n"
+            "new_keys = old_keys[:2]\n"
+            "updates = []\n"
+            "bot._fetch_keys_from_subscription = lambda *_args, **_kwargs: ({'vless': new_keys}, '')\n"
+            "bot._add_subscription_keys_to_pool = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('pool must not change'))\n"
+            "bot._update_subscription_record = lambda proto, **kwargs: updates.append((proto, kwargs))\n"
+            "record = {'url': 'https://subscription.example.test/private', 'hwid_enabled': True, 'managed_keys': old_keys}\n"
+            "assert bot._refresh_subscription_once('vless', record, source='auto') is False\n"
+            "assert len(updates) == 1\n"
+            "assert updates[0][1]['last_attempt_at'] > 0\n"
+            "assert 'suspiciously small' in updates[0][1]['last_error']\n"
+            "assert 'last_success_at' not in updates[0][1]\n"
+        )
+        env = os.environ.copy()
+        env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=str(ROOT),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+
 def test_youtube_health_state_distinguishes_outage_and_degradation():
     pulse_urls, pulse_min_ok, pulse_max_failures = youtube_healthcheck.youtube_healthcheck_profile('pulse')
     assert len(pulse_urls) == 3
@@ -17374,6 +17441,8 @@ def main():
     test_subscription_hwid_request_helpers()
     test_subscription_pool_sync_preserves_manual_keys()
     test_subscription_pool_sync_preserves_active_managed_key()
+    test_automatic_subscription_sync_rejects_catastrophic_shrink()
+    test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink()
     test_telegram_pool_ui()
     test_web_background_helpers()
     test_web_get_actions_helpers()

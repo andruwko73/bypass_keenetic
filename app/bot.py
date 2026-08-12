@@ -12804,11 +12804,19 @@ def _refresh_subscription_once(proto, record, *, source='auto'):
         selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched)
         if not selected_keys:
             raise ValueError('subscription did not return keys for the selected protocol')
+        previous_managed_keys = (record or {}).get('managed_keys', [])
+        if _subscription_runtime().subscription_sync_shrink_is_suspicious(
+            previous_managed_keys,
+            selected_keys,
+        ):
+            raise ValueError(
+                'subscription returned a suspiciously small key set; previous pool preserved'
+            )
         pools, added_keys, removed_keys, _managed_keys, retained_keys = _add_subscription_keys_to_pool(
             proto,
             fetched,
             sync_subscription=True,
-            previous_managed_keys=(record or {}).get('managed_keys', []),
+            previous_managed_keys=previous_managed_keys,
         )
         _update_subscription_record(
             proto,
@@ -12839,13 +12847,12 @@ def _refresh_subscription_once(proto, record, *, source='auto'):
 def _subscription_refresh_due(record, now):
     if not record or not record.get('url') or not record.get('hwid_enabled'):
         return False
-    last_success = float(record.get('last_success_at') or 0)
-    last_attempt = float(record.get('last_attempt_at') or 0)
-    if last_success:
-        return now - last_success >= SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS
-    if last_attempt:
-        return now - last_attempt >= SUBSCRIPTION_AUTO_REFRESH_RETRY_SECONDS
-    return True
+    return _subscription_runtime().subscription_refresh_is_due(
+        record,
+        now,
+        interval_seconds=SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS,
+        retry_seconds=SUBSCRIPTION_AUTO_REFRESH_RETRY_SECONDS,
+    )
 
 
 def _nightly_subscription_pool_probe_state():

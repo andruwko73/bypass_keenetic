@@ -10,6 +10,49 @@ DEFAULT_SUBSCRIPTION_USER_AGENT = 'v2rayN/6.45'
 PROTOCOL_SUBSCRIPTION_SOURCE = {
     'vless2': 'vless',
 }
+AUTO_SYNC_MIN_PREVIOUS_KEYS = 20
+AUTO_SYNC_MIN_RETAINED_KEYS = 5
+AUTO_SYNC_MIN_RETAINED_RATIO = 0.25
+
+
+def subscription_sync_shrink_is_suspicious(
+    previous_managed_keys,
+    fetched_keys,
+    *,
+    min_previous_keys=AUTO_SYNC_MIN_PREVIOUS_KEYS,
+    min_retained_keys=AUTO_SYNC_MIN_RETAINED_KEYS,
+    min_retained_ratio=AUTO_SYNC_MIN_RETAINED_RATIO,
+):
+    """Reject an implausibly small automatic subscription snapshot."""
+    previous_count = len(key_pool_store.dedupe_key_list(previous_managed_keys or []))
+    fetched_count = len(key_pool_store.dedupe_key_list(fetched_keys or []))
+    if previous_count < max(1, int(min_previous_keys or 1)):
+        return False
+    retained_floor = max(
+        max(1, int(min_retained_keys or 1)),
+        int(previous_count * max(0.0, float(min_retained_ratio or 0.0))),
+    )
+    return fetched_count < retained_floor
+
+
+def subscription_refresh_is_due(record, now, *, interval_seconds, retry_seconds):
+    """Use the retry delay after a failed attempt that followed an older success."""
+    record = record if isinstance(record, dict) else {}
+    try:
+        now = float(now)
+        last_success = float(record.get('last_success_at') or 0)
+        last_attempt = float(record.get('last_attempt_at') or 0)
+        interval_seconds = max(0.0, float(interval_seconds or 0))
+        retry_seconds = max(0.0, float(retry_seconds or 0))
+    except (TypeError, ValueError):
+        return False
+    if last_attempt > last_success:
+        return now - last_attempt >= retry_seconds
+    if last_success:
+        return now - last_success >= interval_seconds
+    if last_attempt:
+        return now - last_attempt >= retry_seconds
+    return True
 
 
 def subscription_source_protocol(proto):
