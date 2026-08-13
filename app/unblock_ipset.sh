@@ -738,9 +738,10 @@ resolve_ipv6_domains() {
 	domain_file="$2"
 	[ -n "$ipv6_tmp_set" ] || return 0
 	[ -s "$domain_file" ] || return 0
-	ipv6_resolve_should_run || return 0
+	ipv6_resolve_all=0
+	ipv6_resolve_should_run && ipv6_resolve_all=1
 
-	export DNS_HOST DNS_PORT LOCAL_RE ipv6_tmp_set YOUTUBE_DNS_SAMPLE_SERVERS
+	export DNS_HOST DNS_PORT LOCAL_RE ipv6_tmp_set YOUTUBE_DNS_SAMPLE_SERVERS ipv6_resolve_all
 	parallel_flag="$(xargs_parallel_flag)"
 
 	# shellcheck disable=SC2086
@@ -754,6 +755,7 @@ resolve_ipv6_domains() {
 					youtube_ipv6_domain=1
 					;;
 			esac
+			[ "$ipv6_resolve_all" = "1" ] || [ "$youtube_ipv6_domain" = "1" ] || continue
 			{
 				dig +time=2 +tries=1 +short AAAA "$domain" @"$DNS_HOST" -p "$DNS_PORT" 2>/dev/null
 				for sample_dns in $extra_dns_servers; do

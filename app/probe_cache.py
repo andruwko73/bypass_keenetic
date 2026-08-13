@@ -23,6 +23,8 @@ KEY_PROBE_CACHE_LOCK_ROOT = ''
 KEY_PROBE_CACHE_LOCK_TIMEOUT_SECONDS = 15.0
 KEY_PROBE_CACHE_LOCK_POLL_SECONDS = 0.05
 KEY_PROBE_CACHE_LOCK_STALE_SECONDS = 120.0
+KEY_PROBE_CACHE_RECOVERY_SUFFIX = '.last-good'
+KEY_PROBE_CACHE_RECOVERY_MIN_INTERVAL = 900
 YOUTUBE_QUALITY_STABLE = 'stable'
 YOUTUBE_QUALITY_FAST = 'fast'
 YOUTUBE_QUALITY_DEFAULT_STABLE_LATENCY_MS = 2500
@@ -35,6 +37,10 @@ _cache_lock = threading.RLock()
 
 class KeyProbeCacheLockTimeout(TimeoutError):
     """Raised instead of writing the cache without interprocess protection."""
+
+
+class KeyProbeCacheLoadError(OSError):
+    """Raised when an existing cache and its recovery are unreadable."""
 
 
 def _key_probe_cache_lock_root():
@@ -166,36 +172,54 @@ def hash_key(value):
     return hashlib.sha1((value or '').encode('utf-8', errors='ignore')).hexdigest()
 
 
+def _read_key_probe_cache_file(path):
+    with open(path, 'r', encoding='utf-8') as file:
+        value = json.load(file)
+    if not isinstance(value, dict):
+        raise ValueError('key probe cache root must be an object')
+    result = {}
+    for key, entry in value.items():
+        if not isinstance(entry, dict) or entry.get('schema') not in KEY_PROBE_COMPAT_SCHEMA_VERSIONS:
+            continue
+        normalized = dict(entry)
+        normalized['schema'] = KEY_PROBE_CACHE_SCHEMA_VERSION
+        result[key] = normalized
+    return result
+
+
 def load_key_probe_cache():
+    recovery_path = f'{KEY_PROBE_CACHE_PATH}{KEY_PROBE_CACHE_RECOVERY_SUFFIX}'
+    primary_error = None
     try:
-        with open(KEY_PROBE_CACHE_PATH, 'r', encoding='utf-8') as file:
-            value = json.load(file)
-        if not isinstance(value, dict):
+        return _read_key_probe_cache_file(KEY_PROBE_CACHE_PATH)
+    except FileNotFoundError as error:
+        primary_error = error
+        if not os.path.exists(recovery_path):
             return {}
-        result = {}
-        for key, entry in value.items():
-            if not isinstance(entry, dict) or entry.get('schema') not in KEY_PROBE_COMPAT_SCHEMA_VERSIONS:
-                continue
-            normalized = dict(entry)
-            normalized['schema'] = KEY_PROBE_CACHE_SCHEMA_VERSION
-            result[key] = normalized
-        return result
-    except Exception:
-        return {}
+    except (OSError, ValueError, TypeError) as error:
+        primary_error = error
+    try:
+        return _read_key_probe_cache_file(recovery_path)
+    except (OSError, ValueError, TypeError) as recovery_error:
+        raise KeyProbeCacheLoadError(
+            f'cannot read key probe cache or recovery: {KEY_PROBE_CACHE_PATH}'
+        ) from (primary_error or recovery_error)
 
 
-def save_key_probe_cache(cache):
-    os.makedirs(os.path.dirname(KEY_PROBE_CACHE_PATH), exist_ok=True)
-    tmp_path = f'{KEY_PROBE_CACHE_PATH}.tmp.{os.getpid()}.{threading.get_ident()}'
+def _atomic_write_key_probe_cache(path, cache):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    tmp_path = f'{path}.tmp.{os.getpid()}.{threading.get_ident()}'
     try:
         with open(tmp_path, 'w', encoding='utf-8') as file:
             json.dump(cache, file, ensure_ascii=False, separators=(',', ':'))
             file.flush()
             try:
                 os.fsync(file.fileno())
-            except Exception:
+            except OSError:
                 pass
-        os.replace(tmp_path, KEY_PROBE_CACHE_PATH)
+        os.replace(tmp_path, path)
     finally:
         try:
             os.remove(tmp_path)
@@ -203,6 +227,17 @@ def save_key_probe_cache(cache):
             pass
         except OSError:
             pass
+
+
+def save_key_probe_cache(cache, *, force_recovery=False):
+    recovery_path = f'{KEY_PROBE_CACHE_PATH}{KEY_PROBE_CACHE_RECOVERY_SUFFIX}'
+    try:
+        recovery_age = max(0.0, time.time() - os.path.getmtime(recovery_path))
+    except OSError:
+        recovery_age = float(KEY_PROBE_CACHE_RECOVERY_MIN_INTERVAL)
+    if force_recovery or recovery_age >= float(KEY_PROBE_CACHE_RECOVERY_MIN_INTERVAL):
+        _atomic_write_key_probe_cache(recovery_path, cache)
+    _atomic_write_key_probe_cache(KEY_PROBE_CACHE_PATH, cache)
 
 
 def _stored_probe_value(value):

@@ -24,13 +24,13 @@ jobs:
           node-version: '20'
 
       - name: Install Python smoke dependencies
-        run: python -m pip install --upgrade pyTelegramBotAPI requests pysocks
+        run: python -m pip install --upgrade pytest pyTelegramBotAPI requests pysocks
 
       - name: Python compile
         run: python -m compileall -q .
 
       - name: Python smoke
-        run: python tests/smoke_modules.py
+        run: python -m pytest tests/smoke_modules.py -q
 
       - name: Secret scan
         run: python tests/secret_scan.py

@@ -2547,6 +2547,18 @@ def test_automatic_subscription_sync_rejects_catastrophic_shrink():
         interval_seconds=3600,
         retry_seconds=600,
     )
+    confirmed, pending = subscription_runtime.subscription_shrink_confirmation(
+        {}, previous_keys[:2], 1000, min_age_seconds=300
+    )
+    assert not confirmed and pending['pending_shrink_count'] == 2
+    confirmed, repeated = subscription_runtime.subscription_shrink_confirmation(
+        pending, previous_keys[:2], 1300, min_age_seconds=300
+    )
+    assert confirmed and repeated['pending_shrink_signature'] == pending['pending_shrink_signature']
+    changed, _ = subscription_runtime.subscription_shrink_confirmation(
+        pending, previous_keys[2:4], 1300, min_age_seconds=300
+    )
+    assert not changed
 
 
 def test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink():
@@ -2572,6 +2584,7 @@ def test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink():
             "assert len(updates) == 1\n"
             "assert updates[0][1]['last_attempt_at'] > 0\n"
             "assert 'suspiciously small' in updates[0][1]['last_error']\n"
+            "assert updates[0][1]['pending_shrink_count'] == 2\n"
             "assert 'last_success_at' not in updates[0][1]\n"
         )
         env = os.environ.copy()
@@ -4927,7 +4940,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'active_ipv6_route_in_sets()' in ipset_script
     assert 'ipv6_resolve_should_run()' in ipset_script
     assert 'ipset test "$current_ipv6_set" "$active_ipv6"' in ipset_script
-    assert 'ipv6_resolve_should_run || return 0' in ipset_script
+    assert 'ipv6_resolve_should_run && ipv6_resolve_all=1' in ipset_script
+    assert '[ "$ipv6_resolve_all" = "1" ] || [ "$youtube_ipv6_domain" = "1" ] || continue' in ipset_script
     assert 'lock_pid_is_active()' in ipset_script
     assert 'lock_pid_is_unblock_refresh()' in ipset_script
     assert 'stop_stale_lock_process()' in ipset_script
@@ -6398,6 +6412,29 @@ def test_light_probe_cache_schema_contract_matches_canonical_cache():
         temp_dir.cleanup()
 
 
+def test_light_telegram_probe_uses_canonical_transaction_writer():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    block = source.split('def _record_light_telegram_probe', 1)[1].split(
+        '\ndef _confirm_active_telegram_probe_from_polling', 1
+    )[0]
+    assert 'return _record_key_probe(' in block
+    assert '_write_json_file(' not in block
+    assert '_read_json_file(' not in block
+
+
+def test_pytest_collects_every_smoke_test_function():
+    source = Path(__file__).read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    declared = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith('test_')
+    }
+    assert declared
+    assert all(name in globals() for name in declared)
+
+
 def test_stale_status_snapshot_refreshes_probe_ages_during_pool_check():
     temp_dir = tempfile.TemporaryDirectory()
     temp_path = Path(temp_dir.name)
@@ -7075,6 +7112,8 @@ def test_legacy_update_fixture_preserves_state_and_migrates_config_idempotently(
     restored = set(re.findall(r'restore_runtime_state_file_after_update\s+([A-Za-z0-9_.-]+)', restore_body))
     preserved_state = {
         'bot_app_mode', 'bot_proxy_mode', 'bot_autostart', 'key_pools.json',
+        'key_pools.json.last-good', 'key_probe_cache.json',
+        'key_probe_cache.json.last-good', 'pool_summary_last.json',
         'subscriptions.json', 'subscription_nightly_pool_probe.json', 'custom_checks.json',
         'vmess.key', 'vless.key', 'vless2.key', 'xray_config.json', 'v2ray_config.json',
         'shadowsocks.json', 'trojan_config.json', 'unblock_shadowsocks.txt',
@@ -8788,7 +8827,7 @@ def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health(
     )
     assert legacy_stale_ok_result['label'] == 'Работает'
     assert legacy_stale_ok_result['tone'] == 'ok'
-    assert 'ChatGPT: работает' in legacy_stale_ok_result['details']
+    assert 'ChatGPT / Codex: работает' in legacy_stale_ok_result['details']
     assert 'устарел' not in legacy_stale_ok_result['details']
     legacy_stale_fail_result = web_status_builder.cached_protocol_status(
         'vless://sample',
@@ -8801,7 +8840,7 @@ def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health(
     )
     assert legacy_stale_fail_result['label'] == 'Частично работает'
     assert legacy_stale_fail_result['tone'] == 'warn'
-    assert 'ChatGPT: не работает' in legacy_stale_fail_result['details']
+    assert 'ChatGPT / Codex: не работает' in legacy_stale_fail_result['details']
     assert 'устарел' not in legacy_stale_fail_result['details']
     unknown_result = web_status_builder.cached_protocol_status(
         'vless://sample',
@@ -8824,8 +8863,8 @@ def test_cached_protocol_status_keeps_optional_unknown_separate_from_key_health(
         api_state='stale',
         probe_yt_state='ok',
     )
-    assert required_stale_result['label'] == 'Требуется повторная проверка'
-    assert required_stale_result['tone'] == 'warn'
+    assert required_stale_result['label'] == 'Работает'
+    assert required_stale_result['tone'] == 'ok'
 
     live_unknown = web_status_builder.active_protocol_status(
         endpoint_ok=True,
@@ -9202,7 +9241,7 @@ def test_pool_probe_records_apply_in_disposable_worker(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(probe_cache, 'load_key_probe_cache', lambda: cache)
-    monkeypatch.setattr(probe_cache, 'save_key_probe_cache', lambda current: saved.append(dict(current)))
+    monkeypatch.setattr(probe_cache, 'save_key_probe_cache', lambda current, **_kwargs: saved.append(dict(current)))
     monkeypatch.setattr(probe_cache, 'update_key_probe_cache_entry', update_entry)
     assert pool_probe_process_runner.run_pool_probe_records_apply_worker(
         str(records_path), str(result_path)
@@ -9332,6 +9371,52 @@ def test_key_probe_cache_transaction_timeout_never_writes_unlocked(tmp_path, mon
     assert not cache_path.exists()
     (lock_path / 'owner.json').unlink()
     lock_path.rmdir()
+
+
+def test_key_pool_store_recovers_last_good_and_fails_closed(tmp_path):
+    pool_path = tmp_path / 'key_pools.json'
+    expected = key_pool_store.save_key_pools(
+        str(pool_path),
+        {'vless': ['vless://one@example.test:443']},
+    )
+    recovery_path = Path(f'{pool_path}{key_pool_store.RECOVERY_SUFFIX}')
+    assert recovery_path.exists()
+    pool_path.write_text('{broken', encoding='utf-8')
+    assert key_pool_store.load_key_pools(str(pool_path)) == expected
+    recovery_path.write_text('{also broken', encoding='utf-8')
+    try:
+        key_pool_store.load_key_pools(str(pool_path))
+        raise AssertionError('damaged primary and recovery must fail closed')
+    except key_pool_store.KeyPoolLoadError:
+        pass
+
+
+def test_probe_cache_recovers_last_good_and_fails_closed(tmp_path, monkeypatch):
+    cache_path = tmp_path / 'key_probe_cache.json'
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_PATH', str(cache_path))
+    monkeypatch.setattr(probe_cache, 'KEY_PROBE_CACHE_RECOVERY_MIN_INTERVAL', 0)
+    key_id = probe_cache.hash_key('vless://one@example.test:443')
+    expected = {
+        key_id: {
+            'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
+            'proto': 'vless',
+            'tg_ok': True,
+            'ts': 100,
+        }
+    }
+    probe_cache.save_key_probe_cache(expected)
+    recovery_path = Path(
+        f'{cache_path}{probe_cache.KEY_PROBE_CACHE_RECOVERY_SUFFIX}'
+    )
+    assert recovery_path.exists()
+    cache_path.write_text('{broken', encoding='utf-8')
+    assert probe_cache.load_key_probe_cache() == expected
+    recovery_path.write_text('{also broken', encoding='utf-8')
+    try:
+        probe_cache.load_key_probe_cache()
+        raise AssertionError('damaged primary and recovery must fail closed')
+    except probe_cache.KeyProbeCacheLoadError:
+        pass
 
 
 def test_persisted_full_pool_run_accumulates_resume_and_drives_completion_summary():
@@ -16011,7 +16096,8 @@ def test_vless2_cached_youtube_failure_is_rechecked_on_permanent_port():
     assert "YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK" in source
     assert "_youtube_healthcheck().check_youtube_through_proxy" in source
     assert "service='youtube'" in source
-    assert 'Reality endpoint repair restored current' in source
+    assert 'route repair restored current' in source
+    assert "_start_youtube_edge_prefetch_external('youtube-route-repair')" in source
     assert "_record_key_probe(proto, key_value, yt_ok=True, **yt_metrics)" in source
     assert "_invalidate_key_status_cache()" in source
 
@@ -16256,6 +16342,11 @@ def test_update_maintenance_runtime():
     assert 'Telegram и фоновые проверки приостановлены' in page
     assert 'width:64%' in page
     assert '/api/update_status' in page
+    assert "fetch('/api/status?compact=1&lite=1'" in page
+    assert "fetch('/static/app.js?ready='" in page
+    assert 'readyPasses>=2' in page
+    assert "window.location.replace('/?updated='" in page
+    assert 'window.location.reload()' not in page
 
 
 def test_service_routes_apply_and_profile():

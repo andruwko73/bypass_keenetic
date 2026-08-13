@@ -472,7 +472,7 @@ def apply_pool_probe_records_file(path):
             if entry_changed:
                 changed_count += 1
         if changed:
-            save_key_probe_cache(cache)
+            save_key_probe_cache(cache, force_recovery=True)
     return {
         'records_count': len(records),
         'applied_count': len(records),

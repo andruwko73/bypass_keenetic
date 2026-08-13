@@ -288,6 +288,7 @@ _telegram_call_learning_module = None
 _youtube_edge_prefetch_module = None
 _youtube_healthcheck_module = None
 _subscription_runtime_module = subscription_runtime
+_subscription_refresh_runtime_module = None
 _youtube_route_owner_module = None
 _youtube_failover_transaction_module = None
 _custom_checks_store_module = None
@@ -425,6 +426,7 @@ def _probe_cache():
         import probe_cache as module
 
         _probe_cache_module = module
+    _probe_cache_module.KEY_PROBE_CACHE_PATH = _KEY_PROBE_CACHE_PATH
     return _probe_cache_module
 
 
@@ -539,50 +541,16 @@ def _record_light_telegram_probe(key_name, key_value, tg_ok, *, now=None):
     key_value = str(key_value or '').strip()
     if tg_ok is None or not key_value:
         return False
-    cache = _read_json_file(_KEY_PROBE_CACHE_PATH, {}) or {}
-    if not isinstance(cache, dict):
-        cache = {}
-    key_id = _hash_key(key_value)
-    entry = cache.get(key_id, {})
-    if not isinstance(entry, dict):
-        entry = {}
-    else:
-        entry = dict(entry)
-    now = time.time() if now is None else float(now)
-    try:
-        previous_ts = float(entry.get('ts') or 0)
-    except (TypeError, ValueError):
-        previous_ts = 0.0
-    value = bool(tg_ok)
-    if (
-        value is False and
-        previous_ts and
-        now - previous_ts < _KEY_PROBE_SUCCESS_DOWNGRADE_GRACE and
-        entry.get('tg_ok') is True
-    ):
-        return False
-
-    changed = False
-    if entry.get('schema') != _KEY_PROBE_CACHE_SCHEMA_VERSION:
-        entry['schema'] = _KEY_PROBE_CACHE_SCHEMA_VERSION
-        changed = True
-    if entry.get('proto') != key_name:
-        entry['proto'] = key_name
-        changed = True
-    if entry.get('tg_ok') is not value:
-        entry['tg_ok'] = value
-        changed = True
-    if value is not True and 'tg_latency_ms' in entry:
-        entry.pop('tg_latency_ms', None)
-        changed = True
-    if not changed:
-        return False
-
-    entry['ts'] = now
-    cache[key_id] = entry
-    _write_json_file(_KEY_PROBE_CACHE_PATH, cache)
-    _invalidate_pool_data_cache()
-    return True
+    quality_kwargs = {}
+    if now is not None:
+        quality_kwargs['now'] = float(now)
+    return _record_key_probe(
+        key_name,
+        key_value,
+        tg_ok=bool(tg_ok),
+        min_write_interval=float('inf'),
+        **quality_kwargs,
+    )
 
 
 def _confirm_active_telegram_probe_from_polling():
@@ -658,6 +626,15 @@ def _subscription_runtime():
 
         _subscription_runtime_module = module
     return _subscription_runtime_module
+
+
+def _subscription_refresh_runtime():
+    global _subscription_refresh_runtime_module
+    if _subscription_refresh_runtime_module is None:
+        import subscription_refresh_runtime as module
+
+        _subscription_refresh_runtime_module = module
+    return _subscription_refresh_runtime_module
 
 
 def _youtube_route_owner():
@@ -2140,15 +2117,16 @@ def _refresh_ipset_after_youtube_recovery(route_proto, reason=''):
         )
         if result.returncode == 0:
             _write_runtime_log(f'YouTube recovery: refreshed ipset after {_pool_proto_label(route_proto)} recovery. {reason}'.strip())
+            return True
         else:
             _write_runtime_log(f'YouTube recovery: ipset refresh returned code {result.returncode}. {reason}'.strip())
     except Exception as exc:
         _write_runtime_log(f'YouTube recovery: ipset refresh failed after {_pool_proto_label(route_proto)} recovery: {exc}')
+    return False
 
 
 def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, message):
-    if not _youtube_failure_is_hard_proxy_failure(message):
-        return False
+    hard_proxy_failure = _youtube_failure_is_hard_proxy_failure(message)
     now = time.time()
     last_attempt = float(youtube_hard_failure_recovery_state.get('last_attempt') or 0.0)
     if last_attempt and now - last_attempt < YOUTUBE_VLESS2_HARD_FAILURE_RECOVERY_COOLDOWN_SECONDS:
@@ -2162,12 +2140,26 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
         return False
     youtube_hard_failure_recovery_state['last_attempt'] = now
     _write_runtime_log(
-        f'YouTube recovery: {_pool_proto_label(route_proto)} hard proxy failure detected; '
-        f'repairing current key without failover. Last failure: {message}'
+        f'YouTube recovery: {_pool_proto_label(route_proto)} route failure detected; '
+        f'repairing route before key failover. Last failure: {message}'
     )
 
     recovered = False
-    if route_proto in ('vless', 'vless2'):
+    route_refreshed = _refresh_ipset_after_youtube_recovery(
+        route_proto,
+        'confirmed failure before key failover',
+    )
+    if route_refreshed:
+        _start_youtube_edge_prefetch_external('youtube-route-repair')
+        confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
+        if confirm_ok:
+            recovered = True
+        else:
+            _write_runtime_log(
+                f'YouTube recovery: route refresh did not restore current key: {confirm_message}'
+            )
+
+    if not recovered and hard_proxy_failure and route_proto in ('vless', 'vless2'):
         try:
             repaired = _repair_active_reality_endpoint(
                 route_proto,
@@ -2186,7 +2178,7 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
             else:
                 _write_runtime_log(f'YouTube recovery: endpoint repair did not restore current key: {confirm_message}')
 
-    if not recovered:
+    if not recovered and hard_proxy_failure:
         recovered = _restart_core_proxy_and_recheck_youtube(route_proto, active_key, message)
 
     if recovered:
@@ -2197,9 +2189,8 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
         _record_key_probe(route_proto, active_key, yt_ok=True)
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
-        _refresh_ipset_after_youtube_recovery(route_proto, 'current key kept')
         _write_runtime_log(
-            f'YouTube failover: Reality endpoint repair restored current {_pool_proto_label(route_proto)} key; '
+            f'YouTube failover: route repair restored current {_pool_proto_label(route_proto)} key; '
             'failover skipped.'
         )
         return True
@@ -12790,58 +12781,16 @@ def _import_pool_subscription(proto, subscription_url, *, use_router_hwid=False)
 
 
 def _refresh_subscription_once(proto, record, *, source='auto'):
-    url = str((record or {}).get('url') or '').strip()
-    if not url or not bool((record or {}).get('hwid_enabled')):
-        return False
-    if source == 'auto':
-        if not _subscription_auto_refresh_allowed(proto):
-            return False
-    attempt_at = time.time()
-    try:
-        fetched, error = _fetch_keys_from_subscription(url, use_router_hwid=True)
-        if error:
-            raise ValueError(error)
-        selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched)
-        if not selected_keys:
-            raise ValueError('subscription did not return keys for the selected protocol')
-        previous_managed_keys = (record or {}).get('managed_keys', [])
-        if _subscription_runtime().subscription_sync_shrink_is_suspicious(
-            previous_managed_keys,
-            selected_keys,
-        ):
-            raise ValueError(
-                'subscription returned a suspiciously small key set; previous pool preserved'
-            )
-        pools, added_keys, removed_keys, _managed_keys, retained_keys = _add_subscription_keys_to_pool(
-            proto,
-            fetched,
-            sync_subscription=True,
-            previous_managed_keys=previous_managed_keys,
-        )
-        _update_subscription_record(
-            proto,
-            url=url,
-            hwid_enabled=True,
-            last_attempt_at=attempt_at,
-            last_success_at=time.time(),
-            last_error='',
-            managed_keys=_managed_keys,
-        )
-        _write_runtime_log(
-            f'Subscription {source} refresh for {proto}: added={len(added_keys)}, '
-            f'removed={len(removed_keys)}, retained_active={len(retained_keys)}, total={len(_managed_keys)}'
-        )
-        return True
-    except Exception as exc:
-        _update_subscription_record(
-            proto,
-            url=url,
-            hwid_enabled=True,
-            last_attempt_at=attempt_at,
-            last_error=str(exc),
-        )
-        _write_runtime_log(f'Subscription {source} refresh for {proto} failed: {exc}')
-        return False
+    return _subscription_refresh_runtime().refresh_subscription_once(
+        proto,
+        record,
+        source=source,
+        auto_refresh_allowed=_subscription_auto_refresh_allowed,
+        fetch_keys=_fetch_keys_from_subscription,
+        add_keys_to_pool=_add_subscription_keys_to_pool,
+        update_record=_update_subscription_record,
+        write_log=_write_runtime_log,
+    )
 
 
 def _subscription_refresh_due(record, now):

@@ -79,8 +79,18 @@ def render_maintenance_page(status, *, current_version=''):
 </main>
 <script>
 (function(){{
-let completed=false;
+let completed=false,readyPasses=0,retryTimer=0;
 function text(id,value){{const node=document.getElementById(id);if(node)node.textContent=value||''}}
+function retry(delay){{window.clearTimeout(retryTimer);retryTimer=window.setTimeout(refresh,delay||2000)}}
+async function applicationReady(){{
+  try{{
+    const probes=await Promise.all([
+      fetch('/api/status?compact=1&lite=1',{{headers:{{Accept:'application/json'}},cache:'no-store'}}),
+      fetch('/static/app.js?ready='+Date.now(),{{cache:'no-store'}})
+    ]);
+    return probes.every(function(response){{return response.ok}});
+  }}catch(error){{return false}}
+}}
 async function refresh(){{
   try{{
     const response=await fetch('/api/update_status',{{headers:{{Accept:'application/json'}},cache:'no-store'}});
@@ -89,10 +99,15 @@ async function refresh(){{
     const progress=Math.max(0,Math.min(100,Number(state.progress||0)));
     text('label',state.progress_label||'Обновление выполняется');text('percent',Math.round(progress)+'%');text('message',state.message||'Обновление выполняется…');
     document.getElementById('bar').style.width=progress+'%';
-    if(!state.running&&!completed){{completed=true;text('label','Обновление завершено');window.setTimeout(function(){{window.location.reload()}},1800)}}
-  }}catch(error){{window.setTimeout(function(){{window.location.reload()}},1800)}}
+    if(!state.running){{
+      completed=true;text('label','Проверяем готовность веб-интерфейса');
+      readyPasses=(await applicationReady())?readyPasses+1:0;
+      if(readyPasses>=2){{window.location.replace('/?updated='+Date.now());return}}
+    }}
+  }}catch(error){{readyPasses=0}}
+  retry(completed?2500:2000);
 }}
-window.setInterval(refresh,2000);refresh();
+refresh();
 }})();
 </script>
 </body>

@@ -7,6 +7,11 @@ from urllib.parse import urlsplit
 
 
 PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+RECOVERY_SUFFIX = '.last-good'
+
+
+class KeyPoolLoadError(OSError):
+    """Raised when an existing pool file cannot be read safely."""
 SCHEME_PROTOCOLS = {
     'ss': 'shadowsocks',
     'vmess': 'vmess',
@@ -81,19 +86,32 @@ def repair_key_pool_protocols(pools):
     return repaired, moved
 
 
+def _read_key_pools_file(path):
+    with open(path, 'r', encoding='utf-8') as file:
+        value = json.load(file)
+    if not isinstance(value, dict):
+        raise ValueError('key pool root must be an object')
+    return normalize_key_pools(value)
+
+
 def load_key_pools(path):
+    recovery_path = f'{path}{RECOVERY_SUFFIX}'
+    primary_error = None
     try:
-        with open(path, 'r', encoding='utf-8') as file:
-            value = json.load(file)
-        if isinstance(value, dict):
-            return normalize_key_pools(value)
-    except Exception:
-        pass
-    return {proto: [] for proto in PROTOCOLS}
+        return _read_key_pools_file(path)
+    except FileNotFoundError as error:
+        primary_error = error
+        if not os.path.exists(recovery_path):
+            return {proto: [] for proto in PROTOCOLS}
+    except (OSError, ValueError, TypeError) as error:
+        primary_error = error
+    try:
+        return _read_key_pools_file(recovery_path)
+    except (OSError, ValueError, TypeError) as recovery_error:
+        raise KeyPoolLoadError(f'cannot read key pools or recovery: {path}') from (primary_error or recovery_error)
 
 
-def save_key_pools(path, pools):
-    pools, _ = repair_key_pool_protocols(pools)
+def _atomic_write_key_pools(path, pools):
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
@@ -108,8 +126,14 @@ def save_key_pools(path, pools):
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-            except Exception:
+            except OSError:
                 pass
+
+
+def save_key_pools(path, pools):
+    pools, _ = repair_key_pool_protocols(pools)
+    _atomic_write_key_pools(f'{path}{RECOVERY_SUFFIX}', pools)
+    _atomic_write_key_pools(path, pools)
     return pools
 
 

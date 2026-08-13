@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 import time
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -13,6 +15,7 @@ PROTOCOL_SUBSCRIPTION_SOURCE = {
 AUTO_SYNC_MIN_PREVIOUS_KEYS = 20
 AUTO_SYNC_MIN_RETAINED_KEYS = 5
 AUTO_SYNC_MIN_RETAINED_RATIO = 0.25
+AUTO_SYNC_SHRINK_CONFIRM_MIN_AGE_SECONDS = 300
 
 
 def subscription_sync_shrink_is_suspicious(
@@ -33,6 +36,36 @@ def subscription_sync_shrink_is_suspicious(
         int(previous_count * max(0.0, float(min_retained_ratio or 0.0))),
     )
     return fetched_count < retained_floor
+
+
+def subscription_keys_signature(keys):
+    normalized = sorted(key_pool_store.dedupe_key_list(keys or []))
+    payload = json.dumps(normalized, ensure_ascii=False, separators=(',', ':'))
+    return hashlib.sha256(payload.encode('utf-8', errors='ignore')).hexdigest()
+
+
+def subscription_shrink_confirmation(record, fetched_keys, now, *, min_age_seconds=AUTO_SYNC_SHRINK_CONFIRM_MIN_AGE_SECONDS):
+    """Return whether an identical suspicious snapshot was observed twice."""
+    record = record if isinstance(record, dict) else {}
+    signature = subscription_keys_signature(fetched_keys)
+    try:
+        first_seen_at = float(record.get('pending_shrink_at') or 0)
+        now = float(now)
+    except (TypeError, ValueError):
+        first_seen_at = 0.0
+        now = 0.0
+    confirmed = bool(
+        signature and
+        signature == str(record.get('pending_shrink_signature') or '') and
+        first_seen_at > 0 and
+        now >= first_seen_at and
+        now - first_seen_at >= max(0.0, float(min_age_seconds or 0))
+    )
+    return confirmed, {
+        'pending_shrink_signature': signature,
+        'pending_shrink_count': len(key_pool_store.dedupe_key_list(fetched_keys or [])),
+        'pending_shrink_at': first_seen_at if confirmed else now,
+    }
 
 
 def subscription_refresh_is_due(record, now, *, interval_seconds, retry_seconds):
@@ -120,6 +153,9 @@ def normalize_subscription_state(payload):
             'last_success_at': float(item.get('last_success_at') or 0),
             'last_error': str(item.get('last_error') or '').strip(),
             'managed_keys': key_pool_store.dedupe_key_list(item.get('managed_keys') or []),
+            'pending_shrink_signature': str(item.get('pending_shrink_signature') or '').strip(),
+            'pending_shrink_count': max(0, int(item.get('pending_shrink_count') or 0)),
+            'pending_shrink_at': float(item.get('pending_shrink_at') or 0),
         }
     return state
 
