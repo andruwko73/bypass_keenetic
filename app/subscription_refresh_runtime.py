@@ -37,21 +37,18 @@ def refresh_subscription_once(
             selected_keys,
         )
         if suspicious_shrink and source == 'auto':
-            confirmed, pending_updates = subscription_runtime.subscription_shrink_confirmation(
-                record,
-                selected_keys,
-                attempt_at,
+            update_record(
+                proto,
+                url=url,
+                hwid_enabled=True,
+                last_attempt_at=attempt_at,
+                last_error='subscription returned a suspiciously small key set; automatic pool replacement blocked',
             )
-            if not confirmed:
-                update_record(
-                    proto,
-                    url=url,
-                    hwid_enabled=True,
-                    last_attempt_at=attempt_at,
-                    last_error='subscription returned a suspiciously small key set; previous pool preserved pending confirmation',
-                    **pending_updates,
-                )
-                return False
+            write_log(
+                f'Subscription auto refresh for {proto} blocked destructive shrink: '
+                f'fetched={len(selected_keys)}, previous={len(previous_managed_keys)}'
+            )
+            return False
 
         _pools, added_keys, removed_keys, managed_keys, retained_keys = add_keys_to_pool(
             proto,
@@ -67,9 +64,6 @@ def refresh_subscription_once(
             last_success_at=float(time_provider()),
             last_error='',
             managed_keys=managed_keys,
-            pending_shrink_signature='',
-            pending_shrink_count=0,
-            pending_shrink_at=0,
         )
         write_log(
             f'Subscription {source} refresh for {proto}: added={len(added_keys)}, '

@@ -2547,20 +2547,6 @@ def test_automatic_subscription_sync_rejects_catastrophic_shrink():
         interval_seconds=3600,
         retry_seconds=600,
     )
-    confirmed, pending = subscription_runtime.subscription_shrink_confirmation(
-        {}, previous_keys[:2], 1000, min_age_seconds=300
-    )
-    assert not confirmed and pending['pending_shrink_count'] == 2
-    confirmed, repeated = subscription_runtime.subscription_shrink_confirmation(
-        pending, previous_keys[:2], 1300, min_age_seconds=300
-    )
-    assert confirmed and repeated['pending_shrink_signature'] == pending['pending_shrink_signature']
-    changed, _ = subscription_runtime.subscription_shrink_confirmation(
-        pending, previous_keys[2:4], 1300, min_age_seconds=300
-    )
-    assert not changed
-
-
 def test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink():
     with tempfile.TemporaryDirectory() as directory:
         temp_path = Path(directory)
@@ -2576,16 +2562,20 @@ def test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink():
             "old_keys = [f'vless://old-{i}@example.com:443' for i in range(89)]\n"
             "new_keys = old_keys[:2]\n"
             "updates = []\n"
+            "logs = []\n"
             "bot._fetch_keys_from_subscription = lambda *_args, **_kwargs: ({'vless': new_keys}, '')\n"
             "bot._add_subscription_keys_to_pool = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('pool must not change'))\n"
             "bot._update_subscription_record = lambda proto, **kwargs: updates.append((proto, kwargs))\n"
+            "bot._write_runtime_log = logs.append\n"
             "record = {'url': 'https://subscription.example.test/private', 'hwid_enabled': True, 'managed_keys': old_keys}\n"
-            "assert bot._refresh_subscription_once('vless', record, source='auto') is False\n"
-            "assert len(updates) == 1\n"
+            "for proto in ('vless', 'vless2'):\n"
+            "    assert bot._refresh_subscription_once(proto, record, source='auto') is False\n"
+            "    assert bot._refresh_subscription_once(proto, record, source='auto') is False\n"
+            "assert len(updates) == 4\n"
             "assert updates[0][1]['last_attempt_at'] > 0\n"
             "assert 'suspiciously small' in updates[0][1]['last_error']\n"
-            "assert updates[0][1]['pending_shrink_count'] == 2\n"
             "assert 'last_success_at' not in updates[0][1]\n"
+            "assert all('blocked destructive shrink' in item for item in logs)\n"
         )
         env = os.environ.copy()
         env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
