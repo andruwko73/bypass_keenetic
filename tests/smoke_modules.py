@@ -4140,8 +4140,10 @@ def test_codex_version_matches_commit_count():
     dnsmasq_config = (APP_ROOT / 'dnsmasq.conf').read_text(encoding='utf-8')
     assert 'addn-hosts=/opt/etc/bot/youtube_edge_quality.hosts' in dnsmasq_config
     assert 'strict-order' in dnsmasq_config
-    assert 'server=127.0.0.1#40500' in dnsmasq_config
-    assert 'server=127.0.0.1#40508' in dnsmasq_config
+    assert 'server=9.9.9.9' in dnsmasq_config
+    assert 'server=77.88.8.8' in dnsmasq_config
+    assert 'server=127.0.0.1#40500' not in dnsmasq_config
+    assert 'server=127.0.0.1#40508' not in dnsmasq_config
     assert '# BYPASS_DNS_UPSTREAMS_BEGIN' in dnsmasq_config
     assert '# BYPASS_DNS_UPSTREAMS_END' in dnsmasq_config
     assert 'server=8.8.8.8' not in dnsmasq_config
@@ -4171,7 +4173,7 @@ def test_dnsmasq_upstream_selection_uses_only_available_local_proxies(tmp_path):
     cases = (
         ('both', '40500,40508', ('server=127.0.0.1#40500', 'server=127.0.0.1#40508'), ('server=8.8.8.8', 'server=1.1.1.1')),
         ('tls', '40500', ('server=127.0.0.1#40500',), ('server=127.0.0.1#40508', 'server=8.8.8.8')),
-        ('none', '', ('server=8.8.8.8', 'server=1.1.1.1'), ('server=127.0.0.1#40500', 'server=127.0.0.1#40508')),
+        ('none', '', ('server=9.9.9.9', 'server=77.88.8.8'), ('server=127.0.0.1#40500', 'server=127.0.0.1#40508')),
     )
     for name, ready_ports, expected_lines, forbidden_lines in cases:
         target = tmp_path / f'dnsmasq-{name}.conf'
@@ -4184,6 +4186,9 @@ dns_local_udp_listener_available() {{
   [ "$1" = "40500" ] && [ -n "$READY_PORTS" ] && return 0
   [ "$1" = "40508" ] && [ "$READY_PORTS" = "40500,40508" ] && return 0
   return 1
+}}
+dns_udp_upstream_available() {{
+  [ "$1" = "9.9.9.9" ] || [ "$1" = "77.88.8.8" ]
 }}
 configure_dnsmasq_upstreams "{shell_path(target)}" >/dev/null
 '''.replace('\r', '')
@@ -4214,6 +4219,7 @@ configure_dnsmasq_upstreams "{shell_path(target)}" >/dev/null
 dnsovertlsport=40500
 dnsoverhttpsport=40508
 dns_local_udp_listener_available() {{ return 1; }}
+dns_udp_upstream_available() {{ return 1; }}
 configure_dnsmasq_upstreams "{shell_path(legacy_target)}" >/dev/null
 '''.replace('\r', '')
     completed = subprocess.run(
@@ -4228,10 +4234,77 @@ configure_dnsmasq_upstreams "{shell_path(legacy_target)}" >/dev/null
     repaired = legacy_target.read_text(encoding='utf-8')
     assert repaired.count('# BYPASS_DNS_UPSTREAMS_BEGIN') == 1
     assert repaired.count('strict-order') == 1
-    assert 'server=8.8.8.8' in repaired
-    assert 'server=1.1.1.1' in repaired
+    assert 'server=9.9.9.9' in repaired
+    assert 'server=77.88.8.8' in repaired
     assert 'server=127.0.0.1#40500' not in repaired
     assert 'server=127.0.0.1#40508' not in repaired
+
+
+def test_dnsmasq_fallback_upstream_selection_skips_failed_udp_resolvers(tmp_path):
+    bootstrap = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    start = bootstrap.index('dns_local_udp_listener_available()')
+    end = bootstrap.index('\ndetect_core_proxy_package()', start)
+    functions = bootstrap[start:end].replace('\r', '')
+    target = tmp_path / 'dnsmasq-dynamic-fallback.conf'
+    target.write_bytes((APP_ROOT / 'dnsmasq.conf').read_text(encoding='utf-8').replace('\r', '').encode('utf-8'))
+    shell_target = str(target.resolve()).replace('\\', '/')
+    if re.match(r'^[A-Za-z]:/', shell_target):
+        shell_target = f'/mnt/{shell_target[0].lower()}{shell_target[2:]}'
+    command = f'''{functions}
+dnsovertlsport=40500
+dnsoverhttpsport=40508
+BYPASS_DNS_FALLBACK_CANDIDATES='8.8.8.8 9.9.9.9 77.88.8.8 1.1.1.1'
+dns_local_udp_listener_available() {{ return 1; }}
+dns_udp_upstream_available() {{
+  [ "$1" = "77.88.8.8" ] || [ "$1" = "1.1.1.1" ]
+}}
+configure_dnsmasq_upstreams "{shell_target}" >/dev/null
+'''.replace('\r', '')
+    completed = subprocess.run(
+        ['bash', '-s'],
+        input=command.encode('utf-8'),
+        check=False,
+        cwd=ROOT,
+        env=os.environ,
+        capture_output=True,
+    )
+    assert completed.returncode == 0, completed.stderr.decode('utf-8', errors='replace')
+    rendered = target.read_text(encoding='utf-8')
+    assert 'server=77.88.8.8' in rendered
+    assert 'server=1.1.1.1' in rendered
+    assert 'server=8.8.8.8' not in rendered
+    assert 'server=9.9.9.9' not in rendered
+
+
+def test_dnsmasq_udp_upstream_probe_rejects_blocked_or_incomplete_answers():
+    bootstrap = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    start = bootstrap.index('dns_local_udp_listener_available()')
+    end = bootstrap.index('\ndetect_core_proxy_package()', start)
+    functions = bootstrap[start:end].replace('\r', '')
+    command = f'''{functions}
+DNS_TEST_MODE=blocked
+dig() {{
+  case "$DNS_TEST_MODE:$*" in
+    blocked:*) printf '0.0.0.0\\n' ;;
+    youtube-blocked:*www.youtube.com*) printf '0.0.0.0\\n' ;;
+    *) printf '93.184.216.34\\n' ;;
+  esac
+}}
+if dns_udp_upstream_available 9.9.9.9; then exit 11; fi
+DNS_TEST_MODE=youtube-blocked
+if dns_udp_upstream_available 9.9.9.9; then exit 12; fi
+DNS_TEST_MODE=ok
+dns_udp_upstream_available 9.9.9.9 || exit 13
+'''.replace('\r', '')
+    completed = subprocess.run(
+        ['bash', '-s'],
+        input=command.encode('utf-8'),
+        check=False,
+        cwd=ROOT,
+        env=os.environ,
+        capture_output=True,
+    )
+    assert completed.returncode == 0, completed.stderr.decode('utf-8', errors='replace')
 
 
 def test_ui_smoke_package_scripts_are_declared():

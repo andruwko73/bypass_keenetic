@@ -394,6 +394,65 @@ dns_local_udp_listener_available() {
   netstat -lnu 2>/dev/null | grep -Eq "127\\.0\\.0\\.1:${dns_port}[[:space:]]"
 }
 
+dns_public_ipv4_answer_available() {
+  dns_answer_resolver="$1"
+  awk -v resolver="$dns_answer_resolver" '
+    {
+      octet_count = split($0, octets, ".")
+      if (octet_count != 4) next
+      valid = 1
+      for (octet_index = 1; octet_index <= 4; octet_index++) {
+        if (octets[octet_index] !~ /^[0-9]+$/ || octets[octet_index] > 255) valid = 0
+      }
+      if (!valid || $0 == resolver) next
+      first = octets[1] + 0
+      second = octets[2] + 0
+      if (first == 0 || first == 10 || first == 127 || first >= 224) next
+      if (first == 100 && second >= 64 && second <= 127) next
+      if (first == 169 && second == 254) next
+      if (first == 172 && second >= 16 && second <= 31) next
+      if (first == 192 && second == 168) next
+      found = 1
+    }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+dns_udp_upstream_available() {
+  dns_server="$1"
+  [ -n "$dns_server" ] || return 1
+  command -v dig >/dev/null 2>&1 || return 1
+  printf '%s\n' "$dns_server" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || return 1
+
+  for dns_probe_domain in example.com www.youtube.com; do
+    dig +time=2 +tries=1 +short A "$dns_probe_domain" "@$dns_server" 2>/dev/null |
+      dns_public_ipv4_answer_available "$dns_server" || return 1
+  done
+}
+
+select_dnsmasq_fallback_upstreams() {
+  dns_fallback_candidates="${BYPASS_DNS_FALLBACK_CANDIDATES:-9.9.9.9 77.88.8.8 94.140.14.14 8.8.8.8 1.1.1.1}"
+  dns_fallback_selected=""
+  dns_fallback_count=0
+
+  for dns_fallback_candidate in $dns_fallback_candidates; do
+    case " $dns_fallback_selected " in
+      *" $dns_fallback_candidate "*) continue ;;
+    esac
+    dns_udp_upstream_available "$dns_fallback_candidate" || continue
+    dns_fallback_selected="${dns_fallback_selected}${dns_fallback_selected:+ }${dns_fallback_candidate}"
+    dns_fallback_count=$((dns_fallback_count + 1))
+    [ "$dns_fallback_count" -ge 2 ] && break
+  done
+
+  # bind-dig может быть ещё не установлен во время первичной подготовки Entware.
+  # В этом случае оставляем пару, которая не зависит от Google/Cloudflare UDP.
+  if [ "$dns_fallback_count" -eq 0 ]; then
+    dns_fallback_selected="9.9.9.9 77.88.8.8"
+  fi
+  printf '%s\n' "$dns_fallback_selected"
+}
+
 configure_dnsmasq_upstreams() {
   dnsmasq_path="$1"
   [ -f "$dnsmasq_path" ] || return 1
@@ -409,6 +468,9 @@ configure_dnsmasq_upstreams() {
         $0 == https_line { next }
         $0 == "server=8.8.8.8" { next }
         $0 == "server=1.1.1.1" { next }
+        $0 == "server=9.9.9.9" { next }
+        $0 == "server=77.88.8.8" { next }
+        $0 == "server=94.140.14.14" { next }
         { print }
         END {
           print ""
@@ -427,21 +489,29 @@ configure_dnsmasq_upstreams() {
   dns_https_ready=0
   dns_local_udp_listener_available "$dnsovertlsport" && dns_tls_ready=1
   dns_local_udp_listener_available "$dnsoverhttpsport" && dns_https_ready=1
+  dns_fallback_upstreams=""
+  if [ "$dns_tls_ready" -ne 1 ] && [ "$dns_https_ready" -ne 1 ]; then
+    dns_fallback_upstreams=$(select_dnsmasq_fallback_upstreams) || return 1
+    [ -n "$dns_fallback_upstreams" ] || return 1
+  fi
   dnsmasq_tmp="${dnsmasq_path}.upstreams.$$"
 
   awk \
     -v tls_port="$dnsovertlsport" \
     -v https_port="$dnsoverhttpsport" \
     -v tls_ready="$dns_tls_ready" \
-    -v https_ready="$dns_https_ready" '
+    -v https_ready="$dns_https_ready" \
+    -v fallback_upstreams="$dns_fallback_upstreams" '
       /^# BYPASS_DNS_UPSTREAMS_BEGIN$/ {
         print
         print "strict-order"
         if (tls_ready == 1) print "server=127.0.0.1#" tls_port
         if (https_ready == 1) print "server=127.0.0.1#" https_port
         if (tls_ready != 1 && https_ready != 1) {
-          print "server=8.8.8.8"
-          print "server=1.1.1.1"
+          fallback_count = split(fallback_upstreams, fallback, /[[:space:]]+/)
+          for (fallback_index = 1; fallback_index <= fallback_count; fallback_index++) {
+            if (fallback[fallback_index] != "") print "server=" fallback[fallback_index]
+          }
         }
         replacing = 1
         next
