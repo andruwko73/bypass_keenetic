@@ -6157,9 +6157,23 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'BOT_CONFIG_PATH="$BOT_CONFIG_PATH"' in rollback_source
     assert r'managed_state_snapshot.py" restore "\$BACKUP_DIR/full-state"' in rollback_source
     assert 'full_state_restored=1' in rollback_source
+    assert 'wait_for_rollback_readiness()' in rollback_source
+    assert r'stable_samples=\$((stable_samples + 1))' in rollback_source
+    assert r'curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/"' in rollback_source
+    assert 'if ! wait_for_rollback_readiness; then' in rollback_source
+    before_restore = rollback_source.split('full_state_restored=0', 1)[0]
+    assert 'S24xray ] && /opt/etc/init.d/S24xray stop' not in before_restore
+    assert r'"\$BOT_SERVICE_PATH" stop' not in before_restore
     assert 'restore_file dnsmasq.conf /opt/etc/dnsmasq.conf' in rollback_source
     assert '[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart' in rollback_source
     assert rollback_source.find('restore_file dnsmasq.conf') < rollback_source.find('/opt/etc/init.d/S56dnsmasq restart')
+    assert rollback_source.find('/opt/etc/init.d/S24xray restart') < rollback_source.find('/opt/etc/init.d/S99unblock restart')
+    assert rollback_source.find(r'"\$BOT_SERVICE_PATH" restart') < rollback_source.find('if ! wait_for_rollback_readiness; then')
+    bootstrap_rollback_source = bootstrap_source.split('write_rollback_script() {', 1)[1].split('\nEOF', 1)[0]
+    assert 'wait_for_rollback_readiness()' in bootstrap_rollback_source
+    assert r'curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/"' in bootstrap_rollback_source
+    assert bootstrap_rollback_source.find('/opt/etc/init.d/S99unblock restart') < bootstrap_rollback_source.find('/opt/etc/init.d/S99web_bot restart')
+    assert bootstrap_rollback_source.find('/opt/etc/init.d/S99telegram_bot restart') < bootstrap_rollback_source.find('if ! wait_for_rollback_readiness; then')
     assert 'repair_legacy_dnsmasq_backup "$backup_dir/dnsmasq.conf" || exit 1' in script_source
     assert 'backup_runtime_state_files' in script_source
     assert 'managed_state_snapshot.py" backup "$backup_dir/full-state"' in script_source

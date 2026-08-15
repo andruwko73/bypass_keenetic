@@ -461,6 +461,35 @@ install_unblock_ipset_cron_job() {
     return 1
 }
 
+wait_for_rollback_readiness() {
+    attempts=0
+    stable_samples=0
+    app_service='/opt/etc/init.d/S99telegram_bot'
+    [ ! -x /opt/etc/init.d/S99web_bot ] || app_service='/opt/etc/init.d/S99web_bot'
+    router_ip="\$(ip -4 addr show br0 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
+    [ -n "\$router_ip" ] || router_ip='192.168.1.1'
+    while [ "\$attempts" -lt 45 ]; do
+        attempts=\$((attempts + 1))
+        ready=1
+        [ -x "\$app_service" ] && "\$app_service" status >/dev/null 2>&1 || ready=0
+        curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
+        if [ -x /opt/etc/init.d/S24xray ]; then
+            /opt/etc/init.d/S24xray status >/dev/null 2>&1 || ready=0
+        elif [ -x /opt/etc/init.d/S24v2ray ]; then
+            /opt/etc/init.d/S24v2ray status >/dev/null 2>&1 || ready=0
+        fi
+        [ ! -x /opt/etc/init.d/S99unblock ] || /opt/etc/init.d/S99unblock status >/dev/null 2>&1 || ready=0
+        if [ "\$ready" -eq 1 ]; then
+            stable_samples=\$((stable_samples + 1))
+            [ "\$stable_samples" -ge 2 ] && return 0
+        else
+            stable_samples=0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
 restore_path /opt/etc/bot/main.py
 restore_path /opt/etc/bot/installer.py
 restore_path /opt/etc/bot/installer.env
@@ -532,12 +561,6 @@ if [ -x /opt/sbin/xray ] && [ -f /opt/etc/xray/config.json ]; then
         tail -n 12 /tmp/bypass-xray-rollback-test.log 2>/dev/null || true
     fi
 fi
-if [ -x /opt/etc/init.d/S99web_bot ]; then
-    /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
-    /opt/etc/init.d/S99web_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99web_bot start >/dev/null 2>&1 || true
-else
-    /opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99telegram_bot start >/dev/null 2>&1 || true
-fi
 /opt/bin/unblock_update.sh >/dev/null 2>&1 || true
 install_unblock_ipset_cron_job || true
 /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
@@ -547,6 +570,17 @@ install_unblock_ipset_cron_job || true
 /opt/etc/init.d/S24xray status 2>/dev/null || true
 /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
+if [ -x /opt/etc/init.d/S99web_bot ]; then
+    /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
+    /opt/etc/init.d/S99web_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99web_bot start >/dev/null 2>&1 || true
+else
+    /opt/etc/init.d/S99telegram_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99telegram_bot start >/dev/null 2>&1 || true
+fi
+
+if ! wait_for_rollback_readiness; then
+    echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 90 секунд."
+    exit 1
+fi
 
 echo "Откат завершён из \$BACKUP_DIR"
 EOF

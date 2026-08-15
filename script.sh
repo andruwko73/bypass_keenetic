@@ -1115,11 +1115,32 @@ install_unblock_ipset_cron_job() {
   return 1
 }
 
-[ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks stop >/dev/null 2>&1 || true
-[ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray stop >/dev/null 2>&1 || true
-[ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray stop >/dev/null 2>&1 || true
-[ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan stop >/dev/null 2>&1 || true
-[ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" stop >/dev/null 2>&1 || true
+wait_for_rollback_readiness() {
+  attempts=0
+  stable_samples=0
+  router_ip="\$(ip -4 addr show br0 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
+  [ -n "\$router_ip" ] || router_ip='192.168.1.1'
+  while [ "\$attempts" -lt 45 ]; do
+    attempts=\$((attempts + 1))
+    ready=1
+    [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" status >/dev/null 2>&1 || ready=0
+    curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
+    if [ -x /opt/etc/init.d/S24xray ]; then
+      /opt/etc/init.d/S24xray status >/dev/null 2>&1 || ready=0
+    elif [ -x /opt/etc/init.d/S24v2ray ]; then
+      /opt/etc/init.d/S24v2ray status >/dev/null 2>&1 || ready=0
+    fi
+    [ ! -x /opt/etc/init.d/S99unblock ] || /opt/etc/init.d/S99unblock status >/dev/null 2>&1 || ready=0
+    if [ "\$ready" -eq 1 ]; then
+      stable_samples=\$((stable_samples + 1))
+      [ "\$stable_samples" -ge 2 ] && return 0
+    else
+      stable_samples=0
+    fi
+    sleep 2
+  done
+  return 1
+}
 
 full_state_restored=0
 if [ -f "\$BACKUP_DIR/full-state/manifest.json" ] && [ -f "\$BACKUP_DIR/.rollback-tools/managed_state_snapshot.py" ]; then
@@ -1132,7 +1153,6 @@ restore_file unblock_ipset.sh /opt/bin/unblock_ipset.sh
 restore_file unblock_dnsmasq.sh /opt/bin/unblock_dnsmasq.sh
 restore_file unblock_update.sh /opt/bin/unblock_update.sh
 restore_file dnsmasq.conf /opt/etc/dnsmasq.conf
-[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || true
 restore_file crontab /opt/etc/crontab
 restore_file S99unblock /opt/etc/init.d/S99unblock
 restore_file 100-ipset.sh /opt/etc/ndm/fs.d/100-ipset.sh
@@ -1194,17 +1214,23 @@ if [ "\$full_state_restored" -ne 1 ]; then
   /opt/bin/unblock_update.sh >/dev/null 2>&1 || true
   install_unblock_ipset_cron_job || true
 fi
+[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S10cron ] && /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks restart >/dev/null 2>&1 || /opt/etc/init.d/S22shadowsocks start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || /opt/etc/init.d/S24xray start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || /opt/etc/init.d/S24v2ray start >/dev/null 2>&1 || true
+[ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || /opt/etc/init.d/S22trojan start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S99unblock ] && /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
 if [ "\$full_state_restored" -eq 1 ] && [ -x /opt/etc/init.d/S99unblock ]; then
   /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1 || true
 fi
-[ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks start >/dev/null 2>&1 || true
-[ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || /opt/etc/init.d/S24xray start >/dev/null 2>&1 || true
-[ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || /opt/etc/init.d/S24v2ray start >/dev/null 2>&1 || true
-[ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan start >/dev/null 2>&1 || true
 rm -f "\$UPDATE_MAINTENANCE_PATH" "\$UPDATE_MAINTENANCE_READY_PATH" 2>/dev/null || true
 [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "\$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
+
+if ! wait_for_rollback_readiness; then
+  echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 90 секунд."
+  exit 1
+fi
 
 echo "Откат восстановил файлы из \$BACKUP_DIR."
 EOF
