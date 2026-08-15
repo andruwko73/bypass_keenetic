@@ -102,8 +102,10 @@ from unblock_lists import (
 )
 _CUSTOM_CHECKS_PATH = '/opt/etc/bot/custom_checks.json'
 if _IMPORT_POOL_ENABLED:
+    import subscription_pool_fetch
     import subscription_runtime
 else:
+    subscription_pool_fetch = None
     subscription_runtime = None
 import router_health_runtime
 import router_metrics
@@ -772,11 +774,25 @@ SUBSCRIPTION_HWID_HEADER_NAMES = tuple(
 SUBSCRIPTION_USER_AGENT = str(getattr(
     config,
     'subscription_user_agent',
-    getattr(_subscription_defaults, 'DEFAULT_SUBSCRIPTION_USER_AGENT', 'v2rayN/9.99'),
+    getattr(_subscription_defaults, 'DEFAULT_SUBSCRIPTION_USER_AGENT', 'v2rayN/6.45'),
 ) or '').strip()
 if _subscription_defaults is not None:
     SUBSCRIPTION_USER_AGENT = _subscription_defaults.effective_subscription_user_agent(SUBSCRIPTION_USER_AGENT)
 SUBSCRIPTION_ACCEPT_HEADER = str(getattr(config, 'subscription_accept_header', 'text/plain, */*') or '').strip()
+SUBSCRIPTION_FALLBACK_PROXY_URLS = tuple(getattr(
+    config,
+    'subscription_fallback_proxy_urls',
+    getattr(_subscription_defaults, 'DEFAULT_SUBSCRIPTION_FALLBACK_PROXY_URLS', ()),
+))
+if _subscription_defaults is not None:
+    SUBSCRIPTION_FALLBACK_PROXY_URLS = _subscription_defaults.normalize_subscription_proxy_urls(
+        SUBSCRIPTION_FALLBACK_PROXY_URLS,
+    )
+SUBSCRIPTION_POOL_ROUTE_FALLBACK_ENABLED = bool(getattr(
+    config,
+    'subscription_pool_route_fallback_enabled',
+    True,
+))
 SUBSCRIPTION_AUTO_REFRESH_ENABLED = bool(getattr(config, 'subscription_auto_refresh_enabled', True))
 SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS = max(
     3600,
@@ -1408,12 +1424,30 @@ def _fetch_keys_from_subscription(url, use_router_hwid=False):
             request_headers['User-Agent'] = SUBSCRIPTION_USER_AGENT
         if SUBSCRIPTION_ACCEPT_HEADER and 'accept' not in normalized_header_names:
             request_headers['Accept'] = SUBSCRIPTION_ACCEPT_HEADER
-        raw = _subscription_runtime().fetch_subscription_text(
-            requests,
-            request_url,
-            request_headers,
-            max_bytes=SUBSCRIPTION_MAX_BYTES,
-        )
+        try:
+            raw = _subscription_runtime().fetch_subscription_text(
+                requests,
+                request_url,
+                request_headers,
+                max_bytes=SUBSCRIPTION_MAX_BYTES,
+                fallback_proxy_urls=SUBSCRIPTION_FALLBACK_PROXY_URLS,
+            )
+        except requests.RequestException as primary_exc:
+            if (
+                not SUBSCRIPTION_POOL_ROUTE_FALLBACK_ENABLED or
+                not _subscription_runtime().subscription_request_is_transient(primary_exc, requests)
+            ):
+                raise
+            try:
+                raw = subscription_pool_fetch.fetch_subscription_text_from_pools(
+                    requests,
+                    request_url,
+                    request_headers,
+                    pools=_load_key_pools(),
+                    max_bytes=SUBSCRIPTION_MAX_BYTES,
+                )
+            except Exception:
+                raise primary_exc
         return _key_pool_store().classify_subscription_keys(raw), None
     except requests.RequestException as exc:
         return None, (

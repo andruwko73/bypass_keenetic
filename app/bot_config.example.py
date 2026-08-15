@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.1027
+# ВЕРСИЯ СКРИПТА v1.1028
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -16,8 +16,10 @@ subscription_state_path = '/opt/etc/bot/subscriptions.json'  # сохранен�
 subscription_router_hwid = ''  # если пусто, HWID читается read-only через ndmc show system/version
 subscription_hwid_query_param = 'hwid'
 subscription_hwid_header_names = ('X-HWID', 'X-Router-HWID', 'X-Device-ID')
-subscription_user_agent = 'v2rayN/9.99'
+subscription_user_agent = 'v2rayN/6.45'
 subscription_accept_header = 'text/plain, */*'
+subscription_fallback_proxy_urls = ('socks5h://127.0.0.1:10811', 'socks5h://127.0.0.1:10813')
+subscription_pool_route_fallback_enabled = True
 subscription_auto_refresh_enabled = True
 subscription_auto_refresh_interval_seconds = 21600  # четыре раза в день для подписок с включенным HWID
 subscription_auto_refresh_retry_seconds = 3600

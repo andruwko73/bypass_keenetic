@@ -62,11 +62,26 @@ def dedupe_key_list(keys):
     return result
 
 
+def remove_subscription_error_placeholders(keys):
+    normalized = dedupe_key_list(keys)
+    cleaned = [key_value for key_value in normalized if not subscription_key_is_error_placeholder(key_value)]
+    return cleaned, len(normalized) - len(cleaned)
+
+
 def normalize_key_pools(pools):
     return {
         proto: dedupe_key_list((pools or {}).get(proto, []))
         for proto in PROTOCOLS
     }
+
+
+def remove_subscription_error_placeholders_from_pools(pools):
+    pools = normalize_key_pools(pools)
+    removed = 0
+    for proto in PROTOCOLS:
+        pools[proto], protocol_removed = remove_subscription_error_placeholders(pools.get(proto, []))
+        removed += protocol_removed
+    return pools, removed
 
 
 def key_protocol_for_pool(default_proto, key_value):

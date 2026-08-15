@@ -1,3 +1,4 @@
+import hashlib
 import re
 import time
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -6,8 +7,13 @@ import key_pool_store
 
 
 DEFAULT_HWID_HEADER_NAMES = ('X-HWID', 'X-Router-HWID', 'X-Device-ID')
-DEFAULT_SUBSCRIPTION_USER_AGENT = 'v2rayN/9.99'
-LEGACY_DEFAULT_SUBSCRIPTION_USER_AGENTS = frozenset(('v2rayN/6.45',))
+DEFAULT_SUBSCRIPTION_USER_AGENT = 'v2rayN/6.45'
+LEGACY_DEFAULT_SUBSCRIPTION_USER_AGENTS = frozenset(('v2rayN/9.99',))
+DEFAULT_SUBSCRIPTION_FALLBACK_PROXY_URLS = (
+    'socks5h://127.0.0.1:10811',
+    'socks5h://127.0.0.1:10813',
+)
+REMNAWAVE_HWID_PATTERN = re.compile(r'^[A-Za-z0-9=-]{10,64}$')
 PROTOCOL_SUBSCRIPTION_SOURCE = {
     'vless2': 'vless',
 }
@@ -30,6 +36,23 @@ def effective_subscription_user_agent(value):
     return DEFAULT_SUBSCRIPTION_USER_AGENT if value in LEGACY_DEFAULT_SUBSCRIPTION_USER_AGENTS else value
 
 
+def normalize_subscription_hwid(value):
+    """Keep compatible HWIDs unchanged and derive a stable valid ID otherwise."""
+    value = str(value or '').strip()
+    if not value or REMNAWAVE_HWID_PATTERN.fullmatch(value):
+        return value
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+
+def normalize_subscription_proxy_urls(values):
+    result = []
+    for value in values or ():
+        value = str(value or '').strip()
+        if value and value not in result:
+            result.append(value)
+    return tuple(result)
+
+
 def subscription_request_error_summary(exc):
     """Describe a failed request without persisting its URL, query or HWID."""
     status_code = getattr(getattr(exc, 'response', None), 'status_code', 0)
@@ -47,6 +70,13 @@ def subscription_request_error_summary(exc):
     return 'request failed'
 
 
+def subscription_request_is_transient(exc, requests_module):
+    status_code = getattr(getattr(exc, 'response', None), 'status_code', 0)
+    return isinstance(exc, (requests_module.Timeout, requests_module.ConnectionError)) or status_code in (
+        429, 500, 502, 503, 504,
+    )
+
+
 def fetch_subscription_text(
     requests_module,
     request_url,
@@ -54,21 +84,32 @@ def fetch_subscription_text(
     *,
     max_bytes,
     attempts=2,
+    fallback_proxy_urls=(),
+    direct_first=True,
     sleep_provider=time.sleep,
 ):
-    """Fetch a bounded subscription body with one retry for transient failures."""
+    """Fetch a bounded body direct-first, then through bounded local fallbacks."""
     attempts = max(1, int(attempts or 1))
+    fallback_proxy_urls = normalize_subscription_proxy_urls(fallback_proxy_urls)
+    if fallback_proxy_urls:
+        proxy_routes = ((None,) if direct_first else ()) + fallback_proxy_urls
+    else:
+        proxy_routes = (None,) * attempts if direct_first else ()
+    if not proxy_routes:
+        raise ValueError('subscription request has no routes')
     session = requests_module.Session()
     try:
         session.trust_env = False
-        for attempt in range(attempts):
+        for attempt, proxy_url in enumerate(proxy_routes):
             response = None
             try:
+                proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else None
                 response = session.get(
                     request_url,
                     headers=dict(request_headers or {}),
                     stream=True,
                     timeout=(5, 15),
+                    proxies=proxies,
                 )
                 response.raise_for_status()
                 content_length = response.headers.get('Content-Length')
@@ -90,10 +131,8 @@ def fetch_subscription_text(
                 encoding = response.encoding or 'utf-8'
                 return b''.join(chunks).decode(encoding, errors='replace').strip()
             except requests_module.RequestException as exc:
-                status_code = getattr(getattr(exc, 'response', None), 'status_code', 0)
-                retryable = isinstance(exc, (requests_module.Timeout, requests_module.ConnectionError))
-                retryable = retryable or status_code in (429, 500, 502, 503, 504)
-                if attempt + 1 >= attempts or not retryable:
+                retryable = subscription_request_is_transient(exc, requests_module)
+                if attempt + 1 >= len(proxy_routes) or not retryable:
                     raise
                 sleep_provider(0.5 * (attempt + 1))
             finally:
@@ -170,7 +209,7 @@ def subscription_keys_for_protocol(proto, fetched_keys):
 
 
 def sync_subscription_keys_to_pool(pools, proto, fetched_keys, previous_managed_keys=None, preserve_keys=None):
-    pools = key_pool_store.normalize_key_pools(pools)
+    pools, _removed_placeholders = key_pool_store.remove_subscription_error_placeholders_from_pools(pools)
     if proto not in pools:
         pools[proto] = []
     managed_keys = subscription_keys_for_protocol(proto, fetched_keys)
@@ -221,7 +260,9 @@ def normalize_subscription_state(payload):
             'last_attempt_at': float(item.get('last_attempt_at') or 0),
             'last_success_at': float(item.get('last_success_at') or 0),
             'last_error': str(item.get('last_error') or '').strip(),
-            'managed_keys': key_pool_store.dedupe_key_list(item.get('managed_keys') or []),
+            'managed_keys': key_pool_store.remove_subscription_error_placeholders(
+                item.get('managed_keys') or []
+            )[0],
         }
     return state
 
@@ -307,7 +348,7 @@ def apply_hwid_to_subscription_request(
     query_param='hwid',
     header_names=DEFAULT_HWID_HEADER_NAMES,
 ):
-    hwid = str(hwid or '').strip()
+    hwid = normalize_subscription_hwid(hwid)
     if not hwid:
         return str(url or ''), {}
     request_url = str(url or '').strip()

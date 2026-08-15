@@ -33,6 +33,7 @@ def source_path(name):
 import key_pool_web
 import key_pool_store
 import managed_state_snapshot
+import subscription_pool_fetch
 import subscription_runtime
 import app_version
 import app_runtime_mode
@@ -1976,6 +1977,27 @@ def test_key_pool_subscription_helpers():
     else:
         raise AssertionError('vmess placeholder subscription must be rejected')
 
+    cleaned, removed = key_pool_store.remove_subscription_error_placeholders([
+        vless_key,
+        placeholder,
+        vmess_placeholder,
+    ])
+    assert cleaned == [vless_key]
+    assert removed == 2
+    cleaned_pools, removed = key_pool_store.remove_subscription_error_placeholders_from_pools({
+        'vless': [vless_key, placeholder],
+        'vmess': [vmess_placeholder],
+    })
+    assert cleaned_pools['vless'] == [vless_key]
+    assert cleaned_pools['vmess'] == []
+    assert removed == 2
+    normalized_state = subscription_runtime.normalize_subscription_state({
+        'subscriptions': {
+            'vless': {'managed_keys': [vless_key, placeholder]},
+        },
+    })
+    assert normalized_state['vless']['managed_keys'] == [vless_key]
+
     pools, added = key_pool_store.add_subscription_keys_to_pool({'vless2': []}, 'vless2', classified)
     assert added == [vless_key]
     assert pools['vless2'] == added
@@ -2162,19 +2184,24 @@ def test_pool_import_hint_is_protocol_specific():
 
 
 def test_subscription_hwid_request_helpers():
-    assert subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT == 'v2rayN/9.99'
-    assert subscription_runtime.effective_subscription_user_agent('v2rayN/6.45') == 'v2rayN/9.99'
+    assert subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT == 'v2rayN/6.45'
+    assert subscription_runtime.effective_subscription_user_agent('v2rayN/6.45') == 'v2rayN/6.45'
+    assert subscription_runtime.effective_subscription_user_agent('v2rayN/9.99') == 'v2rayN/6.45'
     assert subscription_runtime.effective_subscription_user_agent('custom-client/1.0') == 'custom-client/1.0'
     url, headers = subscription_runtime.apply_hwid_to_subscription_request(
         'https://sub.example.test/list?token=abc&hwid=old',
-        'KN-12345',
+        'KN-1234567',
     )
-    assert url == 'https://sub.example.test/list?token=abc&hwid=KN-12345'
+    assert url == 'https://sub.example.test/list?token=abc&hwid=KN-1234567'
     assert headers == {
-        'X-HWID': 'KN-12345',
-        'X-Router-HWID': 'KN-12345',
-        'X-Device-ID': 'KN-12345',
+        'X-HWID': 'KN-1234567',
+        'X-Router-HWID': 'KN-1234567',
+        'X-Device-ID': 'KN-1234567',
     }
+    short_hwid = subscription_runtime.normalize_subscription_hwid('1234567')
+    assert len(short_hwid) == 64
+    assert subscription_runtime.REMNAWAVE_HWID_PATTERN.fullmatch(short_hwid)
+    assert short_hwid == subscription_runtime.normalize_subscription_hwid('1234567')
     text = 'model: Keenetic\nserial number: ABCD123456\n'
     assert subscription_runtime.extract_router_hwid(text) == 'ABCD123456'
     text = 'model: Giga (KN-1012)\nhw_id: ABCD-1234\n'
@@ -2262,6 +2289,123 @@ def test_subscription_fetch_retries_transient_response_and_closes_resources():
     assert all(call[2] is False for call in calls)
     assert sleeps == [0.5]
     assert all(response.closed for response in responses)
+
+
+def test_subscription_fetch_uses_bounded_direct_first_proxy_fallback():
+    class RequestException(Exception):
+        def __init__(self, response=None):
+            super().__init__('request failed')
+            self.response = response
+
+    class Timeout(RequestException):
+        pass
+
+    class ConnectionError(RequestException):
+        pass
+
+    class Response:
+        headers = {'Content-Length': '12'}
+        encoding = 'utf-8'
+
+        def __init__(self, status_code, body=b''):
+            self.status_code = status_code
+            self.body = body
+            self.closed = False
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RequestException(self)
+
+        def iter_content(self, chunk_size=16384, decode_unicode=False):
+            yield self.body
+
+        def close(self):
+            self.closed = True
+
+    responses = [Response(502), Response(200, b'fixture-body')]
+    calls = []
+
+    class Session:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            calls.append(kwargs)
+            return responses[len(calls) - 1]
+
+        def close(self):
+            pass
+
+    requests_module = py_types.SimpleNamespace(
+        Session=Session,
+        RequestException=RequestException,
+        Timeout=Timeout,
+        ConnectionError=ConnectionError,
+    )
+    raw = subscription_runtime.fetch_subscription_text(
+        requests_module,
+        'https://subscription.example.test/list',
+        {'User-Agent': 'v2rayN/6.45'},
+        max_bytes=1024,
+        fallback_proxy_urls=(
+            'socks5h://127.0.0.1:10811',
+            'socks5h://127.0.0.1:10811',
+            'socks5h://127.0.0.1:10813',
+        ),
+        sleep_provider=lambda _seconds: None,
+    )
+    assert raw == 'fixture-body'
+    assert len(calls) == 2
+    assert calls[0]['proxies'] is None
+    assert calls[1]['proxies'] == {
+        'http': 'socks5h://127.0.0.1:10811',
+        'https': 'socks5h://127.0.0.1:10811',
+    }
+    assert responses[0].closed and responses[1].closed
+
+
+def test_subscription_pool_fetch_uses_isolated_candidates_without_changing_pools():
+    valid_key = 'vless://uuid@example.com:443?security=tls#sample'
+    pools = {'vless': ['first-key', 'second-key'], 'vless2': ['first-key']}
+    calls = []
+    stops = []
+
+    def build_config(batch, test_port, outbound_builder):
+        calls.append(('build', list(batch), test_port, outbound_builder))
+        return {'batch': list(batch)}
+
+    def start_xray(config):
+        calls.append(('start', config))
+        return object(), '/tmp/test-subscription-pool.json'
+
+    def stop_xray(process, config_path):
+        stops.append((process is not None, config_path))
+
+    def fetch_text(_requests, _url, _headers, **kwargs):
+        calls.append(('fetch', kwargs))
+        proxy_url = kwargs['fallback_proxy_urls'][0]
+        return valid_key if proxy_url.endswith(':12141') else 'not-a-key'
+
+    raw = subscription_pool_fetch.fetch_subscription_text_from_pools(
+        py_types.SimpleNamespace(),
+        'https://subscription.example.test/list',
+        {'User-Agent': 'v2rayN/6.45'},
+        pools=pools,
+        max_bytes=1024,
+        batch_size=2,
+        max_candidates=2,
+        ready_delay_seconds=0,
+        build_config=build_config,
+        start_xray=start_xray,
+        stop_xray=stop_xray,
+        outbound_builder=lambda *_args: {},
+        fetch_text=fetch_text,
+    )
+    assert raw == valid_key
+    assert pools == {'vless': ['first-key', 'second-key'], 'vless2': ['first-key']}
+    fetch_calls = [item for item in calls if item[0] == 'fetch']
+    assert len(fetch_calls) == 2
+    assert all(item[1]['direct_first'] is False for item in fetch_calls)
+    assert stops == [(True, '/tmp/test-subscription-pool.json')]
 
 
 def test_managed_state_snapshot_restores_present_and_absent_paths(tmp_path):
