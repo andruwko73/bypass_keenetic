@@ -2306,6 +2306,45 @@ def test_managed_state_snapshot_verifies_every_file_before_restore(tmp_path):
     assert target.read_text(encoding='utf-8') == 'current'
 
 
+def _create_test_symlink(link, target):
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip('symlink creation is unavailable in this environment')
+
+
+def test_managed_state_snapshot_skips_unchanged_symlink_and_restores_its_content(tmp_path, monkeypatch):
+    target = tmp_path / 'runtime' / 'resolv.conf'
+    link = tmp_path / 'readonly-etc' / 'resolv.conf'
+    target.parent.mkdir(parents=True)
+    link.parent.mkdir()
+    target.write_text('nameserver before\n', encoding='utf-8')
+    _create_test_symlink(link, target)
+    snapshot = tmp_path / 'snapshot'
+    managed_state_snapshot.backup_managed_state(snapshot, paths=(link,))
+
+    original_restore_path = managed_state_snapshot._restore_path
+    restored_destinations = []
+
+    def reject_symlink_replacement(source, destination):
+        if os.fspath(destination) == os.fspath(link):
+            raise OSError('simulated read-only symlink parent')
+        restored_destinations.append(os.fspath(destination))
+        return original_restore_path(source, destination)
+
+    monkeypatch.setattr(managed_state_snapshot, '_restore_path', reject_symlink_replacement)
+    unchanged = managed_state_snapshot.restore_managed_state(snapshot, paths=(link,))
+    assert unchanged == {'entries': 1, 'restored': 1, 'removed': 0}
+    assert restored_destinations == []
+
+    target.write_text('nameserver after\n', encoding='utf-8')
+    restored = managed_state_snapshot.restore_managed_state(snapshot, paths=(link,))
+    assert restored == {'entries': 1, 'restored': 1, 'removed': 0}
+    assert restored_destinations == [os.fspath(target)]
+    assert link.is_symlink()
+    assert target.read_text(encoding='utf-8') == 'nameserver before\n'
+
+
 def test_web_rollback_prefers_update_generated_full_script(tmp_path, monkeypatch):
     backup_dir = tmp_path / 'backup-2026.08.15.00-00-00'
     backup_dir.mkdir()

@@ -9,6 +9,7 @@ import stat
 SNAPSHOT_FORMAT = 1
 MANIFEST_NAME = 'manifest.json'
 TREE_DIR_NAME = 'tree'
+LINK_CONTENT_DIR_NAME = 'link-content'
 
 # Persistent state owned or modified by bypass_keenetic. Transient command,
 # progress, worker and log files are deliberately excluded from rollback.
@@ -78,12 +79,20 @@ def _normalized_paths(paths):
     return tuple(result)
 
 
-def _stored_path(snapshot_dir, source_path):
+def _snapshot_relative_path(source_path):
     drive, tail = os.path.splitdrive(source_path)
     relative = tail.lstrip('/\\')
     if drive:
         relative = os.path.join(drive.rstrip(':').casefold(), relative)
-    return os.path.join(snapshot_dir, TREE_DIR_NAME, relative)
+    return relative
+
+
+def _stored_path(snapshot_dir, source_path):
+    return os.path.join(snapshot_dir, TREE_DIR_NAME, _snapshot_relative_path(source_path))
+
+
+def _stored_link_content_path(snapshot_dir, source_path):
+    return os.path.join(snapshot_dir, LINK_CONTENT_DIR_NAME, _snapshot_relative_path(source_path))
 
 
 def _copy_path(source, target):
@@ -140,6 +149,14 @@ def backup_managed_state(snapshot_dir, paths=None):
             stored = _stored_path(snapshot_dir, source_path)
             _copy_path(source_path, stored)
             entry['sha256'] = _path_digest(stored)
+            if os.path.islink(source_path) and (not os.path.exists(source_path) or os.path.isfile(source_path)):
+                link_content = {'present': os.path.isfile(source_path), 'sha256': ''}
+                if link_content['present']:
+                    stored_content = _stored_link_content_path(snapshot_dir, source_path)
+                    os.makedirs(os.path.dirname(stored_content), exist_ok=True)
+                    shutil.copy2(os.path.realpath(source_path), stored_content)
+                    link_content['sha256'] = _path_digest(stored_content)
+                entry['link_content'] = link_content
         entries.append(entry)
     manifest = {'format': SNAPSHOT_FORMAT, 'entries': entries}
     manifest_path = os.path.join(snapshot_dir, MANIFEST_NAME)
@@ -174,6 +191,24 @@ def _load_verified_manifest(snapshot_dir, paths=None):
         if present:
             if not os.path.lexists(stored) or _path_digest(stored) != entry.get('sha256'):
                 raise ManagedStateSnapshotError('managed state snapshot integrity check failed')
+            link_content = entry.get('link_content')
+            if link_content is not None:
+                if (
+                    not isinstance(link_content, dict)
+                    or link_content.get('present') not in (True, False)
+                    or not os.path.islink(stored)
+                ):
+                    raise ManagedStateSnapshotError('managed state link content metadata is invalid')
+                stored_content = _stored_link_content_path(snapshot_dir, path)
+                if link_content.get('present') is True:
+                    if (
+                        not os.path.isfile(stored_content)
+                        or os.path.islink(stored_content)
+                        or _path_digest(stored_content) != link_content.get('sha256')
+                    ):
+                        raise ManagedStateSnapshotError('managed state link content integrity check failed')
+                elif os.path.lexists(stored_content):
+                    raise ManagedStateSnapshotError('absent managed link content unexpectedly has stored data')
         elif os.path.lexists(stored):
             raise ManagedStateSnapshotError('absent managed state unexpectedly has stored data')
     if seen != allowed_paths:
@@ -195,29 +230,71 @@ def _remove_path(path):
         shutil.rmtree(path)
 
 
+def _current_entry_matches(entry):
+    path = entry['path']
+    if entry.get('present') is not True:
+        return not os.path.lexists(path)
+    if not os.path.lexists(path) or _path_digest(path) != entry.get('sha256'):
+        return False
+    link_content = entry.get('link_content')
+    if link_content is None:
+        return True
+    target_exists = os.path.exists(path)
+    if link_content.get('present') is not True:
+        return not target_exists
+    return os.path.isfile(path) and _path_digest(os.path.realpath(path)) == link_content.get('sha256')
+
+
+def _restore_path(source, target):
+    parent = os.path.dirname(target)
+    os.makedirs(parent, exist_ok=True)
+    temporary = os.path.join(parent, f'.{os.path.basename(target)}.rollback-{os.getpid()}')
+    _remove_path(temporary)
+    try:
+        _copy_path(source, temporary)
+        _remove_path(target)
+        os.replace(temporary, target)
+    finally:
+        _remove_path(temporary)
+
+
+def _restore_link_content(snapshot_dir, entry):
+    link_content = entry.get('link_content')
+    if link_content is None:
+        return
+    target = entry['path']
+    stored = _stored_path(snapshot_dir, target)
+    if not os.path.islink(target) or os.readlink(target) != os.readlink(stored):
+        raise ManagedStateSnapshotError('managed state symlink changed before content restore')
+    resolved_target = os.path.realpath(target)
+    if link_content.get('present') is True:
+        _restore_path(_stored_link_content_path(snapshot_dir, target), resolved_target)
+    else:
+        if os.path.isdir(resolved_target) and not os.path.islink(resolved_target):
+            raise ManagedStateSnapshotError('managed state link target unexpectedly became a directory')
+        _remove_path(resolved_target)
+
+
 def restore_managed_state(snapshot_dir, paths=None):
     snapshot_dir, entries = _load_verified_manifest(snapshot_dir, paths=paths)
     restored = 0
     removed = 0
     for entry in entries:
         target = entry['path']
+        if _current_entry_matches(entry):
+            if entry.get('present') is True:
+                restored += 1
+            continue
         if entry.get('present') is not True:
             if os.path.lexists(target):
                 _remove_path(target)
                 removed += 1
             continue
         stored = _stored_path(snapshot_dir, target)
-        parent = os.path.dirname(target)
-        os.makedirs(parent, exist_ok=True)
-        temporary = os.path.join(parent, f'.{os.path.basename(target)}.rollback-{os.getpid()}')
-        _remove_path(temporary)
-        try:
-            _copy_path(stored, temporary)
-            _remove_path(target)
-            os.replace(temporary, target)
-            restored += 1
-        finally:
-            _remove_path(temporary)
+        if not os.path.lexists(target) or _path_digest(target) != entry.get('sha256'):
+            _restore_path(stored, target)
+        _restore_link_content(snapshot_dir, entry)
+        restored += 1
     return {'entries': len(entries), 'restored': restored, 'removed': removed}
 
 
