@@ -769,13 +769,13 @@ SUBSCRIPTION_HWID_HEADER_NAMES = tuple(
     )
     if str(item or '').strip()
 )
-SUBSCRIPTION_USER_AGENT = str(
-    getattr(
-        config,
-        'subscription_user_agent',
-        getattr(_subscription_defaults, 'DEFAULT_SUBSCRIPTION_USER_AGENT', 'v2rayN/6.45'),
-    ) or ''
-).strip()
+SUBSCRIPTION_USER_AGENT = str(getattr(
+    config,
+    'subscription_user_agent',
+    getattr(_subscription_defaults, 'DEFAULT_SUBSCRIPTION_USER_AGENT', 'v2rayN/9.99'),
+) or '').strip()
+if _subscription_defaults is not None:
+    SUBSCRIPTION_USER_AGENT = _subscription_defaults.effective_subscription_user_agent(SUBSCRIPTION_USER_AGENT)
 SUBSCRIPTION_ACCEPT_HEADER = str(getattr(config, 'subscription_accept_header', 'text/plain, */*') or '').strip()
 SUBSCRIPTION_AUTO_REFRESH_ENABLED = bool(getattr(config, 'subscription_auto_refresh_enabled', True))
 SUBSCRIPTION_AUTO_REFRESH_INTERVAL_SECONDS = max(
@@ -1334,27 +1334,6 @@ def _private_subscription_address(hostname):
     return False
 
 
-def _read_limited_response(response, max_bytes):
-    content_length = response.headers.get('Content-Length')
-    if content_length:
-        try:
-            if int(content_length) > max_bytes:
-                raise ValueError('subscription response is too large')
-        except ValueError:
-            raise ValueError('subscription response is too large')
-    chunks = []
-    total = 0
-    for chunk in response.iter_content(chunk_size=16384, decode_unicode=False):
-        if not chunk:
-            continue
-        total += len(chunk)
-        if total > max_bytes:
-            raise ValueError('subscription response is too large')
-        chunks.append(chunk)
-    encoding = response.encoding or 'utf-8'
-    return b''.join(chunks).decode(encoding, errors='replace').strip()
-
-
 def _read_router_hwid_command(command):
     try:
         result = subprocess.run(
@@ -1429,17 +1408,12 @@ def _fetch_keys_from_subscription(url, use_router_hwid=False):
             request_headers['User-Agent'] = SUBSCRIPTION_USER_AGENT
         if SUBSCRIPTION_ACCEPT_HEADER and 'accept' not in normalized_header_names:
             request_headers['Accept'] = SUBSCRIPTION_ACCEPT_HEADER
-        session = requests.Session()
-        try:
-            session.trust_env = False
-            resp = session.get(request_url, headers=request_headers, stream=True, timeout=(5, 15))
-            try:
-                resp.raise_for_status()
-                raw = _read_limited_response(resp, SUBSCRIPTION_MAX_BYTES)
-            finally:
-                resp.close()
-        finally:
-            session.close()
+        raw = _subscription_runtime().fetch_subscription_text(
+            requests,
+            request_url,
+            request_headers,
+            max_bytes=SUBSCRIPTION_MAX_BYTES,
+        )
         return _key_pool_store().classify_subscription_keys(raw), None
     except requests.RequestException as exc:
         return None, f'Ошибка загрузки subscription: {exc}'
@@ -12757,10 +12731,15 @@ def _import_pool_subscription(proto, subscription_url, *, use_router_hwid=False)
     )
     if error:
         raise ValueError(error)
-    selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched)
-    if use_router_hwid and not selected_keys:
-        raise ValueError('subscription не вернула ключи для выбранного протокола')
     previous_record = _subscription_record(proto) or {}
+    if use_router_hwid:
+        selected_keys = _subscription_runtime().validate_subscription_snapshot(
+            proto,
+            fetched,
+            previous_record.get('managed_keys', []),
+        )
+    else:
+        selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched)
     summary = _import_subscription_keys_to_pools(
         proto,
         fetched,

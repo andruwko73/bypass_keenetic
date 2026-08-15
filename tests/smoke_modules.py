@@ -1943,6 +1943,36 @@ def test_key_pool_subscription_helpers():
     assert classified['vless'] == [vless_key]
     assert classified['trojan'] == [TROJAN_KEY]
 
+    placeholder = 'vless://uuid@example.com:443?security=tls#%20APP%20not%20supported%20'
+    try:
+        key_pool_store.classify_subscription_keys('\n'.join([vless_key, placeholder]))
+    except ValueError as exc:
+        assert 'unsupported application placeholder' in str(exc)
+    else:
+        raise AssertionError('mixed placeholder subscription must be rejected')
+    for label in ('Enable%20HWID', 'Incompatible%20app'):
+        try:
+            key_pool_store.classify_subscription_keys(f'vless://uuid@example.com:443#{label}')
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f'provider placeholder {label} must be rejected')
+
+    vmess_placeholder = 'vmess://' + base64.b64encode(json.dumps({
+        'v': '2',
+        'ps': 'App not supported',
+        'add': 'example.com',
+        'port': '443',
+        'id': 'uuid',
+    }).encode('utf-8')).decode('ascii')
+    encoded_placeholder = base64.b64encode(vmess_placeholder.encode('utf-8')).decode('ascii')
+    try:
+        key_pool_store.classify_subscription_keys(encoded_placeholder)
+    except ValueError as exc:
+        assert 'unsupported application placeholder' in str(exc)
+    else:
+        raise AssertionError('vmess placeholder subscription must be rejected')
+
     pools, added = key_pool_store.add_subscription_keys_to_pool({'vless2': []}, 'vless2', classified)
     assert added == [vless_key]
     assert pools['vless2'] == added
@@ -2074,7 +2104,9 @@ def test_key_pool_subscription_helpers():
     )
     assert youtube_stable_candidates[:2] == [('vless2', 'stable'), ('vless2', 'unstable')]
     bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
-    assert 'finally:\n            session.close()' in bot_source
+    subscription_source = (APP_ROOT / 'subscription_runtime.py').read_text(encoding='utf-8')
+    assert 'fetch_subscription_text(' in bot_source
+    assert 'finally:\n        session.close()' in subscription_source
 
 
 def test_key_pool_import_routes_selected_protocol_and_vless_context():
@@ -2127,7 +2159,9 @@ def test_pool_import_hint_is_protocol_specific():
 
 
 def test_subscription_hwid_request_helpers():
-    assert subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT == 'v2rayN/6.45'
+    assert subscription_runtime.DEFAULT_SUBSCRIPTION_USER_AGENT == 'v2rayN/9.99'
+    assert subscription_runtime.effective_subscription_user_agent('v2rayN/6.45') == 'v2rayN/9.99'
+    assert subscription_runtime.effective_subscription_user_agent('custom-client/1.0') == 'custom-client/1.0'
     url, headers = subscription_runtime.apply_hwid_to_subscription_request(
         'https://sub.example.test/list?token=abc&hwid=old',
         'KN-12345',
@@ -2142,6 +2176,70 @@ def test_subscription_hwid_request_helpers():
     assert subscription_runtime.extract_router_hwid(text) == 'ABCD123456'
     text = 'model: Giga (KN-1012)\nhw_id: ABCD-1234\n'
     assert subscription_runtime.extract_router_hwid(text) == 'ABCD-1234'
+
+
+def test_subscription_fetch_retries_transient_response_and_closes_resources():
+    class RequestException(Exception):
+        def __init__(self, response=None):
+            super().__init__('request failed')
+            self.response = response
+
+    class Timeout(RequestException):
+        pass
+
+    class ConnectionError(RequestException):
+        pass
+
+    class Response:
+        def __init__(self, status_code, body=b''):
+            self.status_code = status_code
+            self.body = body
+            self.headers = {'Content-Length': str(len(body))}
+            self.encoding = 'utf-8'
+            self.closed = False
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RequestException(self)
+
+        def iter_content(self, chunk_size=16384, decode_unicode=False):
+            yield self.body
+
+        def close(self):
+            self.closed = True
+
+    responses = [Response(502), Response(200, b'fixture-body')]
+    calls = []
+    sleeps = []
+
+    class Session:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            calls.append((args, kwargs, self.trust_env))
+            return responses[len(calls) - 1]
+
+        def close(self):
+            self.closed = True
+
+    requests_module = py_types.SimpleNamespace(
+        Session=Session,
+        RequestException=RequestException,
+        Timeout=Timeout,
+        ConnectionError=ConnectionError,
+    )
+    raw = subscription_runtime.fetch_subscription_text(
+        requests_module,
+        'https://subscription.example.test/list',
+        {'User-Agent': 'v2rayN/9.99'},
+        max_bytes=1024,
+        sleep_provider=sleeps.append,
+    )
+    assert raw == 'fixture-body'
+    assert len(calls) == 2
+    assert all(call[2] is False for call in calls)
+    assert sleeps == [0.5]
+    assert all(response.closed for response in responses)
 
 
 def test_subscription_nightly_pool_probe_schedule_helpers():
@@ -2530,10 +2628,15 @@ def test_automatic_subscription_sync_rejects_catastrophic_shrink():
         previous_keys,
         previous_keys[:30],
     )
-    assert not subscription_runtime.subscription_sync_shrink_is_suspicious(
+    assert subscription_runtime.subscription_sync_shrink_is_suspicious(
         previous_keys[:10],
         previous_keys[:2],
     )
+    assert subscription_runtime.subscription_sync_shrink_is_suspicious(
+        previous_keys[:2],
+        previous_keys[:1],
+    )
+    assert not subscription_runtime.subscription_sync_shrink_is_suspicious([], previous_keys[:1])
     record = {'last_success_at': 100.0, 'last_attempt_at': 700.0}
     assert not subscription_runtime.subscription_refresh_is_due(
         record,
@@ -2547,7 +2650,7 @@ def test_automatic_subscription_sync_rejects_catastrophic_shrink():
         interval_seconds=3600,
         retry_seconds=600,
     )
-def test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink():
+def test_automatic_subscription_refresh_preserves_small_pool_on_repeated_shrink():
     with tempfile.TemporaryDirectory() as directory:
         temp_path = Path(directory)
         (temp_path / 'bot_config.py').write_text(
@@ -2559,8 +2662,8 @@ def test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink():
             f"sys.path.insert(0, {str(temp_path)!r})\n"
             f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
             "import bot\n"
-            "old_keys = [f'vless://old-{i}@example.com:443' for i in range(89)]\n"
-            "new_keys = old_keys[:2]\n"
+            "old_keys = [f'vless://old-{i}@example.com:443' for i in range(2)]\n"
+            "new_keys = old_keys[:1]\n"
             "updates = []\n"
             "logs = []\n"
             "bot._fetch_keys_from_subscription = lambda *_args, **_kwargs: ({'vless': new_keys}, '')\n"
@@ -10243,7 +10346,8 @@ def test_telegram_bot_menu_button_smoke():
             '',
         )
         bot_module._subscription_runtime = lambda: py_types.SimpleNamespace(
-            subscription_keys_for_protocol=lambda proto, fetched: fetched.get('vless', [])
+            subscription_keys_for_protocol=lambda proto, fetched: fetched.get('vless', []),
+            validate_subscription_snapshot=subscription_runtime.validate_subscription_snapshot,
         )
         bot_module._subscription_record = lambda proto: {'managed_keys': [old_subscription_uri]}
         bot_module._import_subscription_keys_to_pools = lambda proto, fetched, **kwargs: (
@@ -10269,6 +10373,21 @@ def test_telegram_bot_menu_button_smoke():
         }
         assert subscription_updates[0][0] == 'vless2'
         assert subscription_updates[0][1]['hwid_enabled'] is True
+
+        bot_module._subscription_record = lambda proto: {
+            'managed_keys': [old_subscription_uri, manual_uri],
+        }
+        try:
+            bot_module._import_pool_subscription(
+                'vless2',
+                'https://subscription.example.test/private',
+                use_router_hwid=True,
+            )
+        except ValueError as exc:
+            assert 'suspiciously small' in str(exc)
+        else:
+            raise AssertionError('manual subscription shrink must be blocked before pool mutation')
+        assert len(subscription_calls) == 1
 
         bot_module.proxy_mode = 'vless'
         bot_module.bot_ready = True
@@ -17596,7 +17715,7 @@ def main():
     test_subscription_pool_sync_preserves_manual_keys()
     test_subscription_pool_sync_preserves_active_managed_key()
     test_automatic_subscription_sync_rejects_catastrophic_shrink()
-    test_automatic_subscription_refresh_preserves_pool_on_catastrophic_shrink()
+    test_automatic_subscription_refresh_preserves_small_pool_on_repeated_shrink()
     test_telegram_pool_ui()
     test_web_background_helpers()
     test_web_get_actions_helpers()

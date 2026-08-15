@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 
 PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
@@ -18,6 +18,36 @@ SCHEME_PROTOCOLS = {
     'trojan': 'trojan',
 }
 SUPPORTED_KEY_SCHEMES = frozenset(('vless',) + tuple(SCHEME_PROTOCOLS))
+SUBSCRIPTION_ERROR_LABELS = frozenset((
+    'app not supported',
+    'application not supported',
+    'enable hwid',
+    'hwid required',
+    'incompatible app',
+))
+
+
+def _normalized_subscription_label(value):
+    return ' '.join(unquote(str(value or '')).split()).casefold()
+
+
+def _subscription_key_label(key_value):
+    key_value = str(key_value or '').strip()
+    parsed = urlsplit(key_value)
+    if parsed.scheme.casefold() != 'vmess':
+        return parsed.fragment
+    try:
+        payload = key_value.split('://', 1)[1].split('#', 1)[0]
+        decoded = base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)).decode('utf-8')
+        item = json.loads(decoded)
+        return item.get('ps', '') if isinstance(item, dict) else ''
+    except Exception:
+        return parsed.fragment
+
+
+def subscription_key_is_error_placeholder(key_value):
+    """Recognize provider error sentinels disguised as supported proxy keys."""
+    return _normalized_subscription_label(_subscription_key_label(key_value)) in SUBSCRIPTION_ERROR_LABELS
 
 
 def dedupe_key_list(keys):
@@ -218,14 +248,13 @@ def classify_subscription_keys(raw_text):
         key_value = key_value.strip()
         if not key_value:
             continue
-        if key_value.startswith('ss://'):
-            result['shadowsocks'].append(key_value)
-        elif key_value.startswith('vmess://'):
-            result['vmess'].append(key_value)
-        elif key_value.startswith('vless://'):
-            result['vless'].append(key_value)
-        elif key_value.startswith('trojan://'):
-            result['trojan'].append(key_value)
+        scheme = urlsplit(key_value).scheme.casefold()
+        proto = 'vless' if scheme == 'vless' else SCHEME_PROTOCOLS.get(scheme)
+        if not proto:
+            continue
+        if subscription_key_is_error_placeholder(key_value):
+            raise ValueError('subscription returned an unsupported application placeholder')
+        result[proto].append(key_value)
     return result
 
 

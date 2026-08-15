@@ -28,25 +28,25 @@ def refresh_subscription_once(
         fetched, error = fetch_keys(url, use_router_hwid=True)
         if error:
             raise ValueError(error)
-        selected_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched)
-        if not selected_keys:
-            raise ValueError('subscription did not return keys for the selected protocol')
         previous_managed_keys = record.get('managed_keys', [])
-        suspicious_shrink = subscription_runtime.subscription_sync_shrink_is_suspicious(
-            previous_managed_keys,
-            selected_keys,
-        )
-        if suspicious_shrink and source == 'auto':
+        candidate_keys = subscription_runtime.subscription_keys_for_protocol(proto, fetched)
+        try:
+            subscription_runtime.validate_subscription_snapshot(
+                proto,
+                fetched,
+                previous_managed_keys,
+            )
+        except subscription_runtime.SuspiciousSubscriptionShrink as exc:
             update_record(
                 proto,
                 url=url,
                 hwid_enabled=True,
                 last_attempt_at=attempt_at,
-                last_error='subscription returned a suspiciously small key set; automatic pool replacement blocked',
+                last_error=str(exc),
             )
             write_log(
-                f'Subscription auto refresh for {proto} blocked destructive shrink: '
-                f'fetched={len(selected_keys)}, previous={len(previous_managed_keys)}'
+                f'Subscription {source} refresh for {proto} blocked destructive shrink: '
+                f'fetched={len(candidate_keys)}, previous={len(previous_managed_keys)}'
             )
             return False
 

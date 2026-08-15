@@ -6,13 +6,84 @@ import key_pool_store
 
 
 DEFAULT_HWID_HEADER_NAMES = ('X-HWID', 'X-Router-HWID', 'X-Device-ID')
-DEFAULT_SUBSCRIPTION_USER_AGENT = 'v2rayN/6.45'
+DEFAULT_SUBSCRIPTION_USER_AGENT = 'v2rayN/9.99'
+LEGACY_DEFAULT_SUBSCRIPTION_USER_AGENTS = frozenset(('v2rayN/6.45',))
 PROTOCOL_SUBSCRIPTION_SOURCE = {
     'vless2': 'vless',
 }
 AUTO_SYNC_MIN_PREVIOUS_KEYS = 20
 AUTO_SYNC_MIN_RETAINED_KEYS = 5
 AUTO_SYNC_MIN_RETAINED_RATIO = 0.25
+
+
+class SubscriptionSnapshotError(ValueError):
+    """Raised before a subscription snapshot is allowed to replace managed keys."""
+
+
+class SuspiciousSubscriptionShrink(SubscriptionSnapshotError):
+    """Raised when a fetched snapshot would destructively shrink managed keys."""
+
+
+def effective_subscription_user_agent(value):
+    """Upgrade only shipped legacy defaults while preserving custom user agents."""
+    value = str(value or '').strip()
+    return DEFAULT_SUBSCRIPTION_USER_AGENT if value in LEGACY_DEFAULT_SUBSCRIPTION_USER_AGENTS else value
+
+
+def fetch_subscription_text(
+    requests_module,
+    request_url,
+    request_headers,
+    *,
+    max_bytes,
+    attempts=2,
+    sleep_provider=time.sleep,
+):
+    """Fetch a bounded subscription body with one retry for transient failures."""
+    attempts = max(1, int(attempts or 1))
+    session = requests_module.Session()
+    try:
+        session.trust_env = False
+        for attempt in range(attempts):
+            response = None
+            try:
+                response = session.get(
+                    request_url,
+                    headers=dict(request_headers or {}),
+                    stream=True,
+                    timeout=(5, 15),
+                )
+                response.raise_for_status()
+                content_length = response.headers.get('Content-Length')
+                if content_length:
+                    try:
+                        if int(content_length) > max_bytes:
+                            raise ValueError('subscription response is too large')
+                    except (TypeError, ValueError):
+                        raise ValueError('subscription response is too large')
+                chunks = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=16384, decode_unicode=False):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError('subscription response is too large')
+                    chunks.append(chunk)
+                encoding = response.encoding or 'utf-8'
+                return b''.join(chunks).decode(encoding, errors='replace').strip()
+            except requests_module.RequestException as exc:
+                status_code = getattr(getattr(exc, 'response', None), 'status_code', 0)
+                retryable = isinstance(exc, (requests_module.Timeout, requests_module.ConnectionError))
+                retryable = retryable or status_code in (429, 500, 502, 503, 504)
+                if attempt + 1 >= attempts or not retryable:
+                    raise
+                sleep_provider(0.5 * (attempt + 1))
+            finally:
+                if response is not None:
+                    response.close()
+    finally:
+        session.close()
 
 
 def subscription_sync_shrink_is_suspicious(
@@ -26,13 +97,27 @@ def subscription_sync_shrink_is_suspicious(
     """Reject an implausibly small automatic subscription snapshot."""
     previous_count = len(key_pool_store.dedupe_key_list(previous_managed_keys or []))
     fetched_count = len(key_pool_store.dedupe_key_list(fetched_keys or []))
-    if previous_count < max(1, int(min_previous_keys or 1)):
+    if previous_count <= 0:
         return False
+    if previous_count < max(1, int(min_previous_keys or 1)):
+        return fetched_count < previous_count
     retained_floor = max(
         max(1, int(min_retained_keys or 1)),
         int(previous_count * max(0.0, float(min_retained_ratio or 0.0))),
     )
     return fetched_count < retained_floor
+
+
+def validate_subscription_snapshot(proto, fetched_keys, previous_managed_keys=None):
+    """Return selected keys only when a subscription snapshot is safe to apply."""
+    selected_keys = subscription_keys_for_protocol(proto, fetched_keys)
+    if not selected_keys:
+        raise SubscriptionSnapshotError('subscription did not return keys for the selected protocol')
+    if subscription_sync_shrink_is_suspicious(previous_managed_keys, selected_keys):
+        raise SuspiciousSubscriptionShrink(
+            'subscription returned a suspiciously small key set; pool replacement blocked'
+        )
+    return selected_keys
 
 
 def subscription_refresh_is_due(record, now, *, interval_seconds, retry_seconds):
