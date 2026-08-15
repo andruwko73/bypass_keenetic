@@ -30,6 +30,23 @@ def effective_subscription_user_agent(value):
     return DEFAULT_SUBSCRIPTION_USER_AGENT if value in LEGACY_DEFAULT_SUBSCRIPTION_USER_AGENTS else value
 
 
+def subscription_request_error_summary(exc):
+    """Describe a failed request without persisting its URL, query or HWID."""
+    status_code = getattr(getattr(exc, 'response', None), 'status_code', 0)
+    try:
+        status_code = int(status_code or 0)
+    except (TypeError, ValueError):
+        status_code = 0
+    if status_code:
+        return f'HTTP {status_code}'
+    error_name = type(exc).__name__.casefold()
+    if 'timeout' in error_name:
+        return 'request timed out'
+    if 'connection' in error_name:
+        return 'connection failed'
+    return 'request failed'
+
+
 def fetch_subscription_text(
     requests_module,
     request_url,

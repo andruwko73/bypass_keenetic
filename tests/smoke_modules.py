@@ -15,6 +15,8 @@ import threading
 import time
 import types as py_types
 
+import pytest
+
 # ruff: noqa: E402
 
 
@@ -30,6 +32,7 @@ def source_path(name):
 
 import key_pool_web
 import key_pool_store
+import managed_state_snapshot
 import subscription_runtime
 import app_version
 import app_runtime_mode
@@ -2178,6 +2181,25 @@ def test_subscription_hwid_request_helpers():
     assert subscription_runtime.extract_router_hwid(text) == 'ABCD-1234'
 
 
+def test_subscription_request_error_summary_never_includes_url_or_hwid():
+    response = py_types.SimpleNamespace(status_code=502)
+
+    class HTTPError(Exception):
+        def __init__(self):
+            super().__init__('502 for https://subscription.example.test/list?hwid=private-value')
+            self.response = response
+
+    class ReadTimeout(Exception):
+        pass
+
+    class ConnectionError(Exception):
+        pass
+
+    assert subscription_runtime.subscription_request_error_summary(HTTPError()) == 'HTTP 502'
+    assert subscription_runtime.subscription_request_error_summary(ReadTimeout('private-value')) == 'request timed out'
+    assert subscription_runtime.subscription_request_error_summary(ConnectionError('private-value')) == 'connection failed'
+
+
 def test_subscription_fetch_retries_transient_response_and_closes_resources():
     class RequestException(Exception):
         def __init__(self, response=None):
@@ -2240,6 +2262,68 @@ def test_subscription_fetch_retries_transient_response_and_closes_resources():
     assert all(call[2] is False for call in calls)
     assert sleeps == [0.5]
     assert all(response.closed for response in responses)
+
+
+def test_managed_state_snapshot_restores_present_and_absent_paths(tmp_path):
+    router_root = tmp_path / 'router'
+    settings = router_root / 'etc' / 'settings.json'
+    route_dir = router_root / 'etc' / 'routes'
+    absent = router_root / 'etc' / 'created-by-new-release.conf'
+    settings.parent.mkdir(parents=True)
+    settings.write_text('{"mode":"before"}', encoding='utf-8')
+    route_dir.mkdir()
+    (route_dir / 'domains.txt').write_text('example.test\n', encoding='utf-8')
+    paths = (settings, route_dir, absent)
+    snapshot = tmp_path / 'snapshot'
+
+    backed_up = managed_state_snapshot.backup_managed_state(snapshot, paths=paths)
+    assert backed_up == {'entries': 3, 'present': 2}
+    assert managed_state_snapshot.verify_managed_state(snapshot, paths=paths) == backed_up
+
+    settings.write_text('{"mode":"after"}', encoding='utf-8')
+    shutil.rmtree(route_dir)
+    absent.write_text('new release residue', encoding='utf-8')
+    restored = managed_state_snapshot.restore_managed_state(snapshot, paths=paths)
+
+    assert restored == {'entries': 3, 'restored': 2, 'removed': 1}
+    assert settings.read_text(encoding='utf-8') == '{"mode":"before"}'
+    assert (route_dir / 'domains.txt').read_text(encoding='utf-8') == 'example.test\n'
+    assert not absent.exists()
+
+
+def test_managed_state_snapshot_verifies_every_file_before_restore(tmp_path):
+    target = tmp_path / 'router' / 'settings.json'
+    target.parent.mkdir(parents=True)
+    target.write_text('before', encoding='utf-8')
+    snapshot = tmp_path / 'snapshot'
+    managed_state_snapshot.backup_managed_state(snapshot, paths=(target,))
+    stored = managed_state_snapshot._stored_path(str(snapshot), str(target))
+    Path(stored).write_text('corrupt', encoding='utf-8')
+    target.write_text('current', encoding='utf-8')
+
+    with pytest.raises(managed_state_snapshot.ManagedStateSnapshotError):
+        managed_state_snapshot.restore_managed_state(snapshot, paths=(target,))
+    assert target.read_text(encoding='utf-8') == 'current'
+
+
+def test_web_rollback_prefers_update_generated_full_script(tmp_path, monkeypatch):
+    backup_dir = tmp_path / 'backup-2026.08.15.00-00-00'
+    backup_dir.mkdir()
+    rollback_script = backup_dir / 'rollback.sh'
+    rollback_script.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return py_types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(system_command_runtime.subprocess, 'run', fake_run)
+    result = system_command_runtime.rollback_last_update(str(tmp_path))
+
+    assert result.startswith('Откат выполнен')
+    assert 'настройки, ключи, списки маршрутов и DNS' in result
+    assert calls[0][0] == ['/bin/sh', str(rollback_script)]
+    assert calls[0][1]['stdout'] is subprocess.DEVNULL
 
 
 def test_subscription_nightly_pool_probe_schedule_helpers():
@@ -5888,11 +5972,21 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh' in script_source
     rollback_source = script_source.split('write_update_rollback_script() {', 1)[1].split('\nEOF', 1)[0]
     assert 'BOT_CONFIG_PATH="$BOT_CONFIG_PATH"' in rollback_source
+    assert r'managed_state_snapshot.py" restore "\$BACKUP_DIR/full-state"' in rollback_source
+    assert 'full_state_restored=1' in rollback_source
     assert 'restore_file dnsmasq.conf /opt/etc/dnsmasq.conf' in rollback_source
     assert '[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart' in rollback_source
     assert rollback_source.find('restore_file dnsmasq.conf') < rollback_source.find('/opt/etc/init.d/S56dnsmasq restart')
     assert 'repair_legacy_dnsmasq_backup "$backup_dir/dnsmasq.conf" || exit 1' in script_source
     assert 'backup_runtime_state_files' in script_source
+    assert 'managed_state_snapshot.py" backup "$backup_dir/full-state"' in script_source
+    assert 'chmod 700 "$backup_dir" "$backup_dir/rollback.sh"' in script_source
+    assert 'chmod 755 "$backup_dir"/*' not in script_source
+    full_backup_pos = script_source.find('managed_state_snapshot.py" backup "$backup_dir/full-state"')
+    assert full_backup_pos < script_source.find('\n    ensure_entware_dns', full_backup_pos)
+    assert full_backup_pos < script_source.find('mv /opt/etc/dnsmasq.conf')
+    assert '/etc/resolv.conf' in managed_state_snapshot.MANAGED_PATHS
+    assert '/etc/hosts' in managed_state_snapshot.MANAGED_PATHS
     assert 'backup_runtime_state_file /opt/etc/xray/vless2.key vless2.key' in script_source
     assert 'backup_runtime_state_file /opt/etc/shadowsocks.json shadowsocks.json' in script_source
     assert 'backup_runtime_state_file /opt/etc/trojan/config.json trojan_config.json' in script_source

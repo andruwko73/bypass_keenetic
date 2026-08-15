@@ -253,12 +253,44 @@ def _schedule_app_service_restart(delay_seconds=1.5):
     )
 
 
-def rollback_last_update(backup_root='/opt/root'):
-    import xray_compat_runtime
+def _run_authoritative_rollback_script(backup_dir, timeout_seconds=300):
+    """Use the update-generated rollback so web and automatic recovery stay identical."""
+    rollback_path = os.path.join(backup_dir, 'rollback.sh')
+    if not os.path.isfile(rollback_path) or os.path.islink(rollback_path):
+        return None
+    if os.path.realpath(os.path.dirname(rollback_path)) != os.path.realpath(backup_dir):
+        return 'Резервная копия содержит небезопасный путь сценария отката.'
+    try:
+        completed = subprocess.run(
+            ['/bin/sh', rollback_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            check=False,
+            timeout=max(30, int(timeout_seconds or 300)),
+        )
+    except subprocess.TimeoutExpired:
+        return 'Сценарий полного отката не завершился за отведённое время.'
+    except Exception:
+        return 'Не удалось запустить сценарий полного отката.'
+    if completed.returncode != 0:
+        return f'Сценарий полного отката завершился с кодом {completed.returncode}.'
+    return (
+        f'Откат выполнен из {backup_dir} полным сценарием. '
+        'Восстановлены программа, настройки, ключи, списки маршрутов и DNS; сервисы перезапущены.'
+    )
 
+
+def rollback_last_update(backup_root='/opt/root'):
     backup_dir = _latest_update_backup_dir(backup_root)
     if not backup_dir:
         return 'Резервная копия обновления не найдена в /opt/root/backup-* .'
+    scripted_result = _run_authoritative_rollback_script(backup_dir)
+    if scripted_result is not None:
+        return scripted_result
+
+    import xray_compat_runtime
+
     core_service, core_config, core_dir = _core_paths()
     restored = []
     if _restore_backup_file(os.path.join(backup_dir, 'bot.py'), BOT_SOURCE_PATH, 0o755):

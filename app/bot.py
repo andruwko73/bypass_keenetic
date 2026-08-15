@@ -1416,7 +1416,10 @@ def _fetch_keys_from_subscription(url, use_router_hwid=False):
         )
         return _key_pool_store().classify_subscription_keys(raw), None
     except requests.RequestException as exc:
-        return None, f'Ошибка загрузки subscription: {exc}'
+        return None, (
+            'Ошибка загрузки subscription: '
+            + _subscription_runtime().subscription_request_error_summary(exc)
+        )
     except Exception as exc:
         return None, f'Ошибка обработки subscription: {exc}'
         

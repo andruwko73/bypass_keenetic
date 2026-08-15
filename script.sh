@@ -214,7 +214,14 @@ stop_application_for_final_restart() {
 }
 
 recover_runtime_after_failed_update() {
-  [ "${update_runtime_quiesced:-0}" = "1" ] || return 0
+  if [ "${update_runtime_quiesced:-0}" != "1" ]; then
+    early_snapshot_tool="${backup_dir:-}/.rollback-tools/managed_state_snapshot.py"
+    if [ -f "${backup_dir:-}/full-state/manifest.json" ] && [ -f "$early_snapshot_tool" ]; then
+      PYTHONPATH="$(dirname "$early_snapshot_tool")" python3 \
+        "$early_snapshot_tool" restore "$backup_dir/full-state" >/dev/null 2>&1 || true
+    fi
+    return 0
+  fi
   echo "Обновление прервано в режиме обслуживания. Восстанавливаем рабочее состояние."
   if [ -n "${backup_dir:-}" ] && [ -x "$backup_dir/rollback.sh" ]; then
     /bin/sh "$backup_dir/rollback.sh" && return 0
@@ -1114,6 +1121,13 @@ install_unblock_ipset_cron_job() {
 [ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan stop >/dev/null 2>&1 || true
 [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" stop >/dev/null 2>&1 || true
 
+full_state_restored=0
+if [ -f "\$BACKUP_DIR/full-state/manifest.json" ] && [ -f "\$BACKUP_DIR/.rollback-tools/managed_state_snapshot.py" ]; then
+  PYTHONPATH="\$BACKUP_DIR/.rollback-tools" python3 \
+    "\$BACKUP_DIR/.rollback-tools/managed_state_snapshot.py" restore "\$BACKUP_DIR/full-state"
+  full_state_restored=1
+fi
+
 restore_file unblock_ipset.sh /opt/bin/unblock_ipset.sh
 restore_file unblock_dnsmasq.sh /opt/bin/unblock_dnsmasq.sh
 restore_file unblock_update.sh /opt/bin/unblock_update.sh
@@ -1176,10 +1190,15 @@ restore_file script.sh /opt/root/script.sh
 [ -f /opt/root/script.sh ] && chmod 755 /opt/root/script.sh || true
 ensure_runtime_legacy_paths
 
-/opt/bin/unblock_update.sh >/dev/null 2>&1 || true
-install_unblock_ipset_cron_job || true
+if [ "\$full_state_restored" -ne 1 ]; then
+  /opt/bin/unblock_update.sh >/dev/null 2>&1 || true
+  install_unblock_ipset_cron_job || true
+fi
 [ -x /opt/etc/init.d/S10cron ] && /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S99unblock ] && /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
+if [ "\$full_state_restored" -eq 1 ] && [ -x /opt/etc/init.d/S99unblock ]; then
+  /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1 || true
+fi
 [ -x /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S24xray ] && /opt/etc/init.d/S24xray restart >/dev/null 2>&1 || /opt/etc/init.d/S24xray start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S24v2ray ] && /opt/etc/init.d/S24v2ray restart >/dev/null 2>&1 || /opt/etc/init.d/S24v2ray start >/dev/null 2>&1 || true
@@ -1189,7 +1208,7 @@ rm -f "\$UPDATE_MAINTENANCE_PATH" "\$UPDATE_MAINTENANCE_READY_PATH" 2>/dev/null 
 
 echo "Откат восстановил файлы из \$BACKUP_DIR."
 EOF
-  chmod 755 "$rollback_path"
+  chmod 700 "$rollback_path"
   ln -sf "$rollback_path" /opt/root/bypass-last-update-rollback.sh 2>/dev/null || true
 }
 
@@ -1199,7 +1218,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -2111,22 +2130,28 @@ if [ "$1" = "-update" ]; then
     update_runtime_quiesced=0
     trap 'handle_cli_update_exit "$?"' EXIT
     trap 'exit 143' TERM INT HUP
-  ensure_entware_dns
+    now=$(date +"%Y.%m.%d.%H-%M-%S")
+    stage_dir="/opt/root/update-${now}"
+    backup_dir="/opt/root/backup-${now}"
+    mkdir -m 700 "$stage_dir"
+    download_update_file "$(repo_file_url managed_state_snapshot.py)" \
+      "$stage_dir/managed_state_snapshot.py" "SNAPSHOT_FORMAT" "managed_state_snapshot.py" || exit 1
+    mkdir -m 700 "$backup_dir"
+    PYTHONPATH="$stage_dir" python3 "$stage_dir/managed_state_snapshot.py" backup "$backup_dir/full-state" || exit 1
+    mkdir -m 700 "$backup_dir/.rollback-tools"
+    cp -p "$stage_dir/managed_state_snapshot.py" "$backup_dir/.rollback-tools/managed_state_snapshot.py"
+    chmod 600 "$backup_dir/.rollback-tools/managed_state_snapshot.py"
+
+    ensure_entware_dns
     opkg update > /dev/null 2>&1
     core_proxy_pkg=$(detect_core_proxy_package)
     opkg install "$core_proxy_pkg" > /dev/null 2>&1 || true
     for legacy_pkg in obfs4 tor-geoip tor; do
       opkg remove "$legacy_pkg" > /dev/null 2>&1 || true
     done
-    cleanup_removed_connection_artifacts
     # opkg update
     echo "Ваша версия KeenOS" "${keen_os_full}."
     echo "Пакеты обновлены."
-
-    now=$(date +"%Y.%m.%d.%H-%M-%S")
-    stage_dir="/opt/root/update-${now}"
-    backup_dir="/opt/root/backup-${now}"
-    mkdir -p "$stage_dir"
 
     echo "Скачиваем обновления во временную папку и проверяем файлы."
     write_cli_update_status update true 10 Загрузка "Скачиваем файлы обновления"
@@ -2209,7 +2234,8 @@ if [ "$1" = "-update" ]; then
     echo "Сервисы остановлены."
     write_cli_update_status update true 55 "Резервная копия" "Сервисы остановлены; создаём резервную копию"
 
-    mkdir -p "$backup_dir"
+    PYTHONPATH="$backup_dir/.rollback-tools" python3 \
+      "$backup_dir/.rollback-tools/managed_state_snapshot.py" verify "$backup_dir/full-state" || exit 1
     [ -f /opt/bin/unblock_ipset.sh ] && mv /opt/bin/unblock_ipset.sh "$backup_dir"/unblock_ipset.sh
     [ -f /opt/bin/unblock_dnsmasq.sh ] && mv /opt/bin/unblock_dnsmasq.sh "$backup_dir"/unblock_dnsmasq.sh
     [ -f /opt/bin/unblock_update.sh ] && mv /opt/bin/unblock_update.sh "$backup_dir"/unblock_update.sh
@@ -2239,7 +2265,7 @@ if [ "$1" = "-update" ]; then
     backup_static_assets
     write_update_rollback_script
     cleanup_removed_connection_artifacts
-    chmod 755 "$backup_dir"/* 2>/dev/null
+    chmod 700 "$backup_dir" "$backup_dir/rollback.sh" 2>/dev/null || true
     echo "Бэкап создан."
     write_cli_update_status update true 65 Установка "Устанавливаем подготовленные файлы"
 
