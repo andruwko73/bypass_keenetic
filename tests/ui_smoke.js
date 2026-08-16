@@ -447,9 +447,11 @@ async function protocolHeaderIconSnapshot(page, protocol) {
 
 async function assertProtocolStatusServiceMerge(page, label) {
   const result = await page.evaluate(() => {
-    const merge = window.__bypassTestHooks && window.__bypassTestHooks.mergeProtocolStatusIcons;
-    if (typeof merge !== 'function') {
-      return { error: 'merge hook is unavailable' };
+    const hooks = window.__bypassTestHooks || {};
+    const merge = hooks.mergeProtocolStatusIcons;
+    const scopedStatus = hooks.protocolStatusFromActivePoolRow;
+    if (typeof merge !== 'function' || typeof scopedStatus !== 'function') {
+      return { error: 'protocol status test hooks are unavailable' };
     }
     const item = (service, state, text) => (
       `<span data-status-service="${service}" data-status-state="${state}">${text}</span>`
@@ -470,7 +472,34 @@ async function assertProtocolStatusServiceMerge(page, label) {
         text: node.textContent,
       }));
     };
-    return { merged: parse(merged), liveFail: parse(liveFail), fallback: parse(fallback), poolYoutube: parse(poolYoutube) };
+    const fixture = document.createElement('div');
+    fixture.innerHTML = '<article data-protocol-card="scope-test"></article>' +
+      '<section data-protocol-panel="scope-test" data-core-services-loaded="1" data-core-services="youtube"></section>' +
+      '<table><tr data-pool-row data-protocol="scope-test" data-active="1" data-tg-state="fail" ' +
+      'data-tg-source="pool_probe" data-yt-state="ok"><td data-pool-checked>сейчас</td></tr></table>';
+    document.body.appendChild(fixture);
+    let poolScoped;
+    let liveScoped;
+    try {
+      poolScoped = scopedStatus('scope-test');
+      fixture.querySelector('[data-pool-row]').dataset.tgSource = 'live_polling';
+      liveScoped = scopedStatus('scope-test');
+    } finally {
+      fixture.remove();
+    }
+    const compactStatus = (status) => status ? {
+      tone: status.tone,
+      label: status.label,
+      icons: parse(status.icons),
+    } : null;
+    return {
+      merged: parse(merged),
+      liveFail: parse(liveFail),
+      fallback: parse(fallback),
+      poolYoutube: parse(poolYoutube),
+      poolScoped: compactStatus(poolScoped),
+      liveScoped: compactStatus(liveScoped),
+    };
   });
   if (result.error) {
     throw new Error(`${label}: ${result.error}`);
@@ -481,7 +510,11 @@ async function assertProtocolStatusServiceMerge(page, label) {
     result.merged[0].state !== 'ok' || result.merged[0].text !== 'live-tg' ||
     result.liveFail[0].state !== 'fail' ||
     result.fallback[0].state !== 'ok' ||
-    result.poolYoutube[0].state !== 'ok' || result.poolYoutube[0].text !== 'pool-yt-ok'
+    result.poolYoutube[0].state !== 'ok' || result.poolYoutube[0].text !== 'pool-yt-ok' ||
+    !result.poolScoped || result.poolScoped.tone !== 'ok' || result.poolScoped.label !== 'Работает' ||
+    result.poolScoped.icons.map((item) => item.service).join('|') !== 'youtube' ||
+    !result.liveScoped || result.liveScoped.tone !== 'warn' ||
+    result.liveScoped.icons.map((item) => item.service).join('|') !== 'telegram|youtube'
   ) {
     throw new Error(`${label}: service-aware status merge is wrong ${JSON.stringify(result)}`);
   }

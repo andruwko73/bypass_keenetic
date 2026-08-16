@@ -277,7 +277,16 @@ def active_protocol_status(
         if required_services is not None else
         bool(api_required)
     )
-    pending = bool(api_pending or yt_pending or (api_transient and telegram_required))
+    youtube_required = required_services is None or 'youtube' in required_services
+    pending = bool(
+        (telegram_required and (api_pending or api_transient)) or
+        (youtube_required and yt_pending)
+    )
+    api_state = 'unused' if not telegram_required else ('pending' if api_pending else ('ok' if api_ok else 'fail'))
+    youtube_state = (
+        'unused' if not youtube_required else
+        ('pending' if yt_pending else (yt_state or ('ok' if yt_ok else 'fail')))
+    )
     if endpoint_ok and pending:
         service_parts = service_status_parts(
             api_ok,
@@ -304,12 +313,12 @@ def active_protocol_status(
             'endpoint_ok': endpoint_ok,
             'endpoint_message': endpoint_message,
             'api_ok': api_ok,
-            'api_state': 'pending' if api_pending else ('ok' if api_ok else 'fail'),
+            'api_state': api_state,
             'api_message': api_message,
-            'api_pending': True,
+            'api_pending': bool(telegram_required and (api_pending or api_transient)),
             'yt_ok': yt_ok,
-            'yt_pending': bool(yt_pending),
-            'yt_state': ('pending' if yt_pending else (yt_state or ('ok' if yt_ok else 'fail'))),
+            'yt_pending': bool(yt_pending and youtube_required),
+            'yt_state': youtube_state,
             'yt_message': yt_message,
             'custom': custom_states,
         }
@@ -349,12 +358,12 @@ def active_protocol_status(
         'endpoint_ok': endpoint_ok,
         'endpoint_message': endpoint_message,
         'api_ok': api_ok,
-        'api_state': 'pending' if api_pending else ('ok' if api_ok else 'fail'),
+        'api_state': api_state,
         'api_message': api_message,
-        'api_pending': bool(api_pending),
+        'api_pending': bool(api_pending and telegram_required),
         'yt_ok': yt_ok,
-        'yt_pending': bool(yt_pending),
-        'yt_state': ('pending' if yt_pending else (yt_state or ('ok' if yt_ok else 'fail'))),
+        'yt_pending': bool(yt_pending and youtube_required),
+        'yt_state': youtube_state,
         'yt_message': yt_message,
         'custom': custom_states,
     }
@@ -471,11 +480,15 @@ def cached_protocol_status(
         api_state = 'ok' if probe.get('tg_ok') is True else 'fail' if probe.get('tg_ok') is False else 'unknown'
     if probe_yt_state == 'stale':
         probe_yt_state = youtube_probe_state(probe)
+    telegram_relevant = required_services is None or 'telegram' in required_services
+    youtube_relevant = required_services is None or 'youtube' in required_services
     custom_states = _last_custom_states(custom_states)
-    has_probe_result = any(
-        state in ('ok', 'warn', 'fail')
-        for state in (api_state, probe_yt_state, *custom_states.values())
-    )
+    relevant_states = list(custom_states.values())
+    if telegram_relevant:
+        relevant_states.append(api_state)
+    if youtube_relevant:
+        relevant_states.append(probe_yt_state)
+    has_probe_result = any(state in ('ok', 'warn', 'fail') for state in relevant_states)
     if not has_probe_result:
         return {
             'tone': 'warn',
@@ -484,20 +497,20 @@ def cached_protocol_status(
             'endpoint_ok': None,
             'endpoint_message': '',
             'api_ok': False,
-            'api_state': 'unknown',
+            'api_state': 'unknown' if telegram_relevant else 'unused',
             'api_message': '',
             'yt_ok': False,
-            'yt_state': 'unknown',
+            'yt_state': 'unknown' if youtube_relevant else 'unused',
             'yt_message': '',
             'custom': custom_states,
         }
     api_ok = api_state == 'ok'
     yt_ok = probe_yt_state in ('ok', 'warn')
     service_parts = []
-    if api_state != 'unknown':
+    if telegram_relevant and api_state != 'unknown':
         telegram_state = 'работает' if api_ok else ('не работает' if api_required else 'не требуется для текущего режима')
         service_parts.append(f'Telegram: {telegram_state}')
-    if probe_yt_state != 'unknown':
+    if youtube_relevant and probe_yt_state != 'unknown':
         youtube_state_text = _youtube_state_text(yt_ok, probe_yt_state)
         service_parts.append(f'YouTube: {youtube_state_text}')
     for check in custom_checks or []:
@@ -541,10 +554,10 @@ def cached_protocol_status(
         'endpoint_ok': None,
         'endpoint_message': '',
         'api_ok': api_ok,
-        'api_state': api_state,
+        'api_state': api_state if telegram_relevant else 'unused',
         'api_message': '',
         'yt_ok': yt_ok,
-        'yt_state': probe_yt_state,
+        'yt_state': probe_yt_state if youtube_relevant else 'unused',
         'yt_message': '',
         'custom': custom_states,
         'checked_age_seconds': checked_age_seconds,

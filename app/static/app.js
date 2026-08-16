@@ -1319,6 +1319,7 @@
                         setupPoolControls(loadedPanel);
                         setupServiceRouteMenus(loadedPanel);
                         setupAsyncForms(loadedPanel);
+                        refreshStatusSoon(0, 30000);
                         refreshPoolData(0, protocol);
                     })
                     .catch(function(error) {
@@ -1648,9 +1649,10 @@
                 return null;
             }
             const tgState = lastResultState(row.dataset.tgState || 'unknown');
+            const tgSource = String(row.dataset.tgSource || 'pool_probe');
             const ytState = lastResultState(row.dataset.ytState || 'unknown');
             const knownStates = ['ok', 'warn', 'fail'];
-            const includeTelegram = coreServices.indexOf('telegram') !== -1 || knownStates.indexOf(tgState) !== -1;
+            const includeTelegram = coreServices.indexOf('telegram') !== -1 || tgSource === 'live_polling';
             const includeYoutube = coreServices.indexOf('youtube') !== -1 || knownStates.indexOf(ytState) !== -1;
             const customChecksById = new Map(customChecks.map(function(check) { return [check.id, check]; }));
             const customResults = Array.from(row.querySelectorAll('[data-pool-custom]')).map(function(cell) {
@@ -2392,7 +2394,7 @@
                 const rowIndex = Number(row.index || (position + 1)) - 1;
                 const displayName = escapeHtml(row.display_name || '');
                 const coreCells = poolCoreServiceCells(row, coreServices);
-                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + keyId + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-quality-score="' + Number(row.yt_score || 0) + '" data-quality-class="' + escapeHtml(row.yt_quality || '') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + keyId + '">' +
+                return '<tr class="pool-row' + activeClass + '" data-pool-row data-protocol="' + proto + '" data-key-id="' + keyId + '" data-pool-index="' + rowIndex + '" data-active="' + (row.active ? '1' : '0') + '" data-tg-state="' + escapeHtml(row.tg || 'unknown') + '" data-tg-source="' + escapeHtml(row.tg_source || 'pool_probe') + '" data-yt-state="' + escapeHtml(row.yt || 'unknown') + '" data-quality-score="' + Number(row.yt_score || 0) + '" data-quality-class="' + escapeHtml(row.yt_quality || '') + '" data-checked-ts="' + Number(row.checked_ts || 0) + '" data-search="' + displayName + ' ' + keyId + '">' +
                     '<td class="pool-key-cell">' +
                         '<form method="post" action="/pool_apply" class="pool-apply-form" data-async-action="pool-apply">' +
                             '<input type="hidden" name="type" value="' + proto + '">' +
@@ -2461,6 +2463,7 @@
                 item.classList.toggle('pool-row-active', !!row.active);
                 item.dataset.active = row.active ? '1' : '0';
                 item.dataset.tgState = row.tg || 'unknown';
+                item.dataset.tgSource = row.tg_source || 'pool_probe';
                 item.dataset.ytState = row.yt || 'unknown';
                 item.dataset.qualityScore = String(row.yt_score || 0);
                 item.dataset.qualityClass = String(row.yt_quality || '');
@@ -4084,6 +4087,7 @@
                     pollStatus: pollStatus,
                     refreshPoolData: refreshPoolData,
                     mergeProtocolStatusIcons: mergeProtocolStatusIcons,
+                    protocolStatusFromActivePoolRow: protocolStatusFromActivePoolRow,
                     updatedPageIsReady: updatedPageIsReady,
                     waitForUpdatedWebServerBeforeReload: waitForUpdatedWebServerBeforeReload
                 });

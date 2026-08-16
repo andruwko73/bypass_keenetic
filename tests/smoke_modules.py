@@ -2450,6 +2450,61 @@ def test_managed_state_snapshot_verifies_every_file_before_restore(tmp_path):
     assert target.read_text(encoding='utf-8') == 'current'
 
 
+def _change_test_file_mode(path):
+    original = os.stat(path).st_mode & 0o7777
+    for candidate in (0o444, 0o600, 0o644, 0o666, 0o775):
+        os.chmod(path, candidate)
+        changed = os.stat(path).st_mode & 0o7777
+        if changed != original:
+            return original, changed
+    pytest.skip('file mode changes are unavailable in this environment')
+
+
+def test_managed_state_snapshot_ignores_stored_modes_and_restores_original_mode(tmp_path):
+    target = tmp_path / 'router' / 'settings.json'
+    target.parent.mkdir(parents=True)
+    target.write_text('before', encoding='utf-8')
+    expected_mode, _changed = _change_test_file_mode(target)
+    os.chmod(target, expected_mode)
+    snapshot = tmp_path / 'snapshot'
+
+    managed_state_snapshot.backup_managed_state(snapshot, paths=(target,))
+    manifest = json.loads((snapshot / managed_state_snapshot.MANIFEST_NAME).read_text(encoding='utf-8'))
+    assert manifest['format'] == 2
+    stored = managed_state_snapshot._stored_path(str(snapshot), str(target))
+    _change_test_file_mode(stored)
+    assert managed_state_snapshot.verify_managed_state(snapshot, paths=(target,))['entries'] == 1
+
+    target.write_text('after', encoding='utf-8')
+    managed_state_snapshot.restore_managed_state(snapshot, paths=(target,))
+    assert target.read_text(encoding='utf-8') == 'before'
+    assert os.stat(target).st_mode & 0o7777 == expected_mode
+
+
+def test_managed_state_snapshot_reads_legacy_file_after_stored_mode_change(tmp_path):
+    target = tmp_path / 'router' / 'settings.json'
+    target.parent.mkdir(parents=True)
+    target.write_text('before', encoding='utf-8')
+    snapshot = tmp_path / 'legacy-snapshot'
+    stored = managed_state_snapshot._stored_path(str(snapshot), str(target))
+    managed_state_snapshot._copy_path(str(target), stored)
+    expected_mode = os.stat(stored).st_mode & 0o7777
+    manifest = {
+        'format': 1,
+        'entries': [{'path': str(target), 'present': True, 'sha256': managed_state_snapshot._path_digest(stored)}],
+    }
+    (snapshot / managed_state_snapshot.MANIFEST_NAME).write_text(
+        json.dumps(manifest, separators=(',', ':')) + '\n', encoding='utf-8'
+    )
+    _change_test_file_mode(stored)
+
+    assert managed_state_snapshot.verify_managed_state(snapshot, paths=(target,))['entries'] == 1
+    target.write_text('after', encoding='utf-8')
+    managed_state_snapshot.restore_managed_state(snapshot, paths=(target,))
+    assert target.read_text(encoding='utf-8') == 'before'
+    assert os.stat(target).st_mode & 0o7777 == expected_mode
+
+
 def _create_test_symlink(link, target):
     try:
         link.symlink_to(target)
@@ -2463,9 +2518,14 @@ def test_managed_state_snapshot_skips_unchanged_symlink_and_restores_its_content
     target.parent.mkdir(parents=True)
     link.parent.mkdir()
     target.write_text('nameserver before\n', encoding='utf-8')
+    expected_mode, _changed = _change_test_file_mode(target)
+    os.chmod(target, expected_mode)
     _create_test_symlink(link, target)
     snapshot = tmp_path / 'snapshot'
     managed_state_snapshot.backup_managed_state(snapshot, paths=(link,))
+    stored_content = managed_state_snapshot._stored_link_content_path(str(snapshot), str(link))
+    _change_test_file_mode(stored_content)
+    assert managed_state_snapshot.verify_managed_state(snapshot, paths=(link,))['entries'] == 1
 
     original_restore_path = managed_state_snapshot._restore_path
     restored_destinations = []
@@ -2487,6 +2547,7 @@ def test_managed_state_snapshot_skips_unchanged_symlink_and_restores_its_content
     assert restored_destinations == [os.fspath(target)]
     assert link.is_symlink()
     assert target.read_text(encoding='utf-8') == 'nameserver before\n'
+    assert os.stat(target).st_mode & 0o7777 == expected_mode
 
 
 def test_web_rollback_prefers_update_generated_full_script(tmp_path, monkeypatch):
@@ -7081,11 +7142,11 @@ def test_light_route_status_uses_complete_route_assignments_and_custom_results()
         "vless2 = bot._light_cached_protocol_status_for_key('vless2', 'vless2-key', cache, custom_checks=checks, route_states=route_states)\n"
         "full_vless = bot._cached_protocol_status_for_key('vless', 'vless-key', custom_checks=checks, key_probe_cache=cache, allow_youtube_confirm=False, route_states=route_states)\n"
         "full_vless2 = bot._cached_protocol_status_for_key('vless2', 'vless2-key', custom_checks=checks, key_probe_cache=cache, allow_youtube_confirm=False, route_states=route_states)\n"
-        "assert vless['tone'] == 'ok' and vless['api_ok'] is True and vless['yt_state'] == 'fail', vless\n"
+        "assert vless['tone'] == 'ok' and vless['api_ok'] is True and vless['yt_state'] == 'unused', vless\n"
         "assert vless['custom'] == {'discord': 'ok'}\n"
-        "assert vless2['tone'] == 'ok' and vless2['api_ok'] is False and vless2['yt_ok'] is True, vless2\n"
+        "assert vless2['tone'] == 'ok' and vless2['api_ok'] is False and vless2['api_state'] == 'unused' and vless2['yt_ok'] is True, vless2\n"
         "assert vless2['custom'] == {}\n"
-        "fields = ('tone', 'label', 'api_ok', 'yt_ok', 'yt_state', 'custom')\n"
+        "fields = ('tone', 'label', 'api_ok', 'api_state', 'yt_ok', 'yt_state', 'custom')\n"
         "assert {field: vless[field] for field in fields} == {field: full_vless[field] for field in fields}\n"
         "assert {field: vless2[field] for field in fields} == {field: full_vless2[field] for field in fields}\n"
     )
@@ -15288,6 +15349,8 @@ def test_web_status_builder_helpers():
     )
     assert telegram_scoped['tone'] == 'ok'
     assert telegram_scoped['label'] == 'Работает'
+    assert telegram_scoped['yt_state'] == 'unused'
+    assert 'YouTube:' not in telegram_scoped['details']
     youtube_scoped = web_status_builder.cached_protocol_status(
         'key',
         {'tg_ok': False, 'yt_ok': False, 'yt_stability': 'unstable'},
@@ -15297,6 +15360,30 @@ def test_web_status_builder_helpers():
     )
     assert youtube_scoped['tone'] == 'ok'
     assert youtube_scoped['label'] == 'Работает'
+    assert youtube_scoped['api_state'] == 'unused'
+    assert 'Telegram:' not in youtube_scoped['details']
+    youtube_active = web_status_builder.active_protocol_status(
+        endpoint_ok=True,
+        endpoint_message='SOCKS ok.',
+        api_ok=False,
+        api_message='timeout',
+        api_transient=True,
+        yt_ok=True,
+        yt_message='ok',
+        custom_states={},
+        custom_checks=[],
+        required_services=['youtube'],
+    )
+    assert youtube_active['tone'] == 'ok'
+    assert youtube_active['label'] == 'Работает'
+    assert youtube_active['api_state'] == 'unused'
+    assert youtube_active['api_pending'] is False
+    assert 'Telegram:' not in youtube_active['details']
+    youtube_unchecked = web_status_builder.cached_protocol_status(
+        'key', {}, [], {}, required_services=['youtube']
+    )
+    assert youtube_unchecked['api_state'] == 'unused'
+    assert youtube_unchecked['yt_state'] == 'unknown'
     youtube_only = web_status_builder.cached_protocol_status(
         'key',
         {'tg_ok': False, 'yt_ok': True},
@@ -16250,7 +16337,11 @@ def test_web_template_scripts_helpers():
     assert "card.dataset.protocolLiveStatus === '1'" in scripts
     assert 'function mergeProtocolStatusIcons(primaryHtml, fallbackHtml)' in scripts
     assert "const preferPoolResult = serviceId !== 'telegram' && fallbackKnown;" in scripts
+    assert "const tgSource = String(row.dataset.tgSource || 'pool_probe');" in scripts
+    assert "const includeTelegram = coreServices.indexOf('telegram') !== -1 || tgSource === 'live_polling';" in scripts
     assert "const includeYoutube = coreServices.indexOf('youtube') !== -1 || knownStates.indexOf(ytState) !== -1;" in scripts
+    assert 'data-tg-source="' in scripts
+    assert "item.dataset.tgSource = row.tg_source || 'pool_probe';" in scripts
     assert 'visibleIconCountHtml' not in scripts
     assert 'seedProtocolStatusIcons' not in scripts
     assert "icons.innerHTML = stableProtocolStatusIcons(card, status.icons, false, true);" in scripts

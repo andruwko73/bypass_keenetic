@@ -6,7 +6,8 @@ import shutil
 import stat
 
 
-SNAPSHOT_FORMAT = 1
+SNAPSHOT_FORMAT = 2
+SUPPORTED_SNAPSHOT_FORMATS = frozenset((1, SNAPSHOT_FORMAT))
 MANIFEST_NAME = 'manifest.json'
 TREE_DIR_NAME = 'tree'
 LINK_CONTENT_DIR_NAME = 'link-content'
@@ -105,8 +106,9 @@ def _copy_path(source, target):
         shutil.copy2(source, target, follow_symlinks=False)
 
 
-def _path_digest(path):
+def _path_fingerprint(path, include_modes):
     digest = hashlib.sha256()
+    modes = {}
 
     def update(value):
         digest.update(value.encode('utf-8', errors='surrogateescape'))
@@ -116,22 +118,116 @@ def _path_digest(path):
         metadata = os.lstat(current)
         mode = stat.S_IMODE(metadata.st_mode)
         if stat.S_ISLNK(metadata.st_mode):
-            update(f'link:{relative}:{mode:o}:{os.readlink(current)}')
+            if include_modes:
+                update(f'link:{relative}:{mode:o}:{os.readlink(current)}')
+            else:
+                update(f'link:{relative}:{os.readlink(current)}')
             return
         if stat.S_ISDIR(metadata.st_mode):
-            update(f'dir:{relative}:{mode:o}')
+            modes[relative] = mode
+            update(f'dir:{relative}:{mode:o}' if include_modes else f'dir:{relative}')
             for name in sorted(os.listdir(current)):
                 visit(os.path.join(current, name), os.path.join(relative, name))
             return
         if not stat.S_ISREG(metadata.st_mode):
             raise ManagedStateSnapshotError(f'unsupported managed file type: {relative}')
-        update(f'file:{relative}:{mode:o}:{metadata.st_size}')
+        modes[relative] = mode
+        if include_modes:
+            update(f'file:{relative}:{mode:o}:{metadata.st_size}')
+        else:
+            update(f'file:{relative}:{metadata.st_size}')
         with open(current, 'rb') as file:
             for chunk in iter(lambda: file.read(1024 * 1024), b''):
                 digest.update(chunk)
 
     visit(path, '.')
+    return digest.hexdigest(), modes
+
+
+def _path_digest(path):
+    return _path_fingerprint(path, include_modes=True)[0]
+
+
+def _path_content_state(path):
+    return _path_fingerprint(path, include_modes=False)
+
+
+def _legacy_regular_file_digest(path, mode):
+    metadata = os.lstat(path)
+    digest = hashlib.sha256()
+    digest.update(f'file:.:{mode:o}:{metadata.st_size}'.encode('utf-8'))
+    digest.update(b'\0')
+    with open(path, 'rb') as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b''):
+            digest.update(chunk)
     return digest.hexdigest()
+
+
+def _legacy_regular_file_mode(path, expected_digest):
+    if not isinstance(expected_digest, str) or os.path.islink(path) or not os.path.isfile(path):
+        return None
+    actual_mode = stat.S_IMODE(os.lstat(path).st_mode)
+    candidates = (
+        actual_mode, 0o444, 0o600, 0o640, 0o644, 0o660, 0o664, 0o666,
+        0o700, 0o750, 0o755, 0o770, 0o775,
+    )
+    for mode in dict.fromkeys(candidates):
+        if _legacy_regular_file_digest(path, mode) == expected_digest:
+            return mode
+    return None
+
+
+def _verified_content_state(stored, entry, format_version):
+    expected_digest = entry.get('sha256')
+    if format_version == 1:
+        if _path_digest(stored) == expected_digest:
+            return _path_content_state(stored)
+        recovered_mode = _legacy_regular_file_mode(stored, expected_digest)
+        if recovered_mode is None:
+            raise ManagedStateSnapshotError('managed state snapshot integrity check failed')
+        digest, modes = _path_content_state(stored)
+        modes['.'] = recovered_mode
+        return digest, modes
+    digest, stored_modes = _path_content_state(stored)
+    raw_modes = entry.get('modes')
+    if digest != expected_digest or not isinstance(raw_modes, dict) or set(raw_modes) != set(stored_modes):
+        raise ManagedStateSnapshotError('managed state snapshot integrity check failed')
+    modes = {}
+    for relative, mode in raw_modes.items():
+        if isinstance(mode, bool) or not isinstance(mode, int) or not 0 <= mode <= 0o7777:
+            raise ManagedStateSnapshotError('managed state mode metadata is invalid')
+        modes[relative] = mode
+    return digest, modes
+
+
+def _verified_link_content_state(stored_content, link_content, format_version):
+    if not os.path.isfile(stored_content) or os.path.islink(stored_content):
+        raise ManagedStateSnapshotError('managed state link content integrity check failed')
+    if format_version == 1:
+        mode = _legacy_regular_file_mode(stored_content, link_content.get('sha256'))
+        if mode is None:
+            raise ManagedStateSnapshotError('managed state link content integrity check failed')
+        return _path_content_state(stored_content)[0], mode
+    digest, modes = _path_content_state(stored_content)
+    mode = link_content.get('mode')
+    if (
+        digest != link_content.get('sha256')
+        or set(modes) != {'.'}
+        or isinstance(mode, bool)
+        or not isinstance(mode, int)
+        or not 0 <= mode <= 0o7777
+    ):
+        raise ManagedStateSnapshotError('managed state link content integrity check failed')
+    return digest, mode
+
+
+def _apply_modes(path, modes):
+    for relative, mode in sorted(modes.items(), key=lambda item: item[0].count(os.path.sep), reverse=True):
+        current = path if relative == '.' else os.path.join(path, relative)
+        metadata = os.lstat(current)
+        if stat.S_ISLNK(metadata.st_mode) or not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)):
+            raise ManagedStateSnapshotError('managed state type changed before mode restore')
+        os.chmod(current, mode)
 
 
 def backup_managed_state(snapshot_dir, paths=None):
@@ -144,18 +240,20 @@ def backup_managed_state(snapshot_dir, paths=None):
     entries = []
     for source_path in managed_paths:
         present = os.path.lexists(source_path)
-        entry = {'path': source_path, 'present': present, 'sha256': ''}
+        entry = {'path': source_path, 'present': present, 'sha256': '', 'modes': {}}
         if present:
             stored = _stored_path(snapshot_dir, source_path)
             _copy_path(source_path, stored)
-            entry['sha256'] = _path_digest(stored)
+            entry['sha256'], entry['modes'] = _path_content_state(stored)
             if os.path.islink(source_path) and (not os.path.exists(source_path) or os.path.isfile(source_path)):
-                link_content = {'present': os.path.isfile(source_path), 'sha256': ''}
+                link_content = {'present': os.path.isfile(source_path), 'sha256': '', 'mode': 0}
                 if link_content['present']:
                     stored_content = _stored_link_content_path(snapshot_dir, source_path)
                     os.makedirs(os.path.dirname(stored_content), exist_ok=True)
-                    shutil.copy2(os.path.realpath(source_path), stored_content)
-                    link_content['sha256'] = _path_digest(stored_content)
+                    resolved_source = os.path.realpath(source_path)
+                    link_content['mode'] = stat.S_IMODE(os.stat(resolved_source).st_mode)
+                    shutil.copy2(resolved_source, stored_content)
+                    link_content['sha256'] = _path_content_state(stored_content)[0]
                 entry['link_content'] = link_content
         entries.append(entry)
     manifest = {'format': SNAPSHOT_FORMAT, 'entries': entries}
@@ -175,13 +273,20 @@ def _load_verified_manifest(snapshot_dir, paths=None):
             manifest = json.load(file)
     except Exception as exc:
         raise ManagedStateSnapshotError('managed state manifest is unreadable') from exc
-    if manifest.get('format') != SNAPSHOT_FORMAT or not isinstance(manifest.get('entries'), list):
+    format_version = manifest.get('format')
+    if (
+        isinstance(format_version, bool)
+        or format_version not in SUPPORTED_SNAPSHOT_FORMATS
+        or not isinstance(manifest.get('entries'), list)
+    ):
         raise ManagedStateSnapshotError('managed state manifest format is unsupported')
     allowed_paths = set(_normalized_paths(paths))
     entries = manifest['entries']
     seen = set()
     for entry in entries:
-        path = os.path.normpath(os.path.abspath(os.fspath((entry or {}).get('path', ''))))
+        if not isinstance(entry, dict) or entry.get('present') not in (True, False):
+            raise ManagedStateSnapshotError('managed state manifest entry is invalid')
+        path = os.path.normpath(os.path.abspath(os.fspath(entry.get('path', ''))))
         if path not in allowed_paths or path in seen:
             raise ManagedStateSnapshotError('managed state manifest contains an unsafe path')
         seen.add(path)
@@ -189,8 +294,9 @@ def _load_verified_manifest(snapshot_dir, paths=None):
         present = entry.get('present') is True
         stored = _stored_path(snapshot_dir, path)
         if present:
-            if not os.path.lexists(stored) or _path_digest(stored) != entry.get('sha256'):
+            if not os.path.lexists(stored):
                 raise ManagedStateSnapshotError('managed state snapshot integrity check failed')
+            entry['_content_sha256'], entry['_modes'] = _verified_content_state(stored, entry, format_version)
             link_content = entry.get('link_content')
             if link_content is not None:
                 if (
@@ -201,12 +307,9 @@ def _load_verified_manifest(snapshot_dir, paths=None):
                     raise ManagedStateSnapshotError('managed state link content metadata is invalid')
                 stored_content = _stored_link_content_path(snapshot_dir, path)
                 if link_content.get('present') is True:
-                    if (
-                        not os.path.isfile(stored_content)
-                        or os.path.islink(stored_content)
-                        or _path_digest(stored_content) != link_content.get('sha256')
-                    ):
-                        raise ManagedStateSnapshotError('managed state link content integrity check failed')
+                    link_content['_content_sha256'], link_content['_mode'] = _verified_link_content_state(
+                        stored_content, link_content, format_version
+                    )
                 elif os.path.lexists(stored_content):
                     raise ManagedStateSnapshotError('absent managed link content unexpectedly has stored data')
         elif os.path.lexists(stored):
@@ -234,7 +337,7 @@ def _current_entry_matches(entry):
     path = entry['path']
     if entry.get('present') is not True:
         return not os.path.lexists(path)
-    if not os.path.lexists(path) or _path_digest(path) != entry.get('sha256'):
+    if not os.path.lexists(path) or _path_content_state(path) != (entry['_content_sha256'], entry['_modes']):
         return False
     link_content = entry.get('link_content')
     if link_content is None:
@@ -242,7 +345,9 @@ def _current_entry_matches(entry):
     target_exists = os.path.exists(path)
     if link_content.get('present') is not True:
         return not target_exists
-    return os.path.isfile(path) and _path_digest(os.path.realpath(path)) == link_content.get('sha256')
+    return os.path.isfile(path) and _path_content_state(os.path.realpath(path)) == (
+        link_content['_content_sha256'], {'.': link_content['_mode']}
+    )
 
 
 def _restore_path(source, target):
@@ -268,7 +373,10 @@ def _restore_link_content(snapshot_dir, entry):
         raise ManagedStateSnapshotError('managed state symlink changed before content restore')
     resolved_target = os.path.realpath(target)
     if link_content.get('present') is True:
-        _restore_path(_stored_link_content_path(snapshot_dir, target), resolved_target)
+        expected_state = (link_content['_content_sha256'], {'.': link_content['_mode']})
+        if not os.path.isfile(resolved_target) or _path_content_state(resolved_target) != expected_state:
+            _restore_path(_stored_link_content_path(snapshot_dir, target), resolved_target)
+        _apply_modes(resolved_target, expected_state[1])
     else:
         if os.path.isdir(resolved_target) and not os.path.islink(resolved_target):
             raise ManagedStateSnapshotError('managed state link target unexpectedly became a directory')
@@ -291,8 +399,9 @@ def restore_managed_state(snapshot_dir, paths=None):
                 removed += 1
             continue
         stored = _stored_path(snapshot_dir, target)
-        if not os.path.lexists(target) or _path_digest(target) != entry.get('sha256'):
+        if not os.path.lexists(target) or _path_content_state(target)[0] != entry['_content_sha256']:
             _restore_path(stored, target)
+        _apply_modes(target, entry['_modes'])
         _restore_link_content(snapshot_dir, entry)
         restored += 1
     return {'entries': len(entries), 'restored': restored, 'removed': removed}
