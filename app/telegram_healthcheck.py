@@ -45,6 +45,30 @@ def telegram_http_status_is_denied(message):
     return bool(TELEGRAM_DENIED_HTTP_STATUS_RE.search(str(message or '')))
 
 
+def telegram_failure_reason_code(message):
+    """Return a bounded non-secret category for a Telegram probe failure."""
+    text = str(message or '').strip().lower()
+    if not text:
+        return 'unknown'
+    if ('connect' in text or 'соединен' in text) and any(
+        marker in text for marker in ('timeout', 'timed out', 'время', 'отвед')
+    ):
+        return 'connect_timeout'
+    if ('read' in text or 'чтени' in text) and any(
+        marker in text for marker in ('timeout', 'timed out', 'время', 'отвед')
+    ):
+        return 'read_timeout'
+    if any(marker in text for marker in ('tls', 'ssl', 'unexpected eof', 'eof occurred')):
+        return 'tls_error'
+    if re.search(r'\bhttp\s+[45]\d\d\b', text):
+        return 'http_status'
+    if any(marker in text for marker in ('timeout', 'timed out', 'таймаут', 'отведённое время')):
+        return 'timeout'
+    if any(marker in text for marker in ('api', 'unauthorized', 'forbidden')):
+        return 'api_invalid'
+    return 'unknown'
+
+
 def _recv_exact(sock, length):
     data = b''
     while len(data) < length:

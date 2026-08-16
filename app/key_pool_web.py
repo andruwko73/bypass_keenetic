@@ -189,6 +189,40 @@ def web_probe_checked_at(probe):
     return time.strftime('%d.%m %H:%M', time.localtime(ts))
 
 
+def overlay_active_service_states(pools, live_states):
+    """Overlay live evidence on active rows without mutating the probe cache."""
+    if not isinstance(pools, dict) or not isinstance(live_states, dict):
+        return pools
+    service_fields = {'telegram': 'tg', 'youtube': 'yt'}
+    for proto, services in live_states.items():
+        pool = pools.get(proto)
+        if not isinstance(pool, dict) or not isinstance(services, dict):
+            continue
+        active_row = next((row for row in (pool.get('rows') or []) if row.get('active')), None)
+        if not isinstance(active_row, dict):
+            continue
+        for service, live in services.items():
+            field = service_fields.get(service)
+            if not field or not isinstance(live, dict):
+                continue
+            state = str(live.get('state') or '').strip().lower()
+            if state not in ('ok', 'warn', 'fail', 'unknown', 'pending'):
+                continue
+            probe_field = f'probe_{field}'
+            if probe_field not in active_row:
+                active_row[probe_field] = active_row.get(field, 'unknown')
+                active_row[f'{probe_field}_source'] = active_row.get(f'{field}_source', 'pool_probe')
+                active_row[f'{probe_field}_checked_ts'] = active_row.get(f'{field}_checked_ts', 0)
+                if field == 'tg':
+                    active_row['probe_tg_reason_code'] = active_row.get('tg_reason_code', '')
+            active_row[field] = state
+            active_row[f'{field}_source'] = str(live.get('source') or 'runtime')
+            active_row[f'{field}_checked_ts'] = float(live.get('checked_ts') or 0)
+            if field == 'tg' and state == 'ok':
+                active_row['tg_reason_code'] = ''
+    return pools
+
+
 def web_probe_quality_label(probe):
     if not isinstance(probe, dict):
         return ''
@@ -653,6 +687,9 @@ def web_pool_snapshot(
                 'active': bool(current_key and key_value == current_key),
                 'tg': tg_state,
                 'yt': yt_state,
+                'tg_source': str(probe.get('tg_source') or 'pool_probe') if isinstance(probe, dict) else 'pool_probe',
+                'tg_checked_ts': float(probe.get('tg_checked_ts') or probe.get('ts') or 0) if isinstance(probe, dict) else 0,
+                'tg_reason_code': str(probe.get('tg_error_code') or '') if tg_state == 'fail' and isinstance(probe, dict) else '',
                 'custom': web_custom_probe_states(probe, protocol_checks),
                 'checked_at': probe_checked_at(probe),
                 'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,

@@ -568,7 +568,7 @@ def _confirm_active_telegram_probe_from_polling():
     key_id = _hash_key(key_value)
     if (_load_light_key_probe_cache().get(key_id) or {}).get('tg_ok') is True:
         return False
-    return _record_key_probe(route_proto, key_value, tg_ok=True)
+    return _record_key_probe(route_proto, key_value, tg_ok=True, tg_source='live_polling')
 
 
 def _load_light_key_probe_cache():
@@ -11881,6 +11881,8 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
         if isinstance(item, (list, tuple)) and len(item) >= 2 else ''
         for item in selected
     ]
+    telegram_route_proto = _telegram_route_protocol()
+    telegram_route_key = str(_load_current_keys().get(telegram_route_proto, '') or '')
     payload = {
         'tasks': selected,
         'task_key_ids': task_key_ids,
@@ -11890,7 +11892,9 @@ def _start_selected_pool_probe_process(selected, custom_checks, scope, *, initia
         'total_count': total_count,
         'started_at': started_at,
         'telegram_authenticated': bool(_app_mode_telegram_enabled()),
-        'telegram_required_protocol': _telegram_route_protocol(),
+        'telegram_required_protocol': telegram_route_proto,
+        'telegram_confirm_key_id': _hash_key(telegram_route_key) if telegram_route_key else '',
+        'telegram_confirm_proxy_url': proxy_settings.get(telegram_route_proto, ''),
     }
     manifest_ready = _persist_active_pool_probe_manifest(
         selected,
@@ -13275,26 +13279,27 @@ def _web_pools_light_payload(current_keys, key_pools, protocols=None, include_su
     return payload
 
 
+def _overlay_live_pool_status(payload):
+    route_proto = _telegram_route_protocol()
+    if isinstance(payload, dict) and _app_mode_telegram_enabled() and bot_ready and bot_polling and route_proto:
+        _key_pool_web().overlay_active_service_states(
+            payload.get('pools'),
+            {route_proto: {'telegram': {'state': 'ok', 'source': 'live_polling', 'checked_ts': time.time()}}},
+        )
+    return payload
+
+
 def _web_pools_payload(current_keys=None, protocols=None, include_summary=False, include_custom_checks=False):
     if not current_keys:
         current_keys = _load_current_keys()
     key_pools = _ensure_current_keys_in_pools(current_keys)
-    if not include_summary and not include_custom_checks:
-        worker_payload = _web_pool_snapshot_worker_payload(
-            protocols=protocols,
-            include_summary=False,
-            include_custom_checks=False,
-        )
-        if worker_payload is not None:
-            return worker_payload
-    else:
-        worker_payload = _web_pool_snapshot_worker_payload(
-            protocols=protocols,
-            include_summary=include_summary,
-            include_custom_checks=include_custom_checks,
-        )
-        if worker_payload is not None:
-            return worker_payload
+    worker_payload = _web_pool_snapshot_worker_payload(
+        protocols=protocols,
+        include_summary=include_summary,
+        include_custom_checks=include_custom_checks,
+    )
+    if worker_payload is not None:
+        return _overlay_live_pool_status(worker_payload)
     if _background_task_economy_mode():
         log_key = 'Web pool payload light fallback'
         now = time.time()
@@ -13302,13 +13307,13 @@ def _web_pools_payload(current_keys=None, protocols=None, include_summary=False,
         if now - last_log >= BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS:
             background_task_skip_log_at[log_key] = now
             _write_runtime_log('Web pool payload: using light fallback because bot RSS is high.')
-        return _web_pools_light_payload(
+        return _overlay_live_pool_status(_web_pools_light_payload(
             current_keys,
             key_pools,
             protocols=protocols,
             include_summary=include_summary,
             include_custom_checks=include_custom_checks,
-        )
+        ))
     custom_checks = _load_custom_checks()
     route_states = _service_route_summary()
     key_probe_cache = _load_key_probe_cache()
@@ -13339,7 +13344,7 @@ def _web_pools_payload(current_keys=None, protocols=None, include_summary=False,
         )
     if include_custom_checks:
         payload['custom_checks'] = _key_pool_web().web_custom_checks(custom_checks)
-    return payload
+    return _overlay_live_pool_status(payload)
 
 
 def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):

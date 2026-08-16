@@ -13,6 +13,7 @@ from telegram_healthcheck import (
     TELEGRAM_HEALTHCHECK_MIN_OK,
     TELEGRAM_HEALTHCHECK_URLS,
     check_telegram_service_through_proxy,
+    telegram_failure_reason_code,
 )
 
 __all__ = (
@@ -210,6 +211,7 @@ def check_pool_key_through_proxy(
     youtube_profile='quick',
     measure_download=None,
     quality_settings=None,
+    confirm_telegram=None,
     sleep=time.sleep,
 ):
     tg_connect, tg_read = telegram_timeouts
@@ -295,6 +297,15 @@ def check_pool_key_through_proxy(
             sleep=sleep,
         )
 
+    telegram_runtime_confirmed = False
+    if not tg_ok and telegram_required and callable(confirm_telegram):
+        confirmed_ok, confirmed_message = confirm_telegram()
+        if confirmed_ok:
+            tg_ok = True
+            telegram_runtime_confirmed = True
+        if confirmed_message:
+            tg_message = confirmed_message
+
     quality_kwargs = {}
     if collect_quality:
         quality_kwargs.update(tg_metrics)
@@ -321,6 +332,8 @@ def check_pool_key_through_proxy(
         proto,
         key_value,
         tg_ok=tg_ok,
+        tg_error_code='' if tg_ok else telegram_failure_reason_code(tg_message),
+        tg_source='runtime_confirm' if telegram_runtime_confirmed else 'screening',
         yt_ok=yt_ok,
         allow_recent_success_downgrade=True,
         verification_kind='screening',

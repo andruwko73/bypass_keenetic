@@ -1530,6 +1530,11 @@
                 escapeHtml(accessibleLabel) + '" title="' + escapeHtml(accessibleLabel) + '">' + marker + '</span>';
         }
 
+        function protocolStatusService(serviceId, state, content) {
+            return '<span data-status-service="' + escapeHtml(serviceId) + '" data-status-state="' +
+                escapeHtml(lastResultState(state)) + '">' + content + '</span>';
+        }
+
         function protocolIcons(status) {
             if (!status || status.tone === 'empty') {
                 return '';
@@ -1538,66 +1543,72 @@
             const apiState = status && status.api_state ? status.api_state : (status && status.api_ok ? 'ok' : '');
             const youtubeState = status && status.yt_state ? status.yt_state : (status && status.yt_ok ? 'ok' : '');
             if (apiState && apiState !== 'unused') {
-                html += serviceStatusIcon(TELEGRAM_ICON_SRC, 'Telegram', '', apiState);
+                html += protocolStatusService('telegram', apiState, serviceStatusIcon(TELEGRAM_ICON_SRC, 'Telegram', '', apiState));
             }
             if (youtubeState && youtubeState !== 'unused') {
-                html += serviceStatusIcon(YOUTUBE_ICON_SRC, 'YouTube', '', youtubeState);
+                html += protocolStatusService('youtube', youtubeState, serviceStatusIcon(YOUTUBE_ICON_SRC, 'YouTube', '', youtubeState));
             }
             if (status && status.custom) {
                 customChecks.forEach(function(check) {
                     const state = status.custom[check.id];
                     if (state) {
-                        html += serviceStatusIcon(serviceIconSrc(check.icon), check.label || 'Service', check.badge || '', state);
+                        html += protocolStatusService(
+                            'custom:' + check.id,
+                            state,
+                            serviceStatusIcon(serviceIconSrc(check.icon), check.label || 'Service', check.badge || '', state)
+                        );
                     }
                 });
             }
             return html;
         }
 
-        function visibleIconCountHtml(html) {
-            const text = String(html || '');
-            if (!text) {
-                return 0;
-            }
-            const imgCount = (text.match(/<img\b/gi) || []).length;
-            const badgeCount = (text.match(/custom-service-badge/gi) || []).length;
-            return imgCount + badgeCount;
+        function protocolStatusIconMap(html) {
+            const template = document.createElement('template');
+            template.innerHTML = String(html || '');
+            const result = new Map();
+            template.content.querySelectorAll('[data-status-service]').forEach(function(item) {
+                const serviceId = String(item.dataset.statusService || '');
+                if (serviceId && !result.has(serviceId)) {
+                    result.set(serviceId, item);
+                }
+            });
+            return result;
         }
 
-        function rememberProtocolStatusIcons(card, iconsHtml) {
-            if (!card || !iconsHtml) {
-                return;
+        function mergeProtocolStatusIcons(primaryHtml, fallbackHtml) {
+            const primary = protocolStatusIconMap(primaryHtml);
+            const fallback = protocolStatusIconMap(fallbackHtml);
+            if (!primary.size) {
+                return String(primaryHtml || fallbackHtml || '');
             }
-            const newCount = visibleIconCountHtml(iconsHtml);
-            const oldCount = Number(card.dataset.protocolFullIconCount || 0);
-            if (newCount >= oldCount) {
-                card.dataset.protocolFullIcons = iconsHtml;
-                card.dataset.protocolFullIconCount = String(newCount);
-            }
-        }
-
-        function seedProtocolStatusIcons(card) {
-            if (!card || card.dataset.protocolFullIcons) {
-                return;
-            }
-            const container = card.querySelector('[data-protocol-status-icons]');
-            if (container && container.innerHTML) {
-                rememberProtocolStatusIcons(card, container.innerHTML);
-            }
+            fallback.forEach(function(item, serviceId) {
+                const current = primary.get(serviceId);
+                const currentState = lastResultState(current ? current.dataset.statusState : 'unknown');
+                const fallbackState = lastResultState(item.dataset.statusState || 'unknown');
+                const currentUnknown = ['unknown', 'pending'].indexOf(currentState) !== -1;
+                const fallbackKnown = ['unknown', 'pending'].indexOf(fallbackState) === -1;
+                const preferPoolResult = serviceId !== 'telegram' && fallbackKnown;
+                if (!current || preferPoolResult || (currentUnknown && fallbackKnown)) {
+                    primary.set(serviceId, item);
+                }
+            });
+            return Array.from(primary.values()).map(function(item) { return item.outerHTML; }).join('');
         }
 
         function stableProtocolStatusIcons(card, iconsHtml, isLiveStatus, poolOverride) {
             if (!card) {
                 return iconsHtml || '';
             }
-            seedProtocolStatusIcons(card);
             const current = String(iconsHtml || '');
-            const cached = String(card.dataset.protocolFullIcons || '');
-            if (isLiveStatus && !poolOverride && cached && visibleIconCountHtml(current) < Number(card.dataset.protocolFullIconCount || 0)) {
-                return cached;
+            if (isLiveStatus && !poolOverride) {
+                card.dataset.protocolLiveIcons = current;
+            } else if (poolOverride) {
+                card.dataset.protocolPoolIcons = current;
             }
-            rememberProtocolStatusIcons(card, current);
-            return current;
+            const liveIcons = String(card.dataset.protocolLiveIcons || '');
+            const poolIcons = String(card.dataset.protocolPoolIcons || '');
+            return liveIcons ? mergeProtocolStatusIcons(liveIcons, poolIcons) : current;
         }
 
         function serviceStateText(state, okText, failText) {
@@ -1636,17 +1647,18 @@
             if (!coreServices) {
                 return null;
             }
-            const includeTelegram = coreServices.indexOf('telegram') !== -1;
-            const includeYoutube = coreServices.indexOf('youtube') !== -1;
             const tgState = lastResultState(row.dataset.tgState || 'unknown');
             const ytState = lastResultState(row.dataset.ytState || 'unknown');
+            const knownStates = ['ok', 'warn', 'fail'];
+            const includeTelegram = coreServices.indexOf('telegram') !== -1 || knownStates.indexOf(tgState) !== -1;
+            const includeYoutube = coreServices.indexOf('youtube') !== -1 || knownStates.indexOf(ytState) !== -1;
+            const customChecksById = new Map(customChecks.map(function(check) { return [check.id, check]; }));
             const customResults = Array.from(row.querySelectorAll('[data-pool-custom]')).map(function(cell) {
                 const stateNode = cell.querySelector('[data-service-state]');
                 const checkId = cell.getAttribute('data-pool-custom') || '';
-                const check = customChecks.find(function(item) { return item.id === checkId; });
                 return {
                     state: lastResultState(stateNode ? (stateNode.getAttribute('data-service-state') || 'unknown') : 'unknown'),
-                    check: check
+                    check: customChecksById.get(checkId)
                 };
             }).filter(function(item) { return Boolean(item.check); });
             const customKnown = customResults.filter(function(item) { return item.state !== 'unknown'; });
@@ -1670,19 +1682,23 @@
                 parts.push('YouTube: ' + ytText);
                 states.push(ytState === 'ok' || ytState === 'warn');
             }
-            if (tgState === 'ok' || tgState === 'warn') {
-                icons += serviceIcon(TELEGRAM_ICON_SRC, 'Telegram');
+            if (includeTelegram && ['ok', 'warn', 'fail', 'unknown'].indexOf(tgState) !== -1) {
+                icons += protocolStatusService('telegram', tgState, serviceStatusIcon(TELEGRAM_ICON_SRC, 'Telegram', '', tgState));
             }
-            if (ytState === 'ok' || ytState === 'warn') {
-                icons += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');
+            if (includeYoutube && ['ok', 'warn', 'fail', 'unknown'].indexOf(ytState) !== -1) {
+                icons += protocolStatusService('youtube', ytState, serviceStatusIcon(YOUTUBE_ICON_SRC, 'YouTube', '', ytState));
             }
             customResults.forEach(function(item) {
                 const check = item.check;
-                icons += serviceStatusIcon(
-                    serviceIconSrc(check.icon),
-                    check.label || 'Сервис',
-                    check.badge || '',
-                    item.state
+                icons += protocolStatusService(
+                    'custom:' + check.id,
+                    item.state,
+                    serviceStatusIcon(
+                        serviceIconSrc(check.icon),
+                        check.label || 'Сервис',
+                        check.badge || '',
+                        item.state
+                    )
                 );
                 const stateText = {
                     ok: 'работает',
@@ -1717,12 +1733,19 @@
             const card = document.querySelector('[data-protocol-card="' + proto + '"]');
             const status = protocolStatusFromActivePoolRow(proto);
             if (!status) {
+                if (card) {
+                    delete card.dataset.protocolPoolIcons;
+                    const icons = card.querySelector('[data-protocol-status-icons]');
+                    if (icons && card.dataset.protocolLiveIcons) {
+                        icons.innerHTML = card.dataset.protocolLiveIcons;
+                    }
+                }
                 return false;
             }
             if (!force && card && card.dataset.protocolLiveStatus === '1') {
                 const icons = card.querySelector('[data-protocol-status-icons]');
                 if (icons && status.icons) {
-                    icons.innerHTML = stableProtocolStatusIcons(card, status.icons, true, false);
+                    icons.innerHTML = stableProtocolStatusIcons(card, status.icons, false, true);
                     return true;
                 }
                 return false;
@@ -1776,12 +1799,29 @@
             let html = '';
             (coreServices || []).forEach(function(service) {
                 if (service === 'telegram') {
-                    html += '<td class="pool-service-cell" data-pool-tg>' + probeBadge(row.tg, 'tg') + '</td>';
+                    html += '<td class="pool-service-cell" data-pool-tg title="' + escapeHtml(poolServiceTitle(row, 'tg')) + '">' + probeBadge(row.tg, 'tg') + '</td>';
                 } else if (service === 'youtube') {
-                    html += '<td class="pool-service-cell" data-pool-yt>' + probeBadge(row.yt, 'yt') + '</td>';
+                    html += '<td class="pool-service-cell" data-pool-yt title="' + escapeHtml(poolServiceTitle(row, 'yt')) + '">' + probeBadge(row.yt, 'yt') + '</td>';
                 }
             });
             return html;
+        }
+
+        function poolServiceTitle(row, service) {
+            const isTelegram = service === 'tg';
+            const label = isTelegram ? 'Telegram' : 'YouTube';
+            const state = lastResultState(row && row[service]);
+            const stateText = {ok: 'работает', warn: 'нестабильно', fail: 'не работает', unknown: 'не проверено'}[state] || 'проверяется';
+            const source = String((row && row[service + '_source']) || 'pool_probe');
+            let title = label + ': ' + stateText + (source === 'live_polling' ? ' (живой статус)' : ' (последняя полная проверка)');
+            if (isTelegram && row && row.probe_tg && row.probe_tg !== row.tg) {
+                const probeText = {ok: 'работал', warn: 'был нестабилен', fail: 'не работал', unknown: 'не был проверен'}[lastResultState(row.probe_tg)] || 'проверялся';
+                title += '; полная проверка: ' + probeText;
+            }
+            if (isTelegram && row && row.tg_reason_code) {
+                title += '; причина: ' + String(row.tg_reason_code).replace(/_/g, ' ');
+            }
+            return title;
         }
 
         function updatePoolSortOptions(proto) {
@@ -2439,10 +2479,12 @@
                 const tg = item.querySelector('[data-pool-tg]');
                 if (tg) {
                     tg.innerHTML = probeBadge(row.tg, 'tg');
+                    tg.title = poolServiceTitle(row, 'tg');
                 }
                 const yt = item.querySelector('[data-pool-yt]');
                 if (yt) {
                     yt.innerHTML = probeBadge(row.yt, 'yt');
+                    yt.title = poolServiceTitle(row, 'yt');
                 }
                 const customCells = new Map(Array.from(item.querySelectorAll('[data-pool-custom]')).map(function(cell) {
                     return [cell.dataset.poolCustom || '', cell];
@@ -2800,7 +2842,8 @@
             }
             const icons = card.querySelector('[data-protocol-status-icons]');
             if (icons) {
-                icons.innerHTML = stableProtocolStatusIcons(card, status.icons || protocolIcons(status), isLiveStatus, poolOverride);
+                const generatedIcons = protocolIcons(status);
+                icons.innerHTML = stableProtocolStatusIcons(card, generatedIcons || status.icons || '', isLiveStatus, poolOverride);
             }
             if (!poolOverride) {
                 applyProtocolPoolStatusOverride(proto);
@@ -4040,6 +4083,7 @@
                 window.__bypassTestHooks = Object.assign({}, window.__bypassTestHooks || {}, {
                     pollStatus: pollStatus,
                     refreshPoolData: refreshPoolData,
+                    mergeProtocolStatusIcons: mergeProtocolStatusIcons,
                     updatedPageIsReady: updatedPageIsReady,
                     waitForUpdatedWebServerBeforeReload: waitForUpdatedWebServerBeforeReload
                 });

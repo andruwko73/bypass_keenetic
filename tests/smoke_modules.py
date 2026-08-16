@@ -9654,6 +9654,7 @@ def test_pool_probe_worker_streams_hashed_records_without_cache_import():
         recorder.record('vless', 'key', custom={'service': True}, custom_checks=[{'id': 'service'}])
         assert recorder.close() == str(records_path)
         records = [json.loads(line) for line in records_path.read_text(encoding='utf-8').splitlines()]
+    assert all(record.pop('observed_at', 0) > 0 for record in records)
     assert records == [{
         'key_id': 'hash-id',
         'proto': 'vless',
@@ -15914,6 +15915,152 @@ def test_pool_probe_config_does_not_pin_telegram_api_ip():
     assert '149.154.167.220' not in json.dumps(config)
 
 
+def test_active_pool_live_overlay_preserves_probe_evidence():
+    pools = {
+        'vless': {
+            'rows': [
+                {
+                    'active': True,
+                    'tg': 'fail',
+                    'tg_source': 'screening',
+                    'tg_checked_ts': 100,
+                    'tg_reason_code': 'connect_timeout',
+                },
+                {'active': False, 'tg': 'fail', 'tg_source': 'screening'},
+            ],
+        },
+    }
+    result = key_pool_web.overlay_active_service_states(
+        pools,
+        {'vless': {'telegram': {'state': 'ok', 'source': 'live_polling', 'checked_ts': 200}}},
+    )
+    active, inactive = result['vless']['rows']
+    assert active['tg'] == 'ok'
+    assert active['tg_source'] == 'live_polling'
+    assert active['tg_checked_ts'] == 200
+    assert active['probe_tg'] == 'fail'
+    assert active['probe_tg_source'] == 'screening'
+    assert active['probe_tg_reason_code'] == 'connect_timeout'
+    assert active['tg_reason_code'] == ''
+    assert inactive['tg'] == 'fail'
+
+
+def test_telegram_pool_probe_confirmation_and_safe_reason_codes():
+    def failed_http(_proxy, **kwargs):
+        if 'telegram' in str(kwargs.get('url') or ''):
+            return False, 'connect timed out for a private endpoint'
+        return True, 'ok'
+
+    records = []
+    pool_probe_controller.check_pool_key_through_proxy(
+        'vless',
+        'active-key',
+        [],
+        'isolated-proxy',
+        check_telegram_api=lambda _proxy, **_kwargs: (False, 'connect timed out'),
+        check_http=failed_http,
+        record_key_probe=lambda proto, key, **kwargs: records.append((proto, key, kwargs)),
+        probe_custom_targets=lambda _proxy, custom_checks=None: {},
+        retry_delay_seconds=0,
+        telegram_timeouts=(1, 2),
+        http_timeouts=(1, 2),
+        telegram_required=True,
+        confirm_telegram=lambda: (True, 'permanent proxy confirmed'),
+        sleep=lambda _seconds: None,
+    )
+    assert records[0][2]['tg_ok'] is True
+    assert records[0][2]['tg_source'] == 'runtime_confirm'
+    assert records[0][2]['tg_error_code'] == ''
+
+    assert telegram_healthcheck.telegram_failure_reason_code('connect timed out') == 'connect_timeout'
+    assert telegram_healthcheck.telegram_failure_reason_code('HTTP 403') == 'http_status'
+    assert telegram_healthcheck.telegram_failure_reason_code('token=secret private failure') == 'unknown'
+
+    cache = {}
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'active-key',
+        tg_ok=False,
+        tg_error_code='connect_timeout',
+        tg_source='screening',
+        allow_recent_success_downgrade=True,
+        now=100,
+    )
+    entry = cache[probe_cache.hash_key('active-key')]
+    assert entry['tg_error_code'] == 'connect_timeout'
+    assert entry['tg_source'] == 'screening'
+    assert entry['tg_checked_ts'] == 100
+    assert probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'active-key',
+        tg_ok=True,
+        tg_source='live_polling',
+        now=200,
+    )
+    entry = cache[probe_cache.hash_key('active-key')]
+    assert 'tg_error_code' not in entry
+    assert entry['tg_source'] == 'live_polling'
+    assert not probe_cache.update_key_probe_cache_entry(
+        cache,
+        'vless',
+        'active-key',
+        tg_ok=False,
+        tg_error_code='unknown',
+        allow_recent_success_downgrade=True,
+        now=150,
+    )
+    assert cache[probe_cache.hash_key('active-key')]['tg_ok'] is True
+
+
+def test_pool_probe_records_keep_observation_time():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        cache_path = temp_path / 'cache.json'
+        records_path = temp_path / 'records.jsonl'
+        old_path = probe_cache.KEY_PROBE_CACHE_PATH
+        old_lock_root = probe_cache.KEY_PROBE_CACHE_LOCK_ROOT
+        probe_cache.KEY_PROBE_CACHE_PATH = str(cache_path)
+        probe_cache.KEY_PROBE_CACHE_LOCK_ROOT = str(temp_path / 'locks')
+        try:
+            key_id = probe_cache.hash_key('active-key')
+            cache = {}
+            assert probe_cache.update_key_probe_cache_entry(
+                cache,
+                'vless',
+                'active-key',
+                tg_ok=True,
+                tg_source='live_polling',
+                now=200,
+            )
+            with probe_cache.key_probe_cache_transaction():
+                probe_cache.save_key_probe_cache(cache)
+            records_path.write_text(
+                json.dumps({
+                    'key_id': key_id,
+                    'proto': 'vless',
+                    'observed_at': 100,
+                    'values': {
+                        'tg_ok': False,
+                        'tg_error_code': 'connect_timeout',
+                        'tg_source': 'screening',
+                        'allow_recent_success_downgrade': True,
+                    },
+                }) + '\n',
+                encoding='utf-8',
+            )
+            result = pool_probe_process_runner.apply_pool_probe_records_file(str(records_path))
+            loaded = probe_cache.load_key_probe_cache()
+        finally:
+            probe_cache.KEY_PROBE_CACHE_PATH = old_path
+            probe_cache.KEY_PROBE_CACHE_LOCK_ROOT = old_lock_root
+    assert result['applied_count'] == 1
+    assert result['changed_count'] == 0
+    assert loaded[key_id]['tg_ok'] is True
+    assert loaded[key_id]['tg_source'] == 'live_polling'
+
+
 def test_pool_probe_config_matches_persistent_xray_foundation():
     probe_config = pool_probe_runner.build_pool_probe_core_config_batch(
         [('vless', 'vless://id@example.com:443?security=tls#sample')],
@@ -16098,12 +16245,15 @@ def test_web_template_scripts_helpers():
     assert 'function poolTableCoreServices()' in scripts
     assert "const statusCoreServices = poolCoreServices(pool);" in scripts
     assert "const coreServices = poolTableCoreServices();" in scripts
-    assert "if (tgState === 'ok' || tgState === 'warn') {" in scripts
-    assert "icons += serviceIcon(TELEGRAM_ICON_SRC, 'Telegram');" in scripts
-    assert "icons += serviceIcon(YOUTUBE_ICON_SRC, 'YouTube');" in scripts
+    assert "protocolStatusService('telegram', tgState" in scripts
+    assert "protocolStatusService('youtube', ytState" in scripts
     assert "card.dataset.protocolLiveStatus === '1'" in scripts
-    assert 'function seedProtocolStatusIcons(card)' in scripts
-    assert "icons.innerHTML = stableProtocolStatusIcons(card, status.icons, true, false);" in scripts
+    assert 'function mergeProtocolStatusIcons(primaryHtml, fallbackHtml)' in scripts
+    assert "const preferPoolResult = serviceId !== 'telegram' && fallbackKnown;" in scripts
+    assert "const includeYoutube = coreServices.indexOf('youtube') !== -1 || knownStates.indexOf(ytState) !== -1;" in scripts
+    assert 'visibleIconCountHtml' not in scripts
+    assert 'seedProtocolStatusIcons' not in scripts
+    assert "icons.innerHTML = stableProtocolStatusIcons(card, status.icons, false, true);" in scripts
     assert 'refreshPoolData: refreshPoolData' in scripts
     assert 'function poolCustomChecks(pool)' in scripts
     assert 'pool && Array.isArray(pool.custom_checks)' in scripts

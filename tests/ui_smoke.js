@@ -445,6 +445,48 @@ async function protocolHeaderIconSnapshot(page, protocol) {
   }, protocol);
 }
 
+async function assertProtocolStatusServiceMerge(page, label) {
+  const result = await page.evaluate(() => {
+    const merge = window.__bypassTestHooks && window.__bypassTestHooks.mergeProtocolStatusIcons;
+    if (typeof merge !== 'function') {
+      return { error: 'merge hook is unavailable' };
+    }
+    const item = (service, state, text) => (
+      `<span data-status-service="${service}" data-status-state="${state}">${text}</span>`
+    );
+    const liveOk = item('telegram', 'ok', 'live-tg');
+    const pool = item('telegram', 'fail', 'pool-tg') + item('youtube', 'ok', 'pool-yt') +
+      item('custom:chat', 'ok', 'pool-chat');
+    const merged = merge(liveOk, pool);
+    const liveFail = merge(item('telegram', 'fail', 'live-fail'), item('telegram', 'ok', 'pool-ok'));
+    const fallback = merge(item('telegram', 'unknown', 'live-unknown'), item('telegram', 'ok', 'pool-ok'));
+    const poolYoutube = merge(item('youtube', 'fail', 'live-yt-fail'), item('youtube', 'ok', 'pool-yt-ok'));
+    const parse = (html) => {
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      return Array.from(template.content.querySelectorAll('[data-status-service]')).map((node) => ({
+        service: node.dataset.statusService,
+        state: node.dataset.statusState,
+        text: node.textContent,
+      }));
+    };
+    return { merged: parse(merged), liveFail: parse(liveFail), fallback: parse(fallback), poolYoutube: parse(poolYoutube) };
+  });
+  if (result.error) {
+    throw new Error(`${label}: ${result.error}`);
+  }
+  const services = result.merged.map((item) => item.service);
+  if (
+    services.join('|') !== 'telegram|youtube|custom:chat' ||
+    result.merged[0].state !== 'ok' || result.merged[0].text !== 'live-tg' ||
+    result.liveFail[0].state !== 'fail' ||
+    result.fallback[0].state !== 'ok' ||
+    result.poolYoutube[0].state !== 'ok' || result.poolYoutube[0].text !== 'pool-yt-ok'
+  ) {
+    throw new Error(`${label}: service-aware status merge is wrong ${JSON.stringify(result)}`);
+  }
+}
+
 async function assertPersistedCustomResultsRemainVisible(page, protocol, label) {
   const snapshot = await page.evaluate(async (proto) => {
     const row = document.querySelector(`[data-pool-row][data-protocol="${proto}"][data-active="1"]`);
@@ -1280,6 +1322,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     }
     await assertActivePoolRowPinned(page, 'vless', `${name} vless pool order`);
     await assertPersistedCustomResultsRemainVisible(page, 'vless', `${name} saved custom results`);
+    await assertProtocolStatusServiceMerge(page, `${name} protocol status merge`);
     await assertProtocolServiceIconsStableAfterIdleRefresh(page, 'vless', 5, `${name} vless status icons idle refresh`);
     await assertActiveTelegramCardConsistent(page, 'vless', `${name} vless Telegram status after idle refresh`);
     await assertProtocolServiceIconsStableAfterPoolRefresh(page, 'vless', 5, `${name} vless status icons pool refresh`);

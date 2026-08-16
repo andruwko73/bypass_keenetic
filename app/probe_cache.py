@@ -19,6 +19,11 @@ KEY_PROBE_SUCCESS_DOWNGRADE_GRACE = 300
 KEY_PROBE_ERROR_TEXT_MAX_CHARS = 120
 PROBE_VERIFICATION_SCREENING = 'screening'
 PROBE_VERIFICATION_RUNTIME = 'runtime'
+TELEGRAM_REASON_CODES = frozenset((
+    'connect_timeout', 'read_timeout', 'timeout', 'tls_error',
+    'http_status', 'api_invalid', 'unknown',
+))
+TELEGRAM_PROBE_SOURCES = frozenset(('screening', 'runtime', 'runtime_confirm', 'live_polling'))
 KEY_PROBE_CACHE_LOCK_ROOT = ''
 KEY_PROBE_CACHE_LOCK_TIMEOUT_SECONDS = 15.0
 KEY_PROBE_CACHE_LOCK_POLL_SECONDS = 0.05
@@ -286,6 +291,18 @@ def _stored_error_text(value, fallback='', max_chars=KEY_PROBE_ERROR_TEXT_MAX_CH
     return text[:max(1, int(max_chars or KEY_PROBE_ERROR_TEXT_MAX_CHARS))]
 
 
+def _stored_telegram_reason_code(value):
+    code = str(value or '').strip().lower()
+    return code if code in TELEGRAM_REASON_CODES else 'unknown'
+
+
+def _stored_telegram_source(value, verification_kind):
+    source = str(value or '').strip().lower()
+    if source in TELEGRAM_PROBE_SOURCES:
+        return source
+    return 'screening' if verification_kind == PROBE_VERIFICATION_SCREENING else 'runtime'
+
+
 def youtube_quality_score(
     *,
     yt_ok=None,
@@ -464,6 +481,8 @@ def update_key_probe_cache_entry(
     timeout=False,
     timeout_reason='',
     tg_latency_ms=None,
+    tg_error_code=None,
+    tg_source='',
     yt_latency_ms=None,
     googlevideo_latency_ms=None,
     yt_home_ok=None,
@@ -501,6 +520,8 @@ def update_key_probe_cache_entry(
         return False
     changed = False
     skipped_downgrade = False
+    telegram_update_applied = False
+    telegram_state_changed = False
     if entry.get('schema') != KEY_PROBE_CACHE_SCHEMA_VERSION:
         entry['schema'] = KEY_PROBE_CACHE_SCHEMA_VERSION
         changed = True
@@ -543,10 +564,35 @@ def update_key_probe_cache_entry(
             _skip_recent_success_downgrade(entry, 'tg_ok', value, now, previous_ts)
         ):
             skipped_downgrade = True
-        elif 'tg_ok' not in entry or entry.get('tg_ok') is not value:
-            entry['tg_ok'] = value
-            changed = True
-        if value is not True and tg_latency_ms is None and 'tg_latency_ms' in entry:
+        else:
+            telegram_update_applied = True
+            if 'tg_ok' not in entry or entry.get('tg_ok') is not value:
+                entry['tg_ok'] = value
+                changed = True
+                telegram_state_changed = True
+            source = _stored_telegram_source(tg_source, normalized_verification_kind)
+            if entry.get('tg_source') != source:
+                entry['tg_source'] = source
+                changed = True
+                telegram_state_changed = True
+            if value is True:
+                if 'tg_error_code' in entry:
+                    entry.pop('tg_error_code', None)
+                    changed = True
+                    telegram_state_changed = True
+            else:
+                reason_code = _stored_telegram_reason_code(tg_error_code)
+                if entry.get('tg_error_code') != reason_code:
+                    entry['tg_error_code'] = reason_code
+                    changed = True
+                    telegram_state_changed = True
+            if (
+                telegram_state_changed or not previous_ts or
+                now - previous_ts >= float(min_write_interval or 0)
+            ) and entry.get('tg_checked_ts') != now:
+                entry['tg_checked_ts'] = now
+                changed = True
+        if telegram_update_applied and value is not True and tg_latency_ms is None and 'tg_latency_ms' in entry:
             entry.pop('tg_latency_ms', None)
             changed = True
     if yt_ok is not None:

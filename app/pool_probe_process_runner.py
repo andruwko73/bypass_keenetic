@@ -43,6 +43,7 @@ from proxy_status import (
     probe_custom_targets,
     wait_for_socks5_handshake,
 )
+from telegram_healthcheck import check_telegram_service_through_proxy
 
 
 def _read_json(path, default):
@@ -154,7 +155,12 @@ class _WorkerProbeRecorder:
             if file is None:
                 return
             json.dump(
-                {'key_id': str(key_id), 'proto': str(proto or ''), 'values': values},
+                {
+                    'key_id': str(key_id),
+                    'proto': str(proto or ''),
+                    'observed_at': time.time(),
+                    'values': values,
+                },
                 file,
                 ensure_ascii=False,
                 separators=(',', ':'),
@@ -340,6 +346,18 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
             'stable_latency_ms': settings['quality_stable_latency_ms'], 'fast_latency_ms': settings['quality_fast_latency_ms'],
             'min_1600p_mbps': settings['quality_1600p_mbps'], 'min_4k_mbps': settings['quality_4k_mbps'],
         }
+        task_key_id = task_key_ids.get((str(proto or ''), str(key_value or '')), '')
+        confirm_proxy_url = str(payload.get('telegram_confirm_proxy_url') or '')
+        confirm_telegram = None
+        if task_key_id and task_key_id == str(payload.get('telegram_confirm_key_id') or '') and confirm_proxy_url:
+            confirm_telegram = lambda: check_telegram_service_through_proxy(
+                telegram_check,
+                curl_check_http,
+                confirm_proxy_url,
+                telegram_timeouts=(settings['retry_connect'], settings['retry_read']),
+                http_timeouts=(settings['retry_connect'], settings['retry_read']),
+                allow_app_endpoints_without_api=False,
+            )
         return check_pool_key_through_proxy(
             proto, key_value, custom_checks, proxy_url,
             check_telegram_api=telegram_check, check_http=curl_check_http, record_key_probe=record_key_probe or recorder.record,
@@ -348,6 +366,7 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
             http_retry_timeouts=(settings['retry_connect'], settings['retry_read']),
             telegram_required=str(proto or '') == str(payload.get('telegram_required_protocol') or ''),
             youtube_profile=settings['youtube_profile'], measure_download=measure_quality if settings['quality_enabled'] else None, quality_settings=quality_settings,
+            confirm_telegram=confirm_telegram,
         )
 
     def timeout_budget(custom_checks, task_count=1, workers=1):
@@ -392,6 +411,7 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
 
 _PROBE_RECORD_ALLOWED_FIELDS = frozenset((
     'tg_ok', 'yt_ok', 'custom', 'custom_checks', 'timeout', 'timeout_reason',
+    'tg_error_code', 'tg_source',
     'tg_latency_ms', 'yt_latency_ms', 'googlevideo_latency_ms', 'yt_home_ok',
     'yt_watch_ok', 'yt_short_ok', 'yt_bootstrap_ok', 'googlevideo_ok',
     'yt_error_rate', 'yt_last_error', 'yt_stability', 'yt_first_load_ms',
@@ -447,7 +467,8 @@ def apply_pool_probe_records_file(path):
                 }
                 if not updates:
                     continue
-                records.append((key_id, proto, updates))
+                observed_at = float(record.get('observed_at') or 0)
+                records.append((key_id, proto, observed_at, updates))
     except OSError:
         return dict(empty_result)
     if not records:
@@ -458,13 +479,13 @@ def apply_pool_probe_records_file(path):
     with key_probe_cache_transaction():
         cache = load_key_probe_cache()
         changed = False
-        for key_id, proto, updates in records:
+        for key_id, proto, observed_at, updates in records:
             entry_changed = update_key_probe_cache_entry(
                 cache,
                 proto,
                 '',
                 key_id=key_id,
-                now=now,
+                now=observed_at or now,
                 min_write_interval=0,
                 **updates,
             )
@@ -477,7 +498,7 @@ def apply_pool_probe_records_file(path):
         'records_count': len(records),
         'applied_count': len(records),
         'changed_count': changed_count,
-        'unique_key_count': len({key_id for key_id, _proto, _updates in records}),
+        'unique_key_count': len({key_id for key_id, _proto, _observed_at, _updates in records}),
     }
 
 
