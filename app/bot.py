@@ -159,8 +159,10 @@ from web_command_state import (
     consume_command_state_for_render as _consume_command_state_for_render_impl,
     consume_flash_message as _consume_flash_message_impl,
     estimate_update_progress as _estimate_update_progress,
+    reconcile_update_state as _reconcile_update_state,
     set_command_progress as _set_command_progress_state,
     set_flash_message as _set_flash_message_impl,
+    update_state_matches_command as _update_state_matches_command,
 )
 from web_http_common import (
     BoundedThreadingHTTPServer,
@@ -9521,17 +9523,31 @@ def _web_background_command_code(command):
 
 def _get_web_command_state():
     state = _read_web_command_state_file()
-    if state.get('running') and not _shared_command_job_running(source='web'):
+    job_state = _read_json_file(TELEGRAM_COMMAND_JOB_FILE, {}) or {}
+    changed = False
+    if state.get('command') in WEB_UPDATE_COMMANDS:
+        update_state = update_status.read_update_status()
+        matches = _update_state_matches_command(state, update_state, job_state)
+        if state.get('running'):
+            changed = _reconcile_update_state(state, update_state, job_state)
+        if (
+            matches and
+            not update_state.get('running') and
+            update_state.get('finished_at') and
+            job_state.get('running')
+        ):
+            job_state['running'] = False
+            job_state['finished_at'] = update_state.get('finished_at') or time.time()
+            _write_json_file(TELEGRAM_COMMAND_JOB_FILE, job_state)
+    if state.get('running') and not _shared_command_job_running(job_state, source='web'):
         state['running'] = False
         state['result'] = state.get('result') or 'Команда прервана или сервис был перезапущен до записи результата.'
         state['progress_label'] = ''
         state['finished_at'] = time.time()
+        changed = True
+    if changed:
         _write_web_command_state_for_render(state)
     state = _attach_web_command_duration_estimate(state)
-    if state.get('running') and state.get('command') in WEB_UPDATE_COMMANDS:
-        update_state = update_status.read_update_status()
-        if update_state.get('running') and update_state.get('command') == state.get('command'):
-            state['target_version'] = update_state.get('target_version', '')
     with web_command_lock:
         web_command_state.update(state)
     return _command_state_snapshot(web_command_lock, web_command_state)
@@ -9613,6 +9629,7 @@ def _start_web_command(command):
             progress=state.get('progress', 0),
             progress_label=state.get('progress_label', ''),
             message='Команда запущена',
+            started_at=state['started_at'],
         )
         _record_event('web_command_start', label, source='web', protocol='system', service=command)
     _write_json_file(TELEGRAM_COMMAND_JOB_FILE, {

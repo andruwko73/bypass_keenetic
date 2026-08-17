@@ -18,6 +18,13 @@ COMMON_UPDATE_PROGRESS_STEPS = (
 )
 
 
+def _progress_value(value):
+    try:
+        return max(0, min(100, int(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def command_state_snapshot(lock, state):
     with lock:
         return dict(state)
@@ -112,10 +119,65 @@ def estimate_update_progress(
         ('Legacy-пути уже доступны.', 6, legacy_label),
         ('Подготовка legacy-путей:', 6, legacy_label),
     ) + COMMON_UPDATE_PROGRESS_STEPS
-    for marker, progress, label in progress_steps:
-        if marker in result_text:
-            return progress, label
+    matches = [
+        (progress, label)
+        for marker, progress, label in progress_steps
+        if marker in result_text
+    ]
+    if matches:
+        return max(matches, key=lambda item: item[0])
     return 8, 'Обновление запущено'
+
+
+def update_state_matches_command(state, update_state, job_state=None, *, start_tolerance=10.0):
+    if not isinstance(state, dict) or not isinstance(update_state, dict):
+        return False
+    command = str(state.get('command') or '')
+    if not command or command not in DEFAULT_UPDATE_COMMANDS + ('rollback_update',):
+        return False
+    if str(update_state.get('command') or '') != command:
+        return False
+    if isinstance(job_state, dict) and job_state:
+        if str(job_state.get('source') or '') != 'web':
+            return False
+        if str(job_state.get('command') or '') != command:
+            return False
+    starts = []
+    for value in (
+        state.get('started_at'),
+        update_state.get('started_at'),
+        job_state.get('started_at') if isinstance(job_state, dict) else None,
+    ):
+        try:
+            value = float(value or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            starts.append(value)
+    return not starts or max(starts) - min(starts) <= max(0.0, float(start_tolerance))
+
+
+def reconcile_update_state(state, update_state, job_state=None):
+    if not state.get('running') or not update_state_matches_command(state, update_state, job_state):
+        return False
+    before = dict(state)
+    current_progress = _progress_value(state.get('progress'))
+    incoming_progress = _progress_value(update_state.get('progress'))
+    if incoming_progress >= current_progress:
+        state['progress'] = incoming_progress
+        if update_state.get('progress_label'):
+            state['progress_label'] = str(update_state.get('progress_label'))
+    if update_state.get('target_version'):
+        state['target_version'] = str(update_state.get('target_version'))
+    if not update_state.get('running') and update_state.get('finished_at'):
+        state['running'] = False
+        state['progress'] = 100
+        state['progress_label'] = str(update_state.get('progress_label') or '')
+        state['result'] = str(update_state.get('message') or state.get('result') or '')
+        state['finished_at'] = float(update_state.get('finished_at') or time.time())
+        if 'shown_after_finish' in state:
+            state['shown_after_finish'] = False
+    return state != before
 
 
 def finish_command(

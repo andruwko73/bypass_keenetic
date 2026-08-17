@@ -464,15 +464,17 @@ install_unblock_ipset_cron_job() {
 wait_for_rollback_readiness() {
     attempts=0
     stable_samples=0
+    readiness_deadline=\$((\$(date +%s) + 300))
     app_service='/opt/etc/init.d/S99telegram_bot'
     [ ! -x /opt/etc/init.d/S99web_bot ] || app_service='/opt/etc/init.d/S99web_bot'
     router_ip="\$(ip -4 addr show br0 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
     [ -n "\$router_ip" ] || router_ip='192.168.1.1'
-    while [ "\$attempts" -lt 45 ]; do
+    while [ "\$(date +%s)" -lt "\$readiness_deadline" ]; do
         attempts=\$((attempts + 1))
         ready=1
         [ -x "\$app_service" ] && "\$app_service" status >/dev/null 2>&1 || ready=0
-        curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
+        HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy= \
+            curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
         if [ -x /opt/etc/init.d/S24xray ]; then
             /opt/etc/init.d/S24xray status >/dev/null 2>&1 || ready=0
         elif [ -x /opt/etc/init.d/S24v2ray ]; then
@@ -578,7 +580,7 @@ else
 fi
 
 if ! wait_for_rollback_readiness; then
-    echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 90 секунд."
+    echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 300 секунд."
     exit 1
 fi
 

@@ -253,7 +253,7 @@ def _schedule_app_service_restart(delay_seconds=1.5):
     )
 
 
-def _run_authoritative_rollback_script(backup_dir, timeout_seconds=300):
+def _run_authoritative_rollback_script(backup_dir, timeout_seconds=900):
     """Use the update-generated rollback so web and automatic recovery stay identical."""
     rollback_path = os.path.join(backup_dir, 'rollback.sh')
     if not os.path.isfile(rollback_path) or os.path.islink(rollback_path):
@@ -267,7 +267,7 @@ def _run_authoritative_rollback_script(backup_dir, timeout_seconds=300):
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             check=False,
-            timeout=max(30, int(timeout_seconds or 300)),
+            timeout=max(30, int(timeout_seconds or 900)),
         )
     except subprocess.TimeoutExpired:
         return 'Сценарий полного отката не завершился за отведённое время.'
@@ -540,7 +540,20 @@ def _finish_web_command(web_state_file, command, result):
     )
     _write_json(web_state_file, state)
     if command in web_commands_runtime.WEB_UPDATE_COMMANDS:
-        update_status.finish_update_status(command, result, progress=state.get('progress', 100))
+        current_status = update_status.read_update_status()
+        terminal_matches = bool(
+            not current_status.get('running')
+            and current_status.get('finished_at')
+            and web_command_state.update_state_matches_command(state, current_status)
+        )
+        if not terminal_matches:
+            update_status.finish_update_status(
+                command,
+                result,
+                progress=state.get('progress', 100),
+                sync_web=True,
+                web_state_path=web_state_file,
+            )
         _record_event(
             'web_command_finish',
             result,
@@ -583,19 +596,21 @@ def run_worker(
         return_code, output = executor(command, job, progress_callback=progress_callback)
     except Exception as exc:
         return_code, output = 1, f'Ошибка запуска фоновой команды: {exc}'
-    if command == 'rollback_update' and source != 'web':
-        update_status.finish_update_status('rollback_update', output, progress=100)
-    if source == 'web':
-        _finish_web_command(web_state_file, command, output)
-    else:
-        _write_json(result_file, {
-            'action': command,
-            'chat_id': int(job.get('chat_id') or 0),
-            'menu_name': str(job.get('menu_name') or 'service'),
-            'return_code': int(return_code),
-            'output': str(output or ''),
-            'finished_at': time.time(),
-        })
-    _remove_file(job_file)
+    try:
+        if command == 'rollback_update' and source != 'web':
+            update_status.finish_update_status('rollback_update', output, progress=100)
+        if source == 'web':
+            _finish_web_command(web_state_file, command, output)
+        else:
+            _write_json(result_file, {
+                'action': command,
+                'chat_id': int(job.get('chat_id') or 0),
+                'menu_name': str(job.get('menu_name') or 'service'),
+                'return_code': int(return_code),
+                'output': str(output or ''),
+                'finished_at': time.time(),
+            })
+    finally:
+        _remove_file(job_file)
     gc.collect()
     return int(return_code)

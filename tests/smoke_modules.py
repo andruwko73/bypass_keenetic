@@ -2570,6 +2570,7 @@ def test_web_rollback_prefers_update_generated_full_script(tmp_path, monkeypatch
     assert 'настройки, ключи, списки маршрутов и DNS' in result
     assert calls[0][0] == ['/bin/sh', str(rollback_script)]
     assert calls[0][1]['stdout'] is subprocess.DEVNULL
+    assert calls[0][1]['timeout'] == 900
 
 
 def test_subscription_nightly_pool_probe_schedule_helpers():
@@ -5192,7 +5193,7 @@ def test_direct_update_script_records_update_status():
     unblock_update = (APP_ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
     repo_update_source = (APP_ROOT / 'repo_update.py').read_text(encoding='utf-8')
     assert 'write_cli_update_status()' in script
-    assert "path = '/opt/etc/bot/update_status.json'" in script
+    assert "'/opt/etc/bot/update_status.json'" in script
     assert 'write_cli_update_status update true 3 Подготовка "Обновление запущено"' in script
     assert 'write_cli_update_status update true 10 Загрузка "Скачиваем файлы обновления"' in script
     assert 'download_update_file "$(repo_file_url script.sh)"' in script
@@ -5237,6 +5238,17 @@ def test_direct_update_script_records_update_status():
     assert 'update_completion_message="Обновление завершено; запущен установщик первичной настройки"' in script
     assert 'write_cli_update_status update false 100 Готово "$update_completion_message"' in script
     assert 'write_cli_update_status update false 100 Ошибка "Обновление не удалось; выполнена попытка восстановить рабочее состояние"' in script
+    assert "web_state_path = os.environ.get('BYPASS_WEB_COMMAND_STATE_PATH'" in script
+    assert "job_state.get('source') == 'web'" in script
+    assert "web_state['progress'] = 100" in script
+    assert 'write_rollback_update_status true 10 Подготовка' in script
+    assert 'write_rollback_update_status true 35 Состояние' in script
+    assert 'write_rollback_update_status true 60 Файлы' in script
+    assert 'write_rollback_update_status true 75 Сервисы' in script
+    assert 'write_rollback_update_status true 90 Запуск' in script
+    assert 'write_rollback_update_status false 100 Готово' in script
+    assert 'cp -p "$stage_dir/update_status.py" "$backup_dir/.rollback-tools/update_status.py"' in script
+    assert 'cp -p "$stage_dir/web_command_state.py" "$backup_dir/.rollback-tools/web_command_state.py"' in script
     application_start_index = script.index(
         'write_cli_update_status update true 88 Запуск "Запускаем программу и веб-интерфейс"',
         files_replace_index,
@@ -5294,6 +5306,88 @@ def test_direct_update_script_records_update_status():
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     assert 'cleanup_bootstrap_backups()' in bootstrap
     assert 'cleanup_bootstrap_backups 1' in bootstrap
+
+
+def test_update_script_bridges_progress_for_previous_release():
+    script = (ROOT / 'script.sh').read_text(encoding='utf-8')
+    function_source = script.split('write_cli_update_status() {', 1)[1].split('\nmigrate_runtime_config_defaults() {', 1)[0]
+    python_source = function_source.split("<<'PY'", 1)[1].split('\n', 1)[1].split('\nPY\n', 1)[0]
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        status_path = tmp_path / 'update.json'
+        web_path = tmp_path / 'web.json'
+        job_path = tmp_path / 'job.json'
+        web_path.write_text(json.dumps({
+            'running': True,
+            'command': 'update',
+            'progress': 6,
+            'progress_label': 'Подготовка путей запуска бота',
+            'started_at': 100,
+        }), encoding='utf-8')
+        job_path.write_text(json.dumps({
+            'running': True,
+            'source': 'web',
+            'command': 'update',
+            'started_at': 100,
+        }), encoding='utf-8')
+        status_path.write_text(json.dumps({
+            'running': True,
+            'command': 'update',
+            'progress': 5,
+            'started_at': 100,
+        }), encoding='utf-8')
+        env = dict(os.environ)
+        env.update({
+            'BYPASS_UPDATE_STATUS_PATH': str(status_path),
+            'BYPASS_WEB_COMMAND_STATE_PATH': str(web_path),
+            'BYPASS_COMMAND_JOB_PATH': str(job_path),
+        })
+
+        observed = []
+        for running, progress, label, message, target in (
+            ('true', '3', 'Подготовка', 'Обновление запущено', ''),
+            ('true', '10', 'Загрузка', 'Скачиваем файлы', ''),
+            ('true', '40', 'Подготовлено', 'Файлы проверены', 'v1.1033'),
+            ('true', '65', 'Установка', 'Устанавливаем файлы', ''),
+            ('true', '85', 'Перезапуск', 'Перезапускаем сервисы', ''),
+            ('false', '100', 'Готово', 'Обновление завершено', ''),
+        ):
+            subprocess.run(
+                [sys.executable, '-c', python_source, 'update', running, progress, label, message, target],
+                env=env,
+                check=True,
+            )
+            observed.append(json.loads(web_path.read_text(encoding='utf-8'))['progress'])
+
+        assert observed == sorted(observed)
+        assert observed == [6, 10, 40, 65, 85, 100]
+        assert json.loads(status_path.read_text(encoding='utf-8'))['target_version'] == 'v1.1033'
+        assert json.loads(web_path.read_text(encoding='utf-8'))['running'] is False
+        assert json.loads(job_path.read_text(encoding='utf-8'))['running'] is False
+
+        web_path.write_text(json.dumps({
+            'running': True,
+            'command': 'update',
+            'progress': 6,
+            'started_at': 300,
+        }), encoding='utf-8')
+        job_path.write_text(json.dumps({
+            'running': True,
+            'source': 'telegram',
+            'action': '-update',
+            'started_at': 300,
+        }), encoding='utf-8')
+        subprocess.run(
+            [sys.executable, '-c', python_source, 'update', 'true', '65', 'Установка', 'Шаг', ''],
+            env=env,
+            check=True,
+        )
+        assert json.loads(web_path.read_text(encoding='utf-8'))['progress'] == 6
+
+    update_body = script.split('if [ "$1" = "-update" ]; then', 1)[1].split('if [ "$1" = "-reboot" ]; then', 1)[0]
+    install_body = script.split('if [ "$1" = "-install" ]; then', 1)[1].split('if [ "$1" = "-update" ]; then', 1)[0]
+    assert 'write_cli_update_status' in update_body
+    assert 'write_cli_update_status' not in install_body
 
 
 def test_application_update_maintenance_mode_keeps_web_available():
@@ -6476,7 +6570,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert r'managed_state_snapshot.py" restore "\$BACKUP_DIR/full-state"' in rollback_source
     assert 'full_state_restored=1' in rollback_source
     assert 'wait_for_rollback_readiness()' in rollback_source
+    assert r'readiness_deadline=\$((\$(date +%s) + 300))' in rollback_source
+    assert r'while [ "\$(date +%s)" -lt "\$readiness_deadline" ]' in rollback_source
+    assert 'стабильной готовности за 300 секунд' in rollback_source
     assert r'stable_samples=\$((stable_samples + 1))' in rollback_source
+    assert r'HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy=' in rollback_source
     assert r'curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/"' in rollback_source
     assert 'if ! wait_for_rollback_readiness; then' in rollback_source
     before_restore = rollback_source.split('full_state_restored=0', 1)[0]
@@ -6489,6 +6587,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert rollback_source.find(r'"\$BOT_SERVICE_PATH" restart') < rollback_source.find('if ! wait_for_rollback_readiness; then')
     bootstrap_rollback_source = bootstrap_source.split('write_rollback_script() {', 1)[1].split('\nEOF', 1)[0]
     assert 'wait_for_rollback_readiness()' in bootstrap_rollback_source
+    assert r'readiness_deadline=\$((\$(date +%s) + 300))' in bootstrap_rollback_source
+    assert r'while [ "\$(date +%s)" -lt "\$readiness_deadline" ]' in bootstrap_rollback_source
+    assert 'стабильной готовности за 300 секунд' in bootstrap_rollback_source
+    assert r'HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy=' in bootstrap_rollback_source
     assert r'curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/"' in bootstrap_rollback_source
     assert bootstrap_rollback_source.find('/opt/etc/init.d/S99unblock restart') < bootstrap_rollback_source.find('/opt/etc/init.d/S99web_bot restart')
     assert bootstrap_rollback_source.find('/opt/etc/init.d/S99telegram_bot restart') < bootstrap_rollback_source.find('if ! wait_for_rollback_readiness; then')
@@ -10534,7 +10636,7 @@ def test_system_command_worker_finishes_web_update_state():
         finished = []
         original_finish = update_status.finish_update_status
         original_record_event = system_command_runtime._record_event
-        update_status.finish_update_status = lambda command, result, progress=100: finished.append(
+        update_status.finish_update_status = lambda command, result, progress=100, **_kwargs: finished.append(
             (command, result, progress)
         )
         system_command_runtime._record_event = lambda *_args, **_kwargs: None
@@ -10557,6 +10659,34 @@ def test_system_command_worker_finishes_web_update_state():
         assert state['progress'] == 100
         assert state['result'] == 'готово'
         assert finished == [('update', 'готово', 100)]
+
+
+def test_system_command_worker_clears_job_when_final_state_write_fails():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        job_file = tmp_path / 'job.json'
+        job_file.write_text(json.dumps({
+            'running': True,
+            'source': 'web',
+            'command': 'restart_services',
+        }), encoding='utf-8')
+        original_finish = system_command_runtime._finish_web_command
+
+        def fail_finish(*_args, **_kwargs):
+            raise OSError('state write failed')
+
+        system_command_runtime._finish_web_command = fail_finish
+        try:
+            with pytest.raises(OSError, match='state write failed'):
+                system_command_runtime.run_worker(
+                    str(job_file),
+                    str(tmp_path / 'result.json'),
+                    str(tmp_path / 'web.json'),
+                    execute=lambda *_args, **_kwargs: (0, 'готово'),
+                )
+        finally:
+            system_command_runtime._finish_web_command = original_finish
+        assert not job_file.exists()
 
 
 def test_telegram_install_ui_helpers():
@@ -13937,6 +14067,18 @@ def test_chrome_remote_desktop_routes_are_manual_only():
 def test_web_command_state_helpers():
     assert web_command_state.estimate_update_progress('noop', '', ('update',)) == (0, '')
     assert web_command_state.estimate_update_progress('update', 'Бэкап создан.') == (70, 'Резервная копия готова, идёт замена файлов')
+    mixed_log = '\n'.join((
+        'Legacy-пути бота уже доступны.',
+        'Начинаем обновление.',
+        'Скачиваем обновления во временную папку и проверяем файлы.',
+        'Бэкап создан.',
+        'Обновления скачены, права настроены.',
+    ))
+    assert web_command_state.estimate_update_progress('update', mixed_log) == (82, 'Новые файлы установлены')
+    assert web_command_state.estimate_update_progress('update', mixed_log + '\nБот запущен.') == (
+        100,
+        'Бот перезапущен, обновление завершено',
+    )
     lock = threading.Lock()
     state = {
         'running': True,
@@ -13971,6 +14113,57 @@ def test_web_command_state_helpers():
     ) is True
     assert state['progress'] == 82
     assert state['progress_label'] == 'Новые файлы установлены'
+
+    web_state = {
+        'running': True,
+        'command': 'update',
+        'progress': 6,
+        'progress_label': 'Подготовка путей запуска бота',
+        'started_at': 100,
+    }
+    job_state = {'running': True, 'source': 'web', 'command': 'update', 'started_at': 100}
+    assert web_command_state.reconcile_update_state(web_state, {
+        'running': True,
+        'command': 'update',
+        'progress': 65,
+        'progress_label': 'Установка',
+        'target_version': 'v1.1033',
+        'started_at': 101,
+        'finished_at': 0,
+    }, job_state) is True
+    assert web_state['progress'] == 65
+    assert web_state['target_version'] == 'v1.1033'
+    assert web_command_state.reconcile_update_state(web_state, {
+        'running': True,
+        'command': 'update',
+        'progress': 10,
+        'progress_label': 'Загрузка',
+        'started_at': 101,
+        'finished_at': 0,
+    }, job_state) is False
+    assert web_state['progress'] == 65
+    assert web_command_state.reconcile_update_state(web_state, {
+        'running': False,
+        'command': 'update',
+        'progress': 100,
+        'progress_label': 'Готово',
+        'message': 'Обновление завершено',
+        'started_at': 101,
+        'finished_at': 200,
+    }, job_state) is True
+    assert web_state['running'] is False
+    assert web_state['progress'] == 100
+    assert web_state['result'] == 'Обновление завершено'
+
+    stale_state = {'running': True, 'command': 'update', 'progress': 5, 'started_at': 500}
+    assert web_command_state.reconcile_update_state(stale_state, {
+        'running': False,
+        'command': 'update',
+        'progress': 100,
+        'started_at': 100,
+        'finished_at': 200,
+    }, {'source': 'web', 'command': 'update', 'started_at': 500}) is False
+    assert stale_state['running'] is True
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / 'events.jsonl'
         event_history.record_event(
@@ -14168,12 +14361,17 @@ def test_web_command_render_persistence_is_conditional_and_eio_safe():
             'progress_label': 'Запущено',
             'finished_at': 0,
         },
-        '_shared_command_job_running': lambda source='web': False,
+        '_read_json_file': lambda *_args, **_kwargs: {},
+        '_shared_command_job_running': lambda _state=None, source='web': False,
+        '_reconcile_update_state': web_command_state.reconcile_update_state,
+        '_update_state_matches_command': web_command_state.update_state_matches_command,
+        '_write_json_file': lambda *_args, **_kwargs: None,
         '_write_web_command_state_for_render': lambda payload: stale_repairs.append(dict(payload)) or False,
         '_attach_web_command_duration_estimate': lambda payload: dict(payload),
         '_command_state_snapshot': web_command_state.command_state_snapshot,
         'time': py_types.SimpleNamespace(time=lambda: 123.0),
         'update_status': py_types.SimpleNamespace(read_update_status=lambda: {}),
+        'TELEGRAM_COMMAND_JOB_FILE': '/tmp/job.json',
         'WEB_UPDATE_COMMANDS': ('update',),
         'web_command_lock': stale_lock,
         'web_command_state': stale_state,
@@ -17300,6 +17498,74 @@ def test_update_status_helpers():
         finished = update_status.finish_update_status('update', 'done', path=str(path))
         assert finished['running'] is False
         assert finished['progress'] == 100
+
+        web_path = Path(tmp) / 'web.json'
+        job_path = Path(tmp) / 'job.json'
+        web_path.write_text(json.dumps({
+            'running': True,
+            'command': 'update',
+            'progress': 6,
+            'progress_label': 'Подготовка путей запуска бота',
+            'started_at': 100,
+        }), encoding='utf-8')
+        job_path.write_text(json.dumps({
+            'running': True,
+            'source': 'web',
+            'command': 'update',
+            'started_at': 100,
+        }), encoding='utf-8')
+        update_status.write_update_status(
+            command='update',
+            running=True,
+            progress=65,
+            progress_label='Установка',
+            started_at=100,
+            path=str(path),
+            time_provider=lambda: 110,
+            sync_web=True,
+            web_state_path=str(web_path),
+            job_path=str(job_path),
+        )
+        update_status.write_update_status(
+            command='update',
+            running=True,
+            progress=10,
+            progress_label='Загрузка',
+            started_at=100,
+            path=str(path),
+            time_provider=lambda: 120,
+            sync_web=True,
+            web_state_path=str(web_path),
+            job_path=str(job_path),
+        )
+        assert update_status.read_update_status(str(path))['progress'] == 65
+        assert json.loads(web_path.read_text(encoding='utf-8'))['progress'] == 65
+        terminal = update_status.finish_update_status(
+            'update',
+            'Обновление завершено',
+            path=str(path),
+            sync_web=True,
+            web_state_path=str(web_path),
+            job_path=str(job_path),
+        )
+        assert terminal['running'] is False
+        assert json.loads(web_path.read_text(encoding='utf-8'))['running'] is False
+        assert json.loads(job_path.read_text(encoding='utf-8'))['running'] is False
+
+        missing_web_path = Path(tmp) / 'clean-install-web.json'
+        missing_job_path = Path(tmp) / 'clean-install-job.json'
+        install_status = update_status.write_update_status(
+            command='install',
+            running=True,
+            progress=20,
+            path=str(Path(tmp) / 'install.json'),
+            sync_web=True,
+            web_state_path=str(missing_web_path),
+            job_path=str(missing_job_path),
+        )
+        assert install_status['progress'] == 20
+        assert not missing_web_path.exists()
+        assert not missing_job_path.exists()
 
 
 def test_update_maintenance_runtime():

@@ -1070,6 +1070,42 @@ UPDATE_MAINTENANCE_PATH="$UPDATE_MAINTENANCE_PATH"
 UPDATE_MAINTENANCE_READY_PATH="$UPDATE_MAINTENANCE_READY_PATH"
 ROLLBACK_MODULES="$BOT_RUNTIME_MODULES CHANGELOG.md"
 
+write_rollback_update_status() {
+  running="\${1:-true}"
+  progress="\${2:-5}"
+  progress_label="\${3:-Откат}"
+  message="\${4:-Выполняется откат обновления}"
+  PYTHONPATH="\$BACKUP_DIR/.rollback-tools" python3 - "\$running" "\$progress" "\$progress_label" "\$message" <<'PY' >/dev/null 2>&1 || true
+import sys
+import update_status
+
+running, progress, progress_label, message = sys.argv[1:5]
+update_status.write_update_status(
+    command='rollback_update',
+    running=running.lower() in ('1', 'true', 'yes', 'y'),
+    progress=int(progress or 0),
+    progress_label=progress_label,
+    message=message,
+    sync_web=True,
+)
+PY
+}
+
+handle_rollback_exit() {
+  rollback_exit_code="\$1"
+  trap - EXIT
+  trap '' TERM INT HUP
+  if [ "\${rollback_status_active:-0}" = "1" ] && [ "\$rollback_exit_code" -ne 0 ]; then
+    write_rollback_update_status false 100 Ошибка "Откат не завершён; рабочее состояние требует проверки"
+  fi
+  exit "\$rollback_exit_code"
+}
+
+rollback_status_active=1
+write_rollback_update_status true 10 Подготовка "Проверяем и восстанавливаем резервную копию"
+trap 'handle_rollback_exit "\$?"' EXIT
+trap 'exit 143' TERM INT HUP
+
 restore_file() {
   source_path="\$BACKUP_DIR/\$1"
   target_path="\$2"
@@ -1118,13 +1154,15 @@ install_unblock_ipset_cron_job() {
 wait_for_rollback_readiness() {
   attempts=0
   stable_samples=0
+  readiness_deadline=\$((\$(date +%s) + 300))
   router_ip="\$(ip -4 addr show br0 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
   [ -n "\$router_ip" ] || router_ip='192.168.1.1'
-  while [ "\$attempts" -lt 45 ]; do
+  while [ "\$(date +%s)" -lt "\$readiness_deadline" ]; do
     attempts=\$((attempts + 1))
     ready=1
     [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" status >/dev/null 2>&1 || ready=0
-    curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
+    HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy= \
+      curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
     if [ -x /opt/etc/init.d/S24xray ]; then
       /opt/etc/init.d/S24xray status >/dev/null 2>&1 || ready=0
     elif [ -x /opt/etc/init.d/S24v2ray ]; then
@@ -1148,6 +1186,7 @@ if [ -f "\$BACKUP_DIR/full-state/manifest.json" ] && [ -f "\$BACKUP_DIR/.rollbac
     "\$BACKUP_DIR/.rollback-tools/managed_state_snapshot.py" restore "\$BACKUP_DIR/full-state"
   full_state_restored=1
 fi
+write_rollback_update_status true 35 Состояние "Настройки, ключи и DNS восстановлены из полного снимка"
 
 restore_file unblock_ipset.sh /opt/bin/unblock_ipset.sh
 restore_file unblock_dnsmasq.sh /opt/bin/unblock_dnsmasq.sh
@@ -1200,6 +1239,7 @@ if [ -d "\$BACKUP_DIR/static" ]; then
   mkdir -p "\$BOT_RUNTIME_DIR/static"
   cp -a "\$BACKUP_DIR/static"/. "\$BOT_RUNTIME_DIR/static"/
 fi
+write_rollback_update_status true 60 Файлы "Файлы предыдущего релиза восстановлены"
 
 chmod 755 /opt/bin/unblock_*.sh /opt/etc/ndm/fs.d/100-ipset.sh /opt/etc/ndm/netfilter.d/100-redirect.sh 2>/dev/null || true
 [ -f "\$BOT_MAIN_PATH" ] && chmod 755 "\$BOT_MAIN_PATH" || true
@@ -1209,6 +1249,7 @@ chmod 755 /opt/bin/unblock_*.sh /opt/etc/ndm/fs.d/100-ipset.sh /opt/etc/ndm/netf
 restore_file script.sh /opt/root/script.sh
 [ -f /opt/root/script.sh ] && chmod 755 /opt/root/script.sh || true
 ensure_runtime_legacy_paths
+write_rollback_update_status true 75 Сервисы "Запускаем DNS и прокси-сервисы предыдущего релиза"
 
 if [ "\$full_state_restored" -ne 1 ]; then
   /opt/bin/unblock_update.sh >/dev/null 2>&1 || true
@@ -1225,13 +1266,17 @@ if [ "\$full_state_restored" -eq 1 ] && [ -x /opt/etc/init.d/S99unblock ]; then
   /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1 || true
 fi
 rm -f "\$UPDATE_MAINTENANCE_PATH" "\$UPDATE_MAINTENANCE_READY_PATH" 2>/dev/null || true
+write_rollback_update_status true 90 Запуск "Перезапускаем программу предыдущего релиза"
 [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "\$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
 
 if ! wait_for_rollback_readiness; then
-  echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 90 секунд."
+  echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 300 секунд."
   exit 1
 fi
 
+write_rollback_update_status false 100 Готово "Откат завершён; предыдущий релиз и сохранённое состояние восстановлены"
+rollback_status_active=0
+trap - EXIT TERM INT HUP
 echo "Откат восстановил файлы из \$BACKUP_DIR."
 EOF
   chmod 700 "$rollback_path"
@@ -1270,24 +1315,81 @@ import os
 import sys
 import time
 
-path = '/opt/etc/bot/update_status.json'
+status_path = os.environ.get('BYPASS_UPDATE_STATUS_PATH', '/opt/etc/bot/update_status.json')
+web_state_path = os.environ.get('BYPASS_WEB_COMMAND_STATE_PATH', '/opt/etc/bot/web_command_state.json')
+job_path = os.environ.get('BYPASS_COMMAND_JOB_PATH', '/opt/etc/bot/telegram_command_job.json')
 command, running, progress, progress_label, message, target_version = sys.argv[1:7]
+
+def read_json(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as file:
+            value = json.load(file)
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+def write_json(path, value):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = path + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as file:
+            json.dump(value, file, ensure_ascii=False, separators=(',', ':'))
+        os.replace(tmp_path, path)
+        return True
+    except Exception:
+        return False
+
+def float_value(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+def int_value(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
 try:
     progress = max(0, min(100, int(progress or 0)))
 except Exception:
     progress = 0
 now = time.time()
-current = {}
-try:
-    with open(path, 'r', encoding='utf-8') as file:
-        current = json.load(file)
-except Exception:
-    current = {}
-started_at = now
-if current.get('running') and current.get('command') == command:
-    started_at = current.get('started_at') or now
-    if not target_version:
-        target_version = current.get('target_version') or ''
+current = read_json(status_path)
+web_state = read_json(web_state_path)
+job_state = read_json(job_path)
+job_started_at = float_value(job_state.get('started_at'))
+web_started_at = float_value(web_state.get('started_at'))
+matching_web_job = bool(
+    job_state.get('source') == 'web'
+    and job_state.get('command') == command
+    and web_state.get('running')
+    and web_state.get('command') == command
+    and job_started_at > 0
+    and web_started_at > 0
+    and abs(job_started_at - web_started_at) <= 10
+)
+operation_started_at = job_started_at if matching_web_job else 0
+current_started_at = float_value(current.get('started_at'))
+same_status_run = bool(
+    current.get('running')
+    and current.get('command') == command
+    and (
+        not operation_started_at
+        or not current_started_at
+        or abs(current_started_at - operation_started_at) <= 10
+    )
+)
+started_at = operation_started_at or (current_started_at if same_status_run else now)
+if same_status_run and int_value(current.get('progress')) > progress:
+    progress = int_value(current.get('progress'))
+    progress_label = current.get('progress_label') or progress_label
+    message = current.get('message') or message
+elif matching_web_job and progress < 5:
+    progress = 5
+if same_status_run and not target_version:
+    target_version = current.get('target_version') or ''
 is_running = str(running).lower() in ('1', 'true', 'yes', 'y')
 status = {
     'running': is_running,
@@ -1300,14 +1402,25 @@ status = {
     'updated_at': now,
     'finished_at': 0 if is_running else now,
 }
-try:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = path + '.tmp'
-    with open(tmp_path, 'w', encoding='utf-8') as file:
-        json.dump(status, file, ensure_ascii=False, separators=(',', ':'))
-    os.replace(tmp_path, path)
-except Exception:
-    pass
+write_json(status_path, status)
+if matching_web_job:
+    web_progress = max(0, min(100, int_value(web_state.get('progress'))))
+    if progress >= web_progress:
+        web_state['progress'] = progress
+        web_state['progress_label'] = progress_label
+    if target_version:
+        web_state['target_version'] = target_version
+    if not is_running:
+        web_state['running'] = False
+        web_state['progress'] = 100
+        web_state['progress_label'] = progress_label
+        web_state['result'] = message
+        web_state['finished_at'] = now
+        web_state['shown_after_finish'] = False
+        job_state['running'] = False
+        job_state['finished_at'] = now
+        write_json(job_path, job_state)
+    write_json(web_state_path, web_state)
 PY
 }
 
@@ -2289,6 +2402,9 @@ if [ "$1" = "-update" ]; then
     backup_runtime_state_files
     backup_runtime_modules $BOT_RUNTIME_MODULES
     backup_static_assets
+    cp -p "$stage_dir/update_status.py" "$backup_dir/.rollback-tools/update_status.py"
+    cp -p "$stage_dir/web_command_state.py" "$backup_dir/.rollback-tools/web_command_state.py"
+    chmod 600 "$backup_dir/.rollback-tools/update_status.py" "$backup_dir/.rollback-tools/web_command_state.py"
     write_update_rollback_script
     cleanup_removed_connection_artifacts
     chmod 700 "$backup_dir" "$backup_dir/rollback.sh" 2>/dev/null || true
