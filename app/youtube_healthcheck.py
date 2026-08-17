@@ -39,6 +39,7 @@ YOUTUBE_HEALTHCHECK_CONFIRM_URLS = (
     YOUTUBE_GOOGLEVIDEO_URL,
 )
 YOUTUBE_HEALTHCHECK_PROFILES = {
+    'emergency': ((YOUTUBE_PRIMARY_URL,), 1, 0),
     'pulse': (YOUTUBE_HEALTHCHECK_PULSE_URLS, 3, 0),
     'quick': (YOUTUBE_HEALTHCHECK_QUICK_URLS, 4, 0),
     'confirm': (YOUTUBE_HEALTHCHECK_CONFIRM_URLS, 5, 0),
@@ -188,6 +189,7 @@ def check_youtube_through_proxy(
     metrics=None,
     sleep=time.sleep,
     max_failures=None,
+    retry_unstable=True,
 ):
     profile_name = str(profile or 'full').strip().lower()
     profile_urls, profile_min_ok, profile_max_failures = youtube_healthcheck_profile(profile)
@@ -223,6 +225,7 @@ def check_youtube_through_proxy(
         if ok and youtube_http_status_is_denied(message):
             ok = False
         if (
+            retry_unstable and
             not ok and
             kind in ('primary', 'home', 'watch', 'short', 'bootstrap', 'googlevideo') and
             youtube_error_is_unstable(message)

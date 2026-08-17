@@ -188,6 +188,8 @@ def find_pool_failover_candidate(
     telegram_timeouts,
     http_timeouts,
     youtube_quality_settings=None,
+    youtube_profile='confirm',
+    youtube_retry_unstable=True,
     validate_outbound=pool_probe_outbound,
     build_config_batch=build_pool_probe_core_config_batch,
     start_xray=start_pool_probe_xray,
@@ -240,7 +242,8 @@ def find_pool_failover_candidate(
                         proxy_url,
                         http_timeouts=(http_connect, http_read),
                         metrics=yt_metrics,
-                        profile='confirm',
+                        profile=youtube_profile,
+                        retry_unstable=youtube_retry_unstable,
                     )
                     quality_settings = youtube_quality_settings if isinstance(youtube_quality_settings, dict) else {}
                     if primary_ok and quality_settings.get('enabled'):
@@ -289,7 +292,7 @@ def find_pool_failover_candidate(
                     yt_ok = None
                     yt_metrics = {}
                 record_kwargs = dict(yt_metrics)
-                if service != 'youtube' and tg_ok is False:
+                if primary_ok is False:
                     record_kwargs['allow_recent_success_downgrade'] = True
                 record_key_probe(
                     proto,

@@ -105,6 +105,8 @@ def run_failover_candidate_worker(input_path, result_path):
             log=lambda _message: None,
             telegram_timeouts=(float(telegram_timeouts[0]), float(telegram_timeouts[1])),
             http_timeouts=(float(http_timeouts[0]), float(http_timeouts[1])),
+            youtube_profile=str(payload.get('youtube_profile') or 'confirm'),
+            youtube_retry_unstable=bool(payload.get('youtube_retry_unstable', True)),
             youtube_quality_settings=(
                 dict(payload.get('youtube_quality_settings') or {})
                 if isinstance(payload.get('youtube_quality_settings'), dict)

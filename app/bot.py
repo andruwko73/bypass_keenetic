@@ -293,6 +293,8 @@ _subscription_runtime_module = subscription_runtime
 _subscription_refresh_runtime_module = None
 _youtube_route_owner_module = None
 _youtube_failover_transaction_module = None
+_youtube_failover_policy_module = None
+_youtube_failover_runtime_module = None
 _custom_checks_store_module = None
 _service_catalog_module = None
 _update_maintenance_runtime_module = None
@@ -411,6 +413,24 @@ def _youtube_failover_transaction():
 
         _youtube_failover_transaction_module = module
     return _youtube_failover_transaction_module
+
+
+def _youtube_failover_policy():
+    global _youtube_failover_policy_module
+    if _youtube_failover_policy_module is None:
+        import youtube_failover_policy as module
+
+        _youtube_failover_policy_module = module
+    return _youtube_failover_policy_module
+
+
+def _youtube_failover_runtime():
+    global _youtube_failover_runtime_module
+    if _youtube_failover_runtime_module is None:
+        import youtube_failover_runtime as module
+
+        _youtube_failover_runtime_module = module
+    return _youtube_failover_runtime_module
 
 
 def _update_maintenance_runtime():
@@ -1054,6 +1074,35 @@ YOUTUBE_ROUTE_FAILOVER_MAX_CANDIDATES = min(4, max(1, int(getattr(
     'youtube_route_failover_max_candidates',
     2,
 ))))
+YOUTUBE_ROUTE_EMERGENCY_MAX_CANDIDATES = min(12, max(
+    YOUTUBE_ROUTE_FAILOVER_MAX_CANDIDATES,
+    int(getattr(config, 'youtube_route_emergency_max_candidates', 8)),
+))
+YOUTUBE_ROUTE_EMERGENCY_DEADLINE_SECONDS = min(120, max(30, int(getattr(
+    config,
+    'youtube_route_emergency_deadline_seconds',
+    120,
+))))
+YOUTUBE_ROUTE_EMERGENCY_CONFIRM_RESERVE_SECONDS = min(
+    max(8, YOUTUBE_ROUTE_EMERGENCY_DEADLINE_SECONDS // 2),
+    max(8, int(getattr(config, 'youtube_route_emergency_confirm_reserve_seconds', 25))),
+)
+YOUTUBE_ROUTE_EMERGENCY_REPAIR_TIMEOUT_SECONDS = min(15, max(
+    1,
+    int(getattr(config, 'youtube_route_emergency_repair_timeout_seconds', 8)),
+))
+YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT = max(0.5, min(
+    YOUTUBE_ROUTE_FAILOVER_CHECK_CONNECT_TIMEOUT,
+    float(getattr(config, 'youtube_route_emergency_connect_timeout', 2.0)),
+))
+YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT = max(1.0, min(
+    YOUTUBE_ROUTE_FAILOVER_CHECK_READ_TIMEOUT,
+    float(getattr(config, 'youtube_route_emergency_read_timeout', 4.0)),
+))
+YOUTUBE_ROUTE_HARD_FAILURE_CONFIRM_TTL_SECONDS = max(
+    YOUTUBE_ROUTE_EMERGENCY_DEADLINE_SECONDS,
+    int(getattr(config, 'youtube_route_hard_failure_confirm_ttl_seconds', 300)),
+)
 YOUTUBE_ROUTE_QUALITY_FAILOVER_ENABLED = bool(getattr(config, 'youtube_route_quality_failover_enabled', True))
 YOUTUBE_ROUTE_QUALITY_MIN_DURATION_SECONDS = max(300, int(getattr(
     config,
@@ -1095,6 +1144,11 @@ YOUTUBE_ROUTE_QUALITY_SWITCH_COOLDOWN_SECONDS = max(900, int(getattr(
     'youtube_route_quality_switch_cooldown_seconds',
     900,
 )))
+YOUTUBE_ROUTE_QUALITY_STREAM_MAX_DEFER_SECONDS = min(120, max(0, int(getattr(
+    config,
+    'youtube_route_quality_stream_max_defer_seconds',
+    120,
+))))
 
 # Compatibility aliases for router configurations and narrow helpers created
 # before the route could be owned by any supported proxy protocol.
@@ -1200,8 +1254,11 @@ def _new_youtube_failover_state():
         'last_attempt': 0.0,
         'last_trigger': '',
         'consecutive_failures': 0,
+        'failure_deadline': 0.0,
+        'hard_failure_confirmed_at': 0.0,
         'degraded_since': 0.0,
         'degraded_checks': 0,
+        'degraded_switch_ready_at': 0.0,
         'last_health_state': 'unknown',
         'last_health_reason': '',
         'last_quality_score': 0,
@@ -1247,6 +1304,7 @@ background_task_skip_reason = {}
 background_task_coordinator_lock = threading.Lock()
 background_task_coordinator_state = {'name': '', 'started_at': 0.0}
 background_maintenance_thread = None
+youtube_failover_thread = None
 youtube_edge_prefetch_state = {
     'enabled': YOUTUBE_EDGE_PREFETCH_ENABLED,
     'route_protocol': '',
@@ -1885,30 +1943,49 @@ def _youtube_health_state(ok, metrics=None):
 def _reset_youtube_quality_state(state, *, health_state='healthy', reason='', now=None):
     state['degraded_since'] = 0.0
     state['degraded_checks'] = 0
+    state['degraded_switch_ready_at'] = 0.0
     state['last_health_state'] = str(health_state or 'unknown')
     state['last_health_reason'] = str(reason or '')
     state['last_quality_score'] = 0
     state['last_candidate_score'] = 0
     state['deferred_reason'] = ''
+    if health_state != 'failed':
+        state['failure_deadline'] = 0.0
+        state['hard_failure_confirmed_at'] = 0.0
     if health_state == 'healthy':
         state['phase'] = ''
         state['recovery_failed'] = False
         state['last_ok'] = float(time.time() if now is None else now)
 
 
-def _check_youtube_protocol_once(proto=None, metrics=None, profile='full', measure_quality=False):
+def _check_youtube_protocol_once(
+    proto=None,
+    metrics=None,
+    profile='full',
+    measure_quality=False,
+    http_timeouts=None,
+    retry_unstable=True,
+):
     proto = proto or _youtube_route_protocol()
     if proto not in YOUTUBE_ROUTE_PROTOCOLS:
         return None, 'YouTube route owner is not determined'
+    check_http = _check_http_through_proxy
+    if profile == 'emergency':
+        from pool_probe_curl import check_http_through_proxy as check_http
+    check_timeouts = http_timeouts or (
+        YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+        YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+    )
     ok, message = _youtube_healthcheck().check_youtube_through_proxy(
-        _check_http_through_proxy,
+        check_http,
         proxy_settings.get(proto),
         urls=YOUTUBE_VLESS2_HEALTHCHECK_URLS if profile == 'full' else None,
         min_ok=YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK if profile == 'full' else None,
         profile=profile,
-        http_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
-        http_retry_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
+        http_timeouts=check_timeouts,
+        http_retry_timeouts=check_timeouts,
         retry_delay_seconds=POOL_PROBE_RETRY_DELAY_SECONDS,
+        retry_unstable=retry_unstable,
         metrics=metrics,
         sleep=shutdown_requested.wait,
     )
@@ -1948,30 +2025,73 @@ def _schedule_youtube_cache_confirm(proto, key_value):
     threading.Thread(target=worker, daemon=True).start()
 
 
-def _confirm_youtube_key_detailed(proto, *, measure_quality=False):
+def _confirm_youtube_key_detailed(
+    proto,
+    *,
+    measure_quality=False,
+    profile='confirm',
+    http_timeouts=None,
+    retry_unstable=True,
+    background_worker=True,
+    deadline=0.0,
+    max_attempts=None,
+):
     last_message = ''
     last_metrics = {}
     attempts = 0
-    for attempt in range(YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES):
+    attempt_limit = max(1, int(
+        YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES if max_attempts is None else max_attempts
+    ))
+    for attempt in range(attempt_limit):
+        remaining = _youtube_failover_policy().remaining_seconds(deadline) if deadline else 0
+        if deadline and remaining <= 0:
+            return None, 'YouTube failover deadline reached.', attempts, last_metrics
         attempts += 1
         metrics = {}
-        ok, message = _check_youtube_protocol_for_background(
-            proto,
-            metrics=metrics,
-            profile='confirm',
-            measure_quality=measure_quality,
-        )
+        check_kwargs = {
+            'metrics': metrics,
+            'profile': profile,
+            'measure_quality': measure_quality,
+            'http_timeouts': http_timeouts,
+            'retry_unstable': retry_unstable,
+        }
+        if background_worker:
+            ok, message = _check_youtube_protocol_for_background(
+                proto,
+                worker_timeout_seconds=remaining or None,
+                **check_kwargs,
+            )
+        else:
+            ok, message = _check_youtube_protocol_once(proto, **check_kwargs)
         last_metrics = metrics
         if ok is None:
             return None, message, attempts, last_metrics
         if ok:
             return True, message, attempts, last_metrics
         last_message = message
-        if attempt + 1 < YOUTUBE_VLESS2_FAILOVER_CONFIRM_RETRIES:
-            shutdown_requested.wait(YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS)
+        if attempt + 1 < attempt_limit:
+            delay = YOUTUBE_VLESS2_FAILOVER_CONFIRM_DELAY_SECONDS
+            if deadline:
+                remaining = _youtube_failover_policy().remaining_seconds(deadline)
+                if remaining <= 0:
+                    return None, 'YouTube failover deadline reached.', attempts, last_metrics
+                delay = min(delay, remaining)
+            shutdown_requested.wait(delay)
             if shutdown_requested.is_set():
                 break
     return False, last_message, attempts, last_metrics
+
+
+def _confirm_youtube_key_emergency(proto, *, deadline, max_attempts=2):
+    return _confirm_youtube_key_detailed(
+        proto,
+        profile='emergency',
+        http_timeouts=(YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT, YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT),
+        retry_unstable=False,
+        background_worker=False,
+        deadline=deadline,
+        max_attempts=max_attempts,
+    )
 
 
 def _confirm_youtube_key(proto):
@@ -2025,7 +2145,12 @@ def _restore_youtube_key_after_failed_failover(proto, original_key):
         restored_key = (_load_current_keys().get(proto) or '').strip()
         if restored_key != original_key:
             raise RuntimeError('исходный ключ не подтверждён после восстановления')
-        _record_key_probe(proto, original_key, yt_ok=False)
+        _record_key_probe(
+            proto,
+            original_key,
+            yt_ok=False,
+            allow_recent_success_downgrade=True,
+        )
         _audit_key_switch('youtube_failover_restore', proto, original_key, 'failed candidates')
         _write_runtime_log(f'YouTube failover: restored previous {_pool_proto_label(proto)} key after failed candidates.')
         _clear_youtube_failover_transaction()
@@ -2117,13 +2242,16 @@ def _youtube_failure_is_hard_proxy_failure(message):
     )
 
 
-def _refresh_ipset_after_youtube_recovery(route_proto, reason=''):
+def _refresh_ipset_after_youtube_recovery(route_proto, reason='', timeout_seconds=None):
+    timeout = IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS
+    if timeout_seconds is not None:
+        timeout = max(1.0, min(timeout, float(timeout_seconds)))
     try:
         result = subprocess.run(
             ['/opt/bin/unblock_update.sh'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=IPSET_REFRESH_COMMAND_TIMEOUT_SECONDS,
+            timeout=timeout,
             check=False,
         )
         if result.returncode == 0:
@@ -2136,7 +2264,7 @@ def _refresh_ipset_after_youtube_recovery(route_proto, reason=''):
     return False
 
 
-def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, message):
+def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, message, *, deadline=0.0):
     hard_proxy_failure = _youtube_failure_is_hard_proxy_failure(message)
     now = time.time()
     last_attempt = float(youtube_hard_failure_recovery_state.get('last_attempt') or 0.0)
@@ -2156,13 +2284,30 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
     )
 
     recovered = False
-    route_refreshed = _refresh_ipset_after_youtube_recovery(
-        route_proto,
-        'confirmed failure before key failover',
-    )
+    route_refreshed = False
+    refresh_timeout = None
+    if deadline:
+        remaining = _youtube_failover_policy().remaining_seconds(deadline)
+        refresh_timeout = min(
+            YOUTUBE_ROUTE_EMERGENCY_REPAIR_TIMEOUT_SECONDS,
+            max(0, remaining - YOUTUBE_ROUTE_EMERGENCY_CONFIRM_RESERVE_SECONDS),
+        )
+    if not deadline or refresh_timeout > 0:
+        route_refreshed = _refresh_ipset_after_youtube_recovery(
+            route_proto,
+            'confirmed failure before key failover',
+            timeout_seconds=refresh_timeout,
+        )
     if route_refreshed:
         _start_youtube_edge_prefetch_external('youtube-route-repair')
-        confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
+        if deadline:
+            confirm_ok, confirm_message, _attempts, _metrics = _confirm_youtube_key_emergency(
+                route_proto,
+                deadline=deadline,
+                max_attempts=1,
+            )
+        else:
+            confirm_ok, confirm_message = _confirm_youtube_key(route_proto)
         if confirm_ok:
             recovered = True
         else:
@@ -2170,7 +2315,11 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
                 f'YouTube recovery: route refresh did not restore current key: {confirm_message}'
             )
 
-    if not recovered and hard_proxy_failure and route_proto in ('vless', 'vless2'):
+    if not recovered and deadline:
+        _write_runtime_log(
+            'YouTube recovery: deep endpoint repair deferred so emergency key selection keeps its deadline.'
+        )
+    elif not recovered and hard_proxy_failure and route_proto in ('vless', 'vless2'):
         try:
             repaired = _repair_active_reality_endpoint(
                 route_proto,
@@ -2189,14 +2338,19 @@ def _recover_current_youtube_route_after_hard_failure(route_proto, active_key, m
             else:
                 _write_runtime_log(f'YouTube recovery: endpoint repair did not restore current key: {confirm_message}')
 
-    if not recovered and hard_proxy_failure:
+    if not recovered and hard_proxy_failure and not deadline:
         recovered = _restart_core_proxy_and_recheck_youtube(route_proto, active_key, message)
 
     if recovered:
         state = _youtube_failover_state(route_proto)
-        state['last_ok'] = time.time()
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
+        _reset_youtube_quality_state(
+            state,
+            health_state='healthy',
+            reason='маршрут восстановлен без смены ключа',
+            now=time.time(),
+        )
         _record_key_probe(route_proto, active_key, yt_ok=True)
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
@@ -2221,6 +2375,8 @@ def _youtube_probe_score_for_key(key_value):
 
 
 def _youtube_switch_cooldown_remaining(state, trigger, now):
+    if trigger == 'failed':
+        return 0
     last_attempt = float(state.get('last_attempt') or 0.0)
     if not last_attempt:
         return 0
@@ -2230,6 +2386,34 @@ def _youtube_switch_cooldown_remaining(state, trigger, now):
         else YOUTUBE_VLESS2_FAILOVER_SWITCH_COOLDOWN_SECONDS
     )
     return max(0, int(round(cooldown - (now - last_attempt))))
+
+
+def _youtube_degraded_stream_guard_deferred(route_proto, state, operation):
+    if not _youtube_stream_guard_active(
+        route_proto,
+        operation,
+        log=True,
+        hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+    ):
+        return False
+    now = time.time()
+    ready_at = float(state.get('degraded_switch_ready_at') or 0.0)
+    if ready_at <= 0:
+        ready_at = now
+        state['degraded_switch_ready_at'] = ready_at
+    remaining = _youtube_failover_policy().degraded_stream_defer_remaining(
+        ready_at,
+        YOUTUBE_ROUTE_QUALITY_STREAM_MAX_DEFER_SECONDS,
+        now=now,
+    )
+    if remaining > 0:
+        state['deferred_reason'] = f'идёт активный поток YouTube; ожидание до {remaining} с'
+        return True
+    _write_runtime_log(
+        f'YouTube failover: bypassing {_pool_proto_label(route_proto)} stream guard after the bounded '
+        'quality-degradation wait expired.'
+    )
+    return False
 
 
 def _recover_interrupted_youtube_failover_transaction():
@@ -2349,6 +2533,10 @@ def _switch_youtube_to_verified_candidate(
     current_score=0,
 ):
     now = time.time()
+    failure_deadline = float(state.get('failure_deadline') or 0.0) if trigger == 'failed' else 0.0
+    if trigger == 'failed' and _youtube_failover_policy().remaining_seconds(failure_deadline, now=now) <= 0:
+        state['deferred_reason'] = 'исчерпан аварийный бюджет; повторная попытка будет запущена следующим циклом'
+        return False
     cooldown_remaining = _youtube_switch_cooldown_remaining(state, trigger, now)
     if cooldown_remaining > 0:
         state['deferred_reason'] = f'повторная попытка через {cooldown_remaining} с'
@@ -2358,15 +2546,35 @@ def _switch_youtube_to_verified_candidate(
         return False
 
     pools = _load_key_pools()
+    probe_cache = _load_key_probe_cache()
     candidates = _key_pool_store().failover_candidates(
         pools,
         route_proto,
         active_key,
         protocols=(route_proto,),
-        key_probe_cache=_load_key_probe_cache(),
+        key_probe_cache=probe_cache,
         hash_key=_hash_key,
         service='youtube',
-    )[:YOUTUBE_ROUTE_FAILOVER_MAX_CANDIDATES]
+    )
+    other_active_keys = {
+        str(key_value or '').strip()
+        for proto, key_value in current_keys.items()
+        if proto != route_proto and str(key_value or '').strip()
+    }
+    candidates = [
+        (proto, key_value)
+        for proto, key_value in candidates
+        if key_value not in other_active_keys
+    ]
+    candidates = _youtube_failover_policy().prioritize_candidates(
+        candidates,
+        probe_cache=probe_cache,
+        hash_key=_hash_key,
+        display_name=_pool_key_display_name,
+    )[:(
+        YOUTUBE_ROUTE_EMERGENCY_MAX_CANDIDATES
+        if trigger == 'failed' else YOUTUBE_ROUTE_FAILOVER_MAX_CANDIDATES
+    )]
     if not candidates:
         state['deferred_reason'] = 'нет доступных кандидатов в пуле'
         _write_runtime_log(f'YouTube failover: no {_pool_proto_label(route_proto)} pool candidates are available.')
@@ -2383,13 +2591,44 @@ def _switch_youtube_to_verified_candidate(
         )
         remaining = list(candidates)
         while remaining and not shutdown_requested.is_set():
+            budget = (
+                _youtube_failover_policy().remaining_seconds(failure_deadline)
+                if trigger == 'failed' else 0
+            )
+            if trigger == 'failed' and budget <= 0:
+                state['deferred_reason'] = 'исчерпан аварийный бюджет; исходный ключ сохранён'
+                _write_runtime_log('YouTube failover: emergency deadline expired before candidate screening.')
+                break
+            candidate_timeout = budget or None
+            if trigger == 'failed':
+                if budget <= YOUTUBE_ROUTE_EMERGENCY_CONFIRM_RESERVE_SECONDS:
+                    state['deferred_reason'] = 'аварийный бюджет сохранён для постоянной проверки ключа'
+                    _write_runtime_log(
+                        'YouTube failover: candidate screening stopped to preserve the permanent-port '
+                        'confirmation budget.'
+                    )
+                    break
+                candidate_timeout = budget - YOUTUBE_ROUTE_EMERGENCY_CONFIRM_RESERVE_SECONDS
             candidate = _find_pool_failover_candidate(
                 remaining,
                 service='youtube',
                 measure_youtube_quality=trigger == 'degraded',
+                http_timeouts=(
+                    (YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT, YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT)
+                    if trigger == 'failed' else None
+                ),
+                youtube_profile='emergency' if trigger == 'failed' else 'confirm',
+                youtube_retry_unstable=trigger != 'failed',
+                timeout_seconds=candidate_timeout,
             )
             if not candidate:
-                state['deferred_reason'] = 'подходящий кандидат не найден'
+                if trigger == 'failed' and _youtube_failover_policy().remaining_seconds(failure_deadline) <= 0:
+                    state['deferred_reason'] = (
+                        f'аварийная проверка кандидатов достигла лимита '
+                        f'{YOUTUBE_ROUTE_EMERGENCY_DEADLINE_SECONDS} с'
+                    )
+                else:
+                    state['deferred_reason'] = 'подходящий кандидат не найден'
                 _write_runtime_log('YouTube failover: no candidate passed temporary xray checks.')
                 break
 
@@ -2424,27 +2663,20 @@ def _switch_youtube_to_verified_candidate(
                 )
                 continue
 
-            if _vless_traffic_guard_active(
-                f'{_pool_proto_label(route_proto)} key switch',
-                log=True,
-                hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-                exclude_proto=route_proto,
+            operation = f'{_pool_proto_label(route_proto)} key switch'
+            if trigger == 'degraded' and _youtube_degraded_stream_guard_deferred(
+                route_proto,
+                state,
+                operation,
             ):
                 state['last_attempt'] = 0.0
-                state['deferred_reason'] = 'активен другой Vless-маршрут'
                 return False
-
-            youtube_traffic_active = _youtube_stream_guard_active(
+            if trigger == 'failed' and _youtube_stream_guard_active(
                 route_proto,
-                f'{_pool_proto_label(route_proto)} key switch',
-                log=trigger != 'failed',
+                operation,
+                log=False,
                 hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-            )
-            if youtube_traffic_active and trigger != 'failed':
-                state['last_attempt'] = 0.0
-                state['deferred_reason'] = 'идёт активный поток YouTube'
-                return False
-            if youtube_traffic_active:
+            ):
                 _write_runtime_log(
                     f'YouTube failover: bypassing YouTube stream guard for candidate {key_hash} '
                     'because the current key has a confirmed complete failure.'
@@ -2464,6 +2696,7 @@ def _switch_youtube_to_verified_candidate(
                     tg_ok=tg_ok,
                     yt_ok=False,
                     verification_kind='runtime',
+                    allow_recent_success_downgrade=True,
                 )
                 _write_runtime_log(f'YouTube failover: failed to install candidate {key_hash}: {exc}')
                 if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
@@ -2474,17 +2707,29 @@ def _switch_youtube_to_verified_candidate(
                 _restore_youtube_key_after_failed_failover(route_proto, original_key)
                 return False
 
-            confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_detailed(
-                route_proto,
-                measure_quality=trigger == 'degraded',
-            )
+            if trigger == 'failed':
+                confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_emergency(
+                    route_proto,
+                    deadline=failure_deadline,
+                )
+            else:
+                confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_detailed(
+                    route_proto,
+                    measure_quality=True,
+                )
             if confirm_ok is None:
                 if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
                     return False
                 state['deferred_reason'] = 'проверка постоянного порта недоступна'
                 return False
             if not confirm_ok:
-                _record_key_probe(route_proto, key_value, tg_ok=tg_ok, yt_ok=False)
+                _record_key_probe(
+                    route_proto,
+                    key_value,
+                    tg_ok=tg_ok,
+                    yt_ok=False,
+                    allow_recent_success_downgrade=True,
+                )
                 if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
                     return False
                 _write_runtime_log(
@@ -2611,7 +2856,12 @@ def _handle_confirmed_youtube_hard_failure(
                 return False
 
         state['phase'] = 'current_key_repair'
-        if _recover_current_youtube_route_after_hard_failure(route_proto, active_key, confirm_message):
+        if _recover_current_youtube_route_after_hard_failure(
+            route_proto,
+            active_key,
+            confirm_message,
+            deadline=state.get('failure_deadline'),
+        ):
             state['phase'] = ''
             state['recovery_failed'] = False
             return False
@@ -2623,8 +2873,21 @@ def _handle_confirmed_youtube_hard_failure(
             )
             return False
 
+        remaining = _youtube_failover_policy().remaining_seconds(state.get('failure_deadline'))
+        minimum_switch_budget = max(60, YOUTUBE_ROUTE_EMERGENCY_CONFIRM_RESERVE_SECONDS + 10)
+        if remaining < minimum_switch_budget:
+            state['failure_deadline'] = time.time() + YOUTUBE_ROUTE_EMERGENCY_DEADLINE_SECONDS
+            _write_runtime_log(
+                'YouTube failover: emergency candidate budget renewed after hard failure confirmation.'
+            )
         state['phase'] = 'candidate_selection'
-        _record_key_probe(route_proto, active_key, yt_ok=False, **confirm_metrics)
+        _record_key_probe(
+            route_proto,
+            active_key,
+            yt_ok=False,
+            allow_recent_success_downgrade=True,
+            **confirm_metrics,
+        )
         _invalidate_key_status_cache()
         switched = _switch_youtube_to_verified_candidate(
             route_proto,
@@ -2649,243 +2912,7 @@ def _handle_confirmed_youtube_hard_failure(
 
 
 def _attempt_youtube_failover():
-    route_proto = _youtube_route_protocol()
-    if route_proto not in YOUTUBE_ROUTE_PROTOCOLS:
-        return False
-    state = _youtube_failover_state(route_proto)
-    recovery_result = _recover_interrupted_youtube_failover_transaction()
-    if recovery_result is not None:
-        return bool(recovery_result)
-    if state.get('recovery_failed'):
-        return False
-    now = time.time()
-    if not YOUTUBE_VLESS2_FAILOVER_ENABLED or state['in_progress']:
-        return False
-    current_keys = _load_current_keys()
-    active_key = (current_keys.get(route_proto) or '').strip()
-    if not active_key:
-        state['last_fail'] = 0.0
-        state['consecutive_failures'] = 0
-        _reset_youtube_quality_state(
-            state,
-            health_state='unknown',
-            reason='активный ключ маршрута не найден',
-        )
-        return False
-
-    yt_metrics = {}
-    ok, message = _check_youtube_protocol_once(
-        route_proto,
-        metrics=yt_metrics,
-        profile='pulse',
-    )
-    if ok is None:
-        state['last_health_state'] = 'unknown'
-        state['last_health_reason'] = 'фоновая проверка недоступна'
-        state['deferred_reason'] = 'фоновая проверка недоступна'
-        _write_runtime_log(
-            f'YouTube failover: {_pool_proto_label(route_proto)} health worker did not return a result; '
-            'key switch deferred.'
-        )
-        return False
-    state['last_checked_at'] = time.time()
-
-    previous_health_state = str(state.get('last_health_state') or 'unknown')
-    health_state, health_reason, yt_metrics = _youtube_health_state(ok, yt_metrics)
-    state['last_health_state'] = health_state
-    state['last_health_reason'] = health_reason
-    state['last_quality_score'] = int(yt_metrics.get('yt_score') or 0)
-    state['deferred_reason'] = ''
-
-    if health_state == 'healthy':
-        state['last_fail'] = 0.0
-        state['consecutive_failures'] = 0
-        _reset_youtube_quality_state(
-            state,
-            health_state='healthy',
-            reason=health_reason,
-            now=now,
-        )
-        _record_key_probe(route_proto, active_key, yt_ok=True, **yt_metrics)
-        return False
-
-    if health_state == 'degraded':
-        state['last_fail'] = 0.0
-        state['consecutive_failures'] = 0
-        state['phase'] = ''
-        state['recovery_failed'] = False
-        _record_key_probe(route_proto, active_key, yt_ok=True, **yt_metrics)
-        if previous_health_state != 'degraded' or not state.get('degraded_since'):
-            state['degraded_since'] = now
-            state['degraded_checks'] = 1
-        else:
-            state['degraded_checks'] = int(state.get('degraded_checks') or 0) + 1
-        state['last_health_state'] = 'degraded'
-        state['last_health_reason'] = health_reason
-        state['last_quality_score'] = int(yt_metrics.get('yt_score') or 0)
-
-        if not YOUTUBE_ROUTE_QUALITY_FAILOVER_ENABLED:
-            state['deferred_reason'] = 'переключение при снижении качества отключено'
-            return False
-        degraded_age = max(0.0, now - float(state.get('degraded_since') or now))
-        if (
-            state['degraded_checks'] < YOUTUBE_ROUTE_QUALITY_CONSECUTIVE_CHECKS or
-            degraded_age < YOUTUBE_ROUTE_QUALITY_MIN_DURATION_SECONDS
-        ):
-            state['deferred_reason'] = (
-                f'подтверждение снижения качества '
-                f'{state["degraded_checks"]}/{YOUTUBE_ROUTE_QUALITY_CONSECUTIVE_CHECKS}'
-            )
-            return False
-        if pool_probe_lock.locked():
-            state['deferred_reason'] = 'сравнение качества отложено до завершения проверки пула'
-            return False
-        if not _youtube_quality_settings().get('enabled'):
-            state['deferred_reason'] = 'измерение качества отложено из-за доступной памяти'
-            return False
-        if _vless_traffic_guard_active(
-            f'{_pool_proto_label(route_proto)} quality comparison',
-            log=True,
-            hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-            exclude_proto=route_proto,
-        ):
-            state['deferred_reason'] = 'активен другой Vless-маршрут'
-            return False
-        if _youtube_stream_guard_active(
-            route_proto,
-            f'{_pool_proto_label(route_proto)} quality comparison',
-            log=True,
-            hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
-        ):
-            state['deferred_reason'] = 'идёт активный поток YouTube'
-            return False
-
-        confirm_ok, confirm_message, _attempts, confirm_metrics = _confirm_youtube_key_detailed(
-            route_proto,
-            measure_quality=True,
-        )
-        if confirm_ok is None:
-            state['deferred_reason'] = 'подтверждение качества недоступно'
-            return False
-        if confirm_ok:
-            confirm_state, confirm_reason, confirm_metrics = _youtube_health_state(True, confirm_metrics)
-            current_score = int(confirm_metrics.get('yt_score') or 0)
-            state['last_quality_score'] = current_score
-            _record_key_probe(route_proto, active_key, yt_ok=True, **confirm_metrics)
-            if confirm_state == 'healthy' and current_score > YOUTUBE_ROUTE_QUALITY_SCORE_THRESHOLD:
-                _reset_youtube_quality_state(
-                    state,
-                    health_state='healthy',
-                    reason='повторная проверка качества успешна',
-                    now=time.time(),
-                )
-                return False
-            state['last_health_state'] = 'degraded'
-            state['last_health_reason'] = confirm_reason
-            return _switch_youtube_to_verified_candidate(
-                route_proto,
-                active_key,
-                current_keys,
-                state,
-                trigger='degraded',
-                reason=confirm_reason,
-                current_score=current_score,
-            )
-
-        health_state = 'failed'
-        health_reason = confirm_message or 'повторная проверка выявила полный отказ'
-        state['last_health_state'] = 'failed'
-        state['last_health_reason'] = health_reason
-
-    _reset_youtube_quality_state(
-        state,
-        health_state='failed',
-        reason=health_reason,
-    )
-    state['last_health_state'] = 'failed'
-    state['last_health_reason'] = health_reason
-    if not state['last_fail']:
-        state['last_fail'] = now
-        state['consecutive_failures'] = 1
-        state['deferred_reason'] = 'быстрое подтверждение полного отказа'
-        _write_runtime_log(
-            f'YouTube failover: {_pool_proto_label(route_proto)} complete failure detected; '
-            'a fast confirmation is scheduled.'
-        )
-        if (
-            YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS > 0 and
-            shutdown_requested.wait(YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS)
-        ):
-            return False
-        now = time.time()
-    if now - state['last_fail'] < YOUTUBE_VLESS2_FAILOVER_GRACE_SECONDS:
-        state['deferred_reason'] = 'ожидается короткое подтверждение полного отказа'
-        return False
-
-    pause_generation = 0
-    pause_owner = 'youtube_hard_failure'
-    try:
-        if pool_probe_lock.locked():
-            state['phase'] = 'pool_pausing'
-            state['deferred_reason'] = 'проверка пула безопасно приостанавливается'
-            try:
-                pause_generation, _pause_note = _pause_pool_probe_operation(
-                    pause_owner,
-                    'Проверка пула приостанавливается для подтверждения отказа YouTube.',
-                    timeout=15.0,
-                )
-            except Exception as exc:
-                state['phase'] = 'pool_pause_failed'
-                state['deferred_reason'] = str(exc)
-                return False
-            if not pause_generation and pool_probe_lock.locked():
-                state['phase'] = 'pool_pause_failed'
-                state['deferred_reason'] = 'проверка пула не успела безопасно остановиться'
-                return False
-
-        confirm_ok, confirm_message, confirm_attempts, confirm_metrics = _confirm_youtube_key_detailed(route_proto)
-        if confirm_ok is None:
-            state['deferred_reason'] = 'подтверждение полного отказа недоступно'
-            return False
-        if confirm_ok:
-            confirm_state, confirm_reason, confirm_metrics = _youtube_health_state(True, confirm_metrics)
-            state['last_fail'] = 0.0
-            state['consecutive_failures'] = 0
-            _record_key_probe(route_proto, active_key, yt_ok=True, **confirm_metrics)
-            if confirm_state == 'degraded':
-                state['degraded_since'] = time.time()
-                state['degraded_checks'] = 1
-                state['last_health_state'] = 'degraded'
-                state['last_health_reason'] = confirm_reason
-                state['deferred_reason'] = 'полный отказ не подтвердился; наблюдается качество'
-            else:
-                _reset_youtube_quality_state(
-                    state,
-                    health_state='healthy',
-                    reason='полный отказ не подтвердился',
-                    now=time.time(),
-                )
-            return False
-
-        return _handle_confirmed_youtube_hard_failure(
-            route_proto,
-            active_key,
-            current_keys,
-            state,
-            confirm_message=confirm_message,
-            confirm_attempts=confirm_attempts,
-            confirm_metrics=confirm_metrics,
-            health_reason=health_reason,
-        )
-    finally:
-        if pause_generation:
-            started, _queued = _resume_cancelled_pool_probe(
-                'подтверждения отказа YouTube',
-                owner=pause_owner,
-                generation=pause_generation,
-            )
-            if not started and _has_pool_probe_resume_payload():
-                _schedule_low_memory_pool_probe_resume()
+    return _youtube_failover_runtime().attempt_youtube_failover(globals())
 
 
 def _attempt_youtube_route_failover():
@@ -2954,7 +2981,7 @@ def _youtube_failover_pulse_allowed():
 
 def _run_youtube_failover_cycle():
     if not YOUTUBE_ROUTE_FAILOVER_ENABLED or not _app_mode_pool_enabled():
-        return
+        return False
     ran = False
     try:
         if _youtube_failover_pulse_allowed():
@@ -2967,6 +2994,7 @@ def _run_youtube_failover_cycle():
     finally:
         if ran:
             _memory_cleanup('YouTube failover cycle', clear_status=False, log=False)
+    return ran
 
 
 token = getattr(config, 'token', '') or '0:WEBONLY_DISABLED'
@@ -11019,10 +11047,17 @@ def _proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
     return _store_proxy_outbound_from_key(proto, key_value, tag, email=email)
 
 
-def _find_pool_failover_candidate_inline(candidates, service='telegram', measure_youtube_quality=False):
+def _find_pool_failover_candidate_inline(
+    candidates,
+    service='telegram',
+    measure_youtube_quality=False,
+    http_timeouts=None,
+    youtube_profile='confirm',
+    youtube_retry_unstable=True,
+):
     """Find one working pool key through a temporary xray before touching the active proxy."""
     http_timeouts = (
-        (YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)
+        http_timeouts or (YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT)
         if service == 'youtube'
         else (POOL_PROBE_HTTP_CONNECT_TIMEOUT, POOL_PROBE_HTTP_READ_TIMEOUT)
     )
@@ -11040,6 +11075,8 @@ def _find_pool_failover_candidate_inline(candidates, service='telegram', measure
         log=_write_runtime_log,
         telegram_timeouts=(POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT),
         http_timeouts=http_timeouts,
+        youtube_profile=youtube_profile,
+        youtube_retry_unstable=youtube_retry_unstable,
         youtube_quality_settings=(
             _youtube_quality_settings()
             if service == 'youtube' and measure_youtube_quality else None
@@ -11089,7 +11126,7 @@ def _run_health_check_process_worker(input_path, result_path):
     return health_check_runner.run_health_check_worker(input_path, result_path)
 
 
-def _health_check_in_process(payload):
+def _health_check_in_process(payload, timeout_seconds=None):
     payload = dict(payload or {})
     kind = str(payload.get('kind') or '').strip().lower()
     if kind == 'telegram':
@@ -11098,14 +11135,28 @@ def _health_check_in_process(payload):
         proto = str(payload.get('proto') or '').strip() or _youtube_route_protocol()
         profile = str(payload.get('profile') or 'full').strip().lower()
         measure_quality = bool(payload.get('measure_quality'))
+        requested_timeouts = payload.get('http_timeouts')
+        if isinstance(requested_timeouts, (list, tuple)) and len(requested_timeouts) >= 2:
+            connect_timeout = max(0.5, min(
+                YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+                float(requested_timeouts[0]),
+            ))
+            read_timeout = max(1.0, min(
+                YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+                float(requested_timeouts[1]),
+            ))
+        else:
+            connect_timeout = YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT
+            read_timeout = YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT
         payload.update({
             'proto': proto,
             'proxy_url': proxy_settings.get(proto) or '',
             'profile': profile,
             'urls': list(YOUTUBE_VLESS2_HEALTHCHECK_URLS) if profile == 'full' else [],
             'min_ok': YOUTUBE_VLESS2_HEALTHCHECK_MIN_OK if profile == 'full' else None,
-            'connect_timeout': YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
-            'read_timeout': YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+            'connect_timeout': connect_timeout,
+            'read_timeout': read_timeout,
+            'retry_unstable': bool(payload.get('retry_unstable', True)),
             'retry_delay_seconds': POOL_PROBE_RETRY_DELAY_SECONDS,
             'quality_enabled': bool(measure_quality and POOL_PROBE_QUALITY_ENABLED),
             'quality_url': POOL_PROBE_QUALITY_DOWNLOAD_URL,
@@ -11123,6 +11174,9 @@ def _health_check_in_process(payload):
         env = dict(os.environ)
         env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
         env['BYPASS_KEENETIC_HEALTH_WORKER'] = '1'
+        worker_timeout = POOL_FAILOVER_PROCESS_WORKER_TIMEOUT_SECONDS
+        if timeout_seconds is not None:
+            worker_timeout = min(worker_timeout, max(1.0, float(timeout_seconds)))
         result = subprocess.run(
             [sys.executable, '-c', _health_check_process_worker_code(
                 paths['input_path'],
@@ -11133,7 +11187,7 @@ def _health_check_in_process(payload):
             stderr=subprocess.DEVNULL,
             close_fds=True,
             env=env,
-            timeout=POOL_FAILOVER_PROCESS_WORKER_TIMEOUT_SECONDS,
+            timeout=worker_timeout,
             check=False,
         )
         worker_payload = _read_json_file(paths['result_path'], {}) or {}
@@ -11175,14 +11229,24 @@ def _check_telegram_api_for_background(proxy_url=None, connect_timeout=6, read_t
     )
 
 
-def _check_youtube_protocol_for_background(proto=None, metrics=None, profile='full', measure_quality=False):
+def _check_youtube_protocol_for_background(
+    proto=None,
+    metrics=None,
+    profile='full',
+    measure_quality=False,
+    http_timeouts=None,
+    retry_unstable=True,
+    worker_timeout_seconds=None,
+):
     if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE:
         payload = _health_check_in_process({
             'kind': 'youtube',
             'proto': str(proto or ''),
             'profile': str(profile or 'full'),
             'measure_quality': bool(measure_quality),
-        })
+            'http_timeouts': list(http_timeouts) if http_timeouts else None,
+            'retry_unstable': bool(retry_unstable),
+        }, timeout_seconds=worker_timeout_seconds)
         if payload is None:
             return None, 'YouTube check is unavailable; the last verified result is kept.'
         worker_metrics = payload.get('metrics') or {}
@@ -11194,6 +11258,8 @@ def _check_youtube_protocol_for_background(proto=None, metrics=None, profile='fu
         metrics=metrics,
         profile=profile,
         measure_quality=measure_quality,
+        http_timeouts=http_timeouts,
+        retry_unstable=retry_unstable,
     )
 
 
@@ -11203,7 +11269,15 @@ def _run_failover_candidate_process_worker(input_path, result_path):
     return failover_candidate_runner.run_failover_candidate_worker(input_path, result_path)
 
 
-def _find_pool_failover_candidate_in_process(candidates, service='telegram', measure_youtube_quality=False):
+def _find_pool_failover_candidate_in_process(
+    candidates,
+    service='telegram',
+    measure_youtube_quality=False,
+    http_timeouts=None,
+    youtube_profile='confirm',
+    youtube_retry_unstable=True,
+    timeout_seconds=None,
+):
     candidates = [
         (str(proto or ''), str(key_value or '').strip())
         for proto, key_value in (candidates or [])
@@ -11212,6 +11286,10 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram', mea
     if not candidates:
         return None
     paths = _failover_candidate_process_paths()
+    youtube_http_timeouts = http_timeouts or (
+        YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT,
+        YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT,
+    )
     payload = {
         'service': str(service or 'telegram'),
         'candidates': candidates,
@@ -11219,9 +11297,11 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram', mea
         'test_port': POOL_FAILOVER_TEST_PORT,
         'telegram_timeouts': [POOL_PROBE_TG_CONNECT_TIMEOUT, POOL_PROBE_TG_READ_TIMEOUT],
         'http_timeouts': [
-            YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT if service == 'youtube' else POOL_PROBE_HTTP_CONNECT_TIMEOUT,
-            YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT if service == 'youtube' else POOL_PROBE_HTTP_READ_TIMEOUT,
+            youtube_http_timeouts[0] if service == 'youtube' else POOL_PROBE_HTTP_CONNECT_TIMEOUT,
+            youtube_http_timeouts[1] if service == 'youtube' else POOL_PROBE_HTTP_READ_TIMEOUT,
         ],
+        'youtube_profile': str(youtube_profile or 'confirm'),
+        'youtube_retry_unstable': bool(youtube_retry_unstable),
         'telegram_authenticated': bool(_app_mode_telegram_enabled()),
         'youtube_quality_settings': (
             _youtube_quality_settings()
@@ -11234,6 +11314,9 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram', mea
         env = dict(os.environ)
         env['BYPASS_KEENETIC_COMMAND_WORKER'] = '1'
         env['BYPASS_KEENETIC_POOL_PROBE_WORKER'] = '1'
+        worker_timeout = POOL_FAILOVER_PROCESS_WORKER_TIMEOUT_SECONDS
+        if timeout_seconds is not None:
+            worker_timeout = min(worker_timeout, max(1.0, float(timeout_seconds)))
         result = subprocess.run(
             [sys.executable, '-c', _failover_candidate_process_worker_code(
                 paths['input_path'],
@@ -11244,7 +11327,7 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram', mea
             stderr=subprocess.DEVNULL,
             close_fds=True,
             env=env,
-            timeout=POOL_FAILOVER_PROCESS_WORKER_TIMEOUT_SECONDS,
+            timeout=worker_timeout,
             check=False,
         )
         worker_payload = _read_json_file(paths['result_path'], {}) or {}
@@ -11286,17 +11369,32 @@ def _find_pool_failover_candidate_in_process(candidates, service='telegram', mea
             _cleanup_pool_probe_runtime_light(kill_processes=True)
 
 
-def _find_pool_failover_candidate(candidates, service='telegram', measure_youtube_quality=False):
+def _find_pool_failover_candidate(
+    candidates,
+    service='telegram',
+    measure_youtube_quality=False,
+    http_timeouts=None,
+    youtube_profile='confirm',
+    youtube_retry_unstable=True,
+    timeout_seconds=None,
+):
     if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not POOL_PROBE_WORKER_MODE:
         return _find_pool_failover_candidate_in_process(
             candidates,
             service=service,
             measure_youtube_quality=measure_youtube_quality,
+            http_timeouts=http_timeouts,
+            youtube_profile=youtube_profile,
+            youtube_retry_unstable=youtube_retry_unstable,
+            timeout_seconds=timeout_seconds,
         )
     return _find_pool_failover_candidate_inline(
         candidates,
         service=service,
         measure_youtube_quality=measure_youtube_quality,
+        http_timeouts=http_timeouts,
+        youtube_profile=youtube_profile,
+        youtube_retry_unstable=youtube_retry_unstable,
     )
 
 
@@ -13155,8 +13253,6 @@ def _background_maintenance_tasks():
             _run_subscription_auto_refresh_cycle,
         ))
     tasks.append(('Telegram auto-failover', AUTO_FAILOVER_POLL_SECONDS, 0.0, _run_auto_failover_cycle))
-    if YOUTUBE_VLESS2_FAILOVER_ENABLED:
-        tasks.append(('YouTube failover', YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS, 0.0, _run_youtube_failover_cycle))
     return tasks
 
 
@@ -13201,6 +13297,28 @@ def _start_background_maintenance_thread():
         daemon=True,
     )
     background_maintenance_thread.start()
+
+
+def _start_youtube_failover_thread():
+    global youtube_failover_thread
+    if (
+        not YOUTUBE_VLESS2_FAILOVER_ENABLED or
+        not _app_mode_pool_enabled() or
+        (youtube_failover_thread and youtube_failover_thread.is_alive())
+    ):
+        return
+    youtube_failover_thread = threading.Thread(
+        target=lambda: _youtube_failover_runtime().run_periodic_failover(
+            _run_youtube_failover_cycle,
+            shutdown_requested,
+            interval_seconds=YOUTUBE_VLESS2_FAILOVER_POLL_SECONDS,
+            retry_seconds=5.0,
+            maintenance_active=_update_maintenance_active,
+        ),
+        name='youtube-failover',
+        daemon=True,
+    )
+    youtube_failover_thread.start()
 
 
 def _web_custom_checks():
@@ -15519,6 +15637,7 @@ def main():
         _ensure_current_keys_in_pools()
         _load_persisted_pool_probe_resume()
     _start_background_maintenance_thread()
+    _start_youtube_failover_thread()
     if telegram_enabled:
         _deliver_pending_telegram_command_result()
         _start_telegram_result_retry_worker()

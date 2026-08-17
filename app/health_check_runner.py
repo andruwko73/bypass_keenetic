@@ -199,6 +199,7 @@ def _check_youtube(payload):
             http_timeouts=(connect_timeout, read_timeout),
             http_retry_timeouts=(connect_timeout, read_timeout),
             retry_delay_seconds=float(payload.get('retry_delay_seconds') or 0),
+            retry_unstable=bool(payload.get('retry_unstable', True)),
             metrics=metrics,
             sleep=time.sleep,
         )

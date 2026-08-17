@@ -1,4 +1,4 @@
-# ВЕРСИЯ СКРИПТА v1.1031
+# ВЕРСИЯ СКРИПТА v1.1032
 
 token = 'MyBotFatherToken'  # ключ api бота
 usernames = ['MyTelegramLogin']  # Ваш логин в телеграмме без @, не бота.
@@ -236,6 +236,13 @@ youtube_route_failover_check_read_timeout = 5
 youtube_route_failover_confirm_retries = 2
 youtube_route_failover_confirm_delay_seconds = 3.0
 youtube_route_failover_max_candidates = 2
+youtube_route_emergency_max_candidates = 8  # перебор идёт последовательно внутри общего дедлайна 120 с
+youtube_route_emergency_deadline_seconds = 120  # полный отказ: весь цикл выбора ограничен двумя минутами
+youtube_route_emergency_confirm_reserve_seconds = 25  # оставить время на установку и проверку ключа на постоянном порту
+youtube_route_emergency_repair_timeout_seconds = 8  # краткая попытка обновить маршруты не съедает аварийный дедлайн
+youtube_route_emergency_connect_timeout = 2.0
+youtube_route_emergency_read_timeout = 4.0
+youtube_route_hard_failure_confirm_ttl_seconds = 300  # не повторять тяжёлое подтверждение каждую минуту
 youtube_route_quality_failover_enabled = True
 youtube_route_quality_min_duration_seconds = 300
 youtube_route_quality_consecutive_checks = 3
@@ -245,6 +252,7 @@ youtube_route_quality_min_improvement = 15
 youtube_route_quality_error_rate = 0.2
 youtube_route_quality_latency_ms = 2500
 youtube_route_quality_switch_cooldown_seconds = 900
+youtube_route_quality_stream_max_defer_seconds = 120  # деградация ждёт тихое окно не более двух минут
 active_status_recent_success_ttl = 900
 auto_failover_recent_success_ttl = 900
 youtube_route_failover_recent_success_ttl = 900
