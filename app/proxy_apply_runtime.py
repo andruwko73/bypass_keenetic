@@ -79,6 +79,13 @@ def proxy_apply_settings(core_service_script, ports):
             'startup_wait': 8,
             'fast_startup_wait': 5,
         },
+        'hysteria2': {
+            'label': 'Hysteria2',
+            'port': ports['hysteria2'],
+            'restart_cmds': [core_restart],
+            'startup_wait': 18,
+            'fast_startup_wait': 5,
+        },
     }
 
 

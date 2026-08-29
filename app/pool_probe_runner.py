@@ -11,6 +11,23 @@ from collections import deque
 from proxy_config_builder import socks_inbound, xray_base_config
 
 
+def take_isolated_probe_batch(pending_tasks, batch_size):
+    """Keep Hysteria2 in a one-key Xray process to avoid auth-client cache sharing."""
+    if not pending_tasks:
+        return []
+    first = pending_tasks.popleft()
+    if str(first[0] or '') == 'hysteria2':
+        return [first]
+    batch = [first]
+    while pending_tasks and len(batch) < max(1, int(batch_size or 1)):
+        candidate = pending_tasks.popleft()
+        if str(candidate[0] or '') == 'hysteria2':
+            pending_tasks.appendleft(candidate)
+            break
+        batch.append(candidate)
+    return batch
+
+
 def pool_probe_socks_inbound(port, tag):
     """Use the exact SOCKS inbound used by the persistent router Xray."""
     return socks_inbound(port, tag)
@@ -211,7 +228,7 @@ def find_pool_failover_candidate(
     tg_connect, tg_read = telegram_timeouts
     http_connect, http_read = http_timeouts
     while probe_tasks:
-        raw_batch = [probe_tasks.popleft() for _ in range(min(batch_size, len(probe_tasks)))]
+        raw_batch = take_isolated_probe_batch(probe_tasks, batch_size)
         valid_batch = []
         for proto, key_value in raw_batch:
             try:
@@ -638,7 +655,7 @@ def run_pool_probe_worker(
             else:
                 update_note('')
 
-            raw_batch = [pending_tasks.popleft() for _ in range(min(batch_size, len(pending_tasks)))]
+            raw_batch = take_isolated_probe_batch(pending_tasks, batch_size)
             valid_batch = []
 
             for proto, key_value in raw_batch:

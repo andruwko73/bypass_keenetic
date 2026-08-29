@@ -3,7 +3,7 @@ import re
 
 MENU_STATE_UNSET = object()
 SENSITIVE_MESSAGE_TEXT_PATTERNS = (
-    (re.compile(r'\b(?:vless|vmess|trojan|ss)://[^\s\'"<>]+', re.I), '<proxy-key-hidden>'),
+    (re.compile(r'\b(?:vless|vmess|trojan|ss|hysteria2|hy2)://[^\s\'"<>]+', re.I), '<proxy-key-hidden>'),
     (re.compile(r'\b\d{6,}:[A-Za-z0-9_-]{20,}\b'), '<bot-token-hidden>'),
     (re.compile(r'https?://[^\s\'"<>]+', re.I), '<url-hidden>'),
     (re.compile(r'((?:token|password|passwd|secret|credential|subscription)\s*[=:]\s*)[^\s\'"]+', re.I), r'\1<hidden>'),

@@ -3,6 +3,8 @@ import os
 import tempfile
 import time
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER
+
 
 VALID_PHASES = frozenset((
     'prepared',
@@ -11,7 +13,7 @@ VALID_PHASES = frozenset((
     'restore_started',
     'restore_failed',
 ))
-VALID_PROTOCOLS = frozenset(('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'))
+VALID_PROTOCOLS = frozenset(PROTOCOL_DISPLAY_ORDER)
 
 
 def load_transaction(path):

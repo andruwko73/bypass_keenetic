@@ -155,9 +155,10 @@ def _add_cross_transparent_domain_routes(config_data, inbound_tags, domain_overr
         'vless': 'proxy-vless',
         'vless2': 'proxy-vless2',
         'trojan': 'proxy-trojan',
+        'hysteria2': 'proxy-hysteria2',
     }
     rules = []
-    for protocol in ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan'):
+    for protocol in ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan', 'hysteria2'):
         policy = (domain_overrides or {}).get(protocol) or {}
         domains = list(policy.get('domains') or ())
         outbound_tag = outbound_tags[protocol]
@@ -225,6 +226,7 @@ def build_proxy_core_config(
     vless2_key=None,
     shadowsocks_key=None,
     trojan_key=None,
+    hysteria2_key=None,
     ports,
     error_log_path,
     access_log_path='/dev/null',
@@ -307,6 +309,20 @@ def build_proxy_core_config(
     if transparent_tag:
         transparent_tags.append(transparent_tag)
     _add_socks_proxy(config_data, 'trojan', trojan_key, ports['trojan_bot'], 'in-trojan', 'proxy-trojan')
+    transparent_tag = _add_transparent_proxy(
+        config_data,
+        'hysteria2',
+        hysteria2_key,
+        ports.get('hysteria2', 10840),
+        ports.get('hysteria2_transparent', 10841),
+        'in-hysteria2',
+        'in-hysteria2-transparent',
+        'proxy-hysteria2',
+        route_only='hysteria2' in route_only_transparent,
+        strict_policy=route_policies.get('hysteria2') if 'hysteria2' in strict_transparent else None,
+    )
+    if transparent_tag:
+        transparent_tags.append(transparent_tag)
 
     if include_tproxy_inbounds:
         tproxy_tag = _add_tproxy_route(
@@ -316,6 +332,16 @@ def build_proxy_core_config(
             'in-shadowsocks-tproxy',
             'proxy-shadowsocks',
             route_only='shadowsocks' in route_only_tproxy,
+        )
+        if tproxy_tag:
+            tproxy_tags.append(tproxy_tag)
+        tproxy_tag = _add_tproxy_route(
+            config_data,
+            hysteria2_key,
+            ports.get('hysteria2_tproxy'),
+            'in-hysteria2-tproxy',
+            'proxy-hysteria2',
+            route_only='hysteria2' in route_only_tproxy,
         )
         if tproxy_tag:
             tproxy_tags.append(tproxy_tag)

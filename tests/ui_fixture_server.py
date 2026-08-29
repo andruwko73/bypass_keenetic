@@ -33,6 +33,7 @@ BACKGROUND_FIXTURE_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB
 
 import key_pool_web  # noqa: E402
 import probe_cache  # noqa: E402
+import protocol_catalog  # noqa: E402
 import service_catalog  # noqa: E402
 import service_routes  # noqa: E402
 import web_form_blocks  # noqa: E402
@@ -59,6 +60,7 @@ CURRENT_KEYS = {
     "vless2": "vless://fixture-active-vless2@example.test:443?security=reality#active-vless2",
     "vmess": "",
     "trojan": "",
+    "hysteria2": "",
     "shadowsocks": "",
 }
 
@@ -73,6 +75,7 @@ POOLS = {
     ],
     "vmess": [],
     "trojan": [],
+    "hysteria2": [],
     "shadowsocks": [],
 }
 
@@ -250,6 +253,14 @@ def _protocol_statuses():
             "custom": {"chatgpt_services": "unknown"},
         },
         "trojan": {
+            "tone": "empty",
+            "label": "Empty",
+            "details": "No active key in fixture.",
+            "api_ok": False,
+            "yt_ok": False,
+            "custom": {"chatgpt_services": "unknown"},
+        },
+        "hysteria2": {
             "tone": "empty",
             "label": "Empty",
             "details": "No active key in fixture.",
@@ -464,18 +475,18 @@ def _page_html(mode="advanced"):
         enable_custom_checks=enable_custom_checks,
         pool_probe_pending=False,
     )
+    route_contents = {
+        "vless": "telegram.org\nchatgpt.com\nchat.openai.com",
+        "vless2": "youtube.com\ngooglevideo.com\nrutracker.org",
+    }
     unblock_tabs_html, unblock_panels_html = web_form_blocks.render_unblock_lists(
         [
             {
-                "name": "vless",
-                "label": "Vless 1",
-                "content": "telegram.org\nchatgpt.com\nchat.openai.com",
-            },
-            {
-                "name": "vless2",
-                "label": "Vless 2",
-                "content": "youtube.com\ngooglevideo.com\nrutracker.org",
-            },
+                "name": protocol_catalog.PROTOCOL_ROUTE_NAMES[proto] + ".txt",
+                "label": protocol_catalog.PROTOCOL_LABELS[proto],
+                "content": route_contents.get(proto, ""),
+            }
+            for proto in protocol_catalog.PROTOCOL_DISPLAY_ORDER
         ],
         csrf_input_html,
         (),

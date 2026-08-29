@@ -390,6 +390,8 @@ localportvless_transparent=$((localportvless + 1))
 localportvless2=$((localportvless + 2))
 localportvless2_transparent=$((localportvless + 3))
 localporttrojan=$(config_get "localporttrojan" "10829")
+localporthysteria2=$(config_get "localporthysteria2" "10840")
+localporthysteria2_transparent=$(config_get "localporthysteria2_transparent" "10841")
 dnsovertlsport=$(config_get "dnsovertlsport" "40500")
 dnsoverhttpsport=$(config_get "dnsoverhttpsport" "40508")
 keen_os_full=$(curl -s localhost:79/rci/show/version/title | tr -d \",)
@@ -991,6 +993,7 @@ backup_runtime_state_files() {
   backup_runtime_state_file /opt/etc/xray/vmess.key vmess.key
   backup_runtime_state_file /opt/etc/xray/vless.key vless.key
   backup_runtime_state_file /opt/etc/xray/vless2.key vless2.key
+  backup_runtime_state_file /opt/etc/xray/hysteria2.key hysteria2.key
   backup_runtime_state_file /opt/etc/xray/config.json xray_config.json
   backup_runtime_state_file /opt/etc/v2ray/config.json v2ray_config.json
   backup_runtime_state_file /opt/etc/shadowsocks.json shadowsocks.json
@@ -1000,6 +1003,7 @@ backup_runtime_state_files() {
   backup_runtime_state_file /opt/etc/unblock/vmess.txt unblock_vmess.txt
   backup_runtime_state_file /opt/etc/unblock/vless.txt unblock_vless.txt
   backup_runtime_state_file /opt/etc/unblock/vless-2.txt unblock_vless2.txt
+  backup_runtime_state_file /opt/etc/unblock/hysteria2.txt unblock_hysteria2.txt
   backup_runtime_state_file /opt/etc/unblock/web-ui/background.webp web_ui_background.webp
   backup_runtime_state_file /opt/etc/unblock/web-ui/background.json web_ui_background.json
 }
@@ -1030,6 +1034,7 @@ restore_runtime_state_files_after_update() {
   restore_runtime_state_file_after_update vmess.key /opt/etc/xray/vmess.key 0600
   restore_runtime_state_file_after_update vless.key /opt/etc/xray/vless.key 0600
   restore_runtime_state_file_after_update vless2.key /opt/etc/xray/vless2.key 0600
+  restore_runtime_state_file_after_update hysteria2.key /opt/etc/xray/hysteria2.key 0600
   restore_runtime_state_file_after_update xray_config.json /opt/etc/xray/config.json 0644
   restore_runtime_state_file_after_update v2ray_config.json /opt/etc/v2ray/config.json 0644
   restore_runtime_state_file_after_update shadowsocks.json /opt/etc/shadowsocks.json 0600
@@ -1039,8 +1044,17 @@ restore_runtime_state_files_after_update() {
   restore_runtime_state_file_after_update unblock_vmess.txt /opt/etc/unblock/vmess.txt 0644
   restore_runtime_state_file_after_update unblock_vless.txt /opt/etc/unblock/vless.txt 0644
   restore_runtime_state_file_after_update unblock_vless2.txt /opt/etc/unblock/vless-2.txt 0644
+  restore_runtime_state_file_after_update unblock_hysteria2.txt /opt/etc/unblock/hysteria2.txt 0644
   restore_runtime_state_file_after_update web_ui_background.webp /opt/etc/unblock/web-ui/background.webp 0644
   restore_runtime_state_file_after_update web_ui_background.json /opt/etc/unblock/web-ui/background.json 0644
+}
+
+ensure_hysteria2_runtime_state_files() {
+  mkdir -p /opt/etc/unblock
+  if [ ! -e /opt/etc/unblock/hysteria2.txt ]; then
+    : > /opt/etc/unblock/hysteria2.txt
+  fi
+  chmod 0644 /opt/etc/unblock/hysteria2.txt 2>/dev/null || true
 }
 
 backup_static_assets() {
@@ -1055,6 +1069,7 @@ backup_static_assets() {
 
 write_update_rollback_script() {
   rollback_path="$backup_dir/rollback.sh"
+  rollback_hysteria2_tproxy_port="$(config_get "localporthysteria2_tproxy" "11840")"
   cat > "$rollback_path" <<EOF
 #!/bin/sh
 set -eu
@@ -1068,6 +1083,8 @@ INSTALLER_SERVICE_PATH="$INSTALLER_SERVICE_PATH"
 BOT_CONFIG_PATH="$BOT_CONFIG_PATH"
 UPDATE_MAINTENANCE_PATH="$UPDATE_MAINTENANCE_PATH"
 UPDATE_MAINTENANCE_READY_PATH="$UPDATE_MAINTENANCE_READY_PATH"
+HYSTERIA2_TRANSPARENT_PORT="$localporthysteria2_transparent"
+HYSTERIA2_TPROXY_PORT="$rollback_hysteria2_tproxy_port"
 ROLLBACK_MODULES="$BOT_RUNTIME_MODULES CHANGELOG.md"
 
 write_rollback_update_status() {
@@ -1124,6 +1141,60 @@ ensure_runtime_legacy_paths() {
     rm -f /opt/etc/bot.py
     ln -s "\$BOT_MAIN_PATH" /opt/etc/bot.py 2>/dev/null || cp "\$BOT_MAIN_PATH" /opt/etc/bot.py
   fi
+}
+
+delete_saved_firewall_rules_containing() {
+  firewall_command="\$1"
+  firewall_table="\$2"
+  rule_token="\$3"
+  save_command="\${firewall_command}-save"
+  command -v "\$firewall_command" >/dev/null 2>&1 || return 0
+  command -v "\$save_command" >/dev/null 2>&1 || return 0
+  "\$save_command" -t "\$firewall_table" 2>/dev/null | while IFS= read -r saved_rule; do
+    case "\$saved_rule" in
+      -A\ *"\$rule_token"*)
+        delete_rule="\${saved_rule#-A }"
+        delete_chain="\${delete_rule%% *}"
+        delete_args="\${delete_rule#* }"
+        # Generated rules contain no quoted comments; word splitting preserves
+        # the exact iptables arguments emitted by iptables-save.
+        # shellcheck disable=SC2086
+        "\$firewall_command" -t "\$firewall_table" -D "\$delete_chain" \$delete_args >/dev/null 2>&1 || true
+        ;;
+    esac
+  done
+}
+
+cleanup_unsupported_hysteria2_runtime() {
+  restored_redirect=/opt/etc/ndm/netfilter.d/100-redirect.sh
+  if [ -f "\$restored_redirect" ] && grep -q 'HYSTERIA2' "\$restored_redirect" 2>/dev/null; then
+    return 0
+  fi
+
+  for rule_token in \
+    '--match-set unblockhy2 ' \
+    '--match-set unblockhy2udp ' \
+    '--match-set bypass_call_clients_hy2 ' \
+    '--match-set bypass_call_signal_hy2 ' \
+    '--match-set bypass_tg_call_hy2 '; do
+    for firewall_table in filter nat mangle; do
+      delete_saved_firewall_rules_containing iptables "\$firewall_table" "\$rule_token"
+    done
+  done
+  delete_saved_firewall_rules_containing iptables mangle "--on-port \$HYSTERIA2_TPROXY_PORT "
+  delete_saved_firewall_rules_containing ip6tables filter '--match-set unblockhy26 '
+
+  for reject_target in REJECT DROP; do
+    while iptables -C INPUT -w -p udp --dport "\$HYSTERIA2_TRANSPARENT_PORT" -j "\$reject_target" 2>/dev/null; do
+      iptables -D INPUT -w -p udp --dport "\$HYSTERIA2_TRANSPARENT_PORT" -j "\$reject_target" >/dev/null 2>&1 || break
+    done
+  done
+  for set_name in \
+    unblockhy2 unblockhy2udp unblockhy26 \
+    bypass_call_clients_hy2 bypass_call_signal_hy2 bypass_tg_call_hy2; do
+    ipset destroy "\$set_name" >/dev/null 2>&1 || true
+  done
+  rm -f /opt/etc/xray/hysteria2.key /opt/etc/v2ray/hysteria2.key /opt/etc/unblock/hysteria2.txt
 }
 
 install_unblock_ipset_cron_job() {
@@ -1216,6 +1287,7 @@ restore_file custom_checks.json "\$BOT_RUNTIME_DIR/custom_checks.json"
 restore_file vmess.key /opt/etc/xray/vmess.key
 restore_file vless.key /opt/etc/xray/vless.key
 restore_file vless2.key /opt/etc/xray/vless2.key
+restore_file hysteria2.key /opt/etc/xray/hysteria2.key
 restore_file xray_config.json /opt/etc/xray/config.json
 restore_file v2ray_config.json /opt/etc/v2ray/config.json
 restore_file shadowsocks.json /opt/etc/shadowsocks.json
@@ -1225,6 +1297,7 @@ restore_file unblock_trojan.txt /opt/etc/unblock/trojan.txt
 restore_file unblock_vmess.txt /opt/etc/unblock/vmess.txt
 restore_file unblock_vless.txt /opt/etc/unblock/vless.txt
 restore_file unblock_vless2.txt /opt/etc/unblock/vless-2.txt
+restore_file unblock_hysteria2.txt /opt/etc/unblock/hysteria2.txt
 
 for module in \$ROLLBACK_MODULES; do
   if [ -f "\$BACKUP_DIR/.runtime-absent-\$module" ]; then
@@ -1249,6 +1322,7 @@ chmod 755 /opt/bin/unblock_*.sh /opt/etc/ndm/fs.d/100-ipset.sh /opt/etc/ndm/netf
 restore_file script.sh /opt/root/script.sh
 [ -f /opt/root/script.sh ] && chmod 755 /opt/root/script.sh || true
 ensure_runtime_legacy_paths
+cleanup_unsupported_hysteria2_runtime
 write_rollback_update_status true 75 Сервисы "Запускаем DNS и прокси-сервисы предыдущего релиза"
 
 if [ "\$full_state_restored" -ne 1 ]; then
@@ -1289,7 +1363,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py protocol_catalog.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -1804,6 +1878,10 @@ PYCFG
   grep -Eq '^localportvless_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportvless_tproxy = '11812'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^localportvless2_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localportvless2_tproxy = '11814'\n" >> "$BOT_CONFIG_PATH"
   grep -Eq '^localporttrojan_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localporttrojan_tproxy = '11829'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localporthysteria2[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localporthysteria2 = '10840'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localporthysteria2_transparent[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localporthysteria2_transparent = '10841'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^localporthysteria2_tproxy[[:space:]]*=' "$BOT_CONFIG_PATH" || printf "localporthysteria2_tproxy = '11840'\n" >> "$BOT_CONFIG_PATH"
+  grep -Eq '^udp_quic_block_hysteria2_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'udp_quic_block_hysteria2_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^xray_bittorrent_direct_enabled[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_bittorrent_direct_enabled = True\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^xray_strict_transparent_protocols[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_strict_transparent_protocols = ()\n' >> "$BOT_CONFIG_PATH"
   grep -Eq '^xray_route_only_transparent_protocols[[:space:]]*=' "$BOT_CONFIG_PATH" || printf 'xray_route_only_transparent_protocols = ()\n' >> "$BOT_CONFIG_PATH"
@@ -1887,6 +1965,7 @@ PROTOCOLS = (
     ('VLESS', 'vless.txt', 'udp_quic_block_vless_enabled'),
     ('VLESS2', 'vless-2.txt', 'udp_quic_block_vless2_enabled'),
     ('TROJAN', 'trojan.txt', 'udp_quic_block_trojan_enabled'),
+    ('HYSTERIA2', 'hysteria2.txt', 'udp_quic_block_hysteria2_enabled'),
 )
 
 
@@ -2014,6 +2093,7 @@ print(f'TELEGRAM_CALL_TPROXY_PORT_VMESS={config_int("localportvmess_tproxy", 118
 print(f'TELEGRAM_CALL_TPROXY_PORT_VLESS={config_int("localportvless_tproxy", 11812, 1, 65535)}')
 print(f'TELEGRAM_CALL_TPROXY_PORT_VLESS2={config_int("localportvless2_tproxy", 11814, 1, 65535)}')
 print(f'TELEGRAM_CALL_TPROXY_PORT_TROJAN={config_int("localporttrojan_tproxy", 11829, 1, 65535)}')
+print(f'TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2={config_int("localporthysteria2_tproxy", 11840, 1, 65535)}')
 for env_name, _filename, _attr in PROTOCOLS:
     print(f'BYPASS_TELEGRAM_CALL_ROUTE_{env_name}={1 if realtime_call_route_flags.get(env_name) else 0}')
 for env_name, _filename, _attr in PROTOCOLS:
@@ -2042,6 +2122,8 @@ if [ "$1" = "-remove" ]; then
     ipset flush unblockvless2udp
     ipset flush unblocktroj
     ipset flush unblocktrojudp
+    ipset flush unblockhy2
+    ipset flush unblockhy2udp
     remove_path /opt/root/get-pip.py
     remove_path /opt/etc/crontab
     remove_path /opt/etc/init.d/S22shadowsocks
@@ -2156,7 +2238,8 @@ PY
     touch /opt/etc/unblock/vmess.txt && chmod 0644 /opt/etc/unblock/vmess.txt
     touch /opt/etc/unblock/vless.txt && chmod 0644 /opt/etc/unblock/vless.txt
     touch /opt/etc/unblock/vless-2.txt && chmod 0644 /opt/etc/unblock/vless-2.txt
-    echo "Созданы файлы под сайты и ip-адреса для обхода блокировок для SS, Trojan, Vmess и Vless"
+    touch /opt/etc/unblock/hysteria2.txt && chmod 0644 /opt/etc/unblock/hysteria2.txt
+    echo "Созданы файлы под сайты и ip-адреса для обхода блокировок для SS, Trojan, Vmess, Vless и Hysteria2"
 
     # unblock_ipset.sh
     # chmod 777 /opt/bin/unblock_ipset.sh || rm -rfv /opt/bin/unblock_ipset.sh
@@ -2198,6 +2281,8 @@ PY
     sed -i "s/10813/${localportvless2}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10814/${localportvless2_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/10829/${localporttrojan}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
+    sed -i "s/10840/${localporthysteria2}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
+    sed -i "s/10841/${localporthysteria2_transparent}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     echo "Установлено перенаправление пакетов с адресатами из unblock в: Shadowsocks, Trojan, xray/v2ray. Правила работают на всех интерфейсах роутера."
 
     # dnsmasq.conf
@@ -2348,6 +2433,8 @@ if [ "$1" = "-update" ]; then
     sed -i "s/10813/${localportvless2}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/10814/${localportvless2_transparent}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/10829/${localporttrojan}/g" "$stage_dir/100-redirect.sh"
+    sed -i "s/10840/${localporthysteria2}/g" "$stage_dir/100-redirect.sh"
+    sed -i "s/10841/${localporthysteria2_transparent}/g" "$stage_dir/100-redirect.sh"
     sed -i "s/40500/${dnsovertlsport}/g" "$stage_dir/unblock_ipset.sh"
     sed -i "s/40500/${dnsovertlsport}/g" "$stage_dir/unblock_dnsmasq.sh"
     sed -i "s/192.168.1.1/${lanip}/g" "$stage_dir/dnsmasq.conf"
@@ -2450,6 +2537,7 @@ if [ "$1" = "-update" ]; then
     activate_runtime_modules $BOT_RUNTIME_MODULES
     rm -f "$BOT_RUNTIME_DIR/CHANGELOG.md" 2>/dev/null || true
     restore_runtime_state_files_after_update
+    ensure_hysteria2_runtime_state_files
     ensure_runtime_legacy_paths
     migrate_runtime_config_defaults
     generate_udp_quic_policy_file

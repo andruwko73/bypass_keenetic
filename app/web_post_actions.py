@@ -2,8 +2,10 @@ import os
 import time
 from urllib.parse import urlsplit
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER
 
-PROXY_PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+
+PROXY_PROTOCOLS = PROTOCOL_DISPLAY_ORDER
 
 
 def base_action_context(**values):
@@ -423,7 +425,7 @@ def _is_subscription_input(value):
 def _format_added_counts(added_by_proto):
     if not added_by_proto:
         return ''
-    order = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+    order = PROXY_PROTOCOLS
     parts = [
         f'{proto}: {int(added_by_proto.get(proto) or 0)}'
         for proto in order

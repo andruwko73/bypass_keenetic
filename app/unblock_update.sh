@@ -1,8 +1,8 @@
 #!/bin/sh
 
-SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
-EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
-IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6"
+SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj unblockhy2"
+EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp unblockhy2udp"
+IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6 unblockhy26"
 
 ensure_set() {
 	ipset create "$1" hash:net -exist >/dev/null 2>&1

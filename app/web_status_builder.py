@@ -1,3 +1,6 @@
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER
+
+
 def empty_protocol_status():
     return {
         'tone': 'empty',
@@ -71,7 +74,7 @@ def pool_status_summary(
     custom_checks,
     hash_key,
     *,
-    protocol_order=('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks'),
+    protocol_order=PROTOCOL_DISPLAY_ORDER,
     active_keys_text='протоколов с выбранным ключом',
     pool_total_text='Записей в пулах',
     checked_text='С сохранённым результатом',

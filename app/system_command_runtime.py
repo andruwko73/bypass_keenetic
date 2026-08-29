@@ -345,6 +345,8 @@ def rollback_last_update(backup_root='/opt/root'):
         'trojan_config.json': ('/opt/etc/trojan/config.json', 0o644),
         'unblock_shadowsocks.txt': ('/opt/etc/unblock/shadowsocks.txt', 0o644),
         'unblock_trojan.txt': ('/opt/etc/unblock/trojan.txt', 0o644),
+        'unblock_hysteria2.txt': ('/opt/etc/unblock/hysteria2.txt', 0o644),
+        'hysteria2.key': ('/opt/etc/xray/hysteria2.key', 0o600),
         'unblock_vmess.txt': ('/opt/etc/unblock/vmess.txt', 0o644),
         'unblock_vless.txt': ('/opt/etc/unblock/vless.txt', 0o644),
         'unblock_vless2.txt': ('/opt/etc/unblock/vless-2.txt', 0o644),

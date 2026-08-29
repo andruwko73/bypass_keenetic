@@ -26,7 +26,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py protocol_catalog.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -259,6 +259,7 @@ PROTOCOLS = (
     ('VLESS', 'vless.txt', 'udp_quic_block_vless_enabled'),
     ('VLESS2', 'vless-2.txt', 'udp_quic_block_vless2_enabled'),
     ('TROJAN', 'trojan.txt', 'udp_quic_block_trojan_enabled'),
+    ('HYSTERIA2', 'hysteria2.txt', 'udp_quic_block_hysteria2_enabled'),
 )
 
 
@@ -386,6 +387,7 @@ print(f'TELEGRAM_CALL_TPROXY_PORT_VMESS={config_int("localportvmess_tproxy", 118
 print(f'TELEGRAM_CALL_TPROXY_PORT_VLESS={config_int("localportvless_tproxy", 11812, 1, 65535)}')
 print(f'TELEGRAM_CALL_TPROXY_PORT_VLESS2={config_int("localportvless2_tproxy", 11814, 1, 65535)}')
 print(f'TELEGRAM_CALL_TPROXY_PORT_TROJAN={config_int("localporttrojan_tproxy", 11829, 1, 65535)}')
+print(f'TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2={config_int("localporthysteria2_tproxy", 11840, 1, 65535)}')
 for env_name, _filename, _attr in PROTOCOLS:
     print(f'BYPASS_TELEGRAM_CALL_ROUTE_{env_name}={1 if realtime_call_route_flags.get(env_name) else 0}')
 for env_name, _filename, _attr in PROTOCOLS:
@@ -868,6 +870,7 @@ udp_quic_block_vmess_enabled = True
 udp_quic_block_vless_enabled = True
 udp_quic_block_vless2_enabled = True
 udp_quic_block_trojan_enabled = True
+udp_quic_block_hysteria2_enabled = True
 youtube_quic_policy = 'auto'
 telegram_udp_policy = 'auto'
 youtube_edge_prefetch_enabled = True
@@ -1023,11 +1026,14 @@ localportsh = '1082'
 localportvmess = '10810'
 localportvless = '10811'
 localporttrojan = '10829'
+localporthysteria2 = '10840'
+localporthysteria2_transparent = '10841'
 localportsh_tproxy = '11802'
 localportvmess_tproxy = '11815'
 localportvless_tproxy = '11812'
 localportvless2_tproxy = '11814'
 localporttrojan_tproxy = '11829'
+localporthysteria2_tproxy = '11840'
 default_proxy_mode = {py_string('DEFAULT_PROXY_MODE_ENV')}
 dnsovertlsport = '40500'
 dnsoverhttpsport = '40508'

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE_TOKEN_PATTERNS = [
     ('telegram_bot_token', re.compile(r'\bbot\d{8,}:[A-Za-z0-9_-]{25,}\b')),
     ('telegram_token_value', re.compile(r'\b\d{8,}:[A-Za-z0-9_-]{25,}\b')),
-    ('proxy_uri', re.compile(r'\b(?:vless|vmess|trojan|ss)://[^\s\'"<>]+', re.I)),
+    ('proxy_uri', re.compile(r'\b(?:vless|vmess|trojan|ss|hysteria2|hy2)://[^\s\'"<>]+', re.I)),
     ('private_key_block', re.compile(r'-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----')),
 ]
 
@@ -28,6 +28,9 @@ SAFE_PROXY_MARKERS = (
     'vless://...',
     'vmess://...',
     'trojan://...',
+    'ss://...',
+    'hysteria2://...',
+    'hy2://...',
 )
 
 SAFE_TOKEN_MARKERS = (

@@ -129,6 +129,7 @@ udp_quic_block_vmess_enabled = True
 udp_quic_block_vless_enabled = True
 udp_quic_block_vless2_enabled = True
 udp_quic_block_trojan_enabled = True
+udp_quic_block_hysteria2_enabled = True
 xray_bittorrent_direct_enabled = True
 xray_strict_transparent_protocols = ()
 xray_route_only_transparent_protocols = ()
@@ -293,6 +294,9 @@ localportvmess_tproxy = '11815'
 localportvless_tproxy = '11812'
 localportvless2_tproxy = '11814'
 localporttrojan_tproxy = '11829'
+localporthysteria2 = '10840'
+localporthysteria2_transparent = '10841'
+localporthysteria2_tproxy = '11840'
 default_proxy_mode = '{escape_python(default_proxy_mode)}'
 dnsovertlsport = '40500'
 dnsoverhttpsport = '40508'
@@ -434,6 +438,7 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3, csrf_toke
                             <option value="vless">vless</option>
                             <option value="vless2">vless2</option>
                             <option value="trojan">trojan</option>
+                            <option value="hysteria2">hysteria2</option>
                         </select>
                     </div>
                 </div>

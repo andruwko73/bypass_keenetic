@@ -1,4 +1,7 @@
-PROXY_PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER
+
+
+PROXY_PROTOCOLS = PROTOCOL_DISPLAY_ORDER
 
 
 def telegram_api_success_message():

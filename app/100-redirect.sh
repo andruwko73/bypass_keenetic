@@ -41,6 +41,7 @@ BYPASS_UDP_QUIC_BLOCK_VMESS="${BYPASS_UDP_QUIC_BLOCK_VMESS:-1}"
 BYPASS_UDP_QUIC_BLOCK_VLESS="${BYPASS_UDP_QUIC_BLOCK_VLESS:-1}"
 BYPASS_UDP_QUIC_BLOCK_VLESS2="${BYPASS_UDP_QUIC_BLOCK_VLESS2:-1}"
 BYPASS_UDP_QUIC_BLOCK_TROJAN="${BYPASS_UDP_QUIC_BLOCK_TROJAN:-1}"
+BYPASS_UDP_QUIC_BLOCK_HYSTERIA2="${BYPASS_UDP_QUIC_BLOCK_HYSTERIA2:-1}"
 UDP_QUIC_REJECT_PORT="${UDP_QUIC_REJECT_PORT:-10944}"
 BYPASS_IPV6_FALLBACK_ENABLED="${BYPASS_IPV6_FALLBACK_ENABLED:-1}"
 BYPASS_TELEGRAM_CALL_LEARNING_ENABLED="${BYPASS_TELEGRAM_CALL_LEARNING_ENABLED:-0}"
@@ -62,11 +63,13 @@ BYPASS_TELEGRAM_CALL_ROUTE_VMESS="${BYPASS_TELEGRAM_CALL_ROUTE_VMESS:-0}"
 BYPASS_TELEGRAM_CALL_ROUTE_VLESS="${BYPASS_TELEGRAM_CALL_ROUTE_VLESS:-0}"
 BYPASS_TELEGRAM_CALL_ROUTE_VLESS2="${BYPASS_TELEGRAM_CALL_ROUTE_VLESS2:-0}"
 BYPASS_TELEGRAM_CALL_ROUTE_TROJAN="${BYPASS_TELEGRAM_CALL_ROUTE_TROJAN:-0}"
+BYPASS_TELEGRAM_CALL_ROUTE_HYSTERIA2="${BYPASS_TELEGRAM_CALL_ROUTE_HYSTERIA2:-0}"
 BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_SHADOWSOCKS="${BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_SHADOWSOCKS:-$BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS}"
 BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VMESS="${BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VMESS:-$BYPASS_TELEGRAM_CALL_ROUTE_VMESS}"
 BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS="${BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS:-$BYPASS_TELEGRAM_CALL_ROUTE_VLESS}"
 BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS2="${BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS2:-$BYPASS_TELEGRAM_CALL_ROUTE_VLESS2}"
 BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_TROJAN="${BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_TROJAN:-$BYPASS_TELEGRAM_CALL_ROUTE_TROJAN}"
+BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_HYSTERIA2="${BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_HYSTERIA2:-$BYPASS_TELEGRAM_CALL_ROUTE_HYSTERIA2}"
 TELEGRAM_CALL_CLIENT_SET="${TELEGRAM_CALL_CLIENT_SET:-bypass_tg_call_clients}"
 TELEGRAM_CALL_SIGNAL_SET="${TELEGRAM_CALL_SIGNAL_SET:-bypass_tg_call_signal}"
 CALL_CLIENT_SET_SHADOWSOCKS="${CALL_CLIENT_SET_SHADOWSOCKS:-bypass_call_clients_sh}"
@@ -74,11 +77,13 @@ CALL_CLIENT_SET_VMESS="${CALL_CLIENT_SET_VMESS:-bypass_call_clients_vmess}"
 CALL_CLIENT_SET_VLESS="${CALL_CLIENT_SET_VLESS:-bypass_call_clients_vless}"
 CALL_CLIENT_SET_VLESS2="${CALL_CLIENT_SET_VLESS2:-bypass_call_clients_vless2}"
 CALL_CLIENT_SET_TROJAN="${CALL_CLIENT_SET_TROJAN:-bypass_call_clients_troj}"
+CALL_CLIENT_SET_HYSTERIA2="${CALL_CLIENT_SET_HYSTERIA2:-bypass_call_clients_hy2}"
 CALL_SIGNAL_SET_SHADOWSOCKS="${CALL_SIGNAL_SET_SHADOWSOCKS:-bypass_call_signal_sh}"
 CALL_SIGNAL_SET_VMESS="${CALL_SIGNAL_SET_VMESS:-bypass_call_signal_vmess}"
 CALL_SIGNAL_SET_VLESS="${CALL_SIGNAL_SET_VLESS:-bypass_call_signal_vless}"
 CALL_SIGNAL_SET_VLESS2="${CALL_SIGNAL_SET_VLESS2:-bypass_call_signal_vless2}"
 CALL_SIGNAL_SET_TROJAN="${CALL_SIGNAL_SET_TROJAN:-bypass_call_signal_troj}"
+CALL_SIGNAL_SET_HYSTERIA2="${CALL_SIGNAL_SET_HYSTERIA2:-bypass_call_signal_hy2}"
 TELEGRAM_CALL_LEARN_CHAIN="${TELEGRAM_CALL_LEARN_CHAIN:-BYPASS_TG_CALL_LEARN}"
 TELEGRAM_CALL_ROUTE_CHAIN="${TELEGRAM_CALL_ROUTE_CHAIN:-BYPASS_TG_CALL_ROUTE}"
 TELEGRAM_CALL_TPROXY_CHAIN="${TELEGRAM_CALL_TPROXY_CHAIN:-BYPASS_TG_CALL_TPROXY}"
@@ -87,11 +92,12 @@ TELEGRAM_CALL_TPROXY_PORT_VMESS="${TELEGRAM_CALL_TPROXY_PORT_VMESS:-11815}"
 TELEGRAM_CALL_TPROXY_PORT_VLESS="${TELEGRAM_CALL_TPROXY_PORT_VLESS:-11812}"
 TELEGRAM_CALL_TPROXY_PORT_VLESS2="${TELEGRAM_CALL_TPROXY_PORT_VLESS2:-11814}"
 TELEGRAM_CALL_TPROXY_PORT_TROJAN="${TELEGRAM_CALL_TPROXY_PORT_TROJAN:-11829}"
+TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2="${TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2:-11840}"
 
 install_ipv6_fallback_rules() {
 	command -v ip6tables >/dev/null 2>&1 || return 0
 
-	for set_name in unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6; do
+	for set_name in unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6 unblockhy26; do
 		ipset list "$set_name" >/dev/null 2>&1 || continue
 		for protocol in tcp udp; do
 			while ip6tables -C FORWARD -w -p "$protocol" -m set --match-set "$set_name" dst --dport 443 -j REJECT 2>/dev/null; do
@@ -178,7 +184,7 @@ refresh_udp_quic_reject_port() {
 
 remove_udp_quic_block_rule() {
 	set_name="$1"
-	for reject_port in 1082 10812 10814 10815 10829 "$UDP_QUIC_REJECT_PORT"; do
+	for reject_port in 1082 10812 10814 10815 10829 10841 "$UDP_QUIC_REJECT_PORT"; do
 		while iptables -t nat -C PREROUTING -w -p udp -m set --match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-ports "$reject_port" 2>/dev/null; do
 			iptables -t nat -D PREROUTING -w -p udp -m set --match-set "$set_name" dst -m udp --dport 443 -j REDIRECT --to-ports "$reject_port"
 		done
@@ -202,7 +208,8 @@ refresh_udp_quic_block_rules() {
 		"$BYPASS_UDP_QUIC_BLOCK_VMESS" \
 		"$BYPASS_UDP_QUIC_BLOCK_VLESS" \
 		"$BYPASS_UDP_QUIC_BLOCK_VLESS2" \
-		"$BYPASS_UDP_QUIC_BLOCK_TROJAN"
+		"$BYPASS_UDP_QUIC_BLOCK_TROJAN" \
+		"$BYPASS_UDP_QUIC_BLOCK_HYSTERIA2"
 	do
 		[ "$flag" != "0" ] && reject_enabled=1
 	done
@@ -212,6 +219,7 @@ refresh_udp_quic_block_rules() {
 	install_udp_quic_block_rule unblockvlessudp "$BYPASS_UDP_QUIC_BLOCK_VLESS"
 	install_udp_quic_block_rule unblockvless2udp "$BYPASS_UDP_QUIC_BLOCK_VLESS2"
 	install_udp_quic_block_rule unblocktrojudp "$BYPASS_UDP_QUIC_BLOCK_TROJAN"
+	install_udp_quic_block_rule unblockhy2udp "$BYPASS_UDP_QUIC_BLOCK_HYSTERIA2"
 }
 
 telegram_call_route_enabled() {
@@ -221,6 +229,7 @@ telegram_call_route_enabled() {
 		vless) [ "$BYPASS_TELEGRAM_CALL_ROUTE_VLESS" = "1" ] ;;
 		vless2) [ "$BYPASS_TELEGRAM_CALL_ROUTE_VLESS2" = "1" ] ;;
 		trojan) [ "$BYPASS_TELEGRAM_CALL_ROUTE_TROJAN" = "1" ] ;;
+		hysteria2) [ "$BYPASS_TELEGRAM_CALL_ROUTE_HYSTERIA2" = "1" ] ;;
 		*) return 1 ;;
 	esac
 }
@@ -232,6 +241,7 @@ telegram_call_telegram_route_enabled() {
 		vless) [ "$BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS" = "1" ] ;;
 		vless2) [ "$BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS2" = "1" ] ;;
 		trojan) [ "$BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_TROJAN" = "1" ] ;;
+		hysteria2) [ "$BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_HYSTERIA2" = "1" ] ;;
 		*) return 1 ;;
 	esac
 }
@@ -243,6 +253,7 @@ telegram_call_base_set() {
 		vless) printf '%s\n' unblockvless ;;
 		vless2) printf '%s\n' unblockvless2 ;;
 		trojan) printf '%s\n' unblocktroj ;;
+		hysteria2) printf '%s\n' unblockhy2 ;;
 	esac
 }
 
@@ -253,6 +264,7 @@ telegram_call_client_set() {
 		vless) printf '%s\n' "$CALL_CLIENT_SET_VLESS" ;;
 		vless2) printf '%s\n' "$CALL_CLIENT_SET_VLESS2" ;;
 		trojan) printf '%s\n' "$CALL_CLIENT_SET_TROJAN" ;;
+		hysteria2) printf '%s\n' "$CALL_CLIENT_SET_HYSTERIA2" ;;
 	esac
 }
 
@@ -263,15 +275,16 @@ telegram_call_signal_set() {
 		vless) printf '%s\n' "$CALL_SIGNAL_SET_VLESS" ;;
 		vless2) printf '%s\n' "$CALL_SIGNAL_SET_VLESS2" ;;
 		trojan) printf '%s\n' "$CALL_SIGNAL_SET_TROJAN" ;;
+		hysteria2) printf '%s\n' "$CALL_SIGNAL_SET_HYSTERIA2" ;;
 	esac
 }
 
 telegram_call_all_client_sets() {
-	printf '%s\n' "$TELEGRAM_CALL_CLIENT_SET" "$CALL_CLIENT_SET_SHADOWSOCKS" "$CALL_CLIENT_SET_VMESS" "$CALL_CLIENT_SET_VLESS" "$CALL_CLIENT_SET_VLESS2" "$CALL_CLIENT_SET_TROJAN"
+	printf '%s\n' "$TELEGRAM_CALL_CLIENT_SET" "$CALL_CLIENT_SET_SHADOWSOCKS" "$CALL_CLIENT_SET_VMESS" "$CALL_CLIENT_SET_VLESS" "$CALL_CLIENT_SET_VLESS2" "$CALL_CLIENT_SET_TROJAN" "$CALL_CLIENT_SET_HYSTERIA2"
 }
 
 telegram_call_all_signal_sets() {
-	printf '%s\n' "$TELEGRAM_CALL_SIGNAL_SET" "$CALL_SIGNAL_SET_SHADOWSOCKS" "$CALL_SIGNAL_SET_VMESS" "$CALL_SIGNAL_SET_VLESS" "$CALL_SIGNAL_SET_VLESS2" "$CALL_SIGNAL_SET_TROJAN"
+	printf '%s\n' "$TELEGRAM_CALL_SIGNAL_SET" "$CALL_SIGNAL_SET_SHADOWSOCKS" "$CALL_SIGNAL_SET_VMESS" "$CALL_SIGNAL_SET_VLESS" "$CALL_SIGNAL_SET_VLESS2" "$CALL_SIGNAL_SET_TROJAN" "$CALL_SIGNAL_SET_HYSTERIA2"
 }
 
 telegram_call_learned_set() {
@@ -281,6 +294,7 @@ telegram_call_learned_set() {
 		vless) printf '%s\n' bypass_tg_call_vless ;;
 		vless2) printf '%s\n' bypass_tg_call_vless2 ;;
 		trojan) printf '%s\n' bypass_tg_call_troj ;;
+		hysteria2) printf '%s\n' bypass_tg_call_hy2 ;;
 	esac
 }
 
@@ -291,6 +305,7 @@ telegram_call_target_port() {
 		vless) printf '%s\n' 10812 ;;
 		vless2) [ -n "$vless2_key_path" ] && printf '%s\n' 10814 ;;
 		trojan) printf '%s\n' 10829 ;;
+		hysteria2) [ -n "$hysteria2_key_path" ] && printf '%s\n' 10841 ;;
 	esac
 }
 
@@ -301,6 +316,7 @@ telegram_call_tproxy_port() {
 		vless) printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_VLESS" ;;
 		vless2) [ -n "$vless2_key_path" ] && printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_VLESS2" ;;
 		trojan) printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_TROJAN" ;;
+		hysteria2) [ -n "$hysteria2_key_path" ] && printf '%s\n' "$TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2" ;;
 	esac
 }
 
@@ -333,11 +349,11 @@ mobile_push_legacy_priority_ports() {
 }
 
 mobile_push_route_sets() {
-	printf '%s\n' unblocksh unblockvmess unblockvless unblockvless2 unblocktroj
+	printf '%s\n' unblocksh unblockvmess unblockvless unblockvless2 unblocktroj unblockhy2
 }
 
 mobile_push_proxy_target_ports() {
-	printf '%s\n' 1082 10815 10812 10814 10829
+	printf '%s\n' 1082 10815 10812 10814 10829 10841
 }
 
 mobile_push_port_is_direct() {
@@ -381,11 +397,13 @@ unblockvmess
 unblockvless
 unblockvless2
 unblocktroj
+unblockhy2
 unblockshudp
 unblockvmessudp
 unblockvlessudp
 unblockvless2udp
 unblocktrojudp
+unblockhy2udp
 EOF
 }
 
@@ -465,7 +483,7 @@ ensure_timeout_ipset() {
 refresh_telegram_call_signal_set() {
 	ipset create "$TELEGRAM_CALL_SIGNAL_SET" hash:net -exist >/dev/null 2>&1 || return 1
 	ipset flush "$TELEGRAM_CALL_SIGNAL_SET" >/dev/null 2>&1 || true
-	for proto in shadowsocks vmess vless vless2 trojan; do
+	for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 		signal_set="$(telegram_call_signal_set "$proto")"
 		[ -n "$signal_set" ] || continue
 		ipset create "$signal_set" hash:net -exist >/dev/null 2>&1 || continue
@@ -512,7 +530,7 @@ remove_telegram_call_prerouting_jumps() {
 				done
 			done
 		done
-		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj bypass_tg_call_hy2; do
 			while iptables -t mangle -C PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN" 2>/dev/null; do
 				iptables -t mangle -D PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
 			done
@@ -533,7 +551,7 @@ remove_telegram_call_prerouting_jumps() {
 				iptables -t mangle -D PREROUTING -p udp -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
 			done
 		done
-		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj bypass_tg_call_hy2; do
 			while iptables -t mangle -C PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN" 2>/dev/null; do
 				iptables -t mangle -D PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
 			done
@@ -568,7 +586,7 @@ remove_telegram_call_prerouting_jumps() {
 				iptables -t nat -D PREROUTING -p udp -m set --match-set "$signal_set" dst -j RETURN
 			done
 		done
-		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+		for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj bypass_tg_call_hy2; do
 			while iptables -t nat -C PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN" 2>/dev/null; do
 				iptables -t nat -D PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
 			done
@@ -588,7 +606,7 @@ remove_iptables_chain() {
 }
 
 install_telegram_call_prerouting_jumps() {
-	for proto in shadowsocks vmess vless vless2 trojan; do
+	for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 		telegram_call_route_enabled "$proto" || continue
 		signal_set="$(telegram_call_signal_set "$proto")"
 		[ -n "$signal_set" ] || continue
@@ -598,7 +616,7 @@ install_telegram_call_prerouting_jumps() {
 		done
 		iptables -t mangle -I PREROUTING -p udp -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
 	done
-	for proto in shadowsocks vmess vless vless2 trojan; do
+	for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 		telegram_call_route_enabled "$proto" || continue
 		learned_set="$(telegram_call_learned_set "$proto")"
 		[ -n "$learned_set" ] || continue
@@ -606,7 +624,7 @@ install_telegram_call_prerouting_jumps() {
 		iptables -t mangle -I PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_LEARN_CHAIN"
 	done
 	if [ "$BYPASS_TELEGRAM_CALL_UDP_REDIRECT_ENABLED" != "0" ]; then
-		for proto in shadowsocks vmess vless vless2 trojan; do
+		for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 			telegram_call_route_enabled "$proto" || continue
 			learned_set="$(telegram_call_learned_set "$proto")"
 			[ -n "$learned_set" ] || continue
@@ -614,14 +632,14 @@ install_telegram_call_prerouting_jumps() {
 			iptables -t nat -I PREROUTING -p udp -m set --match-set "$learned_set" dst -j "$TELEGRAM_CALL_ROUTE_CHAIN"
 		done
 	else
-		for proto in shadowsocks vmess vless vless2 trojan; do
+		for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 			telegram_call_route_enabled "$proto" || continue
 			learned_set="$(telegram_call_learned_set "$proto")"
 			[ -n "$learned_set" ] || continue
 			ipset list "$learned_set" >/dev/null 2>&1 || continue
 			iptables -t nat -I PREROUTING -p udp -m set --match-set "$learned_set" dst -j RETURN
 		done
-		for proto in shadowsocks vmess vless vless2 trojan; do
+		for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 			telegram_call_route_enabled "$proto" || continue
 			signal_set="$(telegram_call_signal_set "$proto")"
 			[ -n "$signal_set" ] && ipset list "$signal_set" >/dev/null 2>&1 \
@@ -629,7 +647,7 @@ install_telegram_call_prerouting_jumps() {
 		done
 	fi
 	if [ "$BYPASS_TELEGRAM_CALL_SIGNAL_ROUTE_ENABLED" != "0" ]; then
-		for proto in shadowsocks vmess vless vless2 trojan; do
+		for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 			telegram_call_route_enabled "$proto" || continue
 			signal_set="$(telegram_call_signal_set "$proto")"
 			[ -n "$signal_set" ] || continue
@@ -659,13 +677,13 @@ install_telegram_call_tproxy_prerouting_rule() {
 
 install_telegram_call_tproxy_prerouting_jumps() {
 	[ "$telegram_call_tproxy_ready" = "1" ] || return 0
-	for proto in shadowsocks vmess vless vless2 trojan; do
+	for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 		telegram_call_route_enabled "$proto" || continue
 		signal_set="$(telegram_call_signal_set "$proto")"
 		[ -n "$signal_set" ] && ipset list "$signal_set" >/dev/null 2>&1 \
 			&& install_telegram_call_tproxy_prerouting_rule -p udp -m set --match-set "$signal_set" dst -j "$TELEGRAM_CALL_TPROXY_CHAIN"
 	done
-	for proto in shadowsocks vmess vless vless2 trojan; do
+	for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 		telegram_call_route_enabled "$proto" || continue
 		learned_set="$(telegram_call_learned_set "$proto")"
 		[ -n "$learned_set" ] || continue
@@ -686,7 +704,7 @@ cleanup_telegram_call_learning_rules() {
 	remove_iptables_chain mangle "$TELEGRAM_CALL_LEARN_CHAIN"
 	remove_iptables_chain mangle "$TELEGRAM_CALL_TPROXY_CHAIN"
 	remove_iptables_chain nat "$TELEGRAM_CALL_ROUTE_CHAIN"
-	for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj; do
+	for learned_set in bypass_tg_call_sh bypass_tg_call_vmess bypass_tg_call_vless bypass_tg_call_vless2 bypass_tg_call_troj bypass_tg_call_hy2; do
 		ipset destroy "$learned_set" >/dev/null 2>&1 || true
 	done
 	for client_set in $(telegram_call_all_client_sets); do
@@ -700,7 +718,7 @@ cleanup_telegram_call_learning_rules() {
 }
 
 telegram_call_active_protocols() {
-	for proto in shadowsocks vmess vless vless2 trojan; do
+	for proto in shadowsocks vmess vless vless2 trojan hysteria2; do
 		telegram_call_route_enabled "$proto" && printf '%s\n' "$proto"
 	done
 }
@@ -946,6 +964,30 @@ if [ -n "$vless2_key_path" ]; then
 	refresh_transparent_udp_quic_reject 10814 "$BYPASS_UDP_QUIC_BLOCK_VLESS2"
 fi
 
+hysteria2_key_path=""
+for candidate in /opt/etc/xray/hysteria2.key /opt/etc/v2ray/hysteria2.key; do
+	if [ -s "$candidate" ]; then
+		hysteria2_key_path="$candidate"
+		break
+	fi
+done
+
+ipset create unblockhy2 hash:net -exist 2>/dev/null
+ipset create unblockhy2udp hash:net -exist 2>/dev/null
+for stale_port in 10840 10841; do
+	while iptables -t nat -C PREROUTING -w -p tcp -m set --match-set unblockhy2 dst -j REDIRECT --to-ports "$stale_port" 2>/dev/null; do
+		iptables -t nat -D PREROUTING -w -p tcp -m set --match-set unblockhy2 dst -j REDIRECT --to-ports "$stale_port"
+	done
+	while iptables -t nat -C PREROUTING -w -p udp -m set --match-set unblockhy2 dst -j REDIRECT --to-ports "$stale_port" 2>/dev/null; do
+		iptables -t nat -D PREROUTING -w -p udp -m set --match-set unblockhy2 dst -j REDIRECT --to-ports "$stale_port"
+	done
+done
+if [ -n "$hysteria2_key_path" ]; then
+	iptables -I PREROUTING -w -t nat -p tcp -m set --match-set unblockhy2 dst -j REDIRECT --to-ports 10841
+	iptables -I PREROUTING -w -t nat -p udp -m set --match-set unblockhy2 dst -j REDIRECT --to-ports 10841
+	refresh_transparent_udp_quic_reject 10841 "$BYPASS_UDP_QUIC_BLOCK_HYSTERIA2"
+fi
+
 remove_vless_priority_redirect_rules() {
 	for priority_set in unblockvlesspriority unblockvless2priority; do
 		for priority_port in 10812 10814; do
@@ -1041,7 +1083,8 @@ telegram_route_protocol() {
 		"vmess:$UNBLOCK_DIR/vmess.txt" \
 		"vless:$UNBLOCK_DIR/vless.txt" \
 		"vless2:$UNBLOCK_DIR/vless-2.txt" \
-		"trojan:$UNBLOCK_DIR/trojan.txt"; do
+		"trojan:$UNBLOCK_DIR/trojan.txt" \
+		"hysteria2:$UNBLOCK_DIR/hysteria2.txt"; do
 		protocol="${route_spec%%:*}"
 		route_file="${route_spec#*:}"
 		count="$(route_file_marker_count "$route_file" $telegram_markers)"
@@ -1063,7 +1106,8 @@ youtube_route_protocol() {
 		"vmess:$UNBLOCK_DIR/vmess.txt" \
 		"vless:$UNBLOCK_DIR/vless.txt" \
 		"vless2:$UNBLOCK_DIR/vless-2.txt" \
-		"trojan:$UNBLOCK_DIR/trojan.txt"; do
+		"trojan:$UNBLOCK_DIR/trojan.txt" \
+		"hysteria2:$UNBLOCK_DIR/hysteria2.txt"; do
 		protocol="${route_spec%%:*}"
 		route_file="${route_spec#*:}"
 		count="$(route_file_marker_count "$route_file" $youtube_markers)"
@@ -1085,7 +1129,8 @@ chrome_remote_desktop_route_protocol() {
 		"vmess:$UNBLOCK_DIR/vmess.txt" \
 		"vless:$UNBLOCK_DIR/vless.txt" \
 		"vless2:$UNBLOCK_DIR/vless-2.txt" \
-		"trojan:$UNBLOCK_DIR/trojan.txt"; do
+		"trojan:$UNBLOCK_DIR/trojan.txt" \
+		"hysteria2:$UNBLOCK_DIR/hysteria2.txt"; do
 		protocol="${route_spec%%:*}"
 		route_file="${route_spec#*:}"
 		count="$(route_file_marker_count "$route_file" $chrome_remote_desktop_markers)"
@@ -1104,7 +1149,8 @@ remove_chrome_remote_desktop_tproxy_rules() {
 		"$TELEGRAM_CALL_TPROXY_PORT_VMESS" \
 		"$TELEGRAM_CALL_TPROXY_PORT_VLESS" \
 		"$TELEGRAM_CALL_TPROXY_PORT_VLESS2" \
-		"$TELEGRAM_CALL_TPROXY_PORT_TROJAN"; do
+		"$TELEGRAM_CALL_TPROXY_PORT_TROJAN" \
+		"$TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2"; do
 		while iptables -t mangle -C PREROUTING -w -p udp -d "$CHROME_REMOTE_DESKTOP_STUN_IP" \
 			--dport "$CHROME_REMOTE_DESKTOP_STUN_PORT" -j TPROXY --on-port "$tproxy_port" \
 			--tproxy-mark "$BYPASS_TELEGRAM_CALL_TPROXY_MARK/$BYPASS_TELEGRAM_CALL_TPROXY_MARK" 2>/dev/null; do

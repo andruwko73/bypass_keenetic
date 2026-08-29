@@ -3,6 +3,10 @@ import json
 from urllib.parse import parse_qs, unquote, urlparse
 
 
+HYSTERIA2_SCHEMES = frozenset(('hysteria2', 'hy2'))
+HYSTERIA2_SUPPORTED_PARAMETERS = frozenset(('sni', 'insecure', 'pinsha256', 'alpn'))
+
+
 def parse_vmess_key(key):
     if not key.startswith('vmess://'):
         raise ValueError('Неверный протокол, ожидается vmess://')
@@ -107,6 +111,67 @@ def parse_trojan_key(key):
         'serviceName': params.get('serviceName', [''])[0],
         'fingerprint': params.get('fp', params.get('fingerprint', ['chrome']))[0],
         'alpn': params.get('alpn', [''])[0],
+        'fragment': unquote(parsed.fragment or ''),
+    }
+
+
+def _hysteria2_boolean(value, parameter):
+    normalized = str(value or '').strip().casefold()
+    if normalized in ('1', 'true', 'yes', 'on'):
+        return True
+    if normalized in ('0', 'false', 'no', 'off', ''):
+        return False
+    raise ValueError(f'Параметр Hysteria2 {parameter} должен быть 0 или 1')
+
+
+def parse_hysteria2_key(key):
+    """Parse the interoperable single-port Hysteria2 URI subset supported by Xray."""
+    raw_key = str(key or '').strip()
+    parsed = urlparse(raw_key)
+    if parsed.scheme.casefold() not in HYSTERIA2_SCHEMES:
+        raise ValueError('Неверный протокол, ожидается hysteria2:// или hy2://')
+    if not parsed.hostname:
+        raise ValueError('В Hysteria2-ключе отсутствует адрес сервера')
+    userinfo, separator, _hostinfo = parsed.netloc.rpartition('@')
+    auth = unquote(userinfo) if separator else ''
+    if not auth:
+        raise ValueError('В Hysteria2-ключе отсутствует auth')
+    try:
+        port = parsed.port or 443
+    except ValueError as exc:
+        raise ValueError('Hysteria2 multi-port/port hopping пока не поддерживается') from exc
+    if not 1 <= int(port) <= 65535:
+        raise ValueError('Порт Hysteria2 должен быть в диапазоне 1-65535')
+
+    raw_params = parse_qs(parsed.query, keep_blank_values=True)
+    params = {str(name).casefold(): values for name, values in raw_params.items()}
+    unsupported = sorted(set(params) - HYSTERIA2_SUPPORTED_PARAMETERS)
+    if unsupported:
+        if 'obfs' in unsupported or 'obfs-password' in unsupported:
+            raise ValueError('Обфускация Hysteria2 пока не поддерживается установленным Xray')
+        if 'ech' in unsupported:
+            raise ValueError('ECH в Hysteria2 пока не поддерживается установленным Xray')
+        raise ValueError('Неподдерживаемые параметры Hysteria2: ' + ', '.join(unsupported))
+
+    def first(name, default=''):
+        values = params.get(name) or []
+        return str(values[0] if values else default).strip()
+
+    pin_sha256 = first('pinsha256').replace(':', '').casefold()
+    if pin_sha256 and (
+        len(pin_sha256) != 64
+        or not all(char in '0123456789abcdef' for char in pin_sha256)
+    ):
+        raise ValueError('pinSHA256 Hysteria2 должен содержать 64 шестнадцатеричных символа')
+    alpn = [item.strip() for item in first('alpn', 'h3').split(',') if item.strip()]
+    return {
+        'address': parsed.hostname,
+        'port': int(port),
+        'auth': auth,
+        'sni': first('sni') or parsed.hostname,
+        'insecure': _hysteria2_boolean(first('insecure'), 'insecure'),
+        'pinSHA256': pin_sha256,
+        'alpn': alpn or ['h3'],
         'fragment': unquote(parsed.fragment or ''),
     }
 
@@ -277,5 +342,35 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
                 }]
             },
             'streamSettings': stream_settings,
+        }
+    if proto == 'hysteria2':
+        data = parse_hysteria2_key(key_value)
+        tls_settings = {
+            'serverName': data['sni'],
+            'alpn': list(data['alpn']),
+        }
+        if data['insecure']:
+            tls_settings['allowInsecure'] = True
+        if data.get('pinSHA256'):
+            tls_settings['pinnedPeerCertSha256'] = data['pinSHA256']
+        return {
+            'tag': tag,
+            'protocol': 'hysteria',
+            'settings': {
+                'version': 2,
+                'address': data['address'],
+                'port': int(data['port']),
+            },
+            'streamSettings': {
+                # Xray 26.2.6 uses the legacy name. Its config parser accepts
+                # this shape and maps it to the Hysteria transport method.
+                'network': 'hysteria',
+                'security': 'tls',
+                'tlsSettings': tls_settings,
+                'hysteriaSettings': {
+                    'version': 2,
+                    'auth': data['auth'],
+                },
+            },
         }
     raise ValueError(f'Unsupported protocol: {proto}')

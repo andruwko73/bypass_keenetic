@@ -67,7 +67,7 @@ PY
 )"
   fi
   case "$route_protocol" in
-    shadowsocks|vmess|vless|vless2|trojan) ;;
+    shadowsocks|vmess|vless|vless2|trojan|hysteria2) ;;
     *) route_protocol="" ;;
   esac
   YOUTUBE_ROUTE_PROTOCOL_CACHE="$route_protocol"
@@ -228,6 +228,7 @@ append_youtube_priority_domains() {
     vless) main_set="unblockvless"; udp_set="unblockvlessudp"; call_signal_set="bypass_call_signal_vless" ;;
     vless2) main_set="unblockvless2"; udp_set="unblockvless2udp"; call_signal_set="bypass_call_signal_vless2" ;;
     trojan) main_set="unblocktroj"; udp_set="unblocktrojudp"; call_signal_set="bypass_call_signal_troj" ;;
+    hysteria2) main_set="unblockhy2"; udp_set="unblockhy2udp"; call_signal_set="bypass_call_signal_hy2" ;;
     *) return 0 ;;
   esac
   count=0
@@ -277,6 +278,11 @@ done < "$UNBLOCK_DIR/vless-2.txt"
 while read -r line || [ -n "$line" ]; do
   write_route_domain trojan "$line" unblocktroj unblocktrojudp bypass_call_signal_troj 0
 done < "$UNBLOCK_DIR/trojan.txt"
+
+
+while read -r line || [ -n "$line" ]; do
+  write_route_domain hysteria2 "$line" unblockhy2 unblockhy2udp bypass_call_signal_hy2 0
+done < "$UNBLOCK_DIR/hysteria2.txt"
 
 append_youtube_priority_domains
 dedupe_dnsmasq_output

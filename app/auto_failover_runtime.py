@@ -1,7 +1,9 @@
 import time
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER
 
-POOL_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+
+POOL_PROTOCOLS = PROTOCOL_DISPLAY_ORDER
 
 
 def _recent_active_success(

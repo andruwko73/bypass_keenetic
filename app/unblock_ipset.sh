@@ -23,9 +23,9 @@ YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com ww
 YOUTUBE_ROUTE_OWNER_STATE_FILE="${YOUTUBE_ROUTE_OWNER_STATE_FILE:-/opt/tmp/bypass-youtube-route-owner.json}"
 VLESS_PRIORITY_DOMAINS="${VLESS_PRIORITY_DOMAINS:-remotedesktop.google.com remotedesktop-pa.googleapis.com chromoting-pa.googleapis.com chromoting-client.talkgadget.google.com instantmessaging-pa.googleapis.com instantmessaging-pa.clients6.google.com mtalk.google.com talkgadget.google.com accounts.google.com oauth2.googleapis.com www.googleapis.com apis.google.com clients2.google.com clients3.google.com clients4.google.com clients6.google.com $YOUTUBE_ROUTE_PRIORITY_DOMAINS rutracker.org feed.rutracker.cc rutracker.wiki static.rutracker.cc}"
 VLESS2_KEY_PATH="${VLESS2_KEY_PATH:-/opt/etc/xray/vless2.key}"
-SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj"
-EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp"
-IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6"
+SET_NAMES="unblocksh unblockvmess unblockvless unblockvless2 unblocktroj unblockhy2"
+EXTRA_SET_NAMES="unblockshudp unblockvmessudp unblockvlessudp unblockvless2udp unblocktrojudp unblockhy2udp"
+IPV6_SET_NAMES="unblocksh6 unblockvmess6 unblockvless6 unblockvless2v6 unblocktroj6 unblockhy26"
 UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"
 UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"
 
@@ -229,6 +229,7 @@ log_youtube_route_ipset_counts() {
 		vless) main_set="unblockvless"; udp_set="unblockvlessudp"; priority_set="unblockvlesspriority" ;;
 		vless2) main_set="unblockvless2"; udp_set="unblockvless2udp"; priority_set="unblockvless2priority" ;;
 		trojan) main_set="unblocktroj"; udp_set="unblocktrojudp"; priority_set="" ;;
+		hysteria2) main_set="unblockhy2"; udp_set="unblockhy2udp"; priority_set="" ;;
 		*) return 0 ;;
 	esac
 	main_count="$(ipset_count "$main_set")"
@@ -469,7 +470,7 @@ PY
 )"
 	fi
 	case "$route_protocol" in
-		shadowsocks|vmess|vless|vless2|trojan) ;;
+		shadowsocks|vmess|vless|vless2|trojan|hysteria2) ;;
 		*) route_protocol="" ;;
 	esac
 	YOUTUBE_ROUTE_PROTOCOL_CACHE="$route_protocol"
@@ -1051,6 +1052,7 @@ load_file_to_set "$UNBLOCK_DIR/vmess.txt" unblockvmess "tmp_unblockvmess_$$" unb
 load_file_to_set "$UNBLOCK_DIR/vless.txt" unblockvless "tmp_unblockvless_$$" unblockvlessudp "tmp_unblockvlessudp_$$" unblockvless6 "tmp_unblockvless6_$$"
 load_file_to_set "$UNBLOCK_DIR/vless-2.txt" unblockvless2 "tmp_unblockvless2_$$" unblockvless2udp "tmp_unblockvless2udp_$$" unblockvless2v6 "tmp_unblockvless2v6_$$"
 load_file_to_set "$UNBLOCK_DIR/trojan.txt" unblocktroj "tmp_unblocktroj_$$" unblocktrojudp "tmp_unblocktrojudp_$$" unblocktroj6 "tmp_unblocktroj6_$$"
+load_file_to_set "$UNBLOCK_DIR/hysteria2.txt" unblockhy2 "tmp_unblockhy2_$$" unblockhy2udp "tmp_unblockhy2udp_$$" unblockhy26 "tmp_unblockhy26_$$"
 
 sort -u "$restore_file" > "$sorted_restore_file"
 dedupe_vless_runtime_restore
@@ -1069,11 +1071,14 @@ swap_or_preserve_set unblockvless2 "tmp_unblockvless2_$$"
 swap_or_preserve_set unblockvless2udp "tmp_unblockvless2udp_$$"
 swap_or_preserve_set unblocktroj "tmp_unblocktroj_$$"
 swap_or_preserve_set unblocktrojudp "tmp_unblocktrojudp_$$"
+swap_or_preserve_set unblockhy2 "tmp_unblockhy2_$$"
+swap_or_preserve_set unblockhy2udp "tmp_unblockhy2udp_$$"
 swap_or_preserve_set unblocksh6 "tmp_unblocksh6_$$"
 swap_or_preserve_set unblockvmess6 "tmp_unblockvmess6_$$"
 swap_or_preserve_set unblockvless6 "tmp_unblockvless6_$$"
 swap_or_preserve_set unblockvless2v6 "tmp_unblockvless2v6_$$"
 swap_or_preserve_set unblocktroj6 "tmp_unblocktroj6_$$"
+swap_or_preserve_set unblockhy26 "tmp_unblockhy26_$$"
 
 dedupe_vless_final_ipsets
 

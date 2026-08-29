@@ -8,6 +8,7 @@ KEY_INPUT_LEVELS = {
     'Vless': 11,
     'Vless 1': 11,
     'Vless 2': 12,
+    'Hysteria2': 14,
 }
 
 KEY_INSTALL_PROTOCOLS = {
@@ -15,6 +16,7 @@ KEY_INSTALL_PROTOCOLS = {
     9: 'vmess',
     11: 'vless',
     12: 'vless2',
+    14: 'hysteria2',
 }
 
 
@@ -23,7 +25,7 @@ def key_menu_rows(include_pool=False):
     return (
         ('Vless 1', 'Vless 2'),
         ('Vmess', 'Trojan'),
-        ('Shadowsocks',),
+        ('Hysteria2', 'Shadowsocks'),
         help_row,
         (KEY_BROWSER_TEXT,),
         ('🔙 Назад',),
@@ -45,5 +47,5 @@ def key_install_protocol(level, trojan_level):
 def browser_hint(router_ip, browser_port):
     return (
         f'Откройте в браузере: http://{router_ip}:{browser_port}/\n'
-        'Введите ключ Shadowsocks, Vmess, Vless 1, Vless 2 или Trojan на странице.'
+        'Введите ключ Shadowsocks, Vmess, Vless 1, Vless 2, Trojan или Hysteria2 на странице.'
     )

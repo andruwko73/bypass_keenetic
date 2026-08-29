@@ -5,19 +5,19 @@ import tempfile
 import time
 from urllib.parse import unquote, urlsplit
 
+from protocol_catalog import (
+    PROTOCOL_DISPLAY_ORDER,
+    SUPPORTED_KEY_SCHEMES,
+    protocol_for_scheme,
+)
 
-PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+
+PROTOCOLS = PROTOCOL_DISPLAY_ORDER
 RECOVERY_SUFFIX = '.last-good'
 
 
 class KeyPoolLoadError(OSError):
     """Raised when an existing pool file cannot be read safely."""
-SCHEME_PROTOCOLS = {
-    'ss': 'shadowsocks',
-    'vmess': 'vmess',
-    'trojan': 'trojan',
-}
-SUPPORTED_KEY_SCHEMES = frozenset(('vless',) + tuple(SCHEME_PROTOCOLS))
 SUBSCRIPTION_ERROR_LABELS = frozenset((
     'app not supported',
     'application not supported',
@@ -91,9 +91,7 @@ def key_protocol_for_pool(default_proto, key_value):
         scheme = (urlsplit(key_value).scheme or '').strip().lower()
     except Exception:
         scheme = ''
-    if scheme == 'vless':
-        return default_proto if default_proto in ('vless', 'vless2') else 'vless'
-    return SCHEME_PROTOCOLS.get(scheme, default_proto)
+    return protocol_for_scheme(scheme, default_proto)
 
 
 def key_has_supported_scheme(key_value):
@@ -264,7 +262,7 @@ def classify_subscription_keys(raw_text):
         if not key_value:
             continue
         scheme = urlsplit(key_value).scheme.casefold()
-        proto = 'vless' if scheme == 'vless' else SCHEME_PROTOCOLS.get(scheme)
+        proto = protocol_for_scheme(scheme)
         if not proto:
             continue
         if subscription_key_is_error_placeholder(key_value):

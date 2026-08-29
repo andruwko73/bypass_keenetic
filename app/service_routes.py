@@ -3,6 +3,8 @@ import math
 import os
 import subprocess
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER, PROTOCOL_ROUTE_NAMES
+
 from service_catalog import (
     CUSTOM_CHECK_PRESETS,
     SERVICE_LIST_SOURCES,
@@ -20,16 +22,10 @@ from unblock_lists import (
 )
 
 
-PROTOCOL_ROUTES = {
-    'vless': 'vless',
-    'vless2': 'vless-2',
-    'vmess': 'vmess',
-    'trojan': 'trojan',
-    'shadowsocks': 'shadowsocks',
-}
+PROTOCOL_ROUTES = dict(PROTOCOL_ROUTE_NAMES)
 
 ROUTE_PROTOCOLS = {route: proto for proto, route in PROTOCOL_ROUTES.items()}
-ROUTE_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
+ROUTE_ORDER = list(PROTOCOL_DISPLAY_ORDER)
 
 ROUTE_PROFILES = [
     {

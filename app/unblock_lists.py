@@ -2,19 +2,18 @@ import os
 import re
 import subprocess
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER, PROTOCOL_LABELS, PROTOCOL_ROUTE_NAMES
+
 
 UNBLOCK_DIR = '/opt/etc/unblock'
 UNBLOCK_UPDATE_SCRIPT = '/opt/bin/unblock_update.sh'
 
 BASE_LABELS = {
-    'shadowsocks': 'Shadowsocks',
-    'vmess': 'Vmess',
-    'vless': 'Vless 1',
-    'vless-2': 'Vless 2',
-    'trojan': 'Trojan',
+    PROTOCOL_ROUTE_NAMES[proto]: PROTOCOL_LABELS[proto]
+    for proto in PROTOCOL_DISPLAY_ORDER
 }
 
-DEFAULT_ORDER = ['vless.txt', 'vless-2.txt', 'vmess.txt', 'trojan.txt', 'shadowsocks.txt']
+DEFAULT_ORDER = [f'{PROTOCOL_ROUTE_NAMES[proto]}.txt' for proto in PROTOCOL_DISPLAY_ORDER]
 VISIBLE_UNBLOCK_LISTS = set(DEFAULT_ORDER)
 
 

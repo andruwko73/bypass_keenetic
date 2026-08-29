@@ -14,6 +14,7 @@ ROUTE_FILES = (
     ('vless', 'vless.txt'),
     ('vless2', 'vless-2.txt'),
     ('trojan', 'trojan.txt'),
+    ('hysteria2', 'hysteria2.txt'),
 )
 ROUTE_PROTOCOLS = frozenset(protocol for protocol, _filename in ROUTE_FILES)
 

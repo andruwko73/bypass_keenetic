@@ -22,6 +22,7 @@ CORE_PROXY_CONFIG_DIR = XRAY_CONFIG_DIR if os.path.exists(XRAY_SERVICE_SCRIPT) e
 VMESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vmess.key')
 VLESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless.key')
 VLESS2_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless2.key')
+HYSTERIA2_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'hysteria2.key')
 VMESS_URI_PREFIX = 'vmess' + '://'
 
 
@@ -62,6 +63,7 @@ def _load_current_keys():
         VLESS2_KEY_PATH,
         XRAY_CONFIG_DIR,
         V2RAY_CONFIG_DIR,
+        HYSTERIA2_KEY_PATH,
     )
 
 

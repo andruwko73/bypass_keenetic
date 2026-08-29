@@ -4,6 +4,7 @@ import tempfile
 
 from proxy_config_builder import build_proxy_core_config
 from proxy_key_store import load_current_keys
+from protocol_catalog import PROTOCOL_ROUTE_NAMES
 from service_catalog import CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES, CONNECTIVITY_CHECK_DOMAINS
 from transparent_route_policy import (
     compile_protocol_policies,
@@ -23,13 +24,7 @@ def _configured_protocols(config_module, name):
 
 
 def _transparent_route_entries(unblock_dir=UNBLOCK_DIR):
-    routes = {
-        'shadowsocks': 'shadowsocks',
-        'vmess': 'vmess',
-        'vless': 'vless',
-        'vless2': 'vless-2',
-        'trojan': 'trojan',
-    }
+    routes = PROTOCOL_ROUTE_NAMES
     result = {}
     for protocol, route_name in routes.items():
         try:
@@ -80,6 +75,7 @@ def rebuild_proxy_core_config(
         os.path.join(core_config_dir, 'vless2.key'),
         xray_config_dir,
         v2ray_config_dir,
+        os.path.join(core_config_dir, 'hysteria2.key'),
     )
     strict_transparent_protocols = _configured_protocols(config_module, 'xray_strict_transparent_protocols')
     route_entries = _transparent_route_entries()
@@ -89,6 +85,7 @@ def rebuild_proxy_core_config(
         vless2_key=keys.get('vless2') or '',
         shadowsocks_key=keys.get('shadowsocks') or '',
         trojan_key=keys.get('trojan') or '',
+        hysteria2_key=keys.get('hysteria2') or '',
         ports={
             'vmess': _config_port(config_module, 'localportvmess', 10810),
             'vmess_transparent': str(vless_port + 4),
@@ -103,6 +100,9 @@ def rebuild_proxy_core_config(
             'vless_tproxy': _config_port(config_module, 'localportvless_tproxy', 11812),
             'vless2_tproxy': _config_port(config_module, 'localportvless2_tproxy', 11814),
             'trojan_tproxy': _config_port(config_module, 'localporttrojan_tproxy', 11829),
+            'hysteria2': _config_port(config_module, 'localporthysteria2', 10840),
+            'hysteria2_transparent': _config_port(config_module, 'localporthysteria2_transparent', 10841),
+            'hysteria2_tproxy': _config_port(config_module, 'localporthysteria2_tproxy', 11840),
         },
         error_log_path=os.path.join(core_config_dir, 'error.log'),
         access_log_path='/dev/null',

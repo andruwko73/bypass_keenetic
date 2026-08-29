@@ -1,14 +1,10 @@
 import html
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER, PROTOCOL_FORM_SECTIONS, protocol_label
 
-PROXY_PROTOCOLS = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
-PROTOCOL_SECTIONS = [
-    ('vless', 'Vless 1', 6, 'vless://...'),
-    ('vless2', 'Vless 2', 6, 'vless://...'),
-    ('vmess', 'Vmess', 6, 'vmess://...'),
-    ('trojan', 'Trojan', 5, 'trojan://...'),
-    ('shadowsocks', 'Shadowsocks', 5, 'shadowsocks://...'),
-]
+
+PROXY_PROTOCOLS = PROTOCOL_DISPLAY_ORDER
+PROTOCOL_SECTIONS = list(PROTOCOL_FORM_SECTIONS)
 
 STATUS_REFRESH_PENDING_MARKERS = (
     'Статус обновляется',
@@ -46,14 +42,9 @@ def status_refresh_pending(status, protocol_statuses, pool_probe_pending=False):
 
 
 def proxy_mode_label(proxy_mode, none_label='Без прокси'):
-    return {
-        'none': none_label,
-        'shadowsocks': 'Shadowsocks',
-        'vmess': 'Vmess',
-        'vless': 'Vless 1',
-        'vless2': 'Vless 2',
-        'trojan': 'Trojan',
-    }.get(proxy_mode, proxy_mode)
+    if proxy_mode == 'none':
+        return none_label
+    return protocol_label(proxy_mode)
 
 
 def render_csrf_input(csrf_token):
@@ -170,7 +161,7 @@ def _light_protocol_panel_html(
                 <input type="hidden" name="type" value="{safe_key_name}">
                 <label class="field-label">Импорт ключей и подписки</label>
                 <p class="field-hint">{safe_import_hint}</p>
-                <textarea name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
+                <textarea name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;hysteria2://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
                 <label class="subscription-hwid-toggle">
                     <input type="checkbox" class="subscription-switch-input" name="send_router_hwid" value="1"{hwid_checked}>
                     <span class="subscription-switch-ui" aria-hidden="true"></span>
@@ -532,14 +523,8 @@ def render_form_basics(message, command_state, status, current_keys, current_mod
 
 
 def render_button_mode_picker(active_mode, *, none_label='Без прокси', csrf_input_html=''):
-    options = [
-        ('vless', 'Vless 1'),
-        ('vless2', 'Vless 2'),
-        ('vmess', 'Vmess'),
-        ('trojan', 'Trojan'),
-        ('shadowsocks', 'Shadowsocks'),
-        ('none', none_label),
-    ]
+    options = [(proto, protocol_label(proto)) for proto in PROXY_PROTOCOLS]
+    options.append(('none', none_label))
     mode_buttons_html = ''.join(
         f'''<form method="post" action="/set_proxy" data-async-action="set-proxy">
         {csrf_input_html}

@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO, StringIO
+from collections import deque
 import ast
 import base64
 import gzip
@@ -132,6 +133,7 @@ def test_pool_probe_runner_defers_failover_healthcheck_imports():
 
 SS_KEY = 'ss://YWVzLTEyOC1nY206cGFzc3dvcmQ@example.com:8388#sample'
 TROJAN_KEY = 'trojan://secret@example.com:443?sni=example.com#sample'
+HYSTERIA2_KEY = 'hy2://user%3Apassword@example.com:443?sni=example.com&alpn=h3#sample'
 PORTS = {
     'vmess': 10810,
     'vmess_transparent': 10817,
@@ -146,6 +148,9 @@ PORTS = {
     'vless_tproxy': 11812,
     'vless2_tproxy': 11814,
     'trojan_tproxy': 11829,
+    'hysteria2': 10840,
+    'hysteria2_transparent': 10841,
+    'hysteria2_tproxy': 11840,
 }
 
 
@@ -191,7 +196,7 @@ def _run_udp_policy_python(
         (runtime_dir / 'bot_config.py').write_text(config_text, encoding='utf-8')
         route_files = {
             filename: ['example.org']
-            for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'vless-2.txt', 'trojan.txt')
+            for filename in ('shadowsocks.txt', 'vmess.txt', 'vless.txt', 'vless-2.txt', 'trojan.txt', 'hysteria2.txt')
         }
         if youtube_route:
             route_files.setdefault(youtube_route, []).append('www.youtube.com')
@@ -610,12 +615,16 @@ def test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys():
             'vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none&security=tls&type=tcp#test',
             encoding='utf-8',
         )
+        (xray_dir / 'hysteria2.key').write_text(HYSTERIA2_KEY, encoding='utf-8')
         output_path = xray_dir / 'config.json'
         fake_config = py_types.SimpleNamespace(
             localportvmess='10810',
             localportvless='10811',
             localportsh_bot='10820',
             localporttrojan_bot='10830',
+            localporthysteria2='10840',
+            localporthysteria2_transparent='10841',
+            localporthysteria2_tproxy='11840',
             xray_bittorrent_direct_enabled=True,
             xray_strict_transparent_protocols=('vless',),
             xray_route_only_transparent_protocols=('vless',),
@@ -643,7 +652,10 @@ def test_proxy_config_recovery_rebuilds_atomic_config_from_saved_keys():
         rebuilt = json.loads(output_path.read_text(encoding='utf-8'))
         assert output_path.stat().st_size > 100
         assert any(outbound.get('tag') == 'proxy-vless' for outbound in rebuilt['outbounds'])
+        assert any(outbound.get('tag') == 'proxy-hysteria2' for outbound in rebuilt['outbounds'])
         assert any(inbound.get('port') == 10811 for inbound in rebuilt['inbounds'])
+        assert any(inbound.get('port') == 10840 for inbound in rebuilt['inbounds'])
+        assert any(inbound.get('port') == 10841 for inbound in rebuilt['inbounds'])
         assert any(rule.get('ruleTag') == 'bittorrent-direct' for rule in rebuilt['routing']['rules'])
         crd_cross_rule = next(
             rule for rule in rebuilt['routing']['rules']
@@ -1273,13 +1285,14 @@ def test_proxy_config_builder():
         shadowsocks_key=SS_KEY,
         vless_key='vless://00000000-0000-0000-0000-000000000000@example.com:443?security=tls#sample',
         trojan_key=TROJAN_KEY,
+        hysteria2_key=HYSTERIA2_KEY,
         ports=PORTS,
         error_log_path='/tmp/xray-error.log',
         connectivity_check_domains=['api.telegram.org'],
         include_vmess_transparent=True,
     )
     outbound_tags = {outbound.get('tag') for outbound in core_config['outbounds']}
-    assert {'proxy-shadowsocks', 'proxy-trojan', 'direct'} <= outbound_tags
+    assert {'proxy-shadowsocks', 'proxy-trojan', 'proxy-hysteria2', 'direct'} <= outbound_tags
     assert 'allowInsecure' not in json.dumps(core_config)
     assert core_config['routing']['rules'][0]['outboundTag'] == 'direct'
     transparent_inbounds = [
@@ -1302,8 +1315,9 @@ def test_proxy_config_builder():
         'in-shadowsocks-tproxy',
         'in-vless-tproxy',
         'in-trojan-tproxy',
+        'in-hysteria2-tproxy',
     }
-    assert {inbound['port'] for inbound in tproxy_inbounds} == {11802, 11812, 11829}
+    assert {inbound['port'] for inbound in tproxy_inbounds} == {11802, 11812, 11829, 11840}
     assert all(inbound['settings']['network'] == 'udp' for inbound in tproxy_inbounds)
     assert all(inbound['sniffing']['enabled'] is True for inbound in tproxy_inbounds)
     assert all(inbound['sniffing']['destOverride'] == ['http', 'tls', 'quic'] for inbound in tproxy_inbounds)
@@ -1362,6 +1376,63 @@ def test_proxy_config_builder():
         'proxy-vless',
     )
     assert default_reality_outbound['streamSettings']['realitySettings']['fingerprint'] == 'chrome'
+
+    parsed_hysteria2 = proxy_protocols.parse_hysteria2_key(
+        'hysteria2://user%3Apassword@198.51.100.40:8443?sni=alive-hy2.example.com'
+        '&insecure=1&alpn=h3&pinSHA256=' + ('ab' * 32) + '#sample'
+    )
+    assert parsed_hysteria2 == {
+        'address': '198.51.100.40',
+        'port': 8443,
+        'auth': 'user:password',
+        'sni': 'alive-hy2.example.com',
+        'insecure': True,
+        'pinSHA256': 'ab' * 32,
+        'alpn': ['h3'],
+        'fragment': 'sample',
+    }
+    hysteria2_outbound = proxy_protocols.proxy_outbound_from_key(
+        'hysteria2', HYSTERIA2_KEY, 'proxy-hysteria2'
+    )
+    assert hysteria2_outbound['protocol'] == 'hysteria'
+    assert hysteria2_outbound['settings'] == {
+        'version': 2,
+        'address': 'example.com',
+        'port': 443,
+    }
+    assert hysteria2_outbound['streamSettings']['network'] == 'hysteria'
+    assert hysteria2_outbound['streamSettings']['hysteriaSettings'] == {
+        'version': 2,
+        'auth': 'user:password',
+    }
+    assert hysteria2_outbound['streamSettings']['tlsSettings']['alpn'] == ['h3']
+    for invalid_key, expected in (
+        ('hy2://example.com:443#sample', 'отсутствует auth'),
+        ('hy2://auth@example.com:443,8443#sample', 'port hopping'),
+        ('hy2://auth@example.com:443?obfs=salamander#sample', 'Обфускация'),
+        ('hy2://auth@example.com:443?ech=fixture#sample', 'ECH'),
+        ('hy2://auth@example.com:443?pinSHA256=abcd#sample', '64'),
+    ):
+        with pytest.raises(ValueError, match=expected):
+            proxy_protocols.parse_hysteria2_key(invalid_key)
+
+
+def test_hysteria2_probe_process_isolation():
+    pending = deque([
+        ('vless', 'vless://one'),
+        ('hysteria2', HYSTERIA2_KEY),
+        ('vmess', 'vmess://sample'),
+    ])
+    assert pool_probe_runner.take_isolated_probe_batch(pending, 4) == [('vless', 'vless://one')]
+    assert pool_probe_runner.take_isolated_probe_batch(pending, 4) == [('hysteria2', HYSTERIA2_KEY)]
+    assert pool_probe_runner.take_isolated_probe_batch(pending, 4) == [('vmess', 'vmess://sample')]
+
+    pending = deque([
+        ('hysteria2', 'hy2://first@example.com:443#sample'),
+        ('hysteria2', 'hy2://second@example.com:443#sample'),
+    ])
+    assert len(pool_probe_runner.take_isolated_probe_batch(pending, 8)) == 1
+    assert len(pool_probe_runner.take_isolated_probe_batch(pending, 8)) == 1
 
 
 def test_transparent_route_policy_and_xray_strict_routes():
@@ -1522,7 +1593,7 @@ def test_key_pool_web():
     assert summary['checked_pool_count'] == 2
     assert summary['all_services_count'] == 1
     assert summary['any_service_count'] == 2
-    assert summary['active_text'] == '1 из 5 протоколов с выбранным ключом'
+    assert summary['active_text'] == '1 из 6 протоколов с выбранным ключом'
     assert summary['note'].startswith('Записей в пулах: 3; С сохранённым результатом: 2')
     assert summary['services'] == [
         {'label': 'Telegram', 'count': 2},
@@ -1757,7 +1828,11 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
         (xray_dir / 'vless.key').write_text(active_key, encoding='utf-8')
         (xray_dir / 'vless2.key').write_text('', encoding='utf-8')
         (xray_dir / 'vmess.key').write_text('', encoding='utf-8')
-        key_pools_path.write_text(json.dumps({'vless': [active_key, backup_key]}, ensure_ascii=False), encoding='utf-8')
+        (xray_dir / 'hysteria2.key').write_text(HYSTERIA2_KEY, encoding='utf-8')
+        key_pools_path.write_text(json.dumps({
+            'vless': [active_key, backup_key],
+            'hysteria2': [HYSTERIA2_KEY],
+        }, ensure_ascii=False), encoding='utf-8')
         key_probe_path.write_text(json.dumps({
             probe_cache.hash_key(active_key): {
                 'schema': probe_cache.KEY_PROBE_CACHE_SCHEMA_VERSION,
@@ -1782,6 +1857,7 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
             'VMESS_KEY_PATH': web_pool_snapshot_worker.VMESS_KEY_PATH,
             'VLESS_KEY_PATH': web_pool_snapshot_worker.VLESS_KEY_PATH,
             'VLESS2_KEY_PATH': web_pool_snapshot_worker.VLESS2_KEY_PATH,
+            'HYSTERIA2_KEY_PATH': web_pool_snapshot_worker.HYSTERIA2_KEY_PATH,
             'XRAY_CONFIG_DIR': web_pool_snapshot_worker.XRAY_CONFIG_DIR,
             'V2RAY_CONFIG_DIR': web_pool_snapshot_worker.V2RAY_CONFIG_DIR,
         }
@@ -1793,12 +1869,13 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
             web_pool_snapshot_worker.VMESS_KEY_PATH = str(xray_dir / 'vmess.key')
             web_pool_snapshot_worker.VLESS_KEY_PATH = str(xray_dir / 'vless.key')
             web_pool_snapshot_worker.VLESS2_KEY_PATH = str(xray_dir / 'vless2.key')
+            web_pool_snapshot_worker.HYSTERIA2_KEY_PATH = str(xray_dir / 'hysteria2.key')
             web_pool_snapshot_worker.XRAY_CONFIG_DIR = str(xray_dir)
             web_pool_snapshot_worker.V2RAY_CONFIG_DIR = str(temp_path / 'v2ray')
             probe_cache.KEY_PROBE_CACHE_PATH = str(key_probe_path)
             custom_checks_store.CUSTOM_CHECKS_PATH = str(custom_checks_path)
             payload = web_pool_snapshot_worker.build_payload(
-                protocols=['vless'],
+                protocols=['vless', 'hysteria2'],
                 include_summary=True,
                 include_custom_checks=True,
             )
@@ -1814,11 +1891,12 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
             probe_cache.KEY_PROBE_CACHE_PATH = old_probe_path
             custom_checks_store.CUSTOM_CHECKS_PATH = old_custom_path
 
-    assert list(payload['pools']) == ['vless']
+    assert list(payload['pools']) == ['vless', 'hysteria2']
     assert payload['pools']['vless']['count'] == 2
     assert payload['pools']['vless']['rows'][0]['active'] is True
     assert payload['pools']['vless']['rows'][0]['display_name'] == 'active-vless'
-    assert payload['pool_summary']['pool_total_count'] == 2
+    assert payload['pools']['hysteria2']['rows'][0]['active'] is True
+    assert payload['pool_summary']['pool_total_count'] == 3
     assert payload['pool_summary']['checked_pool_count'] == 2
     assert payload['custom_checks'] == []
     assert {'telegram', 'youtube'} <= set(payload['route_states'])
@@ -1832,7 +1910,7 @@ def test_web_pool_snapshot_worker_payload_is_safe_and_complete():
     assert '\u0412\u0441\u0435 \u0441\u0435\u0440\u0432\u0438\u0441\u044b' not in scoped_summary['note']
     assert '\u0425\u043e\u0442\u044f \u0431\u044b \u043e\u0434\u0438\u043d' not in scoped_summary['note']
     assert summary_payload['pools'] == {}
-    assert summary_payload['pool_summary']['pool_total_count'] == 2
+    assert summary_payload['pool_summary']['pool_total_count'] == 3
     assert summary_payload['pool_summary']['checked_pool_count'] == 2
     assert summary_payload['custom_checks'] is None
     assert {'telegram', 'youtube'} <= set(summary_payload['route_states'])
@@ -1943,11 +2021,18 @@ def test_key_pool_subscription_helpers():
         SS_KEY,
         vless_key,
         TROJAN_KEY,
+        HYSTERIA2_KEY,
     ])
     classified = key_pool_store.classify_subscription_keys(raw)
     assert classified['shadowsocks'] == [SS_KEY]
     assert classified['vless'] == [vless_key]
     assert classified['trojan'] == [TROJAN_KEY]
+    assert classified['hysteria2'] == [HYSTERIA2_KEY]
+    encoded = base64.b64encode(('hysteria2://auth@example.net:443#sample\n' + HYSTERIA2_KEY).encode()).decode()
+    assert key_pool_store.classify_subscription_keys(encoded)['hysteria2'] == [
+        'hysteria2://auth@example.net:443#sample',
+        HYSTERIA2_KEY,
+    ]
 
     placeholder = 'vless://uuid@example.com:443?security=tls#%20APP%20not%20supported%20'
     try:
@@ -2006,17 +2091,19 @@ def test_key_pool_subscription_helpers():
     mixed_pools, added_by_proto = key_pool_store.add_keys_to_pools_by_protocol(
         {'vless2': []},
         'vless2',
-        '\n'.join([vless_key, 'not-a-key-label', vmess_key, TROJAN_KEY, SS_KEY]),
+        '\n'.join([vless_key, 'not-a-key-label', vmess_key, TROJAN_KEY, SS_KEY, HYSTERIA2_KEY]),
     )
     assert added_by_proto == {
         'shadowsocks': [SS_KEY],
         'vmess': [vmess_key],
         'vless2': [vless_key],
         'trojan': [TROJAN_KEY],
+        'hysteria2': [HYSTERIA2_KEY],
     }
     assert mixed_pools['vless2'] == [vless_key]
     assert mixed_pools['vmess'] == [vmess_key]
     assert mixed_pools['trojan'] == [TROJAN_KEY]
+    assert mixed_pools['hysteria2'] == [HYSTERIA2_KEY]
     assert mixed_pools['shadowsocks'] == [SS_KEY]
     vless1_pools, vless1_added_by_proto = key_pool_store.add_keys_to_pools_by_protocol(
         {'vless': [], 'vless2': []},
@@ -2027,13 +2114,14 @@ def test_key_pool_subscription_helpers():
     assert vless1_pools['vless'] == [vless_key]
     assert vless1_pools['vless2'] == []
     repaired, moved = key_pool_store.repair_key_pool_protocols(
-        {'vless2': [vless_key, vmess_key, TROJAN_KEY, SS_KEY]}
+        {'vless2': [vless_key, vmess_key, TROJAN_KEY, SS_KEY, HYSTERIA2_KEY]}
     )
     assert repaired['vless2'] == [vless_key]
     assert repaired['vmess'] == [vmess_key]
     assert repaired['trojan'] == [TROJAN_KEY]
+    assert repaired['hysteria2'] == [HYSTERIA2_KEY]
     assert repaired['shadowsocks'] == [SS_KEY]
-    assert moved == {'vless2': {'shadowsocks': 1, 'vmess': 1, 'trojan': 1}}
+    assert moved == {'vless2': {'shadowsocks': 1, 'vmess': 1, 'trojan': 1, 'hysteria2': 1}}
     ensured, changed = key_pool_store.ensure_current_keys_in_pools(
         {'vless': ['first', 'active', 'last']},
         {'vless': 'active'},
@@ -2145,13 +2233,14 @@ def test_key_pool_import_routes_selected_protocol_and_vless_context():
         ('vless', vless_key, 'vless'),
         ('vless2', vless_key, 'vless2'),
         ('trojan', TROJAN_KEY, 'trojan'),
+        ('hysteria2', HYSTERIA2_KEY, 'hysteria2'),
     )
     for selected_proto, selected_key, target_proto in cases:
         pools, added_by_proto = key_pool_store.add_keys_to_pools_by_protocol({}, selected_proto, selected_key)
         assert added_by_proto == {target_proto: [selected_key]}
         assert pools[target_proto] == [selected_key]
 
-    for selected_proto in ('shadowsocks', 'vmess', 'trojan'):
+    for selected_proto in ('shadowsocks', 'vmess', 'trojan', 'hysteria2'):
         pools, added_by_proto = key_pool_store.add_keys_to_pools_by_protocol({}, selected_proto, vless_key)
         assert added_by_proto == {'vless': [vless_key]}
         assert pools['vless'] == [vless_key]
@@ -2165,6 +2254,7 @@ def test_pool_import_hint_is_protocol_specific():
         ('vless', 'Vless 1', 'vless://...'),
         ('vless2', 'Vless 2', 'vless://...'),
         ('trojan', 'Trojan', 'trojan://...'),
+        ('hysteria2', 'Hysteria2', 'hysteria2://...'),
     )
     for key_name, title, placeholder in protocols:
         hint = web_form_blocks.pool_import_hint(title)
@@ -3944,6 +4034,9 @@ def test_youtube_healthcheck_rejects_failed_googlevideo_media_endpoint():
 
 
 def test_telegram_call_learning_helpers():
+    assert telegram_call_learning.protocol_ipsets('hysteria2') == ('unblockhy2', 'unblockhy2udp')
+    assert telegram_call_learning.protocol_call_ipset('hysteria2') == 'bypass_tg_call_hy2'
+    assert telegram_call_learning.protocol_client_ipset('hysteria2') == 'bypass_call_clients_hy2'
     line = (
         'ipv4 2 udp 17 29 src=192.168.1.23 dst=149.154.167.91 sport=53122 dport=3478 '
         'packets=3 bytes=640 src=149.154.167.91 dst=192.168.1.23 sport=3478 dport=53122 '
@@ -5048,7 +5141,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
 
     unblock_dir = tmp_path / 'unblock'
     unblock_dir.mkdir()
-    for file_name in ('shadowsocks.txt', 'vmess.txt', 'trojan.txt'):
+    for file_name in ('shadowsocks.txt', 'vmess.txt', 'trojan.txt', 'hysteria2.txt'):
         (unblock_dir / file_name).write_text('', encoding='utf-8')
     (unblock_dir / 'vless.txt').write_text('youtube.com\nexample-vless.test\n', encoding='utf-8')
     (unblock_dir / 'vless-2.txt').write_text(
@@ -5173,7 +5266,7 @@ def test_youtube_route_owner_supports_every_protocol_without_forced_fallback(tmp
     assert youtube_route_owner.resolve_youtube_route_owner(
         unblock_dir=str(unblock_dir),
         state_path=str(state_path),
-    ) == {'protocol': 'trojan', 'source': 'last_confirmed'}
+    ) == {'protocol': 'hysteria2', 'source': 'last_confirmed'}
 
     fresh_state_path = tmp_path / 'fresh-owner.json'
     assert youtube_route_owner.resolve_youtube_route_owner(
@@ -5479,6 +5572,9 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     s99unblock = (APP_ROOT / 'S99unblock').read_text(encoding='utf-8')
 
     assert 'flush_set' not in update_script
+    assert 'unblockhy2' in update_script
+    assert 'unblockhy2udp' in update_script
+    assert 'unblockhy26' in update_script
     assert 'Включите DNS Override, чтобы назначить dnsmasq основной DNS-службой' in update_script
     assert 'Используем резервный ndnproxy Keenetic и предварительно заполняем ipset' in update_script
     assert '/opt/bin/unblock_ipset.sh &' not in update_script
@@ -6159,15 +6255,16 @@ def test_vless_tcp_redirect_keeps_mobile_push_connections_reliable():
         'vless:$UNBLOCK_DIR/vless.txt',
         'vless2:$UNBLOCK_DIR/vless-2.txt',
         'trojan:$UNBLOCK_DIR/trojan.txt',
+        'hysteria2:$UNBLOCK_DIR/hysteria2.txt',
     ):
         assert f'"{route_spec}"' in telegram_owner_block
     assert 'route_file_marker_count "$route_file" $telegram_markers' in telegram_owner_block
     assert 'mtalk.google.com' not in telegram_owner_block
     assert '17.249.0.0/16' not in telegram_owner_block
     route_sets = redirect_script.split('mobile_push_route_sets() {', 1)[1].split('\n}', 1)[0]
-    assert "printf '%s\\n' unblocksh unblockvmess unblockvless unblockvless2 unblocktroj" in route_sets
+    assert "printf '%s\\n' unblocksh unblockvmess unblockvless unblockvless2 unblocktroj unblockhy2" in route_sets
     target_ports = redirect_script.split('mobile_push_proxy_target_ports() {', 1)[1].split('\n}', 1)[0]
-    assert "printf '%s\\n' 1082 10815 10812 10814 10829" in target_ports
+    assert "printf '%s\\n' 1082 10815 10812 10814 10829 10841" in target_ports
 
 
 def test_chrome_remote_desktop_stun_uses_targeted_tproxy():
@@ -6267,7 +6364,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'YOUTUBE_UNBLOCK_ENTRIES' in source
     assert 'SERVICE_LIST_SOURCES' in source
     assert 'TELEGRAM_UDP_POLICY' in source
-    assert "UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
+    assert 'UDP_QUIC_POLICY_PROTOCOLS = _PROTOCOL_DISPLAY_ORDER' in source
     assert 'def _route_list_contains_telegram' in source
     assert 'def _route_list_contains_youtube' in source
     assert 'def _udp_quic_block_enabled_for_protocol' in source
@@ -6617,6 +6714,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'restore_runtime_state_file_after_update vmess.key /opt/etc/xray/vmess.key 0600' in script_source
     assert 'restore_runtime_state_file_after_update vless.key /opt/etc/xray/vless.key 0600' in script_source
     assert 'restore_runtime_state_file_after_update vless2.key /opt/etc/xray/vless2.key 0600' in script_source
+    assert 'restore_runtime_state_file_after_update hysteria2.key /opt/etc/xray/hysteria2.key 0600' in script_source
     assert 'restore_runtime_state_file_after_update xray_config.json /opt/etc/xray/config.json 0644' in script_source
     assert 'restore_runtime_state_file_after_update v2ray_config.json /opt/etc/v2ray/config.json 0644' in script_source
     assert 'restore_runtime_state_file_after_update shadowsocks.json /opt/etc/shadowsocks.json 0600' in script_source
@@ -6626,10 +6724,16 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'restore_runtime_state_file_after_update unblock_vmess.txt /opt/etc/unblock/vmess.txt 0644' in script_source
     assert 'restore_runtime_state_file_after_update unblock_vless.txt /opt/etc/unblock/vless.txt 0644' in script_source
     assert 'restore_runtime_state_file_after_update unblock_vless2.txt /opt/etc/unblock/vless-2.txt 0644' in script_source
+    assert 'restore_runtime_state_file_after_update unblock_hysteria2.txt /opt/etc/unblock/hysteria2.txt 0644' in script_source
     restore_state_call = '\n    restore_runtime_state_files_after_update\n'
+    ensure_hysteria2_state_call = '\n    ensure_hysteria2_runtime_state_files\n'
     migrate_defaults_call = '\n    migrate_runtime_config_defaults\n'
     assert script_source.find('activate_runtime_modules $BOT_RUNTIME_MODULES') < script_source.find(restore_state_call)
-    assert script_source.find(restore_state_call) < script_source.find(migrate_defaults_call)
+    assert script_source.find(restore_state_call) < script_source.find(ensure_hysteria2_state_call)
+    assert script_source.find(ensure_hysteria2_state_call) < script_source.find(migrate_defaults_call)
+    assert 'ensure_hysteria2_runtime_state_files()' in script_source
+    assert 'if [ ! -e /opt/etc/unblock/hysteria2.txt ]; then' in script_source
+    assert ': > /opt/etc/unblock/hysteria2.txt' in script_source
     assert 'mv "$INSTALLER_MAIN_PATH" "$backup_dir"/installer.py' in script_source
     assert 'mv "$INSTALLER_SERVICE_PATH" "$backup_dir"/S98telegram_bot_installer' in script_source
     assert 'mv "$BOT_SERVICE_PATH" "$backup_dir"/S99telegram_bot' in script_source
@@ -6640,6 +6744,19 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'restore_file bot_proxy_mode /opt/etc/bot_proxy_mode' in script_source
     assert 'restore_file bot_config.py /opt/etc/bot_config.py' in script_source
     assert 'restore_file vless2.key /opt/etc/xray/vless2.key' in script_source
+    assert 'restore_file hysteria2.key /opt/etc/xray/hysteria2.key' in script_source
+    assert 'restore_file unblock_hysteria2.txt /opt/etc/unblock/hysteria2.txt' in script_source
+    assert 'cleanup_unsupported_hysteria2_runtime()' in rollback_source
+    assert "grep -q 'HYSTERIA2'" in rollback_source
+    assert 'HYSTERIA2_TRANSPARENT_PORT="$localporthysteria2_transparent"' in rollback_source
+    assert 'HYSTERIA2_TPROXY_PORT="$rollback_hysteria2_tproxy_port"' in rollback_source
+    assert 'delete_saved_firewall_rules_containing iptables mangle "--on-port \\$HYSTERIA2_TPROXY_PORT "' in rollback_source
+    assert "delete_saved_firewall_rules_containing ip6tables filter '--match-set unblockhy26 '" in rollback_source
+    assert 'ipset destroy "\\$set_name"' in rollback_source
+    assert 'cleanup_unsupported_hysteria2_runtime' in rollback_source
+    cleanup_call = '\ncleanup_unsupported_hysteria2_runtime\n'
+    assert rollback_source.find('restore_file 100-redirect.sh') < rollback_source.find(cleanup_call)
+    assert rollback_source.find(cleanup_call) < rollback_source.find('/opt/etc/init.d/S24xray restart')
     assert 'restore_file shadowsocks.json /opt/etc/shadowsocks.json' in script_source
     assert 'restore_file trojan_config.json /opt/etc/trojan/config.json' in script_source
     assert 'if [ -s /opt/etc/shadowsocks.json ]; then' in script_source
@@ -6759,7 +6876,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert "return owner if owner in YOUTUBE_ROUTE_PROTOCOLS else ''" in source
     assert "'route_owner_unavailable'" in source
     assert 'def _youtube_route_marker_count' not in source
-    assert "YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')" in source
+    assert 'YOUTUBE_ROUTE_PROTOCOLS = _PROTOCOL_DISPLAY_ORDER' in source
     assert "YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')" in source
     assert "if proxy_mode not in YOUTUBE_STREAM_GUARD_PROTOCOLS" in source
     assert "_vless_traffic_guard_active(\n        'Telegram auto-failover'" in source
@@ -7009,10 +7126,11 @@ def test_http_api_handles_parallel_status_pool_and_asset_requests():
         "(temp / 'bot_config.py').write_text(config_text, encoding='utf-8')\n"
         "(temp / 'bot_app_mode').write_text('advanced\\n', encoding='utf-8')\n"
         "sys.path[:0] = [str(temp), str(app), str(root)]\n"
-        "import app_runtime_mode\n"
-        "app_runtime_mode.APP_RUNTIME_MODE_FILE = str(temp / 'bot_app_mode')\n"
-        "import bot\n"
-        "bot.start_http_server()\n"
+            "import app_runtime_mode\n"
+            "app_runtime_mode.APP_RUNTIME_MODE_FILE = str(temp / 'bot_app_mode')\n"
+            "import bot\n"
+            "bot._SERVICE_ROUTE_STATE_PATH = str(temp / 'service_route_state.json')\n"
+            "bot.start_http_server()\n"
         "time.sleep(0.2)\n"
         "paths = ('/api/status?compact=1&lite=1', '/api/pools?protocol=vless', '/static/app.js', '/static/app.css')\n"
         "def fetch(index):\n"
@@ -7954,6 +8072,10 @@ def test_clean_install_fixture_builds_complete_importable_runtime(tmp_path):
     assert config_namespace['pool_probe_process_worker_enabled'] is True
     assert config_namespace['pool_probe_inprocess_fallback_enabled'] is False
     assert config_namespace['subscription_nightly_pool_probe_enabled'] is True
+    assert config_namespace['localporthysteria2'] == '10840'
+    assert config_namespace['localporthysteria2_transparent'] == '10841'
+    assert config_namespace['localporthysteria2_tproxy'] == '11840'
+    assert config_namespace['udp_quic_block_hysteria2_enabled'] is True
 
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
@@ -7961,7 +8083,12 @@ def test_clean_install_fixture_builds_complete_importable_runtime(tmp_path):
     clean_modules = re.search(r'BOT_RUNTIME_MODULES="([^"]+)"', bootstrap).group(1).split()
     assert update_modules == clean_modules
     assert 'system_command_runtime.py' in clean_modules
+    assert 'protocol_catalog.py' in clean_modules
     assert len(clean_modules) == len(set(clean_modules))
+    assert 'touch /opt/etc/unblock/hysteria2.txt' in script
+    assert 'ipset flush unblockhy2' in script
+    assert 'ipset flush unblockhy2udp' in script
+    assert "('HYSTERIA2', 'hysteria2.txt', 'udp_quic_block_hysteria2_enabled')" in bootstrap
 
     staged = tmp_path / 'clean-runtime'
     staged.mkdir()
@@ -7995,10 +8122,10 @@ def test_legacy_update_fixture_preserves_state_and_migrates_config_idempotently(
         'key_pools.json.last-good', 'key_probe_cache.json',
         'key_probe_cache.json.last-good', 'pool_summary_last.json',
         'subscriptions.json', 'subscription_nightly_pool_probe.json', 'custom_checks.json',
-        'vmess.key', 'vless.key', 'vless2.key', 'xray_config.json', 'v2ray_config.json',
+        'vmess.key', 'vless.key', 'vless2.key', 'hysteria2.key', 'xray_config.json', 'v2ray_config.json',
         'shadowsocks.json', 'trojan_config.json', 'unblock_shadowsocks.txt',
         'unblock_trojan.txt', 'unblock_vmess.txt', 'unblock_vless.txt',
-        'unblock_vless2.txt', 'web_ui_background.webp', 'web_ui_background.json',
+        'unblock_vless2.txt', 'unblock_hysteria2.txt', 'web_ui_background.webp', 'web_ui_background.json',
     }
     assert preserved_state <= backed_up
     assert preserved_state <= restored
@@ -9612,6 +9739,27 @@ def test_telegram_call_router_health_note():
     assert router_health_runtime.telegram_call_proxy_note(health) == 'Звонки через TPROXY работают для Telegram/WhatsApp/Discord на порте: Vless 11812'
     assert ('netstat', '-lnp') in commands
 
+    hysteria2_policy = '\n'.join([
+        'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED=1',
+        'BYPASS_TELEGRAM_CALL_TPROXY_ENABLED=1',
+        'BYPASS_TELEGRAM_CALL_ROUTE_HYSTERIA2=1',
+        'TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2=11840',
+    ])
+
+    def hysteria2_run_text(command, timeout=2):
+        if command[:2] == ['netstat', '-lnp']:
+            return 'udp        0      0 0.0.0.0:11840           0.0.0.0:*                           123/xray\n'
+        if command[:4] == ['iptables', '-t', 'mangle', '-nL']:
+            return 'Chain BYPASS_TG_CALL_TPROXY (3 references)\n'
+        return ''
+
+    hysteria2_health = router_health_runtime.telegram_call_proxy_health(
+        run_text=hysteria2_run_text,
+        read_values=lambda _path: router_health_runtime.parse_key_value_text(hysteria2_policy),
+    )
+    assert hysteria2_health['ports'] == {'hysteria2': 11840}
+    assert 'Hysteria2 11840' in router_health_runtime.telegram_call_proxy_note(hysteria2_health)
+
 
 def test_telegram_call_learning_idle_backoff_source():
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
@@ -10728,13 +10876,14 @@ def test_telegram_key_ui_helpers():
     assert telegram_key_ui.key_menu_rows()[:3] == (
         ('Vless 1', 'Vless 2'),
         ('Vmess', 'Trojan'),
-        ('Shadowsocks',),
+        ('Hysteria2', 'Shadowsocks'),
     )
     assert ('📦 Пул ключей' in telegram_key_ui.key_menu_rows(include_pool=True)[3])
     assert telegram_key_ui.key_input_level('Trojan', trojan_level=13) == 13
     assert telegram_key_ui.key_input_level('Vless 2', trojan_level=13) == 12
     assert telegram_key_ui.key_install_protocol(13, trojan_level=13) == 'trojan'
     assert telegram_key_ui.key_install_protocol(12, trojan_level=13) == 'vless2'
+    assert telegram_key_ui.key_install_protocol(14, trojan_level=13) == 'hysteria2'
     assert 'http://192.168.1.1:8080/' in telegram_key_ui.browser_hint('192.168.1.1', 8080)
     bot_source = (ROOT / 'app' / 'bot.py').read_text(encoding='utf-8')
     report_start = bot_source.index('def _send_key_status_report(')
@@ -10793,6 +10942,14 @@ def test_proxy_diagnostics_redact_credential_ids():
         assert 'id=' not in vmess_diag
         assert 'key_hash=sha256:' in vmess_diag
 
+        hysteria2_auth = 'user:private-password'
+        hysteria2_key = f'hy2://{hysteria2_auth}@hy2.example.com:443?sni=edge.example.com#sample'
+        hysteria2_diag = bot_module._build_proxy_diagnostics('hysteria2', hysteria2_key)
+        assert hysteria2_auth not in hysteria2_diag
+        assert 'private-password' not in hysteria2_diag
+        assert 'auth_len=' in hysteria2_diag
+        assert 'key_hash=sha256:' in hysteria2_diag
+
         original = {
             'rss': bot_module._process_rss_kb,
             'clear': bot_module._clear_runtime_memory_caches,
@@ -10837,6 +10994,19 @@ def test_proxy_diagnostics_redact_credential_ids():
             os.environ.pop('BYPASS_KEENETIC_COMMAND_WORKER', None)
         else:
             os.environ['BYPASS_KEENETIC_COMMAND_WORKER'] = old_worker
+
+
+def test_hysteria2_keys_are_redacted_from_runtime_text():
+    auth = 'fixture-user:fixture-private-password'
+    for scheme in ('hysteria2', 'hy2'):
+        key_value = f'{scheme}://{auth}@hy2.example.com:443?sni=edge.example.com#sample'
+        redacted_values = (
+            event_history.redact_sensitive_text(f'failed {key_value}'),
+            health_check_runner._redact(f'failed {key_value}'),
+            telegram_auth_state._redact_message_debug_text(f'failed {key_value}'),
+        )
+        assert all(auth not in value for value in redacted_values)
+        assert all('fixture-private-password' not in value for value in redacted_values)
 
 
 def test_telegram_bot_menu_button_smoke():
@@ -10891,6 +11061,23 @@ def test_telegram_bot_menu_button_smoke():
         bot_module.types = _FakeTypes
         recorder = _RecorderBot()
         bot_module.bot = recorder
+        bot_module._load_current_keys = lambda: {'hysteria2': HYSTERIA2_KEY}
+        bot_module._build_status_snapshot = lambda *_args, **_kwargs: {
+            'protocols': {
+                'hysteria2': {'tone': 'ok', 'label': 'Работает', 'details': ''},
+            },
+        }
+        bot_module._youtube_failover_status_payload = lambda: {'tone': 'ok', 'label': 'Работает'}
+        bot_module._send_key_status_report(message('status'), None)
+        assert '<b>Hysteria2</b>: Работает' in recorder.messages[-1]['text']
+        assert bot_module._unblock_route_for_key_type('hysteria2') == 'hysteria2'
+        original_route_reader = bot_module._read_unblock_list_entries
+        try:
+            bot_module._read_unblock_list_entries = lambda route_name: (route_name,)
+            route_entries = bot_module._transparent_route_entries_by_protocol()
+        finally:
+            bot_module._read_unblock_list_entries = original_route_reader
+        assert route_entries['hysteria2'] == ('hysteria2',)
         bot_module._send_telegram_readme_info = (
             lambda msg, reply_markup: recorder.send_message(msg.chat.id, 'INFO', reply_markup=reply_markup)
         )
@@ -10908,6 +11095,7 @@ def test_telegram_bot_menu_button_smoke():
             ('Vless 2', 'vless-2'),
             ('Vmess', 'vmess'),
             ('Trojan', 'trojan'),
+            ('Hysteria2', 'hysteria2'),
             ('Shadowsocks', 'shadowsocks'),
         ]
 
@@ -10922,8 +11110,10 @@ def test_telegram_bot_menu_button_smoke():
         assert bot_module._build_keys_menu_markup().rows[:3] == [
             ['Vless 1', 'Vless 2'],
             ['Vmess', 'Trojan'],
-            ['Shadowsocks'],
+            ['Hysteria2', 'Shadowsocks'],
         ]
+        assert ['Hysteria2', 'Shadowsocks'] in bot_module._telegram_unblock_lists_markup().rows
+        assert bot_module._proxy_mode_label('hysteria2') == 'Hysteria2'
         service_labels = [label for row in bot_module._service_list_markup().rows[:-1] for label in row]
         assert service_labels.count('Grok / X / Twitter') == 1
         assert 'X / Twitter' not in service_labels
@@ -10954,10 +11144,19 @@ def test_telegram_bot_menu_button_smoke():
             assert '?' in recorder.messages[-1]['text']
             assert recorder.messages[-1]['kwargs']['reply_markup'].rows == [['✅ Подтвердить', 'Отмена'], ['🔙 Назад']]
 
-        for text in ('Shadowsocks', 'Vmess', 'Vless 1', 'Vless 2', 'Trojan'):
+        input_levels = {
+            'Shadowsocks': 5,
+            'Vmess': 9,
+            'Vless 1': 11,
+            'Vless 2': 12,
+            'Trojan': 13,
+            'Hysteria2': 14,
+        }
+        for text, expected_level in input_levels.items():
             bot_module._set_chat_menu_state(7001, level=8, bypass=None)
             bot_module.bot_message(message(text))
             assert recorder.messages[-1]['text'] == telegram_key_ui.KEY_COPY_PROMPT
+            assert bot_module._get_chat_menu_state(7001)['level'] == expected_level
 
         bot_module._set_chat_menu_state(7001, level=8, bypass=None)
         bot_module.bot_message(message(telegram_key_ui.KEY_BROWSER_TEXT))
@@ -10967,7 +11166,7 @@ def test_telegram_bot_menu_button_smoke():
         assert recorder.messages[-1]['text'] == 'MARKDOWN:keys.md'
 
         completion_summary = {
-        'active_text': '5 из 5 протоколов с выбранным ключом',
+        'active_text': '6 из 6 протоколов с выбранным ключом',
             'pool_total_count': 12,
             'checked_pool_count': 12,
             'latest_run': {
@@ -11198,6 +11397,30 @@ def test_telegram_bot_menu_button_smoke():
         assert restored_snapshot['protocols']['vless']['label'] == 'Работает'
         assert restored_snapshot['protocols']['vless2']['label'] == 'Последний результат'
         bot_module.pool_probe_lock.release()
+
+        light_cache_loads = []
+        expected_light_cache = {'active-key': {'schema': 1}}
+        bot_module._load_light_key_probe_cache = lambda: (
+            light_cache_loads.append(True) or expected_light_cache
+        )
+        bot_module._light_active_protocol_status_for_key = lambda proto, key, **kwargs: {
+            'tone': 'ok',
+            'label': 'Свежий результат',
+            'details': f'active {proto}',
+            'received_cache': kwargs.get('key_probe_cache'),
+        }
+        free_lock_snapshot = bot_module._active_mode_status_snapshot_from_base(
+            {'vless': active_uri},
+            {
+                'web': {},
+                'protocols': {
+                    'vless': {'tone': 'ok', 'label': 'Сохранённый результат'},
+                },
+            },
+        )
+        assert free_lock_snapshot['protocols']['vless']['label'] == 'Свежий результат'
+        assert free_lock_snapshot['protocols']['vless']['received_cache'] is expected_light_cache
+        assert len(light_cache_loads) == 1
     finally:
         sys.modules.pop('bot', None)
         if old_bot_module is not None:
@@ -11672,7 +11895,15 @@ def test_proxy_apply_runtime_helpers():
         'vless': 10811,
         'vless2': 10813,
         'trojan': 10816,
+        'hysteria2': 10840,
     })
+    assert settings['hysteria2'] == {
+        'label': 'Hysteria2',
+        'port': 10840,
+        'restart_cmds': ['/opt/etc/init.d/S24xray restart'],
+        'startup_wait': 18,
+        'fast_startup_wait': 5,
+    }
     youtube_calls = []
     def proxy_apply_youtube_check(proxy, **kwargs):
         youtube_calls.append(kwargs['url'])
@@ -15547,6 +15778,10 @@ def test_web_get_actions_helpers():
     assert alias_panel['payload'] == {'ok': True, 'protocol': 'vless2', 'html': 'panel:vless2'}
     check_panel = web_get_actions.dispatch(ctx, '/api/protocol_check_panel', 'proto=vless')
     assert check_panel['payload'] == {'ok': True, 'protocol': 'vless', 'html': 'check:vless'}
+    hysteria2_panel = web_get_actions.dispatch(ctx, '/api/protocol_panel', 'proto=hysteria2')
+    assert hysteria2_panel['payload'] == {'ok': True, 'protocol': 'hysteria2', 'html': 'panel:hysteria2'}
+    hysteria2_check = web_get_actions.dispatch(ctx, '/api/protocol_check_panel', 'proto=hysteria2')
+    assert hysteria2_check['payload'] == {'ok': True, 'protocol': 'hysteria2', 'html': 'check:hysteria2'}
     script_asset = web_get_actions.dispatch({'build_script_asset': lambda: 'js'}, '/static/app.js')
     assert script_asset['cache_seconds'] == 300
     style_asset = web_get_actions.dispatch({'build_style_asset': lambda: 'css'}, '/static/app.css')
@@ -15556,12 +15791,12 @@ def test_web_get_actions_helpers():
 
 
 def test_web_form_blocks_helpers():
-    expected_protocol_order = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+    expected_protocol_order = ('vless', 'vless2', 'vmess', 'trojan', 'hysteria2', 'shadowsocks')
     assert key_pool_store.PROTOCOLS == expected_protocol_order
     assert web_form_blocks.PROXY_PROTOCOLS == expected_protocol_order
     assert tuple(item[0] for item in web_form_blocks.PROTOCOL_SECTIONS) == expected_protocol_order
     bot_source = source_path('bot.py').read_text(encoding='utf-8')
-    assert "PROTOCOL_DISPLAY_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')" in bot_source
+    assert 'PROTOCOL_DISPLAY_ORDER = _PROTOCOL_DISPLAY_ORDER' in bot_source
     assert 'for key_name, key_value in _ordered_protocol_items(current_keys):' in bot_source
     assert web_form_blocks.proxy_mode_label('none') == 'Без прокси'
     assert web_form_blocks.js_bool(True) == 'true'
@@ -15625,7 +15860,7 @@ def test_web_form_blocks_helpers():
     button_picker = web_form_blocks.render_button_mode_picker('vless', csrf_input_html='<input name="csrf_token">')
     assert 'mode-choice-grid' in button_picker
     assert 'csrf_token' in button_picker
-    expected_mode_order = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks', 'none')
+    expected_mode_order = ('vless', 'vless2', 'vmess', 'trojan', 'hysteria2', 'shadowsocks', 'none')
     assert [button_picker.index(f'data-mode-value="{mode}"') for mode in expected_mode_order] == sorted(
         button_picker.index(f'data-mode-value="{mode}"') for mode in expected_mode_order
     )
@@ -17226,13 +17461,13 @@ def test_web_form_template_smoke():
 def test_telegram_pool_ui():
     markup = telegram_pool_ui.pool_protocol_markup(
         _FakeTypes,
-        ['Vless 1', 'Vless 2', 'Vmess', 'Trojan', 'Shadowsocks'],
+        ['Vless 1', 'Vless 2', 'Vmess', 'Trojan', 'Hysteria2', 'Shadowsocks'],
     )
     assert markup.resize_keyboard is True
     assert markup.rows[:3] == [
         ['Vless 1', 'Vless 2'],
         ['Vmess', 'Trojan'],
-        ['Shadowsocks'],
+        ['Hysteria2', 'Shadowsocks'],
     ]
     flattened = [button for row in markup.rows for button in row]
     assert telegram_pool_ui.POOL_CHECK_ALL_TEXT in flattened
@@ -17305,6 +17540,7 @@ def test_event_history_helpers():
     assert events[0]['action'] == 'event_59'
     assert events[-1]['action'] == 'event_10'
     assert redacted_events[-1]['protocol_label'] == 'Vless 1'
+    assert event_history.PROTOCOL_LABELS['hysteria2'] == 'Hysteria2'
     assert '<proxy-key-hidden>' in redacted_events[-1]['message']
     assert 'vless://' not in redacted_events[-1]['message']
     assert redacted_events[-1]['details']['last_activity_age_s'] == '0'
@@ -17699,6 +17935,7 @@ def test_service_routes_apply_and_profile():
 def test_every_ready_service_can_move_to_every_protocol():
     service_ids = [item['id'] for item in service_routes.route_service_items(include_core=True)]
     assert {'telegram', 'youtube', 'meta', 'chrome_remote_desktop', 'tiktok'} <= set(service_ids)
+    assert 'hysteria2' in service_routes.ROUTE_ORDER
     assert len(service_ids) == len(set(service_ids)) == len(service_catalog.CUSTOM_CHECK_PRESETS) + 2
     for service_id in service_ids:
         expected_entries = set(service_catalog.service_route_entries(service_id))

@@ -3,6 +3,8 @@ import os
 import re
 import threading
 import time
+
+from protocol_catalog import PROTOCOL_LABELS as CATALOG_PROTOCOL_LABELS
 from collections import deque
 
 
@@ -22,19 +24,15 @@ DISPLAY_COMPACT_ACTIONS = frozenset({
 })
 
 PROTOCOL_LABELS = {
-    'shadowsocks': 'Shadowsocks',
-    'vmess': 'Vmess',
-    'vless': 'Vless 1',
-    'vless2': 'Vless 2',
+    **CATALOG_PROTOCOL_LABELS,
     'vless-2': 'Vless 2',
-    'trojan': 'Trojan',
     'web-only': 'Web only',
     'none': 'Без прокси',
     'system': 'Система',
 }
 
 SECRET_PATTERNS = [
-    (re.compile(r'\b(?:vless|vmess|trojan|ss)://[^\s\'"<>]+', re.I), '<proxy-key-hidden>'),
+    (re.compile(r'\b(?:vless|vmess|trojan|ss|hysteria2|hy2)://[^\s\'"<>]+', re.I), '<proxy-key-hidden>'),
     (re.compile(r'\bbot\d{6,}:[A-Za-z0-9_-]{20,}\b'), 'bot<token-hidden>'),
     (re.compile(r'((?:token|password|secret|passwd|web_auth_token)\s*[=:]\s*)[^\s\'"]+', re.I), r'\1<hidden>'),
 ]

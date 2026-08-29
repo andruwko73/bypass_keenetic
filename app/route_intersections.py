@@ -16,6 +16,7 @@ ROUTE_IPSET_SETS = {
     'vless': (('unblockvless', 'tcp'), ('unblockvlessudp', 'udp'), ('unblockvless6', 'ipv6')),
     'vless-2': (('unblockvless2', 'tcp'), ('unblockvless2udp', 'udp'), ('unblockvless2v6', 'ipv6')),
     'trojan': (('unblocktroj', 'tcp'), ('unblocktrojudp', 'udp'), ('unblocktroj6', 'ipv6')),
+    'hysteria2': (('unblockhy2', 'tcp'), ('unblockhy2udp', 'udp'), ('unblockhy26', 'ipv6')),
 }
 ROUTE_PRIORITY_IPSET_SETS = {
     'vless': {

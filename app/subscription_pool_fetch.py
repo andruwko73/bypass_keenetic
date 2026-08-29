@@ -1,6 +1,7 @@
 import concurrent.futures
 import threading
 import time
+from collections import deque
 
 import key_pool_store
 import subscription_runtime
@@ -8,14 +9,16 @@ from pool_probe_runner import (
     build_pool_probe_core_config_batch,
     start_pool_probe_xray,
     stop_pool_probe_xray,
+    take_isolated_probe_batch,
 )
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER
 from proxy_protocols import proxy_outbound_from_key
 
 
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_MAX_CANDIDATES = 12
 DEFAULT_TEST_PORT = 12140
-PROXY_PROTOCOL_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+PROXY_PROTOCOL_ORDER = PROTOCOL_DISPLAY_ORDER
 _FETCH_LOCK = threading.Lock()
 
 
@@ -69,8 +72,9 @@ def fetch_subscription_text_from_pools(
         outbound_builder = outbound_builder or proxy_outbound_from_key
         fetch_text = fetch_text or subscription_runtime.fetch_subscription_text
 
-        for start in range(0, len(candidates), batch_size):
-            batch = candidates[start:start + batch_size]
+        pending_candidates = deque(candidates)
+        while pending_candidates:
+            batch = take_isolated_probe_batch(pending_candidates, batch_size)
             process = None
             config_path = ''
             try:

@@ -119,13 +119,24 @@ def load_trojan_key(config_path=TROJAN_CONFIG_PATH):
         return ''
 
 
-def load_current_keys(vmess_key_path, vless_key_path, vless2_key_path, xray_config_dir, v2ray_config_dir):
+def load_current_keys(
+    vmess_key_path,
+    vless_key_path,
+    vless2_key_path,
+    xray_config_dir,
+    v2ray_config_dir,
+    hysteria2_key_path=None,
+):
     return {
         'shadowsocks': load_shadowsocks_key(),
         'vmess': read_v2ray_key(vmess_key_path, xray_config_dir, v2ray_config_dir) or '',
         'vless': read_v2ray_key(vless_key_path, xray_config_dir, v2ray_config_dir) or '',
         'vless2': read_v2ray_key(vless2_key_path, xray_config_dir, v2ray_config_dir) or '',
         'trojan': load_trojan_key(),
+        'hysteria2': (
+            read_v2ray_key(hysteria2_key_path, xray_config_dir, v2ray_config_dir) or ''
+            if hysteria2_key_path else ''
+        ),
     }
 
 

@@ -24,6 +24,8 @@ IPSET_SET_NAMES = (
     'unblockvless2udp',
     'unblocktroj',
     'unblocktrojudp',
+    'unblockhy2',
+    'unblockhy2udp',
 )
 IPSET_DISPLAY_ORDER = (
     ('unblockvless', 'VLESS'),
@@ -34,6 +36,8 @@ IPSET_DISPLAY_ORDER = (
     ('unblockvmessudp', 'VMESSUDP'),
     ('unblocktroj', 'Trojan'),
     ('unblocktrojudp', 'TrojanUDP'),
+    ('unblockhy2', 'Hysteria2'),
+    ('unblockhy2udp', 'Hysteria2UDP'),
     ('unblocksh', 'ShadowSocks'),
     ('unblockshudp', 'ShadowSocksUDP'),
 )
@@ -59,6 +63,7 @@ TELEGRAM_CALL_TPROXY_DEFAULT_PORTS = {
     'vless': 11812,
     'vless2': 11814,
     'trojan': 11829,
+    'hysteria2': 11840,
 }
 TELEGRAM_CALL_TPROXY_PORT_KEYS = {
     'shadowsocks': 'TELEGRAM_CALL_TPROXY_PORT_SHADOWSOCKS',
@@ -66,6 +71,7 @@ TELEGRAM_CALL_TPROXY_PORT_KEYS = {
     'vless': 'TELEGRAM_CALL_TPROXY_PORT_VLESS',
     'vless2': 'TELEGRAM_CALL_TPROXY_PORT_VLESS2',
     'trojan': 'TELEGRAM_CALL_TPROXY_PORT_TROJAN',
+    'hysteria2': 'TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2',
 }
 TELEGRAM_CALL_ROUTE_KEYS = {
     'shadowsocks': 'BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS',
@@ -73,6 +79,7 @@ TELEGRAM_CALL_ROUTE_KEYS = {
     'vless': 'BYPASS_TELEGRAM_CALL_ROUTE_VLESS',
     'vless2': 'BYPASS_TELEGRAM_CALL_ROUTE_VLESS2',
     'trojan': 'BYPASS_TELEGRAM_CALL_ROUTE_TROJAN',
+    'hysteria2': 'BYPASS_TELEGRAM_CALL_ROUTE_HYSTERIA2',
 }
 TELEGRAM_CALL_PROTOCOL_LABELS = {
     'shadowsocks': 'Shadowsocks',
@@ -80,6 +87,7 @@ TELEGRAM_CALL_PROTOCOL_LABELS = {
     'vless': 'Vless',
     'vless2': 'Vless 2',
     'trojan': 'Trojan',
+    'hysteria2': 'Hysteria2',
 }
 REALTIME_CALL_SERVICE_LABELS = ('Telegram', 'WhatsApp', 'Discord')
 

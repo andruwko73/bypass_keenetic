@@ -23,7 +23,8 @@
             vmess: 'Vmess',
             vless: 'Vless 1',
             vless2: 'Vless 2',
-            trojan: 'Trojan'
+            trojan: 'Trojan',
+            hysteria2: 'Hysteria2'
         };
         let statusPollTimer = null;
         let statusPollUntil = 0;

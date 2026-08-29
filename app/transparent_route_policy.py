@@ -11,8 +11,10 @@ import ipaddress
 import re
 from urllib.parse import urlparse
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER
 
-SUPPORTED_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+
+SUPPORTED_PROTOCOLS = PROTOCOL_DISPLAY_ORDER
 _DOMAIN_RE = re.compile(r'^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$')
 _SUFFIX_PREFIXES = ('domain:', 'domain-suffix,', 'domain,', 'host-suffix,')
 
@@ -24,6 +26,7 @@ STRICT_TRANSPARENT_IP_PORTS = {
     'vmess': '80,443,5222',
     'vless': '80,443,5222',
     'vless2': '80,443',
+    'hysteria2': '80,443,5222',
 }
 
 def normalize_protocol_set(value, allowed=SUPPORTED_PROTOCOLS):

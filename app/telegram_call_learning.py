@@ -43,6 +43,7 @@ PROTOCOL_IPSETS = {
     'vless': ('unblockvless', 'unblockvlessudp'),
     'vless2': ('unblockvless2', 'unblockvless2udp'),
     'trojan': ('unblocktroj', 'unblocktrojudp'),
+    'hysteria2': ('unblockhy2', 'unblockhy2udp'),
 }
 
 CALL_LEARNED_IPSETS = {
@@ -51,6 +52,7 @@ CALL_LEARNED_IPSETS = {
     'vless': 'bypass_tg_call_vless',
     'vless2': 'bypass_tg_call_vless2',
     'trojan': 'bypass_tg_call_troj',
+    'hysteria2': 'bypass_tg_call_hy2',
 }
 
 CALL_CLIENT_IPSETS = {
@@ -59,6 +61,7 @@ CALL_CLIENT_IPSETS = {
     'vless': 'bypass_call_clients_vless',
     'vless2': 'bypass_call_clients_vless2',
     'trojan': 'bypass_call_clients_troj',
+    'hysteria2': 'bypass_call_clients_hy2',
 }
 KNOWN_ROUTE_IPSETS = tuple(dict.fromkeys(
     set_name

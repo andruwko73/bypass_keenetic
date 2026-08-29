@@ -20,6 +20,11 @@ from urllib.parse import parse_qsl, urlencode, unquote, urlparse
 from app_version import APP_VERSION_LABEL
 import app_runtime_mode
 import bot_config as config
+from protocol_catalog import (
+    PROTOCOL_DISPLAY_ORDER as _PROTOCOL_DISPLAY_ORDER,
+    PROTOCOL_ROUTE_NAMES as _PROTOCOL_ROUTE_NAMES,
+    protocol_label as _protocol_label,
+)
 
 COMMAND_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_COMMAND_WORKER') == '1'
 POOL_PROBE_WORKER_MODE = os.environ.get('BYPASS_KEENETIC_POOL_PROBE_WORKER') == '1'
@@ -52,6 +57,7 @@ from proxy_key_store import (
 )
 from proxy_protocols import (
     decode_shadowsocks_uri as _store_decode_shadowsocks_uri,
+    parse_hysteria2_key as _store_parse_hysteria2_key,
     parse_trojan_key as _store_parse_trojan_key,
     parse_vless_key as _store_parse_vless_key,
     parse_vmess_key as _store_parse_vmess_key,
@@ -349,6 +355,7 @@ _TELEGRAM_CALL_LEARNING_PROTOCOL_IPSETS = {
     'vless': ('unblockvless', 'unblockvlessudp'),
     'vless2': ('unblockvless2', 'unblockvless2udp'),
     'trojan': ('unblocktroj', 'unblocktrojudp'),
+    'hysteria2': ('unblockhy2', 'unblockhy2udp'),
 }
 _TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = {
     'shadowsocks': 'bypass_call_clients_sh',
@@ -356,6 +363,7 @@ _TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = {
     'vless': 'bypass_call_clients_vless',
     'vless2': 'bypass_call_clients_vless2',
     'trojan': 'bypass_call_clients_troj',
+    'hysteria2': 'bypass_call_clients_hy2',
 }
 
 
@@ -1528,22 +1536,11 @@ def _set_active_key(proto, key):
 def _install_key_for_protocol(proto, key_value, verify=True):
     started_at = time.time()
     try:
-        if proto == 'shadowsocks':
-            shadowsocks(key_value)
-            return _apply_installed_proxy('shadowsocks', key_value, verify=verify)
-        if proto == 'vmess':
-            vmess(key_value)
-            return _apply_installed_proxy('vmess', key_value, verify=verify)
-        if proto == 'vless':
-            vless(key_value)
-            return _apply_installed_proxy('vless', key_value, verify=verify)
-        if proto == 'vless2':
-            vless2(key_value)
-            return _apply_installed_proxy('vless2', key_value, verify=verify)
-        if proto == 'trojan':
-            trojan(key_value)
-            return _apply_installed_proxy('trojan', key_value, verify=verify)
-        raise ValueError(f'Unsupported protocol: {proto}')
+        installer = PROXY_KEY_INSTALLERS.get(proto)
+        if installer is None:
+            raise ValueError(f'Unsupported protocol: {proto}')
+        installer(key_value)
+        return _apply_installed_proxy(proto, key_value, verify=verify)
     finally:
         duration_ms = int(max(0.0, time.time() - started_at) * 1000)
         _write_runtime_log(f'Key apply: protocol={proto} verify={int(bool(verify))} duration_ms={duration_ms}')
@@ -3022,6 +3019,9 @@ localportvmess_tproxy = str(getattr(config, 'localportvmess_tproxy', 11815))
 localportvless_tproxy = str(getattr(config, 'localportvless_tproxy', 11812))
 localportvless2_tproxy = str(getattr(config, 'localportvless2_tproxy', 11814))
 localporttrojan_tproxy = str(getattr(config, 'localporttrojan_tproxy', 11829))
+localporthysteria2 = str(getattr(config, 'localporthysteria2', 10840))
+localporthysteria2_transparent = str(getattr(config, 'localporthysteria2_transparent', 10841))
+localporthysteria2_tproxy = str(getattr(config, 'localporthysteria2_tproxy', 11840))
 XRAY_BITTORRENT_DIRECT_ENABLED = bool(getattr(config, 'xray_bittorrent_direct_enabled', False))
 XRAY_STRICT_TRANSPARENT_PROTOCOLS = _normalize_transparent_protocol_set(
     getattr(config, 'xray_strict_transparent_protocols', ())
@@ -3366,6 +3366,7 @@ UDP_QUIC_BLOCK_VMESS_ENABLED = bool(getattr(config, 'udp_quic_block_vmess_enable
 UDP_QUIC_BLOCK_VLESS_ENABLED = bool(getattr(config, 'udp_quic_block_vless_enabled', True))
 UDP_QUIC_BLOCK_VLESS2_ENABLED = bool(getattr(config, 'udp_quic_block_vless2_enabled', True))
 UDP_QUIC_BLOCK_TROJAN_ENABLED = bool(getattr(config, 'udp_quic_block_trojan_enabled', True))
+UDP_QUIC_BLOCK_HYSTERIA2_ENABLED = bool(getattr(config, 'udp_quic_block_hysteria2_enabled', True))
 YOUTUBE_QUIC_POLICY = str(getattr(config, 'youtube_quic_policy', 'auto') or 'auto').strip().lower()
 if YOUTUBE_QUIC_POLICY not in ('auto', 'allow', 'block'):
     YOUTUBE_QUIC_POLICY = 'auto'
@@ -3434,10 +3435,11 @@ IPV6_BYPASS_FALLBACK_ENABLED = bool(getattr(config, 'ipv6_bypass_fallback_enable
 VMESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vmess.key')
 VLESS_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless.key')
 VLESS2_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'vless2.key')
+HYSTERIA2_KEY_PATH = os.path.join(CORE_PROXY_CONFIG_DIR, 'hysteria2.key')
 KEY_SWITCH_AUDIT_LOG = '/opt/etc/bot/key_switch_audit.log'
-YOUTUBE_ROUTE_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+YOUTUBE_ROUTE_PROTOCOLS = _PROTOCOL_DISPLAY_ORDER
 YOUTUBE_STREAM_GUARD_PROTOCOLS = ('vless', 'vless2')
-UDP_QUIC_POLICY_PROTOCOLS = ('shadowsocks', 'vmess', 'vless', 'vless2', 'trojan')
+UDP_QUIC_POLICY_PROTOCOLS = _PROTOCOL_DISPLAY_ORDER
 TELEGRAM_CALL_LEARNING_ENABLED = bool(getattr(config, 'telegram_call_learning_enabled', False))
 TELEGRAM_CALL_LEARNING_DEFAULT_STATE_PATH = '/tmp/bypass_telegram_call_learning.json'
 TELEGRAM_CALL_LEARNING_LEGACY_STATE_PATH = '/opt/tmp/bypass_telegram_call_learning.json'
@@ -3491,7 +3493,7 @@ TELEGRAM_CALL_LEARNING_ADDRESS_TIMEOUT_SECONDS = max(
 TELEGRAM_CALL_TPROXY_ENABLED = bool(getattr(config, 'telegram_call_tproxy_enabled', False))
 TELEGRAM_CALL_LEARNING_CLIENT_IPSET = 'bypass_tg_call_clients'
 TELEGRAM_CALL_LEARNING_CLIENT_IPSETS = dict(_TELEGRAM_CALL_LEARNING_CLIENT_IPSETS)
-PROTOCOL_DISPLAY_ORDER = ('vless', 'vless2', 'vmess', 'trojan', 'shadowsocks')
+PROTOCOL_DISPLAY_ORDER = _PROTOCOL_DISPLAY_ORDER
 TELEGRAM_CALL_LEARNING_PROTOCOL_ORDER = PROTOCOL_DISPLAY_ORDER
 
 bot_ready = False
@@ -3512,6 +3514,7 @@ proxy_settings = {
     'vless': f'socks5h://127.0.0.1:{localportvless}',
     'vless2': f'socks5h://127.0.0.1:{localportvless2}',
     'trojan': f'socks5h://127.0.0.1:{localporttrojan_bot}',
+    'hysteria2': f'socks5h://127.0.0.1:{localporthysteria2}',
 }
 PROXY_LOCAL_PORTS = {
     'shadowsocks': localportsh_bot,
@@ -3519,6 +3522,7 @@ PROXY_LOCAL_PORTS = {
     'vless': localportvless,
     'vless2': localportvless2,
     'trojan': localporttrojan_bot,
+    'hysteria2': localporthysteria2,
 }
 proxy_supports_http = {
     'none': True,
@@ -3527,6 +3531,7 @@ proxy_supports_http = {
     'vless': True,
     'vless2': True,
     'trojan': True,
+    'hysteria2': True,
 }
 status_snapshot_cache = {
     'timestamp': 0,
@@ -4695,12 +4700,14 @@ def _sync_udp_policy_config():
     block_vless = _udp_quic_block_enabled_for_protocol('vless', UDP_QUIC_BLOCK_VLESS_ENABLED)
     block_vless2 = _udp_quic_block_enabled_for_protocol('vless2', UDP_QUIC_BLOCK_VLESS2_ENABLED)
     block_trojan = _udp_quic_block_enabled_for_protocol('trojan', UDP_QUIC_BLOCK_TROJAN_ENABLED)
+    block_hysteria2 = _udp_quic_block_enabled_for_protocol('hysteria2', UDP_QUIC_BLOCK_HYSTERIA2_ENABLED)
     telegram_routes = {
         'shadowsocks': _route_list_contains_telegram('shadowsocks'),
         'vmess': _route_list_contains_telegram('vmess'),
         'vless': _route_list_contains_telegram('vless'),
         'vless2': _route_list_contains_telegram('vless2'),
         'trojan': _route_list_contains_telegram('trojan'),
+        'hysteria2': _route_list_contains_telegram('hysteria2'),
     }
     realtime_call_routes = {
         'shadowsocks': _route_list_contains_realtime_call('shadowsocks'),
@@ -4708,6 +4715,7 @@ def _sync_udp_policy_config():
         'vless': _route_list_contains_realtime_call('vless'),
         'vless2': _route_list_contains_realtime_call('vless2'),
         'trojan': _route_list_contains_realtime_call('trojan'),
+        'hysteria2': _route_list_contains_realtime_call('hysteria2'),
     }
     call_signal_routes_payload = ''.join(
         f'{entry}\n' for entry in _service_catalog().REALTIME_CALL_SIGNAL_ROUTE_ENTRIES
@@ -4719,6 +4727,7 @@ def _sync_udp_policy_config():
         f'BYPASS_UDP_QUIC_BLOCK_VLESS={1 if block_vless else 0}\n'
         f'BYPASS_UDP_QUIC_BLOCK_VLESS2={1 if block_vless2 else 0}\n'
         f'BYPASS_UDP_QUIC_BLOCK_TROJAN={1 if block_trojan else 0}\n'
+        f'BYPASS_UDP_QUIC_BLOCK_HYSTERIA2={1 if block_hysteria2 else 0}\n'
         f'BYPASS_IPV6_FALLBACK_ENABLED={1 if IPV6_BYPASS_FALLBACK_ENABLED else 0}\n'
         f'BYPASS_TELEGRAM_CALL_LEARNING_ENABLED={1 if TELEGRAM_CALL_LEARNING_ENABLED else 0}\n'
         f'BYPASS_TELEGRAM_CALL_CLIENT_TIMEOUT={TELEGRAM_CALL_LEARNING_CLIENT_TIMEOUT_SECONDS}\n'
@@ -4730,16 +4739,19 @@ def _sync_udp_policy_config():
         f'TELEGRAM_CALL_TPROXY_PORT_VLESS={localportvless_tproxy}\n'
         f'TELEGRAM_CALL_TPROXY_PORT_VLESS2={localportvless2_tproxy}\n'
         f'TELEGRAM_CALL_TPROXY_PORT_TROJAN={localporttrojan_tproxy}\n'
+        f'TELEGRAM_CALL_TPROXY_PORT_HYSTERIA2={localporthysteria2_tproxy}\n'
         f'BYPASS_TELEGRAM_CALL_ROUTE_SHADOWSOCKS={1 if realtime_call_routes["shadowsocks"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_ROUTE_VMESS={1 if realtime_call_routes["vmess"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS={1 if realtime_call_routes["vless"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_ROUTE_VLESS2={1 if realtime_call_routes["vless2"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_ROUTE_TROJAN={1 if realtime_call_routes["trojan"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_ROUTE_HYSTERIA2={1 if realtime_call_routes["hysteria2"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_SHADOWSOCKS={1 if telegram_routes["shadowsocks"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VMESS={1 if telegram_routes["vmess"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS={1 if telegram_routes["vless"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_VLESS2={1 if telegram_routes["vless2"] else 0}\n'
         f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_TROJAN={1 if telegram_routes["trojan"] else 0}\n'
+        f'BYPASS_TELEGRAM_CALL_TELEGRAM_ROUTE_HYSTERIA2={1 if telegram_routes["hysteria2"] else 0}\n'
     )
     try:
         directory = os.path.dirname(UDP_POLICY_CONFIG_PATH)
@@ -7010,15 +7022,7 @@ def _save_proxy_mode(proxy_type):
 
 
 def _proxy_mode_label(proxy_type):
-    labels = {
-        'none': 'None',
-        'shadowsocks': 'Shadowsocks',
-        'vmess': 'Vmess',
-        'vless': 'Vless 1',
-        'vless2': 'Vless 2',
-        'trojan': 'Trojan',
-    }
-    return labels.get(proxy_type, proxy_type)
+    return 'None' if proxy_type == 'none' else _protocol_label(proxy_type)
 
 
 def _save_bot_autostart(enabled):
@@ -7182,14 +7186,7 @@ def _apply_socialnet_list(list_name, service_key=SOCIALNET_ALL_KEY, remove=False
 
 
 def _unblock_route_for_key_type(key_type):
-    routes = {
-        'shadowsocks': 'shadowsocks',
-        'vmess': 'vmess',
-        'vless': 'vless',
-        'vless2': 'vless-2',
-        'trojan': 'trojan',
-    }
-    return routes.get(key_type, key_type)
+    return _PROTOCOL_ROUTE_NAMES.get(key_type, key_type)
 
 
 def _key_type_for_unblock_route(list_name):
@@ -7472,13 +7469,6 @@ def _handle_getlist_request(message, service_name, route_name=None, reply_markup
 def _send_key_status_report(message, service_markup):
     text_lines = ['<b>Статус ключей:</b>']
     emoji = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'empty': '➖'}
-    proto_labels = {
-        'shadowsocks': 'Shadowsocks',
-        'vmess': 'Vmess',
-        'vless': 'Vless 1',
-        'vless2': 'Vless 2',
-        'trojan': 'Trojan',
-    }
     try:
         current_keys = _load_current_keys()
         snapshot = _build_status_snapshot(current_keys, force_refresh=True)
@@ -7499,7 +7489,7 @@ def _send_key_status_report(message, service_markup):
     for proto in POOL_PROTOCOL_ORDER:
         st = statuses.get(proto, {}) if isinstance(statuses, dict) else {}
         mark = emoji.get(st.get('tone', 'empty'), '➖')
-        label = proto_labels.get(proto, proto)
+        label = _protocol_label(proto)
         status = st.get('label', 'Нет данных')
         status_text = html.unescape(status).replace('\xa0', ' ')
         has_telegram_icon = '<img' in status or 'Telegram' in status_text
@@ -8477,7 +8467,14 @@ def _load_trojan_key():
 
 
 def _load_current_keys():
-    return _store_load_current_keys(VMESS_KEY_PATH, VLESS_KEY_PATH, VLESS2_KEY_PATH, XRAY_CONFIG_DIR, V2RAY_CONFIG_DIR)
+    return _store_load_current_keys(
+        VMESS_KEY_PATH,
+        VLESS_KEY_PATH,
+        VLESS2_KEY_PATH,
+        XRAY_CONFIG_DIR,
+        V2RAY_CONFIG_DIR,
+        HYSTERIA2_KEY_PATH,
+    )
 
 
 def _ensure_current_keys_in_pools(current_keys=None):
@@ -8534,7 +8531,7 @@ def _file_cache_signature(path):
 
 
 def _web_service_routes_cache_signature():
-    route_names = ('vless', 'vless-2', 'vmess', 'trojan', 'shadowsocks')
+    route_names = tuple(_PROTOCOL_ROUTE_NAMES[proto] for proto in _PROTOCOL_DISPLAY_ORDER)
     return (
         tuple((name, _file_cache_signature(_unblock_list_path(name))) for name in route_names),
         _file_cache_signature(_CUSTOM_CHECKS_PATH),
@@ -9726,6 +9723,22 @@ def _format_proxy_key_summary(key_type, key_value):
                     type=data['type'],
                     password_len=len(data['password']),
                     key_hash=key_hash)
+    if key_type == 'hysteria2':
+        data = _store_parse_hysteria2_key(key_value)
+        return (
+            'Параметры Hysteria2: address={address}, port={port}, sni={sni}, '
+            'insecure={insecure}, alpn={alpn}, auth_len={auth_len}, pin={pin}, '
+            'key_hash=sha256:{key_hash}'
+        ).format(
+            address=data['address'],
+            port=data['port'],
+            sni=data['sni'],
+            insecure=bool(data['insecure']),
+            alpn=','.join(data.get('alpn') or []),
+            auth_len=len(data['auth']),
+            pin='present' if data.get('pinSHA256') else 'absent',
+            key_hash=key_hash,
+        )
     return ''
 
 
@@ -9806,16 +9819,13 @@ def _pool_protocol_markup():
 def _resolve_pool_protocol(text):
     value = (text or '').strip().lower()
     aliases = {
-        'shadowsocks': 'shadowsocks',
         'ss': 'shadowsocks',
-        'vmess': 'vmess',
-        'vless': 'vless',
         'vless 1': 'vless',
         'vless1': 'vless',
         'vless 2': 'vless2',
-        'vless2': 'vless2',
-        'trojan': 'trojan',
+        'hy2': 'hysteria2',
     }
+    aliases.update({proto: proto for proto in POOL_PROTOCOL_ORDER})
     for proto, label in _key_pool_web().POOL_PROTOCOL_LABELS.items():
         aliases[label.lower()] = proto
         aliases[f'📦 {label}'.lower()] = proto
@@ -10786,6 +10796,9 @@ def _clear_installed_key_for_protocol(proto):
         _remove_file_if_exists('/opt/etc/shadowsocks.json')
     elif proto == 'trojan':
         _remove_file_if_exists('/opt/etc/trojan/config.json')
+    elif proto == 'hysteria2':
+        for file_path in _v2ray_key_file_candidates(HYSTERIA2_KEY_PATH):
+            _remove_file_if_exists(file_path)
     else:
         raise ValueError('Неизвестный протокол')
     if _load_proxy_mode() == proto:
@@ -13509,7 +13522,7 @@ def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
 
 
 def _check_local_proxy_endpoint(key_type, port):
-    if key_type in ['shadowsocks', 'vmess', 'vless', 'vless2', 'trojan']:
+    if key_type in PROXY_LOCAL_PORTS:
         if _wait_for_socks5_handshake(port, timeout=3):
             return True, f'Локальный SOCKS-порт 127.0.0.1:{port} отвечает как SOCKS5.'
         if _port_is_listening(port):
@@ -13776,10 +13789,10 @@ def _active_mode_status_snapshot_from_base(
         for key_name, _key_value in _ordered_protocol_items(current_keys)
         if key_name != proxy_mode
     )
+    key_probe_cache = None
+    light_key_probe_cache = None
+    light_youtube_proto = None
     if (not pool_locked and include_route_details) or cached is None or rebuild_pending_locked:
-        key_probe_cache = None
-        light_key_probe_cache = None
-        light_youtube_proto = None
         for key_name, key_value in _ordered_protocol_items(current_keys):
             if key_name == proxy_mode:
                 continue
@@ -15398,15 +15411,9 @@ def _repair_active_reality_endpoint(
 
 
 def _transparent_route_entries_by_protocol():
-    route_names = {
-        'shadowsocks': 'shadowsocks',
-        'vmess': 'vmess',
-        'vless': 'vless',
-        'vless2': 'vless-2',
-        'trojan': 'trojan',
-    }
     entries = {}
-    for protocol, route_name in route_names.items():
+    for protocol in _PROTOCOL_DISPLAY_ORDER:
+        route_name = _PROTOCOL_ROUTE_NAMES[protocol]
         try:
             entries[protocol] = _read_unblock_list_entries(route_name)
         except Exception:
@@ -15432,13 +15439,21 @@ def _transparent_cross_route_domain_overrides():
     )
 
 
-def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
+def _build_v2ray_config(
+    vmess_key=None,
+    vless_key=None,
+    vless2_key=None,
+    shadowsocks_key=None,
+    trojan_key=None,
+    hysteria2_key=None,
+):
     return _builder_build_proxy_core_config(
         vmess_key=vmess_key,
         vless_key=_apply_reality_endpoint_override(vless_key),
         vless2_key=_apply_reality_endpoint_override(vless2_key),
         shadowsocks_key=shadowsocks_key,
         trojan_key=trojan_key,
+        hysteria2_key=hysteria2_key,
         ports={
             'vmess': localportvmess,
             'vmess_transparent': localportvmess_transparent,
@@ -15453,6 +15468,9 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
             'vless_tproxy': localportvless_tproxy,
             'vless2_tproxy': localportvless2_tproxy,
             'trojan_tproxy': localporttrojan_tproxy,
+            'hysteria2': localporthysteria2,
+            'hysteria2_transparent': localporthysteria2_transparent,
+            'hysteria2_tproxy': localporthysteria2_tproxy,
         },
         error_log_path=CORE_PROXY_ERROR_LOG,
         access_log_path='/dev/null',
@@ -15468,8 +15486,22 @@ def _build_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadows
     )
 
 
-def _write_v2ray_config(vmess_key=None, vless_key=None, vless2_key=None, shadowsocks_key=None, trojan_key=None):
-    config_json = _build_v2ray_config(vmess_key, vless_key, vless2_key, shadowsocks_key, trojan_key)
+def _write_v2ray_config(
+    vmess_key=None,
+    vless_key=None,
+    vless2_key=None,
+    shadowsocks_key=None,
+    trojan_key=None,
+    hysteria2_key=None,
+):
+    config_json = _build_v2ray_config(
+        vmess_key,
+        vless_key,
+        vless2_key,
+        shadowsocks_key,
+        trojan_key,
+        hysteria2_key,
+    )
     os.makedirs(CORE_PROXY_CONFIG_DIR, exist_ok=True)
     with core_proxy_config_write_lock:
         _write_json_file(CORE_PROXY_CONFIG_PATH, config_json)
@@ -15482,6 +15514,7 @@ def _write_all_proxy_core_config():
         _read_v2ray_key(VLESS2_KEY_PATH),
         _load_shadowsocks_key(),
         _load_trojan_key(),
+        _read_v2ray_key(HYSTERIA2_KEY_PATH),
     )
 
 
@@ -15500,6 +15533,12 @@ def vless2(key):
 def vmess(key):
     _parse_vmess_key(key)
     _save_v2ray_key(VMESS_KEY_PATH, key)
+    _write_all_proxy_core_config()
+
+
+def hysteria2(key):
+    _store_parse_hysteria2_key(key)
+    _save_v2ray_key(HYSTERIA2_KEY_PATH, key)
     _write_all_proxy_core_config()
 
 def trojan(key):
@@ -15526,6 +15565,7 @@ PROXY_KEY_INSTALLERS = {
     'vless': vless,
     'vless2': vless2,
     'trojan': trojan,
+    'hysteria2': hysteria2,
 }
 
 

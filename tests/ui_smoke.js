@@ -352,9 +352,9 @@ async function assertNoBrokenImages(page, label) {
 
 async function assertDesktopListEditorSizing(page, label) {
   const layout = await page.evaluate(() => {
-    const textarea = document.querySelector('[data-view="lists"].active .list-editor-form textarea');
+    const textarea = document.querySelector('[data-view="lists"].active .list-workspace.active .list-editor-form textarea');
     const workspace = document.querySelector('[data-view="lists"].active .list-workspace.active');
-    const actions = document.querySelector('[data-view="lists"].active .list-editor-form .form-actions');
+    const actions = document.querySelector('[data-view="lists"].active .list-workspace.active .list-editor-form .form-actions');
     const shell = document.querySelector('.app-shell');
     const rect = (node) => node ? node.getBoundingClientRect() : null;
     return {
@@ -682,7 +682,7 @@ async function assertActiveTelegramCardConsistent(page, protocol, label) {
 
 async function assertUnifiedImportLayout(page, label) {
   const layout = await page.evaluate(() => {
-    const panel = document.querySelector('[data-protocol-panel="vless2"].active [data-subview="key"].active');
+    const panel = document.querySelector('[data-protocol-panel].active [data-subview="key"].active');
     const keyForm = panel ? panel.querySelector('.key-editor-form') : null;
     const importForm = panel ? panel.querySelector('.pool-import-form') : null;
     const keyTextarea = keyForm ? keyForm.querySelector('textarea[name="key"]') : null;
@@ -705,6 +705,7 @@ async function assertUnifiedImportLayout(page, label) {
         'vless://fixture-import-' + 'b'.repeat(180) + '@example.test:443?security=reality#fixture-import-vless',
         'vmess://fixture-import-vmess',
         'trojan://fixture-import-trojan',
+        'hy2://fixture-auth@fixture.example:443#fixture-import-hysteria2',
         'ss://fixture-import-shadowsocks',
         'https://sub.example.com/fixture'
       ].join('\n')
@@ -1123,6 +1124,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   if (modeToggleCount) {
     await page.locator('#mode-toggle-button').click();
     await assertVisibleBox(page, '#mode-picker:not(.hidden)', `${name} mode picker`);
+    await assertVisibleBox(page, '#mode-picker:not(.hidden) [data-mode-value="hysteria2"]', `${name} Hysteria2 mode choice`);
     await page.locator('#mode-toggle-button').click();
   }
 
@@ -1170,6 +1172,40 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);
   await assertPoolKeysAreMasked(page, `${name} initial keys`);
   await assertNoBrokenImages(page, `${name} initial keys`);
+  await clickLazyProtocol(page, 'hysteria2', `${name} Hysteria2 menu`);
+  await assertVisibleBox(
+    page,
+    '[data-protocol-panel="hysteria2"].active [data-subview="key"].active',
+    `${name} Hysteria2 key and subscription tab`,
+  );
+  const hysteria2KeyType = await page.locator(
+    '[data-protocol-panel="hysteria2"].active [data-subview="key"].active .key-editor-form input[name="type"]',
+  ).getAttribute('value');
+  if (hysteria2KeyType !== 'hysteria2') {
+    throw new Error(`${name}: Hysteria2 key form is not selected`);
+  }
+  if (modeConfig.expectPool) {
+    await assertUnifiedImportLayout(page, `${name} Hysteria2 unified import`);
+    const hysteria2ImportPlaceholder = await page.locator(
+      '[data-protocol-panel="hysteria2"].active textarea[name="import_payload"]',
+    ).getAttribute('placeholder');
+    if (!String(hysteria2ImportPlaceholder || '').includes('hysteria2://')) {
+      throw new Error(`${name}: Hysteria2 import placeholder is missing`);
+    }
+    await page.locator('[data-protocol-panel="hysteria2"].active [data-subview-target="pool"]').click();
+    await assertVisibleBox(
+      page,
+      '[data-protocol-panel="hysteria2"].active [data-pool-filter]',
+      `${name} Hysteria2 pool`,
+    );
+    await page.locator('[data-protocol-panel="hysteria2"].active [data-subview-target="check"]').click();
+    await assertVisibleBox(
+      page,
+      '[data-protocol-panel="hysteria2"].active .service-route-tools',
+      `${name} Hysteria2 checks and routes`,
+    );
+  }
+  await clickLazyProtocol(page, 'vless', `${name} Vless return after Hysteria2 audit`);
   if (modeConfig.expectPool) {
     let injectedCheck404 = false;
     if (modeConfig.mode === 'advanced' && !isMobile) {
@@ -1375,7 +1411,6 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: expected 3 protocol subtabs, got ${subtabCount}`);
     }
     await assertUnifiedImportLayout(page, `${name} vless2 unified import`);
-
     await page.evaluate(() => localStorage.setItem('router-active-protocol', 'vless2'));
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
@@ -1394,6 +1429,12 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await page.locator('.side-nav .nav-item[data-view-target="lists"]:visible, .mobile-nav .nav-item[data-view-target="lists"]:visible').click();
   await assertVisibleBox(page, '[data-view="lists"].active', `${name} lists view`);
+  const hysteria2ListTab = page.locator('.list-tab[data-list-target="hysteria2.txt"]');
+  if (await hysteria2ListTab.count() !== 1 || !(await hysteria2ListTab.innerText()).includes('Hysteria2')) {
+    throw new Error(`${name}: Hysteria2 list menu is missing`);
+  }
+  await hysteria2ListTab.click();
+  await assertVisibleBox(page, '[data-list-panel="hysteria2.txt"].active', `${name} Hysteria2 list editor`);
   await assertNoBrokenImages(page, `${name} lists`);
   await assertNoHorizontalOverflow(page, `${name} lists`);
   if (!isMobile) {

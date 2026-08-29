@@ -2,6 +2,8 @@ import html
 import time
 from urllib.parse import urlparse
 
+from protocol_catalog import PROTOCOL_DISPLAY_ORDER, PROTOCOL_LABELS, PROTOCOL_ROUTE_NAMES
+
 from probe_cache import custom_probe_result_state, probe_result_state
 from web_status_builder import (
     pool_status_summary as build_pool_status_summary,
@@ -10,14 +12,8 @@ from web_status_builder import (
 from web_form_blocks import render_event_history_html
 
 
-POOL_PROTOCOL_ORDER = ['vless', 'vless2', 'vmess', 'trojan', 'shadowsocks']
-POOL_PROTOCOL_LABELS = {
-    'vless': 'Vless 1',
-    'vless2': 'Vless 2',
-    'vmess': 'Vmess',
-    'trojan': 'Trojan',
-    'shadowsocks': 'Shadowsocks',
-}
+POOL_PROTOCOL_ORDER = list(PROTOCOL_DISPLAY_ORDER)
+POOL_PROTOCOL_LABELS = dict(PROTOCOL_LABELS)
 _ACTIVE_KEYS_TEXT = '\u043f\u0440\u043e\u0442\u043e\u043a\u043e\u043b\u043e\u0432 \u0441 \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u043c \u043a\u043b\u044e\u0447\u043e\u043c'
 _POOL_TOTAL_TEXT = '\u0417\u0430\u043f\u0438\u0441\u0435\u0439 \u0432 \u043f\u0443\u043b\u0430\u0445'
 _CHECKED_TEXT = '\u0421 \u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u044b\u043c \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u043e\u043c'
@@ -26,7 +22,7 @@ def pool_proto_label(proto):
 
 
 def _route_list_label(route):
-    proto = 'vless2' if route == 'vless-2' else route
+    proto = next((proto for proto, name in PROTOCOL_ROUTE_NAMES.items() if name == route), route)
     return pool_proto_label(proto)
 
 
@@ -626,7 +622,7 @@ def web_route_intersections_html(report, protocol_options, csrf_input_html=''):
         </div>{shared_html}'''
     buttons = []
     for item in ((protocol_options or []) if file_count else []):
-        route_value = 'vless-2' if item['value'] == 'vless2' else item['value']
+        route_value = PROTOCOL_ROUTE_NAMES.get(item['value'], item['value'])
         buttons.append(f'''<form method="post" action="/route_intersections_resolve" data-async-action="service-route" data-confirm-title="Перенести пересечения?" data-confirm-message="Все найденные пересекающиеся адреса будут оставлены только в списке {html.escape(item['label'])}.">
             {csrf_input_html}
             <input type="hidden" name="target_route" value="{html.escape(route_value, quote=True)}">

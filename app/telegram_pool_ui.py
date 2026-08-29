@@ -12,6 +12,7 @@ POOL_PROTOCOL_BUTTON_PREFIXES = {
     'vless': 'V1',
     'vless2': 'V2',
     'trojan': 'TR',
+    'hysteria2': 'HY2',
 }
 TELEGRAM_BUTTON_ICON = 'TG'
 YOUTUBE_BUTTON_ICON = 'YT'
@@ -61,9 +62,8 @@ def add_page_controls(types, markup, info):
 def pool_protocol_markup(types, protocol_labels):
     markup = _markup(types)
     buttons = [_button(types, label) for label in protocol_labels]
-    markup.row(buttons[0], buttons[1])
-    markup.row(buttons[2], buttons[3])
-    markup.row(buttons[4])
+    for index in range(0, len(buttons), 2):
+        markup.row(*buttons[index:index + 2])
     markup.row(_button(types, POOL_CHECK_ALL_TEXT), _button(types, POOL_STOP_PROBE_TEXT))
     markup.row(_button(types, _KEY_MENU), _button(types, _BACK))
     return markup

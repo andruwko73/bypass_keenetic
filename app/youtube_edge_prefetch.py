@@ -76,6 +76,7 @@ ROUTE_IPSETS = {
     'vless': ('unblockvless', 'unblockvlessudp'),
     'vless2': ('unblockvless2', 'unblockvless2udp'),
     'trojan': ('unblocktroj', 'unblocktrojudp'),
+    'hysteria2': ('unblockhy2', 'unblockhy2udp'),
 }
 
 ROUTE_PRIORITY_IPSETS = {

@@ -9,7 +9,7 @@ import time
 
 
 _TOKEN_PATH_RE = re.compile(r'/bot[^/\s]+/', re.I)
-_PROXY_KEY_RE = re.compile(r'\b(?:vless|vmess|trojan|ss)://[^\s]+', re.I)
+_PROXY_KEY_RE = re.compile(r'\b(?:vless|vmess|trojan|ss|hysteria2|hy2)://[^\s]+', re.I)
 
 
 def _read_json(path, default):
