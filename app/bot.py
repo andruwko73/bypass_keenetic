@@ -15675,7 +15675,9 @@ def main():
         return
     _daemonize_process()
     _register_signal_handlers()
-    _write_runtime_log('main() entered', mode='w')
+    # Keep the previous failed-start traceback available for the transactional
+    # updater/rollback guard. S99telegram_bot already bounds this log by size.
+    _write_runtime_log('main() entered', mode='a')
     runtime_mode = _load_app_runtime_mode()
     pool_enabled = _app_mode_pool_enabled(runtime_mode)
     telegram_enabled = _app_mode_telegram_enabled(runtime_mode)

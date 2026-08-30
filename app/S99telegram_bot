@@ -192,12 +192,21 @@ case "$1" in
         MALLOC_TRIM_THRESHOLD_="${MALLOC_TRIM_THRESHOLD_:-262144}" \
         PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT" >> "$LOG_FILE" 2>&1 &
         pid=$!
-        sleep 2
-
-        if has_running_process; then
-            echo "Bot started successfully (PID: $pid)"
-            exit 0
-        fi
+        attempts=0
+        stable_samples=0
+        while [ "$attempts" -lt 15 ]; do
+            if has_running_process; then
+                stable_samples=$((stable_samples + 1))
+                if [ "$stable_samples" -ge 2 ]; then
+                    echo "Bot started successfully (PID: $pid)"
+                    exit 0
+                fi
+            else
+                stable_samples=0
+            fi
+            attempts=$((attempts + 1))
+            sleep 1
+        done
 
         echo "Error: Bot failed to start"
         exit 1

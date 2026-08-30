@@ -26,7 +26,7 @@ BACKUP_DIR="$BACKUP_ROOT/$BACKUP_ID"
 ABSENT_PATHS_FILE="$BACKUP_DIR/.absent-paths"
 ROLLBACK_SCRIPT="$BACKUP_DIR/rollback.sh"
 LAST_ROLLBACK_LINK="/opt/root/bypass-last-rollback.sh"
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py protocol_catalog.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py protocol_catalog.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_runtime_guard.sh update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 cleanup() {
     rm -rf "$TMP_DIR"
@@ -419,6 +419,13 @@ set -eu
 BACKUP_DIR='$BACKUP_DIR'
 ABSENT_PATHS_FILE='$ABSENT_PATHS_FILE'
 BOT_RUNTIME_MODULES='$BOT_RUNTIME_MODULES'
+RUNTIME_GUARD_PATH='$BACKUP_DIR/.rollback-tools/update_runtime_guard.sh'
+
+[ -f "\$RUNTIME_GUARD_PATH" ] || {
+    echo "Ошибка отката: отсутствует модуль контроля готовности."
+    exit 1
+}
+. "\$RUNTIME_GUARD_PATH"
 
 restore_path() {
     target_path="\$1"
@@ -464,34 +471,9 @@ install_unblock_ipset_cron_job() {
 }
 
 wait_for_rollback_readiness() {
-    attempts=0
-    stable_samples=0
-    readiness_deadline=\$((\$(date +%s) + 300))
     app_service='/opt/etc/init.d/S99telegram_bot'
     [ ! -x /opt/etc/init.d/S99web_bot ] || app_service='/opt/etc/init.d/S99web_bot'
-    router_ip="\$(ip -4 addr show br0 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
-    [ -n "\$router_ip" ] || router_ip='192.168.1.1'
-    while [ "\$(date +%s)" -lt "\$readiness_deadline" ]; do
-        attempts=\$((attempts + 1))
-        ready=1
-        [ -x "\$app_service" ] && "\$app_service" status >/dev/null 2>&1 || ready=0
-        HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy= \
-            curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
-        if [ -x /opt/etc/init.d/S24xray ]; then
-            /opt/etc/init.d/S24xray status >/dev/null 2>&1 || ready=0
-        elif [ -x /opt/etc/init.d/S24v2ray ]; then
-            /opt/etc/init.d/S24v2ray status >/dev/null 2>&1 || ready=0
-        fi
-        [ ! -x /opt/etc/init.d/S99unblock ] || /opt/etc/init.d/S99unblock status >/dev/null 2>&1 || ready=0
-        if [ "\$ready" -eq 1 ]; then
-            stable_samples=\$((stable_samples + 1))
-            [ "\$stable_samples" -ge 2 ] && return 0
-        else
-            stable_samples=0
-        fi
-        sleep 2
-    done
-    return 1
+    bypass_wait_application_ready "\$app_service" 90
 }
 
 restore_path /opt/etc/bot/main.py
@@ -574,6 +556,11 @@ install_unblock_ipset_cron_job || true
 /opt/etc/init.d/S24xray status 2>/dev/null || true
 /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || true
 /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
+if ! bypass_apply_runtime_network_rules; then
+    echo "Ошибка отката: не удалось восстановить прозрачные ipset/NAT/mangle правила."
+    exit 1
+fi
+bypass_clear_stale_main_lock /opt/etc/bot/main.py || true
 if [ -x /opt/etc/init.d/S99web_bot ]; then
     /opt/etc/init.d/S99telegram_bot stop >/dev/null 2>&1 || true
     /opt/etc/init.d/S99web_bot restart >/dev/null 2>&1 || /opt/etc/init.d/S99web_bot start >/dev/null 2>&1 || true
@@ -582,7 +569,11 @@ else
 fi
 
 if ! wait_for_rollback_readiness; then
-    echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 300 секунд."
+    bypass_capture_bot_start_failure \
+        /opt/etc/bot/error.log \
+        /opt/root/bypass-last-failed-bootstrap-rollback-bot.log \
+        bootstrap-rollback-start >/dev/null 2>&1 || true
+    echo "Ошибка отката: программа, веб-интерфейс, SOCKS или прозрачные правила не достигли готовности."
     exit 1
 fi
 
@@ -683,6 +674,10 @@ backup_path "/opt/etc/init.d/S99unblock"
 backup_path "/opt/etc/ndm/netfilter.d/100-redirect.sh"
 backup_path "/opt/etc/dnsmasq.conf"
 backup_path "/opt/etc/crontab"
+mkdir -p "$BACKUP_DIR/.rollback-tools"
+download_file "$(repo_file_url update_runtime_guard.sh)" "$TMP_DIR/update_runtime_guard.sh" 'bypass_wait_application_ready'
+cp -p "$TMP_DIR/update_runtime_guard.sh" "$BACKUP_DIR/.rollback-tools/update_runtime_guard.sh"
+chmod 600 "$BACKUP_DIR/.rollback-tools/update_runtime_guard.sh"
 write_rollback_script
 
 download_file "$(repo_file_url script.sh)" "$TMP_DIR/script.sh" 'if \[ "$1" = "-install" \]; then'

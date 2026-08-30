@@ -214,6 +214,14 @@ stop_application_for_final_restart() {
 }
 
 recover_runtime_after_failed_update() {
+  runtime_guard_path="$BOT_RUNTIME_DIR/update_runtime_guard.sh"
+  if [ -f "$runtime_guard_path" ]; then
+    . "$runtime_guard_path"
+    bypass_capture_bot_start_failure \
+      "$BOT_RUNTIME_DIR/error.log" \
+      /opt/root/bypass-last-failed-update-bot.log \
+      update-failed >/dev/null 2>&1 || true
+  fi
   if [ "${update_runtime_quiesced:-0}" != "1" ]; then
     early_snapshot_tool="${backup_dir:-}/.rollback-tools/managed_state_snapshot.py"
     if [ -f "${backup_dir:-}/full-state/manifest.json" ] && [ -f "$early_snapshot_tool" ]; then
@@ -265,15 +273,102 @@ sanitize_xray26_compat() {
 }
 
 validate_xray_core_config() {
+  xray_validate_config_path="${1:-/opt/etc/xray/config.json}"
   [ -x /opt/etc/init.d/S24xray ] || return 0
   [ -x /opt/sbin/xray ] || return 0
-  [ -f /opt/etc/xray/config.json ] || return 0
+  [ -f "$xray_validate_config_path" ] || return 0
   log_path="/tmp/bypass-xray-test.log"
-  if /opt/sbin/xray run -test -c /opt/etc/xray/config.json > "$log_path" 2>&1; then
+  if /opt/sbin/xray run -test -c "$xray_validate_config_path" > "$log_path" 2>&1; then
     return 0
   fi
   echo "Проверка конфигурации Xray завершилась ошибкой:"
   tail -n 12 "$log_path" 2>/dev/null || cat "$log_path" 2>/dev/null || true
+  return 1
+}
+
+load_runtime_guard() {
+  guard_path="$1"
+  [ -f "$guard_path" ] || {
+    echo "Ошибка: модуль контроля запуска не найден: $guard_path"
+    return 1
+  }
+  . "$guard_path"
+}
+
+validate_staged_shell_runtime() {
+  shell_checker=''
+  shell_checker_mode='direct'
+  if /bin/sh -n /dev/null >/dev/null 2>&1; then
+    shell_checker=/bin/sh
+  elif [ -x /opt/bin/sh ] && /opt/bin/sh -n /dev/null >/dev/null 2>&1; then
+    shell_checker=/opt/bin/sh
+  elif [ -x /opt/bin/bash ] && /opt/bin/bash -n /dev/null >/dev/null 2>&1; then
+    shell_checker=/opt/bin/bash
+  elif command -v busybox >/dev/null 2>&1 && busybox ash -n /dev/null >/dev/null 2>&1; then
+    shell_checker=busybox
+    shell_checker_mode=ash
+  fi
+
+  if [ -z "$shell_checker" ]; then
+    echo "Предупреждение: установленный shell не поддерживает безопасный режим проверки -n; проверка shell уже выполнена при сборке релиза."
+    return 0
+  fi
+
+  for shell_path in \
+    "$stage_dir/script.sh" \
+    "$stage_dir/100-ipset.sh" \
+    "$stage_dir/100-redirect.sh" \
+    "$stage_dir/unblock_ipset.sh" \
+    "$stage_dir/unblock_dnsmasq.sh" \
+    "$stage_dir/unblock_update.sh" \
+    "$stage_dir/S99unblock" \
+    "$stage_dir/S98telegram_bot_installer" \
+    "$stage_dir/S99telegram_bot" \
+    "$stage_dir/update_runtime_guard.sh"; do
+    if [ "$shell_checker_mode" = "ash" ]; then
+      busybox ash -n "$shell_path" || return 1
+    else
+      "$shell_checker" -n "$shell_path" || return 1
+    fi
+  done
+}
+
+validate_staged_update_runtime() {
+  load_runtime_guard "$stage_dir/update_runtime_guard.sh" || return 1
+  validate_staged_shell_runtime || return 1
+  candidate_config="$stage_dir/.candidate-core-config.json"
+  if ! bypass_validate_staged_python_runtime "$stage_dir" "$BOT_RUNTIME_DIR"; then
+    rm -f "$candidate_config" 2>/dev/null || true
+    return 1
+  fi
+  validate_xray_core_config "$candidate_config"
+  validation_rc=$?
+  rm -f "$candidate_config" 2>/dev/null || true
+  return "$validation_rc"
+}
+
+start_updated_bot_transactionally() {
+  load_runtime_guard "$BOT_RUNTIME_DIR/update_runtime_guard.sh" || return 1
+  attempt=0
+  while [ "$attempt" -lt 2 ]; do
+    attempt=$((attempt + 1))
+    bypass_clear_stale_main_lock "$BOT_MAIN_PATH" || true
+    start_rc=0
+    "$BOT_SERVICE_PATH" start || start_rc=$?
+    readiness_timeout=90
+    [ "$start_rc" -eq 0 ] || readiness_timeout=10
+    if bypass_apply_runtime_network_rules && \
+       bypass_wait_application_ready "$BOT_SERVICE_PATH" "$readiness_timeout"; then
+      return 0
+    fi
+    bypass_capture_bot_start_failure \
+      "$BOT_RUNTIME_DIR/error.log" \
+      /opt/root/bypass-last-failed-update-bot.log \
+      "update-start-attempt-$attempt" >/dev/null 2>&1 || true
+    "$BOT_SERVICE_PATH" stop >/dev/null 2>&1 || true
+    sleep 2
+  done
+  echo "Ошибка: новая версия не достигла готовности: ${BYPASS_RUNTIME_GUARD_REASON:-причина сохранена в закрытом диагностическом файле}"
   return 1
 }
 
@@ -1075,6 +1170,7 @@ write_update_rollback_script() {
 set -eu
 
 BACKUP_DIR="$backup_dir"
+RUNTIME_GUARD_PATH="$backup_dir/.rollback-tools/update_runtime_guard.sh"
 BOT_MAIN_PATH="$BOT_MAIN_PATH"
 BOT_RUNTIME_DIR="$BOT_RUNTIME_DIR"
 BOT_SERVICE_PATH="$BOT_SERVICE_PATH"
@@ -1086,6 +1182,12 @@ UPDATE_MAINTENANCE_READY_PATH="$UPDATE_MAINTENANCE_READY_PATH"
 HYSTERIA2_TRANSPARENT_PORT="$localporthysteria2_transparent"
 HYSTERIA2_TPROXY_PORT="$rollback_hysteria2_tproxy_port"
 ROLLBACK_MODULES="$BOT_RUNTIME_MODULES CHANGELOG.md"
+
+[ -f "\$RUNTIME_GUARD_PATH" ] || {
+  echo "Ошибка отката: отсутствует модуль контроля готовности."
+  exit 1
+}
+. "\$RUNTIME_GUARD_PATH"
 
 write_rollback_update_status() {
   running="\${1:-true}"
@@ -1223,32 +1325,7 @@ install_unblock_ipset_cron_job() {
 }
 
 wait_for_rollback_readiness() {
-  attempts=0
-  stable_samples=0
-  readiness_deadline=\$((\$(date +%s) + 300))
-  router_ip="\$(ip -4 addr show br0 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n1 || true)"
-  [ -n "\$router_ip" ] || router_ip='192.168.1.1'
-  while [ "\$(date +%s)" -lt "\$readiness_deadline" ]; do
-    attempts=\$((attempts + 1))
-    ready=1
-    [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" status >/dev/null 2>&1 || ready=0
-    HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy= \
-      curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/" || ready=0
-    if [ -x /opt/etc/init.d/S24xray ]; then
-      /opt/etc/init.d/S24xray status >/dev/null 2>&1 || ready=0
-    elif [ -x /opt/etc/init.d/S24v2ray ]; then
-      /opt/etc/init.d/S24v2ray status >/dev/null 2>&1 || ready=0
-    fi
-    [ ! -x /opt/etc/init.d/S99unblock ] || /opt/etc/init.d/S99unblock status >/dev/null 2>&1 || ready=0
-    if [ "\$ready" -eq 1 ]; then
-      stable_samples=\$((stable_samples + 1))
-      [ "\$stable_samples" -ge 2 ] && return 0
-    else
-      stable_samples=0
-    fi
-    sleep 2
-  done
-  return 1
+  bypass_wait_application_ready "\$BOT_SERVICE_PATH" 90
 }
 
 full_state_restored=0
@@ -1339,12 +1416,21 @@ fi
 if [ "\$full_state_restored" -eq 1 ] && [ -x /opt/etc/init.d/S99unblock ]; then
   /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1 || true
 fi
+if ! bypass_apply_runtime_network_rules; then
+  echo "Ошибка отката: не удалось восстановить прозрачные ipset/NAT/mangle правила."
+  exit 1
+fi
 rm -f "\$UPDATE_MAINTENANCE_PATH" "\$UPDATE_MAINTENANCE_READY_PATH" 2>/dev/null || true
 write_rollback_update_status true 90 Запуск "Перезапускаем программу предыдущего релиза"
+bypass_clear_stale_main_lock "\$BOT_MAIN_PATH" || true
 [ -x "\$BOT_SERVICE_PATH" ] && "\$BOT_SERVICE_PATH" restart >/dev/null 2>&1 || "\$BOT_SERVICE_PATH" start >/dev/null 2>&1 || true
 
 if ! wait_for_rollback_readiness; then
-  echo "Ошибка отката: веб-интерфейс или службы не достигли стабильной готовности за 300 секунд."
+  bypass_capture_bot_start_failure \
+    "\$BOT_RUNTIME_DIR/error.log" \
+    /opt/root/bypass-last-failed-rollback-bot.log \
+    rollback-start >/dev/null 2>&1 || true
+  echo "Ошибка отката: программа, веб-интерфейс, SOCKS или прозрачные правила не достигли готовности."
   exit 1
 fi
 
@@ -1363,7 +1449,7 @@ activate_runtime_modules() {
   done
 }
 
-BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py protocol_catalog.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
+BOT_RUNTIME_MODULES="app_version.py app_runtime_mode.py auto_failover_runtime.py custom_check_policy.py custom_checks_store.py entware_dns_runtime.py event_history.py failover_candidate_runner.py health_check_runner.py installer_common.py key_pool_store.py key_pool_web.py managed_state_snapshot.py pool_probe_controller.py pool_probe_process_runner.py pool_probe_resume.py pool_probe_runner.py probe_cache.py protocol_catalog.py proxy_apply_runtime.py proxy_config_builder.py proxy_config_recovery.py proxy_key_store.py proxy_protocols.py proxy_status.py repo_update.py route_intersections.py router_health_runtime.py router_metrics.py service_catalog.py service_routes.py subscription_pool_fetch.py subscription_runtime.py subscription_refresh_runtime.py system_command_runtime.py telegram_auth_state.py telegram_call_learning.py telegram_confirm.py telegram_healthcheck.py telegram_info_runtime.py telegram_install_ui.py telegram_jobs.py telegram_key_ui.py telegram_message_flow.py telegram_pool_ui.py transparent_route_policy.py unblock_lists.py update_maintenance_runtime.py update_runtime_guard.sh update_status.py web_background.py web_command_state.py web_commands_runtime.py web_form_blocks.py web_form_template.py web_get_actions.py web_http_common.py web_pool_form_blocks.py web_pool_snapshot_worker.py web_post_actions.py web_route_tools_runtime.py web_service_routes_worker.py web_status_builder.py web_status_runtime.py xray_compat_runtime.py youtube_edge_prefetch.py youtube_edge_prefetch_runner.py youtube_failover_policy.py youtube_failover_runtime.py youtube_failover_transaction.py youtube_healthcheck.py youtube_route_owner.py pool_probe_curl.py version.md README.md"
 
 ensure_runtime_legacy_paths() {
   if [ "$BOT_MAIN_PATH" = "/opt/etc/bot/main.py" ] && [ -f "$BOT_MAIN_PATH" ]; then
@@ -2317,6 +2403,11 @@ PY
     ensure_runtime_legacy_paths
     generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
+    load_runtime_guard "$BOT_RUNTIME_DIR/update_runtime_guard.sh" || exit 1
+    bypass_apply_runtime_network_rules || {
+      echo "Ошибка: прозрачные сетевые правила не достигли готовности после установки."
+      exit 1
+    }
     /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || /opt/etc/init.d/S99unblock start >/dev/null 2>&1 || true
     run_youtube_edge_prefetch_once "Post-install"
     echo "Установлены все изначальные скрипты и скрипты разблокировок, выполнена основная настройка бота"
@@ -2441,6 +2532,10 @@ if [ "$1" = "-update" ]; then
     sed -i "s/40500/${dnsovertlsport}/g" "$stage_dir/dnsmasq.conf"
     sed -i "s/40508/${dnsoverhttpsport}/g" "$stage_dir/dnsmasq.conf"
     configure_dnsmasq_upstreams "$stage_dir/dnsmasq.conf" || exit 1
+    validate_staged_update_runtime || {
+      echo "Ошибка: подготовленный релиз не прошёл проверку запуска; текущая версия продолжает работать."
+      exit 1
+    }
     echo "Файлы успешно скачаны и подготовлены."
     target_release=$(sed -n 's/^\*v\([0-9][0-9A-Za-z._-]*\).*/v\1/p' "$stage_dir/version.md" | head -n1)
     write_cli_update_status update true 40 Подготовлено "Файлы обновления скачаны и проверены" "$target_release"
@@ -2491,7 +2586,11 @@ if [ "$1" = "-update" ]; then
     backup_static_assets
     cp -p "$stage_dir/update_status.py" "$backup_dir/.rollback-tools/update_status.py"
     cp -p "$stage_dir/web_command_state.py" "$backup_dir/.rollback-tools/web_command_state.py"
-    chmod 600 "$backup_dir/.rollback-tools/update_status.py" "$backup_dir/.rollback-tools/web_command_state.py"
+    cp -p "$stage_dir/update_runtime_guard.sh" "$backup_dir/.rollback-tools/update_runtime_guard.sh"
+    chmod 600 \
+      "$backup_dir/.rollback-tools/update_status.py" \
+      "$backup_dir/.rollback-tools/web_command_state.py" \
+      "$backup_dir/.rollback-tools/update_runtime_guard.sh"
     write_update_rollback_script
     cleanup_removed_connection_artifacts
     chmod 700 "$backup_dir" "$backup_dir/rollback.sh" 2>/dev/null || true
@@ -2585,14 +2684,8 @@ if [ "$1" = "-update" ]; then
       start_telegram_installer
       update_completion_message="Обновление завершено; запущен установщик первичной настройки"
     elif [ -x "$BOT_SERVICE_PATH" ]; then
-      "$BOT_SERVICE_PATH" start
-      sleep 3
-      if "$BOT_SERVICE_PATH" status | grep -q "Bot is running"; then
-        echo "Бот запущен. Нажмите сюда: /start"
-      else
-        echo "Ошибка: не удалось подтвердить перезапуск бота через $BOT_SERVICE_PATH"
-        exit 1
-      fi
+      start_updated_bot_transactionally || exit 1
+      echo "Бот, веб-интерфейс, локальный прокси и прозрачные правила подтверждены. Нажмите сюда: /start"
     else
       bot_pid=$(pgrep -f "python3 $BOT_MAIN_PATH")
       for bot in ${bot_pid}; do kill "${bot}" >/dev/null 2>&1 || true; done

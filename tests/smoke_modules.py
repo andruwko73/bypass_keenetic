@@ -5282,6 +5282,7 @@ def test_youtube_route_owner_supports_every_protocol_without_forced_fallback(tmp
 def test_direct_update_script_records_update_status():
     script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     bootstrap = (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+    runtime_guard = (APP_ROOT / 'update_runtime_guard.sh').read_text(encoding='utf-8')
     update_fork = (APP_ROOT / 'update_fork.sh').read_text(encoding='utf-8')
     unblock_update = (APP_ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
     repo_update_source = (APP_ROOT / 'repo_update.py').read_text(encoding='utf-8')
@@ -5299,6 +5300,13 @@ def test_direct_update_script_records_update_status():
     assert 'write_cli_update_status update true 55 "Резервная копия" "Сервисы остановлены; создаём резервную копию"' in script
     assert 'prepare_application_for_update() {' in script
     assert 'stop_application_for_final_restart() {' in script
+    assert 'validate_staged_update_runtime() {' in script
+    assert 'validate_staged_shell_runtime() {' in script
+    assert 'if /bin/sh -n /dev/null >/dev/null 2>&1; then' in script
+    assert 'busybox ash -n /dev/null' in script
+    assert 'установленный shell не поддерживает безопасный режим проверки -n' in script
+    assert '/bin/sh -n "$shell_path"' not in script
+    assert 'start_updated_bot_transactionally() {' in script
     assert 'recover_runtime_after_failed_update() {' in script
     assert 'handle_cli_update_exit() {' in script
     assert 'trap \'handle_cli_update_exit "$?"\' EXIT' in script
@@ -5310,11 +5318,12 @@ def test_direct_update_script_records_update_status():
     assert 'процесс проверки пула ещё работает; обновление отменено до замены файлов' in script
     assert 'proxy_config_recovery.py' in script
     update_log_index = script.index('exec >> "$stage_dir/update.log" 2>&1')
+    staged_preflight_index = script.index('validate_staged_update_runtime || {')
     quiesce_index = script.index('prepare_application_for_update || exit 1', update_log_index)
     recovery_index = script.index('python3 "$stage_dir/proxy_config_recovery.py" || exit 1', quiesce_index)
     services_stop_index = script.index('/opt/etc/init.d/S22shadowsocks stop', recovery_index)
     files_replace_index = script.index('mv "$stage_dir/bot.py" "$BOT_MAIN_PATH"', services_stop_index)
-    assert update_log_index < quiesce_index < recovery_index < services_stop_index < files_replace_index
+    assert staged_preflight_index < update_log_index < quiesce_index < recovery_index < services_stop_index < files_replace_index
     assert '"$BOT_SERVICE_PATH" stop' not in script[quiesce_index:files_replace_index]
     manifest_index = script.index('staged_runtime_modules=$(sed -n')
     manifest_activation_index = script.index('BOT_RUNTIME_MODULES="$staged_runtime_modules"', manifest_index)
@@ -5342,13 +5351,29 @@ def test_direct_update_script_records_update_status():
     assert 'write_rollback_update_status false 100 Готово' in script
     assert 'cp -p "$stage_dir/update_status.py" "$backup_dir/.rollback-tools/update_status.py"' in script
     assert 'cp -p "$stage_dir/web_command_state.py" "$backup_dir/.rollback-tools/web_command_state.py"' in script
+    assert 'cp -p "$stage_dir/update_runtime_guard.sh" "$backup_dir/.rollback-tools/update_runtime_guard.sh"' in script
+    assert 'bypass_apply_runtime_network_rules' in script
+    assert r'bypass_wait_application_ready "\$BOT_SERVICE_PATH" 90' in script
+    assert '/opt/root/bypass-last-failed-update-bot.log' in script
+    assert '/opt/root/bypass-last-failed-rollback-bot.log' in script
+    assert 'update_runtime_guard.sh' in script
+    assert 'update_runtime_guard.sh' in bootstrap
+    assert 'bypass_validate_staged_python_runtime()' in runtime_guard
+    assert 'bypass_runtime_network_ready()' in runtime_guard
+    assert 'bypass_socks_ready()' in runtime_guard
+    assert 'bypass_wait_application_ready()' in runtime_guard
+    assert 'tail -c 262144 "$source_log"' in runtime_guard
+    assert 'os.chmod(candidate_config, 0o600)' in runtime_guard
+    assert 'stage_dir = os.path.abspath(stage_dir)' in runtime_guard
+    assert 'sys.path.insert(0, stage_dir)' in runtime_guard
+    assert 'rm -f "$candidate_config"' in script
     application_start_index = script.index(
         'write_cli_update_status update true 88 Запуск "Запускаем программу и веб-интерфейс"',
         files_replace_index,
     )
     static_install_index = script.index('install_staged_static_assets || exit 1', files_replace_index)
     final_stop_index = script.index('stop_application_for_final_restart || {', application_start_index)
-    bot_restart_index = script.index('"$BOT_SERVICE_PATH" start', final_stop_index)
+    bot_restart_index = script.index('start_updated_bot_transactionally || exit 1', final_stop_index)
     web_available_index = script.index(
         'write_cli_update_status update true 90 Завершение "Веб-интерфейс доступен; завершаем обновление сетевых списков"',
         bot_restart_index,
@@ -5481,6 +5506,112 @@ def test_update_script_bridges_progress_for_previous_release():
     install_body = script.split('if [ "$1" = "-install" ]; then', 1)[1].split('if [ "$1" = "-update" ]; then', 1)[0]
     assert 'write_cli_update_status' in update_body
     assert 'write_cli_update_status' not in install_body
+    assert 'load_runtime_guard "$BOT_RUNTIME_DIR/update_runtime_guard.sh" || exit 1' in install_body
+    assert 'bypass_apply_runtime_network_rules || {' in install_body
+
+
+def test_transactional_update_runtime_guard_covers_start_and_network_recovery(tmp_path):
+    guard = (APP_ROOT / 'update_runtime_guard.sh').read_text(encoding='utf-8')
+    redirect = (APP_ROOT / '100-redirect.sh').read_text(encoding='utf-8')
+    service = (APP_ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
+    bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+
+    assert 'REDIRECT_LOCK_STALE_SECONDS' not in redirect
+    assert 'if [ -z "$lock_pid" ]; then' in redirect
+    assert 'rm -rf "$REDIRECT_LOCK_DIR"' in redirect
+    assert redirect.index('if [ -z "$lock_pid" ]; then') < redirect.index('rm -rf "$REDIRECT_LOCK_DIR"')
+    assert 'while [ "$attempts" -lt 15 ]; do' in service
+    assert 'stable_samples=$((stable_samples + 1))' in service
+    assert "_write_runtime_log('main() entered', mode='a')" in bot_source
+    assert 'table=nat "$redirect_script"' in guard
+    assert 'table=mangle "$redirect_script"' in guard
+    assert 'type=ip6tables table=filter "$redirect_script"' in guard
+    assert 'iptables-save -t nat' in guard
+    assert '--match-set $set_name dst' in guard
+
+    if os.name == 'nt' and os.environ.get('BYPASS_RUN_BASH_TESTS') != '1':
+        return
+    bash_candidates = [shutil.which('bash')]
+    if os.name == 'nt':
+        bash_candidates = [r'C:\Program Files\Git\bin\bash.exe', *bash_candidates]
+    bash = next((path for path in bash_candidates if path and Path(path).is_file()), None)
+    if not bash:
+        return
+
+    def bash_path(path):
+        value = Path(path).resolve().as_posix()
+        if os.name == 'nt' and re.match(r'^[A-Za-z]:/', value):
+            return f'/{value[0].lower()}{value[2:]}'
+        return value
+
+    fake_bin = tmp_path / 'bin'
+    unblock_dir = tmp_path / 'unblock'
+    fake_bin.mkdir()
+    unblock_dir.mkdir()
+    (unblock_dir / 'vless.txt').write_text('youtube.com\n', encoding='utf-8')
+    state_path = tmp_path / 'nat-ready'
+    call_log = tmp_path / 'calls.log'
+
+    (fake_bin / 'iptables-save').write_text(
+        '#!/bin/sh\n'
+        '[ -f "$TEST_NAT_STATE" ] && printf "%s\\n" '
+        "'-A PREROUTING -m set --match-set unblockvless dst -j REDIRECT'\n",
+        encoding='utf-8',
+    )
+    (fake_bin / 'ipset').write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    ipset_boot = tmp_path / '100-ipset.sh'
+    ipset_boot.write_text('#!/bin/sh\nprintf "ipset %s\\n" "$1" >> "$TEST_CALL_LOG"\n', encoding='utf-8')
+    redirect_script = tmp_path / '100-redirect.sh'
+    redirect_script.write_text(
+        '#!/bin/sh\n'
+        'printf "redirect table=%s type=%s\\n" "${table:-}" "${type:-}" >> "$TEST_CALL_LOG"\n'
+        '[ "${table:-}" = "nat" ] && : > "$TEST_NAT_STATE"\n',
+        encoding='utf-8',
+    )
+    for path in (fake_bin / 'iptables-save', fake_bin / 'ipset', ipset_boot, redirect_script):
+        path.chmod(0o755)
+
+    harness = f'''
+set -eu
+. "{bash_path(APP_ROOT / 'update_runtime_guard.sh')}"
+if bypass_runtime_network_ready; then
+    exit 20
+fi
+bypass_apply_runtime_network_rules
+bypass_runtime_network_ready
+'''
+    env = dict(os.environ)
+    env.update({
+        'PATH': f'{bash_path(fake_bin)}:{env.get("PATH", "")}',
+        'BYPASS_UNBLOCK_DIR': bash_path(unblock_dir),
+        'BYPASS_IPSET_BOOT_SCRIPT': bash_path(ipset_boot),
+        'BYPASS_REDIRECT_SCRIPT': bash_path(redirect_script),
+        'TEST_NAT_STATE': bash_path(state_path),
+        'TEST_CALL_LOG': bash_path(call_log),
+    })
+    subprocess.run([bash, '-c', harness], env=env, check=True)
+    calls = call_log.read_text(encoding='utf-8')
+    assert 'ipset start' in calls
+    assert 'redirect table=nat' in calls
+    assert 'redirect table=mangle' in calls
+    assert 'redirect table=filter type=ip6tables' in calls
+
+    stale_lock = tmp_path / 'stale-redirect.lock'
+    stale_lock.mkdir()
+    (stale_lock / 'pid').write_text('999999\n', encoding='utf-8')
+    (stale_lock / 'started_at').write_text(str(int(time.time())), encoding='utf-8')
+    stale_env = dict(env)
+    stale_env.update({
+        'REDIRECT_LOCK_DIR': bash_path(stale_lock),
+        'type': 'ip6tables',
+        'table': 'filter',
+    })
+    subprocess.run(
+        [bash, bash_path(APP_ROOT / '100-redirect.sh')],
+        env=stale_env,
+        check=True,
+    )
+    assert not stale_lock.exists()
 
 
 def test_application_update_maintenance_mode_keeps_web_available():
@@ -5987,7 +6118,8 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'unblockvless2udp' in redirect_script
     assert 'telegram_call_ipset_has_entries()' in redirect_script
     assert 'telegram_call_chains_installed()' in redirect_script
-    assert 'REDIRECT_LOCK_STALE_SECONDS="${REDIRECT_LOCK_STALE_SECONDS:-120}"' in redirect_script
+    assert 'REDIRECT_LOCK_STALE_SECONDS' not in redirect_script
+    assert 'if [ -z "$lock_pid" ]; then' in redirect_script
     assert 'REDIRECT_LOCK_DIR="${REDIRECT_LOCK_DIR:-/tmp/bypass-redirect-${type:-iptables}-${table:-unknown}.lock}"' in redirect_script
     assert 'if telegram_call_ipset_has_entries "$TELEGRAM_CALL_CLIENT_SET" && telegram_call_chains_installed; then' not in redirect_script
     assert 'telegram_call_mangle_tproxy_insert_index()' in redirect_script
@@ -6667,12 +6799,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert r'managed_state_snapshot.py" restore "\$BACKUP_DIR/full-state"' in rollback_source
     assert 'full_state_restored=1' in rollback_source
     assert 'wait_for_rollback_readiness()' in rollback_source
-    assert r'readiness_deadline=\$((\$(date +%s) + 300))' in rollback_source
-    assert r'while [ "\$(date +%s)" -lt "\$readiness_deadline" ]' in rollback_source
-    assert 'стабильной готовности за 300 секунд' in rollback_source
-    assert r'stable_samples=\$((stable_samples + 1))' in rollback_source
-    assert r'HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy=' in rollback_source
-    assert r'curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/"' in rollback_source
+    assert r'bypass_wait_application_ready "\$BOT_SERVICE_PATH" 90' in rollback_source
+    assert 'if ! bypass_apply_runtime_network_rules; then' in rollback_source
+    assert r'bypass_clear_stale_main_lock "\$BOT_MAIN_PATH"' in rollback_source
+    assert 'программа, веб-интерфейс, SOCKS или прозрачные правила не достигли готовности' in rollback_source
     assert 'if ! wait_for_rollback_readiness; then' in rollback_source
     before_restore = rollback_source.split('full_state_restored=0', 1)[0]
     assert 'S24xray ] && /opt/etc/init.d/S24xray stop' not in before_restore
@@ -6684,13 +6814,15 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert rollback_source.find(r'"\$BOT_SERVICE_PATH" restart') < rollback_source.find('if ! wait_for_rollback_readiness; then')
     bootstrap_rollback_source = bootstrap_source.split('write_rollback_script() {', 1)[1].split('\nEOF', 1)[0]
     assert 'wait_for_rollback_readiness()' in bootstrap_rollback_source
-    assert r'readiness_deadline=\$((\$(date +%s) + 300))' in bootstrap_rollback_source
-    assert r'while [ "\$(date +%s)" -lt "\$readiness_deadline" ]' in bootstrap_rollback_source
-    assert 'стабильной готовности за 300 секунд' in bootstrap_rollback_source
-    assert r'HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy=' in bootstrap_rollback_source
-    assert r'curl -sS --max-time 3 -o /dev/null "http://\$router_ip:8080/"' in bootstrap_rollback_source
+    assert r'bypass_wait_application_ready "\$app_service" 90' in bootstrap_rollback_source
+    assert 'if ! bypass_apply_runtime_network_rules; then' in bootstrap_rollback_source
+    assert 'bypass_clear_stale_main_lock /opt/etc/bot/main.py' in bootstrap_rollback_source
+    assert '/opt/root/bypass-last-failed-bootstrap-rollback-bot.log' in bootstrap_rollback_source
     assert bootstrap_rollback_source.find('/opt/etc/init.d/S99unblock restart') < bootstrap_rollback_source.find('/opt/etc/init.d/S99web_bot restart')
     assert bootstrap_rollback_source.find('/opt/etc/init.d/S99telegram_bot restart') < bootstrap_rollback_source.find('if ! wait_for_rollback_readiness; then')
+    guard_download_index = bootstrap_source.index('download_file "$(repo_file_url update_runtime_guard.sh)"')
+    bootstrap_rollback_write_index = bootstrap_source.index('write_rollback_script\n', guard_download_index)
+    assert guard_download_index < bootstrap_rollback_write_index
     assert 'repair_legacy_dnsmasq_backup "$backup_dir/dnsmasq.conf" || exit 1' in script_source
     assert 'backup_runtime_state_files' in script_source
     assert 'managed_state_snapshot.py" backup "$backup_dir/full-state"' in script_source

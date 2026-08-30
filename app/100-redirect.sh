@@ -6,7 +6,6 @@ ip4t() {
 	fi
 }
 
-REDIRECT_LOCK_STALE_SECONDS="${REDIRECT_LOCK_STALE_SECONDS:-120}"
 REDIRECT_LOCK_DIR="${REDIRECT_LOCK_DIR:-/tmp/bypass-redirect-${type:-iptables}-${table:-unknown}.lock}"
 redirect_lock_acquired=0
 if mkdir "$REDIRECT_LOCK_DIR" 2>/dev/null; then
@@ -18,16 +17,22 @@ else
 	if [ -n "$lock_pid" ] && [ -d "/proc/$lock_pid" ]; then
 		exit 0
 	fi
-	lock_started="$(cat "$REDIRECT_LOCK_DIR/started_at" 2>/dev/null || echo 0)"
-	lock_now="$(date +%s 2>/dev/null || echo 0)"
-	if [ "$lock_now" -gt 0 ] 2>/dev/null && [ "$lock_started" -gt 0 ] 2>/dev/null \
-		&& [ $((lock_now - lock_started)) -gt "$REDIRECT_LOCK_STALE_SECONDS" ] 2>/dev/null; then
-		rm -rf "$REDIRECT_LOCK_DIR" 2>/dev/null || true
-		if mkdir "$REDIRECT_LOCK_DIR" 2>/dev/null; then
-			redirect_lock_acquired=1
-			printf '%s\n' "$$" > "$REDIRECT_LOCK_DIR/pid" 2>/dev/null || true
-			date +%s > "$REDIRECT_LOCK_DIR/started_at" 2>/dev/null || true
+	# A killed update can leave a fresh lock whose PID is already gone. Waiting
+	# for the age threshold would make every immediate rollback invocation exit
+	# successfully without restoring NAT/mangle rules. Recheck a PID-less lock
+	# once to avoid racing the tiny mkdir-to-pid window, then reclaim it.
+	if [ -z "$lock_pid" ]; then
+		sleep 1
+		lock_pid="$(cat "$REDIRECT_LOCK_DIR/pid" 2>/dev/null || true)"
+		if [ -n "$lock_pid" ] && [ -d "/proc/$lock_pid" ]; then
+			exit 0
 		fi
+	fi
+	rm -rf "$REDIRECT_LOCK_DIR" 2>/dev/null || true
+	if mkdir "$REDIRECT_LOCK_DIR" 2>/dev/null; then
+		redirect_lock_acquired=1
+		printf '%s\n' "$$" > "$REDIRECT_LOCK_DIR/pid" 2>/dev/null || true
+		date +%s > "$REDIRECT_LOCK_DIR/started_at" 2>/dev/null || true
 	fi
 	[ "$redirect_lock_acquired" = "1" ] || exit 0
 fi
