@@ -4,7 +4,14 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 
 HYSTERIA2_SCHEMES = frozenset(('hysteria2', 'hy2'))
-HYSTERIA2_SUPPORTED_PARAMETERS = frozenset(('sni', 'insecure', 'pinsha256', 'alpn'))
+HYSTERIA2_SUPPORTED_PARAMETERS = frozenset((
+    'sni',
+    'insecure',
+    'pinsha256',
+    'alpn',
+    'obfs',
+    'obfs-password',
+))
 
 
 def parse_vmess_key(key):
@@ -147,8 +154,6 @@ def parse_hysteria2_key(key):
     params = {str(name).casefold(): values for name, values in raw_params.items()}
     unsupported = sorted(set(params) - HYSTERIA2_SUPPORTED_PARAMETERS)
     if unsupported:
-        if 'obfs' in unsupported or 'obfs-password' in unsupported:
-            raise ValueError('Обфускация Hysteria2 пока не поддерживается установленным Xray')
         if 'ech' in unsupported:
             raise ValueError('ECH в Hysteria2 пока не поддерживается установленным Xray')
         raise ValueError('Неподдерживаемые параметры Hysteria2: ' + ', '.join(unsupported))
@@ -168,6 +173,14 @@ def parse_hysteria2_key(key):
         raise ValueError(
             'insecure=1 удалён из Xray 26; Hysteria2-ключ должен содержать pinSHA256'
         )
+    obfs = first('obfs').casefold()
+    obfs_password = first('obfs-password')
+    if obfs and obfs != 'salamander':
+        raise ValueError(f'Неподдерживаемая обфускация Hysteria2: {obfs}')
+    if obfs == 'salamander' and not obfs_password:
+        raise ValueError('Для obfs=salamander требуется obfs-password')
+    if obfs_password and not obfs:
+        raise ValueError('Параметр obfs-password требует параметр obfs')
     alpn = [item.strip() for item in first('alpn', 'h3').split(',') if item.strip()]
     return {
         'address': parsed.hostname,
@@ -177,6 +190,8 @@ def parse_hysteria2_key(key):
         'insecure': insecure,
         'pinSHA256': pin_sha256,
         'alpn': alpn or ['h3'],
+        'obfs': obfs,
+        'obfs_password': obfs_password,
         'fragment': unquote(parsed.fragment or ''),
     }
 
@@ -356,6 +371,24 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
         }
         if data.get('pinSHA256'):
             tls_settings['pinnedPeerCertSha256'] = data['pinSHA256']
+        stream_settings = {
+            # Xray 26.2.6 uses the legacy name. Its config parser accepts
+            # this shape and maps it to the Hysteria transport method.
+            'network': 'hysteria',
+            'security': 'tls',
+            'tlsSettings': tls_settings,
+            'hysteriaSettings': {
+                'version': 2,
+                'auth': data['auth'],
+            },
+        }
+        if data.get('obfs') == 'salamander':
+            stream_settings['finalmask'] = {
+                'udp': [{
+                    'type': 'salamander',
+                    'settings': {'password': data['obfs_password']},
+                }],
+            }
         return {
             'tag': tag,
             'protocol': 'hysteria',
@@ -364,16 +397,6 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
                 'address': data['address'],
                 'port': int(data['port']),
             },
-            'streamSettings': {
-                # Xray 26.2.6 uses the legacy name. Its config parser accepts
-                # this shape and maps it to the Hysteria transport method.
-                'network': 'hysteria',
-                'security': 'tls',
-                'tlsSettings': tls_settings,
-                'hysteriaSettings': {
-                    'version': 2,
-                    'auth': data['auth'],
-                },
-            },
+            'streamSettings': stream_settings,
         }
     raise ValueError(f'Unsupported protocol: {proto}')

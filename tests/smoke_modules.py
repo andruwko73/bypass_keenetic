@@ -576,7 +576,17 @@ def test_xray_compat_runtime_helpers():
             json.dumps({
                 'outbounds': [
                     {'streamSettings': {'security': 'tls', 'tlsSettings': {'allowInsecure': True}}},
-                    {'settings': {'nested': [{'allowInsecure': False, 'value': 1}]}},
+                    {
+                        'streamSettings': {
+                            'finalmask': {
+                                'udp': [{
+                                    'type': 'salamander',
+                                    'settings': {'password': 'fixture-password'},
+                                }],
+                            },
+                        },
+                        'settings': {'nested': [{'allowInsecure': False, 'value': 1}]},
+                    },
                 ],
             }),
             encoding='utf-8',
@@ -584,6 +594,10 @@ def test_xray_compat_runtime_helpers():
         assert xray_compat_runtime.sanitize_xray_config_file(str(config_path))
         sanitized = json.loads(config_path.read_text(encoding='utf-8'))
     assert 'allowInsecure' not in json.dumps(sanitized)
+    assert sanitized['outbounds'][1]['streamSettings']['finalmask']['udp'][0] == {
+        'type': 'salamander',
+        'settings': {'password': 'fixture-password'},
+    }
     with tempfile.TemporaryDirectory() as tmp_dir:
         config_path = Path(tmp_dir) / 'config.json'
         protocols_path = Path(tmp_dir) / 'proxy_protocols.py'
@@ -1414,6 +1428,8 @@ def test_proxy_config_builder():
         'insecure': True,
         'pinSHA256': 'ab' * 32,
         'alpn': ['h3'],
+        'obfs': '',
+        'obfs_password': '',
         'fragment': 'sample',
     }
     pinned_hysteria2_outbound = proxy_protocols.proxy_outbound_from_key(
@@ -1439,10 +1455,30 @@ def test_proxy_config_builder():
         'auth': 'user:password',
     }
     assert hysteria2_outbound['streamSettings']['tlsSettings']['alpn'] == ['h3']
+    assert 'finalmask' not in hysteria2_outbound['streamSettings']
+
+    salamander_key = (
+        'hy2://auth@example.com:443?sni=example.com&obfs=SALAMANDER'
+        '&obfs-password=fixture%3Apassword%2Bvalue#sample'
+    )
+    parsed_salamander = proxy_protocols.parse_hysteria2_key(salamander_key)
+    assert parsed_salamander['obfs'] == 'salamander'
+    assert parsed_salamander['obfs_password'] == 'fixture:password+value'
+    salamander_outbound = proxy_protocols.proxy_outbound_from_key(
+        'hysteria2', salamander_key, 'proxy-hysteria2-salamander'
+    )
+    assert salamander_outbound['streamSettings']['finalmask'] == {
+        'udp': [{
+            'type': 'salamander',
+            'settings': {'password': 'fixture:password+value'},
+        }],
+    }
     for invalid_key, expected in (
         ('hy2://example.com:443#sample', 'отсутствует auth'),
         ('hy2://auth@example.com:443,8443#sample', 'port hopping'),
-        ('hy2://auth@example.com:443?obfs=salamander#sample', 'Обфускация'),
+        ('hy2://auth@example.com:443?obfs=salamander#sample', 'требуется obfs-password'),
+        ('hy2://auth@example.com:443?obfs=unknown&obfs-password=fixture#sample', 'Неподдерживаемая'),
+        ('hy2://auth@example.com:443?obfs-password=fixture#sample', 'требует параметр obfs'),
         ('hy2://auth@example.com:443?ech=fixture#sample', 'ECH'),
         ('hy2://auth@example.com:443?insecure=1#sample', 'должен содержать pinSHA256'),
         ('hy2://auth@example.com:443?pinSHA256=abcd#sample', '64'),
@@ -2051,17 +2087,22 @@ def test_web_service_routes_worker_mutations_defer_runtime_apply_to_parent():
 def test_key_pool_subscription_helpers():
     vless_key = 'vless://uuid@example.com:443?security=tls#sample'
     vmess_key = 'vmess://sample'
+    hysteria2_salamander_key = (
+        'hy2://auth@example.net:443?obfs=salamander&obfs-password=fixture-password#sample'
+    )
     raw = '\n'.join([
         SS_KEY,
         vless_key,
         TROJAN_KEY,
         HYSTERIA2_KEY,
+        hysteria2_salamander_key,
     ])
     classified = key_pool_store.classify_subscription_keys(raw)
     assert classified['shadowsocks'] == [SS_KEY]
     assert classified['vless'] == [vless_key]
     assert classified['trojan'] == [TROJAN_KEY]
-    assert classified['hysteria2'] == [HYSTERIA2_KEY]
+    assert classified['hysteria2'] == [HYSTERIA2_KEY, hysteria2_salamander_key]
+    assert proxy_protocols.parse_hysteria2_key(hysteria2_salamander_key)['obfs'] == 'salamander'
     encoded = base64.b64encode(('hysteria2://auth@example.net:443#sample\n' + HYSTERIA2_KEY).encode()).decode()
     assert key_pool_store.classify_subscription_keys(encoded)['hysteria2'] == [
         'hysteria2://auth@example.net:443#sample',
