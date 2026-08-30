@@ -153,6 +153,57 @@ async function assertNoHorizontalOverflow(page, label) {
   }
 }
 
+async function assertProtocolMenuGrid(page, label, isMobile) {
+  const menus = [
+    {
+      selector: '.protocol-tabs',
+      hysteriaSelector: '[data-protocol-target="hysteria2"]',
+      shadowsocksSelector: '[data-protocol-target="shadowsocks"]',
+    },
+    {
+      selector: '.list-tabs',
+      hysteriaSelector: '[data-list-target="hysteria2.txt"]',
+      shadowsocksSelector: '[data-list-target="shadowsocks.txt"]',
+    },
+  ];
+  for (const menu of menus) {
+    if (!(await page.locator(menu.selector).isVisible())) {
+      continue;
+    }
+    const layout = await page.locator(menu.selector).evaluate((root, selectors) => {
+      const tabs = Array.from(root.querySelectorAll('.seg-tab'));
+      const hysteria = root.querySelector(selectors.hysteriaSelector);
+      const shadowsocks = root.querySelector(selectors.shadowsocksSelector);
+      const rect = (node) => {
+        if (!node) return null;
+        const box = node.getBoundingClientRect();
+        return { left: box.left, top: box.top, width: box.width };
+      };
+      return {
+        count: tabs.length,
+        rowCount: new Set(tabs.map((node) => Math.round(node.getBoundingClientRect().top))).size,
+        container: rect(root),
+        hysteria: rect(hysteria),
+        shadowsocks: rect(shadowsocks),
+      };
+    }, menu);
+    if (layout.count !== 6 || !layout.container || !layout.hysteria || !layout.shadowsocks) {
+      throw new Error(`${label} ${menu.selector}: expected all six protocol tabs, got ${JSON.stringify(layout)}`);
+    }
+    if (isMobile) {
+      const sameRow = Math.abs(layout.hysteria.top - layout.shadowsocks.top) <= 2;
+      const equalWidth = Math.abs(layout.hysteria.width - layout.shadowsocks.width) <= 2;
+      const separateColumns = Math.abs(layout.hysteria.left - layout.shadowsocks.left) > 2;
+      const shadowsocksIsNotFullWidth = layout.shadowsocks.width < layout.container.width * 0.75;
+      if (layout.rowCount !== 3 || !sameRow || !equalWidth || !separateColumns || !shadowsocksIsNotFullWidth) {
+        throw new Error(`${label} ${menu.selector}: Hysteria2 and Shadowsocks must share the third mobile row ${JSON.stringify(layout)}`);
+      }
+    } else if (layout.rowCount !== 1) {
+      throw new Error(`${label} ${menu.selector}: desktop protocol tabs must stay on one row ${JSON.stringify(layout)}`);
+    }
+  }
+}
+
 async function assertPoolServiceColumns(page, label, expectHorizontalScroll) {
   const layout = await page.evaluate(() => {
     const panel = document.querySelector('[data-protocol-panel].active');
@@ -1170,6 +1221,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await page.locator('.side-nav .nav-item[data-view-target="keys"]:visible, .mobile-nav .nav-item[data-view-target="keys"]:visible').click();
   await assertVisibleBox(page, '[data-view="keys"].active', `${name} keys view`);
+  await assertProtocolMenuGrid(page, `${name} keys protocol menu`, isMobile);
   await assertPoolKeysAreMasked(page, `${name} initial keys`);
   await assertNoBrokenImages(page, `${name} initial keys`);
   await clickLazyProtocol(page, 'hysteria2', `${name} Hysteria2 menu`);
@@ -1429,6 +1481,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await page.locator('.side-nav .nav-item[data-view-target="lists"]:visible, .mobile-nav .nav-item[data-view-target="lists"]:visible').click();
   await assertVisibleBox(page, '[data-view="lists"].active', `${name} lists view`);
+  await assertProtocolMenuGrid(page, `${name} lists protocol menu`, isMobile);
   const hysteria2ListTab = page.locator('.list-tab[data-list-target="hysteria2.txt"]');
   if (await hysteria2ListTab.count() !== 1 || !(await hysteria2ListTab.innerText()).includes('Hysteria2')) {
     throw new Error(`${name}: Hysteria2 list menu is missing`);

@@ -484,10 +484,10 @@ def parse_dns_backend(netstat_text):
 def read_dnsmasq_state(run_text=run_command_text):
     text = run_text(['/opt/etc/init.d/S56dnsmasq', 'status'], timeout=2)
     lowered = (text or '').lower()
-    if 'running' in lowered:
-        return 'running'
-    if 'dead' in lowered or 'not running' in lowered or 'stopped' in lowered:
+    if 'dead' in lowered or 'not running' in lowered or 'not alive' in lowered or 'stopped' in lowered:
         return 'dead'
+    if 'running' in lowered or 'alive' in lowered:
+        return 'running'
     if lowered.strip():
         return 'unknown'
     return 'unavailable'

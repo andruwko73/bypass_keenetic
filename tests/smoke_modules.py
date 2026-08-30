@@ -526,6 +526,10 @@ def test_router_health_runtime_dns_parsers():
     assert router_health_runtime.parse_dns_backend('tcp 0 0 0.0.0.0:53 0.0.0.0:* LISTEN 12/dnsmasq') == 'dnsmasq'
     assert router_health_runtime.parse_dns_backend('tcp 0 0 0.0.0.0:53 0.0.0.0:* LISTEN') == 'unknown'
     assert router_health_runtime.parse_dns_backend('') == 'none'
+    assert router_health_runtime.read_dnsmasq_state(lambda *_args, **_kwargs: 'alive') == 'running'
+    assert router_health_runtime.read_dnsmasq_state(lambda *_args, **_kwargs: 'running') == 'running'
+    assert router_health_runtime.read_dnsmasq_state(lambda *_args, **_kwargs: 'not alive') == 'dead'
+    assert router_health_runtime.read_dnsmasq_state(lambda *_args, **_kwargs: 'not running') == 'dead'
     assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nMembers:\n1.1.1.1\n2.2.2.0/24\n') == 2
     assert router_health_runtime.parse_ipset_member_count('Name: unblockvless2\nNumber of entries: 42\nMembers:\n') == 42
     status_counts = {
@@ -548,7 +552,7 @@ def test_router_health_runtime_dns_parsers():
         if command[:2] == ['netstat', '-lnptu']:
             return 'tcp 0 0 0.0.0.0:53 0.0.0.0:* LISTEN 12/dnsmasq\n'
         if command[:2] == ['/opt/etc/init.d/S56dnsmasq', 'status']:
-            return 'running'
+            return 'alive'
         if command[:2] == ['ipset', 'list']:
             raise AssertionError('ipset list should not run when status counts are available')
         return ''
@@ -559,6 +563,7 @@ def test_router_health_runtime_dns_parsers():
         time_provider=lambda: 160,
     )
     assert dns_health['backend'] == 'dnsmasq'
+    assert dns_health['dnsmasq_state'] == 'running'
     assert dns_health['ipset_counts']['unblockvless2'] == 221
     assert dns_health['ipset_refresh_age_seconds'] == 60
     assert not any(command[:2] == ('ipset', 'list') for command in commands)
@@ -16414,6 +16419,10 @@ def test_web_template_styles_helpers():
     assert '--surface:#e7ebf0;' in styles
     assert '.pool-apply-btn{width:100%;min-width:0;padding:4px 0;border:none;background:transparent;box-shadow:none;color:var(--text);font-size:12px;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;justify-content:flex-start;gap:6px;}' in styles
     assert '.pool-apply-btn{display:flex;width:100%;font-size:10.5px;line-height:1.18;text-align:left;justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;gap:4px;}' in styles
+    assert '.protocol-tabs,.list-tabs{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);overflow:hidden;}' in styles
+    assert '.protocol-tabs,.list-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:row;grid-auto-columns:auto;' in styles
+    assert '.protocol-tabs .seg-tab:last-child:nth-child(odd),.list-tabs .seg-tab:last-child:nth-child(odd){grid-column:1 / -1;' in styles
+    assert '.protocol-tabs,.list-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;}' not in styles
     assert '.subtabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));' in styles
     assert '.protocol-subview-key.active{display:grid;gap:8px;align-content:start;overflow:visible;}' in styles
     assert '.protocol-subview-key .key-editor-form,.protocol-subview-key .pool-import-form{padding:8px;border:1px solid rgba(91,124,150,.28);border-radius:9px;background:rgba(255,255,255,.025);min-width:0;}' in styles
