@@ -145,11 +145,27 @@ PY
 
 bypass_wait_application_ready() {
     bot_service="${1:-/opt/etc/init.d/S99telegram_bot}"
-    timeout_seconds="${2:-90}"
+    timeout_seconds="${2:-45}"
+    heartbeat_seconds="${BYPASS_RUNTIME_HEARTBEAT_SECONDS:-10}"
+    case "$heartbeat_seconds" in
+        ''|*[!0-9]*|0) heartbeat_seconds=10 ;;
+    esac
     router_ip="$(bypass_router_ip)"
-    deadline=$(( $(date +%s) + timeout_seconds ))
+    started_at="$(date +%s)"
+    deadline=$(( started_at + timeout_seconds ))
+    next_heartbeat="$started_at"
     stable_samples=0
-    while [ "$(date +%s)" -lt "$deadline" ]; do
+    while :; do
+        now="$(date +%s)"
+        [ "$now" -lt "$deadline" ] || break
+        if [ "$now" -ge "$next_heartbeat" ]; then
+            elapsed=$(( now - started_at ))
+            echo "Ожидаем готовность программы и сети: ${elapsed}/${timeout_seconds} сек."
+            if command -v bypass_runtime_status_heartbeat >/dev/null 2>&1; then
+                bypass_runtime_status_heartbeat "$elapsed" "$timeout_seconds" || true
+            fi
+            next_heartbeat=$(( now + heartbeat_seconds ))
+        fi
         ready=1
         [ -x "$bot_service" ] && "$bot_service" status >/dev/null 2>&1 || ready=0
         HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy= \
@@ -172,11 +188,36 @@ bypass_wait_application_ready() {
     bypass_guard_fail 'программа, веб-интерфейс, локальный SOCKS или прозрачные правила не достигли готовности'
 }
 
+bypass_validate_python_sources() {
+    runtime_dir="$1"
+    python_bin="$(command -v python3 2>/dev/null || true)"
+    [ -n "$python_bin" ] || bypass_guard_fail 'Python 3 не найден'
+    [ -d "$runtime_dir" ] || bypass_guard_fail "каталог Python runtime не найден: $runtime_dir"
+    PYTHONDONTWRITEBYTECODE=1 "$python_bin" - "$runtime_dir" <<'PY'
+import os
+import sys
+
+runtime_dir = os.path.abspath(sys.argv[1])
+paths = sorted(
+    os.path.join(runtime_dir, filename)
+    for filename in os.listdir(runtime_dir)
+    if filename.endswith('.py')
+)
+if not paths:
+    raise SystemExit(f'Python sources not found in {runtime_dir}')
+for path in paths:
+    with open(path, 'rb') as source_file:
+        source = source_file.read()
+    compile(source, path, 'exec')
+PY
+}
+
 bypass_validate_staged_python_runtime() {
     stage_dir="$1"
     live_runtime_dir="${2:-/opt/etc/bot}"
     python_bin="$(command -v python3 2>/dev/null || true)"
     [ -n "$python_bin" ] || bypass_guard_fail 'Python 3 не найден'
+    bypass_validate_python_sources "$stage_dir" || return 1
     candidate_config="$stage_dir/.candidate-core-config.json"
     BYPASS_KEENETIC_COMMAND_WORKER=1 \
     BYPASS_KEENETIC_POOL_PROBE_WORKER=1 \
@@ -186,15 +227,11 @@ bypass_validate_staged_python_runtime() {
 import importlib.util
 import json
 import os
-import py_compile
 import sys
 
 stage_dir, candidate_config = sys.argv[1:3]
 stage_dir = os.path.abspath(stage_dir)
 sys.path.insert(0, stage_dir)
-for filename in os.listdir(stage_dir):
-    if filename.endswith('.py'):
-        py_compile.compile(os.path.join(stage_dir, filename), doraise=True)
 
 spec = importlib.util.spec_from_file_location('bypass_update_candidate', os.path.join(stage_dir, 'bot.py'))
 module = importlib.util.module_from_spec(spec)

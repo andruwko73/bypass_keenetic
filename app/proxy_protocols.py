@@ -163,13 +163,18 @@ def parse_hysteria2_key(key):
         or not all(char in '0123456789abcdef' for char in pin_sha256)
     ):
         raise ValueError('pinSHA256 Hysteria2 должен содержать 64 шестнадцатеричных символа')
+    insecure = _hysteria2_boolean(first('insecure'), 'insecure')
+    if insecure and not pin_sha256:
+        raise ValueError(
+            'insecure=1 удалён из Xray 26; Hysteria2-ключ должен содержать pinSHA256'
+        )
     alpn = [item.strip() for item in first('alpn', 'h3').split(',') if item.strip()]
     return {
         'address': parsed.hostname,
         'port': int(port),
         'auth': auth,
         'sni': first('sni') or parsed.hostname,
-        'insecure': _hysteria2_boolean(first('insecure'), 'insecure'),
+        'insecure': insecure,
         'pinSHA256': pin_sha256,
         'alpn': alpn or ['h3'],
         'fragment': unquote(parsed.fragment or ''),
@@ -349,8 +354,6 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
             'serverName': data['sni'],
             'alpn': list(data['alpn']),
         }
-        if data['insecure']:
-            tls_settings['allowInsecure'] = True
         if data.get('pinSHA256'):
             tls_settings['pinnedPeerCertSha256'] = data['pinSHA256']
         return {

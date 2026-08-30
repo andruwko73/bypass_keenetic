@@ -581,6 +581,26 @@ def test_xray_compat_runtime_helpers():
     assert 'allowInsecure' not in json.dumps(sanitized)
     with tempfile.TemporaryDirectory() as tmp_dir:
         config_path = Path(tmp_dir) / 'config.json'
+        protocols_path = Path(tmp_dir) / 'proxy_protocols.py'
+        config_path.write_text(
+            json.dumps({'tlsSettings': {'allowInsecure': True, 'serverName': 'example.com'}}),
+            encoding='utf-8',
+        )
+        protocols_source = (
+            "def build(data):\n"
+            "    if data['insecure']:\n"
+            "        return {'allowInsecure': True}\n"
+            "    return {}\n"
+        )
+        protocols_path.write_text(protocols_source, encoding='utf-8')
+        changed = xray_compat_runtime.sanitize_xray26_compat_files(
+            config_paths=(str(config_path),),
+        )
+        assert changed == ['config.json']
+        assert protocols_path.read_text(encoding='utf-8') == protocols_source
+        compile(protocols_path.read_bytes(), str(protocols_path), 'exec')
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        config_path = Path(tmp_dir) / 'config.json'
         original_text = json.dumps({'tlsSettings': {'allowInsecure': True}, 'keep': 1})
         config_path.write_text(original_text, encoding='utf-8')
         original_replace = xray_compat_runtime.os.replace
@@ -1391,6 +1411,14 @@ def test_proxy_config_builder():
         'alpn': ['h3'],
         'fragment': 'sample',
     }
+    pinned_hysteria2_outbound = proxy_protocols.proxy_outbound_from_key(
+        'hysteria2',
+        'hy2://auth@example.com:443?insecure=1&pinSHA256=' + ('ab' * 32),
+        'proxy-hysteria2-pinned',
+    )
+    pinned_tls = pinned_hysteria2_outbound['streamSettings']['tlsSettings']
+    assert pinned_tls['pinnedPeerCertSha256'] == 'ab' * 32
+    assert 'allowInsecure' not in pinned_tls
     hysteria2_outbound = proxy_protocols.proxy_outbound_from_key(
         'hysteria2', HYSTERIA2_KEY, 'proxy-hysteria2'
     )
@@ -1411,6 +1439,7 @@ def test_proxy_config_builder():
         ('hy2://auth@example.com:443,8443#sample', 'port hopping'),
         ('hy2://auth@example.com:443?obfs=salamander#sample', 'Обфускация'),
         ('hy2://auth@example.com:443?ech=fixture#sample', 'ECH'),
+        ('hy2://auth@example.com:443?insecure=1#sample', 'должен содержать pinSHA256'),
         ('hy2://auth@example.com:443?pinSHA256=abcd#sample', '64'),
     ):
         with pytest.raises(ValueError, match=expected):
@@ -2660,7 +2689,7 @@ def test_web_rollback_prefers_update_generated_full_script(tmp_path, monkeypatch
     assert 'настройки, ключи, списки маршрутов и DNS' in result
     assert calls[0][0] == ['/bin/sh', str(rollback_script)]
     assert calls[0][1]['stdout'] is subprocess.DEVNULL
-    assert calls[0][1]['timeout'] == 900
+    assert calls[0][1]['timeout'] == 180
 
 
 def test_subscription_nightly_pool_probe_schedule_helpers():
@@ -5353,7 +5382,7 @@ def test_direct_update_script_records_update_status():
     assert 'cp -p "$stage_dir/web_command_state.py" "$backup_dir/.rollback-tools/web_command_state.py"' in script
     assert 'cp -p "$stage_dir/update_runtime_guard.sh" "$backup_dir/.rollback-tools/update_runtime_guard.sh"' in script
     assert 'bypass_apply_runtime_network_rules' in script
-    assert r'bypass_wait_application_ready "\$BOT_SERVICE_PATH" 90' in script
+    assert r'bypass_wait_application_ready "\$BOT_SERVICE_PATH" 60' in script
     assert '/opt/root/bypass-last-failed-update-bot.log' in script
     assert '/opt/root/bypass-last-failed-rollback-bot.log' in script
     assert 'update_runtime_guard.sh' in script
@@ -5512,6 +5541,7 @@ def test_update_script_bridges_progress_for_previous_release():
 
 def test_transactional_update_runtime_guard_covers_start_and_network_recovery(tmp_path):
     guard = (APP_ROOT / 'update_runtime_guard.sh').read_text(encoding='utf-8')
+    update_script = (ROOT / 'script.sh').read_text(encoding='utf-8')
     redirect = (APP_ROOT / '100-redirect.sh').read_text(encoding='utf-8')
     service = (APP_ROOT / 'S99telegram_bot').read_text(encoding='utf-8')
     bot_source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
@@ -5528,6 +5558,18 @@ def test_transactional_update_runtime_guard_covers_start_and_network_recovery(tm
     assert 'type=ip6tables table=filter "$redirect_script"' in guard
     assert 'iptables-save -t nat' in guard
     assert '--match-set $set_name dst' in guard
+    assert 'bypass_validate_python_sources()' in guard
+    assert "compile(source, path, 'exec')" in guard
+    assert 'py_compile' not in guard
+    assert 'BYPASS_RUNTIME_HEARTBEAT_SECONDS:-10' in guard
+    assert 'bypass_runtime_status_heartbeat' in guard
+    sanitize_body = re.search(r'sanitize_xray26_compat\(\) \{(?P<body>.*?)\n\}', update_script, re.S).group('body')
+    assert 'proxy_protocols.py' not in sanitize_body
+    assert "sed -i '/allowInsecure/d' \"$config_path\"" in sanitize_body
+    assert "readiness_timeout=45" in update_script
+    assert 'bypass_wait_application_ready "\\$BOT_SERVICE_PATH" 60' in update_script
+    assert update_script.count('bypass_validate_python_sources "$BOT_RUNTIME_DIR"') >= 2
+    assert 'bypass_validate_python_sources "\\$BOT_RUNTIME_DIR"' in update_script
 
     if os.name == 'nt' and os.environ.get('BYPASS_RUN_BASH_TESTS') != '1':
         return
@@ -5559,6 +5601,10 @@ def test_transactional_update_runtime_guard_covers_start_and_network_recovery(tm
         encoding='utf-8',
     )
     (fake_bin / 'ipset').write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    (fake_bin / 'python3').write_text(
+        f'#!/bin/sh\nexec "{bash_path(sys.executable)}" "$@"\n',
+        encoding='utf-8',
+    )
     ipset_boot = tmp_path / '100-ipset.sh'
     ipset_boot.write_text('#!/bin/sh\nprintf "ipset %s\\n" "$1" >> "$TEST_CALL_LOG"\n', encoding='utf-8')
     redirect_script = tmp_path / '100-redirect.sh'
@@ -5568,7 +5614,7 @@ def test_transactional_update_runtime_guard_covers_start_and_network_recovery(tm
         '[ "${table:-}" = "nat" ] && : > "$TEST_NAT_STATE"\n',
         encoding='utf-8',
     )
-    for path in (fake_bin / 'iptables-save', fake_bin / 'ipset', ipset_boot, redirect_script):
+    for path in (fake_bin / 'iptables-save', fake_bin / 'ipset', fake_bin / 'python3', ipset_boot, redirect_script):
         path.chmod(0o755)
 
     harness = f'''
@@ -5595,6 +5641,20 @@ bypass_runtime_network_ready
     assert 'redirect table=nat' in calls
     assert 'redirect table=mangle' in calls
     assert 'redirect table=filter type=ip6tables' in calls
+
+    runtime_dir = tmp_path / 'python-runtime'
+    runtime_dir.mkdir()
+    (runtime_dir / 'valid.py').write_text('VALUE = 1\n', encoding='utf-8')
+    validation_harness = f'''
+set -eu
+. "{bash_path(APP_ROOT / 'update_runtime_guard.sh')}"
+bypass_validate_python_sources "{bash_path(runtime_dir)}"
+printf '%s\n' 'if True:' > "{bash_path(runtime_dir / 'invalid.py')}"
+if bypass_validate_python_sources "{bash_path(runtime_dir)}"; then
+    exit 21
+fi
+'''
+    subprocess.run([bash, '-c', validation_harness], env=env, check=True)
 
     stale_lock = tmp_path / 'stale-redirect.lock'
     stale_lock.mkdir()
@@ -6799,7 +6859,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert r'managed_state_snapshot.py" restore "\$BACKUP_DIR/full-state"' in rollback_source
     assert 'full_state_restored=1' in rollback_source
     assert 'wait_for_rollback_readiness()' in rollback_source
-    assert r'bypass_wait_application_ready "\$BOT_SERVICE_PATH" 90' in rollback_source
+    assert r'bypass_wait_application_ready "\$BOT_SERVICE_PATH" 60' in rollback_source
     assert 'if ! bypass_apply_runtime_network_rules; then' in rollback_source
     assert r'bypass_clear_stale_main_lock "\$BOT_MAIN_PATH"' in rollback_source
     assert 'программа, веб-интерфейс, SOCKS или прозрачные правила не достигли готовности' in rollback_source
@@ -15112,6 +15172,9 @@ def test_installer_page_is_bot_setup_only():
 
 
 def test_repo_update_helpers():
+    assert repo_update.INACTIVITY_TIMEOUT_SECONDS == 2 * 60
+    assert repo_update.HARD_TIMEOUT_SECONDS == 20 * 60
+    assert repo_update.TERMINATE_GRACE_SECONDS == 3 * 60
     class _Response:
         def __init__(self, url, text='', payload=None, fail=False):
             self.url = url

@@ -269,7 +269,6 @@ sanitize_xray26_compat() {
   for config_path in /opt/etc/xray/config.json /opt/etc/v2ray/config.json; do
     [ -f "$config_path" ] && sed -i '/allowInsecure/d' "$config_path" >/dev/null 2>&1 || true
   done
-  [ -f "$BOT_RUNTIME_DIR/proxy_protocols.py" ] && sed -i '/allowInsecure/d' "$BOT_RUNTIME_DIR/proxy_protocols.py" >/dev/null 2>&1 || true
 }
 
 validate_xray_core_config() {
@@ -347,16 +346,28 @@ validate_staged_update_runtime() {
   return "$validation_rc"
 }
 
+bypass_runtime_status_heartbeat() {
+  [ "${cli_update_status_active:-0}" -eq 1 ] || return 0
+  heartbeat_elapsed="$1"
+  heartbeat_timeout="$2"
+  heartbeat_attempt="${runtime_start_attempt:-1}"
+  write_cli_update_status update true 88 Запуск \
+    "Проверяем готовность новой версии: попытка ${heartbeat_attempt}/2, ${heartbeat_elapsed}/${heartbeat_timeout} сек."
+}
+
 start_updated_bot_transactionally() {
   load_runtime_guard "$BOT_RUNTIME_DIR/update_runtime_guard.sh" || return 1
   attempt=0
   while [ "$attempt" -lt 2 ]; do
     attempt=$((attempt + 1))
+    runtime_start_attempt="$attempt"
+    write_cli_update_status update true 88 Запуск \
+      "Проверяем готовность новой версии: попытка ${attempt}/2"
     bypass_clear_stale_main_lock "$BOT_MAIN_PATH" || true
     start_rc=0
     "$BOT_SERVICE_PATH" start || start_rc=$?
-    readiness_timeout=90
-    [ "$start_rc" -eq 0 ] || readiness_timeout=10
+    readiness_timeout=45
+    [ "$start_rc" -eq 0 ] || readiness_timeout=5
     if bypass_apply_runtime_network_rules && \
        bypass_wait_application_ready "$BOT_SERVICE_PATH" "$readiness_timeout"; then
       return 0
@@ -1325,7 +1336,14 @@ install_unblock_ipset_cron_job() {
 }
 
 wait_for_rollback_readiness() {
-  bypass_wait_application_ready "\$BOT_SERVICE_PATH" 90
+  bypass_wait_application_ready "\$BOT_SERVICE_PATH" 60
+}
+
+bypass_runtime_status_heartbeat() {
+  heartbeat_elapsed="\$1"
+  heartbeat_timeout="\$2"
+  write_rollback_update_status true 90 Запуск \
+    "Проверяем восстановленную версию: \${heartbeat_elapsed}/\${heartbeat_timeout} сек."
 }
 
 full_state_restored=0
@@ -1383,6 +1401,10 @@ for module in \$ROLLBACK_MODULES; do
     restore_file "\$module" "\$BOT_RUNTIME_DIR/\$module"
   fi
 done
+if ! bypass_validate_python_sources "\$BOT_RUNTIME_DIR"; then
+  echo "Ошибка отката: восстановленные Python-файлы не прошли проверку синтаксиса."
+  exit 1
+fi
 if [ -d "\$BACKUP_DIR/static" ]; then
   mkdir -p "\$BOT_RUNTIME_DIR/static"
   rm -rf "\$BOT_RUNTIME_DIR/static"
@@ -2404,6 +2426,10 @@ PY
     generate_udp_quic_policy_file
     /opt/bin/unblock_update.sh
     load_runtime_guard "$BOT_RUNTIME_DIR/update_runtime_guard.sh" || exit 1
+    bypass_validate_python_sources "$BOT_RUNTIME_DIR" || {
+      echo "Ошибка: установленные Python-файлы не прошли проверку синтаксиса."
+      exit 1
+    }
     bypass_apply_runtime_network_rules || {
       echo "Ошибка: прозрачные сетевые правила не достигли готовности после установки."
       exit 1
@@ -2653,6 +2679,11 @@ if [ "$1" = "-update" ]; then
     cleanup_update_artifacts 1
     echo "Обновления скачены, права настроены."
     write_cli_update_status update true 85 Перезапуск "Перезапускаем сервисы"
+    load_runtime_guard "$BOT_RUNTIME_DIR/update_runtime_guard.sh" || exit 1
+    bypass_validate_python_sources "$BOT_RUNTIME_DIR" || {
+      echo "Ошибка: установленная версия не прошла итоговую проверку Python; запускаем автоматический откат."
+      exit 1
+    }
 
     /opt/etc/init.d/S10cron restart > /dev/null 2>&1 || /opt/etc/init.d/S10cron start > /dev/null 2>&1 || true
     /opt/etc/init.d/S22shadowsocks start > /dev/null 2>&1

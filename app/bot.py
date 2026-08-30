@@ -8026,22 +8026,9 @@ def _sanitize_xray26_compat_files():
         except Exception as exc:
             _write_runtime_log(f'Xray fallback migration failed for config: {exc}')
 
-        protocols_path = os.path.join(BOT_DIR, 'proxy_protocols.py')
-        try:
-            if os.path.isfile(protocols_path):
-                with open(protocols_path, 'r', encoding='utf-8', errors='ignore') as file:
-                    text = file.read()
-                if 'allowInsecure' in text:
-                    filtered = ''.join(line for line in text.splitlines(True) if 'allowInsecure' not in line)
-                    with open(protocols_path, 'w', encoding='utf-8') as file:
-                        file.write(filtered)
-                    changed.append('proxy_protocols.py')
-        except Exception as exc:
-            _write_runtime_log(f'Xray fallback migration failed for proxy_protocols.py: {exc}')
         return changed
     return xray_compat_runtime.sanitize_xray26_compat_files(
         config_paths=(CORE_PROXY_CONFIG_PATH,),
-        protocols_path=os.path.join(BOT_DIR, 'proxy_protocols.py'),
         logger=_write_runtime_log,
     )
 

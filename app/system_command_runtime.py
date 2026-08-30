@@ -253,7 +253,7 @@ def _schedule_app_service_restart(delay_seconds=1.5):
     )
 
 
-def _run_authoritative_rollback_script(backup_dir, timeout_seconds=900):
+def _run_authoritative_rollback_script(backup_dir, timeout_seconds=180):
     """Use the update-generated rollback so web and automatic recovery stay identical."""
     rollback_path = os.path.join(backup_dir, 'rollback.sh')
     if not os.path.isfile(rollback_path) or os.path.islink(rollback_path):
@@ -267,7 +267,7 @@ def _run_authoritative_rollback_script(backup_dir, timeout_seconds=900):
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             check=False,
-            timeout=max(30, int(timeout_seconds or 900)),
+            timeout=max(30, int(timeout_seconds or 180)),
         )
     except subprocess.TimeoutExpired:
         return 'Сценарий полного отката не завершился за отведённое время.'
@@ -371,7 +371,6 @@ def rollback_last_update(backup_root='/opt/root'):
             restored.append('bot_config.py legacy')
     restored.extend(xray_compat_runtime.sanitize_xray26_compat_files(
         config_paths=(core_config,),
-        protocols_path=os.path.join(BOT_DIR, 'proxy_protocols.py'),
     ))
     core_ok, core_message = _restart_core_proxy_after_validation(core_service, core_config)
     if not restored:

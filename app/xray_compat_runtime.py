@@ -8,7 +8,6 @@ import tempfile
 
 XRAY_CONFIG_PATH = '/opt/etc/xray/config.json'
 V2RAY_CONFIG_PATH = '/opt/etc/v2ray/config.json'
-PROXY_PROTOCOLS_PATH = '/opt/etc/bot/proxy_protocols.py'
 XRAY_SERVICE_PATH = '/opt/etc/init.d/S24xray'
 V2RAY_SERVICE_PATH = '/opt/etc/init.d/S24v2ray'
 XRAY_REQUIRED_PORTS = (10811, 10812, 10813, 10814)
@@ -77,25 +76,9 @@ def sanitize_xray_config_file(config_path=XRAY_CONFIG_PATH):
     return True
 
 
-def sanitize_proxy_protocols_file(protocols_path=PROXY_PROTOCOLS_PATH):
-    if not os.path.isfile(protocols_path):
-        return False
-    with open(protocols_path, 'r', encoding='utf-8', errors='ignore') as file:
-        text = file.read()
-    if not any(option in text for option in XRAY_REMOVED_OPTIONS):
-        return False
-    filtered = ''.join(
-        line for line in text.splitlines(True)
-        if not any(option in line for option in XRAY_REMOVED_OPTIONS)
-    )
-    _write_text_atomic(protocols_path, filtered)
-    return True
-
-
 def sanitize_xray26_compat_files(
     *,
     config_paths=(XRAY_CONFIG_PATH, V2RAY_CONFIG_PATH),
-    protocols_path=PROXY_PROTOCOLS_PATH,
     logger=None,
 ):
     changed = []
@@ -106,12 +89,6 @@ def sanitize_xray26_compat_files(
         except Exception as exc:
             if logger:
                 logger(f'Xray migration failed for {config_path}: {exc}')
-    try:
-        if sanitize_proxy_protocols_file(protocols_path):
-            changed.append(os.path.basename(protocols_path))
-    except Exception as exc:
-        if logger:
-            logger(f'Xray migration failed for {protocols_path}: {exc}')
     return changed
 
 
