@@ -11350,6 +11350,9 @@ def test_telegram_bot_menu_button_smoke():
             ['Vmess', 'Trojan'],
             ['Hysteria2', 'Shadowsocks'],
         ]
+        web_action_context = bot_module._web_action_context()
+        assert web_action_context['apply_manual_key'] is bot_module._apply_manual_key_safely
+        assert web_action_context['install_verify'] is False
         assert ['Hysteria2', 'Shadowsocks'] in bot_module._telegram_unblock_lists_markup().rows
         assert bot_module._proxy_mode_label('hysteria2') == 'Hysteria2'
         service_labels = [label for row in bot_module._service_list_markup().rows[:-1] for label in row]
@@ -11482,6 +11485,19 @@ def test_telegram_bot_menu_button_smoke():
         assert apply_events[0] == 'pause'
         assert apply_events[1] == ('install', 'vless', manual_uri, False)
         assert ('active', 'vless', manual_uri) in apply_events
+        assert 'resume' in apply_events
+        assert bot_module.pool_apply_lock.locked() is False
+
+        apply_events.clear()
+        bot_module._load_current_keys = lambda: {'hysteria2': HYSTERIA2_KEY}
+        assert bot_module._apply_manual_key_safely(
+            'hysteria2',
+            HYSTERIA2_KEY,
+            source='test_hysteria2_manual',
+        ) == 'installed'
+        assert apply_events[0] == 'pause'
+        assert apply_events[1] == ('install', 'hysteria2', HYSTERIA2_KEY, False)
+        assert ('active', 'hysteria2', HYSTERIA2_KEY) in apply_events
         assert 'resume' in apply_events
         assert bot_module.pool_apply_lock.locked() is False
 
