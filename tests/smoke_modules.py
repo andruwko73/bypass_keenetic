@@ -5424,6 +5424,7 @@ def test_direct_update_script_records_update_status():
     assert 'write_rollback_update_status true 75 Сервисы' in script
     assert 'write_rollback_update_status true 90 Запуск' in script
     assert 'write_rollback_update_status false 100 Готово' in script
+    assert '/opt/etc/init.d/S99unblock tick >/dev/null 2>&1 || true' in script
     assert 'cp -p "$stage_dir/update_status.py" "$backup_dir/.rollback-tools/update_status.py"' in script
     assert 'cp -p "$stage_dir/web_command_state.py" "$backup_dir/.rollback-tools/web_command_state.py"' in script
     assert 'cp -p "$stage_dir/update_runtime_guard.sh" "$backup_dir/.rollback-tools/update_runtime_guard.sh"' in script
@@ -6917,6 +6918,11 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart' in rollback_source
     assert rollback_source.find('restore_file dnsmasq.conf') < rollback_source.find('/opt/etc/init.d/S56dnsmasq restart')
     assert rollback_source.find('/opt/etc/init.d/S24xray restart') < rollback_source.find('/opt/etc/init.d/S99unblock restart')
+    full_snapshot_refresh = rollback_source.split(
+        'if [ "\\$full_state_restored" -eq 1 ]', 1
+    )[1].split('\nfi', 1)[0]
+    assert '/opt/etc/init.d/S99unblock tick' in full_snapshot_refresh
+    assert '/opt/etc/init.d/S99unblock refresh' not in full_snapshot_refresh
     assert rollback_source.find(r'"\$BOT_SERVICE_PATH" restart') < rollback_source.find('if ! wait_for_rollback_readiness; then')
     bootstrap_rollback_source = bootstrap_source.split('write_rollback_script() {', 1)[1].split('\nEOF', 1)[0]
     assert 'wait_for_rollback_readiness()' in bootstrap_rollback_source

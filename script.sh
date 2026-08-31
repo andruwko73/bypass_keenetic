@@ -1436,7 +1436,9 @@ fi
 [ -x /opt/etc/init.d/S22trojan ] && /opt/etc/init.d/S22trojan restart >/dev/null 2>&1 || /opt/etc/init.d/S22trojan start >/dev/null 2>&1 || true
 [ -x /opt/etc/init.d/S99unblock ] && /opt/etc/init.d/S99unblock restart >/dev/null 2>&1 || true
 if [ "\$full_state_restored" -eq 1 ] && [ -x /opt/etc/init.d/S99unblock ]; then
-  /opt/etc/init.d/S99unblock refresh >/dev/null 2>&1 || true
+  # The full snapshot already restored the route sources. Recheck their
+  # signature instead of forcing a costly DNS/ipset rebuild when unchanged.
+  /opt/etc/init.d/S99unblock tick >/dev/null 2>&1 || true
 fi
 if ! bypass_apply_runtime_network_rules; then
   echo "Ошибка отката: не удалось восстановить прозрачные ipset/NAT/mangle правила."
