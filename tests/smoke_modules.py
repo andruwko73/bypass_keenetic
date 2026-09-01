@@ -10358,6 +10358,25 @@ def test_health_check_worker_command_uses_narrow_runner():
     assert 'health_check_runner.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
 
 
+def test_background_status_uses_one_quick_plan_and_keeps_detailed_worker():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    status_block = source.split('def _protocol_status_for_key', 1)[1].split(
+        'def _cached_protocol_status_for_key', 1
+    )[0]
+    assert status_block.count('_run_quick_health_check_plan(tasks)') == 1
+    assert "'profile': 'quick'" in status_block
+    assert "if telegram_probe_required:" in status_block
+    assert "if youtube_probe_required:" in status_block
+    youtube_background_block = source.split('def _check_youtube_protocol_for_background', 1)[1].split(
+        'def _run_failover_candidate_process_worker', 1
+    )[0]
+    assert "('emergency', 'pulse', 'quick', 'confirm')" in youtube_background_block
+    assert '_health_check_in_process(check_payload' in youtube_background_block
+    assert 'and not measure_quality' in youtube_background_block
+    assert 'def _run_auto_failover_cycle' in source
+    assert 'def _run_youtube_failover_cycle' in source
+
+
 def test_failover_candidate_worker_command_uses_narrow_runner():
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     worker_block = source.split('def _failover_candidate_process_worker_code', 1)[1].split(
@@ -10453,6 +10472,188 @@ def test_pool_probe_curl_helpers_do_not_import_requests():
     assert 'pool_probe_curl.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
     assert 'custom_check_policy.py' in (ROOT / 'script.sh').read_text(encoding='utf-8')
     assert 'custom_check_policy.py' in (ROOT / 'bootstrap' / 'install.sh').read_text(encoding='utf-8')
+
+
+def test_pool_probe_curl_parent_timeout_cleans_temp_file_and_maps_errors():
+    calls = []
+
+    def timeout_run(args, **kwargs):
+        calls.append((args, kwargs))
+        raise subprocess.TimeoutExpired(args, kwargs.get('timeout'))
+
+    status_code, final_url, body, error = pool_probe_curl._run_curl(
+        'socks5://127.0.0.1:10811',
+        'https://example.com/private',
+        2,
+        3,
+        command_runner=timeout_run,
+    )
+    assert (status_code, final_url, body, error) == (0, '', b'', 'request timed out')
+    args, kwargs = calls[0]
+    assert kwargs['timeout'] == 7.0
+    assert 'https://example.com/private' not in args
+    output_path = Path(args[args.index('--output') + 1])
+    assert not output_path.exists()
+    assert pool_probe_curl._curl_error(6) == 'host name resolution failed'
+    assert pool_probe_curl._curl_error(7) == 'proxy or remote connection failed'
+    assert pool_probe_curl._curl_error(28) == 'request timed out'
+    assert pool_probe_curl._curl_error(35) == 'TLS handshake failed'
+    assert pool_probe_curl._curl_error(56) == 'connection was interrupted'
+    assert pool_probe_curl._curl_error(97) == 'SOCKS proxy handshake failed'
+
+
+def test_quick_health_check_plan_is_sequential_and_keeps_partial_results():
+    calls = []
+    original_telegram = health_check_runner._quick_check_telegram
+    original_youtube = health_check_runner._quick_check_youtube
+    try:
+        health_check_runner._quick_check_telegram = (
+            lambda task: calls.append(('telegram', task['proxy_url'])) or (True, 'telegram ok')
+        )
+
+        def youtube_failure(task):
+            calls.append(('youtube', task['proxy_url']))
+            raise RuntimeError('youtube failed')
+
+        health_check_runner._quick_check_youtube = youtube_failure
+        results = health_check_runner.run_quick_health_check_plan((
+            {'kind': 'telegram', 'proxy_url': 'socks5://127.0.0.1:10811'},
+            {'kind': 'youtube', 'proxy_url': 'socks5://127.0.0.1:10813'},
+            {'kind': 'unsupported'},
+        ))
+    finally:
+        health_check_runner._quick_check_telegram = original_telegram
+        health_check_runner._quick_check_youtube = original_youtube
+    assert calls == [
+        ('telegram', 'socks5://127.0.0.1:10811'),
+        ('youtube', 'socks5://127.0.0.1:10813'),
+    ]
+    assert results[0]['ok'] is True
+    assert results[0]['error'] == ''
+    assert results[1]['ok'] is False
+    assert results[1]['error'] == 'RuntimeError: youtube failed'
+    assert results[2]['error'] == 'unsupported health check kind: unsupported'
+
+
+def test_quick_health_check_plan_releases_transport_between_services():
+    events = []
+
+    class TrackingLock:
+        def __enter__(self):
+            events.append('enter')
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            events.append('exit')
+
+    original_lock = health_check_runner._QUICK_PLAN_LOCK
+    original_telegram = health_check_runner._quick_check_telegram
+    original_youtube = health_check_runner._quick_check_youtube
+    try:
+        health_check_runner._QUICK_PLAN_LOCK = TrackingLock()
+        health_check_runner._quick_check_telegram = lambda _task: (True, 'telegram ok')
+        health_check_runner._quick_check_youtube = lambda _task: (True, 'youtube ok', {})
+        health_check_runner.run_quick_health_check_plan((
+            {'kind': 'telegram'},
+            {'kind': 'youtube'},
+        ))
+    finally:
+        health_check_runner._QUICK_PLAN_LOCK = original_lock
+        health_check_runner._quick_check_telegram = original_telegram
+        health_check_runner._quick_check_youtube = original_youtube
+    assert events == ['enter', 'exit', 'enter', 'exit']
+
+
+def test_quick_health_check_plans_do_not_overlap():
+    state = {'active': 0, 'maximum': 0}
+    state_lock = threading.Lock()
+    original_telegram = health_check_runner._quick_check_telegram
+
+    def check(_task):
+        with state_lock:
+            state['active'] += 1
+            state['maximum'] = max(state['maximum'], state['active'])
+        time.sleep(0.03)
+        with state_lock:
+            state['active'] -= 1
+        return True, 'ok'
+
+    health_check_runner._quick_check_telegram = check
+    try:
+        threads = [
+            threading.Thread(
+                target=health_check_runner.run_quick_health_check_plan,
+                args=(({'kind': 'telegram'},),),
+            )
+            for _index in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=2)
+            assert not thread.is_alive()
+    finally:
+        health_check_runner._quick_check_telegram = original_telegram
+    assert state['maximum'] == 1
+
+
+def test_quick_health_checks_reuse_curl_helpers_and_return_metrics():
+    original_run_curl = pool_probe_curl._run_curl
+    original_http_check = pool_probe_curl.check_http_through_proxy
+    try:
+        pool_probe_curl._run_curl = lambda *args, **kwargs: (200, '', b'{}', '')
+        telegram_ok, telegram_message = health_check_runner._quick_check_telegram({
+            'authenticated': False,
+            'proxy_url': 'socks5://127.0.0.1:10811',
+            'connect_timeout': 2,
+            'read_timeout': 3,
+        })
+        assert telegram_ok is True
+        assert 'HTTP 200' in telegram_message
+        pool_probe_curl.check_http_through_proxy = (
+            lambda proxy_url, *, url, connect_timeout, read_timeout: (True, 'HTTP 204')
+        )
+        youtube_ok, _youtube_message, metrics = health_check_runner._quick_check_youtube({
+            'proxy_url': 'socks5://127.0.0.1:10813',
+            'profile': 'emergency',
+            'connect_timeout': 2,
+            'read_timeout': 3,
+        })
+        assert youtube_ok is True
+        assert metrics['yt_stability'] == 'stable'
+    finally:
+        pool_probe_curl._run_curl = original_run_curl
+        pool_probe_curl.check_http_through_proxy = original_http_check
+
+
+def test_quick_health_check_plan_does_not_eagerly_import_requests():
+    script = (
+        "import json, sys\n"
+        f"sys.path.insert(0, {str(APP_ROOT)!r})\n"
+        "import health_check_runner\n"
+        "health_check_runner.run_quick_health_check_plan(())\n"
+        "print(json.dumps({'requests': 'requests' in sys.modules}))\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, '-c', script],
+        check=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(completed.stdout)['requests'] is False
+
+
+def test_quick_http_status_semantics_reject_server_errors():
+    original_run_curl = pool_probe_curl._run_curl
+    try:
+        pool_probe_curl._run_curl = lambda *args, **kwargs: (204, '', b'', '')
+        assert pool_probe_curl.check_http_through_proxy('socks5://127.0.0.1:10811', 'https://example.com/')[0] is True
+        pool_probe_curl._run_curl = lambda *args, **kwargs: (429, '', b'', '')
+        assert pool_probe_curl.check_http_through_proxy('socks5://127.0.0.1:10811', 'https://example.com/')[0] is True
+        pool_probe_curl._run_curl = lambda *args, **kwargs: (500, '', b'', '')
+        assert pool_probe_curl.check_http_through_proxy('socks5://127.0.0.1:10811', 'https://example.com/')[0] is False
+    finally:
+        pool_probe_curl._run_curl = original_run_curl
 
 
 def test_pool_probe_worker_streams_hashed_records_without_cache_import():

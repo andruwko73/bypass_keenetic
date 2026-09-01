@@ -5,11 +5,13 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 
 
 _TOKEN_PATH_RE = re.compile(r'/bot[^/\s]+/', re.I)
 _PROXY_KEY_RE = re.compile(r'\b(?:vless|vmess|trojan|ss|hysteria2|hy2)://[^\s]+', re.I)
+_QUICK_PLAN_LOCK = threading.Lock()
 
 
 def _read_json(path, default):
@@ -216,6 +218,70 @@ def _check_youtube(payload):
         }
     finally:
         session.close()
+
+
+def _quick_check_telegram(payload):
+    from pool_probe_curl import check_telegram_api
+
+    return check_telegram_api(
+        bool(payload.get('authenticated')),
+        str(payload.get('proxy_url') or '').strip() or None,
+        connect_timeout=float(payload.get('connect_timeout') or 6),
+        read_timeout=float(payload.get('read_timeout') or 10),
+    )
+
+
+def _quick_check_youtube(payload):
+    from pool_probe_curl import check_http_through_proxy
+    from youtube_healthcheck import check_youtube_through_proxy
+
+    connect_timeout = float(payload.get('connect_timeout') or 6)
+    read_timeout = float(payload.get('read_timeout') or 10)
+    raw_urls = tuple(payload.get('urls') or ())
+    raw_min_ok = payload.get('min_ok')
+    metrics = {}
+    ok, message = check_youtube_through_proxy(
+        check_http_through_proxy,
+        str(payload.get('proxy_url') or '').strip() or None,
+        urls=raw_urls or None,
+        min_ok=int(raw_min_ok) if raw_min_ok is not None else None,
+        profile=str(payload.get('profile') or 'quick'),
+        http_timeouts=(connect_timeout, read_timeout),
+        http_retry_timeouts=(connect_timeout, read_timeout),
+        retry_delay_seconds=float(payload.get('retry_delay_seconds') or 0),
+        retry_unstable=bool(payload.get('retry_unstable', True)),
+        metrics=metrics,
+        sleep=time.sleep,
+    )
+    return bool(ok), _redact(message), {
+        str(key): value
+        for key, value in metrics.items()
+        if isinstance(value, (bool, int, float, str)) or value is None
+    }
+
+
+def run_quick_health_check_plan(tasks):
+    """Run bounded service probes sequentially without importing requests."""
+    results = []
+    for raw_task in tasks or ():
+        task = dict(raw_task or {})
+        kind = str(task.get('kind') or '').strip().lower()
+        result = {'kind': kind, 'ok': False, 'message': '', 'metrics': {}, 'error': ''}
+        try:
+            # Serialize the memory-heavy transport itself, not the whole plan.
+            # This keeps one curl child at a time while allowing another service
+            # contour to proceed between Telegram and YouTube tasks.
+            with _QUICK_PLAN_LOCK:
+                if kind == 'telegram':
+                    result['ok'], result['message'] = _quick_check_telegram(task)
+                elif kind == 'youtube':
+                    result['ok'], result['message'], result['metrics'] = _quick_check_youtube(task)
+                else:
+                    result['error'] = f'unsupported health check kind: {kind}'
+        except Exception as exc:
+            result['error'] = f'{type(exc).__name__}: {_redact(exc)}'
+        results.append(result)
+    return results
 
 
 def run_health_check_worker(input_path, result_path):

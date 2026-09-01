@@ -9096,12 +9096,38 @@ def _protocol_status_for_key(
             checked_age_seconds=_probe_cache().key_probe_age_seconds(cached_probe),
         )
 
+    background_results = None
+    telegram_probe_required = bool('telegram' in required_services or active_telegram_required)
+    youtube_probe_required = bool('youtube' in required_services)
     if background_checks:
-        api_ok, api_message = _check_telegram_api_for_background(
-            proxy_url,
-            connect_timeout=5,
-            read_timeout=8,
-        )
+        tasks = []
+        if telegram_probe_required:
+            tasks.append({
+                'kind': 'telegram',
+                'proxy_url': str(proxy_url or ''),
+                'authenticated': active_telegram_required,
+                'connect_timeout': 5,
+                'read_timeout': 8,
+            })
+        if youtube_probe_required:
+            tasks.append({
+                'kind': 'youtube',
+                'proto': key_name,
+                'profile': 'quick',
+                'measure_quality': False,
+                'retry_unstable': True,
+            })
+        background_results = _run_quick_health_check_plan(tasks)
+        api_payload = background_results.get('telegram') if telegram_probe_required else None
+        if telegram_probe_required and api_payload and not api_payload.get('error'):
+            api_ok = bool(api_payload.get('ok'))
+            api_message = str(api_payload.get('message') or '')
+        elif telegram_probe_required:
+            api_ok = None
+            api_message = 'Telegram API check is unavailable; the last verified result is kept.'
+        else:
+            api_ok = False
+            api_message = ''
     else:
         api_ok, api_message = _check_telegram_api_through_proxy(
             proxy_url,
@@ -9118,7 +9144,19 @@ def _protocol_status_for_key(
     api_transient = (not api_unknown) and (not api_ok) and _is_transient_telegram_api_failure(api_message)
     yt_metrics = {}
     if background_checks:
-        yt_ok, yt_message = _check_youtube_protocol_for_background(key_name, metrics=yt_metrics)
+        yt_payload = background_results.get('youtube') if youtube_probe_required else None
+        if youtube_probe_required and yt_payload and not yt_payload.get('error'):
+            yt_ok = bool(yt_payload.get('ok'))
+            yt_message = str(yt_payload.get('message') or '')
+            worker_metrics = yt_payload.get('metrics') or {}
+            if isinstance(worker_metrics, dict):
+                yt_metrics.update(worker_metrics)
+        elif youtube_probe_required:
+            yt_ok = None
+            yt_message = 'YouTube check is unavailable; the last verified result is kept.'
+        else:
+            yt_ok = False
+            yt_message = ''
     else:
         yt_ok, yt_message = _check_youtube_health_through_proxy(proxy_url, metrics=yt_metrics)
     yt_unknown = yt_ok is None
@@ -11143,7 +11181,7 @@ def _run_health_check_process_worker(input_path, result_path):
     return health_check_runner.run_health_check_worker(input_path, result_path)
 
 
-def _health_check_in_process(payload, timeout_seconds=None):
+def _prepare_health_check_payload(payload):
     payload = dict(payload or {})
     kind = str(payload.get('kind') or '').strip().lower()
     if kind == 'telegram':
@@ -11185,6 +11223,36 @@ def _health_check_in_process(payload, timeout_seconds=None):
             'quality_1600p_min_mbps': POOL_PROBE_QUALITY_1600P_MIN_MBPS,
             'quality_4k_min_mbps': POOL_PROBE_QUALITY_4K_MIN_MBPS,
         })
+    return payload
+
+
+def _run_quick_health_check_plan(tasks):
+    try:
+        import health_check_runner
+
+        prepared = [_prepare_health_check_payload(task) for task in (tasks or ())]
+        results = health_check_runner.run_quick_health_check_plan(prepared)
+    except Exception as exc:
+        _write_runtime_log(f'Quick health check plan failed: {_redact_sensitive_text(exc)}')
+        return {}
+    planned = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        kind = str(result.get('kind') or '').strip().lower()
+        if not kind:
+            continue
+        if result.get('error'):
+            _write_runtime_log(
+                f'Quick {kind} health check failed: '
+                f'{_redact_sensitive_text(result.get("error"))}'
+            )
+        planned[kind] = result
+    return planned
+
+
+def _health_check_in_process(payload, timeout_seconds=None):
+    payload = _prepare_health_check_payload(payload)
     paths = _health_check_process_paths()
     try:
         _write_json_file_private(paths['input_path'], payload)
@@ -11230,13 +11298,13 @@ def _health_check_in_process(payload, timeout_seconds=None):
 
 def _check_telegram_api_for_background(proxy_url=None, connect_timeout=6, read_timeout=10):
     if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE:
-        payload = _health_check_in_process({
+        payload = _run_quick_health_check_plan(({
             'kind': 'telegram',
             'proxy_url': str(proxy_url or ''),
             'connect_timeout': float(connect_timeout or 0),
             'read_timeout': float(read_timeout or 0),
-        })
-        if payload is None:
+        },)).get('telegram')
+        if not payload or payload.get('error'):
             return None, 'Telegram API check is unavailable; the last verified result is kept.'
         return bool(payload.get('ok')), str(payload.get('message') or '')
     return _check_telegram_api_through_proxy(
@@ -11256,15 +11324,21 @@ def _check_youtube_protocol_for_background(
     worker_timeout_seconds=None,
 ):
     if POOL_FAILOVER_PROCESS_WORKER_ENABLED and not HEALTH_CHECK_WORKER_MODE:
-        payload = _health_check_in_process({
+        check_payload = {
             'kind': 'youtube',
             'proto': str(proto or ''),
             'profile': str(profile or 'full'),
             'measure_quality': bool(measure_quality),
             'http_timeouts': list(http_timeouts) if http_timeouts else None,
             'retry_unstable': bool(retry_unstable),
-        }, timeout_seconds=worker_timeout_seconds)
+        }
+        if str(profile or 'full').strip().lower() in ('emergency', 'pulse', 'quick', 'confirm') and not measure_quality:
+            payload = _run_quick_health_check_plan((check_payload,)).get('youtube')
+        else:
+            payload = _health_check_in_process(check_payload, timeout_seconds=worker_timeout_seconds)
         if payload is None:
+            return None, 'YouTube check is unavailable; the last verified result is kept.'
+        if payload.get('error'):
             return None, 'YouTube check is unavailable; the last verified result is kept.'
         worker_metrics = payload.get('metrics') or {}
         if isinstance(metrics, dict) and isinstance(worker_metrics, dict):

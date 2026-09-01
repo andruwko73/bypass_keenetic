@@ -15,6 +15,25 @@ _CODE_MARKER = b'\n__BK_HTTP_CODE__'
 _URL_MARKER = b'\n__BK_URL__'
 
 
+def _curl_error(returncode):
+    code = int(returncode or 0)
+    if code == 28:
+        return 'request timed out'
+    if code in (5, 6):
+        return 'host name resolution failed'
+    if code == 7:
+        return 'proxy or remote connection failed'
+    if code == 35:
+        return 'TLS handshake failed'
+    if code == 52:
+        return 'remote server returned an empty response'
+    if code in (55, 56):
+        return 'connection was interrupted'
+    if code == 97:
+        return 'SOCKS proxy handshake failed'
+    return f'curl exited with code {code or 1}'
+
+
 def _proxy_url(value):
     parsed = urlparse(str(value or '').strip())
     if not parsed.hostname:
@@ -52,8 +71,16 @@ def _run_curl(proxy_url, url, connect_timeout, read_timeout, *, body_limit=4096,
             input=curl_config,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=timeout + 2.0,
             check=False,
         )
+    except subprocess.TimeoutExpired:
+        if body_path:
+            try:
+                os.remove(body_path)
+            except OSError:
+                pass
+        return 0, '', b'', 'request timed out'
     except Exception:
         if body_path:
             try:
@@ -64,11 +91,9 @@ def _run_curl(proxy_url, url, connect_timeout, read_timeout, *, body_limit=4096,
     try:
         output = completed.stdout if isinstance(completed.stdout, bytes) else str(completed.stdout or '').encode('utf-8')
         if _CODE_MARKER not in output:
-            if int(getattr(completed, 'returncode', 1) or 0) == 28:
-                return 0, '', b'', 'request timed out'
-            return 0, '', b'', f'curl exited with code {int(getattr(completed, "returncode", 1) or 1)}'
+            return 0, '', b'', _curl_error(getattr(completed, 'returncode', 1))
         if int(getattr(completed, 'returncode', 1) or 0) != 0:
-            return 0, '', b'', f'curl exited with code {int(getattr(completed, "returncode", 1) or 1)}'
+            return 0, '', b'', _curl_error(getattr(completed, 'returncode', 1))
         try:
             with open(body_path, 'rb') as body_file:
                 body = body_file.read(body_limit)
