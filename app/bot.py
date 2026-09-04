@@ -12180,15 +12180,17 @@ def _schedule_low_memory_pool_probe_resume():
                         return
                 if not rss_ready:
                     note = (
-                        f'Проверка пула приостановлена до освобождения памяти бота: RSS {int(rss_kb or 0)} KB, '
-                        f'порог {MEMORY_WATCHDOG_RSS_SOFT_KB} KB.'
+                        f'Проверка пула приостановлена до освобождения памяти бота: '
+                        f'RSS {int(round(float(rss_kb or 0) / 1024.0))} МБ, '
+                        f'порог {int(round(float(MEMORY_WATCHDOG_RSS_SOFT_KB) / 1024.0))} МБ.'
                     )
                 elif available_kb is None:
                     note = 'Проверка пула приостановлена до освобождения памяти.'
                 else:
                     note = (
-                        f'Проверка пула приостановлена до освобождения памяти: доступно {available_kb} KB, '
-                        f'порог {POOL_PROBE_PAUSE_AVAILABLE_KB} KB.'
+                        f'Проверка пула приостановлена до освобождения памяти: '
+                        f'доступно {int(round(float(available_kb) / 1024.0))} МБ, '
+                        f'порог {int(round(float(POOL_PROBE_PAUSE_AVAILABLE_KB) / 1024.0))} МБ.'
                     )
                 _set_pool_probe_progress(note=note)
                 shutdown_requested.wait(max(3.0, POOL_PROBE_LOW_MEMORY_DELAY_SECONDS))

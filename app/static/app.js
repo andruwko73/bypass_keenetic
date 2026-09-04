@@ -1537,6 +1537,14 @@
                 escapeHtml(lastResultState(state)) + '">' + content + '</span>';
         }
 
+        function workingProtocolStatusService(serviceId, state, src, label, badge) {
+            const normalizedState = lastResultState(state);
+            const content = ['ok', 'warn'].indexOf(normalizedState) !== -1
+                ? serviceStatusIcon(src, label, badge || '', normalizedState)
+                : '';
+            return protocolStatusService(serviceId, normalizedState, content);
+        }
+
         function protocolIcons(status) {
             if (!status || status.tone === 'empty') {
                 return '';
@@ -1545,10 +1553,10 @@
             const apiState = status && status.api_state ? status.api_state : (status && status.api_ok ? 'ok' : '');
             const youtubeState = status && status.yt_state ? status.yt_state : (status && status.yt_ok ? 'ok' : '');
             if (apiState && apiState !== 'unused') {
-                html += protocolStatusService('telegram', apiState, serviceStatusIcon(TELEGRAM_ICON_SRC, 'Telegram', '', apiState));
+                html += workingProtocolStatusService('telegram', apiState, TELEGRAM_ICON_SRC, 'Telegram');
             }
             if (youtubeState && youtubeState !== 'unused') {
-                html += protocolStatusService('youtube', youtubeState, serviceStatusIcon(YOUTUBE_ICON_SRC, 'YouTube', '', youtubeState));
+                html += workingProtocolStatusService('youtube', youtubeState, YOUTUBE_ICON_SRC, 'YouTube');
             }
             if (status && status.custom) {
                 customChecks.forEach(function(check) {
@@ -1590,7 +1598,11 @@
                 const fallbackState = lastResultState(item.dataset.statusState || 'unknown');
                 const currentUnknown = ['unknown', 'pending'].indexOf(currentState) !== -1;
                 const fallbackKnown = ['unknown', 'pending'].indexOf(fallbackState) === -1;
-                const preferPoolResult = serviceId !== 'telegram' && fallbackKnown;
+                const currentWorks = ['ok', 'warn'].indexOf(currentState) !== -1;
+                const fallbackWorks = ['ok', 'warn'].indexOf(fallbackState) !== -1;
+                const preferPoolResult = fallbackKnown && (
+                    serviceId !== 'telegram' || (!currentWorks && fallbackWorks)
+                );
                 if (!current || preferPoolResult || (currentUnknown && fallbackKnown)) {
                     primary.set(serviceId, item);
                 }
@@ -1626,16 +1638,6 @@
             return '';
         }
 
-        function protocolPanelCoreServices(proto) {
-            const panel = document.querySelector('[data-protocol-panel="' + proto + '"]');
-            if (panel && panel.dataset.coreServicesLoaded === '1') {
-                return String(panel.dataset.coreServices || '').split(',').map(function(item) {
-                    return item.trim();
-                }).filter(Boolean);
-            }
-            return null;
-        }
-
         function protocolStatusFromActivePoolRow(proto) {
             if (!ENABLE_KEY_POOL) {
                 return null;
@@ -1645,16 +1647,11 @@
             if (!row) {
                 return null;
             }
-            const coreServices = protocolPanelCoreServices(proto);
-            if (!coreServices) {
-                return null;
-            }
             const tgState = lastResultState(row.dataset.tgState || 'unknown');
-            const tgSource = String(row.dataset.tgSource || 'pool_probe');
             const ytState = lastResultState(row.dataset.ytState || 'unknown');
             const knownStates = ['ok', 'warn', 'fail'];
-            const includeTelegram = coreServices.indexOf('telegram') !== -1 || tgSource === 'live_polling';
-            const includeYoutube = coreServices.indexOf('youtube') !== -1 || knownStates.indexOf(ytState) !== -1;
+            const includeTelegram = knownStates.indexOf(tgState) !== -1;
+            const includeYoutube = knownStates.indexOf(ytState) !== -1;
             const customChecksById = new Map(customChecks.map(function(check) { return [check.id, check]; }));
             const customResults = Array.from(row.querySelectorAll('[data-pool-custom]')).map(function(cell) {
                 const stateNode = cell.querySelector('[data-service-state]');
@@ -1685,11 +1682,11 @@
                 parts.push('YouTube: ' + ytText);
                 states.push(ytState === 'ok' || ytState === 'warn');
             }
-            if (includeTelegram && ['ok', 'warn', 'fail', 'unknown'].indexOf(tgState) !== -1) {
-                icons += protocolStatusService('telegram', tgState, serviceStatusIcon(TELEGRAM_ICON_SRC, 'Telegram', '', tgState));
+            if (includeTelegram) {
+                icons += workingProtocolStatusService('telegram', tgState, TELEGRAM_ICON_SRC, 'Telegram');
             }
-            if (includeYoutube && ['ok', 'warn', 'fail', 'unknown'].indexOf(ytState) !== -1) {
-                icons += protocolStatusService('youtube', ytState, serviceStatusIcon(YOUTUBE_ICON_SRC, 'YouTube', '', ytState));
+            if (includeYoutube) {
+                icons += workingProtocolStatusService('youtube', ytState, YOUTUBE_ICON_SRC, 'YouTube');
             }
             customResults.forEach(function(item) {
                 const check = item.check;
@@ -1775,17 +1772,6 @@
                 return '<span class="service-probe-mark service-probe-fail">✕</span>';
             }
             return '<span class="service-probe-mark service-probe-unknown">?</span>';
-        }
-
-        function poolCoreServices(pool) {
-            if (pool && Array.isArray(pool.core_services)) {
-                return pool.core_services.map(function(service) {
-                    return String(service || '').trim();
-                }).filter(function(service) {
-                    return service === 'telegram' || service === 'youtube';
-                });
-            }
-            return ['telegram', 'youtube'];
         }
 
         function poolTableCoreServices() {
@@ -2365,14 +2351,8 @@
                 return;
             }
             const rows = pool.rows || [];
-            const statusCoreServices = poolCoreServices(pool);
             const coreServices = poolTableCoreServices();
             const checks = poolCustomChecks(pool);
-            const panel = body.closest('[data-protocol-panel]');
-            if (panel) {
-                panel.dataset.coreServices = statusCoreServices.join(',');
-                panel.dataset.coreServicesLoaded = '1';
-            }
             syncPoolCustomCheckColumns(proto, checks);
             updatePoolSortOptions(proto);
             const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');
@@ -2429,14 +2409,8 @@
                 return;
             }
             const rows = pool.rows || [];
-            const statusCoreServices = poolCoreServices(pool);
             const coreServices = poolTableCoreServices();
             const checks = poolCustomChecks(pool);
-            const panel = body.closest('[data-protocol-panel]');
-            if (panel) {
-                panel.dataset.coreServices = statusCoreServices.join(',');
-                panel.dataset.coreServicesLoaded = '1';
-            }
             syncPoolCustomCheckColumns(proto, checks);
             updatePoolSortOptions(proto);
             const tab = document.querySelector('[data-protocol-target="' + proto + '"] .tab-count');

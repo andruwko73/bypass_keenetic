@@ -519,6 +519,9 @@ def run_pool_probe_worker(
             return available_kb
         return None
 
+    def memory_mib(value_kb):
+        return max(0, int(round(float(value_kb or 0) / 1024.0)))
+
     def cpu_above_limit():
         if not cpu_busy_percent or not max_cpu_percent or max_cpu_percent <= 0:
             return None
@@ -573,8 +576,8 @@ def run_pool_probe_worker(
                 if memory_cleanup and rss_cleanup_attempts < max_cleanup_attempts:
                     rss_cleanup_attempts += 1
                     note = (
-                        f'Проверка пула освобождает память: RSS бота {int(high_rss_kb)} KB, '
-                        f'порог {int(max_process_rss_kb)} KB.'
+                        f'Проверка пула освобождает память: RSS бота {memory_mib(high_rss_kb)} МБ, '
+                        f'порог {memory_mib(max_process_rss_kb)} МБ.'
                     )
                     log(note)
                     update_note(note)
@@ -585,8 +588,8 @@ def run_pool_probe_worker(
                         continue
                     continue
                 note = (
-                    f'Проверка пула приостановлена: RSS бота {int(high_rss_kb)} KB, '
-                    f'порог {int(max_process_rss_kb)} KB.'
+                    f'Проверка пула приостановлена: RSS бота {memory_mib(high_rss_kb)} МБ, '
+                    f'порог {memory_mib(max_process_rss_kb)} МБ.'
                 )
                 log(note)
                 update_note(note)
@@ -634,8 +637,8 @@ def run_pool_probe_worker(
                 if low_memory_since is None:
                     low_memory_since = time_provider()
                 note = (
-                    f'Проверка ждёт свободную память: доступно {low_memory_kb} KB, '
-                    f'порог {min_available_kb} KB.'
+                    f'Проверка ждёт доступную память: сейчас {memory_mib(low_memory_kb)} МБ, '
+                    f'порог {memory_mib(min_available_kb)} МБ.'
                 )
                 update_note(note)
                 if max_low_memory_wait_seconds and time_provider() - low_memory_since >= max_low_memory_wait_seconds:
@@ -647,11 +650,9 @@ def run_pool_probe_worker(
             low_memory_since = None
             slow_memory_kb = memory_below_limit(slow_available_kb)
             if slow_memory_kb is not None:
-                slow_memory_mib = max(0, int(round(float(slow_memory_kb) / 1024.0)))
-                slow_threshold_mib = max(0, int(round(float(slow_available_kb) / 1024.0)))
                 update_note(
-                    f'Экономный режим: свободно {slow_memory_mib} МБ, '
-                    f'порог замедления {slow_threshold_mib} МБ.'
+                    f'Экономный режим: доступной памяти меньше порога замедления '
+                    f'{memory_mib(slow_available_kb)} МБ.'
                 )
                 sleep(max(0.0, float(slow_memory_delay_seconds or 0.0)))
             else:
@@ -687,8 +688,8 @@ def run_pool_probe_worker(
                 low_memory_kb = memory_below_limit(min_available_kb)
                 if low_memory_kb is not None:
                     note = (
-                        f'Проверка остановила временный xray: доступно {low_memory_kb} KB, '
-                        f'порог {min_available_kb} KB.'
+                        f'Проверка остановила временный Xray: доступно {memory_mib(low_memory_kb)} МБ, '
+                        f'порог {memory_mib(min_available_kb)} МБ.'
                     )
                     log(note)
                     update_note(note)

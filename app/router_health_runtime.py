@@ -688,30 +688,28 @@ def build_router_health_payload(
     linux_cache_kb = max(0, buffers_kb + cached_kb + reclaimable_kb)
     available_kb = int(meminfo.get('MemAvailable') or (free_kb + linux_cache_kb) or free_kb or 0)
     router_total_kb = int(ndmc_system.get('memory_total') or ndmc_system.get('memtotal') or total_kb or 0)
-    ndmc_free_kb = int(ndmc_system.get('memfree') or 0)
-    ndmc_buffers_kb = int(ndmc_system.get('membuffers') or 0)
-    ndmc_cache_kb = int(ndmc_system.get('memcache') or 0)
-    ndmc_cache_total_kb = max(0, ndmc_buffers_kb + ndmc_cache_kb)
-    if router_total_kb and int(ndmc_system.get('memory_used') or 0):
-        used_kb = int(ndmc_system.get('memory_used') or 0)
-        display_cache_kb = ndmc_cache_total_kb
-        memory_source = 'keenetic'
-    elif router_total_kb and ndmc_free_kb:
-        used_kb = max(0, router_total_kb - ndmc_free_kb - ndmc_cache_total_kb)
-        display_cache_kb = ndmc_cache_total_kb
-        memory_source = 'keenetic'
-    else:
-        router_total_kb = total_kb
-        used_kb = max(0, total_kb - free_kb - buffers_kb - cached_kb) if total_kb else 0
-        display_cache_kb = max(0, buffers_kb + cached_kb)
-        memory_source = 'proc'
-    # The main line stays compact and uses the Linux-visible memory total.
-    # Keenetic remains the source of the separate used-memory figure below.
     display_total_kb = total_kb or router_total_kb
+    if display_total_kb and available_kb:
+        available_kb = min(display_total_kb, max(0, available_kb))
+        used_kb = max(0, display_total_kb - available_kb)
+        display_cache_kb = linux_cache_kb
+        memory_source = 'proc_available'
+    else:
+        ndmc_cache_kb = max(
+            0,
+            int(ndmc_system.get('membuffers') or 0) + int(ndmc_system.get('memcache') or 0),
+        )
+        router_used_kb = int(ndmc_system.get('memory_used') or 0)
+        if not router_used_kb and display_total_kb:
+            router_used_kb = max(0, display_total_kb - int(ndmc_system.get('memfree') or 0) - ndmc_cache_kb)
+        used_kb = min(display_total_kb, max(0, router_used_kb)) if display_total_kb else 0
+        available_kb = max(0, display_total_kb - used_kb) if display_total_kb else 0
+        display_cache_kb = ndmc_cache_kb
+        memory_source = 'keenetic'
     used_mb = int(round(used_kb / 1024.0)) if used_kb else 0
     total_mb = int(round(display_total_kb / 1024.0)) if display_total_kb else 0
     available_mb = int(round(available_kb / 1024.0)) if available_kb else 0
-    used_percent = int(round((used_kb / float(router_total_kb)) * 100)) if router_total_kb else 0
+    used_percent = int(round((used_kb / float(display_total_kb)) * 100)) if display_total_kb else 0
     bot_rss_mb = int(round(bot_rss_kb / 1024.0)) if bot_rss_kb else 0
     probe_progress = probe_progress or {}
     probe_running = bool(probe_progress.get('running')) and int(probe_progress.get('total') or 0) > 0
@@ -725,15 +723,13 @@ def build_router_health_payload(
     flash_total_mb = int(round(flash_total_kb / 1024.0)) if flash_total_kb else 0
     flash_used_mb = int(round(flash_used_kb / 1024.0)) if flash_used_kb else 0
     if total_mb and available_kb:
-        memory_text = f'Память: доступно {available_mb} MB из {total_mb} MB'
+        memory_text = (
+            f'Память: доступно {available_mb} МБ, '
+            f'занято {used_mb} МБ из {total_mb} МБ ({used_percent}%)'
+        )
     else:
         memory_text = 'Память: данные недоступны'
     router_details = []
-    if used_mb:
-        used_label = 'Занято по данным роутера' if memory_source == 'keenetic' else 'Занято'
-        router_details.append(f'{used_label}: {used_mb} MB ({used_percent}%)')
-    else:
-        router_details.append('Занято: -')
     sampled_cpu_percent = _normalize_cpu_percent(cpu_percent)
     keenetic_cpu_percent = _normalize_cpu_percent(ndmc_system.get('cpuload'))
     normalized_cpu_percent = keenetic_cpu_percent if keenetic_cpu_percent is not None else sampled_cpu_percent
@@ -764,27 +760,27 @@ def build_router_health_payload(
     program_rss_mb = int(round(program_rss_kb / 1024.0)) if program_rss_kb else 0
     program_parts = []
     if bot_rss_mb:
-        program_parts.append(f'бот {bot_rss_mb} MB')
+        program_parts.append(f'бот {bot_rss_mb} МБ')
     if xray_rss_mb:
-        program_parts.append(f'Xray {xray_rss_mb} MB')
+        program_parts.append(f'Xray {xray_rss_mb} МБ')
     if pool_worker_rss_mb:
-        program_parts.append(f'проверка пула {pool_worker_rss_mb} MB')
+        program_parts.append(f'проверка пула {pool_worker_rss_mb} МБ')
     if temporary_xray_rss_mb:
-        program_parts.append(f'временный Xray {temporary_xray_rss_mb} MB')
+        program_parts.append(f'временный Xray {temporary_xray_rss_mb} МБ')
     if youtube_prefetch_rss_mb:
-        program_parts.append(f'YouTube prefetch {youtube_prefetch_rss_mb} MB')
+        program_parts.append(f'YouTube prefetch {youtube_prefetch_rss_mb} МБ')
     if background_worker_rss_mb:
-        program_parts.append(f'фоновые задачи {background_worker_rss_mb} MB')
+        program_parts.append(f'фоновые задачи {background_worker_rss_mb} МБ')
     program_details = []
     if program_rss_mb:
         if len(program_parts) > 1:
-            program_details.append(f'Программа использует {program_rss_mb} MB RAM: {", ".join(program_parts)}')
+            program_details.append(f'Программа использует {program_rss_mb} МБ ОЗУ: {", ".join(program_parts)}')
         elif bot_rss_mb:
-            program_details.append(f'Программа использует {bot_rss_mb} MB RAM')
+            program_details.append(f'Программа использует {bot_rss_mb} МБ ОЗУ')
         else:
-            program_details.append(f'Программа использует {program_rss_mb} MB RAM')
+            program_details.append(f'Программа использует {program_rss_mb} МБ ОЗУ')
     if flash_total_mb:
-        program_details.append(f'Flash-носитель: занято {flash_used_mb} из {flash_total_mb} MB ({flash_used_percent}%)')
+        program_details.append(f'Flash-носитель: занято {flash_used_mb} из {flash_total_mb} МБ ({flash_used_percent}%)')
     dns_note = dns_health_note(dns_health)
     core_proxy_health = core_proxy_health or {}
     if xray_compat_runtime is not None and core_proxy_health:

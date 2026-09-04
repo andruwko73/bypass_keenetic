@@ -301,7 +301,7 @@ def test_app_runtime_mode_setter_callbacks():
     assert ('bad-restart', None) not in calls
 
 
-def test_router_health_runtime_payload_uses_keenetic_memory():
+def test_router_health_runtime_payload_uses_consistent_available_memory():
     payload = router_health_runtime.build_router_health_payload(
         meminfo={
             'MemTotal': 485 * 1024,
@@ -328,19 +328,20 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
         temp_xray_count=0,
         flash_storage={'path': '/opt', 'total_kb': 2048 * 1024, 'used_kb': 768 * 1024, 'free_kb': 1280 * 1024},
     )
-    assert payload['memory_source'] == 'keenetic'
-    assert payload['memory_text'] == 'Память: доступно 201 MB из 485 MB'
-    assert payload['used_percent'] == 55
+    assert payload['memory_source'] == 'proc_available'
+    assert payload['memory_text'] == 'Память: доступно 201 МБ, занято 284 МБ из 485 МБ (59%)'
+    assert payload['available_kb'] + payload['used_kb'] == payload['total_kb']
+    assert payload['used_percent'] == 59
     assert payload['total_kb'] == 485 * 1024
     assert payload['router_total_kb'] == 512 * 1024
     assert payload['cpu_percent'] == 2
     assert payload['cpu_source'] == 'keenetic'
     assert payload['cpu_sample_percent'] == 0.84
     assert payload['pool_probe_text'] == 'Не запущена'
-    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 281 MB (55%); Нагрузка CPU: 2%'
+    assert payload['note'].splitlines()[0] == 'Нагрузка CPU: 2%'
     assert 'Нагрузка CPU: 2%' in payload['note']
-    assert 'Программа использует 52 MB RAM' in payload['note']
-    assert 'Flash-носитель: занято 768 из 2048 MB (38%)' in payload['note']
+    assert 'Программа использует 52 МБ ОЗУ' in payload['note']
+    assert 'Flash-носитель: занято 768 из 2048 МБ (38%)' in payload['note']
     assert '\n\n' not in payload['note']
     assert 'Свободно:' not in payload['note']
     assert 'Доступно для приложений:' not in payload['note']
@@ -350,6 +351,18 @@ def test_router_health_runtime_payload_uses_keenetic_memory():
     assert payload['flash_used_percent'] == 38
     assert not payload['note'].endswith('.')
     assert 'Проверка пула' not in payload['note']
+
+    fallback = router_health_runtime.build_router_health_payload(
+        meminfo={},
+        ndmc_system={'memory_total': 512 * 1024, 'memory_used': 281 * 1024},
+        load_text='',
+        bot_rss_kb=0,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+    )
+    assert fallback['memory_source'] == 'keenetic'
+    assert fallback['available_kb'] + fallback['used_kb'] == fallback['total_kb']
+    assert fallback['memory_text'] == 'Память: доступно 231 МБ, занято 281 МБ из 512 МБ (55%)'
 
 
 def test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample():
@@ -363,7 +376,9 @@ def test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample
         temp_xray_count=0,
         flash_storage={'path': '/opt', 'total_kb': 29527 * 1024, 'used_kb': 862 * 1024, 'free_kb': 28665 * 1024},
     )
-    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 291 MB (57%); Нагрузка CPU: -'
+    assert payload['memory_text'] == 'Память: доступно 256 МБ, занято 256 МБ из 512 МБ (50%)'
+    assert payload['available_kb'] + payload['used_kb'] == payload['total_kb']
+    assert payload['note'].splitlines()[0] == 'Нагрузка CPU: -'
     assert 'Средняя нагрузка' not in payload['note']
     assert '\n\n' not in payload['note']
 
@@ -385,15 +400,16 @@ def test_router_health_runtime_payload_marks_proc_fallbacks_explicitly():
         probe_progress={'running': False, 'total': 0},
         temp_xray_count=0,
     )
-    assert payload['memory_source'] == 'proc'
-    assert payload['memory_text'] == 'Память: доступно 224 MB из 512 MB'
+    assert payload['memory_source'] == 'proc_available'
+    assert payload['memory_text'] == 'Память: доступно 224 МБ, занято 288 МБ из 512 МБ (56%)'
     assert payload['available_kb'] == 224 * 1024
+    assert payload['available_kb'] + payload['used_kb'] == payload['total_kb']
     assert payload['linux_cache_kb'] == 112 * 1024
-    assert payload['router_cache_kb'] == 96 * 1024
+    assert payload['router_cache_kb'] == 112 * 1024
     assert payload['cpu_percent'] == 0.84
     assert payload['cpu_source'] == 'proc'
     assert payload['cpu_sample_percent'] == 0.84
-    assert payload['note'].splitlines()[0] == 'Занято: 288 MB (56%); Нагрузка CPU: 0.84%'
+    assert payload['note'].splitlines()[0] == 'Нагрузка CPU: 0.84%'
 
 
 def test_router_health_runtime_program_rss_includes_related_processes():
@@ -418,9 +434,11 @@ def test_router_health_runtime_program_rss_includes_related_processes():
     assert payload['temporary_xray_rss_kb'] == 18 * 1024
     assert payload['youtube_prefetch_rss_kb'] == 14 * 1024
     assert payload['background_worker_rss_kb'] == 7 * 1024
-    assert payload['note'].splitlines()[0] == 'Занято по данным роутера: 318 MB (62%); Нагрузка CPU: 53.28%'
-    assert 'Программа использует 164 MB RAM: бот 63 MB, Xray 24 MB, проверка пула 38 MB, временный Xray 18 MB, YouTube prefetch 14 MB, фоновые задачи 7 MB' in payload['note']
-    assert 'Flash-носитель: занято 774 из 29527 MB (3%)' in payload['note']
+    assert payload['memory_text'] == 'Память: доступно 160 МБ, занято 352 МБ из 512 МБ (69%)'
+    assert payload['available_kb'] + payload['used_kb'] == payload['total_kb']
+    assert payload['note'].splitlines()[0] == 'Нагрузка CPU: 53.28%'
+    assert 'Программа использует 164 МБ ОЗУ: бот 63 МБ, Xray 24 МБ, проверка пула 38 МБ, временный Xray 18 МБ, YouTube prefetch 14 МБ, фоновые задачи 7 МБ' in payload['note']
+    assert 'Flash-носитель: занято 774 из 29527 МБ (3%)' in payload['note']
     assert '\n\n' not in payload['note']
 
 
@@ -964,7 +982,7 @@ def test_router_health_runtime_slow_snapshot_caches_heavy_checks():
     assert first['cpu_percent'] is None
     assert second['cpu_percent'] == 20.0
     assert first['flash_used_percent'] == 25
-    assert 'Flash-носитель: занято 256 из 1024 MB (25%)' in first['note']
+    assert 'Flash-носитель: занято 256 из 1024 МБ (25%)' in first['note']
     assert first['program_rss_kb'] == 64000 + (20 + 40 + 14 + 7) * 1024
     assert second['program_rss_kb'] == 64000 + (20 + 40 + 14 + 7) * 1024
     assert third['temporary_xray_count'] == 2
@@ -1128,14 +1146,14 @@ def test_router_health_runtime_compact_snapshot_refreshes_ndmc_by_ttl_and_force(
             setattr(router_health_runtime, name, value)
 
     assert calls['ndmc'] == 3
-    assert first['memory_text'] == 'Память: доступно 224 MB из 512 MB'
+    assert first['memory_text'] == 'Память: доступно 224 МБ, занято 288 МБ из 512 МБ (56%)'
     assert first['cpu_percent'] == 1
     assert first['cpu_source'] == 'keenetic'
     assert cached['used_kb'] == first['used_kb']
     assert cached['cpu_percent'] == 1
-    assert refreshed['used_kb'] == 300 * 1024
+    assert refreshed['used_kb'] == first['used_kb']
     assert refreshed['cpu_percent'] == 5
-    assert forced['used_kb'] == 320 * 1024
+    assert forced['used_kb'] == first['used_kb']
     assert forced['cpu_percent'] == 3
 
 
@@ -13910,7 +13928,8 @@ def test_pool_probe_runner_failover_candidate():
     assert stopped == [('process', 'config.json')]
     assert cleaned == [True]
     assert paused_remaining == [('vless', 'low-memory')]
-    assert '190000' in memory_logs[-1]
+    assert '1 МБ' in memory_logs[-1]
+    assert 'порог 186 МБ' in memory_logs[-1]
 
     rss_notes = []
     rss_logs = []
@@ -13945,7 +13964,7 @@ def test_pool_probe_runner_failover_candidate():
     )
     assert (checked, total) == (0, 2)
     assert rss_remaining == [('vless2', 'rss-high'), ('vless2', 'rss-next')]
-    assert any('RSS' in note and '71680' in note for note in rss_notes)
+    assert any('RSS бота 71 МБ' in note and 'порог 70 МБ' in note for note in rss_notes)
     assert any('RSS' in item for item in rss_logs)
 
     rss_values = iter([73000, 70000, 70000])
@@ -14020,7 +14039,7 @@ def test_pool_probe_runner_failover_candidate():
     assert (checked, total) == (1, 1)
     assert slow_processed == [('vless', 'slow-memory')]
     assert slow_sleeps == [3.0]
-    assert any('Экономный режим: свободно' in note for note in slow_notes)
+    assert any('Экономный режим: доступной памяти меньше порога замедления' in note for note in slow_notes)
     assert any('МБ' in note and 'KB' not in note for note in slow_notes)
 
     cpu_values = iter([92.0, 20.0])
@@ -17727,19 +17746,23 @@ def test_web_template_scripts_helpers():
     assert "state === 'warn'" in scripts
     assert 'service-probe-warn' in scripts
     assert 'service-probe-icon-warn' in scripts
-    assert 'function poolCoreServices(pool)' in scripts
-    assert 'Array.isArray(pool.core_services)' in scripts
+    assert 'function poolCoreServices(pool)' not in scripts
+    assert 'Array.isArray(pool.core_services)' not in scripts
     assert 'function poolTableCoreServices()' in scripts
-    assert "const statusCoreServices = poolCoreServices(pool);" in scripts
+    assert "const statusCoreServices = poolCoreServices(pool);" not in scripts
     assert "const coreServices = poolTableCoreServices();" in scripts
-    assert "protocolStatusService('telegram', tgState" in scripts
-    assert "protocolStatusService('youtube', ytState" in scripts
+    assert 'function workingProtocolStatusService(serviceId, state, src, label, badge)' in scripts
+    assert "workingProtocolStatusService('telegram', tgState" in scripts
+    assert "workingProtocolStatusService('youtube', ytState" in scripts
     assert "card.dataset.protocolLiveStatus === '1'" in scripts
     assert 'function mergeProtocolStatusIcons(primaryHtml, fallbackHtml)' in scripts
-    assert "const preferPoolResult = serviceId !== 'telegram' && fallbackKnown;" in scripts
-    assert "const tgSource = String(row.dataset.tgSource || 'pool_probe');" in scripts
-    assert "const includeTelegram = coreServices.indexOf('telegram') !== -1 || tgSource === 'live_polling';" in scripts
-    assert "const includeYoutube = coreServices.indexOf('youtube') !== -1 || knownStates.indexOf(ytState) !== -1;" in scripts
+    assert 'const preferPoolResult = fallbackKnown && (' in scripts
+    assert "serviceId !== 'telegram' || (!currentWorks && fallbackWorks)" in scripts
+    assert "const tgSource = String(row.dataset.tgSource || 'pool_probe');" not in scripts
+    assert "const includeTelegram = knownStates.indexOf(tgState) !== -1;" in scripts
+    assert "const includeYoutube = knownStates.indexOf(ytState) !== -1;" in scripts
+    assert 'protocolPanelCoreServices' not in scripts
+    assert 'coreServicesLoaded' not in scripts
     assert 'data-tg-source="' in scripts
     assert "item.dataset.tgSource = row.tg_source || 'pool_probe';" in scripts
     assert 'visibleIconCountHtml' not in scripts
@@ -19638,7 +19661,7 @@ def test_service_route_runtime_auto_resolve_uses_cross_runtime_lock():
 
 def main():
     test_app_runtime_mode_setter_callbacks()
-    test_router_health_runtime_payload_uses_keenetic_memory()
+    test_router_health_runtime_payload_uses_consistent_available_memory()
     test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample()
     test_router_health_runtime_payload_marks_proc_fallbacks_explicitly()
     test_router_health_runtime_program_rss_includes_related_processes()

@@ -166,7 +166,7 @@ async function assertExpandedTopbarStatusIsReadable(page, label) {
     const previousText = text.textContent;
     pill.classList.add('topbar-status-expanded');
     title.textContent = 'Статус обновляется';
-    text.textContent = '⏳ Проверка всех ключей: 6/109 · Экономный режим: свободно 154 МБ, порог замедления 160 МБ.';
+    text.textContent = '⏳ Проверка всех ключей: 6/109 · Экономный режим: доступной памяти меньше порога замедления 160 МБ.';
     const textStyle = getComputedStyle(text);
     const result = {
       textClientHeight: text.clientHeight,
@@ -560,6 +560,7 @@ async function assertProtocolStatusServiceMerge(page, label) {
         service: node.dataset.statusService,
         state: node.dataset.statusState,
         text: node.textContent,
+        hasImage: Boolean(node.querySelector('img')),
       }));
     };
     const fixture = document.createElement('div');
@@ -598,13 +599,16 @@ async function assertProtocolStatusServiceMerge(page, label) {
   if (
     services.join('|') !== 'telegram|youtube|custom:chat' ||
     result.merged[0].state !== 'ok' || result.merged[0].text !== 'live-tg' ||
-    result.liveFail[0].state !== 'fail' ||
+    result.liveFail[0].state !== 'ok' || result.liveFail[0].text !== 'pool-ok' ||
     result.fallback[0].state !== 'ok' ||
     result.poolYoutube[0].state !== 'ok' || result.poolYoutube[0].text !== 'pool-yt-ok' ||
-    !result.poolScoped || result.poolScoped.tone !== 'ok' || result.poolScoped.label !== 'Работает' ||
-    result.poolScoped.icons.map((item) => item.service).join('|') !== 'youtube' ||
-    !result.liveScoped || result.liveScoped.tone !== 'warn' ||
-    result.liveScoped.icons.map((item) => item.service).join('|') !== 'telegram|youtube'
+    !result.poolScoped || result.poolScoped.tone !== 'warn' || result.poolScoped.label !== 'Частично работает' ||
+    result.poolScoped.icons.map((item) => item.service).join('|') !== 'telegram|youtube' ||
+    result.poolScoped.icons[0].state !== 'fail' || result.poolScoped.icons[0].text !== '' ||
+    result.poolScoped.icons[0].hasImage || !result.poolScoped.icons[1].hasImage ||
+    !result.liveScoped || result.liveScoped.tone !== 'warn' || result.liveScoped.label !== 'Частично работает' ||
+    result.liveScoped.icons.map((item) => item.service).join('|') !== 'telegram|youtube' ||
+    result.liveScoped.icons[0].state !== 'fail' || result.liveScoped.icons[0].hasImage
   ) {
     throw new Error(`${label}: service-aware status merge is wrong ${JSON.stringify(result)}`);
   }
