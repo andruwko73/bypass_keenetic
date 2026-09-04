@@ -6,6 +6,12 @@ from protocol_catalog import PROTOCOL_DISPLAY_ORDER
 POOL_PROTOCOLS = PROTOCOL_DISPLAY_ORDER
 
 
+def _clear_forced_recovery(state):
+    state['force_recovery'] = False
+    state['hard_failure'] = False
+    state['failure_key_id'] = ''
+
+
 def _recent_active_success(
     *,
     state,
@@ -98,18 +104,37 @@ def attempt_auto_failover(
     audit_key_switch=None,
     defer_switch=None,
     confirm_candidate=None,
+    begin_switch_transaction=None,
+    update_switch_transaction=None,
+    clear_switch_transaction=None,
     max_runtime_candidates=3,
     time_provider=time.time,
 ):
     now = time_provider()
+    force_recovery = bool(state.get('force_recovery'))
+    failure_key_id = str(state.get('failure_key_id') or '')
+    if force_recovery and failure_key_id and callable(hash_key):
+        active_key = _active_key_for_mode(load_current_keys, proxy_mode)
+        if not active_key or hash_key(active_key) != failure_key_id:
+            force_recovery = False
+            state['force_recovery'] = False
+            state['hard_failure'] = False
+            state['failure_key_id'] = ''
+            state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
+            state['last_failure_message'] = ''
     if state['in_progress']:
         return False
     if pool_probe_locked and pool_probe_locked():
         return False
-    if state['last_attempt'] and now - state['last_attempt'] < switch_cooldown_seconds:
+    if (
+        not force_recovery and
+        state['last_attempt'] and
+        now - state['last_attempt'] < switch_cooldown_seconds
+    ):
         return False
 
-    if _recent_active_success(
+    if not force_recovery and _recent_active_success(
         state=state,
         now=now,
         proxy_mode=proxy_mode,
@@ -124,7 +149,7 @@ def attempt_auto_failover(
         return False
 
     startup_hold = float(startup_hold_seconds or 0)
-    if startup_hold > 0:
+    if startup_hold > 0 and not force_recovery:
         try:
             started_at = float(state.get('started_at') or 0)
         except (TypeError, ValueError):
@@ -143,7 +168,7 @@ def attempt_auto_failover(
     except (TypeError, ValueError):
         last_fail = 0.0
 
-    if last_fail and now - last_fail < grace_seconds:
+    if last_fail and not force_recovery and now - last_fail < grace_seconds:
         return False
 
     if last_fail:
@@ -158,6 +183,7 @@ def attempt_auto_failover(
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
             state['last_failure_message'] = ''
+            _clear_forced_recovery(state)
             _record_active_telegram_success(
                 record_key_probe,
                 proxy_mode,
@@ -169,7 +195,7 @@ def attempt_auto_failover(
             started_at = float(state.get('started_at') or 0)
         except (TypeError, ValueError):
             started_at = 0.0
-        if startup_hold > 0 and started_at and now - started_at < startup_hold:
+        if not force_recovery and startup_hold > 0 and started_at and now - started_at < startup_hold:
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
             state['last_failure_message'] = ''
@@ -178,7 +204,7 @@ def attempt_auto_failover(
 
     current_keys = None
     recent_ttl = float(recent_success_ttl or 0)
-    if recent_ttl > 0:
+    if recent_ttl > 0 and not force_recovery:
         try:
             last_ok = float(state.get('last_ok') or 0)
         except (TypeError, ValueError):
@@ -208,7 +234,11 @@ def attempt_auto_failover(
             log('Auto-failover: active Telegram key is recently marked working in the pool cache; switch skipped.')
             return False
 
-    if callable(is_transient_failure) and is_transient_failure(failure_message):
+    if (
+        not force_recovery and
+        callable(is_transient_failure) and
+        is_transient_failure(failure_message)
+    ):
         ttl = float(transient_success_ttl or 0)
         try:
             last_ok = float(state.get('last_ok') or 0)
@@ -222,6 +252,7 @@ def attempt_auto_failover(
             return False
         current_keys = current_keys if current_keys is not None else load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
+
         probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
         active_probe = probe_cache.get(hash_key(active_key), {}) if probe_cache and hash_key and active_key else {}
         try:
@@ -260,6 +291,7 @@ def attempt_auto_failover(
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
         state['last_failure_message'] = ''
+        _clear_forced_recovery(state)
         _record_active_telegram_success(
             record_key_probe,
             proxy_mode,
@@ -295,7 +327,6 @@ def attempt_auto_failover(
             log(f'Auto-failover: traffic guard callback failed: {exc}')
 
     state['in_progress'] = True
-    state['last_attempt'] = now
     try:
         if callable(repair_active_proxy):
             try:
@@ -317,12 +348,31 @@ def attempt_auto_failover(
                     state['last_fail'] = 0.0
                     state['consecutive_failures'] = 0
                     state['last_failure_message'] = ''
+                    _clear_forced_recovery(state)
                     log('Auto-failover: active proxy endpoint repair restored Telegram API; key switch skipped.')
                     return False
                 failure_message = repair_message or failure_message
 
         current_keys = current_keys if current_keys is not None else load_current_keys()
         active_key = (current_keys.get(proxy_mode) or '').strip()
+
+        def restore_original_key():
+            try:
+                install_key_for_protocol(proxy_mode, active_key, verify=False)
+                restore_result = update_proxy(proxy_mode)
+                if isinstance(restore_result, tuple) and restore_result and restore_result[0] is False:
+                    raise RuntimeError(str(restore_result[1] or 'failed to restore previous proxy'))
+                set_active_key(proxy_mode, active_key)
+                if callable(clear_switch_transaction):
+                    clear_switch_transaction()
+                return True
+            except Exception as restore_exc:
+                log(
+                    f'Auto-failover: failed to restore previous {proxy_mode} key after '
+                    f'candidate check: {restore_exc}'
+                )
+                return False
+
         probe_cache = key_probe_cache() if callable(key_probe_cache) else key_probe_cache
         exclude_keys = {
             str(key_value or '').strip()
@@ -371,6 +421,13 @@ def attempt_auto_failover(
                 item for item in remaining_candidates
                 if not (item[0] == proto and item[1] == key_value)
             ]
+            if callable(begin_switch_transaction) and not begin_switch_transaction(
+                proto,
+                active_key,
+                key_value,
+            ):
+                log('Auto-failover: transaction checkpoint could not be persisted; switch aborted.')
+                return False
             try:
                 result = install_key_for_protocol(proto, key_value, verify=False)
             except Exception as exc:
@@ -383,7 +440,14 @@ def attempt_auto_failover(
                     allow_recent_success_downgrade=True,
                 )
                 log(f'Auto-failover: ошибка установки {proto} ключа; пробуем следующий кандидат: {exc}')
+                if not restore_original_key():
+                    return False
                 continue
+
+            if callable(update_switch_transaction) and not update_switch_transaction('candidate_installed'):
+                log('Auto-failover: candidate installation checkpoint could not be persisted; restoring previous key.')
+                restore_original_key()
+                return False
 
             try:
                 update_result = update_proxy(proto)
@@ -413,9 +477,17 @@ def attempt_auto_failover(
                     f'Auto-failover: candidate {proto} passed temporary Xray screening but {status} '
                     f'on the permanent proxy; trying the next candidate. {confirm_message}'
                 )
+                if not restore_original_key():
+                    return False
                 continue
 
+            if callable(update_switch_transaction) and not update_switch_transaction('candidate_verified'):
+                log('Auto-failover: candidate verification checkpoint could not be persisted; restoring previous key.')
+                restore_original_key()
+                return False
             set_active_key(proto, key_value)
+            if callable(clear_switch_transaction):
+                clear_switch_transaction()
             if callable(audit_key_switch):
                 audit_key_switch('telegram_auto_failover', proto, key_value, failure_message)
             record_key_probe(
@@ -425,10 +497,13 @@ def attempt_auto_failover(
                 yt_ok=yt_ok,
                 verification_kind='runtime',
             )
-            state['last_ok'] = time_provider()
+            switched_at = time_provider()
+            state['last_ok'] = switched_at
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
             state['last_failure_message'] = ''
+            state['last_attempt'] = switched_at
+            _clear_forced_recovery(state)
             log(
                 f'Auto-failover: переключено на {proto}; Telegram API подтверждён через рабочий Xray. {result}'
             )
@@ -437,14 +512,7 @@ def attempt_auto_failover(
         if not attempted_candidates:
             log('Auto-failover: перебор ключей из пулов не дал доступа к Telegram API.')
             return False
-        try:
-            install_key_for_protocol(proxy_mode, active_key, verify=False)
-            restore_result = update_proxy(proxy_mode)
-            if isinstance(restore_result, tuple) and restore_result and restore_result[0] is False:
-                raise RuntimeError(str(restore_result[1] or 'failed to restore previous proxy'))
-            set_active_key(proxy_mode, active_key)
-        except Exception as restore_exc:
-            log(f'Auto-failover: failed to restore previous {proxy_mode} key after all candidate checks: {restore_exc}')
+        if not restore_original_key():
             return False
         log(
             f'Auto-failover: {attempted_candidates} candidate(s) did not pass confirmation on the permanent proxy; '

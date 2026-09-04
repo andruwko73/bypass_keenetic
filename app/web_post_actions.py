@@ -636,6 +636,10 @@ def _pool_apply(ctx, data):
             lock.release()
         if should_resume_probe:
             _call(ctx, 'resume_cancelled_pool_probe')
+    if success and key_to_apply:
+        probe_note = _call(ctx, 'schedule_applied_pool_key_probe', proto, key_to_apply)
+        if probe_note:
+            result = f'{result}\n{probe_note}'
     return _result(result, success=success, extra={'protocol': proto, 'key_id': key_id})
 
 

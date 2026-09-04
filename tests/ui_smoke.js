@@ -153,6 +153,45 @@ async function assertNoHorizontalOverflow(page, label) {
   }
 }
 
+async function assertExpandedTopbarStatusIsReadable(page, label) {
+  const layout = await page.evaluate(() => {
+    const pill = document.getElementById('web-api-pill');
+    const title = document.getElementById('topbar-status-title');
+    const text = document.getElementById('topbar-status-text');
+    if (!pill || !title || !text) {
+      return null;
+    }
+    const previousClass = pill.className;
+    const previousTitle = title.textContent;
+    const previousText = text.textContent;
+    pill.classList.add('topbar-status-expanded');
+    title.textContent = 'Статус обновляется';
+    text.textContent = '⏳ Проверка всех ключей: 6/109 · Экономный режим: свободно 154 МБ, порог замедления 160 МБ.';
+    const textStyle = getComputedStyle(text);
+    const result = {
+      textClientHeight: text.clientHeight,
+      textScrollHeight: text.scrollHeight,
+      pillClientHeight: pill.clientHeight,
+      pillScrollHeight: pill.scrollHeight,
+      overflow: textStyle.overflow,
+      lineClamp: textStyle.webkitLineClamp,
+    };
+    pill.className = previousClass;
+    title.textContent = previousTitle;
+    text.textContent = previousText;
+    return result;
+  });
+  if (!layout) {
+    throw new Error(`${label}: topbar status markup is missing`);
+  }
+  if (layout.textScrollHeight > layout.textClientHeight + 1 || layout.pillScrollHeight > layout.pillClientHeight + 1) {
+    throw new Error(`${label}: expanded topbar status is clipped ${JSON.stringify(layout)}`);
+  }
+  if (layout.overflow === 'hidden' || layout.lineClamp === '2') {
+    throw new Error(`${label}: expanded topbar status still applies clipping ${JSON.stringify(layout)}`);
+  }
+}
+
 async function assertProtocolMenuGrid(page, label, isMobile) {
   const menus = [
     {
@@ -947,6 +986,9 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
     throw new Error(`${name}: automatic failover labels leaked into the web interface`);
   }
   await assertNoHorizontalOverflow(page, name);
+  if (modeConfig.mode === 'advanced') {
+    await assertExpandedTopbarStatusIsReadable(page, name);
+  }
   if (modeConfig.expectPool) {
     const poolSummaryText = (await page.locator('#pool-summary-note').innerText()).trim();
     if (!poolSummaryText.includes('Instagram / Facebook:')) {

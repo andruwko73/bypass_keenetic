@@ -888,6 +888,9 @@ AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS = max(
     int(getattr(config, 'auto_failover_candidate_failure_backoff_seconds', 900)),
 )
 AUTO_FAILOVER_CONSECUTIVE_FAILURES = max(1, int(getattr(config, 'auto_failover_consecutive_failures', 3)))
+TELEGRAM_ROUTE_NEUTRAL_CHECK_URL = str(
+    getattr(config, 'telegram_route_neutral_check_url', 'https://www.gstatic.com/generate_204') or ''
+).strip()
 AUTO_FAILOVER_TRAFFIC_GUARD_BYPASS_FAILURES = max(
     AUTO_FAILOVER_CONSECUTIVE_FAILURES,
     int(getattr(config, 'auto_failover_traffic_guard_bypass_failures', AUTO_FAILOVER_CONSECUTIVE_FAILURES)),
@@ -920,11 +923,14 @@ auto_failover_state = {
     'last_attempt': 0.0,
     'last_idle_log': 0.0,
     'consecutive_failures': 0,
+    'force_recovery': False,
+    'hard_failure': False,
+    'failure_key_id': '',
     'in_progress': False,
 }
 
 
-def _prime_auto_failover_after_telegram_failure(message):
+def _prime_auto_failover_after_telegram_failure(message, *, key_id='', hard_failure=False):
     now = time.time()
     try:
         started_at = float(auto_failover_state.get('started_at') or now)
@@ -937,6 +943,9 @@ def _prime_auto_failover_after_telegram_failure(message):
     auto_failover_state['last_ok'] = 0.0
     auto_failover_state['last_fail'] = now - max(0, AUTO_FAILOVER_GRACE_SECONDS)
     auto_failover_state['last_failure_message'] = str(message or 'Telegram API failure')[:500]
+    auto_failover_state['force_recovery'] = True
+    auto_failover_state['hard_failure'] = bool(hard_failure)
+    auto_failover_state['failure_key_id'] = str(key_id or '')
     try:
         failures = int(auto_failover_state.get('consecutive_failures') or 0)
     except (TypeError, ValueError):
@@ -965,7 +974,22 @@ def _is_telegram_connectivity_error(error):
     return any(marker in text for marker in markers)
 
 
-def _mark_active_telegram_failure(message):
+def _telegram_route_failure_is_hard(proto):
+    if not TELEGRAM_ROUTE_NEUTRAL_CHECK_URL:
+        return False
+    try:
+        ok, _message = _check_http_through_proxy(
+            proxy_settings.get(proto),
+            url=TELEGRAM_ROUTE_NEUTRAL_CHECK_URL,
+            connect_timeout=int(max(2.0, AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT)),
+            read_timeout=int(max(3.0, AUTO_FAILOVER_CHECK_READ_TIMEOUT)),
+        )
+        return ok is False
+    except Exception:
+        return False
+
+
+def _mark_active_telegram_failure(message, *, hard_failure=None):
     now = time.time()
     telegram_route_proto = _telegram_route_protocol() or proxy_mode
     active_key = (
@@ -979,7 +1003,13 @@ def _mark_active_telegram_failure(message):
             tg_ok=False,
             allow_recent_success_downgrade=True,
         )
-    _prime_auto_failover_after_telegram_failure(message)
+    if hard_failure is None:
+        hard_failure = _telegram_route_failure_is_hard(telegram_route_proto)
+    _prime_auto_failover_after_telegram_failure(
+        message,
+        key_id=_hash_key(active_key) if active_key else '',
+        hard_failure=hard_failure,
+    )
     background_task_skip_until.pop('Telegram auto-failover', None)
     background_task_skip_reason.pop('Telegram auto-failover', None)
     _invalidate_key_status_cache()
@@ -988,7 +1018,7 @@ def _mark_active_telegram_failure(message):
         background_task_skip_log_at['Telegram polling failure'] = now
         _write_runtime_log(
             f'Auto-failover: Telegram polling failed through {telegram_route_proto}; '
-            'active key marked failed and recovery scheduled.'
+            f'active key marked failed and recovery scheduled; hard_failure={int(bool(hard_failure))}.'
         )
 
 
@@ -1259,6 +1289,7 @@ YOUTUBE_EDGE_PREFETCH_EXCLUSIVE_IPSETS = bool(getattr(config, 'youtube_edge_pref
 
 def _new_youtube_failover_state():
     return {
+        'active_key_id': '',
         'last_ok': 0.0,
         'last_fail': 0.0,
         'last_attempt': 0.0,
@@ -1572,7 +1603,9 @@ def _apply_manual_key_safely(proto, key, *, source='manual_install', verify=Fals
         if should_resume_probe:
             _resume_cancelled_pool_probe()
     if pool_enabled:
-        _refresh_status_caches_async(_load_current_keys(), active_only=True)
+        probe_note = _schedule_applied_pool_key_probe(proto, key)
+        if probe_note:
+            result = f'{result}\n{probe_note}'
     return result
 
 
@@ -1627,6 +1660,8 @@ def _auto_failover_log(message):
 
 
 def _auto_failover_defer_switch_for_traffic_guard(**kwargs):
+    if auto_failover_state.get('hard_failure'):
+        return False
     if proxy_mode not in YOUTUBE_STREAM_GUARD_PROTOCOLS:
         return False
     try:
@@ -1690,6 +1725,9 @@ def _mark_auto_failover_polling_ok(now=None):
     auto_failover_state['last_fail'] = 0.0
     auto_failover_state['consecutive_failures'] = 0
     auto_failover_state['last_failure_message'] = ''
+    auto_failover_state['force_recovery'] = False
+    auto_failover_state['hard_failure'] = False
+    auto_failover_state['failure_key_id'] = ''
 
 
 def _restore_telegram_polling_after_verified_recovery():
@@ -1701,7 +1739,7 @@ def _restore_telegram_polling_after_verified_recovery():
         last_ok = 0.0
     if last_ok <= 0.0:
         return False
-    globals()['bot_polling'] = True
+    _reset_telegram_http_session('verified route recovery')
     _invalidate_web_status_api_cache()
     _invalidate_web_status_cache()
     return True
@@ -1731,13 +1769,32 @@ def _auto_failover_should_run():
     if not _app_mode_pool_enabled():
         return False, 'pool disabled'
     if _auto_failover_has_pending_failure():
-        return True, 'pending failure'
+        return True, 'hard failure' if auto_failover_state.get('hard_failure') else 'pending failure'
     if not _app_mode_telegram_enabled():
         return False, 'telegram disabled'
     if bot_polling:
         _mark_auto_failover_polling_ok()
         return False, 'Telegram polling is healthy'
     return True, 'Telegram polling stopped'
+
+
+def _confirm_telegram_failover_candidate(proto, _key_value):
+    ok, message = _check_telegram_api_for_background(
+        proxy_settings.get(proto),
+        connect_timeout=int(max(float(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT), 5.0)),
+        read_timeout=int(max(float(AUTO_FAILOVER_CHECK_READ_TIMEOUT), 8.0)),
+    )
+    if ok is not True or not auto_failover_state.get('hard_failure'):
+        return ok, message
+    neutral_ok, neutral_message = _check_http_through_proxy(
+        proxy_settings.get(proto),
+        url=TELEGRAM_ROUTE_NEUTRAL_CHECK_URL,
+        connect_timeout=int(max(2.0, AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT)),
+        read_timeout=int(max(3.0, AUTO_FAILOVER_CHECK_READ_TIMEOUT)),
+    )
+    if neutral_ok is True:
+        return True, message
+    return False, neutral_message or 'neutral HTTPS confirmation failed'
 
 
 def _attempt_auto_failover():
@@ -1747,56 +1804,88 @@ def _attempt_auto_failover():
     if _app_mode_telegram_enabled() and bot_polling and not _auto_failover_has_pending_failure():
         _mark_auto_failover_polling_ok()
         return False
-    if proxy_mode != telegram_route_proto:
-        _auto_failover_log(
-            f'Auto-failover: restoring Telegram route protocol {telegram_route_proto} '
-            f'instead of current mode {proxy_mode}.'
-        )
-        ok, error = update_proxy(telegram_route_proto)
-        if not ok:
-            _auto_failover_log(
-                f'Auto-failover: cannot restore Telegram route protocol {telegram_route_proto}: {error}'
-            )
+
+    pause_owner = 'telegram_auto_failover'
+    pause_generation = 0
+    apply_acquired = False
+    try:
+        if pool_probe_lock.locked():
+            try:
+                pause_generation, _pause_note = _pause_pool_probe_operation(
+                    pause_owner,
+                    'Проверка пула приостанавливается для аварийного восстановления Vless1.',
+                    timeout=15.0,
+                )
+            except Exception as exc:
+                _auto_failover_log(f'Auto-failover: pool probe pause deferred recovery: {exc}')
+                return False
+
+        apply_acquired = pool_apply_lock.acquire(blocking=False)
+        if not apply_acquired:
+            _auto_failover_log('Auto-failover: another key operation is active; emergency retry scheduled.')
             return False
-    switched = _auto_failover_runtime().attempt_auto_failover(
-        state=auto_failover_state,
-        pool_probe_locked=lambda: bool(globals().get('pool_probe_lock') and pool_probe_lock.locked()),
-        proxy_mode=telegram_route_proto,
-        proxy_url=proxy_settings.get(telegram_route_proto),
-        check_telegram_api=_check_telegram_api_for_background,
-        load_current_keys=_load_current_keys,
-        load_key_pools=_load_key_pools,
-        failover_candidates=_key_pool_store().failover_candidates,
-        find_pool_failover_candidate=_find_pool_failover_candidate,
-        install_key_for_protocol=_install_key_for_protocol,
-        update_proxy=update_proxy,
-        set_active_key=_set_active_key,
-        record_key_probe=_record_key_probe,
-        log=_auto_failover_log,
-        audit_key_switch=_audit_key_switch,
-        grace_seconds=AUTO_FAILOVER_GRACE_SECONDS,
-        switch_cooldown_seconds=AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
-        check_timeouts=(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
-        key_probe_cache=_load_key_probe_cache,
-        hash_key=_hash_key,
-        is_transient_failure=_is_transient_telegram_api_failure,
-        transient_success_ttl=TELEGRAM_TRANSIENT_OK_CACHE_TTL,
-        recent_success_ttl=AUTO_FAILOVER_RECENT_SUCCESS_TTL,
-        recent_failure_backoff_seconds=AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS,
-        skip_failed_candidates=True,
-        startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS,
-        min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES,
-        repair_active_proxy=_repair_active_reality_endpoint,
-        protocols=(telegram_route_proto,),
-        defer_switch=_auto_failover_defer_switch_for_traffic_guard,
-        confirm_candidate=lambda proto, _key: _check_telegram_api_for_background(
-            proxy_settings.get(proto),
-            connect_timeout=max(float(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT), 5.0),
-            read_timeout=max(float(AUTO_FAILOVER_CHECK_READ_TIMEOUT), 8.0),
-        ),
-    )
-    _restore_telegram_polling_after_verified_recovery()
-    return switched
+
+        if proxy_mode != telegram_route_proto:
+            _auto_failover_log(
+                f'Auto-failover: restoring Telegram route protocol {telegram_route_proto} '
+                f'instead of current mode {proxy_mode}.'
+            )
+            ok, error = update_proxy(telegram_route_proto)
+            if not ok:
+                _auto_failover_log(
+                    f'Auto-failover: cannot restore Telegram route protocol {telegram_route_proto}: {error}'
+                )
+                return False
+
+        switched = _auto_failover_runtime().attempt_auto_failover(
+            state=auto_failover_state,
+            pool_probe_locked=lambda: bool(pool_probe_lock.locked()),
+            proxy_mode=telegram_route_proto,
+            proxy_url=proxy_settings.get(telegram_route_proto),
+            check_telegram_api=_check_telegram_api_for_background,
+            load_current_keys=_load_current_keys,
+            load_key_pools=_load_key_pools,
+            failover_candidates=_key_pool_store().failover_candidates,
+            find_pool_failover_candidate=_find_pool_failover_candidate,
+            install_key_for_protocol=_install_key_for_protocol,
+            update_proxy=update_proxy,
+            set_active_key=_set_active_key,
+            record_key_probe=_record_key_probe,
+            log=_auto_failover_log,
+            audit_key_switch=_audit_key_switch,
+            grace_seconds=AUTO_FAILOVER_GRACE_SECONDS,
+            switch_cooldown_seconds=AUTO_FAILOVER_SWITCH_COOLDOWN_SECONDS,
+            check_timeouts=(AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
+            key_probe_cache=_load_key_probe_cache,
+            hash_key=_hash_key,
+            is_transient_failure=_is_transient_telegram_api_failure,
+            transient_success_ttl=TELEGRAM_TRANSIENT_OK_CACHE_TTL,
+            recent_success_ttl=AUTO_FAILOVER_RECENT_SUCCESS_TTL,
+            recent_failure_backoff_seconds=AUTO_FAILOVER_CANDIDATE_FAILURE_BACKOFF_SECONDS,
+            skip_failed_candidates=True,
+            startup_hold_seconds=AUTO_FAILOVER_STARTUP_HOLD_SECONDS,
+            min_consecutive_failures=AUTO_FAILOVER_CONSECUTIVE_FAILURES,
+            repair_active_proxy=_repair_active_reality_endpoint,
+            protocols=(telegram_route_proto,),
+            defer_switch=_auto_failover_defer_switch_for_traffic_guard,
+            confirm_candidate=_confirm_telegram_failover_candidate,
+            begin_switch_transaction=_begin_telegram_failover_transaction,
+            update_switch_transaction=_update_telegram_failover_transaction,
+            clear_switch_transaction=_clear_telegram_failover_transaction,
+        )
+        _restore_telegram_polling_after_verified_recovery()
+        return switched
+    finally:
+        if apply_acquired:
+            pool_apply_lock.release()
+        if pause_generation:
+            started, _queued = _resume_cancelled_pool_probe(
+                'аварийного восстановления Telegram',
+                owner=pause_owner,
+                generation=pause_generation,
+            )
+            if not started and _has_pool_probe_resume_payload():
+                _schedule_low_memory_pool_probe_resume()
 
 
 def _youtube_route_protocol():
@@ -2084,6 +2173,7 @@ def _confirm_youtube_key_detailed(
 def _confirm_youtube_key_emergency(proto, *, deadline, max_attempts=2):
     return _confirm_youtube_key_detailed(
         proto,
+        measure_quality=True,
         profile='emergency',
         http_timeouts=(YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT, YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT),
         retry_unstable=False,
@@ -2098,7 +2188,7 @@ def _confirm_youtube_key(proto):
     return ok, message
 
 
-def _youtube_failover_key_by_id(proto, key_id):
+def _failover_key_by_id(proto, key_id):
     key_id = str(key_id or '').strip().lower()
     if len(key_id) != 40:
         return ''
@@ -2133,35 +2223,74 @@ def _clear_youtube_failover_transaction():
     return _youtube_failover_transaction().clear_transaction(YOUTUBE_FAILOVER_TRANSACTION_FILE)
 
 
-def _restore_youtube_key_after_failed_failover(proto, original_key):
-    current_key = (_load_current_keys().get(proto) or '').strip()
-    if not original_key or current_key == original_key:
-        _clear_youtube_failover_transaction()
-        return bool(original_key and current_key == original_key)
-    _update_youtube_failover_transaction('restore_started')
-    try:
-        _install_key_for_protocol(proto, original_key, verify=False)
-        restored_key = (_load_current_keys().get(proto) or '').strip()
-        if restored_key != original_key:
-            raise RuntimeError('исходный ключ не подтверждён после восстановления')
-        _record_key_probe(
-            proto,
-            original_key,
-            yt_ok=False,
-            allow_recent_success_downgrade=True,
-        )
-        _audit_key_switch('youtube_failover_restore', proto, original_key, 'failed candidates')
-        _write_runtime_log(f'YouTube failover: restored previous {_pool_proto_label(proto)} key after failed candidates.')
-        _clear_youtube_failover_transaction()
-        return True
-    except Exception as exc:
-        _update_youtube_failover_transaction('restore_failed')
+
+def _begin_telegram_failover_transaction(proto, original_key, candidate_key):
+    return _youtube_failover_transaction().begin_transaction(
+        TELEGRAM_FAILOVER_TRANSACTION_FILE,
+        proto,
+        _hash_key(original_key),
+        _hash_key(candidate_key),
+        trigger='telegram',
+        original_key=original_key,
+    )
+
+
+def _update_telegram_failover_transaction(phase):
+    return _youtube_failover_transaction().update_phase(TELEGRAM_FAILOVER_TRANSACTION_FILE, phase)
+
+
+def _clear_telegram_failover_transaction():
+    return _youtube_failover_transaction().clear_transaction(TELEGRAM_FAILOVER_TRANSACTION_FILE)
+
+
+def _restore_youtube_key_after_failed_failover(proto, original_key, expected_current_key=None):
+    if not pool_apply_lock.acquire(timeout=5.0):
         state = _youtube_failover_state(proto)
-        state['recovery_failed'] = True
-        state['phase'] = 'recovery_failed'
-        state['deferred_reason'] = 'исходный ключ не удалось восстановить; автоматические переключения остановлены'
-        _write_runtime_log(f'YouTube failover: failed to restore previous {_pool_proto_label(proto)} key: {exc}')
+        state['deferred_reason'] = 'восстановление ждёт завершения другой операции с ключом'
         return False
+    try:
+        current_key = (_load_current_keys().get(proto) or '').strip()
+        if expected_current_key and current_key not in (original_key, expected_current_key):
+            _clear_youtube_failover_transaction()
+            state = _youtube_failover_state(proto)
+            state['active_key_id'] = _hash_key(current_key) if current_key else ''
+            state['deferred_reason'] = 'автоматическое восстановление отменено после ручной смены ключа'
+            _write_runtime_log(
+                f'YouTube failover: {_pool_proto_label(proto)} key changed outside the active transaction; '
+                'manual selection was preserved.'
+            )
+            return True
+        if not original_key or current_key == original_key:
+            _clear_youtube_failover_transaction()
+            return bool(original_key and current_key == original_key)
+        _update_youtube_failover_transaction('restore_started')
+        try:
+            _install_key_for_protocol(proto, original_key, verify=False)
+            restored_key = (_load_current_keys().get(proto) or '').strip()
+            if restored_key != original_key:
+                raise RuntimeError('исходный ключ не подтверждён после восстановления')
+            _record_key_probe(
+                proto,
+                original_key,
+                yt_ok=False,
+                allow_recent_success_downgrade=True,
+            )
+            _audit_key_switch('youtube_failover_restore', proto, original_key, 'failed candidates')
+            _write_runtime_log(
+                f'YouTube failover: restored previous {_pool_proto_label(proto)} key after failed candidates.'
+            )
+            _clear_youtube_failover_transaction()
+            return True
+        except Exception as exc:
+            _update_youtube_failover_transaction('restore_failed')
+            state = _youtube_failover_state(proto)
+            state['recovery_failed'] = True
+            state['phase'] = 'recovery_failed'
+            state['deferred_reason'] = 'исходный ключ не удалось восстановить; автоматические переключения остановлены'
+            _write_runtime_log(f'YouTube failover: failed to restore previous {_pool_proto_label(proto)} key: {exc}')
+            return False
+    finally:
+        pool_apply_lock.release()
 
 
 def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_message=''):
@@ -2447,8 +2576,8 @@ def _recover_interrupted_youtube_failover_transaction():
                 state['deferred_reason'] = str(exc)
                 return False
 
-        original_key = _youtube_failover_key_by_id(proto, transaction['original_id'])
-        candidate_key = _youtube_failover_key_by_id(proto, transaction['candidate_id'])
+        original_key = _failover_key_by_id(proto, transaction['original_id'])
+        candidate_key = _failover_key_by_id(proto, transaction['candidate_id'])
         current_key = str(_load_current_keys().get(proto) or '').strip()
         current_id = _hash_key(current_key) if current_key else ''
 
@@ -2514,6 +2643,87 @@ def _recover_interrupted_youtube_failover_transaction():
         if pause_generation:
             started, _queued = _resume_cancelled_pool_probe(
                 'восстановления незавершённого переключения YouTube',
+                owner=pause_owner,
+                generation=pause_generation,
+            )
+            if not started and _has_pool_probe_resume_payload():
+                _schedule_low_memory_pool_probe_resume()
+
+
+
+def _recover_interrupted_telegram_failover_transaction():
+    transaction = _youtube_failover_transaction().load_transaction(TELEGRAM_FAILOVER_TRANSACTION_FILE)
+    if not transaction:
+        if os.path.exists(TELEGRAM_FAILOVER_TRANSACTION_FILE):
+            _write_runtime_log(
+                'Telegram auto-failover: invalid recovery transaction; marker removed without changing Xray.'
+            )
+            _clear_telegram_failover_transaction()
+            return False
+        return None
+
+    proto = str(transaction.get('proto') or '')
+    original_key = str(transaction.get('original_key') or '').strip()
+    if original_key and _hash_key(original_key) != str(transaction.get('original_id') or ''):
+        original_key = ''
+    if not original_key:
+        original_key = _failover_key_by_id(proto, transaction.get('original_id'))
+    if not original_key:
+        _update_telegram_failover_transaction('restore_failed')
+        _write_runtime_log(
+            'Telegram auto-failover: original key for interrupted transaction is unavailable; '
+            'automatic recovery will retry without changing Xray.'
+        )
+        return False
+
+    pause_owner = 'telegram_transaction_recovery'
+    pause_generation = 0
+    apply_acquired = False
+    try:
+        if pool_probe_lock.locked():
+            pause_generation, _pause_note = _pause_pool_probe_operation(
+                pause_owner,
+                'Проверка пула приостанавливается для восстановления Vless1.',
+                timeout=15.0,
+            )
+        apply_acquired = pool_apply_lock.acquire(blocking=False)
+        if not apply_acquired:
+            _write_runtime_log(
+                'Telegram auto-failover: interrupted transaction recovery waits for another key operation.'
+            )
+            return False
+        current_key = str(_load_current_keys().get(proto) or '').strip()
+        if current_key != original_key:
+            _update_telegram_failover_transaction('restore_started')
+            _install_key_for_protocol(proto, original_key, verify=False)
+            update_result = update_proxy(proto)
+            if isinstance(update_result, tuple) and update_result and update_result[0] is False:
+                raise RuntimeError(str(update_result[1] or 'failed to restore Telegram route'))
+            _set_active_key(proto, original_key)
+        restored_key = str(_load_current_keys().get(proto) or '').strip()
+        if restored_key != original_key:
+            raise RuntimeError('restored Telegram key was not confirmed')
+        _clear_telegram_failover_transaction()
+        _audit_key_switch(
+            'telegram_auto_failover_recovery',
+            proto,
+            original_key,
+            'interrupted transaction restored',
+        )
+        _invalidate_web_status_cache()
+        _invalidate_key_status_cache()
+        _write_runtime_log('Telegram auto-failover: interrupted key switch was rolled back safely.')
+        return True
+    except Exception as exc:
+        _update_telegram_failover_transaction('restore_failed')
+        _write_runtime_log(f'Telegram auto-failover: interrupted switch recovery failed: {exc}')
+        return False
+    finally:
+        if apply_acquired:
+            pool_apply_lock.release()
+        if pause_generation:
+            started, _queued = _resume_cancelled_pool_probe(
+                'восстановления незавершённого переключения Telegram',
                 owner=pause_owner,
                 generation=pause_generation,
             )
@@ -2589,6 +2799,7 @@ def _switch_youtube_to_verified_candidate(
             f'testing up to {len(candidates)} verified pool candidates. Reason: {reason}'
         )
         remaining = list(candidates)
+        last_installed_candidate = ''
         while remaining and not shutdown_requested.is_set():
             budget = (
                 _youtube_failover_policy().remaining_seconds(failure_deadline)
@@ -2611,7 +2822,7 @@ def _switch_youtube_to_verified_candidate(
             candidate = _find_pool_failover_candidate(
                 remaining,
                 service='youtube',
-                measure_youtube_quality=trigger == 'degraded',
+                measure_youtube_quality=True,
                 http_timeouts=(
                     (YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT, YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT)
                     if trigger == 'failed' else None
@@ -2652,9 +2863,12 @@ def _switch_youtube_to_verified_candidate(
 
             candidate_score, _candidate_probe = _youtube_probe_score_for_key(key_value)
             state['last_candidate_score'] = candidate_score
-            if trigger == 'degraded' and (
+            if (
                 candidate_score < YOUTUBE_ROUTE_QUALITY_CANDIDATE_MIN_SCORE or
-                candidate_score - current_score < YOUTUBE_ROUTE_QUALITY_MIN_IMPROVEMENT
+                (
+                    trigger == 'degraded' and
+                    candidate_score - current_score < YOUTUBE_ROUTE_QUALITY_MIN_IMPROVEMENT
+                )
             ):
                 _write_runtime_log(
                     f'YouTube failover: candidate {key_hash} score {candidate_score} is not sufficiently better '
@@ -2681,14 +2895,40 @@ def _switch_youtube_to_verified_candidate(
                     'because the current key has a confirmed complete failure.'
                 )
 
-            state['last_attempt'] = time.time()
-            if not _begin_youtube_failover_transaction(route_proto, original_key, key_value, trigger):
-                state['deferred_reason'] = 'не удалось сохранить безопасную точку переключения'
-                _write_runtime_log('YouTube failover: transaction checkpoint could not be persisted; switch aborted.')
+            latest_active_key = str(_load_current_keys().get(route_proto) or '').strip()
+            if latest_active_key != original_key:
+                state['active_key_id'] = _hash_key(latest_active_key) if latest_active_key else ''
+                state['deferred_reason'] = 'цикл остановлен после смены активного ключа'
+                _write_runtime_log(
+                    f'YouTube failover: {_pool_proto_label(route_proto)} active key changed during '
+                    'candidate screening; stale switch cancelled.'
+                )
                 return False
+            if not pool_apply_lock.acquire(blocking=False):
+                state['deferred_reason'] = 'переключение ждёт завершения другой операции с ключом'
+                return False
+            install_error = None
+            result = ''
             try:
-                result = _install_key_for_protocol(route_proto, key_value, verify=False)
-            except Exception as exc:
+                latest_active_key = str(_load_current_keys().get(route_proto) or '').strip()
+                if latest_active_key != original_key:
+                    state['active_key_id'] = _hash_key(latest_active_key) if latest_active_key else ''
+                    state['deferred_reason'] = 'цикл остановлен после смены активного ключа'
+                    return False
+                state['last_attempt'] = time.time()
+                if not _begin_youtube_failover_transaction(route_proto, original_key, key_value, trigger):
+                    state['deferred_reason'] = 'не удалось сохранить безопасную точку переключения'
+                    _write_runtime_log(
+                        'YouTube failover: transaction checkpoint could not be persisted; switch aborted.'
+                    )
+                    return False
+                try:
+                    result = _install_key_for_protocol(route_proto, key_value, verify=False)
+                except Exception as exc:
+                    install_error = exc
+            finally:
+                pool_apply_lock.release()
+            if install_error is not None:
                 _record_key_probe(
                     route_proto,
                     key_value,
@@ -2697,13 +2937,22 @@ def _switch_youtube_to_verified_candidate(
                     verification_kind='runtime',
                     allow_recent_success_downgrade=True,
                 )
-                _write_runtime_log(f'YouTube failover: failed to install candidate {key_hash}: {exc}')
-                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                _write_runtime_log(f'YouTube failover: failed to install candidate {key_hash}: {install_error}')
+                if not _restore_youtube_key_after_failed_failover(
+                    route_proto,
+                    original_key,
+                    expected_current_key=key_value,
+                ):
                     return False
                 continue
+            last_installed_candidate = key_value
             if not _update_youtube_failover_transaction('candidate_installed'):
                 state['deferred_reason'] = 'не удалось подтвердить установку запасного ключа'
-                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                _restore_youtube_key_after_failed_failover(
+                    route_proto,
+                    original_key,
+                    expected_current_key=key_value,
+                )
                 return False
 
             if trigger == 'failed':
@@ -2717,7 +2966,11 @@ def _switch_youtube_to_verified_candidate(
                     measure_quality=True,
                 )
             if confirm_ok is None:
-                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                if not _restore_youtube_key_after_failed_failover(
+                    route_proto,
+                    original_key,
+                    expected_current_key=key_value,
+                ):
                     return False
                 state['deferred_reason'] = 'проверка постоянного порта недоступна'
                 return False
@@ -2729,7 +2982,11 @@ def _switch_youtube_to_verified_candidate(
                     yt_ok=False,
                     allow_recent_success_downgrade=True,
                 )
-                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                if not _restore_youtube_key_after_failed_failover(
+                    route_proto,
+                    original_key,
+                    expected_current_key=key_value,
+                ):
                     return False
                 _write_runtime_log(
                     f'YouTube failover: candidate {key_hash} passed temporary check '
@@ -2740,12 +2997,19 @@ def _switch_youtube_to_verified_candidate(
             confirm_state, confirm_reason, confirm_metrics = _youtube_health_state(True, confirm_metrics)
             candidate_score = int(confirm_metrics.get('yt_score') or candidate_score or 0)
             state['last_candidate_score'] = candidate_score
-            if trigger == 'degraded' and (
+            if (
                 confirm_state != 'healthy' or
                 candidate_score < YOUTUBE_ROUTE_QUALITY_CANDIDATE_MIN_SCORE or
-                candidate_score - current_score < YOUTUBE_ROUTE_QUALITY_MIN_IMPROVEMENT
+                (
+                    trigger == 'degraded' and
+                    candidate_score - current_score < YOUTUBE_ROUTE_QUALITY_MIN_IMPROVEMENT
+                )
             ):
-                if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                if not _restore_youtube_key_after_failed_failover(
+                    route_proto,
+                    original_key,
+                    expected_current_key=key_value,
+                ):
                     return False
                 _write_runtime_log(
                     f'YouTube failover: candidate {key_hash} did not confirm a quality improvement '
@@ -2760,7 +3024,11 @@ def _switch_youtube_to_verified_candidate(
                     read_timeout=AUTO_FAILOVER_CHECK_READ_TIMEOUT,
                 )
                 if tg_ok is None:
-                    if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                    if not _restore_youtube_key_after_failed_failover(
+                        route_proto,
+                        original_key,
+                        expected_current_key=key_value,
+                    ):
                         return False
                     state['deferred_reason'] = 'проверка Telegram недоступна'
                     return False
@@ -2772,7 +3040,11 @@ def _switch_youtube_to_verified_candidate(
                         yt_ok=True,
                         verification_kind='runtime',
                     )
-                    if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+                    if not _restore_youtube_key_after_failed_failover(
+                        route_proto,
+                        original_key,
+                        expected_current_key=key_value,
+                    ):
                         return False
                     _write_runtime_log(
                         f'YouTube failover: candidate {key_hash} has YouTube. Telegram is required '
@@ -2782,9 +3054,35 @@ def _switch_youtube_to_verified_candidate(
 
             if not _update_youtube_failover_transaction('candidate_verified'):
                 state['deferred_reason'] = 'не удалось сохранить результат проверки запасного ключа'
-                _restore_youtube_key_after_failed_failover(route_proto, original_key)
+                _restore_youtube_key_after_failed_failover(
+                    route_proto,
+                    original_key,
+                    expected_current_key=key_value,
+                )
                 return False
-            _set_active_key(route_proto, key_value)
+            if not pool_apply_lock.acquire(blocking=False):
+                state['deferred_reason'] = 'фиксация ключа ждёт завершения другой операции'
+                if not _restore_youtube_key_after_failed_failover(
+                    route_proto,
+                    original_key,
+                    expected_current_key=key_value,
+                ):
+                    return False
+                return False
+            try:
+                latest_active_key = str(_load_current_keys().get(route_proto) or '').strip()
+                if latest_active_key != key_value:
+                    _clear_youtube_failover_transaction()
+                    state['active_key_id'] = _hash_key(latest_active_key) if latest_active_key else ''
+                    state['deferred_reason'] = 'подтверждённый кандидат отменён после ручной смены ключа'
+                    _write_runtime_log(
+                        f'YouTube failover: {_pool_proto_label(route_proto)} key changed during '
+                        'candidate confirmation; manual selection was preserved.'
+                    )
+                    return False
+                _set_active_key(route_proto, key_value)
+            finally:
+                pool_apply_lock.release()
             _clear_youtube_failover_transaction()
             _audit_key_switch('youtube_auto_failover', route_proto, key_value, confirm_message)
             _record_key_probe(
@@ -2797,6 +3095,7 @@ def _switch_youtube_to_verified_candidate(
             )
             _invalidate_web_status_cache()
             _invalidate_key_status_cache()
+            state['active_key_id'] = _hash_key(key_value)
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
             _reset_youtube_quality_state(
@@ -2811,7 +3110,11 @@ def _switch_youtube_to_verified_candidate(
             )
             return True
 
-        if not _restore_youtube_key_after_failed_failover(route_proto, original_key):
+        if not _restore_youtube_key_after_failed_failover(
+            route_proto,
+            original_key,
+            expected_current_key=last_installed_candidate or original_key,
+        ):
             return False
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
@@ -2920,15 +3223,22 @@ def _attempt_youtube_route_failover():
 
 def _run_auto_failover_cycle():
     ran = False
+    result = False
     try:
         should_run, reason = _auto_failover_should_run()
+        emergency = reason in ('hard failure', 'pending failure', 'Telegram polling stopped')
         if not should_run:
             _auto_failover_idle_log(reason)
         elif _background_task_allowed(
             'Telegram auto-failover',
-            allow_high_rss=reason in ('pending failure', 'Telegram polling stopped'),
+            allow_high_rss=emergency,
+            allow_pool_probe=emergency,
+            allow_status_refresh=emergency,
+            ignore_bot_rss=emergency,
+            bypass_backoff=emergency,
+            max_cpu_percent=0 if reason == 'hard failure' else None,
         ):
-            ran, _result = _run_coordinated_background_task(
+            ran, result = _run_coordinated_background_task(
                 'Telegram auto-failover',
                 _attempt_auto_failover,
             )
@@ -2937,6 +3247,7 @@ def _run_auto_failover_cycle():
     finally:
         if ran:
             _memory_cleanup('Telegram auto-failover cycle', clear_status=False, log=False)
+    return bool(ran and result)
 
 
 def _youtube_failover_pulse_allowed():
@@ -3103,6 +3414,7 @@ WEB_COMMAND_STATE_FILE = '/opt/etc/bot/web_command_state.json'
 POOL_PROBE_RESUME_FILE = '/opt/etc/bot/pool_probe_resume.json'
 POOL_PROBE_ACTIVE_FILE = '/opt/etc/bot/pool_probe_active.json'
 YOUTUBE_FAILOVER_TRANSACTION_FILE = '/opt/etc/bot/youtube_failover_transaction.json'
+TELEGRAM_FAILOVER_TRANSACTION_FILE = '/opt/etc/bot/telegram_failover_transaction.json'
 COMMAND_JOB_STALE_AFTER = 1800
 TELEGRAM_RESULT_RETRY_INTERVAL = 30
 
@@ -3615,6 +3927,9 @@ subscription_auto_refresh_skip_log_at = {'rss': 0.0}
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_cancel_event = threading.Event()
+applied_pool_probe_pending_lock = threading.Lock()
+applied_pool_probe_pending = {}
+applied_pool_probe_waiter = None
 pool_probe_resume_lock = threading.Lock()
 youtube_cache_confirm_lock = threading.Lock()
 vless2_youtube_cache_confirm_lock = youtube_cache_confirm_lock
@@ -5749,6 +6064,9 @@ def _background_task_allowed(
     max_program_rss_kb=None,
     max_cpu_percent=None,
     allow_pool_probe=False,
+    allow_status_refresh=False,
+    ignore_bot_rss=False,
+    bypass_backoff=False,
 ):
     if _update_maintenance_active():
         return False
@@ -5760,7 +6078,7 @@ def _background_task_allowed(
         task_class,
         allow_high_rss=allow_high_rss,
     )
-    bot_hard_limit_kb = (
+    bot_hard_limit_kb = 0 if ignore_bot_rss else (
         default_bot_hard_limit_kb
         if max_bot_rss_kb is None else
         max(0, int(max_bot_rss_kb))
@@ -5778,17 +6096,17 @@ def _background_task_allowed(
     can_bypass_rss_skip = (
         (
             skip_reason == 'rss' and
-            bot_hard_limit_kb > default_bot_hard_limit_kb
+            (ignore_bot_rss or bot_hard_limit_kb > default_bot_hard_limit_kb)
         ) or (
             skip_reason == 'program_rss' and
-            program_limit_kb > default_program_limit_kb
+            (allow_high_rss or program_limit_kb > default_program_limit_kb)
         )
     )
-    if skip_until and now < skip_until and not can_bypass_rss_skip:
+    if skip_until and now < skip_until and not (can_bypass_rss_skip or bypass_backoff):
         return False
     try:
         if _memory_sensitive_operation_running(
-            ignore_status_refresh=(task_name == 'status refresh'),
+            ignore_status_refresh=(task_name == 'status refresh' or allow_status_refresh),
             ignore_pool_probe=allow_pool_probe,
         ):
             background_task_skip_until[task_name] = now + min(60.0, BACKGROUND_TASK_BUSY_BACKOFF_SECONDS)
@@ -10761,9 +11079,7 @@ def _apply_pool_key(proto, key_value, schedule_probe=True):
     _set_active_key(proto, key_value)
     _audit_key_switch('telegram_pool_apply', proto, key_value, 'manual pool apply')
     _schedule_youtube_key_apply_prefetch(proto)
-    refreshed_status = _probe_applied_pool_key_services(proto, key_value) if schedule_probe else (
-        'Статусы выбранного ключа обновит продолжающаяся проверка пула.'
-    )
+    refreshed_status = _probe_applied_pool_key_services(proto, key_value)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
     if refreshed_status:
@@ -11048,7 +11364,14 @@ def _pool_probe_timeout_budget(custom_checks=None, task_count=1, workers=1):
     )
 
 
-def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_url=None, record_key_probe=None):
+def _check_pool_key_through_proxy(
+    proto,
+    key_value,
+    custom_checks=None,
+    proxy_url=None,
+    record_key_probe=None,
+    verification_kind='screening',
+):
     return _pool_probe_controller().check_pool_key_through_proxy(
         proto,
         key_value,
@@ -11066,15 +11389,35 @@ def _check_pool_key_through_proxy(proto, key_value, custom_checks=None, proxy_ur
         youtube_profile=POOL_PROBE_YOUTUBE_PROFILE,
         measure_download=_measure_limited_pool_probe_quality_download if POOL_PROBE_QUALITY_ENABLED else None,
         quality_settings=_pool_probe_quality_settings(),
+        verification_kind=verification_kind,
     )
 
 
+def _reset_failover_state_after_manual_apply(proto, key_value):
+    key_id = _hash_key(key_value) if key_value else ''
+    if proto == _telegram_route_protocol():
+        auto_failover_state['last_ok'] = 0.0
+        auto_failover_state['last_fail'] = 0.0
+        auto_failover_state['last_failure_message'] = ''
+        auto_failover_state['consecutive_failures'] = 0
+        auto_failover_state['force_recovery'] = False
+        auto_failover_state['hard_failure'] = False
+        auto_failover_state['failure_key_id'] = ''
+    if proto == _youtube_route_protocol():
+        state = _youtube_failover_state(proto)
+        state.clear()
+        state.update(_new_youtube_failover_state())
+        state['active_key_id'] = key_id
+
+
 def _schedule_applied_pool_key_probe(proto, key_value):
+    global applied_pool_probe_waiter
+    key_value = str(key_value or '').strip()
     if not key_value:
         return ''
-    if pool_probe_lock.locked():
-        return 'Статусы выбранного ключа обновятся после текущей проверки пула.'
-    try:
+    _reset_failover_state_after_manual_apply(proto, key_value)
+
+    def start_probe():
         started, queued = _probe_pool_keys_background(
             proto,
             [key_value],
@@ -11082,16 +11425,85 @@ def _schedule_applied_pool_key_probe(proto, key_value):
             stale_only=False,
             scope='applied',
         )
-        if started:
+        if started or queued:
             _invalidate_web_status_cache()
             _invalidate_key_status_cache()
-            return 'Статусы выбранного ключа обновляются фоновой проверкой.'
-        if queued:
-            return 'Фоновая проверка выбранного ключа уже выполняется.'
-        return 'Ключ применён; проверка сервисов не запускалась.'
-    except Exception as exc:
-        _write_runtime_log(f'Applied pool key background probe failed for {proto}: {exc}')
-        return f'⚠️ Ключ применён, но фоновую проверку сервисов не удалось запустить: {exc}'
+        return started, queued
+
+    if not pool_probe_lock.locked():
+        try:
+            started, queued = start_probe()
+            if started:
+                return 'Статусы выбранного ключа обновляются фоновой runtime-проверкой.'
+            if queued:
+                return 'Runtime-проверка выбранного ключа уже выполняется.'
+            return 'Ключ применён; проверка сервисов не запускалась.'
+        except Exception as exc:
+            _write_runtime_log(f'Applied pool key background probe failed for {proto}: {exc}')
+            return f'⚠️ Ключ применён, но фоновую проверку сервисов не удалось запустить: {exc}'
+
+    with applied_pool_probe_pending_lock:
+        applied_pool_probe_pending[str(proto or '')] = (key_value, _hash_key(key_value))
+        if applied_pool_probe_waiter and applied_pool_probe_waiter.is_alive():
+            return 'Runtime-проверка выбранного ключа запланирована после текущей проверки пула.'
+
+        def wait_and_start():
+            global applied_pool_probe_waiter
+            deadline = time.time() + 120.0
+            while not shutdown_requested.is_set() and time.time() < deadline:
+                if pool_probe_lock.locked() or pool_apply_lock.locked():
+                    shutdown_requested.wait(0.5)
+                    continue
+                with applied_pool_probe_pending_lock:
+                    if not applied_pool_probe_pending:
+                        applied_pool_probe_waiter = None
+                        return
+                    pending = dict(applied_pool_probe_pending)
+                    applied_pool_probe_pending.clear()
+                retry = {}
+                for pending_proto, (pending_key, pending_id) in pending.items():
+                    current_key = str(_load_current_keys().get(pending_proto) or '').strip()
+                    if not current_key or _hash_key(current_key) != pending_id:
+                        continue
+                    try:
+                        started, queued = _probe_pool_keys_background(
+                            pending_proto,
+                            [pending_key],
+                            max_keys=1,
+                            stale_only=False,
+                            scope='applied',
+                        )
+                    except Exception as exc:
+                        _write_runtime_log(
+                            f'Queued applied pool key probe failed for {pending_proto}: {exc}'
+                        )
+                        started = queued = False
+                    if not started and not queued:
+                        retry[pending_proto] = (pending_key, pending_id)
+                if retry:
+                    with applied_pool_probe_pending_lock:
+                        applied_pool_probe_pending.update(retry)
+                    shutdown_requested.wait(2.0)
+                else:
+                    _invalidate_web_status_cache()
+                    _invalidate_key_status_cache()
+            with applied_pool_probe_pending_lock:
+                expired = len(applied_pool_probe_pending)
+                applied_pool_probe_pending.clear()
+                applied_pool_probe_waiter = None
+            if expired:
+                _write_runtime_log(
+                    f'Applied key runtime probe queue expired after 120 seconds; '
+                    f'{expired} superseded request(s) discarded.'
+                )
+
+        applied_pool_probe_waiter = threading.Thread(
+            target=wait_and_start,
+            name='applied-key-probe-waiter',
+            daemon=True,
+        )
+        applied_pool_probe_waiter.start()
+    return 'Runtime-проверка выбранного ключа запланирована после текущей проверки пула.'
 
 
 def _probe_applied_pool_key_services(proto, key_value):
@@ -12659,6 +13071,27 @@ def _run_selected_pool_probe(
         flush_every=POOL_PROBE_CACHE_FLUSH_EVERY,
         flush_interval=POOL_PROBE_CACHE_FLUSH_INTERVAL,
     )
+    verification_kind = 'runtime' if scope == 'applied' else 'screening'
+
+    def record_probe_for_scope(proto, key_value, **kwargs):
+        kwargs.setdefault('verification_kind', verification_kind)
+        return probe_recorder.record(proto, key_value, **kwargs)
+
+    def check_pool_key_for_scope(
+        proto,
+        key_value,
+        custom_checks=None,
+        proxy_url=None,
+        record_key_probe=None,
+    ):
+        return _check_pool_key_through_proxy(
+            proto,
+            key_value,
+            custom_checks,
+            proxy_url,
+            record_key_probe=record_key_probe,
+            verification_kind=verification_kind,
+        )
     start_rss_kb = int(_process_rss_kb() or 0)
     batch_size = POOL_PROBE_BATCH_SIZE
     if not POOL_PROBE_BATCH_SIZE_CONFIGURED:
@@ -12698,12 +13131,12 @@ def _run_selected_pool_probe(
                 _proxy_outbound_from_key,
             ),
             failed_custom_results=_pool_probe_controller().failed_custom_probe_results,
-            record_key_probe=probe_recorder.record,
+            record_key_probe=record_probe_for_scope,
             start_xray_for_batch=lambda valid_batch: _pool_probe_runner().start_pool_probe_xray(
                 _pool_probe_runner().build_pool_probe_core_config_batch(valid_batch, POOL_PROBE_TEST_PORT, _proxy_outbound_from_key)
             ),
             wait_for_socks5=_wait_for_socks5_handshake,
-            check_pool_key=_check_pool_key_through_proxy,
+            check_pool_key=check_pool_key_for_scope,
             timeout_budget=_pool_probe_timeout_budget,
             stop_xray=_pool_probe_runner().stop_pool_probe_xray,
             cleanup_runtime=_pool_probe_runner().cleanup_pool_probe_runtime,
@@ -14514,6 +14947,7 @@ def _web_action_context():
             set_active_key=_set_active_key,
             audit_key_switch=_audit_key_switch,
             schedule_youtube_key_apply_prefetch=_schedule_youtube_key_apply_prefetch,
+            schedule_applied_pool_key_probe=_schedule_applied_pool_key_probe,
             clear_pool=_clear_pool,
             fetch_keys_from_subscription=_fetch_keys_from_subscription,
             add_subscription_keys_to_pool=_key_pool_store().add_subscription_keys_to_pool,
@@ -15692,19 +16126,27 @@ def _run_telegram_polling_loop():
             bot_polling = False
             shutdown_requested.wait(0.5)
             continue
+        if os.path.exists(TELEGRAM_FAILOVER_TRANSACTION_FILE):
+            recovery_result = _recover_interrupted_telegram_failover_transaction()
+            if recovery_result is False and os.path.exists(TELEGRAM_FAILOVER_TRANSACTION_FILE):
+                bot_polling = False
+                shutdown_requested.wait(5)
+                continue
         try:
             if proxy_mode in PROXY_LOCAL_PORTS:
                 preflight_ok, preflight_message = _check_telegram_api_through_proxy(
                     proxy_settings.get(proxy_mode),
-                    connect_timeout=max(2.0, AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT),
-                    read_timeout=max(3.0, AUTO_FAILOVER_CHECK_READ_TIMEOUT),
+                    connect_timeout=int(max(2.0, AUTO_FAILOVER_CHECK_CONNECT_TIMEOUT)),
+                    read_timeout=int(max(3.0, AUTO_FAILOVER_CHECK_READ_TIMEOUT)),
                     authenticated=True,
                 )
                 if not preflight_ok:
                     bot_polling = False
                     _mark_active_telegram_failure(preflight_message)
                     _memory_cleanup('telegram polling preflight failed', clear_status=False, log=False)
-                    shutdown_requested.wait(10)
+                    if _run_auto_failover_cycle():
+                        continue
+                    shutdown_requested.wait(5)
                     continue
             bot_polling = True
             _confirm_active_telegram_probe_from_polling()
@@ -15712,17 +16154,20 @@ def _run_telegram_polling_loop():
         except Exception as err:
             bot_polling = False
             _write_runtime_log(err)
-            if _is_telegram_connectivity_error(err):
+            connectivity_error = _is_telegram_connectivity_error(err)
+            if connectivity_error:
                 _mark_active_telegram_failure(err)
             _reset_telegram_http_session('polling error')
             _memory_cleanup('telegram polling error', force=True, clear_status=False)
             if shutdown_requested.is_set():
                 break
+            if connectivity_error and _run_auto_failover_cycle():
+                continue
             if _is_polling_conflict(err):
                 _write_runtime_log('Обнаружен конфликт getUpdates, ожидание перед повторной попыткой 65 секунд')
-                time.sleep(65)
+                shutdown_requested.wait(65)
             else:
-                time.sleep(5)
+                shutdown_requested.wait(5)
         else:
             if shutdown_requested.is_set():
                 break

@@ -45,7 +45,7 @@ def normalize_transaction(payload):
         updated_at = float(payload.get('updated_at') or started_at)
     except (TypeError, ValueError):
         return None
-    return {
+    normalized = {
         'schema': 1,
         'proto': proto,
         'original_id': original_id,
@@ -55,14 +55,30 @@ def normalize_transaction(payload):
         'started_at': started_at,
         'updated_at': updated_at,
     }
+    original_key = str(payload.get('original_key') or '').strip()
+    if original_key:
+        if len(original_key) > 16384:
+            return None
+        normalized['original_key'] = original_key
+    return normalized
 
 
-def begin_transaction(path, proto, original_id, candidate_id, *, trigger='', now=None):
+def begin_transaction(
+    path,
+    proto,
+    original_id,
+    candidate_id,
+    *,
+    trigger='',
+    original_key='',
+    now=None,
+):
     now = time.time() if now is None else float(now)
     payload = normalize_transaction({
         'proto': proto,
         'original_id': original_id,
         'candidate_id': candidate_id,
+        'original_key': original_key,
         'trigger': trigger,
         'phase': 'prepared',
         'started_at': now,

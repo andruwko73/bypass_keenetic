@@ -192,7 +192,8 @@ def _topbar_status_html(
         if enable_telegram and bot_polling and safe_icon_src else
         ''
     )
-    return f'''<span class="api-pill topbar-status topbar-status-{safe_tone}" id="web-api-pill" data-bot-ready="{str(bool(bot_ready)).lower()}" data-bot-polling="{str(bool(bot_polling)).lower()}">
+    safe_status_title = html.escape(f'{title}: {text}', quote=True)
+    return f'''<span class="api-pill topbar-status topbar-status-{safe_tone}" id="web-api-pill" data-bot-ready="{str(bool(bot_ready)).lower()}" data-bot-polling="{str(bool(bot_polling)).lower()}" aria-live="polite" title="{safe_status_title}">
                     {icon_html}
                     <span class="topbar-status-copy">
                         <strong id="topbar-status-title">{html.escape(title)}</strong>

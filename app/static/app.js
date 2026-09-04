@@ -2915,7 +2915,7 @@
                 const progressLabel = poolProbeProgressLabel(progress.scope || '');
                 const progressNote = progress.note ? String(progress.note) : '';
                 const progressText = '⏳ ' + progressLabel + ': ' + (progress.checked || 0) + '/' + (progress.total || 0);
-                return ['info', 'Статус обновляется', progressNote ? progressText + '. ' + progressNote : progressText, false];
+                return ['info', 'Статус обновляется', progressNote ? progressText + ' · ' + progressNote : progressText, false, true];
             }
 
             const health = snapshot.router_health || {};
@@ -2954,8 +2954,12 @@
             const item = topbarStatusFromSnapshot(snapshot || {});
             const tone = item[0] || 'info';
             const showTelegramIcon = ENABLE_TELEGRAM && !!item[3];
-            pill.className = 'api-pill topbar-status topbar-status-' + escapeHtml(tone);
+            const expanded = !!item[4];
+            pill.className = 'api-pill topbar-status topbar-status-' + escapeHtml(tone) +
+                (expanded ? ' topbar-status-expanded' : '');
             pill.setAttribute('data-bot-ready', showTelegramIcon ? 'true' : 'false');
+            pill.setAttribute('aria-live', 'polite');
+            pill.setAttribute('title', [item[1], item[2]].filter(Boolean).join(': '));
             pill.innerHTML = (showTelegramIcon ? '<span class="topbar-status-icon topbar-status-icon-telegram" aria-hidden="true"><img src="' + escapeHtml(TELEGRAM_ICON_SRC) + '" alt=""></span>' : '') +
                 '<span class="topbar-status-copy"><strong id="topbar-status-title">' + escapeHtml(item[1] || '') +
                 '</strong><span id="topbar-status-text">' + escapeHtml(item[2] || '') + '</span></span>';

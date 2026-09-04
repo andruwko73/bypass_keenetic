@@ -36,8 +36,10 @@ def attempt_youtube_failover(context):
     _confirm_youtube_key_detailed = context["_confirm_youtube_key_detailed"]
     _confirm_youtube_key_emergency = context["_confirm_youtube_key_emergency"]
     _handle_confirmed_youtube_hard_failure = context["_handle_confirmed_youtube_hard_failure"]
+    _hash_key = context["_hash_key"]
     _has_pool_probe_resume_payload = context["_has_pool_probe_resume_payload"]
     _load_current_keys = context["_load_current_keys"]
+    _new_youtube_failover_state = context["_new_youtube_failover_state"]
     _pause_pool_probe_operation = context["_pause_pool_probe_operation"]
     _pool_proto_label = context["_pool_proto_label"]
     _record_key_probe = context["_record_key_probe"]
@@ -80,6 +82,12 @@ def attempt_youtube_failover(context):
             reason='активный ключ маршрута не найден',
         )
         return False
+    active_key_id = _hash_key(active_key)
+    previous_active_key_id = str(state.get('active_key_id') or '')
+    if previous_active_key_id and previous_active_key_id != active_key_id:
+        state.clear()
+        state.update(_new_youtube_failover_state())
+    state['active_key_id'] = active_key_id
 
     yt_metrics = {}
     ok, message = _check_youtube_protocol_once(
@@ -89,6 +97,17 @@ def attempt_youtube_failover(context):
         http_timeouts=(YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT, YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT),
         retry_unstable=False,
     )
+    latest_active_key = str(_load_current_keys().get(route_proto) or '').strip()
+    if latest_active_key != active_key:
+        state.clear()
+        state.update(_new_youtube_failover_state())
+        state['active_key_id'] = _hash_key(latest_active_key) if latest_active_key else ''
+        state['deferred_reason'] = 'результат устарел после смены активного ключа'
+        _write_runtime_log(
+            f'YouTube failover: {_pool_proto_label(route_proto)} active key changed during health check; '
+            'stale result ignored.'
+        )
+        return False
     if ok is None:
         state['last_health_state'] = 'unknown'
         state['last_health_reason'] = 'фоновая проверка недоступна'

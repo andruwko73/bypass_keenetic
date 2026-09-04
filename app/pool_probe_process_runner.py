@@ -367,6 +367,7 @@ def run_pool_probe_process_worker(input_path, progress_path, result_path, cancel
             telegram_required=str(proto or '') == str(payload.get('telegram_required_protocol') or ''),
             youtube_profile=settings['youtube_profile'], measure_download=measure_quality if settings['quality_enabled'] else None, quality_settings=quality_settings,
             confirm_telegram=confirm_telegram,
+            verification_kind='runtime' if scope == 'applied' else 'screening',
         )
 
     def timeout_budget(custom_checks, task_count=1, workers=1):

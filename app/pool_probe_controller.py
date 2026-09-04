@@ -212,6 +212,7 @@ def check_pool_key_through_proxy(
     measure_download=None,
     quality_settings=None,
     confirm_telegram=None,
+    verification_kind='screening',
     sleep=time.sleep,
 ):
     tg_connect, tg_read = telegram_timeouts
@@ -336,7 +337,7 @@ def check_pool_key_through_proxy(
         tg_source='runtime_confirm' if telegram_runtime_confirmed else 'screening',
         yt_ok=yt_ok,
         allow_recent_success_downgrade=True,
-        verification_kind='screening',
+        verification_kind=verification_kind,
         **quality_kwargs,
     )
     if custom_checks and not tg_ok and not yt_ok:
@@ -346,7 +347,7 @@ def check_pool_key_through_proxy(
             custom=failed_custom_probe_results(custom_checks),
             custom_checks=custom_checks,
             allow_recent_success_downgrade=True,
-            verification_kind='screening',
+            verification_kind=verification_kind,
         )
         return
     if custom_checks:
@@ -356,7 +357,7 @@ def check_pool_key_through_proxy(
             custom=probe_custom_targets(proxy_url, custom_checks=custom_checks),
             custom_checks=custom_checks,
             allow_recent_success_downgrade=True,
-            verification_kind='screening',
+            verification_kind=verification_kind,
         )
 
 

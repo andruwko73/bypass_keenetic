@@ -647,9 +647,11 @@ def run_pool_probe_worker(
             low_memory_since = None
             slow_memory_kb = memory_below_limit(slow_available_kb)
             if slow_memory_kb is not None:
+                slow_memory_mib = max(0, int(round(float(slow_memory_kb) / 1024.0)))
+                slow_threshold_mib = max(0, int(round(float(slow_available_kb) / 1024.0)))
                 update_note(
-                    f'Проверка пула идёт в экономном режиме: доступно {slow_memory_kb} KB, '
-                    f'порог замедления {int(slow_available_kb)} KB.'
+                    f'Экономный режим: свободно {slow_memory_mib} МБ, '
+                    f'порог замедления {slow_threshold_mib} МБ.'
                 )
                 sleep(max(0.0, float(slow_memory_delay_seconds or 0.0)))
             else:
