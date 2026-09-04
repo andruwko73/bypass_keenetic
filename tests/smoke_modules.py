@@ -5451,6 +5451,7 @@ def test_direct_update_script_records_update_status():
     assert 'write_cli_update_status update true 85 Перезапуск "Перезапускаем сервисы"' in script
     assert 'write_cli_update_status update true 88 Запуск "Запускаем программу и веб-интерфейс"' in script
     assert 'write_cli_update_status update true 90 Завершение "Веб-интерфейс доступен; завершаем обновление сетевых списков"' in script
+    assert 'write_cli_update_status update true 95 Завершение "Сетевые списки запущены; завершаем фоновые задачи"' in script
     assert 'update_completion_message="Обновление завершено; запущен установщик первичной настройки"' in script
     assert 'write_cli_update_status update false 100 Готово "$update_completion_message"' in script
     assert 'write_cli_update_status update false 100 Ошибка "Обновление не удалось; выполнена попытка восстановить рабочее состояние"' in script
@@ -5494,7 +5495,23 @@ def test_direct_update_script_records_update_status():
         bot_restart_index,
     )
     ipset_refresh_index = script.index('run_update_ipset_refresh "После обновления"', web_available_index)
-    assert files_replace_index < static_install_index < application_start_index < final_stop_index < bot_restart_index < web_available_index < ipset_refresh_index
+    final_progress_index = script.index(
+        'write_cli_update_status update true 95 Завершение "Сетевые списки запущены; завершаем фоновые задачи"',
+        ipset_refresh_index,
+    )
+    prefetch_index = script.index('run_youtube_edge_prefetch_once "Post-update" &', final_progress_index)
+    update_success_index = script.index(
+        'write_cli_update_status update false 100 Готово "$update_completion_message"',
+        prefetch_index,
+    )
+    transaction_release_index = script.index('update_runtime_quiesced=0', update_success_index)
+    trap_clear_index = script.index('trap - EXIT TERM INT HUP', transaction_release_index)
+    assert (
+        files_replace_index < static_install_index < application_start_index < final_stop_index <
+        bot_restart_index < web_available_index < ipset_refresh_index < final_progress_index <
+        prefetch_index < update_success_index < transaction_release_index < trap_clear_index
+    )
+    assert 'update_runtime_quiesced=0' not in script[web_available_index:update_success_index]
     assert 'keep_count="${1:-1}"' in script
     assert 'cleanup_update_artifacts 1' in script
     assert 'cleanup_update_artifacts 3' not in script
@@ -15686,9 +15703,45 @@ def test_repo_update_helpers():
     assert "direct_env['REPO_REF'] = branch" not in command_source
     assert 'activity_probe=activity_probe' in command_source
     assert 'os.stat(update_status.UPDATE_STATUS_PATH).st_mtime_ns' in command_source
+    assert "if action in ('update', '-update'):" in command_source
     assert repo_update.download_repo_script.__defaults__ == ('main',)
     assert telegram_jobs.start_background_command.__kwdefaults__['branch'] == 'main'
     assert repo_update.direct_fetch_env(('HTTP_PROXY',), {'HTTP_PROXY': 'x', 'keep': 'y'}) == {'keep': 'y'}
+
+
+def test_system_update_activity_probe_without_progress_callback():
+    captured = {}
+    original_prepare_dns = entware_dns_runtime.prepare_entware_dns
+    original_legacy_paths = system_command_runtime.ensure_legacy_bot_paths
+    original_record_event = system_command_runtime._record_event
+    original_direct_env = repo_update.direct_fetch_env
+    original_run_script = repo_update.run_script_and_collect
+
+    def capture_run(action, env, logs, progress_callback=None, **kwargs):
+        captured.update({
+            'action': action,
+            'progress_callback': progress_callback,
+            'activity_probe': kwargs.get('activity_probe'),
+        })
+        return 0, 'ok'
+
+    try:
+        entware_dns_runtime.prepare_entware_dns = lambda: 'dns-ready'
+        system_command_runtime.ensure_legacy_bot_paths = lambda: 'paths-ready'
+        system_command_runtime._record_event = lambda *_args, **_kwargs: None
+        repo_update.direct_fetch_env = lambda _keys: {}
+        repo_update.run_script_and_collect = capture_run
+        assert system_command_runtime.run_script_action('-update', progress_callback=None) == (0, 'ok')
+    finally:
+        entware_dns_runtime.prepare_entware_dns = original_prepare_dns
+        system_command_runtime.ensure_legacy_bot_paths = original_legacy_paths
+        system_command_runtime._record_event = original_record_event
+        repo_update.direct_fetch_env = original_direct_env
+        repo_update.run_script_and_collect = original_run_script
+
+    assert captured['action'] == '-update'
+    assert captured['progress_callback'] is None
+    assert callable(captured['activity_probe'])
 
 
 def test_repo_update_progress_is_bounded_and_linear():
@@ -19631,6 +19684,7 @@ def main():
     test_installer_page_is_bot_setup_only()
     test_repo_update_helpers()
     test_repo_update_progress_is_bounded_and_linear()
+    test_system_update_activity_probe_without_progress_callback()
     test_repo_update_progress_callback_failure_is_nonfatal()
     test_repo_update_watchdog_terminates_process_groups()
     test_repo_update_activity_probe_defers_inactivity_timeout()

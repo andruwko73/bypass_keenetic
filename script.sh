@@ -2734,15 +2734,16 @@ if [ "$1" = "-update" ]; then
       fi
     fi
 
-    update_runtime_quiesced=0
     write_cli_update_status update true 90 Завершение "Веб-интерфейс доступен; завершаем обновление сетевых списков"
     echo "Веб-интерфейс запущен. Завершаем обновление сетевых списков."
     echo "Обновляем ipset после запуска основного прокси-сервиса."
     run_update_ipset_refresh "После обновления"
-    run_youtube_edge_prefetch_once "Post-update"
+    write_cli_update_status update true 95 Завершение "Сетевые списки запущены; завершаем фоновые задачи"
+    run_youtube_edge_prefetch_once "Post-update" &
     run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
     write_cli_update_status update false 100 Готово "$update_completion_message"
     cli_update_status_active=0
+    update_runtime_quiesced=0
     trap - EXIT TERM INT HUP
     exit 0
 fi

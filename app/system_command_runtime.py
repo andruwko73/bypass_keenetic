@@ -162,7 +162,7 @@ def run_script_action(action, repo_owner=None, repo_name=None, *, progress_callb
         repo_update.write_script(script_text)
 
     activity_probe = None
-    if progress_callback:
+    if action in ('update', '-update'):
         def activity_probe():
             try:
                 return os.stat(update_status.UPDATE_STATUS_PATH).st_mtime_ns
