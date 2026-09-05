@@ -72,6 +72,7 @@ import pool_probe_curl
 import pool_probe_process_runner
 import pool_probe_resume
 import pool_probe_runner
+import post_apply_runtime
 import probe_cache
 import auto_failover_runtime
 import proxy_apply_runtime
@@ -4546,6 +4547,23 @@ def test_web_post_actions_helpers():
         {'source': 'web_manual_install', 'verify': True},
     )]
 
+    manual_apply_calls.clear()
+    shared_pool_apply_result = web_post_actions.dispatch(
+        pool_ctx,
+        '/pool_apply',
+        {'type': ['vless'], 'key_id': ['id-one-1234']},
+    )
+    assert shared_pool_apply_result['success'] is True
+    assert manual_apply_calls == [(
+        'vless',
+        'vless://one',
+        {
+            'source': 'web_pool_apply',
+            'verify': False,
+            'schedule_probe': True,
+        },
+    )]
+
     shared_subscription_calls = []
     pool_ctx['import_pool_subscription'] = lambda proto, url, **kwargs: (
         shared_subscription_calls.append((proto, url, kwargs)) or {
@@ -6606,6 +6624,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     command_source = (APP_ROOT / 'system_command_runtime.py').read_text(encoding='utf-8')
     pool_controller_source = (APP_ROOT / 'pool_probe_controller.py').read_text(encoding='utf-8')
     pool_runner_source = (APP_ROOT / 'pool_probe_runner.py').read_text(encoding='utf-8')
+    post_apply_source = (APP_ROOT / 'post_apply_runtime.py').read_text(encoding='utf-8')
     proxy_apply_source = (APP_ROOT / 'proxy_apply_runtime.py').read_text(encoding='utf-8')
     youtube_health_source = (APP_ROOT / 'youtube_healthcheck.py').read_text(encoding='utf-8')
     youtube_failover_runtime_source = (APP_ROOT / 'youtube_failover_runtime.py').read_text(encoding='utf-8')
@@ -6767,7 +6786,8 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'ignore_bot_rss=emergency' in source
     assert 'bypass_backoff=emergency' in source
     assert "max_cpu_percent=0 if reason == 'hard failure' else None" in source
-    assert "name='applied-key-probe-waiter'" in source
+    assert "name='post-apply-key-check'" in post_apply_source
+    assert "name='applied-key-probe-waiter'" not in source
     assert "verification_kind = 'runtime' if scope == 'applied' else 'screening'" in source
     assert 'status_refresh_in_progress.add(refresh_key)' in source
     assert source.find('status_refresh_in_progress.add(refresh_key)') < source.find(
@@ -7135,8 +7155,10 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert '_start_youtube_vless2_failover_thread()' not in source
     assert 'def _probe_applied_pool_key_services' in source
     applied_probe_body = source.split('def _schedule_applied_pool_key_probe', 1)[1].split('\ndef ', 1)[0]
-    assert 'stale_only=False' in applied_probe_body
-    assert "scope='applied'" in applied_probe_body
+    assert '_post_apply_coordinator().schedule(' in applied_probe_body
+    assert '_probe_pool_keys_background(' not in applied_probe_body
+    assert "scope='applied'" not in applied_probe_body
+    assert 'class PostApplyCoordinator' in (APP_ROOT / 'post_apply_runtime.py').read_text(encoding='utf-8')
     assert 'probe_applied_pool_key_services=_probe_applied_pool_key_services' in source
     assert "telegram_required=_telegram_required_for_protocol(proto)" in source
     assert "'probe_applied_pool_key_services'" not in (APP_ROOT / 'web_post_actions.py').read_text(encoding='utf-8')
@@ -8331,6 +8353,8 @@ def test_runtime_modules_are_installed_by_update_scripts():
     assert 'youtube_edge_prefetch.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in script_modules
     assert 'youtube_edge_prefetch_runner.py' in bootstrap_modules
+    assert 'post_apply_runtime.py' in script_modules
+    assert 'post_apply_runtime.py' in bootstrap_modules
     assert {'youtube_failover_policy.py', 'youtube_failover_runtime.py'} <= script_modules
     assert 'stage_runtime_module web_pool_form_blocks.py render_protocol_check_content || exit 1' in script
     assert (
@@ -11759,26 +11783,26 @@ def test_telegram_bot_menu_button_smoke():
         )
         bot_module._set_active_key = lambda proto, key: apply_events.append(('active', proto, key))
         bot_module._audit_key_switch = lambda *args: apply_events.append(('audit', args))
-        bot_module._schedule_youtube_key_apply_prefetch = lambda proto: apply_events.append(('prefetch', proto))
         bot_module._invalidate_web_status_cache = lambda: apply_events.append('invalidate-web')
         bot_module._invalidate_key_status_cache = lambda: apply_events.append('invalidate-key')
         bot_module._resume_cancelled_pool_probe = lambda: apply_events.append('resume')
         bot_module._load_current_keys = lambda: {'vless': manual_uri}
+        bot_module._active_key_endpoint_healthy = lambda proto, key: False
         bot_module._refresh_status_caches_async = lambda keys, **kwargs: apply_events.append(('refresh', keys, kwargs))
-        bot_module._schedule_applied_pool_key_probe = lambda proto, key: (
-            apply_events.append(('applied-probe', proto, key)) or 'probe scheduled'
+        bot_module._schedule_applied_pool_key_probe = lambda proto, key, resume_pool_probe=False: (
+            apply_events.append(('applied-probe', proto, key, resume_pool_probe)) or 'probe scheduled'
         )
         assert bot_module._apply_manual_key_safely(
             'vless',
             manual_uri,
             source='test_manual',
             verify=False,
-        ) == 'installed\nprobe scheduled'
+        ) == 'paused\ninstalled\nprobe scheduled'
         assert apply_events[0] == 'pause'
         assert apply_events[1] == ('install', 'vless', manual_uri, False)
         assert ('active', 'vless', manual_uri) in apply_events
-        assert ('applied-probe', 'vless', manual_uri) in apply_events
-        assert 'resume' in apply_events
+        assert ('applied-probe', 'vless', manual_uri, True) in apply_events
+        assert 'resume' not in apply_events
         assert bot_module.pool_apply_lock.locked() is False
 
         apply_events.clear()
@@ -11787,12 +11811,33 @@ def test_telegram_bot_menu_button_smoke():
             'hysteria2',
             HYSTERIA2_KEY,
             source='test_hysteria2_manual',
-        ) == 'installed\nprobe scheduled'
+        ) == 'paused\ninstalled\nprobe scheduled'
         assert apply_events[0] == 'pause'
         assert apply_events[1] == ('install', 'hysteria2', HYSTERIA2_KEY, False)
         assert ('active', 'hysteria2', HYSTERIA2_KEY) in apply_events
-        assert 'resume' in apply_events
+        assert ('applied-probe', 'hysteria2', HYSTERIA2_KEY, True) in apply_events
+        assert 'resume' not in apply_events
         assert bot_module.pool_apply_lock.locked() is False
+
+        apply_events.clear()
+        bot_module._load_current_keys = lambda: {'vless': manual_uri}
+        bot_module._active_key_endpoint_healthy = lambda proto, key: True
+        assert 'без перезапуска' in bot_module._apply_manual_key_safely(
+            'vless',
+            manual_uri,
+            source='test_same_active',
+            verify=False,
+        )
+        assert not any(isinstance(event, tuple) and event[0] == 'install' for event in apply_events)
+        assert ('active', 'vless', manual_uri) in apply_events
+        assert ('applied-probe', 'vless', manual_uri, True) in apply_events
+
+        apply_events.clear()
+        bot_module._active_key_endpoint_healthy = lambda proto, key: False
+        assert bot_module._apply_pool_key('vless', manual_uri, schedule_probe=False) == 'paused\ninstalled'
+        assert ('install', 'vless', manual_uri, False) in apply_events
+        assert not any(isinstance(event, tuple) and event[0] == 'applied-probe' for event in apply_events)
+        assert 'resume' in apply_events
 
         bot_module._resolve_socialnet_service = lambda service_key: 'chrome_remote_desktop'
         bot_module._key_type_for_unblock_route = lambda list_name: 'vless'
@@ -13044,6 +13089,83 @@ def test_pool_probe_pause_never_forces_worker_without_durable_checkpoint():
     assert coordinator.snapshot()['checkpoint_ready'] is True
 
 
+def test_post_apply_runtime_keeps_latest_key_and_resumes_after_drain():
+    current = {'vless': 'old-key'}
+    ready_gate = threading.Event()
+    ready_seen = threading.Event()
+    calls = []
+    logs = []
+
+    def ready():
+        ready_seen.set()
+        return ready_gate.is_set()
+
+    coordinator = post_apply_runtime.PostApplyCoordinator(
+        current_matches=lambda proto, key: current.get(proto) == key,
+        ready=ready,
+        probe=lambda proto, key: calls.append(('probe', proto, key)) or {'youtube_ok': True},
+        prefetch=lambda proto, outcome: calls.append(('prefetch', proto, outcome)),
+        invalidate=lambda: calls.append(('invalidate',)),
+        resume_pool_probe=lambda: calls.append(('resume',)),
+        log=logs.append,
+        wait_timeout=1.0,
+        poll_seconds=0.01,
+    )
+    assert coordinator.schedule('vless', 'old-key', resume_pool_probe=True) == 'started'
+    assert ready_seen.wait(1.0)
+    current['vless'] = 'new-key'
+    assert coordinator.schedule('vless', 'new-key', resume_pool_probe=True) == 'queued'
+    ready_gate.set()
+    deadline = time.monotonic() + 2.0
+    while ('resume',) not in calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert coordinator.snapshot() == {
+        'running': False,
+        'pending_protocols': (),
+        'resume_requested': False,
+    }
+    assert calls == [
+        ('probe', 'vless', 'new-key'),
+        ('prefetch', 'vless', {'youtube_ok': True}),
+        ('invalidate',),
+        ('resume',),
+    ]
+    assert all('old-key' not in entry and 'new-key' not in entry for entry in logs)
+
+    timeout_calls = []
+    timeout_coordinator = post_apply_runtime.PostApplyCoordinator(
+        current_matches=lambda proto, key: True,
+        ready=lambda: False,
+        probe=lambda proto, key: timeout_calls.append(('probe', proto, key)),
+        resume_pool_probe=lambda: timeout_calls.append(('resume',)),
+        wait_timeout=0.01,
+        poll_seconds=0.01,
+    )
+    assert timeout_coordinator.schedule('vless2', 'timeout-key', resume_pool_probe=True) == 'started'
+    deadline = time.monotonic() + 1.0
+    while timeout_coordinator.snapshot()['running'] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert timeout_calls == [('resume',)]
+
+    class FailingThread:
+        def start(self):
+            raise RuntimeError('cannot start')
+
+    failed = post_apply_runtime.PostApplyCoordinator(
+        current_matches=lambda proto, key: True,
+        ready=lambda: True,
+        probe=lambda proto, key: None,
+        thread_factory=lambda **kwargs: FailingThread(),
+    )
+    with pytest.raises(RuntimeError, match='cannot start'):
+        failed.schedule('vless', 'never-logged-key', resume_pool_probe=True)
+    assert failed.snapshot() == {
+        'running': False,
+        'pending_protocols': (),
+        'resume_requested': False,
+    }
+
+
 def test_pool_probe_controller_helpers():
     progress = pool_probe_controller.PoolProbeProgress()
     assert progress.snapshot()['running'] is False
@@ -13094,7 +13216,7 @@ def test_pool_probe_controller_helpers():
     ) == [('vless', 'active')]
 
     applied_records = []
-    pool_probe_controller.check_pool_key_through_proxy(
+    applied_result = pool_probe_controller.check_pool_key_through_proxy(
         'vless',
         'active',
         [],
@@ -13111,6 +13233,11 @@ def test_pool_probe_controller_helpers():
     )
     assert len(applied_records) == 1
     assert applied_records[0][2]['verification_kind'] == 'runtime'
+    assert applied_result == {
+        'telegram_ok': True,
+        'youtube_ok': True,
+        'custom': None,
+    }
 
     state = {}
     invalidated = []

@@ -77,6 +77,7 @@ from proxy_apply_runtime import (
     apply_installed_proxy_runtime as _runtime_apply_installed_proxy,
     proxy_apply_settings as _runtime_proxy_apply_settings,
 )
+from post_apply_runtime import PostApplyCoordinator
 from proxy_status import (
     active_mode_status_signature as _status_active_mode_signature,
     cached_active_status as _status_cached_active_status,
@@ -1577,35 +1578,67 @@ def _install_key_for_protocol(proto, key_value, verify=True):
         _write_runtime_log(f'Key apply: protocol={proto} verify={int(bool(verify))} duration_ms={duration_ms}')
 
 
-def _apply_manual_key_safely(proto, key, *, source='manual_install', verify=False):
+def _active_key_endpoint_healthy(proto, key):
+    if not _post_apply_current_matches(proto, key):
+        return False
+    settings = _proxy_apply_settings().get(proto) or {}
+    port = settings.get('port')
+    if not port:
+        return False
+    endpoint_ok, _ = _check_local_proxy_endpoint(proto, port)
+    return bool(endpoint_ok)
+
+
+def _apply_manual_key_safely(
+    proto,
+    key,
+    *,
+    source='manual_install',
+    verify=False,
+    schedule_probe=True,
+):
     if proto not in PROXY_KEY_INSTALLERS:
         raise ValueError(f'Unsupported protocol: {proto}')
     pool_enabled = _app_mode_pool_enabled()
     acquired = False
     should_resume_probe = False
+    pause_note = ''
+    apply_completed = False
     if pool_enabled:
         acquired = pool_apply_lock.acquire(blocking=False)
         if not acquired:
             raise RuntimeError('Уже выполняется применение ключа. Дождитесь результата и повторите попытку.')
     try:
         if pool_enabled:
-            should_resume_probe, _ = _pause_pool_probe_for_apply()
-        result = _install_key_for_protocol(proto, key, verify=verify)
+            should_resume_probe, pause_note = _pause_pool_probe_for_apply()
+        same_active_key = bool(not verify and _active_key_endpoint_healthy(proto, key))
+        if same_active_key:
+            label = (_proxy_apply_settings().get(proto) or {}).get('label', proto)
+            result = f'✅ {label}: этот ключ уже активен, рабочий локальный прокси сохранён без перезапуска.'
+        else:
+            result = _install_key_for_protocol(proto, key, verify=verify)
         if pool_enabled:
             _set_active_key(proto, key)
-            _audit_key_switch(source, proto, key, 'manual install')
-            _schedule_youtube_key_apply_prefetch(proto)
+            reason = 'manual active key refresh' if same_active_key else 'manual install'
+            _audit_key_switch(source, proto, key, reason)
         _invalidate_web_status_cache()
         _invalidate_key_status_cache()
+        apply_completed = True
     finally:
         if acquired:
             pool_apply_lock.release()
-        if should_resume_probe:
+        if should_resume_probe and (not apply_completed or not schedule_probe):
             _resume_cancelled_pool_probe()
-    if pool_enabled:
-        probe_note = _schedule_applied_pool_key_probe(proto, key)
+    if pool_enabled and schedule_probe:
+        probe_note = _schedule_applied_pool_key_probe(
+            proto,
+            key,
+            resume_pool_probe=should_resume_probe,
+        )
         if probe_note:
             result = f'{result}\n{probe_note}'
+    if pause_note:
+        result = f'{pause_note}\n{result}'
     return result
 
 
@@ -3927,9 +3960,8 @@ subscription_auto_refresh_skip_log_at = {'rss': 0.0}
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
 pool_probe_cancel_event = threading.Event()
-applied_pool_probe_pending_lock = threading.Lock()
-applied_pool_probe_pending = {}
-applied_pool_probe_waiter = None
+post_apply_coordinator_lock = threading.Lock()
+post_apply_coordinator_instance = None
 pool_probe_resume_lock = threading.Lock()
 youtube_cache_confirm_lock = threading.Lock()
 vless2_youtube_cache_confirm_lock = youtube_cache_confirm_lock
@@ -5733,14 +5765,14 @@ def _youtube_edge_prefetch_skip_reason():
     return ''
 
 
-def _start_youtube_edge_prefetch_external(trigger='manual-fast-key-apply'):
+def _start_youtube_edge_prefetch_external(trigger='manual-fast-key-apply', *, wait=False, timeout=90.0):
     if not YOUTUBE_EDGE_PREFETCH_ENABLED or YOUTUBE_EDGE_PREFETCH_MODE != 'external':
         return False
     runner_path = os.path.join(BOT_DIR, 'youtube_edge_prefetch_runner.py')
     if not os.path.isfile(runner_path):
         return False
     try:
-        subprocess.Popen(
+        process = subprocess.Popen(
             [sys.executable or 'python3', runner_path, f'--trigger={trigger}'],
             cwd=BOT_DIR,
             stdin=subprocess.DEVNULL,
@@ -5748,7 +5780,19 @@ def _start_youtube_edge_prefetch_external(trigger='manual-fast-key-apply'):
             stderr=subprocess.DEVNULL,
             close_fds=True,
         )
-        return True
+        if not wait:
+            return True
+        try:
+            return process.wait(timeout=max(1.0, float(timeout or 90.0))) == 0
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3.0)
+            _write_runtime_log('YouTube edge prefetch external timed out after key apply.')
+            return False
     except Exception as exc:
         _write_runtime_log(f'YouTube edge prefetch external start failed: {type(exc).__name__}')
         return False
@@ -11075,41 +11119,23 @@ def _pool_key_by_callback_id(proto, key_id):
 
 
 def _apply_pool_key(proto, key_value, schedule_probe=True):
-    result = _install_key_for_protocol(proto, key_value, verify=False)
-    _set_active_key(proto, key_value)
-    _audit_key_switch('telegram_pool_apply', proto, key_value, 'manual pool apply')
-    _schedule_youtube_key_apply_prefetch(proto)
-    refreshed_status = _probe_applied_pool_key_services(proto, key_value)
-    _invalidate_web_status_cache()
-    _invalidate_key_status_cache()
-    if refreshed_status:
-        result = f'{result}\n{refreshed_status}'
-    return result
+    return _apply_manual_key_safely(
+        proto,
+        key_value,
+        source='telegram_pool_apply',
+        verify=False,
+        schedule_probe=schedule_probe,
+    )
 
 
 def _apply_pool_key_background(chat_id, proto, key_value, index, page=0):
     def worker():
-        if not pool_apply_lock.acquire(blocking=False):
-            bot.send_message(
-                chat_id,
-                'Уже выполняется применение ключа. Дождитесь результата и попробуйте снова.',
-                reply_markup=_pool_action_markup(proto, page),
-            )
-            return
-        should_resume_probe = False
         try:
-            should_resume_probe, pause_note = _pause_pool_probe_for_apply()
-            result = _apply_pool_key(proto, key_value, schedule_probe=not should_resume_probe)
+            result = _apply_pool_key(proto, key_value, schedule_probe=True)
             display_name = _pool_key_display_name(key_value)
             prefix = f'✅ Ключ #{index} «{display_name}» применён для {_pool_proto_label(proto)}.\n{result}'
-            if pause_note:
-                prefix = f'{pause_note}\n{prefix}'
         except Exception as exc:
             prefix = f'Ошибка применения ключа #{index} из пула {_pool_proto_label(proto)}: {exc}'
-        finally:
-            pool_apply_lock.release()
-            if should_resume_probe:
-                _resume_cancelled_pool_probe()
         _send_pool_page(chat_id, proto, page=page, prefix=prefix)
 
     threading.Thread(target=worker, daemon=True).start()
@@ -11371,7 +11397,9 @@ def _check_pool_key_through_proxy(
     proxy_url=None,
     record_key_probe=None,
     verification_kind='screening',
+    measure_quality=True,
 ):
+    quality_enabled = bool(POOL_PROBE_QUALITY_ENABLED and measure_quality)
     return _pool_probe_controller().check_pool_key_through_proxy(
         proto,
         key_value,
@@ -11387,8 +11415,8 @@ def _check_pool_key_through_proxy(
         http_retry_timeouts=(POOL_PROBE_RETRY_CONNECT_TIMEOUT, POOL_PROBE_RETRY_READ_TIMEOUT),
         telegram_required=_telegram_required_for_protocol(proto),
         youtube_profile=POOL_PROBE_YOUTUBE_PROFILE,
-        measure_download=_measure_limited_pool_probe_quality_download if POOL_PROBE_QUALITY_ENABLED else None,
-        quality_settings=_pool_probe_quality_settings(),
+        measure_download=_measure_limited_pool_probe_quality_download if quality_enabled else None,
+        quality_settings=_pool_probe_quality_settings() if quality_enabled else {'enabled': False},
         verification_kind=verification_kind,
     )
 
@@ -11410,100 +11438,102 @@ def _reset_failover_state_after_manual_apply(proto, key_value):
         state['active_key_id'] = key_id
 
 
-def _schedule_applied_pool_key_probe(proto, key_value):
-    global applied_pool_probe_waiter
+def _post_apply_current_matches(proto, key_value):
+    current_key = str(_load_current_keys().get(str(proto or '')) or '').strip()
+    return bool(current_key and _hash_key(current_key) == _hash_key(key_value))
+
+
+def _post_apply_ready():
+    if _update_maintenance_active() or pool_apply_lock.locked() or pool_probe_lock.locked():
+        return False
+    try:
+        return not bool(_youtube_edge_prefetch_snapshot().get('running'))
+    except Exception:
+        return True
+
+
+def _run_applied_key_live_probe(proto, key_value):
+    def record_if_current(record_proto, record_key, **kwargs):
+        if not _post_apply_current_matches(record_proto, record_key):
+            return False
+        return _record_key_probe(record_proto, record_key, **kwargs)
+
+    try:
+        return _check_pool_key_through_proxy(
+            proto,
+            key_value,
+            custom_checks=_load_custom_checks(),
+            proxy_url=proxy_settings.get(proto),
+            record_key_probe=record_if_current,
+            verification_kind='runtime',
+            measure_quality=str(proto or '') == _youtube_route_protocol(),
+        ) or {}
+    finally:
+        _memory_cleanup('applied key live probe', force=True, clear_status=False, log=False)
+
+
+def _run_post_apply_youtube_prefetch(proto, outcome):
+    if str(proto or '') != _youtube_route_protocol() or not isinstance(outcome, dict):
+        return False
+    if not outcome.get('telegram_ok') and not outcome.get('youtube_ok'):
+        return False
+    return _start_youtube_edge_prefetch_external(
+        'manual-fast-key-apply',
+        wait=True,
+        timeout=90.0,
+    )
+
+
+def _invalidate_post_apply_status():
+    _invalidate_web_status_cache()
+    _invalidate_key_status_cache()
+
+
+def _post_apply_coordinator():
+    global post_apply_coordinator_instance
+    if post_apply_coordinator_instance is not None:
+        return post_apply_coordinator_instance
+    with post_apply_coordinator_lock:
+        if post_apply_coordinator_instance is None:
+            post_apply_coordinator_instance = PostApplyCoordinator(
+                current_matches=_post_apply_current_matches,
+                ready=_post_apply_ready,
+                probe=_run_applied_key_live_probe,
+                prefetch=_run_post_apply_youtube_prefetch,
+                invalidate=_invalidate_post_apply_status,
+                resume_pool_probe=_resume_cancelled_pool_probe,
+                shutdown_event=shutdown_requested,
+                log=_write_runtime_log,
+            )
+    return post_apply_coordinator_instance
+
+
+def _schedule_applied_pool_key_probe(proto, key_value, *, resume_pool_probe=False):
     key_value = str(key_value or '').strip()
     if not key_value:
+        if resume_pool_probe:
+            _resume_cancelled_pool_probe()
         return ''
     _reset_failover_state_after_manual_apply(proto, key_value)
-
-    def start_probe():
-        started, queued = _probe_pool_keys_background(
+    try:
+        state = _post_apply_coordinator().schedule(
             proto,
-            [key_value],
-            max_keys=1,
-            stale_only=False,
-            scope='applied',
+            key_value,
+            resume_pool_probe=resume_pool_probe,
         )
-        if started or queued:
-            _invalidate_web_status_cache()
-            _invalidate_key_status_cache()
-        return started, queued
-
-    if not pool_probe_lock.locked():
-        try:
-            started, queued = start_probe()
-            if started:
-                return 'Статусы выбранного ключа обновляются фоновой runtime-проверкой.'
-            if queued:
-                return 'Runtime-проверка выбранного ключа уже выполняется.'
-            return 'Ключ применён; проверка сервисов не запускалась.'
-        except Exception as exc:
-            _write_runtime_log(f'Applied pool key background probe failed for {proto}: {exc}')
-            return f'⚠️ Ключ применён, но фоновую проверку сервисов не удалось запустить: {exc}'
-
-    with applied_pool_probe_pending_lock:
-        applied_pool_probe_pending[str(proto or '')] = (key_value, _hash_key(key_value))
-        if applied_pool_probe_waiter and applied_pool_probe_waiter.is_alive():
-            return 'Runtime-проверка выбранного ключа запланирована после текущей проверки пула.'
-
-        def wait_and_start():
-            global applied_pool_probe_waiter
-            deadline = time.time() + 120.0
-            while not shutdown_requested.is_set() and time.time() < deadline:
-                if pool_probe_lock.locked() or pool_apply_lock.locked():
-                    shutdown_requested.wait(0.5)
-                    continue
-                with applied_pool_probe_pending_lock:
-                    if not applied_pool_probe_pending:
-                        applied_pool_probe_waiter = None
-                        return
-                    pending = dict(applied_pool_probe_pending)
-                    applied_pool_probe_pending.clear()
-                retry = {}
-                for pending_proto, (pending_key, pending_id) in pending.items():
-                    current_key = str(_load_current_keys().get(pending_proto) or '').strip()
-                    if not current_key or _hash_key(current_key) != pending_id:
-                        continue
-                    try:
-                        started, queued = _probe_pool_keys_background(
-                            pending_proto,
-                            [pending_key],
-                            max_keys=1,
-                            stale_only=False,
-                            scope='applied',
-                        )
-                    except Exception as exc:
-                        _write_runtime_log(
-                            f'Queued applied pool key probe failed for {pending_proto}: {exc}'
-                        )
-                        started = queued = False
-                    if not started and not queued:
-                        retry[pending_proto] = (pending_key, pending_id)
-                if retry:
-                    with applied_pool_probe_pending_lock:
-                        applied_pool_probe_pending.update(retry)
-                    shutdown_requested.wait(2.0)
-                else:
-                    _invalidate_web_status_cache()
-                    _invalidate_key_status_cache()
-            with applied_pool_probe_pending_lock:
-                expired = len(applied_pool_probe_pending)
-                applied_pool_probe_pending.clear()
-                applied_pool_probe_waiter = None
-            if expired:
-                _write_runtime_log(
-                    f'Applied key runtime probe queue expired after 120 seconds; '
-                    f'{expired} superseded request(s) discarded.'
-                )
-
-        applied_pool_probe_waiter = threading.Thread(
-            target=wait_and_start,
-            name='applied-key-probe-waiter',
-            daemon=True,
-        )
-        applied_pool_probe_waiter.start()
-    return 'Runtime-проверка выбранного ключа запланирована после текущей проверки пула.'
+    except Exception as exc:
+        if resume_pool_probe:
+            _resume_cancelled_pool_probe()
+        _write_runtime_log(f'Applied key live probe scheduling failed for {proto}: {type(exc).__name__}')
+        return '⚠️ Ключ применён, но проверку сервисов не удалось запланировать.'
+    _invalidate_post_apply_status()
+    if state == 'started':
+        return 'Статусы выбранного ключа обновляются через его рабочее подключение.'
+    if state == 'queued':
+        return 'Проверка выбранного ключа поставлена в компактную очередь.'
+    if resume_pool_probe:
+        _resume_cancelled_pool_probe()
+    return 'Ключ применён; проверка сервисов не запускалась.'
 
 
 def _probe_applied_pool_key_services(proto, key_value):

@@ -340,25 +340,32 @@ def check_pool_key_through_proxy(
         verification_kind=verification_kind,
         **quality_kwargs,
     )
+    custom_results = None
     if custom_checks and not tg_ok and not yt_ok:
+        custom_results = failed_custom_probe_results(custom_checks)
         record_key_probe(
             proto,
             key_value,
-            custom=failed_custom_probe_results(custom_checks),
+            custom=custom_results,
             custom_checks=custom_checks,
             allow_recent_success_downgrade=True,
             verification_kind=verification_kind,
         )
-        return
-    if custom_checks:
+    elif custom_checks:
+        custom_results = probe_custom_targets(proxy_url, custom_checks=custom_checks)
         record_key_probe(
             proto,
             key_value,
-            custom=probe_custom_targets(proxy_url, custom_checks=custom_checks),
+            custom=custom_results,
             custom_checks=custom_checks,
             allow_recent_success_downgrade=True,
             verification_kind=verification_kind,
         )
+    return {
+        'telegram_ok': bool(tg_ok),
+        'youtube_ok': bool(yt_ok),
+        'custom': custom_results,
+    }
 
 
 def select_pool_probe_tasks(tasks, *, protocol_order, custom_checks, cache, hash_key, is_fresh, max_keys=None, stale_only=False, now=None):
