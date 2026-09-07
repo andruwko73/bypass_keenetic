@@ -3922,6 +3922,15 @@ router_health = router_health_runtime.RouterHealthRuntime(
     ndmc_cache_ttl=ROUTER_HEALTH_NDMC_CACHE_TTL,
     related_process_cache_ttl=ROUTER_HEALTH_RELATED_PROCESS_CACHE_TTL,
     cpu_smoothing_factor=ROUTER_HEALTH_CPU_SMOOTHING_FACTOR,
+    memory_limits={
+        'slow_available_kb': POOL_PROBE_SLOW_AVAILABLE_KB,
+        'pause_available_kb': POOL_PROBE_PAUSE_AVAILABLE_KB,
+        'critical_available_kb': SUBSCRIPTION_AUTO_REFRESH_MIN_AVAILABLE_KB,
+        'background_bot_rss_kb': BACKGROUND_TASK_MAX_BOT_RSS_KB,
+        'background_program_rss_kb': BACKGROUND_TASK_MAX_PROGRAM_RSS_KB,
+        'watchdog_soft_bot_rss_kb': MEMORY_WATCHDOG_RSS_SOFT_KB,
+        'watchdog_hard_bot_rss_kb': MEMORY_WATCHDOG_RSS_LIMIT_KB,
+    },
 )
 router_metrics_runtime = router_metrics.RouterMetricsRuntime(
     history_limit=ROUTER_METRICS_HISTORY_LIMIT,
@@ -6074,13 +6083,7 @@ def _program_rss_kb(probe_running=None):
             related = {}
     if not isinstance(related, dict):
         return total
-    for key in (
-        'xray_rss_kb',
-        'pool_worker_rss_kb',
-        'temporary_xray_rss_kb',
-        'youtube_prefetch_rss_kb',
-        'background_worker_rss_kb',
-    ):
+    for key in router_health_runtime.RESOURCE_GUARD_RSS_FIELDS:
         try:
             total += int(related.get(key) or 0)
         except Exception:

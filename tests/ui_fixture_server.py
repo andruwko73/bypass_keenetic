@@ -295,12 +295,15 @@ def _live_protocol_statuses():
 
 def _router_health():
     return {
-        "memory_text": "Память: доступно 256 МБ, занято 256 МБ из 512 МБ (50%)",
+        "memory_text": "Память: доступно 148 МБ, занято 338 МБ из 486 МБ (70%)",
         "note": "Нагрузка CPU: 2%\nПрограмма использует 42 МБ ОЗУ; Flash-носитель: занято 384 из 1024 МБ (38%)",
         "dns_note": "DNS: ndnproxy; S56dnsmasq не используется; ipset обновлён: 1 мин назад; записи ipset: VLESS=488, VLESSUDP=187, VLESS2=340, VLESS2UDP=328, VMESS=0, VMESSUDP=0, Trojan=0, TrojanUDP=0, ShadowSocks=0, ShadowSocksUDP=0",
         "core_proxy_note": "Прокси: Xray работает на портах: 10811, 10812, 10813, 10814",
         "telegram_call_note": "Звонки через TPROXY работают для Telegram/WhatsApp/Discord на порте: Vless 11812",
-        "used_percent": 50,
+        "used_percent": 70,
+        "memory_state": "economy",
+        "memory_tone": "info",
+        "memory_reason": "Доступно 148 МБ; ресурсоёмкие фоновые проверки работают в экономичном режиме",
         "flash_storage_path": "/opt",
         "flash_total_kb": 1024 * 1024,
         "flash_used_kb": 384 * 1024,

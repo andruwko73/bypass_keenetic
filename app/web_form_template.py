@@ -124,10 +124,12 @@ def _attention_items(status, router_health, pool_summary_note, enable_key_pool, 
     status = status or {}
     router_health = router_health or {}
     used_percent = _safe_percent(router_health.get('used_percent'))
-    if used_percent >= 85:
-        items.append(('danger', 'Память роутера почти заполнена', f'Сейчас занято {used_percent}%; лучше остановить проверку пула или перезапустить сервис'))
-    elif used_percent >= 70:
-        items.append(('warn', 'Память роутера под нагрузкой', f'Сейчас занято {used_percent}%; проверку большого пула стоит запускать осторожно'))
+    memory_tone = str(router_health.get('memory_tone') or '').strip().lower()
+    memory_reason = str(router_health.get('memory_reason') or '').strip()
+    if memory_tone == 'danger':
+        items.append(('danger', 'Память роутера почти заполнена', memory_reason or f'Сейчас занято {used_percent}%'))
+    elif memory_tone == 'warn':
+        items.append(('warn', 'Памяти становится мало', memory_reason or f'Сейчас занято {used_percent}%'))
 
     api_status = str(status.get('api_status') or '').strip()
     if enable_telegram and _api_status_requires_attention(api_status):
@@ -276,7 +278,14 @@ def render_web_form(
     router_core_proxy_note = html.escape(_display_note_text(router_health.get('core_proxy_note') or ''))
     router_telegram_call_note = html.escape(_display_note_text(router_health.get('telegram_call_note') or ''))
     router_memory_percent = _safe_percent(router_health.get('used_percent'))
-    router_memory_tone = ' danger' if router_memory_percent >= 85 else ' warn' if router_memory_percent >= 70 else ''
+    router_memory_status_tone = str(router_health.get('memory_tone') or '').strip().lower()
+    router_memory_tone = f' {router_memory_status_tone}' if router_memory_status_tone in ('warn', 'danger') else ''
+    router_memory_reason = str(router_health.get('memory_reason') or '').strip()
+    router_memory_title = html.escape(
+        f'Занято памяти: {router_memory_percent}%'
+        + (f'. {router_memory_reason}' if router_memory_reason else ''),
+        quote=True,
+    )
     keys_view_subtitle = (
         'Выберите протокол, сохраните активный ключ или управляйте его пулом'
         if enable_key_pool else
@@ -522,7 +531,7 @@ def render_web_form(
                                     <div class="status-copy">
                                         <span class="status-label">Роутер</span>
                                         <span class="status-value" id="router-memory-text">{router_memory_text}</span>
-                                        <div class="health-meter{router_memory_tone}" id="router-memory-meter" title="Занято памяти: {router_memory_percent}%">
+                                        <div class="health-meter{router_memory_tone}" id="router-memory-meter" title="{router_memory_title}">
                                             <span style="width:{router_memory_percent}%"></span>
                                         </div>
                                         <p class="status-note" id="router-health-note">{router_health_note}</p>

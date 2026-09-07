@@ -384,6 +384,52 @@ def test_router_health_runtime_payload_uses_stable_cpu_label_before_first_sample
     assert '\n\n' not in payload['note']
 
 
+def test_router_health_memory_pressure_uses_absolute_guards_not_used_percent():
+    payload = router_health_runtime.build_router_health_payload(
+        meminfo={
+            'MemTotal': 486 * 1024,
+            'MemFree': 60 * 1024,
+            'MemAvailable': 148 * 1024,
+        },
+        ndmc_system={},
+        load_text='0.10 / 0.08 / 0.06',
+        bot_rss_kb=75 * 1024,
+        xray_rss_kb=30 * 1024,
+        probe_progress={'running': False, 'total': 0},
+        temp_xray_count=0,
+    )
+    assert payload['memory_text'] == 'Память: доступно 148 МБ, занято 338 МБ из 486 МБ (70%)'
+    assert payload['used_percent'] == 70
+    assert payload['memory_state'] == 'economy'
+    assert payload['memory_tone'] == 'info'
+    assert payload['memory_guard_active'] is True
+    assert payload['memory_headroom_kb'] == (148 * 1024) - 125000
+    assert 'экономичном режиме' in payload['memory_reason']
+
+    base = {'bot_rss_kb': 60 * 1024, 'guard_program_rss_kb': 90 * 1024}
+    assert router_health_runtime.classify_memory_pressure(available_kb=190000, **base)['state'] == 'normal'
+    assert router_health_runtime.classify_memory_pressure(available_kb=189999, **base)['state'] == 'economy'
+    assert router_health_runtime.classify_memory_pressure(available_kb=125000, **base)['state'] == 'economy'
+    assert router_health_runtime.classify_memory_pressure(available_kb=124999, **base)['state'] == 'warning'
+    assert router_health_runtime.classify_memory_pressure(available_kb=92160, **base)['state'] == 'warning'
+    assert router_health_runtime.classify_memory_pressure(available_kb=92159, **base)['state'] == 'danger'
+    assert router_health_runtime.classify_memory_pressure(
+        available_kb=200000,
+        bot_rss_kb=85 * 1024,
+        guard_program_rss_kb=90 * 1024,
+    )['state'] == 'warning'
+    assert router_health_runtime.classify_memory_pressure(
+        available_kb=200000,
+        bot_rss_kb=110 * 1024,
+        guard_program_rss_kb=120 * 1024,
+    )['state'] == 'danger'
+    assert router_health_runtime.classify_memory_pressure(
+        available_kb=200000,
+        bot_rss_kb=60 * 1024,
+        guard_program_rss_kb=100 * 1024,
+    )['state'] == 'economy'
+
+
 def test_router_health_runtime_payload_marks_proc_fallbacks_explicitly():
     payload = router_health_runtime.build_router_health_payload(
         meminfo={
@@ -421,6 +467,8 @@ def test_router_health_runtime_program_rss_includes_related_processes():
         cpu_percent=53.28,
         bot_rss_kb=63 * 1024,
         xray_rss_kb=24 * 1024,
+        shadowsocks_rss_kb=2 * 1024,
+        trojan_rss_kb=6 * 1024,
         pool_worker_rss_kb=38 * 1024,
         temporary_xray_rss_kb=18 * 1024,
         youtube_prefetch_rss_kb=14 * 1024,
@@ -429,8 +477,11 @@ def test_router_health_runtime_program_rss_includes_related_processes():
         temp_xray_count=1,
         flash_storage={'path': '/opt', 'total_kb': 29527 * 1024, 'used_kb': 774 * 1024, 'free_kb': 28753 * 1024},
     )
-    assert payload['program_rss_kb'] == 164 * 1024
+    assert payload['program_rss_kb'] == 172 * 1024
+    assert payload['guard_program_rss_kb'] == 164 * 1024
     assert payload['xray_rss_kb'] == 24 * 1024
+    assert payload['shadowsocks_rss_kb'] == 2 * 1024
+    assert payload['trojan_rss_kb'] == 6 * 1024
     assert payload['pool_worker_rss_kb'] == 38 * 1024
     assert payload['temporary_xray_rss_kb'] == 18 * 1024
     assert payload['youtube_prefetch_rss_kb'] == 14 * 1024
@@ -438,7 +489,7 @@ def test_router_health_runtime_program_rss_includes_related_processes():
     assert payload['memory_text'] == 'Память: доступно 160 МБ, занято 352 МБ из 512 МБ (69%)'
     assert payload['available_kb'] + payload['used_kb'] == payload['total_kb']
     assert payload['note'].splitlines()[0] == 'Нагрузка CPU: 53.28%'
-    assert 'Программа использует 164 МБ ОЗУ: бот 63 МБ, Xray 24 МБ, проверка пула 38 МБ, временный Xray 18 МБ, YouTube prefetch 14 МБ, фоновые задачи 7 МБ' in payload['note']
+    assert 'Программа использует 172 МБ ОЗУ: бот 63 МБ, Xray 24 МБ, Trojan 6 МБ, Shadowsocks 2 МБ, проверка пула 38 МБ, временный Xray 18 МБ, YouTube prefetch 14 МБ, фоновые задачи 7 МБ' in payload['note']
     assert 'Flash-носитель: занято 774 из 29527 МБ (3%)' in payload['note']
     assert '\n\n' not in payload['note']
 
@@ -759,6 +810,10 @@ def test_router_health_runtime_related_process_snapshot():
     add_proc(104, 'python3\x00/opt/etc/bot/main.py\x00', 64000)
     add_proc(105, 'python3\x00/opt/etc/bot/youtube_edge_prefetch_runner.py\x00--trigger\x00ipset-refresh\x00', 14000)
     add_proc(106, 'python3\x00-c\x00BYPASS_KEENETIC_COMMAND_WORKER=1 other worker\x00', 7000)
+    add_proc(107, 'ss-redir\x00-c\x00/opt/etc/shadowsocks.json\x00', 1500)
+    add_proc(108, 'trojan\x00', 5600)
+    add_proc(109, 'trojan-helper\x00', 9000)
+    add_proc(110, 'python3\x00-c\x00print("xray /opt/etc/xray/config.json")\x00', 9000)
 
     def fake_read(path, max_bytes=16384):
         return Path(path).read_text(encoding='utf-8')
@@ -771,6 +826,10 @@ def test_router_health_runtime_related_process_snapshot():
     assert snapshot == {
         'xray_count': 1,
         'xray_rss_kb': 24000,
+        'shadowsocks_count': 1,
+        'shadowsocks_rss_kb': 1500,
+        'trojan_count': 1,
+        'trojan_rss_kb': 5600,
         'pool_worker_count': 1,
         'pool_worker_rss_kb': 38000,
         'temporary_xray_count': 1,
@@ -17089,6 +17148,25 @@ def test_web_template_styles_helpers():
     assert 'repeating-linear-gradient' not in styles
     assert '{TELEGRAM_SVG_B64}' not in styles
     assert '{{' not in styles
+
+
+def test_router_memory_attention_uses_backend_pressure_tone():
+    economy = {'used_percent': 70, 'memory_tone': 'info', 'memory_reason': 'Экономичный режим'}
+    items = web_form_template._attention_items({}, economy, '', False, enable_telegram=False)
+    assert items == [('ok', 'Проблем не найдено', 'Память роутера в норме, веб-интерфейс готов к работе')]
+    assert web_form_template._topbar_status_item(
+        {}, economy, '', False, enable_telegram=False
+    ) == ('ok', 'Проблем не найдено', 'Память роутера в норме, веб-интерфейс готов к работе')
+
+    warning = {'used_percent': 76, 'memory_tone': 'warn', 'memory_reason': 'Проверка пула приостановлена'}
+    assert web_form_template._attention_items(
+        {}, warning, '', False, enable_telegram=False
+    )[0] == ('warn', 'Памяти становится мало', 'Проверка пула приостановлена')
+
+    danger = {'used_percent': 84, 'memory_tone': 'danger', 'memory_reason': 'Ниже критического порога'}
+    assert web_form_template._attention_items(
+        {}, danger, '', False, enable_telegram=False
+    )[0] == ('danger', 'Память роутера почти заполнена', 'Ниже критического порога')
 
 
 def test_probe_cache_update_entry_min_interval():

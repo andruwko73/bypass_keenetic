@@ -2894,10 +2894,12 @@
 
             const health = snapshot.router_health || {};
             const usedPercent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));
-            if (usedPercent >= 85) {
-                return ['danger', 'Память роутера почти заполнена', 'Сейчас занято ' + usedPercent + '%; лучше остановить проверку пула или перезапустить сервис', botReady];
-            } else if (usedPercent >= 70) {
-                return ['warn', 'Память роутера под нагрузкой', 'Сейчас занято ' + usedPercent + '%; проверку большого пула стоит запускать осторожно', botReady];
+            const memoryTone = String(health.memory_tone || '').trim().toLowerCase();
+            const memoryReason = String(health.memory_reason || '').trim();
+            if (memoryTone === 'danger') {
+                return ['danger', 'Память роутера почти заполнена', memoryReason || ('Сейчас занято ' + usedPercent + '%'), botReady];
+            } else if (memoryTone === 'warn') {
+                return ['warn', 'Памяти становится мало', memoryReason || ('Сейчас занято ' + usedPercent + '%'), botReady];
             }
             const web = snapshot.web || {};
             const apiStatus = String(web.api_status || '').trim();
@@ -2974,10 +2976,12 @@
             const meter = document.getElementById('router-memory-meter');
             if (meter) {
                 const percent = Math.max(0, Math.min(100, Number(health.used_percent || 0)));
+                const tone = String(health.memory_tone || '').trim().toLowerCase();
+                const reason = String(health.memory_reason || '').trim();
                 const fill = meter.querySelector('span');
-                meter.classList.toggle('warn', percent >= 70 && percent < 85);
-                meter.classList.toggle('danger', percent >= 85);
-                meter.setAttribute('title', 'Занято памяти: ' + percent + '%');
+                meter.classList.toggle('warn', tone === 'warn');
+                meter.classList.toggle('danger', tone === 'danger');
+                meter.setAttribute('title', 'Занято памяти: ' + percent + '%' + (reason ? '. ' + reason : ''));
                 if (fill) {
                     fill.style.width = percent + '%';
                 }

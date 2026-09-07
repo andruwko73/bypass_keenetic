@@ -982,6 +982,20 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
   await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
+  const memoryMeter = page.locator('#router-memory-meter');
+  await assertVisibleBox(page, '#router-memory-meter', `${name} router memory meter`);
+  const memoryMeterClass = await memoryMeter.getAttribute('class') || '';
+  if (memoryMeterClass.includes('warn') || memoryMeterClass.includes('danger')) {
+    throw new Error(`${name}: healthy economy state at 70% must stay neutral, got ${memoryMeterClass}`);
+  }
+  const memoryMeterWidth = await memoryMeter.locator('span').evaluate((node) => node.style.width);
+  if (memoryMeterWidth !== '70%') {
+    throw new Error(`${name}: memory meter must preserve the real used percentage, got ${memoryMeterWidth}`);
+  }
+  const memoryMeterTitle = await memoryMeter.getAttribute('title') || '';
+  if (!memoryMeterTitle.includes('экономичном режиме')) {
+    throw new Error(`${name}: memory meter must explain the neutral economy state, got ${memoryMeterTitle}`);
+  }
   if (await page.locator('#youtube-failover-note, [data-youtube-failover-card]').count() !== 0) {
     throw new Error(`${name}: automatic failover diagnostics must not be rendered in the web interface`);
   }

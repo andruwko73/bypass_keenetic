@@ -91,6 +91,38 @@ TELEGRAM_CALL_PROTOCOL_LABELS = {
 }
 REALTIME_CALL_SERVICE_LABELS = ('Telegram', 'WhatsApp', 'Discord')
 
+RELATED_PROCESS_RSS_FIELDS = (
+    'xray_rss_kb',
+    'shadowsocks_rss_kb',
+    'trojan_rss_kb',
+    'pool_worker_rss_kb',
+    'temporary_xray_rss_kb',
+    'youtube_prefetch_rss_kb',
+    'background_worker_rss_kb',
+)
+RESOURCE_GUARD_RSS_FIELDS = (
+    'xray_rss_kb',
+    'pool_worker_rss_kb',
+    'temporary_xray_rss_kb',
+    'youtube_prefetch_rss_kb',
+    'background_worker_rss_kb',
+)
+DEFAULT_MEMORY_PRESSURE_LIMITS = {
+    'slow_available_kb': 190000,
+    'pause_available_kb': 125000,
+    'critical_available_kb': 90 * 1024,
+    'background_bot_rss_kb': 65 * 1024,
+    'background_program_rss_kb': 100 * 1024,
+    'watchdog_soft_bot_rss_kb': 85 * 1024,
+    'watchdog_hard_bot_rss_kb': 110 * 1024,
+}
+MEMORY_STATE_LABELS = {
+    'normal': 'Запас памяти достаточный',
+    'economy': 'Экономичный режим',
+    'warning': 'Памяти становится мало',
+    'danger': 'Критически мало памяти',
+}
+
 
 def read_proc_text(path, max_bytes=16384):
     try:
@@ -257,6 +289,46 @@ def process_rss_kb(pid='self', read_text=read_proc_text):
     return parse_process_rss_kb(read_text(f'/proc/{pid}/status'))
 
 
+def _related_process_kind(cmdline):
+    normalized = str(cmdline or '').replace('\x00', ' ').strip()
+    if not normalized:
+        return ''
+    tokens = normalized.split()
+    executable = os.path.basename(tokens[0]) if tokens else ''
+    if executable in ('xray', 'v2ray') and '/opt/etc/xray/config.json' in tokens:
+        return 'xray'
+    if executable in ('xray', 'v2ray') and any(
+        token.startswith('/tmp/bypass_pool_probe_') for token in tokens
+    ):
+        return 'temporary_xray'
+    if executable == 'ss-redir' and '/opt/etc/shadowsocks.json' in tokens:
+        return 'shadowsocks'
+    if executable == 'trojan':
+        return 'trojan'
+    if 'youtube_edge_prefetch_runner.py' in normalized:
+        return 'youtube_prefetch'
+    if (
+        'BYPASS_KEENETIC_POOL_PROBE_WORKER' in normalized or
+        '_run_pool_probe_process_worker' in normalized
+    ):
+        return 'pool_worker'
+    if 'BYPASS_KEENETIC_COMMAND_WORKER' in normalized:
+        return 'background_worker'
+    return ''
+
+
+def sum_program_rss_kb(bot_rss_kb, related_processes, *, include_persistent_proxies=True):
+    total = max(0, int(bot_rss_kb or 0))
+    related_processes = related_processes if isinstance(related_processes, dict) else {}
+    fields = RELATED_PROCESS_RSS_FIELDS if include_persistent_proxies else RESOURCE_GUARD_RSS_FIELDS
+    for field in fields:
+        try:
+            total += max(0, int(related_processes.get(field) or 0))
+        except Exception:
+            pass
+    return total
+
+
 def related_program_process_snapshot(
     *,
     probe_running=False,
@@ -266,6 +338,10 @@ def related_program_process_snapshot(
     result = {
         'xray_count': 0,
         'xray_rss_kb': 0,
+        'shadowsocks_count': 0,
+        'shadowsocks_rss_kb': 0,
+        'trojan_count': 0,
+        'trojan_rss_kb': 0,
         'pool_worker_count': 0,
         'pool_worker_rss_kb': 0,
         'temporary_xray_count': 0,
@@ -285,21 +361,7 @@ def related_program_process_snapshot(
         cmdline = read_text(os.path.join(proc_root, name, 'cmdline'), max_bytes=2048)
         if not cmdline:
             continue
-        normalized = cmdline.replace('\x00', ' ')
-        snapshot_key = ''
-        if 'xray' in normalized and '/opt/etc/xray/config.json' in normalized:
-            snapshot_key = 'xray'
-        elif 'xray' in normalized and '/tmp/bypass_pool_probe_' in normalized:
-            snapshot_key = 'temporary_xray'
-        elif 'youtube_edge_prefetch_runner.py' in normalized:
-            snapshot_key = 'youtube_prefetch'
-        elif (
-            'BYPASS_KEENETIC_POOL_PROBE_WORKER' in normalized or
-            '_run_pool_probe_process_worker' in normalized
-        ):
-            snapshot_key = 'pool_worker'
-        elif 'BYPASS_KEENETIC_COMMAND_WORKER' in normalized:
-            snapshot_key = 'background_worker'
+        snapshot_key = _related_process_kind(cmdline)
         if snapshot_key:
             rss_kb = parse_process_rss_kb(read_text(os.path.join(proc_root, name, 'status'))) or 0
             result[f'{snapshot_key}_count'] += 1
@@ -659,6 +721,98 @@ def _format_cpu_percent(cpu_percent):
     return f'{text}%'
 
 
+def _memory_pressure_limits(overrides=None):
+    limits = dict(DEFAULT_MEMORY_PRESSURE_LIMITS)
+    if isinstance(overrides, dict):
+        for key in tuple(limits):
+            if key not in overrides:
+                continue
+            try:
+                limits[key] = max(0, int(overrides.get(key) or 0))
+            except Exception:
+                pass
+    return limits
+
+
+def classify_memory_pressure(
+    *,
+    available_kb,
+    bot_rss_kb,
+    guard_program_rss_kb,
+    limits=None,
+):
+    limits = _memory_pressure_limits(limits)
+    available_kb = max(0, int(available_kb or 0))
+    bot_rss_kb = max(0, int(bot_rss_kb or 0))
+    guard_program_rss_kb = max(0, int(guard_program_rss_kb or 0))
+    slow_available_kb = limits['slow_available_kb']
+    pause_available_kb = limits['pause_available_kb']
+    critical_available_kb = limits['critical_available_kb']
+    watchdog_soft_kb = limits['watchdog_soft_bot_rss_kb']
+    watchdog_hard_kb = limits['watchdog_hard_bot_rss_kb']
+    background_bot_rss_kb = limits['background_bot_rss_kb']
+    background_program_rss_kb = limits['background_program_rss_kb']
+
+    if critical_available_kb and available_kb and available_kb < critical_available_kb:
+        state = 'danger'
+        reason = (
+            f'Доступно {int(round(available_kb / 1024.0))} МБ — '
+            f'ниже критического порога {int(round(critical_available_kb / 1024.0))} МБ'
+        )
+    elif watchdog_hard_kb and bot_rss_kb >= watchdog_hard_kb:
+        state = 'danger'
+        reason = (
+            f'Бот использует {int(round(bot_rss_kb / 1024.0))} МБ — '
+            f'достигнут жёсткий порог {int(round(watchdog_hard_kb / 1024.0))} МБ'
+        )
+    elif pause_available_kb and available_kb and available_kb < pause_available_kb:
+        state = 'warning'
+        reason = (
+            f'Доступно {int(round(available_kb / 1024.0))} МБ — '
+            f'проверка пула приостанавливается ниже {int(round(pause_available_kb / 1024.0))} МБ'
+        )
+    elif watchdog_soft_kb and bot_rss_kb >= watchdog_soft_kb:
+        state = 'warning'
+        reason = (
+            f'Бот использует {int(round(bot_rss_kb / 1024.0))} МБ — '
+            f'включена очистка памяти от {int(round(watchdog_soft_kb / 1024.0))} МБ'
+        )
+    elif slow_available_kb and available_kb and available_kb < slow_available_kb:
+        state = 'economy'
+        reason = (
+            f'Доступно {int(round(available_kb / 1024.0))} МБ; '
+            'ресурсоёмкие фоновые проверки работают в экономичном режиме'
+        )
+    elif (
+        (background_bot_rss_kb and bot_rss_kb >= background_bot_rss_kb) or
+        (background_program_rss_kb and guard_program_rss_kb >= background_program_rss_kb)
+    ):
+        state = 'economy'
+        reason = 'Необязательные фоновые задачи ограничены по RSS'
+    else:
+        state = 'normal'
+        reason = 'Запас памяти достаточный'
+
+    tone = {
+        'normal': 'ok',
+        'economy': 'info',
+        'warning': 'warn',
+        'danger': 'danger',
+    }[state]
+    headroom_kb = available_kb - pause_available_kb if available_kb and pause_available_kb else 0
+    return {
+        'state': state,
+        'tone': tone,
+        'label': MEMORY_STATE_LABELS[state],
+        'reason': reason,
+        'guard_active': state != 'normal',
+        'headroom_kb': headroom_kb,
+        'slow_available_kb': slow_available_kb,
+        'pause_available_kb': pause_available_kb,
+        'critical_available_kb': critical_available_kb,
+    }
+
+
 def build_router_health_payload(
     *,
     meminfo,
@@ -668,6 +822,8 @@ def build_router_health_payload(
     probe_progress,
     temp_xray_count,
     xray_rss_kb=0,
+    shadowsocks_rss_kb=0,
+    trojan_rss_kb=0,
     pool_worker_rss_kb=0,
     temporary_xray_rss_kb=0,
     youtube_prefetch_rss_kb=0,
@@ -676,6 +832,7 @@ def build_router_health_payload(
     core_proxy_health=None,
     cpu_percent=None,
     flash_storage=None,
+    memory_limits=None,
 ):
     meminfo = meminfo or {}
     ndmc_system = ndmc_system or {}
@@ -740,22 +897,33 @@ def build_router_health_payload(
     else:
         router_details.append('Нагрузка CPU: -')
     xray_rss_kb = int(xray_rss_kb or 0)
+    shadowsocks_rss_kb = int(shadowsocks_rss_kb or 0)
+    trojan_rss_kb = int(trojan_rss_kb or 0)
     pool_worker_rss_kb = int(pool_worker_rss_kb or 0)
     temporary_xray_rss_kb = int(temporary_xray_rss_kb or 0)
     youtube_prefetch_rss_kb = int(youtube_prefetch_rss_kb or 0)
     background_worker_rss_kb = int(background_worker_rss_kb or 0)
     xray_rss_mb = int(round(xray_rss_kb / 1024.0)) if xray_rss_kb else 0
+    shadowsocks_rss_mb = int(round(shadowsocks_rss_kb / 1024.0)) if shadowsocks_rss_kb else 0
+    trojan_rss_mb = int(round(trojan_rss_kb / 1024.0)) if trojan_rss_kb else 0
     pool_worker_rss_mb = int(round(pool_worker_rss_kb / 1024.0)) if pool_worker_rss_kb else 0
     temporary_xray_rss_mb = int(round(temporary_xray_rss_kb / 1024.0)) if temporary_xray_rss_kb else 0
     youtube_prefetch_rss_mb = int(round(youtube_prefetch_rss_kb / 1024.0)) if youtube_prefetch_rss_kb else 0
     background_worker_rss_mb = int(round(background_worker_rss_kb / 1024.0)) if background_worker_rss_kb else 0
-    program_rss_kb = (
-        int(bot_rss_kb or 0) +
-        xray_rss_kb +
-        pool_worker_rss_kb +
-        temporary_xray_rss_kb +
-        youtube_prefetch_rss_kb +
-        background_worker_rss_kb
+    related_processes = {
+        'xray_rss_kb': xray_rss_kb,
+        'shadowsocks_rss_kb': shadowsocks_rss_kb,
+        'trojan_rss_kb': trojan_rss_kb,
+        'pool_worker_rss_kb': pool_worker_rss_kb,
+        'temporary_xray_rss_kb': temporary_xray_rss_kb,
+        'youtube_prefetch_rss_kb': youtube_prefetch_rss_kb,
+        'background_worker_rss_kb': background_worker_rss_kb,
+    }
+    program_rss_kb = sum_program_rss_kb(bot_rss_kb, related_processes)
+    guard_program_rss_kb = sum_program_rss_kb(
+        bot_rss_kb,
+        related_processes,
+        include_persistent_proxies=False,
     )
     program_rss_mb = int(round(program_rss_kb / 1024.0)) if program_rss_kb else 0
     program_parts = []
@@ -763,6 +931,10 @@ def build_router_health_payload(
         program_parts.append(f'бот {bot_rss_mb} МБ')
     if xray_rss_mb:
         program_parts.append(f'Xray {xray_rss_mb} МБ')
+    if trojan_rss_mb:
+        program_parts.append(f'Trojan {trojan_rss_mb} МБ')
+    if shadowsocks_rss_mb:
+        program_parts.append(f'Shadowsocks {shadowsocks_rss_mb} МБ')
     if pool_worker_rss_mb:
         program_parts.append(f'проверка пула {pool_worker_rss_mb} МБ')
     if temporary_xray_rss_mb:
@@ -781,6 +953,12 @@ def build_router_health_payload(
             program_details.append(f'Программа использует {program_rss_mb} МБ ОЗУ')
     if flash_total_mb:
         program_details.append(f'Flash-носитель: занято {flash_used_mb} из {flash_total_mb} МБ ({flash_used_percent}%)')
+    memory_pressure = classify_memory_pressure(
+        available_kb=available_kb,
+        bot_rss_kb=bot_rss_kb,
+        guard_program_rss_kb=guard_program_rss_kb,
+        limits=memory_limits,
+    )
     dns_note = dns_health_note(dns_health)
     core_proxy_health = core_proxy_health or {}
     if xray_compat_runtime is not None and core_proxy_health:
@@ -813,6 +991,15 @@ def build_router_health_payload(
         'proc_total_kb': total_kb,
         'router_total_kb': router_total_kb,
         'used_percent': used_percent,
+        'memory_state': memory_pressure['state'],
+        'memory_tone': memory_pressure['tone'],
+        'memory_state_label': memory_pressure['label'],
+        'memory_reason': memory_pressure['reason'],
+        'memory_guard_active': memory_pressure['guard_active'],
+        'memory_headroom_kb': memory_pressure['headroom_kb'],
+        'memory_slow_available_kb': memory_pressure['slow_available_kb'],
+        'memory_pause_available_kb': memory_pressure['pause_available_kb'],
+        'memory_critical_available_kb': memory_pressure['critical_available_kb'],
         'linux_cache_kb': linux_cache_kb,
         'router_cache_kb': display_cache_kb,
         'memory_source': memory_source,
@@ -822,7 +1009,10 @@ def build_router_health_payload(
         'cpu_sample_percent': sampled_cpu_percent,
         'bot_rss_kb': bot_rss_kb or 0,
         'program_rss_kb': program_rss_kb,
+        'guard_program_rss_kb': guard_program_rss_kb,
         'xray_rss_kb': xray_rss_kb,
+        'shadowsocks_rss_kb': shadowsocks_rss_kb,
+        'trojan_rss_kb': trojan_rss_kb,
         'pool_worker_rss_kb': pool_worker_rss_kb,
         'temporary_xray_rss_kb': temporary_xray_rss_kb,
         'youtube_prefetch_rss_kb': youtube_prefetch_rss_kb,
@@ -859,6 +1049,7 @@ class RouterHealthRuntime:
         ndmc_cache_ttl=5.0,
         related_process_cache_ttl=45.0,
         cpu_smoothing_factor=0.35,
+        memory_limits=None,
     ):
         self.cache_ttl = float(cache_ttl or 0)
         self.core_proxy_cache_ttl = float(core_proxy_cache_ttl or 0)
@@ -866,6 +1057,7 @@ class RouterHealthRuntime:
         self.ndmc_cache_ttl = float(ndmc_cache_ttl or 0)
         self.related_process_cache_ttl = float(related_process_cache_ttl or 0)
         self.cpu_smoothing_factor = min(1.0, max(0.0, float(cpu_smoothing_factor or 0.0)))
+        self.memory_limits = _memory_pressure_limits(memory_limits)
         self.time_provider = time_provider
         self._lock = threading.Lock()
         self._cpu_lock = threading.Lock()
@@ -1010,6 +1202,8 @@ class RouterHealthRuntime:
             probe_progress=probe_progress,
             temp_xray_count=related_processes.get('temporary_xray_count') or 0,
             xray_rss_kb=related_processes.get('xray_rss_kb') or 0,
+            shadowsocks_rss_kb=related_processes.get('shadowsocks_rss_kb') or 0,
+            trojan_rss_kb=related_processes.get('trojan_rss_kb') or 0,
             pool_worker_rss_kb=related_processes.get('pool_worker_rss_kb') or 0,
             temporary_xray_rss_kb=related_processes.get('temporary_xray_rss_kb') or 0,
             youtube_prefetch_rss_kb=related_processes.get('youtube_prefetch_rss_kb') or 0,
@@ -1017,6 +1211,7 @@ class RouterHealthRuntime:
             dns_health=dns_health,
             core_proxy_health=core_proxy_health,
             flash_storage=read_flash_storage(),
+            memory_limits=self.memory_limits,
         )
         payload['health_scope'] = 'compact'
         if sample_cpu:
@@ -1058,6 +1253,8 @@ class RouterHealthRuntime:
             probe_progress=probe_progress,
             temp_xray_count=related_processes.get('temporary_xray_count') or 0,
             xray_rss_kb=related_processes.get('xray_rss_kb') or 0,
+            shadowsocks_rss_kb=related_processes.get('shadowsocks_rss_kb') or 0,
+            trojan_rss_kb=related_processes.get('trojan_rss_kb') or 0,
             pool_worker_rss_kb=related_processes.get('pool_worker_rss_kb') or 0,
             temporary_xray_rss_kb=related_processes.get('temporary_xray_rss_kb') or 0,
             youtube_prefetch_rss_kb=related_processes.get('youtube_prefetch_rss_kb') or 0,
@@ -1065,6 +1262,7 @@ class RouterHealthRuntime:
             dns_health=self._dns_snapshot(now),
             core_proxy_health=self._core_proxy_snapshot(now),
             flash_storage=read_flash_storage(),
+            memory_limits=self.memory_limits,
         )
         if sample_cpu:
             with self._lock:
