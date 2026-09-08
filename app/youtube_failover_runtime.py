@@ -1,5 +1,16 @@
 """YouTube route failover state machine, isolated from the main bot module."""
 
+from youtube_healthcheck import youtube_error_is_unstable
+
+
+def transient_failure_should_wait_for_stream(message, *, stream_active, hard_proxy_failure=False):
+    """Keep a progressing media stream authoritative over one unstable control probe."""
+    return bool(
+        stream_active and
+        youtube_error_is_unstable(message) and
+        not hard_proxy_failure
+    )
+
 def run_periodic_failover(
     run_cycle,
     shutdown_requested,
@@ -31,6 +42,7 @@ def attempt_youtube_failover(context):
     YOUTUBE_ROUTE_QUALITY_FAILOVER_ENABLED = context["YOUTUBE_ROUTE_QUALITY_FAILOVER_ENABLED"]
     YOUTUBE_ROUTE_QUALITY_MIN_DURATION_SECONDS = context["YOUTUBE_ROUTE_QUALITY_MIN_DURATION_SECONDS"]
     YOUTUBE_ROUTE_QUALITY_SCORE_THRESHOLD = context["YOUTUBE_ROUTE_QUALITY_SCORE_THRESHOLD"]
+    YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS = context["YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS"]
     YOUTUBE_VLESS2_FAILOVER_ENABLED = context["YOUTUBE_VLESS2_FAILOVER_ENABLED"]
     _check_youtube_protocol_once = context["_check_youtube_protocol_once"]
     _confirm_youtube_key_detailed = context["_confirm_youtube_key_detailed"]
@@ -52,9 +64,14 @@ def attempt_youtube_failover(context):
     _youtube_degraded_stream_guard_deferred = context["_youtube_degraded_stream_guard_deferred"]
     _youtube_failover_policy = context["_youtube_failover_policy"]
     _youtube_failover_state = context["_youtube_failover_state"]
+    _youtube_failure_is_hard_proxy_failure = context.get(
+        "_youtube_failure_is_hard_proxy_failure",
+        lambda _message: False,
+    )
     _youtube_health_state = context["_youtube_health_state"]
     _youtube_quality_settings = context["_youtube_quality_settings"]
     _youtube_route_protocol = context["_youtube_route_protocol"]
+    _youtube_stream_guard_active = context["_youtube_stream_guard_active"]
     pool_probe_lock = context["pool_probe_lock"]
     shutdown_requested = context["shutdown_requested"]
     time = context["time"]
@@ -137,6 +154,51 @@ def attempt_youtube_failover(context):
         )
         _record_key_probe(route_proto, active_key, yt_ok=True, **yt_metrics)
         return False
+
+    retry_not_before = float(state.get('retry_not_before') or 0.0)
+    retry_remaining = _youtube_failover_policy().remaining_seconds(retry_not_before, now=now)
+    if retry_remaining > 0:
+        state['last_fail'] = 0.0
+        state['consecutive_failures'] = 0
+        _reset_youtube_quality_state(
+            state,
+            health_state='unknown',
+            reason='ожидание после восстановления исходного ключа',
+        )
+        state['phase'] = 'waiting_retry'
+        state['deferred_reason'] = f'повторная аварийная попытка не раньше чем через {retry_remaining} с'
+        return False
+    state['retry_not_before'] = 0.0
+
+    if health_state == 'failed':
+        failure_message = message or health_reason
+        hard_proxy_failure = bool(_youtube_failure_is_hard_proxy_failure(failure_message))
+        stream_active = False
+        if youtube_error_is_unstable(failure_message) and not hard_proxy_failure:
+            stream_active = bool(_youtube_stream_guard_active(
+                route_proto,
+                'YouTube transient control-endpoint failure',
+                log=True,
+                hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+            ))
+        if transient_failure_should_wait_for_stream(
+            failure_message,
+            stream_active=stream_active,
+            hard_proxy_failure=hard_proxy_failure,
+        ):
+            state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
+            _reset_youtube_quality_state(
+                state,
+                health_state='unknown',
+                reason='контрольный адрес не ответил, но медиапоток продолжает передавать данные',
+            )
+            state['deferred_reason'] = 'одиночный тайм-аут проигнорирован из-за активного медиапотока'
+            _write_runtime_log(
+                f'YouTube failover: {_pool_proto_label(route_proto)} transient control probe failed '
+                'while media traffic was progressing; hard failover suppressed.'
+            )
+            return False
 
     if health_state == 'degraded':
         state['last_fail'] = 0.0

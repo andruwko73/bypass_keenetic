@@ -3403,7 +3403,7 @@ def test_youtube_failover_paths_do_not_use_other_vless_traffic_as_a_switch_guard
         (APP_ROOT / 'bot.py').read_text(encoding='utf-8'),
         functions['_switch_youtube_to_verified_candidate'],
     )
-    assert "youtube_profile='emergency' if trigger == 'failed' else 'confirm'" in switch_source
+    assert "youtube_profile='pulse' if trigger == 'failed' else 'confirm'" in switch_source
     assert 'other_active_keys' in switch_source
     assert 'background_worker=False' in (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
     source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
@@ -3473,7 +3473,16 @@ def test_youtube_failover_confirmed_failures_override_recent_success_grace():
             forced_failures += 1
             force_value = keywords.get('allow_recent_success_downgrade')
             assert isinstance(force_value, ast.Constant) and force_value.value is True
-    assert forced_failures == 4
+    assert forced_failures == 3
+    restore_source = ast.get_source_segment(
+        source,
+        next(
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == '_restore_youtube_key_after_failed_failover'
+        ),
+    )
+    assert '_record_key_probe' not in restore_source
 
 
 def test_youtube_route_failover_state_machine_switches_after_fast_confirmation():
@@ -3592,6 +3601,74 @@ def test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
     assert ('live', 'emergency') in calls
     assert ('confirm', 'vless2') in calls
     assert ('switch', 'failed') in calls
+
+    transient_state = dict(state)
+    transient_state.update({
+        'active_key_id': 'active',
+        'last_fail': 0.0,
+        'consecutive_failures': 0,
+        'failure_deadline': 0.0,
+        'hard_failure_confirmed_at': 0.0,
+        'last_health_state': 'healthy',
+        'last_health_reason': '',
+        'retry_not_before': 0.0,
+        'in_progress': False,
+        'recovery_failed': False,
+    })
+    transient_calls = []
+    transient_namespace = dict(namespace)
+    transient_namespace.update({
+        '_youtube_failover_state': lambda _proto: transient_state,
+        '_check_youtube_protocol_once': (
+            lambda *args, **kwargs: transient_calls.append(('check', kwargs.get('profile'))) or
+            (False, 'request timed out')
+        ),
+        '_youtube_health_state': lambda ok, metrics=None: ('failed', 'полный отказ', dict(metrics or {})),
+        '_youtube_failure_is_hard_proxy_failure': lambda _message: False,
+        '_youtube_stream_guard_active': (
+            lambda *args, **kwargs: transient_calls.append(('stream_guard', kwargs.get('hold_seconds'))) or True
+        ),
+        '_confirm_youtube_key_emergency': (
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('transient stream failure was confirmed'))
+        ),
+        '_switch_youtube_to_verified_candidate': (
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('transient stream failure switched key'))
+        ),
+        '_write_runtime_log': lambda message: transient_calls.append(('log', message)),
+    })
+    assert youtube_failover_runtime.attempt_youtube_failover(transient_namespace) is False
+    assert transient_calls[0] == ('check', 'emergency')
+    assert transient_calls[1] == ('stream_guard', 45)
+    assert transient_state['last_health_state'] == 'unknown'
+    assert transient_state['consecutive_failures'] == 0
+    assert transient_state['failure_deadline'] == 0.0
+    assert 'активного медиапотока' in transient_state['deferred_reason']
+
+    retry_state = dict(transient_state)
+    retry_state.update({
+        'active_key_id': 'active',
+        'retry_not_before': 200.0,
+        'in_progress': False,
+    })
+    retry_calls = []
+    retry_namespace = dict(namespace)
+    retry_namespace.update({
+        '_youtube_failover_state': lambda _proto: retry_state,
+        '_check_youtube_protocol_once': (
+            lambda *args, **kwargs: retry_calls.append('check') or (False, 'connection refused')
+        ),
+        '_youtube_health_state': lambda ok, metrics=None: ('failed', 'полный отказ', dict(metrics or {})),
+        '_confirm_youtube_key_emergency': (
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('retry backoff confirmed failure'))
+        ),
+        '_switch_youtube_to_verified_candidate': (
+            lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('retry backoff switched key'))
+        ),
+    })
+    assert youtube_failover_runtime.attempt_youtube_failover(retry_namespace) is False
+    assert retry_calls == ['check']
+    assert retry_state['phase'] == 'waiting_retry'
+    assert '100 с' in retry_state['deferred_reason']
 
     stale_state = dict(state)
     stale_state.update({
@@ -3982,6 +4059,85 @@ def test_youtube_failed_candidate_escalates_restore_failure():
     assert phases == ['restore_started', 'restore_failed']
     assert state['recovery_failed'] is True and state['phase'] == 'recovery_failed'
     assert any('failed to restore' in item for item in logs)
+
+
+def test_youtube_failed_candidate_restore_resets_failure_and_adds_backoff():
+    source = (APP_ROOT / 'bot.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    function_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_restore_youtube_key_after_failed_failover'
+    )
+    state = {
+        'last_fail': 90.0,
+        'consecutive_failures': 4,
+        'failure_deadline': 120.0,
+        'hard_failure_confirmed_at': 95.0,
+        'phase': 'switching',
+        'deferred_reason': '',
+    }
+    current = {'vless2': 'candidate'}
+    calls = []
+
+    def install(_proto, key, **_kwargs):
+        current['vless2'] = key
+        calls.append(('install', key))
+
+    def reset_quality(target, *, health_state='healthy', reason='', now=None):
+        target['last_health_state'] = health_state
+        target['last_health_reason'] = reason
+        target['failure_deadline'] = 0.0
+        target['hard_failure_confirmed_at'] = 0.0
+        target['deferred_reason'] = ''
+
+    namespace = {
+        'pool_apply_lock': threading.Lock(),
+        '_load_current_keys': lambda: dict(current),
+        '_clear_youtube_failover_transaction': lambda: calls.append(('clear',)) or True,
+        '_update_youtube_failover_transaction': lambda phase: calls.append(('phase', phase)) or True,
+        '_install_key_for_protocol': install,
+        '_audit_key_switch': lambda *args: calls.append(('audit', args[0])),
+        '_pool_proto_label': lambda _proto: 'Vless 2',
+        '_youtube_failover_state': lambda _proto: state,
+        '_write_runtime_log': lambda message: calls.append(('log', message)),
+        '_reset_youtube_quality_state': reset_quality,
+        '_hash_key': lambda key: f'id:{key}',
+        '_schedule_youtube_cache_confirm': lambda proto, key: calls.append(('confirm', proto, key)),
+        'YOUTUBE_ROUTE_FAILOVER_SWITCH_COOLDOWN_SECONDS': 300,
+        'time': py_types.SimpleNamespace(time=lambda: 100.0),
+    }
+    exec(compile(ast.Module(body=[function_node], type_ignores=[]), 'bot.py', 'exec'), namespace)
+    assert namespace['_restore_youtube_key_after_failed_failover'](
+        'vless2',
+        'original',
+        expected_current_key='candidate',
+    ) is True
+    assert current['vless2'] == 'original'
+    assert state['active_key_id'] == 'id:original'
+    assert state['last_health_state'] == 'unknown'
+    assert state['last_fail'] == 0.0
+    assert state['consecutive_failures'] == 0
+    assert state['failure_deadline'] == 0.0
+    assert state['hard_failure_confirmed_at'] == 0.0
+    assert state['retry_not_before'] == 400.0
+    assert state['phase'] == 'waiting_retry'
+    assert ('confirm', 'vless2', 'original') in calls
+
+
+def test_youtube_transient_failure_stream_guard_only_suppresses_unstable_errors():
+    assert youtube_failover_runtime.transient_failure_should_wait_for_stream(
+        'request timed out',
+        stream_active=True,
+    ) is True
+    assert youtube_failover_runtime.transient_failure_should_wait_for_stream(
+        'connection refused',
+        stream_active=True,
+        hard_proxy_failure=True,
+    ) is False
+    assert youtube_failover_runtime.transient_failure_should_wait_for_stream(
+        'request timed out',
+        stream_active=False,
+    ) is False
 
 
 def test_youtube_healthcheck_detects_first_load_instability():
@@ -19923,12 +20079,14 @@ def main():
     test_youtube_health_state_distinguishes_outage_and_degradation()
     test_youtube_route_failover_fast_and_quality_paths_are_wired()
     test_youtube_route_failover_state_machine_switches_after_fast_confirmation()
+    test_youtube_transient_failure_stream_guard_only_suppresses_unstable_errors()
     test_confirmed_youtube_failure_pauses_and_resumes_pool_once()
     test_youtube_failover_pulse_guard_keeps_only_emergency_limits()
     test_youtube_cycle_uses_pulse_guard_instead_of_generic_rss_guard()
     test_youtube_success_clears_stale_failover_phase()
     test_youtube_transaction_recovery_refreshes_runtime_state()
     test_youtube_failed_candidate_escalates_restore_failure()
+    test_youtube_failed_candidate_restore_resets_failure_and_adds_backoff()
     test_youtube_healthcheck_detects_first_load_instability()
     test_youtube_healthcheck_requires_watch_page()
     test_youtube_healthcheck_retries_transient_watch_page()

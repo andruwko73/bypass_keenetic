@@ -1294,6 +1294,7 @@ def _new_youtube_failover_state():
         'last_ok': 0.0,
         'last_fail': 0.0,
         'last_attempt': 0.0,
+        'retry_not_before': 0.0,
         'last_trigger': '',
         'consecutive_failures': 0,
         'failure_deadline': 0.0,
@@ -2076,6 +2077,7 @@ def _reset_youtube_quality_state(state, *, health_state='healthy', reason='', no
     if health_state == 'healthy':
         state['phase'] = ''
         state['recovery_failed'] = False
+        state['retry_not_before'] = 0.0
         state['last_ok'] = float(time.time() if now is None else now)
 
 
@@ -2207,7 +2209,7 @@ def _confirm_youtube_key_emergency(proto, *, deadline, max_attempts=2):
     return _confirm_youtube_key_detailed(
         proto,
         measure_quality=True,
-        profile='emergency',
+        profile='pulse',
         http_timeouts=(YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT, YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT),
         retry_unstable=False,
         background_worker=False,
@@ -2302,17 +2304,26 @@ def _restore_youtube_key_after_failed_failover(proto, original_key, expected_cur
             restored_key = (_load_current_keys().get(proto) or '').strip()
             if restored_key != original_key:
                 raise RuntimeError('исходный ключ не подтверждён после восстановления')
-            _record_key_probe(
-                proto,
-                original_key,
-                yt_ok=False,
-                allow_recent_success_downgrade=True,
-            )
             _audit_key_switch('youtube_failover_restore', proto, original_key, 'failed candidates')
             _write_runtime_log(
                 f'YouTube failover: restored previous {_pool_proto_label(proto)} key after failed candidates.'
             )
             _clear_youtube_failover_transaction()
+            state = _youtube_failover_state(proto)
+            _reset_youtube_quality_state(
+                state,
+                health_state='unknown',
+                reason='исходный ключ восстановлен после отклонения кандидатов',
+            )
+            state['active_key_id'] = _hash_key(original_key)
+            state['last_fail'] = 0.0
+            state['consecutive_failures'] = 0
+            state['failure_deadline'] = 0.0
+            state['hard_failure_confirmed_at'] = 0.0
+            state['retry_not_before'] = time.time() + YOUTUBE_ROUTE_FAILOVER_SWITCH_COOLDOWN_SECONDS
+            state['phase'] = 'waiting_retry'
+            state['deferred_reason'] = 'исходный ключ восстановлен; повторная аварийная попытка отложена'
+            _schedule_youtube_cache_confirm(proto, original_key)
             return True
         except Exception as exc:
             _update_youtube_failover_transaction('restore_failed')
@@ -2860,7 +2871,7 @@ def _switch_youtube_to_verified_candidate(
                     (YOUTUBE_ROUTE_EMERGENCY_CONNECT_TIMEOUT, YOUTUBE_ROUTE_EMERGENCY_READ_TIMEOUT)
                     if trigger == 'failed' else None
                 ),
-                youtube_profile='emergency' if trigger == 'failed' else 'confirm',
+                youtube_profile='pulse' if trigger == 'failed' else 'confirm',
                 youtube_retry_unstable=trigger != 'failed',
                 timeout_seconds=candidate_timeout,
             )
