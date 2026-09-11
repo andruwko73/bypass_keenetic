@@ -774,6 +774,41 @@ async function assertActiveTelegramCardConsistent(page, protocol, label) {
   }
 }
 
+async function assertMultipleSubscriptionsFixture(page, protocol, label) {
+  const response = await page.request.get(page.url());
+  if (response.headers()['x-bypass-ui-fixture'] !== '1') return;
+  const panel = page.locator(`[data-protocol-panel="${protocol}"].active`);
+  const form = panel.locator('.pool-import-form');
+  const sources = panel.locator('[data-subscriptions]');
+  const initial = await sources.locator('[data-subscription-id]').count();
+  for (const index of [1, 2]) {
+    await form.locator('[name="import_payload"]').fill(`https://subscriptions.example.test/${protocol}/ui-${index}`);
+    await form.locator('[name="subscription_name"]').fill(`UI source ${index}`);
+    await form.locator('[name="send_router_hwid"]').check();
+    const result = page.waitForResponse((item) => item.url().endsWith('/pool_import') && item.request().method() === 'POST');
+    await form.locator('button[type="submit"]').click();
+    if (!(await (await result).json()).ok) throw new Error(`${label}: subscription import failed`);
+    await page.waitForFunction(({ proto, count }) => document.querySelectorAll(`[data-subscriptions="${proto}"] [data-subscription-id]`).length === count, { proto: protocol, count: initial + index });
+  }
+  const second = sources.locator('[data-subscription-id]').filter({ hasText: 'UI source 2' });
+  const refresh = page.waitForResponse((item) => item.url().endsWith('/pool_subscription_refresh'));
+  await second.getByRole('button', { name: 'Обновить UI source 2', exact: true }).click();
+  if (!(await (await refresh).json()).ok) throw new Error(`${label}: subscription refresh failed`);
+  await page.waitForFunction((proto) => document.querySelectorAll(`[data-subscriptions="${proto}"] form[data-async-bound="1"]`).length >= 4, protocol);
+  for (const index of [1, 2]) {
+    const row = sources.locator('[data-subscription-id]').filter({ hasText: `UI source ${index}` });
+    await row.getByRole('button', { name: `Удалить UI source ${index}`, exact: true }).click();
+    const removed = page.waitForResponse((item) => item.url().endsWith('/pool_subscription_remove'));
+    await page.locator('#confirm-accept').click();
+    if (!(await (await removed).json()).ok) throw new Error(`${label}: subscription removal failed`);
+    await page.waitForFunction(({ proto, count }) => document.querySelectorAll(`[data-subscriptions="${proto}"] [data-subscription-id]`).length === count, { proto: protocol, count: initial + 2 - index });
+  }
+  const markup = await sources.innerHTML();
+  if (markup.includes('https://subscriptions.example.test') || markup.includes('fixture-imported-key')) {
+    throw new Error(`${label}: subscription UI exposed private fields`);
+  }
+}
+
 async function assertUnifiedImportLayout(page, label) {
   const layout = await page.evaluate(() => {
     const panel = document.querySelector('[data-protocol-panel].active [data-subview="key"].active');
@@ -1523,6 +1558,10 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       throw new Error(`${name}: expected 3 protocol subtabs, got ${subtabCount}`);
     }
     await assertUnifiedImportLayout(page, `${name} vless2 unified import`);
+    await assertMultipleSubscriptionsFixture(page, 'vless2', `${name} vless2 subscriptions`);
+    await clickLazyProtocol(page, 'vless', `${name} vless1 subscriptions`);
+    await page.locator('[data-protocol-panel="vless"].active [data-subview-target="key"]').click();
+    await assertMultipleSubscriptionsFixture(page, 'vless', `${name} vless1 subscriptions`);
     await page.evaluate(() => localStorage.setItem('router-active-protocol', 'vless2'));
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});

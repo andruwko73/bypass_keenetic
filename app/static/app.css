@@ -188,6 +188,14 @@
         .pool-import-form .field-label,.pool-import-form .field-hint,.pool-import-form textarea,.pool-import-form .subscription-hwid-toggle{grid-column:1 / -1;}
         .pool-import-form textarea{min-width:0;width:100%;max-width:100%;min-height:92px;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
         .pool-import-form button{justify-self:start;min-width:160px;height:var(--control-height);min-height:var(--control-height);padding:0 12px;white-space:nowrap;}
+        .subscription-name-field{grid-column:1 / -1;display:grid;gap:6px;min-width:0;}
+        .subscription-name-field input{width:100%;min-width:0;}
+        .subscription-sources{grid-column:1 / -1;min-width:0;}
+        .subscription-source{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px 0;border-bottom:1px solid rgba(91,124,150,.28);}
+        .subscription-source-info{min-width:0;flex:1 1 180px;overflow-wrap:anywhere;}
+        .subscription-source-info .field-hint{margin:4px 0 0;}
+        .subscription-source-actions{display:flex;flex-wrap:wrap;gap:8px;}
+        .subscription-source-actions button{min-height:var(--control-height);}
         .pool-clear-form{margin:0;display:flex;}
         .pool-clear-btn{height:100%;}
         .secondary-button{border-color:rgba(78,216,205,.5);background:rgba(34,67,73,.28);color:#96f1eb;box-shadow:none;}

@@ -208,14 +208,14 @@ def subscription_keys_for_protocol(proto, fetched_keys):
     return key_pool_store.dedupe_key_list(fetched_keys.get(source_proto, []) or [])
 
 
-def sync_subscription_keys_to_pool(pools, proto, fetched_keys, previous_managed_keys=None, preserve_keys=None):
+def sync_subscription_keys_to_pool(pools, proto, fetched_keys, previous_managed_keys=None, preserve_keys=None, shared_keys=None):
     pools, _removed_placeholders = key_pool_store.remove_subscription_error_placeholders_from_pools(pools)
     if proto not in pools:
         pools[proto] = []
     managed_keys = subscription_keys_for_protocol(proto, fetched_keys)
     managed_set = set(managed_keys)
     previous_set = set(key_pool_store.dedupe_key_list(previous_managed_keys or []))
-    preserve_set = set(key_pool_store.dedupe_key_list(preserve_keys or []))
+    preserve_set = set(key_pool_store.dedupe_key_list(list(preserve_keys or []) + list(shared_keys or [])))
     retained_keys = [
         key_value
         for key_value in key_pool_store.dedupe_key_list(preserve_keys or [])
@@ -245,7 +245,31 @@ def sync_subscription_keys_to_pool(pools, proto, fetched_keys, previous_managed_
     return pools, added_keys, removed_keys, state_managed_keys
 
 
+def _normalize_subscription_record(item, index=1):
+    item = item if isinstance(item, dict) else {}
+    url = str(item.get('url') or '').strip()
+    managed = key_pool_store.remove_subscription_error_placeholders(item.get('managed_keys') or [])[0]
+    return {
+        'id': hashlib.sha256(url.encode('utf-8')).hexdigest()[:20] if url else '',
+        'name': ' '.join(str(item.get('name') or f'Подписка {index}').split())[:80],
+        'url': url,
+        'hwid_enabled': bool(item.get('hwid_enabled')),
+        'last_attempt_at': float(item.get('last_attempt_at') or 0),
+        'last_success_at': float(item.get('last_success_at') or 0),
+        'last_error': str(item.get('last_error') or '').strip(),
+        'managed_keys': managed,
+        'imported_keys': key_pool_store.remove_subscription_error_placeholders(
+            item.get('imported_keys', managed) or []
+        )[0],
+    }
+
+
 def normalize_subscription_state(payload):
+    """Read legacy single records and preserve independently managed sources.
+
+    The first-record fields remain available to older readers; sources is the
+    authoritative list for this version, including an explicitly empty list.
+    """
     if not isinstance(payload, dict):
         payload = {}
     entries = payload.get('subscriptions') if isinstance(payload.get('subscriptions'), dict) else payload
@@ -254,22 +278,79 @@ def normalize_subscription_state(payload):
         item = entries.get(proto, {}) if isinstance(entries, dict) else {}
         if not isinstance(item, dict):
             item = {}
-        state[proto] = {
-            'url': str(item.get('url') or '').strip(),
-            'hwid_enabled': bool(item.get('hwid_enabled')),
-            'last_attempt_at': float(item.get('last_attempt_at') or 0),
-            'last_success_at': float(item.get('last_success_at') or 0),
-            'last_error': str(item.get('last_error') or '').strip(),
-            'managed_keys': key_pool_store.remove_subscription_error_placeholders(
-                item.get('managed_keys') or []
-            )[0],
-        }
+        raw_sources = item.get('sources')
+        if not isinstance(raw_sources, list):
+            raw_sources = [item] if item.get('url') or item.get('managed_keys') else []
+        sources = {}
+        for raw in raw_sources:
+            if not isinstance(raw, dict):
+                continue
+            record = _normalize_subscription_record(raw, len(sources) + 1)
+            if record['url'] or record['managed_keys']:
+                sources[record['url']] = record
+        records = list(sources.values())
+        state[proto] = dict(records[0] if records else _normalize_subscription_record({}))
+        state[proto]['sources'] = records
     return state
+
+
+def iter_subscription_records(state):
+    for proto, item in normalize_subscription_state(state).items():
+        for record in item['sources']:
+            if record['url']:
+                yield proto, record
+
+
+def subscription_record_for_url(state, proto, url):
+    url = str(url or '').strip()
+    return next((record for owner, record in iter_subscription_records(state)
+                 if owner == proto and record['url'] == url), {})
+
+
+def update_subscription_record(state, proto, **updates):
+    state = normalize_subscription_state(state)
+    if proto not in state:
+        raise ValueError('Неизвестный протокол')
+    url = str(updates.get('url') or '').strip()
+    if not url:
+        raise ValueError('Укажите адрес подписки')
+    records = state[proto]['sources']
+    record = next((item for item in records if item['url'] == url), None)
+    if record is None:
+        names = {item['name'] for item in records}
+        index = 1
+        while f'Подписка {index}' in names:
+            index += 1
+        record = _normalize_subscription_record({'url': url}, index)
+        records.append(record)
+    updates = dict(updates)
+    if not str(updates.get('name') or '').strip():
+        updates.pop('name', None)
+    record.update(updates)
+    return normalize_subscription_state(state)
+
+
+def other_subscription_keys(state, proto, url):
+    return key_pool_store.dedupe_key_list([
+        key for owner, record in iter_subscription_records(state)
+        if owner == proto and record['url'] != str(url or '').strip()
+        for key in record['managed_keys'] + record['imported_keys']
+    ])
+
+
+def remove_subscription_record(state, proto, subscription_id):
+    state = normalize_subscription_state(state)
+    records = state.get(proto, {}).get('sources', [])
+    retained = [record for record in records if record['id'] != subscription_id]
+    if not subscription_id or len(retained) == len(records):
+        raise ValueError('Подписка не найдена. Обновите страницу.')
+    state[proto]['sources'] = retained
+    return normalize_subscription_state(state)
 
 
 def serialize_subscription_state(state):
     state = normalize_subscription_state(state)
-    return {'subscriptions': state}
+    return {'schema': 2, 'subscriptions': state}
 
 
 def nightly_pool_probe_window_date(timestamp, *, start_hour=3, end_hour=6, localtime=time.localtime):
@@ -316,7 +397,7 @@ def latest_recent_subscription_success_at(state, now, *, max_age_seconds):
     except (TypeError, ValueError):
         return 0.0
     latest = 0.0
-    for record in normalize_subscription_state(state).values():
+    for _proto, record in iter_subscription_records(state):
         if not record.get('url') or not record.get('hwid_enabled'):
             continue
         try:
@@ -333,9 +414,17 @@ def subscription_public_settings(state):
     state = normalize_subscription_state(state)
     return {
         proto: {
-            'hwid_enabled': bool(item.get('hwid_enabled')),
-            'last_success_at': float(item.get('last_success_at') or 0),
-            'last_error': str(item.get('last_error') or ''),
+            'hwid_enabled': any(record['hwid_enabled'] for record in item['sources']),
+            'last_success_at': max((record['last_success_at'] for record in item['sources']), default=0),
+            'last_error': 'Ошибка обновления' if any(record['last_error'] for record in item['sources']) else '',
+            'sources': [{
+                'id': record['id'],
+                'name': record['name'],
+                'hwid_enabled': record['hwid_enabled'],
+                'key_count': len(record['imported_keys']),
+                'last_success_at': record['last_success_at'],
+                'last_error': 'Не удалось обновить подписку' if record['last_error'] else '',
+            } for record in item['sources'] if record['url']],
         }
         for proto, item in state.items()
     }

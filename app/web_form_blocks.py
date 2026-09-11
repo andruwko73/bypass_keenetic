@@ -22,7 +22,39 @@ def pool_import_hint(title):
     return (
         'Вставьте один ключ, список ключей или ссылку на подписку. '
         f'Ключи {title} будут добавлены в этот пул, а ключи остальных протоколов — в соответствующие им пулы.'
+        ' Можно добавить несколько подписок по очереди; повторный импорт той же ссылки обновит её.'
     )
+
+
+def render_subscription_sources(proto, settings, csrf_input_html=''):
+    safe_proto = html.escape(proto, quote=True)
+    rows = []
+    for record in (settings or {}).get('sources', []):
+        source_id = html.escape(str(record.get('id') or ''), quote=True)
+        name = html.escape(str(record.get('name') or 'Подписка'))
+        mode = 'Автообновление с HWID' if record.get('hwid_enabled') else 'Без автообновления'
+        status = html.escape(str(record.get('last_error') or mode))
+        count = int(record.get('key_count') or 0)
+        fields = (
+            f'{csrf_input_html}<input type="hidden" name="type" value="{safe_proto}">'
+            f'<input type="hidden" name="subscription_id" value="{source_id}">'
+        )
+        rows.append(f'''
+            <div class="subscription-source" data-subscription-id="{source_id}">
+                <div class="subscription-source-info"><strong>{name}</strong>
+                    <p class="field-hint">Ключей: {count} · {status}</p></div>
+                <div class="subscription-source-actions">
+                    <form method="post" action="/pool_subscription_refresh" data-async-action="pool-subscription-refresh">
+                        {fields}<button type="submit" class="secondary-button" aria-label="Обновить {name}">Обновить</button>
+                    </form>
+                    <form method="post" action="/pool_subscription_remove" data-async-action="pool-subscription-remove"
+                        data-confirm-title="Удалить подписку?" data-confirm-message="Подписка будет удалена из списка обновления. Её ключи останутся в пуле.">
+                        {fields}<button type="submit" class="secondary-button" aria-label="Удалить {name}">Удалить</button>
+                    </form>
+                </div>
+            </div>''')
+    content = ''.join(rows) or '<p class="field-hint">Подписок пока нет. Добавьте ссылку через форму выше.</p>'
+    return f'<h3 class="field-label">Сохранённые подписки</h3>{content}'
 
 
 def js_bool(value):
@@ -159,9 +191,12 @@ def _light_protocol_panel_html(
             <form method="post" action="/pool_import" class="pool-import-form" data-async-action="pool-import">
                 {csrf_input_html}
                 <input type="hidden" name="type" value="{safe_key_name}">
-                <label class="field-label">Импорт ключей и подписки</label>
+                <label class="field-label" for="pool-import-{safe_key_name}">Импорт ключей и подписок</label>
                 <p class="field-hint">{safe_import_hint}</p>
-                <textarea name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;hysteria2://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
+                <textarea id="pool-import-{safe_key_name}" name="import_payload" rows="5" placeholder="vless://...&#10;vmess://...&#10;trojan://...&#10;hysteria2://...&#10;ss://...&#10;https://sub.example.com/..."></textarea>
+                <label class="subscription-name-field field-label">Название подписки (необязательно)
+                    <input type="text" name="subscription_name" maxlength="80" placeholder="Например, вторая подписка" autocomplete="off">
+                </label>
                 <label class="subscription-hwid-toggle">
                     <input type="checkbox" class="subscription-switch-input" name="send_router_hwid" value="1"{hwid_checked}>
                     <span class="subscription-switch-ui" aria-hidden="true"></span>
@@ -254,6 +289,7 @@ def _light_protocol_panel_html(
                 </div>
             </form>
             {import_form_html}
+            {f'<div class="subscription-sources" data-subscriptions="{safe_key_name}">{render_subscription_sources(key_name, subscription_settings, csrf_input_html)}</div>' if enable_key_pool else ''}
         </div>
         {pool_subview_html}
         {check_subview_html}

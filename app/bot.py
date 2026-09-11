@@ -3974,6 +3974,7 @@ background_cpu_busy_cache_lock = threading.Lock()
 background_cpu_busy_cache = {'timestamp': 0.0, 'value': None}
 key_pool_lock = threading.RLock()
 subscription_state_lock = threading.RLock()
+subscription_operation_lock = threading.RLock()
 subscription_hwid_lock = threading.Lock()
 subscription_hwid_cache = {'value': None, 'checked_at': 0.0}
 subscription_auto_refresh_skip_log_at = {'rss': 0.0}
@@ -4484,20 +4485,43 @@ def _subscription_public_settings():
     return _subscription_runtime().subscription_public_settings(_load_subscription_state())
 
 
-def _subscription_record(proto):
-    return _load_subscription_state().get(proto, {})
+def _subscription_record(proto, *, url=None, subscription_id=None):
+    state = _load_subscription_state()
+    if url is not None:
+        return _subscription_runtime().subscription_record_for_url(state, proto, url)
+    records = state.get(proto, {}).get('sources', [])
+    if subscription_id is not None:
+        return next((record for record in records if record['id'] == subscription_id), {})
+    return records[0] if records else {}
 
 
 def _update_subscription_record(proto, **updates):
     if not SUBSCRIPTION_STATE_PATH:
         return dict(updates)
-    with subscription_state_lock:
-        state = _subscription_runtime().normalize_subscription_state(_read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {})
-        record = dict(state.get(proto, {}) or {})
-        record.update(updates)
-        state[proto] = record
+    with subscription_operation_lock, subscription_state_lock:
+        state = _subscription_runtime().update_subscription_record(
+            _read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {}, proto, **updates,
+        )
         _write_json_file(SUBSCRIPTION_STATE_PATH, _subscription_runtime().serialize_subscription_state(state))
-        return record
+        return _subscription_runtime().subscription_record_for_url(state, proto, updates.get('url'))
+
+
+def _remove_pool_subscription(proto, subscription_id):
+    with subscription_operation_lock, subscription_state_lock:
+        state = _subscription_runtime().remove_subscription_record(
+            _load_subscription_state(), proto, subscription_id,
+        )
+        _write_json_file(SUBSCRIPTION_STATE_PATH, _subscription_runtime().serialize_subscription_state(state))
+
+
+def _refresh_pool_subscription(proto, subscription_id):
+    with subscription_operation_lock:
+        record = _subscription_record(proto, subscription_id=subscription_id)
+        if not record:
+            raise ValueError('Подписка не найдена. Обновите страницу.')
+        return _import_pool_subscription(
+            proto, record['url'], use_router_hwid=record['hwid_enabled'], name=record['name'],
+        )
 
 
 def _write_text_file_atomic(path, text, mode=0o644):
@@ -13368,10 +13392,14 @@ def _subscription_preserve_active_keys(proto, fetched_keys, previous_managed_key
     return []
 
 
-def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None):
+def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None, subscription_url=None):
     retained_keys = []
+    shared_keys = []
     if sync_subscription:
         retained_keys = _subscription_preserve_active_keys(proto, fetched_keys, previous_managed_keys)
+        shared_keys = _subscription_runtime().other_subscription_keys(
+            _load_subscription_state(), proto, subscription_url,
+        ) if subscription_url is not None else []
     with key_pool_lock:
         if sync_subscription:
             pools, added_keys, removed_keys, managed_keys = _subscription_runtime().sync_subscription_keys_to_pool(
@@ -13380,6 +13408,7 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
                 fetched_keys,
                 previous_managed_keys=previous_managed_keys,
                 preserve_keys=retained_keys,
+                shared_keys=shared_keys,
             )
         else:
             pools, added_keys = _key_pool_store().add_subscription_keys_to_pool(
@@ -13398,13 +13427,14 @@ def _add_subscription_keys_to_pool(proto, fetched_keys, *, sync_subscription=Fal
     return pools, added_keys, removed_keys, managed_keys, retained_keys
 
 
-def _import_subscription_keys_to_pools(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None):
+def _import_subscription_keys_to_pools(proto, fetched_keys, *, sync_subscription=False, previous_managed_keys=None, subscription_url=None):
     selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched_keys)
     pools, added_keys, removed_keys, managed_keys, retained_keys = _add_subscription_keys_to_pool(
         proto,
         fetched_keys,
         sync_subscription=sync_subscription,
         previous_managed_keys=previous_managed_keys,
+        subscription_url=subscription_url,
     )
     selected_source = _subscription_runtime().subscription_source_protocol(proto)
     extra_lines = []
@@ -13431,7 +13461,14 @@ def _import_subscription_keys_to_pools(proto, fetched_keys, *, sync_subscription
     }
 
 
-def _import_pool_subscription(proto, subscription_url, *, use_router_hwid=False):
+def _import_pool_subscription(proto, subscription_url, *, use_router_hwid=False, name=''):
+    with subscription_operation_lock:
+        return _import_pool_subscription_locked(
+            proto, subscription_url, use_router_hwid=use_router_hwid, name=name,
+        )
+
+
+def _import_pool_subscription_locked(proto, subscription_url, *, use_router_hwid=False, name=''):
     if proto not in POOL_PROTOCOL_ORDER:
         raise ValueError('Неизвестный протокол')
     fetched, error = _fetch_keys_from_subscription(
@@ -13440,12 +13477,12 @@ def _import_pool_subscription(proto, subscription_url, *, use_router_hwid=False)
     )
     if error:
         raise ValueError(error)
-    previous_record = _subscription_record(proto) or {}
+    previous_record = _subscription_record(proto, url=subscription_url) or {}
     if use_router_hwid:
         selected_keys = _subscription_runtime().validate_subscription_snapshot(
             proto,
             fetched,
-            previous_record.get('managed_keys', []),
+            previous_record.get('imported_keys', previous_record.get('managed_keys', [])),
         )
     else:
         selected_keys = _subscription_runtime().subscription_keys_for_protocol(proto, fetched)
@@ -13454,31 +13491,41 @@ def _import_pool_subscription(proto, subscription_url, *, use_router_hwid=False)
         fetched,
         sync_subscription=bool(use_router_hwid and selected_keys),
         previous_managed_keys=previous_record.get('managed_keys', []),
+        subscription_url=subscription_url,
     )
     if selected_keys:
         _update_subscription_record(
             proto,
             url=str(subscription_url or '').strip(),
+            name=name,
             hwid_enabled=bool(use_router_hwid),
             last_attempt_at=time.time(),
             last_success_at=time.time(),
             last_error='',
             managed_keys=summary.get('managed_keys', []) if use_router_hwid else [],
+            imported_keys=selected_keys,
         )
     return summary
 
 
 def _refresh_subscription_once(proto, record, *, source='auto'):
-    return _subscription_refresh_runtime().refresh_subscription_once(
-        proto,
-        record,
-        source=source,
-        auto_refresh_allowed=_subscription_auto_refresh_allowed,
-        fetch_keys=_fetch_keys_from_subscription,
-        add_keys_to_pool=_add_subscription_keys_to_pool,
-        update_record=_update_subscription_record,
-        write_log=_write_runtime_log,
-    )
+    with subscription_operation_lock:
+        if record.get('id'):
+            record = _subscription_record(proto, subscription_id=record['id'])
+            if not record:
+                return False
+            if source == 'auto' and not _subscription_refresh_due(record, time.time()):
+                return False
+        return _subscription_refresh_runtime().refresh_subscription_once(
+            proto,
+            record,
+            source=source,
+            auto_refresh_allowed=_subscription_auto_refresh_allowed,
+            fetch_keys=_fetch_keys_from_subscription,
+            add_keys_to_pool=_add_subscription_keys_to_pool,
+            update_record=_update_subscription_record,
+            write_log=_write_runtime_log,
+        )
 
 
 def _subscription_refresh_due(record, now):
@@ -13779,7 +13826,7 @@ def _run_subscription_auto_refresh_cycle():
     try:
         state = _load_subscription_state()
         now = time.time()
-        for proto, record in state.items():
+        for proto, record in _subscription_runtime().iter_subscription_records(state):
             if shutdown_requested.is_set():
                 break
             if _subscription_refresh_due(record, now):
@@ -15000,6 +15047,9 @@ def _web_action_context():
             add_subscription_keys_to_pool_saved=_add_subscription_keys_to_pool,
             import_subscription_keys_to_pools=_import_subscription_keys_to_pools,
             import_pool_subscription=_import_pool_subscription,
+            refresh_pool_subscription=_refresh_pool_subscription,
+            remove_pool_subscription=_remove_pool_subscription,
+            subscription_public_settings=_subscription_public_settings,
             subscription_keys_for_protocol=_subscription_runtime().subscription_keys_for_protocol,
             subscription_record=_subscription_record,
             save_subscription_record=_update_subscription_record,

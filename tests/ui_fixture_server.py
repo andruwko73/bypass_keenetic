@@ -39,6 +39,38 @@ import service_routes  # noqa: E402
 import web_form_blocks  # noqa: E402
 import web_form_template  # noqa: E402
 import web_pool_form_blocks  # noqa: E402
+import subscription_runtime  # noqa: E402
+import web_post_actions  # noqa: E402
+
+SUBSCRIPTIONS = subscription_runtime.normalize_subscription_state({})
+for fixture_proto in ('vless', 'vless2'):
+    for fixture_index in (1, 2):
+        SUBSCRIPTIONS = subscription_runtime.update_subscription_record(
+            SUBSCRIPTIONS, fixture_proto,
+            url=f'https://subscriptions.example.test/{fixture_proto}/{fixture_index}',
+            name=f'Подписка {fixture_index}', hwid_enabled=True,
+            imported_keys=[f'fixture-source-{fixture_index}'],
+        )
+
+
+def _fixture_import_subscription(proto, url, *, use_router_hwid=False, name=''):
+    global SUBSCRIPTIONS
+    SUBSCRIPTIONS = subscription_runtime.update_subscription_record(
+        SUBSCRIPTIONS, proto, url=url, name=name, hwid_enabled=use_router_hwid,
+        imported_keys=['fixture-imported-key'], last_success_at=time.time(), last_error='',
+    )
+    return {'selected_total': 1, 'selected_added': 1, 'extra': {}}
+
+
+def _fixture_refresh_subscription(proto, subscription_id):
+    record = next(item for owner, item in subscription_runtime.iter_subscription_records(SUBSCRIPTIONS)
+                  if owner == proto and item['id'] == subscription_id)
+    return _fixture_import_subscription(proto, record['url'], use_router_hwid=record['hwid_enabled'], name=record['name'])
+
+
+def _fixture_remove_subscription(proto, subscription_id):
+    global SUBSCRIPTIONS
+    SUBSCRIPTIONS = subscription_runtime.remove_subscription_record(SUBSCRIPTIONS, proto, subscription_id)
 
 
 def _svg_b64(color, text):
@@ -410,6 +442,7 @@ def _protocol_panel(protocol):
         _protocol_statuses(),
         csrf_input_html,
         key_pools=POOLS,
+        subscription_settings=subscription_runtime.subscription_public_settings(SUBSCRIPTIONS),
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
         active_protocol=protocol,
@@ -471,6 +504,7 @@ def _page_html(mode="advanced"):
         _protocol_statuses(),
         csrf_input_html,
         key_pools=POOLS if enable_key_pool else None,
+        subscription_settings=subscription_runtime.subscription_public_settings(SUBSCRIPTIONS),
         telegram_icon_html=_telegram_icon_html,
         youtube_icon_html=_youtube_icon_html,
         active_protocol="vless",
@@ -791,6 +825,18 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self._json(dict(BACKGROUND_STATE))
             return
         protocol = (params.get("type") or params.get("protocol") or ["vless"])[0]
+        if path in ('/pool_import', '/pool_subscription_refresh', '/pool_subscription_remove'):
+            context = web_post_actions.pool_action_context(
+                import_pool_subscription=_fixture_import_subscription,
+                refresh_pool_subscription=_fixture_refresh_subscription,
+                remove_pool_subscription=_fixture_remove_subscription,
+                subscription_public_settings=lambda: subscription_runtime.subscription_public_settings(SUBSCRIPTIONS),
+                load_current_keys=lambda: CURRENT_KEYS,
+                web_pool_snapshot=lambda *args, **kwargs: _pool_snapshot([protocol]),
+            )
+            result = web_post_actions.dispatch(context, path, params)
+            self._json({'ok': result['success'], 'result': result['result'], **result['extra']})
+            return
         if path == "/pool_apply":
             self._json(
                 {

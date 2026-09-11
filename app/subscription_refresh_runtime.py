@@ -34,7 +34,7 @@ def refresh_subscription_once(
             subscription_runtime.validate_subscription_snapshot(
                 proto,
                 fetched,
-                previous_managed_keys,
+                record.get('imported_keys', previous_managed_keys),
             )
         except subscription_runtime.SuspiciousSubscriptionShrink as exc:
             update_record(
@@ -55,6 +55,7 @@ def refresh_subscription_once(
             fetched,
             sync_subscription=True,
             previous_managed_keys=previous_managed_keys,
+            subscription_url=url,
         )
         update_record(
             proto,
@@ -64,6 +65,7 @@ def refresh_subscription_once(
             last_success_at=float(time_provider()),
             last_error='',
             managed_keys=managed_keys,
+            imported_keys=candidate_keys,
         )
         write_log(
             f'Subscription {source} refresh for {proto}: added={len(added_keys)}, '
@@ -71,12 +73,13 @@ def refresh_subscription_once(
         )
         return True
     except Exception as exc:
+        error_summary = subscription_runtime.subscription_request_error_summary(exc)
         update_record(
             proto,
             url=url,
             hwid_enabled=True,
             last_attempt_at=attempt_at,
-            last_error=str(exc),
+            last_error=error_summary,
         )
-        write_log(f'Subscription {source} refresh for {proto} failed: {exc}')
+        write_log(f'Subscription {source} refresh for {proto} failed: {error_summary}')
         return False

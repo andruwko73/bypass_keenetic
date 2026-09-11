@@ -2415,6 +2415,7 @@ def test_pool_import_hint_is_protocol_specific():
         assert hint == (
             'Вставьте один ключ, список ключей или ссылку на подписку. '
             f'Ключи {title} будут добавлены в этот пул, а ключи остальных протоколов — в соответствующие им пулы.'
+            ' Можно добавить несколько подписок по очереди; повторный импорт той же ссылки обновит её.'
         )
         assert 'Vless-ключи' not in hint
         light_panel = web_form_blocks._light_protocol_panel_html(
@@ -4682,7 +4683,7 @@ def test_web_post_actions_helpers():
     pool_ctx.update(
         fetch_keys_from_subscription=lambda url, **kwargs: ({'vless': [subscription_vless_uri], 'trojan': [subscription_trojan_uri]}, ''),
         subscription_keys_for_protocol=lambda proto, fetched: fetched.get('vless', []) if proto == 'vless2' else fetched.get(proto, []),
-        subscription_record=lambda proto: {'managed_keys': [old_vless_uri]},
+        subscription_record=lambda proto, **kwargs: {'managed_keys': [old_vless_uri]},
         save_subscription_record=lambda proto, **updates: subscription_saves.append((proto, updates)),
         import_subscription_keys_to_pools=lambda proto, fetched, **kwargs: subscription_calls.append((proto, kwargs)) or {
             'selected_added': 1,
@@ -12102,7 +12103,7 @@ def test_telegram_bot_menu_button_smoke():
             subscription_keys_for_protocol=lambda proto, fetched: fetched.get('vless', []),
             validate_subscription_snapshot=subscription_runtime.validate_subscription_snapshot,
         )
-        bot_module._subscription_record = lambda proto: {'managed_keys': [old_subscription_uri]}
+        bot_module._subscription_record = lambda proto, **kwargs: {'managed_keys': [old_subscription_uri]}
         bot_module._import_subscription_keys_to_pools = lambda proto, fetched, **kwargs: (
             subscription_calls.append((proto, fetched, kwargs)) or {
                 'selected_added': 1,
@@ -12123,11 +12124,12 @@ def test_telegram_bot_menu_button_smoke():
         assert subscription_calls[0][2] == {
             'sync_subscription': True,
             'previous_managed_keys': [old_subscription_uri],
+            'subscription_url': 'https://subscription.example.test/private',
         }
         assert subscription_updates[0][0] == 'vless2'
         assert subscription_updates[0][1]['hwid_enabled'] is True
 
-        bot_module._subscription_record = lambda proto: {
+        bot_module._subscription_record = lambda proto, **kwargs: {
             'managed_keys': [old_subscription_uri, manual_uri],
         }
         try:
@@ -18191,7 +18193,7 @@ def test_web_template_scripts_helpers():
     assert "fetch('/api/pool_probe'" in scripts
     assert 'function applyPoolProbeStatusPayload(payload)' in scripts
     assert 'function refreshStatusSoon(delayMs, durationMs)' in scripts
-    assert "['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe', 'pool-import']" in scripts
+    assert "['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe', 'pool-import', 'pool-subscription-refresh', 'pool-subscription-remove']" in scripts
     assert 'schedulePoolProbePolling(1200)' in scripts
     assert "setOptionalText('pool-summary-note', progressSummary)" in scripts
     assert "document.querySelectorAll('[data-pool-probe-cancel-button]')" in scripts

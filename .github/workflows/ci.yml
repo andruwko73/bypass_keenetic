@@ -30,14 +30,14 @@ jobs:
         run: python -m compileall -q .
 
       - name: Python smoke
-        run: python -m pytest tests/smoke_modules.py -q
+        run: python -m pytest tests/smoke_modules.py tests/test_multiple_subscriptions.py -q
 
       - name: Secret scan
         run: python tests/secret_scan.py
 
       - name: Shell syntax
         run: |
-          bash -n \
+          for script in \
             script.sh \
             bootstrap/install.sh \
             app/update_fork.sh \
@@ -48,6 +48,9 @@ jobs:
             app/S99telegram_bot \
             app/S98telegram_bot_installer \
             app/S99unblock
+          do
+            bash -n "$script"
+          done
 
       - name: JavaScript syntax
         run: npm run ui:check

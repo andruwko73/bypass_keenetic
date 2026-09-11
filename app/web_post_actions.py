@@ -91,6 +91,14 @@ def _pool_payload(ctx, protocols=None):
     except TypeError:
         pools = web_pool_snapshot(current_keys, include_keys=False)
     payload = {'pools': pools}
+    subscription_settings = _ctx(ctx, 'subscription_public_settings')
+    if subscription_settings:
+        from web_form_blocks import render_subscription_sources
+        payload['subscription_panels'] = {
+            proto: render_subscription_sources(proto, settings)
+            for proto, settings in subscription_settings().items()
+            if protocols is None or proto in protocols
+        }
     get_progress = _ctx(ctx, 'get_pool_probe_progress')
     if get_progress:
         try:
@@ -500,6 +508,7 @@ def _pool_import(ctx, data):
                     proto,
                     subscription_url,
                     use_router_hwid=send_router_hwid,
+                    **({'name': form_value(data, 'subscription_name')} if form_value(data, 'subscription_name').strip() else {}),
                 )
                 result = _format_subscription_import_result(proto, summary)
                 _invalidate_status(ctx)
@@ -518,12 +527,13 @@ def _pool_import(ctx, data):
             previous_record = {}
             subscription_record = _ctx(ctx, 'subscription_record')
             if subscription_record:
-                previous_record = subscription_record(proto) or {}
+                previous_record = subscription_record(proto, url=subscription_url) or {}
             summary = import_subscription(
                 proto,
                 fetched,
                 sync_subscription=bool(send_router_hwid and selected_keys),
                 previous_managed_keys=previous_record.get('managed_keys', []),
+                subscription_url=subscription_url,
             )
             save_subscription_record = _ctx(ctx, 'save_subscription_record')
             if save_subscription_record and selected_keys:
@@ -535,6 +545,7 @@ def _pool_import(ctx, data):
                     last_success_at=time.time(),
                     last_error='',
                     managed_keys=summary.get('managed_keys', []) if send_router_hwid and selected_keys else [],
+                    imported_keys=selected_keys,
                 )
             result = _format_subscription_import_result(proto, summary)
         else:
@@ -682,6 +693,7 @@ def _pool_subscribe(ctx, data):
                 proto,
                 subscription_url,
                 use_router_hwid=send_router_hwid,
+                **({'name': form_value(data, 'subscription_name')} if form_value(data, 'subscription_name').strip() else {}),
             )
             result = _format_subscription_import_result(proto, summary)
             _invalidate_status(ctx)
@@ -701,13 +713,14 @@ def _pool_subscribe(ctx, data):
         previous_record = {}
         subscription_record = _ctx(ctx, 'subscription_record')
         if subscription_record:
-            previous_record = subscription_record(proto) or {}
+            previous_record = subscription_record(proto, url=subscription_url) or {}
         if add_saved:
             saved_result = add_saved(
                 proto,
                 fetched,
                 sync_subscription=send_router_hwid,
                 previous_managed_keys=previous_record.get('managed_keys', []),
+                subscription_url=subscription_url,
             )
             if len(saved_result) >= 5:
                 pools, added_keys, removed_keys, managed_keys, _ = saved_result[:5]
@@ -730,6 +743,7 @@ def _pool_subscribe(ctx, data):
                 last_success_at=time.time(),
                 last_error='',
                 managed_keys=managed_keys if send_router_hwid else [],
+                imported_keys=managed_keys,
             )
         result = f'Загружено из subscription и добавлено в пул {proto}: {len(added_keys)} ключей'
         if removed_keys:
@@ -790,6 +804,24 @@ def _install(ctx, data):
     return _result(result, success=success, extra=extra)
 
 
+def _pool_subscription_action(ctx, data, *, remove=False):
+    proto = form_value(data, 'type')
+    try:
+        if proto not in PROXY_PROTOCOLS:
+            raise ValueError('Неизвестный протокол')
+        callback = _ctx(ctx, 'remove_pool_subscription' if remove else 'refresh_pool_subscription')
+        if not callable(callback):
+            raise ValueError('Управление подписками недоступно')
+        summary = callback(proto, form_value(data, 'subscription_id'))
+        message = ('Подписка удалена. Ключи сохранены в пуле.' if remove
+                   else _format_subscription_import_result(proto, summary))
+        _invalidate_status(ctx)
+        return _result(message, extra=_pool_payload(ctx, protocols=[proto]))
+    except Exception:
+        return _result('Не удалось удалить подписку. Обновите страницу.' if remove else
+                       'Не удалось обновить подписку. Проверьте её доступность и повторите попытку.', success=False)
+
+
 def dispatch(ctx, path, data):
     custom_actions = {
         '/custom_checks_to_list',
@@ -799,7 +831,7 @@ def dispatch(ctx, path, data):
         '/service_profile_apply',
         '/route_intersections_resolve',
     }
-    pool_actions = {'/pool_probe', '/pool_probe_cancel', '/pool_add', '/pool_import', '/pool_delete', '/pool_apply', '/pool_clear', '/pool_subscribe'}
+    pool_actions = {'/pool_probe', '/pool_probe_cancel', '/pool_add', '/pool_import', '/pool_delete', '/pool_apply', '/pool_clear', '/pool_subscribe', '/pool_subscription_refresh', '/pool_subscription_remove'}
     if path in custom_actions and not _ctx(ctx, 'custom_checks_enabled', False):
         return None
     if path in pool_actions and not _ctx(ctx, 'pool_actions_enabled', False):
@@ -836,6 +868,8 @@ def dispatch(ctx, path, data):
         '/pool_apply': _pool_apply,
         '/pool_clear': _pool_clear,
         '/pool_subscribe': _pool_subscribe,
+        '/pool_subscription_refresh': _pool_subscription_action,
+        '/pool_subscription_remove': lambda context, form: _pool_subscription_action(context, form, remove=True),
         '/install': _install,
     }
     action = common_actions.get(path)

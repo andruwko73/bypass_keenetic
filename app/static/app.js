@@ -3921,6 +3921,23 @@
                             if (payload.pools || payload.pool_summary) {
                                 applyPoolPayload(payload);
                             }
+                            Object.keys(payload.subscription_panels || {}).forEach(function(owner) {
+                                const container = document.querySelector('[data-subscriptions="' + owner + '"]');
+                                if (container) {
+                                    container.innerHTML = payload.subscription_panels[owner];
+                                    setupAsyncForms(container);
+                                }
+                            });
+                            if (ok && action === 'pool-import') {
+                                const input = form.querySelector('[name="import_payload"]');
+                                const nameInput = form.querySelector('[name="subscription_name"]');
+                                if (input && input.value === String(formData.get('import_payload') || '')) {
+                                    input.value = ''; autoResizeTextarea(input);
+                                }
+                                if (nameInput && nameInput.value === String(formData.get('subscription_name') || '')) {
+                                    nameInput.value = '';
+                                }
+                            }
                             if (payload.list_name && typeof payload.list_content === 'string') {
                                 const listPanel = document.querySelector('[data-list-panel="' + payload.list_name + '"]');
                                 const listTextarea = listPanel ? listPanel.querySelector('textarea[name="content"]') : null;
@@ -3971,7 +3988,7 @@
                                     window.location.reload();
                                 }, Number(payload.reload_after_ms) || 900);
                             }
-                            const poolMutationAction = ['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe', 'pool-import'].indexOf(action) !== -1;
+                            const poolMutationAction = ['pool-add', 'pool-delete', 'pool-clear', 'pool-subscribe', 'pool-import', 'pool-subscription-refresh', 'pool-subscription-remove'].indexOf(action) !== -1;
                             if (action === 'pool-probe-cancel') {
                                 refreshPoolData(1200);
                                 scheduleStatusPolling(15000);
