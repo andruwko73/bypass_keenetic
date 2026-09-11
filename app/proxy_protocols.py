@@ -1,4 +1,5 @@
 import base64
+import copy
 import json
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -11,7 +12,79 @@ HYSTERIA2_SUPPORTED_PARAMETERS = frozenset((
     'alpn',
     'obfs',
     'obfs-password',
+    'fm',
 ))
+
+
+def _share_json_object(value, parameter):
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        raise ValueError(f'Параметр {parameter} должен содержать JSON-объект') from None
+    if not isinstance(parsed, dict):
+        raise ValueError(f'Параметр {parameter} должен содержать JSON-объект')
+    return parsed
+
+
+def _hysteria2_finalmask(value):
+    mask = _share_json_object(value, 'fm')
+    if set(mask) - {'tcp', 'udp', 'quicParams'}:
+        raise ValueError('Неподдерживаемый раздел Hysteria2 fm')
+    for direction in ('tcp', 'udp'):
+        if direction not in mask:
+            continue
+        layers = mask[direction]
+        if not isinstance(layers, list) or any(
+            not isinstance(layer, dict)
+            or not isinstance(layer.get('type'), str)
+            or not layer['type']
+            or not isinstance(layer.get('settings', {}), dict)
+            or set(layer) - {'type', 'settings'}
+            for layer in layers
+        ):
+            raise ValueError('Некорректный список слоёв Hysteria2 fm')
+    if 'quicParams' in mask and not isinstance(mask['quicParams'], dict):
+        raise ValueError('Hysteria2 fm.quicParams должен быть JSON-объектом')
+    return mask
+
+
+def _hysteria2_finalmask_settings(mask):
+    """Translate the modern QUIC envelope for the pre-26.3.27 core schema."""
+    mask = copy.deepcopy(mask)
+    if 'quicParams' not in mask:
+        return mask, {}
+    from xray_compat_runtime import xray_version
+    version = xray_version()
+    if version is None:
+        raise ValueError('Не удалось определить версию Xray для Hysteria2 fm.quicParams')
+    if version >= (26, 3, 27):
+        return mask, {}
+    quic = mask.pop('quicParams')
+    mapping = {
+        'congestion': 'congestion', 'brutalUp': 'up', 'brutalDown': 'down',
+        'initStreamReceiveWindow': 'initStreamReceiveWindow',
+        'maxStreamReceiveWindow': 'maxStreamReceiveWindow',
+        'initConnectionReceiveWindow': 'initConnectionReceiveWindow',
+        'maxConnectionReceiveWindow': 'maxConnectionReceiveWindow',
+        'maxIdleTimeout': 'maxIdleTimeout', 'keepAlivePeriod': 'keepAlivePeriod',
+        'disablePathMTUDiscovery': 'disablePathMTUDiscovery',
+    }
+    if set(quic) - set(mapping) - {'udpHop', 'debug'}:
+        raise ValueError('Параметры Hysteria2 fm.quicParams требуют Xray 26.3.27 или новее')
+    if 'debug' in quic and quic['debug'] is not False:
+        raise ValueError('Hysteria2 fm.quicParams.debug требует Xray 26.3.27 или новее')
+    settings = {target: quic[source] for source, target in mapping.items() if source in quic}
+    for name in ('up', 'down'):
+        if name in settings and isinstance(settings[name], (int, float)) and not isinstance(settings[name], bool):
+            settings[name] = str(settings[name])
+    if 'udpHop' in quic:
+        hop = quic['udpHop']
+        if not isinstance(hop, dict) or set(hop) - {'ports', 'interval'}:
+            raise ValueError('Некорректные параметры Hysteria2 fm.quicParams.udpHop')
+        settings['udphop'] = {
+            ('port' if name == 'ports' else name): value for name, value in hop.items()
+        }
+    return mask, settings
 
 
 def parse_vmess_key(key):
@@ -83,6 +156,10 @@ def parse_vless_key(key):
         'fingerprint': fingerprint,
         'spiderX': spider_x,
         'alpn': alpn,
+        'pinnedPeerCertSha256': params.get('pcs', [''])[0],
+        'verifyPeerCertByName': params.get('vcn', [''])[0],
+        'mode': params.get('mode', ['auto'])[0],
+        'extra': _share_json_object(params['extra'][0], 'extra') if network in ('xhttp', 'splithttp') and params.get('extra') else None,
     }
 
 
@@ -182,7 +259,7 @@ def parse_hysteria2_key(key):
     if obfs_password and not obfs:
         raise ValueError('Параметр obfs-password требует параметр obfs')
     alpn = [item.strip() for item in first('alpn', 'h3').split(',') if item.strip()]
-    return {
+    result = {
         'address': parsed.hostname,
         'port': int(port),
         'auth': auth,
@@ -194,6 +271,11 @@ def parse_hysteria2_key(key):
         'obfs_password': obfs_password,
         'fragment': unquote(parsed.fragment or ''),
     }
+    if 'fm' in params:
+        result['finalmask'] = _hysteria2_finalmask(first('fm'))
+        if obfs and result['finalmask'].get('udp'):
+            raise ValueError('Hysteria2 obfs и fm.udp нельзя задавать одновременно')
+    return result
 
 
 def decode_shadowsocks_uri(key):
@@ -294,6 +376,13 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
             stream_settings[f'{security}Settings'] = {
                 'serverName': data.get('sni', ''),
             }
+            if security == 'tls':
+                tls_settings = stream_settings['tlsSettings']
+                for name in ('fingerprint', 'pinnedPeerCertSha256', 'verifyPeerCertByName'):
+                    if data.get(name):
+                        tls_settings[name] = data[name]
+                if data.get('alpn'):
+                    tls_settings['alpn'] = [item.strip() for item in data['alpn'].split(',') if item.strip()]
         elif security == 'reality':
             stream_settings['security'] = 'reality'
             stream_settings['realitySettings'] = {
@@ -314,6 +403,15 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
             }
         elif network == 'grpc':
             stream_settings['grpcSettings'] = {'serviceName': data.get('serviceName', ''), 'multiMode': False}
+        elif network in ('xhttp', 'splithttp'):
+            if data['mode'] not in ('auto', 'packet-up', 'stream-up', 'stream-one'):
+                raise ValueError('Неподдерживаемый режим VLESS XHTTP')
+            stream_settings['network'] = 'xhttp'
+            stream_settings['xhttpSettings'] = {
+                'path': data['path'], 'host': data['host'], 'mode': data['mode'],
+            }
+            if data['extra'] is not None:
+                stream_settings['xhttpSettings']['extra'] = data['extra']
         return {
             'tag': tag,
             'domainStrategy': 'UseIPv4',
@@ -382,13 +480,16 @@ def proxy_outbound_from_key(proto, key_value, tag, email='t@t.tt'):
                 'auth': data['auth'],
             },
         }
+        if data.get('finalmask') is not None:
+            finalmask, legacy_quic = _hysteria2_finalmask_settings(data['finalmask'])
+            if finalmask:
+                stream_settings['finalmask'] = finalmask
+            stream_settings['hysteriaSettings'].update(legacy_quic)
         if data.get('obfs') == 'salamander':
-            stream_settings['finalmask'] = {
-                'udp': [{
-                    'type': 'salamander',
-                    'settings': {'password': data['obfs_password']},
-                }],
-            }
+            stream_settings.setdefault('finalmask', {})['udp'] = [{
+                'type': 'salamander',
+                'settings': {'password': data['obfs_password']},
+            }]
         return {
             'tag': tag,
             'protocol': 'hysteria',

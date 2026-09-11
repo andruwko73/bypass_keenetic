@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from functools import lru_cache
 
 
 XRAY_CONFIG_PATH = '/opt/etc/xray/config.json'
@@ -25,6 +26,28 @@ def _resolve_binary(binary_name, fallback):
         return binary_name
     resolved = shutil.which(binary_name or os.path.basename(fallback))
     return resolved or fallback
+
+
+@lru_cache(maxsize=4)
+def _read_xray_version(binary, mtime_ns, size):
+    """Cache by binary identity so an in-place core upgrade invalidates the result."""
+    result = subprocess.run(
+        [binary, 'version'], capture_output=True, text=True,
+        encoding='utf-8', errors='replace', timeout=3, check=False,
+    )
+    match = re.search(r'\bXray\s+(\d+)\.(\d+)\.(\d+)\b', result.stdout or '')
+    if result.returncode != 0 or match is None:
+        raise ValueError('Xray version unavailable')
+    return tuple(int(part) for part in match.groups())
+
+
+def xray_version():
+    binary = _resolve_binary('xray', '/opt/sbin/xray')
+    try:
+        info = os.stat(binary)
+        return _read_xray_version(binary, info.st_mtime_ns, info.st_size)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 def drop_xray_removed_options(value):
