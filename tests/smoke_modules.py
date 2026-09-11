@@ -18298,12 +18298,12 @@ def test_web_form_template_smoke():
     assert 'API отвечает, память роутера в норме' not in page
     assert '"botReady":true' in page
     assert '"botPolling":true' in page
-    assert 'status-overview-head' in page
+    assert 'status-overview-head' not in page
     assert 'Панель состояния' not in page
     assert '10 / 64 MB' in page
     assert 'DNS: ndnproxy' in page
     assert 'value="update"' not in page
-    assert 'Локальная панель управления обходом на роутере' in page
+    assert '<strong>Панель управления</strong>' in page
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
     assert 'Связь, активный режим и сервисные действия собраны в одном месте.' not in page
     assert 'Выберите протокол, сохраните активный ключ или управляйте его пулом.' not in page
@@ -18539,7 +18539,7 @@ def test_web_form_template_smoke():
     assert 'active-mode-card' not in web_only_page
     assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in web_only_page
     assert 'Telegram API отвечает' not in web_only_page
-    assert 'Веб-интерфейс, состояние роутера' in web_only_page
+    assert 'Веб-интерфейс, состояние роутера' not in web_only_page
     assert '"enableTelegram":false' in web_only_page
     assert 'value="update"' not in web_only_page
 

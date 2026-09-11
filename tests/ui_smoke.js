@@ -1016,7 +1016,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   }
 
   await assertVisibleBox(page, '.topbar', `${name} topbar`);
-  await assertVisibleBox(page, '[data-view="status"].active .view-head', `${name} overview`);
+  await assertVisibleBox(page, '[data-view="status"].active .status-dashboard', `${name} overview`);
   const memoryMeter = page.locator('#router-memory-meter');
   await assertVisibleBox(page, '#router-memory-meter', `${name} router memory meter`);
   const memoryMeterClass = await memoryMeter.getAttribute('class') || '';
