@@ -50,11 +50,42 @@ detect_ipset_type() {
 cleanup_update_artifacts() {
   keep_count="${1:-1}"
   ls -dt /opt/root/update-* 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
-    case "$old_dir" in /opt/root/update-*) rm -rf "$old_dir" ;; esac
-  done
+    [ -d "$old_dir" ] && [ ! -L "$old_dir" ] || continue
+    case "$old_dir" in /opt/root/update-*) rm -rf "$old_dir" || exit 1 ;; esac
+  done || return 1
   ls -dt /opt/root/backup-* 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_dir; do
-    case "$old_dir" in /opt/root/backup-*) rm -rf "$old_dir" ;; esac
+    [ -d "$old_dir" ] && [ ! -L "$old_dir" ] || continue
+    case "$old_dir" in /opt/root/backup-*) rm -rf "$old_dir" || exit 1 ;; esac
   done
+}
+
+cleanup_completed_update_artifacts() {
+  # Keep recovery material until the new runtime has passed its health checks.
+  case "$backup_dir" in /opt/root/backup-*) ;; *) return 1 ;; esac
+  [ "$(dirname "$backup_dir")" = /opt/root ] || return 1
+  [ -d "$backup_dir" ] && [ ! -L "$backup_dir" ] || return 1
+  [ -f "$backup_dir/rollback.sh" ] && [ ! -L "$backup_dir/rollback.sh" ] || return 1
+  [ "$(readlink /opt/root/bypass-last-update-rollback.sh)" = "$backup_dir/rollback.sh" ] || return 1
+  for cleanup_completed_dir in /opt/root/update-* /opt/root/backup-*; do
+    [ -d "$cleanup_completed_dir" ] && [ ! -L "$cleanup_completed_dir" ] || continue
+    [ "$cleanup_completed_dir" = "$backup_dir" ] && continue
+    rm -rf "$cleanup_completed_dir" || return 1
+  done
+
+  # A full update backup supersedes the initial install's absent-path rollback.
+  cleanup_installer_root=/opt/root/bypass-installer-backups
+  [ -d "$cleanup_installer_root" ] && [ ! -L "$cleanup_installer_root" ] || return 0
+  for cleanup_installer_dir in "$cleanup_installer_root"/????????-??????; do
+    [ -d "$cleanup_installer_dir" ] && [ ! -L "$cleanup_installer_dir" ] || continue
+    case "${cleanup_installer_dir##*/}" in *[!0-9-]*) continue ;; esac
+    [ -f "$cleanup_installer_dir/rollback.sh" ] || continue
+    if [ -L /opt/root/bypass-last-rollback.sh ] &&
+       [ "$(readlink /opt/root/bypass-last-rollback.sh)" = "$cleanup_installer_dir/rollback.sh" ]; then
+      rm -f /opt/root/bypass-last-rollback.sh || return 1
+    fi
+    rm -rf "$cleanup_installer_dir" || return 1
+  done
+  rmdir "$cleanup_installer_root" 2>/dev/null || true
 }
 
 cleanup_removed_connection_artifacts() {
@@ -2741,6 +2772,9 @@ if [ "$1" = "-update" ]; then
     write_cli_update_status update true 95 Завершение "Сетевые списки запущены; завершаем фоновые задачи"
     run_youtube_edge_prefetch_once "Post-update" &
     run_youtube_edge_prefetch_retry_if_skipped "Post-update-late" 90
+    cleanup_completed_update_artifacts || {
+      update_completion_message="$update_completion_message; не удалось удалить временные файлы установки"
+    }
     write_cli_update_status update false 100 Готово "$update_completion_message"
     cli_update_status_active=0
     update_runtime_quiesced=0
