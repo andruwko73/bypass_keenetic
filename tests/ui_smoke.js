@@ -774,6 +774,31 @@ async function assertActiveTelegramCardConsistent(page, protocol, label) {
   }
 }
 
+async function wheelKeyWorkspace(page, direction) {
+  const point = await page.evaluate(() => {
+    const panel = document.querySelector('[data-protocol-panel].active [data-subview="key"].active');
+    const r = panel.getBoundingClientRect();
+    return {x: Math.min(innerWidth - 12, r.right - 12), y: Math.max(1, Math.min(innerHeight - 20, r.bottom - 20))};
+  });
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.wheel(0, direction * 10000);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+async function assertUserCanReachSubscriptionEnd(page, sources, label) {
+  // Playwright click() can programmatically scroll overflow:hidden ancestors.
+  // A wheel event proves that the user can reach the last action themselves.
+  await wheelKeyWorkspace(page, 1);
+  const last = sources.locator('.subscription-source-actions button').last();
+  await last.evaluate((node) => {
+    const r = node.getBoundingClientRect();
+    const x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
+    if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight || !node.contains(document.elementFromPoint(x,y))) {
+      throw new Error('Last subscription action is clipped after user scrolling');
+    }
+  }).catch(error => { throw new Error(`${label}: ${error.message}`); });
+}
+
 async function assertMultipleSubscriptionsFixture(page, protocol, label) {
   const response = await page.request.get(page.url());
   if (response.headers()['x-bypass-ui-fixture'] !== '1') return;
@@ -790,6 +815,7 @@ async function assertMultipleSubscriptionsFixture(page, protocol, label) {
     if (!(await (await result).json()).ok) throw new Error(`${label}: subscription import failed`);
     await page.waitForFunction(({ proto, count }) => document.querySelectorAll(`[data-subscriptions="${proto}"] [data-subscription-id]`).length === count, { proto: protocol, count: initial + index });
   }
+  await assertUserCanReachSubscriptionEnd(page, sources, label);
   const second = sources.locator('[data-subscription-id]').filter({ hasText: 'UI source 2' });
   const refresh = page.waitForResponse((item) => item.url().endsWith('/pool_subscription_refresh'));
   await second.getByRole('button', { name: 'Обновить UI source 2', exact: true }).click();
@@ -807,6 +833,7 @@ async function assertMultipleSubscriptionsFixture(page, protocol, label) {
   if (markup.includes('https://subscriptions.example.test') || markup.includes('fixture-imported-key')) {
     throw new Error(`${label}: subscription UI exposed private fields`);
   }
+  await wheelKeyWorkspace(page, -1);
 }
 
 async function assertUnifiedImportLayout(page, label) {
@@ -922,8 +949,9 @@ async function assertUnifiedImportLayout(page, label) {
   if (layout.viewportWidth < 720 && layout.subtabWrap && layout.checkSubtab && Math.abs(layout.checkSubtab.width - layout.subtabWrap.width) > 4) {
     throw new Error(`${label}: check subtab is not full-row on mobile ${JSON.stringify(layout)}`);
   }
-  if (layout.viewportWidth >= 1024 && layout.importButton.bottom > layout.viewportHeight + 2) {
-    throw new Error(`${label}: import button is below desktop viewport ${JSON.stringify(layout)}`);
+  if (layout.viewportWidth >= 761 && layout.importButton.bottom > layout.viewportHeight + 2) {
+    const overflowY = await page.locator('[data-protocol-panel].active [data-subview="key"].active').evaluate(node => getComputedStyle(node).overflowY);
+    if (!['auto','scroll'].includes(overflowY)) throw new Error(`${label}: import button is clipped without user scrolling`);
   }
 }
 
@@ -1595,6 +1623,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   assertNoPageFailures(failures);
 
   await context.close();
+  console.log(`UI smoke passed: ${modeConfig.mode}, ${name}`);
 }
 
 (async () => {

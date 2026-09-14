@@ -301,6 +301,11 @@ def render_web_form(
     pool_probe_running = enable_key_pool and bool(router_health.get('pool_probe_running'))
     pool_probe_start_disabled = ' disabled aria-disabled="true"' if pool_probe_running else ' aria-disabled="false"'
     pool_probe_cancel_disabled = ' aria-disabled="false"' if pool_probe_running else ' disabled aria-disabled="true"'
+    status_overview_subtitle = (
+        'Связь, активный режим и сервисные действия собраны в одном месте'
+        if enable_telegram else
+        'Веб-интерфейс, состояние роутера и сервисные действия собраны в одном месте'
+    )
     if enable_key_pool:
         pool_latest_run_text = str(pool_summary.get('latest_run_text') or '').strip()
         pool_latest_run_hidden = '' if pool_latest_run_text else ' hidden'
@@ -502,6 +507,12 @@ def render_web_form(
             </nav>
             <main class="app-main">
                 <section class="app-view active" data-view="status">
+                    <div class="view-head status-overview-head">
+                        <div class="status-overview-copy">
+                            <h2>Статус и сервис</h2>
+                            <p class="section-subtitle">{html.escape(status_overview_subtitle)}</p>
+                        </div>
+                    </div>
                     <div class="{dashboard_class}">
                         <div class="status-dashboard-column status-dashboard-column-primary">
                             <div class="status-card quick-start-card">

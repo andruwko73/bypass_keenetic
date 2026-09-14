@@ -148,10 +148,37 @@ def read_proc_meminfo(meminfo_path='/proc/meminfo'):
     return values
 
 
+def storage_kind_for_path(path, mounts_text):
+    """Classify the filesystem containing the app, including nested mounts."""
+    selected = None
+    for row in str(mounts_text or '').splitlines():
+        fields = row.split()
+        if len(fields) < 3:
+            continue
+        source, mount, filesystem = fields[:3]
+        for escaped, value in ((r'\040', ' '), (r'\011', '\t'), (r'\134', '\\')):
+            mount = mount.replace(escaped, value)
+        mount = mount.rstrip('/') or '/'
+        if path != mount and not path.startswith(mount.rstrip('/') + '/'):
+            continue
+        if selected is None or len(mount) > len(selected[0]):
+            selected = (mount, source, filesystem)
+    if selected is None:
+        return 'unknown'
+    _, source, filesystem = selected
+    if filesystem in ('ubifs', 'jffs2'):
+        return 'internal'
+    if source.startswith(('/dev/sd', '/dev/mmcblk')):
+        return 'external'
+    return 'unknown'
+
+
 def read_flash_storage(
     paths=FLASH_STORAGE_PATHS,
     disk_usage=shutil.disk_usage,
     path_exists=os.path.exists,
+    read_text=read_proc_text,
+    realpath=os.path.realpath,
 ):
     for path in paths:
         try:
@@ -165,8 +192,13 @@ def read_flash_storage(
         free = int(getattr(usage, 'free', 0) or 0)
         if total <= 0:
             continue
+        try:
+            kind = storage_kind_for_path(realpath(path), read_text('/proc/mounts', max_bytes=65536))
+        except Exception:
+            kind = 'unknown'
         return {
             'path': path,
+            'kind': kind,
             'total_kb': int(round(total / 1024.0)),
             'used_kb': int(round(used / 1024.0)),
             'free_kb': int(round(free / 1024.0)),
@@ -876,6 +908,7 @@ def build_router_health_payload(
     flash_used_kb = int(flash_storage.get('used_kb') or 0)
     flash_free_kb = int(flash_storage.get('free_kb') or 0)
     flash_path = str(flash_storage.get('path') or '').strip()
+    flash_kind = str(flash_storage.get('kind') or 'unknown')
     flash_used_percent = int(round((flash_used_kb / float(flash_total_kb)) * 100)) if flash_total_kb else 0
     flash_total_mb = int(round(flash_total_kb / 1024.0)) if flash_total_kb else 0
     flash_used_mb = int(round(flash_used_kb / 1024.0)) if flash_used_kb else 0
@@ -952,7 +985,8 @@ def build_router_health_payload(
         else:
             program_details.append(f'Программа использует {program_rss_mb} МБ ОЗУ')
     if flash_total_mb:
-        program_details.append(f'Flash-носитель: занято {flash_used_mb} из {flash_total_mb} МБ ({flash_used_percent}%)')
+        storage_label = 'Внутренняя память' if flash_kind == 'internal' else 'Flash-носитель'
+        program_details.append(f'{storage_label}: занято {flash_used_mb} из {flash_total_mb} МБ ({flash_used_percent}%)')
     memory_pressure = classify_memory_pressure(
         available_kb=available_kb,
         bot_rss_kb=bot_rss_kb,
@@ -1018,6 +1052,7 @@ def build_router_health_payload(
         'youtube_prefetch_rss_kb': youtube_prefetch_rss_kb,
         'background_worker_rss_kb': background_worker_rss_kb,
         'flash_storage_path': flash_path,
+        'flash_storage_kind': flash_kind,
         'flash_total_kb': flash_total_kb,
         'flash_used_kb': flash_used_kb,
         'flash_free_kb': flash_free_kb,

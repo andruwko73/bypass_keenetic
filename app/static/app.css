@@ -791,7 +791,7 @@
             .topbar{z-index:520;isolation:isolate;}
             .workspace-layout{position:relative;z-index:1;}
             .app-main{position:relative;z-index:1;}
-            .app-view[data-view="status"].active{grid-template-rows:auto auto auto auto;align-content:start;gap:8px;overflow:hidden;}
+            .app-view[data-view="status"].active{grid-template-rows:repeat(4,max-content);align-content:start;gap:8px;overflow:auto;}
             .status-dashboard{overflow:visible;align-items:stretch;margin-bottom:0;}
             .status-dashboard-column{min-height:auto;}
             .status-dashboard-with-pool{align-items:stretch;}
@@ -812,9 +812,9 @@
             .protocol-panels,.list-panels{min-height:0;overflow:hidden;}
             .protocol-workspace.active{min-height:0;}
             .protocol-workspace.active:has(.protocol-subview[data-subview="key"].active),
-            .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active){height:auto;display:grid;grid-template-rows:auto auto auto;align-self:start;overflow:visible;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active){height:100%;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);align-self:stretch;overflow:hidden;}
             .protocol-workspace.active:has(.protocol-subview[data-subview="key"].active) .protocol-subview.active,
-            .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active) .protocol-subview.active{min-height:0;overflow:visible;}
+            .protocol-workspace.active:has(.protocol-subview[data-subview="subscription"].active) .protocol-subview.active{min-height:0;overflow:auto;scrollbar-gutter:stable;padding-right:4px;}
             .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active){height:100%;overflow:hidden;}
             .protocol-workspace.active:has(.protocol-subview[data-subview="check"].active) .protocol-subview-check.active{display:block;min-height:0;max-height:100%;overflow:auto;padding-right:4px;}
             .protocol-subview-check.active > * + *{margin-top:8px;}

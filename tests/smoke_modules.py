@@ -17253,7 +17253,7 @@ def test_web_template_styles_helpers():
     assert '.mode-control #mode-picker,.theme-control .theme-picker{position:absolute;top:calc(100% + 8px);width:min(260px,calc(100vw - 42px));min-width:0;max-height:min(360px,calc(100vh - 220px));overflow:auto;z-index:330;}' in styles
     assert 'html.command-running body{min-height:100vh;}' in styles
     assert 'html.command-running .app-main,' in styles
-    assert '.app-view[data-view="status"].active{grid-template-rows:auto auto auto auto;align-content:start;gap:8px;overflow:hidden;}' in styles
+    assert '.app-view[data-view="status"].active{grid-template-rows:repeat(4,max-content);align-content:start;gap:8px;overflow:auto;}' in styles
     assert '.topbar{position:relative;z-index:260;top:0;padding:8px 10px;margin-bottom:8px;' in styles
     assert '.workspace-layout{flex:1;min-height:0;gap:8px;align-items:stretch;}' in styles
     assert '.view-head,.segmented,.status-dashboard,.overview-service-grid{margin-bottom:0;}' in styles
@@ -18298,14 +18298,15 @@ def test_web_form_template_smoke():
     assert 'API отвечает, память роутера в норме' not in page
     assert '"botReady":true' in page
     assert '"botPolling":true' in page
-    assert 'status-overview-head' not in page
+    assert 'status-overview-head' in page
+    assert '<h2>Статус и сервис</h2>' in page
     assert 'Панель состояния' not in page
     assert '10 / 64 MB' in page
     assert 'DNS: ndnproxy' in page
     assert 'value="update"' not in page
     assert '<strong>Панель управления</strong>' in page
     assert 'Режим работы: интерфейс с пулом ключей и Telegram-бот' in page
-    assert 'Связь, активный режим и сервисные действия собраны в одном месте.' not in page
+    assert 'Связь, активный режим и сервисные действия собраны в одном месте' in page
     assert 'Выберите протокол, сохраните активный ключ или управляйте его пулом.' not in page
     assert 'Домены из выбранного списка будут отправляться через соответствующий протокол.' not in page
     assert 'Переустановка компонентов' not in page
@@ -18539,7 +18540,7 @@ def test_web_form_template_smoke():
     assert 'active-mode-card' not in web_only_page
     assert 'data-pool-probe-cancel-button disabled aria-disabled="true"' in web_only_page
     assert 'Telegram API отвечает' not in web_only_page
-    assert 'Веб-интерфейс, состояние роутера' not in web_only_page
+    assert 'Веб-интерфейс, состояние роутера' in web_only_page
     assert '"enableTelegram":false' in web_only_page
     assert 'value="update"' not in web_only_page
 
