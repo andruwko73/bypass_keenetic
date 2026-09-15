@@ -1106,8 +1106,14 @@ class RouterHealthRuntime:
         self._last_cpu_stat = None
         self._last_cpu_percent = None
         self._cpu_prime_pending = False
+        self._generation = 0
+        self._web_cache = {'timestamp': 0, 'payload': None}
+        self._web_refreshing = False
+        self._web_retry_at = 0
+        self._web_refresh_failed = False
 
     def _cached_payload(self, cache_name, ttl, now, loader, force_refresh=False):
+        generation = self._generation
         cache = getattr(self, cache_name)
         cached = cache.get('payload')
         if (
@@ -1117,7 +1123,9 @@ class RouterHealthRuntime:
         ):
             return dict(cached) if isinstance(cached, dict) else cached
         payload = loader()
-        setattr(self, cache_name, {'timestamp': now, 'payload': dict(payload) if isinstance(payload, dict) else payload})
+        with self._lock:
+            if generation == self._generation:
+                setattr(self, cache_name, {'timestamp': now, 'payload': dict(payload) if isinstance(payload, dict) else payload})
         return dict(payload) if isinstance(payload, dict) else payload
 
     def _core_proxy_snapshot(self, now):
@@ -1198,6 +1206,7 @@ class RouterHealthRuntime:
             return self._last_cpu_percent
 
     def _related_process_snapshot(self, now, probe_running):
+        generation = self._generation
         cache_ttl = min(5.0, self.related_process_cache_ttl) if probe_running else self.related_process_cache_ttl
         if cache_ttl > 0:
             cached = self._related_process_cache.get('payload')
@@ -1208,15 +1217,18 @@ class RouterHealthRuntime:
             ):
                 return dict(cached)
         payload = related_program_process_snapshot(probe_running=probe_running)
-        self._related_process_cache = {
-            'timestamp': now,
-            'payload': dict(payload) if isinstance(payload, dict) else payload,
-            'probe_running': bool(probe_running),
-        }
+        with self._lock:
+            if generation == self._generation:
+                self._related_process_cache = {
+                    'timestamp': now,
+                    'payload': dict(payload) if isinstance(payload, dict) else payload,
+                    'probe_running': bool(probe_running),
+                }
         return dict(payload) if isinstance(payload, dict) else payload
 
     def _compact_snapshot(self, now, probe_progress, probe_running, sample_cpu=True, force_refresh=False, prime_cpu=False):
         with self._lock:
+            generation = self._generation
             payload = self._compact_cache.get('payload')
             if (
                 not force_refresh and
@@ -1249,8 +1261,8 @@ class RouterHealthRuntime:
             memory_limits=self.memory_limits,
         )
         payload['health_scope'] = 'compact'
-        if sample_cpu:
-            with self._lock:
+        with self._lock:
+            if generation == self._generation:
                 self._compact_cache['timestamp'] = now
                 self._compact_cache['payload'] = payload
         return dict(payload)
@@ -1258,6 +1270,7 @@ class RouterHealthRuntime:
     def snapshot(self, pool_probe_progress_getter, compact=False, sample_cpu=True, force_refresh=False, prime_cpu=False):
         now = self.time_provider()
         with self._lock:
+            generation = self._generation
             payload = self._cache.get('payload')
             if (
                 not force_refresh and
@@ -1299,16 +1312,95 @@ class RouterHealthRuntime:
             flash_storage=read_flash_storage(),
             memory_limits=self.memory_limits,
         )
-        if sample_cpu:
-            with self._lock:
+        with self._lock:
+            if generation == self._generation:
                 self._cache['timestamp'] = now
                 self._cache['payload'] = payload
                 self._compact_cache['timestamp'] = now
                 self._compact_cache['payload'] = payload
         return dict(payload)
 
+    def web_snapshot(self, pool_probe_progress_getter, compact=False):
+        """Never run router commands in an HTTP request; keep one refresh in flight.
+
+        Safety decisions continue to use snapshot() and fresh /proc readings.
+        An invalidated result cannot repopulate the web cache after a key change.
+        """
+        now = self.time_provider()
+        worker = None
+        with self._lock:
+            cached = self._web_cache
+            payload = dict(cached['payload']) if cached['payload'] is not None else None
+            sampled_at = cached['timestamp'] if payload is not None else None
+            stale = payload is None or now - sampled_at >= self.cache_ttl
+            if stale and not self._web_refreshing and now >= self._web_retry_at:
+                self._web_refreshing = True
+                generation = self._generation
+
+                def refresh():
+                    try:
+                        result = self.snapshot(pool_probe_progress_getter, compact=True,
+                                               sample_cpu=False, force_refresh=True)
+                        with self._lock:
+                            if generation == self._generation:
+                                self._web_cache = {'timestamp': self.time_provider(), 'payload': result}
+                                self._web_refresh_failed = False
+                    except Exception:
+                        with self._lock:
+                            if generation == self._generation:
+                                self._web_refresh_failed = True
+                                self._web_retry_at = self.time_provider() + 5.0
+                    finally:
+                        with self._lock:
+                            self._web_refreshing = False
+
+                worker = threading.Thread(target=refresh, name='router-health-refresh', daemon=True)
+            refreshing = self._web_refreshing
+            failed = self._web_refresh_failed
+        if worker is not None:
+            try:
+                worker.start()
+            except Exception:
+                with self._lock:
+                    self._web_refreshing = False
+                    self._web_refresh_failed = True
+                    self._web_retry_at = now + 5.0
+                refreshing, failed = False, True
+        if payload is None:
+            # /proc and statvfs only: no ndmc, DNS, process walk or proxy validation.
+            payload = build_router_health_payload(
+                meminfo=read_proc_meminfo(), bot_rss_kb=process_rss_kb('self'),
+                ndmc_system={}, load_text='', probe_progress={}, temp_xray_count=0,
+                cpu_percent=self._cpu_snapshot(sample=False), flash_storage=read_flash_storage(),
+                memory_limits=self.memory_limits,
+            )
+            # The total for the other processes has not been measured yet.
+            payload['note'] = ''
+            payload['dns_note'] = ''
+        payload.update({
+            'health_scope': 'compact' if compact else 'full',
+            'health_sampled_at': sampled_at,
+            'health_age_seconds': max(0, int(now - sampled_at)) if sampled_at is not None else None,
+            'health_stale': stale,
+            'health_refreshing': refreshing,
+            'health_refresh_failed': failed,
+        })
+        if stale:
+            if failed:
+                status = 'Статус роутера не удалось обновить; повтор через несколько секунд.'
+            elif sampled_at is None:
+                status = 'Статус роутера обновляется.'
+            else:
+                status = f'Статус роутера обновляется; данным {payload["health_age_seconds"]} с.'
+            payload['note'] = '\n'.join(filter(None, (payload.get('note'), status)))
+        return payload
+
     def invalidate(self, include_heavy=True):
         with self._lock:
+            self._generation += 1
+            self._web_cache = {'timestamp': 0, 'payload': None}
+            self._web_retry_at = 0
+            self._web_refresh_failed = False
             self._cache = {'timestamp': 0, 'payload': None}
             self._compact_cache = {'timestamp': 0, 'payload': None}
             if include_heavy:

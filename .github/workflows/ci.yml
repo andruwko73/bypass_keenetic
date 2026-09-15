@@ -30,7 +30,7 @@ jobs:
         run: python -m compileall -q .
 
       - name: Python smoke
-        run: python -m pytest tests/smoke_modules.py tests/test_multiple_subscriptions.py tests/test_proxy_share_parameters.py tests/test_update_cleanup.py tests/test_router_storage_kind.py -q
+        run: python -m pytest tests/smoke_modules.py tests/test_multiple_subscriptions.py tests/test_proxy_share_parameters.py tests/test_update_cleanup.py tests/test_router_storage_kind.py tests/test_ipset_batch_parser.py tests/test_router_health_cache.py tests/test_metrics_retention.py -q
 
       - name: Secret scan
         run: python tests/secret_scan.py

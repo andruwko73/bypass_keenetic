@@ -806,6 +806,133 @@ prepare_temp_set() {
 	printf '%s\n' "$prepare_tmp_set" >> "$temp_sets_file"
 }
 
+parse_list_entries() {
+	# One awk process per source. Preserve the legacy parser's precedence and
+	# normalization; DNS resolution and transactional ipset application stay below.
+	BK_LIST="$list_path" BK_MAIN="$main_tmp_set" \
+	BK_MIRROR="$mirror_tmp_set" BK_IPV6="$ipv6_tmp_set" \
+	BK_SOURCE="$source_file" BK_MIRROR_SOURCE="$mirror_source_file" \
+	BK_IPV6_SOURCE="$ipv6_source_file" BK_DOMAINS="$domain_file" \
+	BK_MIRROR_DOMAINS="$mirror_domain_file" BK_POLICY="$UDP_QUIC_POLICY_SOURCE" \
+	BK_EXCLUDE="$UDP_QUIC_EXCLUDE_SOURCE" BK_LOCAL_RE="$LOCAL_RE" \
+	awk '
+		function trim(s) {
+			sub(/^[[:space:]]*/, "", s); sub(/[[:space:]]*$/, "", s)
+			return s
+		}
+		function norm(s) {
+			gsub(/\r/, "", s)
+			sub(/^DOMAIN-SUFFIX,/, "", s); sub(/^DOMAIN,/, "", s)
+			sub(/^HOST-SUFFIX,/, "", s); sub(/^\+\./, "", s); sub(/^\*\./, "", s)
+			sub(/[[:space:]].*$/, "", s); sub(/,.*$/, "", s)
+			sub(/^\//, "", s); sub(/\/$/, "", s)
+			return trim(s)
+		}
+		function direct_match(s, pattern, candidate) {
+			while (match(s, pattern)) {
+				candidate=substr(s, RSTART, RLENGTH)
+				s=substr(s, RSTART+RLENGTH)
+				if (candidate !~ local_re) return candidate
+			}
+			return ""
+		}
+		function direct_entry(s, value) {
+			value=direct_match(s, ip "/[0-9][0-9]?")
+			if (value == "") value=direct_match(s, ip "-" ip)
+			if (value == "") value=direct_match(s, ip)
+			return value
+		}
+		function ipv6_entry(s) {
+			gsub(/\r/, "", s); sub(/#.*/, "", s)
+			sub(/[[:space:]].*$/, "", s); sub(/,.*$/, "", s)
+			s=trim(s)
+			if (s ~ /:/ && s ~ /^[0-9A-Fa-f:]+(\/[0-9][0-9]?[0-9]?)?$/) return s
+			return ""
+		}
+		function policy_norm(s) {
+			s=tolower(s); sub(/\r/, "", s); sub(/#.*/, "", s); s=trim(s)
+			sub(/^domain-suffix,/, "", s); sub(/^domain,/, "", s)
+			sub(/^host-suffix,/, "", s); sub(/^\+\./, "", s); sub(/^\*\./, "", s)
+			sub(/\/$/, "", s)
+			return s
+		}
+		function udp_domain(s, i) {
+			if (!have_policy) return 0
+			for (i=1; i<=domain_count; i++)
+				if (s == domains[i] || s ~ ("\\." domains[i] "$")) return 1
+			return 0
+		}
+		function touch(path) {
+			if (path != "" && !(path in touched)) {
+				printf "%s", "" > path
+				close(path); touched[path]=1
+			}
+		}
+		function add(set_name, value) {
+			if (set_name != "" && value != "") print "add " set_name " " value
+		}
+		BEGIN {
+			list=ENVIRON["BK_LIST"]; main=ENVIRON["BK_MAIN"]
+			mirror=ENVIRON["BK_MIRROR"]; ipv6=ENVIRON["BK_IPV6"]
+			source=ENVIRON["BK_SOURCE"]; mirror_source=ENVIRON["BK_MIRROR_SOURCE"]
+			ipv6_source=ENVIRON["BK_IPV6_SOURCE"]
+			domain_file=ENVIRON["BK_DOMAINS"]; mirror_file=ENVIRON["BK_MIRROR_DOMAINS"]
+			local_re=ENVIRON["BK_LOCAL_RE"]
+			octet="[0-9][0-9]?[0-9]?"
+			ip=octet "\\." octet "\\." octet "\\." octet
+			policy=ENVIRON["BK_POLICY"]; exclude=ENVIRON["BK_EXCLUDE"]
+			if (policy != "") {
+				while ((getline entry < policy) > 0) {
+					have_policy=1
+					d=tolower(entry); sub(/\r/, "", d); sub(/#.*/, "", d); d=trim(d)
+					if (d ~ /^[0-9.]+(\/[0-9]+)?$/) direct_policy[d]=1
+					d=policy_norm(entry)
+					if (d != "" && d !~ /[:\/]/ && d !~ /^[0-9.]+$/)
+						domains[++domain_count]=d
+				}
+				close(policy)
+			}
+			if (exclude != "") {
+				while ((getline entry < exclude) > 0) excluded[entry]=1
+				close(exclude)
+			}
+			while ((read_result=(getline raw < list)) > 0) {
+				line=trim(raw)
+				if (line == "" || line ~ /^#/) continue
+				value=direct_entry(line)
+				if (value != "") {
+					touch(source); add(main, value)
+					if (mirror != "" && (value in direct_policy) && !(value in excluded)) {
+						touch(mirror_source); add(mirror, value)
+					}
+					continue
+				}
+				value=ipv6_entry(line)
+				if (value != "") {
+					if (ipv6 != "") touch(ipv6_source)
+					add(ipv6, value); continue
+				}
+				domain=norm(line)
+				if (domain == "") continue
+				# The old connectivity/UDP shell helpers also normalize their
+				# global domain variable, which affects the emitted lists.
+				domain=tolower(norm(domain))
+				if (domain ~ /^(connectivitycheck\.gstatic\.com|connectivitycheck\.android\.com|clients3\.google\.com|clients4\.google\.com|www\.google\.com|www\.gstatic\.com)$/) continue
+				touch(source); print domain >> domain_file
+				if (ipv6 != "") touch(ipv6_source)
+				if (mirror != "") {
+					domain=tolower(norm(domain))
+					if (udp_domain(domain)) {
+						touch(mirror_source); print domain >> mirror_file
+					}
+				}
+			}
+			close(list)
+			if (read_result < 0) exit 2
+		}
+	' >> "$restore_file"
+}
+
 load_file_to_set() {
 	list_path="$1"
 	set_name="$2"
@@ -837,40 +964,7 @@ load_file_to_set() {
 	: > "$domain_file"
 	[ -n "$mirror_set_name" ] && : > "$mirror_domain_file"
 
-	while IFS= read -r raw_line || [ -n "$raw_line" ]; do
-		line="$(printf '%s\n' "$raw_line" | trim_line)"
-		case "$line" in
-			''|\#*) continue ;;
-		esac
-
-		if direct_entry="$(extract_direct_entry "$line")"; then
-			: > "$source_file"
-			append_restore "$main_tmp_set" "$direct_entry"
-			if [ -n "$mirror_set_name" ] && [ -n "$mirror_tmp_set" ] && udp_quic_direct_entry "$direct_entry"; then
-				: > "$mirror_source_file"
-				append_restore "$mirror_tmp_set" "$direct_entry"
-			fi
-			continue
-		fi
-
-		if direct_ipv6_entry="$(extract_ipv6_direct_entry "$line")"; then
-			[ -n "$ipv6_tmp_set" ] && : > "$ipv6_source_file"
-			append_restore "$ipv6_tmp_set" "$direct_ipv6_entry"
-			continue
-		fi
-
-		domain="$(normalize_domain "$line")"
-		if [ -n "$domain" ]; then
-			connectivity_check_domain "$domain" && continue
-			: > "$source_file"
-			printf '%s\n' "$domain" >> "$domain_file"
-			[ -n "$ipv6_set_name" ] && : > "$ipv6_source_file"
-			if [ -n "$mirror_set_name" ] && udp_quic_domain "$domain"; then
-				: > "$mirror_source_file"
-				printf '%s\n' "$domain" >> "$mirror_domain_file"
-			fi
-		fi
-	done < "$list_path"
+	parse_list_entries || fail_status "Не удалось разобрать список; прежние ipset сохранены."
 
 	resolve_domains "$main_tmp_set" "$domain_file" "$mirror_tmp_set" "$mirror_domain_file"
 	resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"

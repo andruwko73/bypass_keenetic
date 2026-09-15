@@ -9137,13 +9137,12 @@ def _append_status_note(note, extra):
 
 
 def _router_health_snapshot(compact=False, sample_cpu=True, force_refresh=False, prime_cpu=False):
-    payload = router_health.snapshot(
-        _get_pool_probe_progress,
-        compact=compact,
-        sample_cpu=False,
-        force_refresh=force_refresh,
-        prime_cpu=False,
-    )
+    if force_refresh:
+        payload = router_health.snapshot(
+            _get_pool_probe_progress, compact=compact, sample_cpu=False, force_refresh=True,
+        )
+    else:
+        payload = router_health.web_snapshot(_get_pool_probe_progress, compact=compact)
     payload['memory_timeline_enabled'] = bool(MEMORY_TIMELINE_ENABLED and MEMORY_TIMELINE_PATH)
     payload['memory_timeline_path'] = MEMORY_TIMELINE_PATH if MEMORY_TIMELINE_ENABLED else ''
     payload['memory_timeline_bytes'] = _safe_file_size(MEMORY_TIMELINE_PATH) if MEMORY_TIMELINE_ENABLED else 0

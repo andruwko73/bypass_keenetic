@@ -6453,11 +6453,10 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'resolve_ipv6_domains "$ipv6_tmp_set" "$domain_file"' in ipset_script
     assert 'unblockvless6 "tmp_unblockvless6_$$"' in ipset_script
     assert 'unblockvless2v6 "tmp_unblockvless2v6_$$"' in ipset_script
-    assert 'udp_quic_domain "$domain"' in ipset_script
-    assert 'connectivity_check_domain "$domain" && continue' in ipset_script
-    assert 'udp_quic_direct_entry "$direct_entry"' in ipset_script
+    # Entry classification is verified against the frozen legacy parser in
+    # test_ipset_batch_parser.py; do not require its former per-line shell calls.
+    assert 'parse_list_entries || fail_status' in ipset_script
     assert 'extract_ipv6_direct_entry()' in ipset_script
-    assert 'append_restore "$ipv6_tmp_set" "$direct_ipv6_entry"' in ipset_script
     assert 'entry ~ /^[0-9.]+(\\/[0-9]+)?$/' in ipset_script
     assert 'UDP_QUIC_POLICY_FILE="${UDP_QUIC_POLICY_FILE:-/opt/etc/bot/udp_quic_routes.txt}"' in ipset_script
     assert 'UDP_QUIC_EXCLUDE_FILE="${UDP_QUIC_EXCLUDE_FILE:-/opt/etc/bot/udp_quic_exclude.txt}"' in ipset_script
