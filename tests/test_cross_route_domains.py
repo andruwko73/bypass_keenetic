@@ -191,6 +191,7 @@ def test_runtime_uses_one_snapshot_for_general_policy():
 def test_real_xray_sniffed_hosts_use_distinct_egresses(monkeypatch, tmp_path):
     """Actual HTTP sniffing/rule selection; kernel REDIRECT is tested on the router."""
     import contextlib
+    import http.client
     import http.server
     import json
     import os
@@ -220,10 +221,16 @@ def test_real_xray_sniffed_hosts_use_distinct_egresses(monkeypatch, tmp_path):
                 pass
         return Reply
 
+    allocated_ports = set()
+
     def free_port():
-        with socket.socket() as sock:
-            sock.bind(('127.0.0.1', 0))
-            return sock.getsockname()[1]
+        while True:
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            if port not in allocated_ports:
+                allocated_ports.add(port)
+                return port
 
     def request(port, host, socks=False):
         with socket.create_connection(('127.0.0.1', port), timeout=4) as client:
@@ -240,13 +247,10 @@ def test_real_xray_sniffed_hosts_use_distinct_egresses(monkeypatch, tmp_path):
                 assert response[1] == 0
             header = ('Host: ' + host + '\r\n') if host else ''
             client.sendall(('GET / HTTP/1.0\r\n' + header + '\r\n').encode())
-            response = bytearray()
-            while True:
-                part = client.recv(4096)
-                if not part:
-                    break
-                response.extend(part)
-            return bytes(response).split(b'\r\n\r\n', 1)[1].decode()
+            response = http.client.HTTPResponse(client)
+            response.begin()
+            assert response.status == 200
+            return response.read().decode()
 
     try:
         targets = {}
@@ -280,13 +284,19 @@ def test_real_xray_sniffed_hosts_use_distinct_egresses(monkeypatch, tmp_path):
             subprocess.run([os.environ['XRAY_TEST_BINARY'], 'run', '-test', '-c', str(path)],
                            capture_output=True, timeout=15, check=True)
             proc = subprocess.Popen([os.environ['XRAY_TEST_BINARY'], 'run', '-c', str(path)],
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             processes.append(proc)
-            for _ in range(100):
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
                 assert proc.poll() is None, 'Xray fixture exited'
                 try:
-                    with socket.create_connection(('127.0.0.1', ports['in-vless2-transparent']), timeout=0.1):
-                        return proc
+                    # Wait for every listener, using a complete HTTP exchange.
+                    # Bare connect/close can strand the HTTP fixture on Linux.
+                    for tag, port in ports.items():
+                        transparent = tag.endswith('-transparent')
+                        expected = 'direct' if transparent else tag.replace('in-', 'proxy-')
+                        assert request(port, 'ready.example.net', socks=not transparent) == expected
+                    return proc
                 except OSError:
                     time.sleep(0.02)
             pytest.fail('Xray did not start')
@@ -299,6 +309,10 @@ def test_real_xray_sniffed_hosts_use_distinct_egresses(monkeypatch, tmp_path):
         assert request(ports['in-vless2-transparent'], 'vless.example.org') == 'direct'
         proc.terminate()
         proc.wait(timeout=5)
+        # Use fresh ports: Linux may still retain the previous connections.
+        for inbound in config['inbounds']:
+            inbound['port'] = free_port()
+            ports[inbound['tag']] = inbound['port']
         start(config, 'after.json')
         for inbound in ('vless', 'vless2', 'vmess', 'hysteria2'):
             for target in policy.SUPPORTED_PROTOCOLS:
@@ -322,10 +336,12 @@ def test_real_xray_sniffed_hosts_use_distinct_egresses(monkeypatch, tmp_path):
                 if proc.poll() is None:
                     proc.kill()
                     proc.wait(timeout=5)
+            output = proc.communicate(timeout=5)[0]
+            if sys.exc_info()[0] is not None and output:
+                print(output[-2000:].decode('utf-8', errors='replace'))
         for server in servers:
             server.shutdown()
             server.server_close()
         for thread in threads:
             thread.join(timeout=5)
             assert not thread.is_alive()
-
