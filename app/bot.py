@@ -70,7 +70,7 @@ from proxy_config_builder import (
 )
 from transparent_route_policy import (
     compile_protocol_policies as _compile_transparent_route_policies,
-    compile_service_domain_overrides as _compile_transparent_service_overrides,
+    compile_cross_route_domain_overrides as _compile_transparent_domain_overrides,
     normalize_protocol_set as _normalize_transparent_protocol_set,
 )
 from proxy_apply_runtime import (
@@ -16011,21 +16011,20 @@ def _transparent_route_entries_by_protocol():
     return entries
 
 
-def _transparent_route_policies():
+def _transparent_route_policies(entries=None):
     if not XRAY_STRICT_TRANSPARENT_PROTOCOLS:
         return {}
     return _compile_transparent_route_policies(
-        _transparent_route_entries_by_protocol(),
+        _transparent_route_entries_by_protocol() if entries is None else entries,
         XRAY_STRICT_TRANSPARENT_PROTOCOLS,
     )
 
 
-def _transparent_cross_route_domain_overrides():
+def _transparent_cross_route_domain_overrides(entries=None):
     if not XRAY_STRICT_TRANSPARENT_PROTOCOLS:
         return {}
-    return _compile_transparent_service_overrides(
-        _transparent_route_entries_by_protocol(),
-        _service_catalog().CHROME_REMOTE_DESKTOP_ROUTE_ENTRIES,
+    return _compile_transparent_domain_overrides(
+        _transparent_route_entries_by_protocol() if entries is None else entries,
     )
 
 
@@ -16037,6 +16036,7 @@ def _build_v2ray_config(
     trojan_key=None,
     hysteria2_key=None,
 ):
+    route_entries = _transparent_route_entries_by_protocol() if XRAY_STRICT_TRANSPARENT_PROTOCOLS else {}
     return _builder_build_proxy_core_config(
         vmess_key=vmess_key,
         vless_key=_apply_reality_endpoint_override(vless_key),
@@ -16070,8 +16070,8 @@ def _build_v2ray_config(
         route_only_transparent_protocols=XRAY_ROUTE_ONLY_TRANSPARENT_PROTOCOLS,
         route_only_tproxy_protocols=XRAY_ROUTE_ONLY_TPROXY_PROTOCOLS,
         strict_transparent_protocols=XRAY_STRICT_TRANSPARENT_PROTOCOLS,
-        transparent_route_policies=_transparent_route_policies(),
-        cross_route_domain_overrides=_transparent_cross_route_domain_overrides(),
+        transparent_route_policies=_transparent_route_policies(route_entries),
+        cross_route_domain_overrides=_transparent_cross_route_domain_overrides(route_entries),
         bittorrent_direct_enabled=XRAY_BITTORRENT_DIRECT_ENABLED,
     )
 

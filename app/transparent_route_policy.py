@@ -119,6 +119,51 @@ def compile_protocol_policies(entries_by_protocol, strict_protocols):
     return result
 
 
+def compile_cross_route_domain_overrides(entries_by_protocol):
+    """Recover every unambiguous domain route after shared-IP interception.
+
+    A reversed-label trie detects both duplicate owners and overlapping suffix
+    rules without comparing every pair of entries. Conflicting branches retain
+    the existing inbound policy; choosing the first protocol would silently
+    override user intent. Exact host rules do not cover their subdomains.
+    """
+    def node():
+        return {'children': {}, 'domain': 0, 'full': 0, 'subtree': 0}
+
+    root = node()
+    candidates = []
+    source = entries_by_protocol or {}
+    for index, protocol in enumerate(SUPPORTED_PROTOCOLS):
+        owner = 1 << index
+        for token in compile_route_entries(source.get(protocol) or ())['domains']:
+            kind, hostname = token.split(':', 1)
+            labels = tuple(reversed(hostname.split('.')))
+            current = root
+            current['subtree'] |= owner
+            for label in labels:
+                if label not in current['children']:
+                    current['children'][label] = node()
+                current = current['children'][label]
+                current['subtree'] |= owner
+            current[kind] |= owner
+            candidates.append((protocol, owner, token, kind, labels))
+
+    grouped = {protocol: [] for protocol in SUPPORTED_PROTOCOLS}
+    for protocol, owner, token, kind, labels in candidates:
+        current = root
+        overlapping = 0
+        for label in labels:
+            current = current['children'][label]
+            overlapping |= current['domain']
+        overlapping |= current['subtree'] if kind == 'domain' else current['full']
+        if overlapping == owner:
+            grouped[protocol].append(token)
+    return {
+        protocol: {'domains': tuple(sorted(domains))}
+        for protocol, domains in grouped.items() if domains
+    }
+
+
 def compile_service_domain_overrides(entries_by_protocol, service_entries):
     """Return the unique configured route owner of every service domain.
 

@@ -30,7 +30,14 @@ jobs:
         run: python -m compileall -q .
 
       - name: Python smoke
-        run: python -m pytest tests/smoke_modules.py tests/test_multiple_subscriptions.py tests/test_proxy_share_parameters.py tests/test_update_cleanup.py tests/test_router_storage_kind.py tests/test_ipset_batch_parser.py tests/test_router_health_cache.py tests/test_metrics_retention.py -q
+        run: python -m pytest tests/smoke_modules.py tests/test_multiple_subscriptions.py tests/test_proxy_share_parameters.py tests/test_update_cleanup.py tests/test_router_storage_kind.py tests/test_ipset_batch_parser.py tests/test_router_health_cache.py tests/test_metrics_retention.py tests/test_cross_route_domains.py -q
+
+      - name: Xray routing integration
+        run: |
+          curl -fsSL --retry 2 https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-64.zip -o "$RUNNER_TEMP/xray.zip"
+          unzip -p "$RUNNER_TEMP/xray.zip" xray > "$RUNNER_TEMP/xray"
+          chmod 700 "$RUNNER_TEMP/xray"
+          XRAY_TEST_BINARY="$RUNNER_TEMP/xray" python -m pytest tests/test_cross_route_domains.py -q -k real_xray
 
       - name: Secret scan
         run: python tests/secret_scan.py
