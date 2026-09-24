@@ -9,6 +9,17 @@ INSTALLER_SERVICE_PATH="/opt/etc/init.d/S98telegram_bot_installer"
 SERVICE_LOCK_DIR="/tmp/bypass_telegram_bot_service.lock"
 SERVICE_LOCK_HELD=0
 
+# Acquire the apply lock before the service lock, also for recursive restart.
+# Older installations do not have the coordinator and retain their stop path.
+case "$1" in
+    stop|restart)
+        if [ "${BYPASS_PROXY_SERVICE_LOCKED:-0}" != "1" ] && \
+           [ -f "$BOT_DIR/proxy_apply_coordinator.py" ]; then
+            exec python3 -B "$BOT_DIR/proxy_apply_coordinator.py" --service-lock "$0" "$1"
+        fi
+        ;;
+esac
+
 release_service_lock() {
     if [ "$SERVICE_LOCK_HELD" = "1" ]; then
         rm -rf "$SERVICE_LOCK_DIR" 2>/dev/null || true
@@ -188,6 +199,7 @@ case "$1" in
         cleanup_python_bytecode
         trim_runtime_logs
         unset BYPASS_KEENETIC_COMMAND_WORKER
+        unset BYPASS_PROXY_SERVICE_LOCKED
         MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-1}" \
         MALLOC_TRIM_THRESHOLD_="${MALLOC_TRIM_THRESHOLD_:-262144}" \
         PYTHONDONTWRITEBYTECODE=1 python3 "$MAIN_SCRIPT" >> "$LOG_FILE" 2>&1 &

@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import stat
+from contextlib import nullcontext
 
 
 SNAPSHOT_FORMAT = 2
@@ -22,6 +23,7 @@ MANAGED_PATHS = (
     '/opt/etc/bot_proxy_mode',
     '/opt/etc/bot_autostart',
     '/opt/etc/bot/bot_config.py',
+    '/opt/etc/bot/.proxy-apply',
     '/opt/etc/bot/key_pools.json',
     '/opt/etc/bot/key_pools.json.last-good',
     '/opt/etc/bot/key_probe_cache.json',
@@ -407,17 +409,33 @@ def restore_managed_state(snapshot_dir, paths=None):
     return {'entries': len(entries), 'restored': restored, 'removed': removed}
 
 
+def _application_apply_lock():
+    # Staging invokes this CLI before downloading all runtime modules. Use the
+    # installed coordinator only when present; pre-coordinator releases have
+    # no hot transaction to serialize against.
+    runtime = '/opt/etc/bot'
+    if not os.path.isfile(os.path.join(runtime, 'proxy_apply_coordinator.py')):
+        return nullcontext()
+    import sys
+    sys.path.insert(0, runtime)
+    from proxy_apply_coordinator import ApplyCoordinator, private_runtime_directory
+    return ApplyCoordinator(private_runtime_directory('/tmp/bypass-proxy-apply'), timeout=180).lock
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('action', choices=('backup', 'verify', 'restore'))
     parser.add_argument('snapshot_dir')
     args = parser.parse_args(argv)
-    if args.action == 'backup':
-        result = backup_managed_state(args.snapshot_dir)
-    elif args.action == 'verify':
-        result = verify_managed_state(args.snapshot_dir)
-    else:
-        result = restore_managed_state(args.snapshot_dir)
+    with _application_apply_lock():
+        if args.action == 'backup':
+            if os.path.lexists('/opt/etc/bot/.proxy-apply/transaction.json'):
+                raise ManagedStateSnapshotError('Unfinished key transaction requires recovery before backup')
+            result = backup_managed_state(args.snapshot_dir)
+        elif args.action == 'verify':
+            result = verify_managed_state(args.snapshot_dir)
+        else:
+            result = restore_managed_state(args.snapshot_dir)
     print(f'managed_state_{args.action}=ok entries={result["entries"]}')
     return 0
 

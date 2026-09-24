@@ -78,6 +78,10 @@ from proxy_apply_runtime import (
     proxy_apply_settings as _runtime_proxy_apply_settings,
 )
 from post_apply_runtime import PostApplyCoordinator
+from proxy_apply_coordinator import (
+    ApplyCoordinator, StaleApply, core_process_identity,
+    install_proxy_controls, private_runtime_directory,
+)
 from proxy_status import (
     active_mode_status_signature as _status_active_mode_signature,
     cached_active_status as _status_cached_active_status,
@@ -1562,13 +1566,21 @@ def _fetch_keys_from_subscription(url, use_router_hwid=False):
 
 def _set_active_key(proto, key):
     with key_pool_lock:
-        pools = _key_pool_store().set_active_key(_key_pool_store().load_key_pools(KEY_POOLS_PATH), proto, key)
+        pools = _key_pool_store().load_key_pools(KEY_POOLS_PATH)
+        if str(key or '').strip() in (pools.get(proto) or []):
+            return
+        pools = _key_pool_store().set_active_key(pools, proto, key)
         _key_pool_store().save_key_pools(KEY_POOLS_PATH, pools)
 
 
 def _install_key_for_protocol(proto, key_value, verify=True):
     started_at = time.time()
     try:
+        live_apply = globals().get('_try_live_key_apply')
+        if callable(live_apply):
+            live_result = live_apply(proto, key_value)
+            if live_result is not None:
+                return live_result
         installer = PROXY_KEY_INSTALLERS.get(proto)
         if installer is None:
             raise ValueError(f'Unsupported protocol: {proto}')
@@ -1582,12 +1594,11 @@ def _install_key_for_protocol(proto, key_value, verify=True):
 def _active_key_endpoint_healthy(proto, key):
     if not _post_apply_current_matches(proto, key):
         return False
-    settings = _proxy_apply_settings().get(proto) or {}
-    port = settings.get('port')
-    if not port:
+    # Saved text and a SOCKS greeting cannot prove which configuration is
+    # loaded. Only the controlled runtime receipt plus data-plane evidence can.
+    if globals().get('proxy_live_backend') is None:
         return False
-    endpoint_ok, _ = _check_local_proxy_endpoint(proto, port)
-    return bool(endpoint_ok)
+    return _try_live_key_apply(proto, key) is not None
 
 
 def _apply_manual_key_safely(
@@ -1618,6 +1629,9 @@ def _apply_manual_key_safely(
             result = f'✅ {label}: этот ключ уже активен, рабочий локальный прокси сохранён без перезапуска.'
         else:
             result = _install_key_for_protocol(proto, key, verify=verify)
+        discard_previous = globals().get('_discard_superseded_failover_transactions')
+        if callable(discard_previous):
+            discard_previous(proto)
         if pool_enabled:
             _set_active_key(proto, key)
             reason = 'manual active key refresh' if same_active_key else 'manual install'
@@ -2358,6 +2372,8 @@ def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_me
     )
     try:
         _write_all_proxy_core_config()
+        backend = globals().get('proxy_live_backend')
+        previous_identity = backend.identity() if backend is not None else None
         result = subprocess.run(
             [CORE_PROXY_SERVICE_SCRIPT, 'restart'],
             stdout=subprocess.DEVNULL,
@@ -2369,6 +2385,8 @@ def _restart_core_proxy_and_recheck_youtube(route_proto, active_key, previous_me
             _write_runtime_log(f'YouTube failover: core proxy restart returned code {result.returncode}.')
             return False
         time.sleep(6)
+        if backend is not None:
+            _confirm_proxy_controlled_load(previous_identity)
     except Exception as exc:
         _write_runtime_log(f'YouTube failover: core proxy restart before key switch failed: {exc}')
         return False
@@ -3980,6 +3998,9 @@ subscription_hwid_cache = {'value': None, 'checked_at': 0.0}
 subscription_auto_refresh_skip_log_at = {'rss': 0.0}
 pool_probe_lock = threading.Lock()
 pool_apply_lock = threading.Lock()
+proxy_apply_control = None
+proxy_live_backend = None
+proxy_live_prepared_config = None
 pool_probe_cancel_event = threading.Event()
 post_apply_coordinator_lock = threading.Lock()
 post_apply_coordinator_instance = None
@@ -4498,7 +4519,9 @@ def _subscription_record(proto, *, url=None, subscription_id=None):
 def _update_subscription_record(proto, **updates):
     if not SUBSCRIPTION_STATE_PATH:
         return dict(updates)
-    with subscription_operation_lock, subscription_state_lock:
+    from contextlib import nullcontext
+    control = globals().get('proxy_apply_control')
+    with subscription_operation_lock, (control.lock if control is not None else nullcontext()), subscription_state_lock:
         state = _subscription_runtime().update_subscription_record(
             _read_json_file(SUBSCRIPTION_STATE_PATH, {}) or {}, proto, **updates,
         )
@@ -4507,7 +4530,9 @@ def _update_subscription_record(proto, **updates):
 
 
 def _remove_pool_subscription(proto, subscription_id):
-    with subscription_operation_lock, subscription_state_lock:
+    from contextlib import nullcontext
+    control = globals().get('proxy_apply_control')
+    with subscription_operation_lock, (control.lock if control is not None else nullcontext()), subscription_state_lock:
         state = _subscription_runtime().remove_subscription_record(
             _load_subscription_state(), proto, subscription_id,
         )
@@ -7177,6 +7202,11 @@ def _update_maintenance_web_request_finished():
 
 
 def _update_maintenance_locks_idle():
+    backend = globals().get('proxy_live_backend')
+    if backend is not None and backend.bundle.pending():
+        # Do not overwrite a partially committed bundle during update/rollback.
+        # A controlled service restart must recover it first.
+        return False
     locks = (
         background_task_coordinator_lock,
         pool_probe_lock,
@@ -8462,6 +8492,8 @@ def _validate_xray_core_config():
 
 
 def _restart_core_proxy_after_validation():
+    backend = globals().get('proxy_live_backend')
+    previous_identity = backend.identity() if backend is not None else None
     validation = _validate_xray_core_config()
     if not validation.get('ok'):
         return False, f'Xray config error: {str(validation.get("message") or "").strip()}'
@@ -8500,6 +8532,12 @@ def _restart_core_proxy_after_validation():
         note = xray_compat_runtime.core_proxy_note(health)
     if not health.get('ok'):
         _write_runtime_log(f'Core proxy health warning: {note}')
+    elif backend is not None:
+        try:
+            _confirm_proxy_controlled_load(previous_identity)
+        except Exception:
+            _write_runtime_log('Core load receipt could not be confirmed; hot apply is blocked.')
+            return False, 'Загрузка конфигурации Xray не подтверждена.'
     return bool(health.get('ok')), note
 
 
@@ -11300,6 +11338,8 @@ def _clear_pool(proto):
 
 
 def _restart_proxy_services_for_protocols(protocols):
+    backend = globals().get('proxy_live_backend')
+    previous_identity = backend.identity() if backend is not None else None
     commands = []
     if 'shadowsocks' in protocols:
         commands.append('/opt/etc/init.d/S22shadowsocks restart')
@@ -11311,6 +11351,8 @@ def _restart_proxy_services_for_protocols(protocols):
         os.system(command)
     if commands:
         time.sleep(3)
+    if protocols and backend is not None:
+        _confirm_proxy_controlled_load(previous_identity)
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
 
@@ -11458,6 +11500,15 @@ def _check_pool_key_through_proxy(
     )
 
 
+def _discard_superseded_failover_transactions(proto):
+    # A completed manual choice owns the route. Recovery from an older
+    # automatic attempt must not restore its original key over that choice.
+    if proto == _telegram_route_protocol():
+        _clear_telegram_failover_transaction()
+    if proto == _youtube_route_protocol():
+        _clear_youtube_failover_transaction()
+
+
 def _reset_failover_state_after_manual_apply(proto, key_value):
     key_id = _hash_key(key_value) if key_value else ''
     if proto == _telegram_route_protocol():
@@ -11489,8 +11540,27 @@ def _post_apply_ready():
         return True
 
 
-def _run_applied_key_live_probe(proto, key_value):
+def _proxy_probe_generation():
+    control = globals().get('proxy_apply_control')
+    if control is None:
+        return None
+    binary = '/opt/sbin/xray' if os.path.isfile('/opt/sbin/xray') else '/opt/bin/v2ray'
+    return control.token(), core_process_identity(binary, CORE_PROXY_CONFIG_PATH)
+
+
+def _run_applied_key_live_probe(proto, key_value, generation=None):
     def record_if_current(record_proto, record_key, **kwargs):
+        if generation is not None:
+            control = globals().get('proxy_apply_control')
+            if control is None:
+                return False
+            try:
+                with control.lock, control.commit_guard(generation[0]):
+                    if generation != _proxy_probe_generation() or not _post_apply_current_matches(record_proto, record_key):
+                        return False
+                    return _record_key_probe(record_proto, record_key, **kwargs)
+            except StaleApply:
+                return False
         if not _post_apply_current_matches(record_proto, record_key):
             return False
         return _record_key_probe(record_proto, record_key, **kwargs)
@@ -11541,6 +11611,8 @@ def _post_apply_coordinator():
                 resume_pool_probe=_resume_cancelled_pool_probe,
                 shutdown_event=shutdown_requested,
                 log=_write_runtime_log,
+                generation_getter=globals().get('_proxy_probe_generation'),
+                generation_probe=_run_applied_key_live_probe,
             )
     return post_apply_coordinator_instance
 
@@ -14125,7 +14197,9 @@ def _proxy_apply_settings():
 
 
 def _apply_installed_proxy(key_type, key_value, verify=True):
-    return _runtime_apply_installed_proxy(
+    backend = globals().get('proxy_live_backend')
+    previous_identity = backend.identity() if backend is not None else None
+    result = _runtime_apply_installed_proxy(
         key_type,
         key_value,
         settings=_proxy_apply_settings(),
@@ -14143,6 +14217,9 @@ def _apply_installed_proxy(key_type, key_value, verify=True):
         youtube_timeouts=(YOUTUBE_VLESS2_FAILOVER_CHECK_CONNECT_TIMEOUT, YOUTUBE_VLESS2_FAILOVER_CHECK_READ_TIMEOUT),
         verify=verify,
     )
+    if backend is not None:
+        _confirm_proxy_controlled_load(previous_identity)
+    return result
 
 
 def update_proxy(proxy_type, persist=True):
@@ -15788,7 +15865,7 @@ def _current_core_proxy_endpoint(outbound_tag):
         with open(CORE_PROXY_CONFIG_PATH, 'r', encoding='utf-8') as file:
             config_data = json.load(file)
         for outbound in config_data.get('outbounds', []):
-            if outbound.get('tag') == outbound_tag:
+            if str(outbound.get('tag') or '').split('@', 1)[0] == outbound_tag:
                 return str((outbound.get('settings', {}).get('vnext') or [{}])[0].get('address') or '').strip()
     except Exception:
         pass
@@ -15801,7 +15878,7 @@ def _write_core_proxy_endpoint(outbound_tag, endpoint, server_name):
             config_data = json.load(file)
         changed = False
         for outbound in config_data.get('outbounds', []):
-            if outbound.get('tag') != outbound_tag:
+            if str(outbound.get('tag') or '').split('@', 1)[0] != outbound_tag:
                 continue
             vnext = outbound.get('settings', {}).get('vnext') or []
             if not vnext:
@@ -15815,6 +15892,12 @@ def _write_core_proxy_endpoint(outbound_tag, endpoint, server_name):
                 changed = True
         if not changed:
             return False
+        if globals().get('proxy_live_backend') is not None:
+            # The endpoint override was already set by the repair caller.
+            # Rebuild the full logical snapshot so the controlled reload has
+            # the same generation mapping and attests the actual new endpoint.
+            _write_all_proxy_core_config()
+            return True
         _write_json_file(CORE_PROXY_CONFIG_PATH, config_data)
         return True
 
@@ -16092,9 +16175,16 @@ def _write_v2ray_config(
         trojan_key,
         hysteria2_key,
     )
+    global proxy_live_prepared_config
+    logical_config = config_json
+    backend = globals().get('proxy_live_backend')
+    if backend is not None:
+        config_json = backend.config_for_load(logical_config)
     os.makedirs(CORE_PROXY_CONFIG_DIR, exist_ok=True)
     with core_proxy_config_write_lock:
         _write_json_file(CORE_PROXY_CONFIG_PATH, config_json)
+        if backend is not None:
+            proxy_live_prepared_config = logical_config
 
 
 def _write_all_proxy_core_config():
@@ -16181,8 +16271,7 @@ def _check_startup_proxy_endpoint():
         return True, endpoint_message
     _write_runtime_log(f'Прокси-режим {proxy_mode} не ответил при старте: {endpoint_message}. Перезапускаю core proxy.')
     try:
-        os.system(CORE_PROXY_SERVICE_SCRIPT + ' restart')
-        time.sleep(3)
+        _restart_core_proxy_after_validation()
     except Exception:
         pass
     return _check_local_proxy_endpoint(proxy_mode, PROXY_LOCAL_PORTS.get(proxy_mode))
@@ -16271,10 +16360,185 @@ def _run_telegram_polling_loop():
             shutdown_requested.wait(2)
 
 
+def _proxy_mutation_preflight():
+    backend = globals().get('proxy_live_backend')
+    if backend is not None and backend.bundle.pending():
+        raise RuntimeError('Незавершённая запись ключа требует восстановления при запуске программы. '
+                           'Новые изменения пока не применяются.')
+
+
+def _logical_proxy_config(overrides=None):
+    overrides = overrides or {}
+    return _build_v2ray_config(
+        overrides.get('vmess', _read_v2ray_key(VMESS_KEY_PATH)),
+        overrides.get('vless', _read_v2ray_key(VLESS_KEY_PATH)),
+        overrides.get('vless2', _read_v2ray_key(VLESS2_KEY_PATH)),
+        _load_shadowsocks_key(), _load_trojan_key(),
+        overrides.get('hysteria2', _read_v2ray_key(HYSTERIA2_KEY_PATH)),
+    )
+
+
+def _live_key_required_services(proto):
+    services = []
+    if proto == _telegram_route_protocol():
+        services.append('telegram')
+    if proto == _youtube_route_protocol():
+        services.append('youtube')
+    return services
+
+
+def _live_key_data_check(proto, key):
+    # No cache write before runtime and disk commit. The normal post-apply
+    # worker records results after its generation/identity check.
+    result = _check_pool_key_through_proxy(
+        proto, key, custom_checks=[], proxy_url=proxy_settings.get(proto),
+        record_key_probe=lambda *args, **kwargs: None,
+        verification_kind='runtime', measure_quality=False,
+    ) or {}
+    services = _live_key_required_services(proto)
+    if services:
+        return all(result.get(service + '_ok') is True for service in services)
+    return result.get('telegram_ok') is True or result.get('youtube_ok') is True
+
+
+def _live_key_precheck(proto, key):
+    services = _live_key_required_services(proto) or ['telegram']
+    for service in services:
+        candidate = _find_pool_failover_candidate(
+            [(proto, key)], service=service, measure_youtube_quality=False,
+            youtube_profile='pulse', timeout_seconds=45,
+        )
+        if not candidate or candidate[0] != proto or candidate[1].strip() != key.strip():
+            return False
+    return True
+
+
+def _try_live_key_apply(proto, key):
+    backend = globals().get('proxy_live_backend')
+    if backend is None or proto not in backend.allowed_protocols:
+        return None
+    try:
+        ticket = proxy_apply_control.active_ticket()
+        current, desired = _logical_proxy_config(), _logical_proxy_config({proto: key})
+        result = backend.try_apply(
+            proto, key, current=current, desired=desired, ticket=ticket,
+            verify=lambda: _live_key_data_check(proto, key),
+            precheck=lambda: _live_key_precheck(proto, key),
+        )
+    except Exception:
+        # Never convert API/disk uncertainty into a global restart.
+        raise RuntimeError('Смена ключа не подтверждена. Прежний маршрут сохранён, '
+                           'либо требуется восстановление незавершённой операции. '
+                           'Общий Xray не перезапускался.') from None
+    if result is None:
+        return None
+    if result == 'unhealthy':
+        raise RuntimeError('Ключ сохранён, но передача данных через него сейчас не подтверждена. '
+                           'Xray не перезапускался.')
+    label = (_proxy_apply_settings().get(proto) or {}).get('label', proto)
+    message = f'✅ {label}: ключ подтверждён, Xray работает без перезапуска.'
+    if result == 'hot_cleanup_pending':
+        message += ' Очистка прежнего обработчика отложена; следующая смена требует восстановления.'
+    return message
+
+
+def _confirm_proxy_controlled_load(previous_identity):
+    backend = globals().get('proxy_live_backend')
+    logical = globals().get('proxy_live_prepared_config')
+    if backend is None or logical is None:
+        return
+    backend.register_controlled_load(
+        logical, previous_identity=previous_identity,
+        generation=proxy_apply_control.generation(),
+    )
+
+
+def _live_key_pool_updates(proto, key):
+    if not _app_mode_pool_enabled():
+        return {}
+    store = _key_pool_store()
+    pools = store.set_active_key(store.load_key_pools(KEY_POOLS_PATH), proto, key)
+    pools, _ = store.repair_key_pool_protocols(pools)
+    data = json.dumps(pools, ensure_ascii=False, indent=2).encode('utf-8')
+    return {KEY_POOLS_PATH: data, KEY_POOLS_PATH + store.RECOVERY_SUFFIX: data}
+
+
+def _initialize_proxy_live_backend(control):
+    global proxy_live_backend
+    binary = '/opt/sbin/xray'
+    if not os.path.isfile(binary):
+        return
+    try:
+        version = subprocess.run([binary, 'version'], stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, timeout=5, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    if b'Xray 26.2.6 ' not in version or b'12ee51e4' not in version:
+        _write_runtime_log('Hot key apply is unavailable for this core build; controlled cold apply retained.')
+        return
+    from proxy_live_runtime import ProxyLiveRuntime
+    backend = ProxyLiveRuntime(
+        coordinator=control, directory=private_runtime_directory('/opt/etc/bot/.proxy-apply'),
+        ram_directory=private_runtime_directory('/tmp/bypass-proxy-apply'),
+        config_path=CORE_PROXY_CONFIG_PATH,
+        key_paths={'vless': VLESS_KEY_PATH, 'vless2': VLESS2_KEY_PATH, 'vmess': VMESS_KEY_PATH},
+        binary=binary, allowed_protocols=('vless', 'vless2', 'vmess'), detach_qualified=True,
+        metadata_paths=(KEY_POOLS_PATH, KEY_POOLS_PATH + _key_pool_store().RECOVERY_SUFFIX),
+        metadata_lock=key_pool_lock, metadata_updates=_live_key_pool_updates,
+        resource_guard=lambda: (_available_memory_kb() or 0) >= 65536,
+        max_attempts_per_minute=6,
+    )
+    # Recovery must finish before config rebuild, background tasks or web start.
+    # An invalid/inconsistent journal deliberately aborts startup, never
+    # overwriting a possible external change with a guessed old key.
+    with control.lock:
+        backend.recover_files_before_startup()
+    proxy_live_backend = backend
+
+
+def _initialize_proxy_apply_control():
+    global proxy_apply_control, pool_apply_lock, core_proxy_config_write_lock
+    if proxy_apply_control is not None:
+        return proxy_apply_control
+    control = ApplyCoordinator(private_runtime_directory('/tmp/bypass-proxy-apply'))
+    control.recover_abandoned_manual()
+    proxy_apply_control = control
+    pool_apply_lock = core_proxy_config_write_lock = control.lock
+    install_proxy_controls(
+        globals(), control,
+        manual=('_apply_manual_key_safely',),
+        background=('_attempt_auto_failover', '_attempt_youtube_failover'),
+        metadata=('_save_key_pools', '_set_active_key', '_ensure_current_keys_in_pools',
+                  '_add_keys_to_pool', '_import_keys_to_pools', '_add_subscription_keys_to_pool',
+                  '_import_subscription_keys_to_pools'),
+        writers=(
+            '_install_key_for_protocol', '_write_all_proxy_core_config', '_write_v2ray_config',
+            '_write_core_proxy_endpoint', '_sync_proxy_route_policy_config', '_sync_udp_policy_config',
+            '_restart_core_proxy_after_validation', '_restart_core_proxy_at_startup',
+            '_restart_proxy_services_for_protocols',
+            '_check_startup_proxy_endpoint', '_restore_startup_proxy_mode',
+            '_delete_pool_key', '_clear_pool', '_clear_installed_key_for_protocol', '_repair_active_reality_endpoint',
+            '_restart_core_proxy_and_recheck_youtube', '_recover_interrupted_youtube_failover_transaction',
+            '_recover_interrupted_telegram_failover_transaction', '_restore_youtube_key_after_failed_failover',
+            '_sanitize_xray26_compat_files', 'update_proxy',
+            '_apply_entries_to_unblock_list', '_append_entries_to_unblock_list', '_service_route_worker_mutation',
+            '_handle_unblock_list_state',
+            'shadowsocks', 'vmess', 'vless', 'vless2', 'trojan', 'hysteria2',
+        ),
+    )
+    for protocol, installer in tuple(PROXY_KEY_INSTALLERS.items()):
+        PROXY_KEY_INSTALLERS[protocol] = globals()[installer.__name__]
+    initialize_live = globals().get('_initialize_proxy_live_backend')
+    if callable(initialize_live):
+        initialize_live(control)
+    return control
+
+
 def main():
     if not _acquire_main_instance_lock():
         return
     _daemonize_process()
+    _initialize_proxy_apply_control()
     _register_signal_handlers()
     # Keep the previous failed-start traceback available for the transactional
     # updater/rollback guard. S99telegram_bot already bounds this log by size.

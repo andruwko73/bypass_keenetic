@@ -23,6 +23,8 @@ class PostApplyCoordinator:
         thread_factory=threading.Thread,
         monotonic=time.monotonic,
         sleep=time.sleep,
+        generation_getter=None,
+        generation_probe=None,
     ):
         self._current_matches = current_matches
         self._ready = ready
@@ -37,6 +39,8 @@ class PostApplyCoordinator:
         self._thread_factory = thread_factory
         self._monotonic = monotonic
         self._sleep = sleep
+        self._generation_getter = generation_getter
+        self._generation_probe = generation_probe
         self._lock = threading.Lock()
         self._pending = {}
         self._worker = None
@@ -90,7 +94,8 @@ class PostApplyCoordinator:
             return 'skipped'
         worker_to_start = None
         with self._lock:
-            self._pending[proto] = key_value
+            generation = self._generation_getter() if callable(self._generation_getter) else None
+            self._pending[proto] = (key_value, generation)
             self._resume_requested = self._resume_requested or bool(resume_pool_probe)
             if self._worker is None:
                 worker_to_start = self._new_worker_locked()
@@ -147,22 +152,25 @@ class PostApplyCoordinator:
                 if not self._wait_until_ready():
                     self._write_log('Post-apply service check expired while waiting for router resources.')
                     continue
-                for proto, key_value in pending.items():
+                for proto, (key_value, generation) in pending.items():
                     if self._stopped():
                         return
                     try:
-                        if not self._current_matches(proto, key_value):
+                        if not self._is_current(proto, key_value, generation):
                             continue
                     except Exception as exc:
                         self._write_log(f'Post-apply active-key check failed for {proto}: {type(exc).__name__}')
                         continue
                     outcome = None
                     try:
-                        outcome = self._probe(proto, key_value)
+                        if callable(self._generation_probe) and callable(self._generation_getter):
+                            outcome = self._generation_probe(proto, key_value, generation)
+                        else:
+                            outcome = self._probe(proto, key_value)
                     except Exception as exc:
                         self._write_log(f'Post-apply service check failed for {proto}: {type(exc).__name__}')
                     try:
-                        still_current = self._current_matches(proto, key_value)
+                        still_current = self._is_current(proto, key_value, generation)
                     except Exception:
                         still_current = False
                     if still_current and callable(self._prefetch):
@@ -177,3 +185,9 @@ class PostApplyCoordinator:
                             self._write_log(f'Post-apply cache invalidation failed: {type(exc).__name__}')
         finally:
             self._finish_worker(current_worker)
+
+    def _is_current(self, proto, key_value, generation):
+        if callable(self._generation_getter):
+            if generation is None or generation != self._generation_getter():
+                return False
+        return self._current_matches(proto, key_value)
