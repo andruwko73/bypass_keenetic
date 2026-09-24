@@ -4,6 +4,7 @@ import json
 import time
 from urllib.parse import urlsplit
 
+from app_version import APP_VERSION_COUNTER
 from route_profiles import PROTOCOLS, profile_fingerprint
 
 LABELS={'vless':'Vless 1','vless2':'Vless 2','vmess':'VMess','trojan':'Trojan','shadowsocks':'Shadowsocks','hysteria2':'Hysteria2','direct':'Напрямую'}
@@ -17,6 +18,14 @@ REASONS={'stale':'Результат устарел','source_unverified':'Ист
 
 
 def _escape(value):return html.escape(str(value),quote=True)
+
+
+def navigation_html():
+    return ('<div class="route-intersection-card route-diagnostics-entry">'
+            '<div class="route-section-head"><strong>Качество маршрутов</strong>'
+            '<small>Сравните доступные пути к сервису без изменения настроек.</small></div>'
+            '<div class="route-intersection-actions"><form action="/route-diagnostics" method="get">'
+            '<button type="submit">Диагностика маршрутов</button></form></div></div>')
 
 
 def results_html(profiles,state,*,generation,now=None):
@@ -41,12 +50,12 @@ def results_html(profiles,state,*,generation,now=None):
             detail='Активный ключ не установлен' if item.get('reason')=='no_active_key' else 'Проверка этого пути недоступна'
             items.append('<li><strong>'+_escape(LABELS.get(item.get('protocol'),''))+'</strong> — '+detail+'</li>')
         source='Роутер' if profile['device']=='router' else profile['device']
-        rows.append(f'''<article class="route-diagnostic-card">
+        rows.append(f'''<article class="panel route-diagnostic-card">
             <h2>{_escape(profile['label'])}</h2>
             <p>{_escape(source)} · {_escape(profile['destination'])} · {_escape(profile['wan'])}</p>
             <p><strong>{_escape(summary)}</strong></p>
             <ul>{''.join(items)}</ul>
-            <p class="muted">Игровая задержка, UDP и потери пакетов: нет данных.</p>
+            <p class="field-hint">Игровая задержка, UDP и потери пакетов: нет данных.</p>
             <div class="route-diagnostic-actions">
               <button type="button" data-route-run="{_escape(profile['id'])}">Проверить маршрут</button>
               <button type="button" class="outline-button" data-route-remove="{_escape(profile['id'])}">Удалить профиль</button>
@@ -61,50 +70,42 @@ def render_page(payload,csrf_token):
     options=''.join(f'<option value="{_escape(name)}">{_escape(name)}</option>' for name in wans)
     if not options:options='<option value="">Нет доступного подключения</option>'
     available=payload.get('active_protocols',[])
-    checks=''.join(f'<label class="route-choice"><input type="checkbox" name="protocols" value="{proto}"'+(' checked' if proto in available[:2] else '')+f'> {_escape(LABELS[proto])}</label>' for proto in PROTOCOLS)
+    checks=''.join(f'<label class="subscription-hwid-toggle route-choice"><input class="subscription-switch-input" type="checkbox" name="protocols" value="{proto}"'+(' checked' if proto in available[:2] else '')+f'><span class="subscription-switch-ui" aria-hidden="true"></span><span class="subscription-hwid-label">{_escape(LABELS[proto])}</span></label>' for proto in PROTOCOLS)
     nonce=_escape(csrf_token)
     cards=results_html(profiles,state,generation=payload['generation'])
     job=STATES.get(state.get('job',{}).get('state','idle'),STATES['idle'])
-    return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Диагностика маршрутов</title><link rel="stylesheet" href="/static/app.css">
-    <style>
-    body{{padding:0}}.route-diagnostic-page{{max-width:1080px;margin:auto;padding:20px;overflow-wrap:anywhere}}
-    .route-diagnostic-page h1{{font-size:clamp(24px,5vw,36px)}}
-    .route-diagnostic-card,.route-diagnostic-form{{border:1px solid var(--border);border-radius:18px;padding:20px;margin-block:24px;background:var(--surface);color:var(--text)}}
-    .route-diagnostic-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:18px}}
-    .route-diagnostic-grid label{{display:grid;gap:8px;min-width:0}}
-    .route-diagnostic-page input:not([type=checkbox]),.route-diagnostic-page select{{width:100%;box-sizing:border-box;min-height:44px;font-size:16px}}
-    .route-diagnostic-actions{{display:flex;flex-wrap:wrap;gap:12px;margin-block-start:20px}}
-    .route-diagnostic-actions button{{min-height:44px;max-width:100%}}
-    .route-diagnostic-page .route-choice{{display:inline-flex;align-items:center;gap:8px;min-height:44px;margin-inline-end:16px}}
-    .route-diagnostic-page [hidden]{{display:none!important}}
-    .route-diagnostic-page input[type=checkbox]{{width:20px;height:20px;flex:0 0 20px}}
-    .route-diagnostic-page a{{color:var(--text);text-underline-offset:4px}}
-    .route-diagnostic-page .muted{{opacity:.8}}.route-diagnostic-page fieldset{{margin-block:20px;min-width:0}}
-    .route-diagnostic-page button:focus-visible,.route-diagnostic-page a:focus-visible{{outline:3px solid #69e4dc;outline-offset:4px}}
-    @media(max-width:480px){{.route-diagnostic-page{{padding:12px}}.route-diagnostic-card,.route-diagnostic-form{{padding:16px}}}}
-    </style></head><body><main class="route-diagnostic-page">
-    <a href="/">← Панель управления</a><h1>Диагностика маршрутов</h1>
-    <p>Сравните доступные пути к сервису. Проверка даёт рекомендации и не меняет ключи или маршруты.</p>
-    <p class="muted">Измерения выполняются с роутера. Время ответа HTTPS не является пингом игры и не включает Wi-Fi устройства.</p>
-    <p id="route-job" role="status" aria-live="polite">{_escape(job)}</p>
-    <p id="route-error" role="alert">{_escape(payload.get('error',''))}</p>
-    <button type="button" class="outline-button" id="route-cancel" hidden>Остановить проверку</button>
+    return f'''<!doctype html><html lang="ru" class="route-diagnostics"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <title>Диагностика маршрутов</title><link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/app.css?v={_escape(APP_VERSION_COUNTER)}">
+    <script src="/static/app.js?v={_escape(APP_VERSION_COUNTER)}" defer></script>
+    </head><body><main class="shell route-diagnostic-page">
+    <header class="view-head route-diagnostic-header">
+      <div class="route-diagnostic-heading"><h1>Диагностика маршрутов</h1>
+        <form action="/" method="get"><button type="submit" class="outline-button">← Панель управления</button></form>
+      </div>
+      <p class="field-hint">Сравните доступные пути к сервису. Проверка даёт рекомендации и не меняет ключи или маршруты.</p>
+      <p class="field-hint">Измерения выполняются с роутера. Время ответа HTTPS не является пингом игры и не включает Wi-Fi устройства.</p>
+    </header>
+    <section class="panel route-diagnostic-status" aria-label="Состояние проверки">
+      <p id="route-job" role="status" aria-live="polite">{_escape(job)}</p>
+      <p id="route-error" role="alert">{_escape(payload.get('error',''))}</p>
+      <div class="route-diagnostic-actions"><button type="button" class="outline-button" id="route-cancel" hidden>Остановить проверку</button></div>
+    </section>
     <section id="route-results" aria-label="Сохранённые профили">{cards}</section>
-    <form id="route-profile-form" class="route-diagnostic-form">
+    <form id="route-profile-form" class="panel route-diagnostic-form">
       <h2>Добавить профиль</h2><input type="hidden" name="csrf_token" value="{nonce}">
       <div class="route-diagnostic-grid">
-        <label>Название<input name="label" required maxlength="64" placeholder="Например, видео на ПК"></label>
-        <label>HTTPS-адрес сервиса<input name="url" type="url" required placeholder="https://example.com/" aria-describedby="route-url-hint"></label>
-        <label>Устройство<input name="device" placeholder="IP устройства или router" value="router" aria-describedby="route-device-hint"></label>
-        <label>Интернет-подключение<select name="wan" required>{options}</select></label>
+        <label><span class="field-label">Название</span><input name="label" required maxlength="64" placeholder="Например, видео на ПК"></label>
+        <label><span class="field-label">HTTPS-адрес сервиса</span><input name="url" type="url" required placeholder="https://example.com/" aria-describedby="route-url-hint"></label>
+        <label><span class="field-label">Устройство</span><input name="device" placeholder="IP устройства или router" value="router" aria-describedby="route-device-hint"></label>
+        <label><span class="field-label">Интернет-подключение</span><select name="wan" required>{options}</select></label>
       </div>
-      <p class="muted" id="route-url-hint">Открытый HTTPS-адрес без пароля и параметров. До 20 коротких запросов на каждый путь.</p>
-      <p class="muted" id="route-device-hint">Укажите router для самого роутера или IPv4-адрес домашнего устройства. Сейчас профиль используется только для сравнения.</p>
-      <fieldset><legend>Прокси для сравнения — до трёх</legend>{checks}</fieldset>
-      <label class="route-choice"><input type="checkbox" name="direct_allowed" value="1"> Разрешить сравнение с прямым подключением</label>
-      <p class="muted">Для сервисов, которым обязательно нужен прокси, оставьте прямое подключение выключенным.</p>
+      <p class="field-hint" id="route-url-hint">Открытый HTTPS-адрес без пароля и параметров. До 20 коротких запросов на каждый путь.</p>
+      <p class="field-hint" id="route-device-hint">Укажите router для самого роутера или IPv4-адрес домашнего устройства. Сейчас профиль используется только для сравнения.</p>
+      <fieldset class="route-diagnostic-options"><legend class="field-label">Прокси для сравнения — до трёх</legend><div class="route-diagnostic-choices">{checks}</div></fieldset>
+      <label class="subscription-hwid-toggle route-choice"><input class="subscription-switch-input" type="checkbox" name="direct_allowed" value="1"><span class="subscription-switch-ui" aria-hidden="true"></span><span class="subscription-hwid-label">Разрешить сравнение с прямым подключением</span></label>
+      <p class="field-hint">Для сервисов, которым обязательно нужен прокси, оставьте прямое подключение выключенным.</p>
       <div class="route-diagnostic-actions"><button type="submit"{' disabled' if len(profiles)>=8 or not wans or payload.get('read_only') else ''}>Сохранить профиль</button></div>
     </form></main>
     <script>

@@ -4033,6 +4033,12 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Auxiliary pages share appearance, without main-panel polling or forms.
+            if (document.documentElement.classList.contains('route-diagnostics')) {
+                loadBackground();
+                setupLiquidPointer();
+                return;
+            }
             restoreRouteActionRecoveryMessage();
             const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
             updateThemeControls(currentTheme);

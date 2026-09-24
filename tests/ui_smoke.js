@@ -1550,6 +1550,22 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
       }
     }
     await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
+    const diagnosticEntry = page.locator('[data-protocol-panel].active .route-diagnostics-entry');
+    await assertVisibleBox(page, '[data-protocol-panel].active .route-diagnostics-entry', `${name} diagnostics entry`);
+    const entryStyles = await diagnosticEntry.evaluate(node => {
+      const button = node.querySelector('button');
+      const sibling = node.parentElement.querySelector('.route-profile-btn');
+      const style = getComputedStyle(button), reference = getComputedStyle(sibling);
+      return {
+        navigates: button.form.getAttribute('action') === '/route-diagnostics' && button.form.method === 'get',
+        compact: parseFloat(getComputedStyle(node.querySelector('small')).fontSize) <= 13,
+        shared: ['fontFamily', 'color', 'backgroundColor', 'borderRadius'].every(key => style[key] === reference[key]),
+        fits: node.scrollWidth <= node.clientWidth + 2,
+      };
+    });
+    if (!Object.values(entryStyles).every(Boolean)) {
+      throw new Error(`${name}: diagnostics entry does not match the panel: ${JSON.stringify(entryStyles)}`);
+    }
     const routeTextFits = await page.locator('[data-protocol-panel].active .service-route-card').evaluateAll((nodes) => (
       nodes.every((node) => node.scrollWidth <= node.clientWidth + 2)
     ));

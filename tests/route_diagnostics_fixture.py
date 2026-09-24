@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 from types import SimpleNamespace
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 APP = Path(__file__).resolve().parents[1] / 'app'
 sys.path.insert(0, str(APP))
@@ -72,8 +72,15 @@ def main():
                 self.wfile.write(raw)
 
             def do_GET(self):
-                if self.path == '/static/app.css':
-                    return self.send((APP/'static/app.css').read_text(encoding='utf-8'), 'text/css')
+                path = urlsplit(self.path).path
+                if path in ('/static/app.css', '/static/app.js'):
+                    return self.send((APP/path.lstrip('/')).read_text(encoding='utf-8'),
+                                     'text/css' if path.endswith('.css') else 'text/javascript')
+                if path == '/api/ui_background':
+                    return self.send(json.dumps({'available': True, 'enabled': True,
+                        'shade': 55, 'panel_transparency': 20, 'url': '/fixture/background.svg'}), 'application/json')
+                if path == '/fixture/background.svg':
+                    return self.send('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><path fill="#143436" d="M0 0h40v40H0z"/></svg>', 'image/svg+xml')
                 if self.path == '/api/route_diagnostics':
                     return self.send(json.dumps(service.payload()), 'application/json')
                 if self.path == '/fixture/stop':

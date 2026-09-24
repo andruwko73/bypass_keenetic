@@ -41,6 +41,7 @@ import web_form_template  # noqa: E402
 import web_pool_form_blocks  # noqa: E402
 import subscription_runtime  # noqa: E402
 import web_post_actions  # noqa: E402
+import route_diagnostics_web  # noqa: E402
 
 SUBSCRIPTIONS = subscription_runtime.normalize_subscription_state({})
 for fixture_proto in ('vless', 'vless2'):
@@ -388,6 +389,7 @@ def _pool_snapshot(protocols=None):
 def _route_tools_html(csrf_input_html):
     return "".join(
         [
+            route_diagnostics_web.navigation_html(),
             key_pool_web.web_route_profiles_html(
                 service_routes.ROUTE_PROFILES,
                 csrf_input_html=csrf_input_html,
