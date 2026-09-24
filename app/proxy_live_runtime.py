@@ -35,7 +35,7 @@ class ProxyLiveRuntime:
                  allowed_protocols=(), max_retained=8, detach_qualified=False, api=None,
                  metadata_paths=(), metadata_lock=None, metadata_updates=None,
                  resource_guard=None, max_attempts_per_minute=0,
-                 key_encoder=None, service_protocols=(), service_apply=None):
+                 key_encoder=None, service_protocols=(), service_apply=None, service_qualifier=None):
         self.coordinator = coordinator
         self.directory, self.ram_directory = Path(directory), Path(ram_directory)
         self.config_path = Path(config_path).absolute()
@@ -48,6 +48,7 @@ class ProxyLiveRuntime:
         self.metadata_lock, self.metadata_updates = metadata_lock, metadata_updates
         self.key_encoder = key_encoder or (lambda protocol, key: (key.strip() + '\n').encode('utf-8'))
         self.service_protocols, self.service_apply = frozenset(service_protocols), service_apply
+        self.service_qualifier = service_qualifier
         if (not self.service_protocols.issubset(self.allowed_protocols) or
                 self.service_protocols and not callable(self.service_apply)):
             raise ValueError('Invalid dependent service policy')
@@ -211,6 +212,9 @@ class ProxyLiveRuntime:
             return None
         if change == ChangeKind.OUTBOUND and (not qualify_outbound(new_out[logical_tag]) or
                                               not qualify_outbound(old_out[logical_tag])):
+            return None
+        if (change == ChangeKind.OUTBOUND and protocol in self.service_protocols and self.service_qualifier and
+                not all(self.service_qualifier(protocol, item) for item in (old_out[logical_tag], new_out[logical_tag]))):
             return None
         if change == ChangeKind.OUTBOUND and {
             tag for tag in old_out if json.dumps(old_out[tag], sort_keys=True) != json.dumps(new_out[tag], sort_keys=True)

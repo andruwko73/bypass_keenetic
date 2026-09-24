@@ -384,3 +384,12 @@ def test_hysteria_collision_cannot_pass_using_cached_old_auth(setup):
             verify=lambda: probes.append('verify') or True, precheck=lambda: probes.append('precheck') or True) is None
     assert probes == [] and runtime.api.calls == []
     assert runtime.key_paths['vless'].read_text() == 'old-key\n'
+
+
+def test_native_success_cannot_bypass_dependent_service_capability(setup):
+    runtime, config, _ = setup
+    runtime.service_protocols = frozenset(('vless',))
+    runtime.service_qualifier = lambda protocol, outbound: False
+    result, _ = apply(runtime, config)
+    assert result is None and runtime.api.calls == []
+    assert runtime.key_paths['vless'].read_text() == 'old-key\n'

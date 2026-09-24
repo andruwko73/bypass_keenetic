@@ -16533,7 +16533,7 @@ def _initialize_proxy_live_backend(control):
         _write_runtime_log('Hot key apply is unavailable for this core build; controlled cold apply retained.')
         return
     from proxy_live_runtime import ProxyLiveRuntime
-    from proxy_live_services import encode_key, restart_service
+    from proxy_live_services import encode_key, restart_service, qualify_service_outbound
     service_ports = {'shadowsocks': localportsh, 'trojan': localporttrojan}
     backend = ProxyLiveRuntime(
         coordinator=control, directory=private_runtime_directory('/opt/etc/bot/.proxy-apply'),
@@ -16545,6 +16545,7 @@ def _initialize_proxy_live_backend(control):
         binary=binary, allowed_protocols=('vless', 'vless2', 'vmess', 'shadowsocks', 'trojan', 'hysteria2'),
         detach_qualified=True, key_encoder=lambda protocol, key: encode_key(protocol, key, ports=service_ports),
         service_protocols=('shadowsocks', 'trojan'),
+        service_qualifier=qualify_service_outbound,
         service_apply=lambda protocol: restart_service(protocol, int(service_ports[protocol])),
         metadata_paths=(KEY_POOLS_PATH, KEY_POOLS_PATH + _key_pool_store().RECOVERY_SUFFIX),
         metadata_lock=key_pool_lock, metadata_updates=_live_key_pool_updates,

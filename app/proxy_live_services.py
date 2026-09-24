@@ -4,6 +4,7 @@ Only these two fixed init scripts may run. Xray is never restarted here.
 Service output can contain endpoints/credentials and is deliberately discarded.
 """
 import json
+from functools import lru_cache
 from pathlib import Path
 import subprocess
 import time
@@ -15,6 +16,26 @@ SERVICE_PATHS = {
     'shadowsocks': ('/opt/etc/init.d/S22shadowsocks', '/opt/etc/shadowsocks.json', 'ss-redir'),
     'trojan': ('/opt/etc/init.d/S22trojan', '/opt/etc/trojan/config.json', 'trojan'),
 }
+
+
+def qualify_service_outbound(protocol, outbound):
+    # The separate Trojan NAT service always uses TLS, even when a native Xray
+    # outbound would support plaintext. Do not attest only the SOCKS half.
+    return protocol != 'trojan' or (outbound.get('streamSettings') or {}).get('security') == 'tls'
+
+
+@lru_cache(maxsize=4)
+def _trojan_default_config(executable, fingerprint):
+    """Attest the installed binary's compiled default; never guess from its name."""
+    try:
+        if not Path(executable).samefile('/opt/bin/trojan'):
+            return False
+        result = subprocess.run(['/opt/bin/trojan', '--help'], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5, check=False)
+        marker = b'-c [ --config ] CONFIG (=/opt/etc/trojan/config.json)'
+        return result.returncode == 0 and marker in result.stdout + result.stderr
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def encode_key(protocol, key, *, ports):
@@ -47,8 +68,18 @@ def service_listener(protocol, port, *, proc_root='/proc'):
             continue
         try:
             args = (entry / 'cmdline').read_bytes().rstrip(b'\0').decode().split('\0')
-            if Path(args[0]).name != executable or config not in args:
+            if Path(args[0]).name != executable:
                 continue
+            explicit = (args[1:] == [config] or '--config=' + config in args or '-c' + config in args or
+                        any(arg in ('-c', '--config') and index + 1 < len(args) and args[index + 1] == config
+                            for index, arg in enumerate(args)))
+            if not explicit:
+                if protocol != 'trojan' or len(args) != 1:
+                    continue
+                binary = (entry / 'exe').resolve(strict=True)
+                info = binary.stat()
+                if not _trojan_default_config(str(binary), (info.st_ino, info.st_size, info.st_mtime_ns)):
+                    continue
             if any(fd.is_symlink() and str(fd.readlink()) in sockets for fd in (entry / 'fd').iterdir()):
                 return True
         except (OSError, UnicodeError, IndexError):

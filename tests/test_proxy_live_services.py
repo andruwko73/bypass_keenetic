@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
-from proxy_live_services import encode_key, restart_service, service_listener, SERVICE_PATHS
+from proxy_live_services import encode_key, restart_service, service_listener, qualify_service_outbound, SERVICE_PATHS
 
 
 @pytest.mark.parametrize('protocol', ['trojan', 'shadowsocks'])
@@ -65,3 +65,29 @@ def test_key_files_keep_legacy_reader_compatible_format():
     value = json.loads(encode_key('shadowsocks', key, ports=ports))
     assert value['raw_uri'] == key and value['local_port'] == 12346
     assert encode_key('vless', 'synthetic-key', ports=ports) == b'synthetic-key\n'
+
+
+def test_trojan_service_requires_tls_even_if_native_outbound_accepts_plaintext():
+    assert qualify_service_outbound('trojan', {'streamSettings': {'security': 'tls'}})
+    assert not qualify_service_outbound('trojan', {'streamSettings': {'security': 'none'}})
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Requires POSIX proc symlink semantics')
+@pytest.mark.parametrize('default_confirmed', [False, True])
+def test_trojan_without_arguments_requires_attested_compiled_default(tmp_path, monkeypatch, default_confirmed):
+    import proxy_live_services
+    (tmp_path / 'net').mkdir()
+    (tmp_path / 'net' / 'tcp').write_text('header\n0: 00000000:3039 00000000:0000 0A 0 0 0 0 0 1234\n')
+    process = tmp_path / '42'
+    (process / 'fd').mkdir(parents=True)
+    (process / 'fd' / '7').symlink_to('socket:[1234]')
+    binary = tmp_path / 'trojan';binary.write_bytes(b'synthetic')
+    (process / 'exe').symlink_to(binary)
+    (process / 'cmdline').write_bytes(b'/opt/bin/trojan\0')
+    calls=[]
+    def default(executable, fingerprint):
+        calls.append((executable,fingerprint))
+        return default_confirmed
+    monkeypatch.setattr(proxy_live_services,'_trojan_default_config',default)
+    assert service_listener('trojan',12345,proc_root=tmp_path) is default_confirmed
+    assert len(calls)==1
