@@ -438,6 +438,9 @@ class ServiceRouteToolsRuntime:
                 <small>Маршруты загрузятся без блокировки интерфейса.</small>
             </div>'''
         return ''.join([
+            '<div class="route-intersection-card"><strong>Качество маршрутов</strong>'
+            '<p>Сравните доступные пути к сервису без изменения настроек.</p>'
+            '<a href="/route-diagnostics">Открыть диагностику маршрутов</a></div>',
             key_pool_web.web_route_profiles_html(
                 service_routes.ROUTE_PROFILES,
                 csrf_input_html=csrf_input_html,

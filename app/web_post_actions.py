@@ -823,6 +823,9 @@ def _pool_subscription_action(ctx, data, *, remove=False):
 
 
 def dispatch(ctx, path, data):
+    if path in ('/route_diagnostics/save', '/route_diagnostics/remove',
+                '/route_diagnostics/run', '/route_diagnostics/cancel'):
+        return _call(ctx, 'route_diagnostics_action', path.rsplit('/', 1)[-1], data)
     custom_actions = {
         '/custom_checks_to_list',
         '/custom_check_add',

@@ -295,6 +295,8 @@ _web_post_actions_module = None
 _web_form_template_module = None
 _web_form_template_lock = threading.Lock()
 _web_route_tools_runtime = None
+_route_diagnostics_service = None
+_route_diagnostics_init_lock = threading.Lock()
 _key_pool_web_module = None
 _telegram_pool_ui_module = None
 _web_pool_form_blocks_module = None
@@ -6464,7 +6466,7 @@ def _conntrack_route_diagnostic(proto, sample_limit=6):
     }
 
 
-def _youtube_active_connection_count(proto):
+def _youtube_active_connection_count(proto, *, require_downlink=False):
     if not YOUTUBE_STREAM_GUARD_ENABLED:
         return 0
     ports = _youtube_protocol_conntrack_ports(proto)
@@ -6472,6 +6474,8 @@ def _youtube_active_connection_count(proto):
         return 0
     now = time.time()
     state = _youtube_stream_guard_state(proto)
+    if require_downlink:
+        state = state.setdefault('incoming_media', {})
     last_scan_at = float(state.get('last_scan_at') or 0.0)
     if last_scan_at and now - last_scan_at < YOUTUBE_STREAM_GUARD_SCAN_CACHE_SECONDS:
         try:
@@ -6503,6 +6507,14 @@ def _youtube_active_connection_count(proto):
                     'seen': now,
                 }
                 old = previous.get(identity, {})
+                if require_downlink:
+                    from youtube_stream_evidence import reply_counters, incoming_progress
+                    reply = reply_counters(line)
+                    if reply:
+                        current[identity].update(reply)
+                    if incoming_progress(reply, old, minimum_bytes=YOUTUBE_STREAM_GUARD_MIN_BYTES):
+                        active += 1
+                    continue
                 try:
                     packet_delta = packets - int(old.get('packets') or 0)
                     byte_delta = bytes_count - int(old.get('bytes') or 0)
@@ -6538,12 +6550,17 @@ def _youtube_active_connection_count(proto):
     return active
 
 
-def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None):
+def _youtube_stream_guard_active(proto, reason='', log=False, hold_seconds=None, require_downlink=False):
     if not YOUTUBE_STREAM_GUARD_ENABLED:
         return False
     now = time.time()
     state = _youtube_stream_guard_state(proto)
-    active_count = _youtube_active_connection_count(proto)
+    if require_downlink:
+        state = state.setdefault('incoming_media', {})
+    active_count = (
+        _youtube_active_connection_count(proto, require_downlink=True)
+        if require_downlink else _youtube_active_connection_count(proto)
+    )
     if active_count > 0:
         state['last_active'] = now
         state['last_count'] = active_count
@@ -7296,6 +7313,8 @@ def _release_update_maintenance(reason='update cancelled'):
 
 
 def _finalize_shutdown():
+    if _route_diagnostics_service is not None:
+        _route_diagnostics_service.runtime.close()
     if web_httpd is not None:
         try:
             web_httpd.server_close()
@@ -15060,6 +15079,28 @@ def _start_web_bot_action():
     return APP_START_RESULT
 
 
+def _route_diagnostics():
+    global _route_diagnostics_service
+    with _route_diagnostics_init_lock:
+        if _route_diagnostics_service is None:
+            from route_diagnostics_service import RouteDiagnosticsService, memory_available
+            if proxy_apply_control is None:
+                raise RuntimeError('Proxy coordinator is not ready')
+            _route_diagnostics_service = RouteDiagnosticsService(
+                path='/opt/etc/bot/route_diagnostics.json',
+                control=proxy_apply_control,
+                load_keys=_load_current_keys,
+                coordinated=_run_coordinated_background_task,
+                probe_lock=pool_probe_lock,
+                resource_guard=lambda: (
+                    not shutdown_requested.is_set() and memory_available() and
+                    _background_task_allowed('route diagnostics', allow_pool_probe=True,
+                                             max_cpu_percent=60)
+                ),
+            )
+        return _route_diagnostics_service
+
+
 def _web_action_context():
     pool_enabled = _app_mode_pool_enabled()
     context = _web_post_actions().base_action_context(
@@ -15139,6 +15180,7 @@ def _web_action_context():
             custom_checks_enabled=False,
             pool_actions_enabled=False,
         ))
+    context['route_diagnostics_action'] = lambda name, data: _route_diagnostics().action(name, data)
     return context
 
 
@@ -15150,6 +15192,8 @@ def _web_get_context(handler):
     )
     return {
         'build_form': handler._build_form,
+        'route_diagnostics_page': lambda: _route_diagnostics().page(handler._get_or_create_csrf_token()),
+        'route_diagnostics_payload': lambda: _route_diagnostics().payload(),
         'build_protocol_panel': handler._build_protocol_panel,
         'build_protocol_check_panel': handler._build_protocol_check_panel,
         'build_style_asset': handler._build_style_asset,
@@ -16508,6 +16552,10 @@ def _initialize_proxy_apply_control():
         globals(), control,
         manual=('_apply_manual_key_safely',),
         background=('_attempt_auto_failover', '_attempt_youtube_failover'),
+        recoveries={
+            '_recover_interrupted_youtube_failover_transaction': lambda: os.path.exists(YOUTUBE_FAILOVER_TRANSACTION_FILE),
+            '_recover_interrupted_telegram_failover_transaction': lambda: os.path.exists(TELEGRAM_FAILOVER_TRANSACTION_FILE),
+        },
         metadata=('_save_key_pools', '_set_active_key', '_ensure_current_keys_in_pools',
                   '_add_keys_to_pool', '_import_keys_to_pools', '_add_subscription_keys_to_pool',
                   '_import_subscription_keys_to_pools'),
@@ -16518,8 +16566,7 @@ def _initialize_proxy_apply_control():
             '_restart_proxy_services_for_protocols',
             '_check_startup_proxy_endpoint', '_restore_startup_proxy_mode',
             '_delete_pool_key', '_clear_pool', '_clear_installed_key_for_protocol', '_repair_active_reality_endpoint',
-            '_restart_core_proxy_and_recheck_youtube', '_recover_interrupted_youtube_failover_transaction',
-            '_recover_interrupted_telegram_failover_transaction', '_restore_youtube_key_after_failed_failover',
+            '_restart_core_proxy_and_recheck_youtube', '_restore_youtube_key_after_failed_failover',
             '_sanitize_xray26_compat_files', 'update_proxy',
             '_apply_entries_to_unblock_list', '_append_entries_to_unblock_list', '_service_route_worker_mutation',
             '_handle_unblock_list_state',

@@ -343,6 +343,10 @@ def _router_health_payload(ctx, query):
 
 
 def dispatch(ctx, path, query=''):
+    if path == '/route-diagnostics':
+        return {'kind': 'html', 'html': _call(ctx, 'route_diagnostics_page') or ''}
+    if path == '/api/route_diagnostics':
+        return {'kind': 'json', 'payload': _call(ctx, 'route_diagnostics_payload') or {}, 'status': 200}
     if path in PAGE_ROUTES:
         build_form = _ctx(ctx, 'build_form')
         consume_flash_message = _ctx(ctx, 'consume_flash_message')

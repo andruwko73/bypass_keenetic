@@ -5,6 +5,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import tempfile
 import time
 from collections import deque
 
@@ -59,30 +60,30 @@ def build_pool_probe_core_config_batch(probe_tasks, test_port, proxy_outbound_fr
 
 def start_pool_probe_xray(config_json):
     xray_binary = shutil.which('xray') or '/opt/sbin/xray'
-    config_path = f'/tmp/bypass_pool_probe_{os.getpid()}_{threading.get_ident()}.json'
-    with open(config_path, 'w', encoding='utf-8') as file:
-        json.dump(config_json, file, ensure_ascii=False, separators=(',', ':'))
-    preexec_fn = None
-    if os.name == 'posix':
-        def prepare_child_process():
-            try:
-                if hasattr(os, 'setsid'):
-                    os.setsid()
-            except Exception:
-                pass
-            try:
-                if hasattr(os, 'nice'):
-                    os.nice(10)
-            except Exception:
-                pass
-        preexec_fn = prepare_child_process
-    process = subprocess.Popen(
-        [xray_binary, 'run', '-c', config_path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-        preexec_fn=preexec_fn,
-    )
+    descriptor, config_path = tempfile.mkstemp(prefix='bypass_pool_probe_', suffix='.json', dir='/tmp' if os.path.isdir('/tmp') else None)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as file:
+            json.dump(config_json, file, ensure_ascii=False, separators=(',', ':'))
+    except BaseException:
+        os.unlink(config_path)
+        raise
+    try:
+        process = subprocess.Popen(
+            [xray_binary, 'run', '-c', config_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            # No Python preexec_fn after fork in a multithreaded web process.
+            start_new_session=(os.name == 'posix'),
+        )
+    except BaseException:
+        os.unlink(config_path)
+        raise
+    if os.name == 'posix' and hasattr(os, 'setpriority'):
+        try:
+            os.setpriority(os.PRIO_PROCESS, process.pid, 10)
+        except OSError:
+            pass
     return process, config_path
 
 

@@ -409,21 +409,36 @@ def core_process_identity(binary, config_path, *, proc_root='/proc'):
     return identities[0] if len(identities) == 1 else None
 
 
-def install_proxy_controls(namespace, coordinator, *, manual=(), background=(), writers=(), metadata=()):
+def install_proxy_controls(namespace, coordinator, *, manual=(), background=(), writers=(), metadata=(), recoveries=None):
     """Bind explicit application entry points after all functions are defined.
 
     Background wrappers capture an intent before probes, while writer wrappers
     acquire the execution lock. Manual wrappers do both with manual priority.
     """
+    recoveries = dict(recoveries or {})
     groups = {'manual': tuple(manual), 'background': tuple(background),
-              'writer': tuple(writers), 'metadata': tuple(metadata)}
+              'writer': tuple(writers), 'metadata': tuple(metadata), 'recovery': tuple(recoveries)}
     names = [name for group in groups.values() for name in group]
     if len(names) != len(set(names)) or any(not callable(namespace.get(name)) for name in names):
         raise ValueError('Invalid proxy writer registry')
+    if any(not callable(predicate) for predicate in recoveries.values()):
+        raise ValueError('Invalid proxy recovery predicate')
 
-    def wrap(function, kind):
+    def wrap(function, kind, recovery_needed=None):
         @wraps(function)
         def controlled(*args, **kwargs):
+            if kind == 'recovery':
+                # Routine absence checks must not invalidate every ongoing
+                # diagnostic or verification ticket. Journal detection and
+                # actual recovery remain serialized with all writers.
+                with coordinator.lock:
+                    if not recovery_needed():
+                        return None
+                    with coordinator.mutation():
+                        guard = namespace.get('_proxy_mutation_preflight')
+                        if callable(guard):
+                            guard()
+                        return function(*args, **kwargs)
             if kind == 'metadata':
                 scope = coordinator.lock
             else:
@@ -440,7 +455,7 @@ def install_proxy_controls(namespace, coordinator, *, manual=(), background=(), 
         for name in group:
             previous = getattr(namespace[name], '_proxy_control_kind', None)
             if previous is None:
-                namespace[name] = wrap(namespace[name], kind)
+                namespace[name] = wrap(namespace[name], kind, recoveries.get(name))
             elif previous != kind:
                 raise ValueError('Conflicting proxy writer registration')
 

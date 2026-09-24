@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "ui:check": "node --check tests/ui_smoke.js && node --check tests/run_ui_smoke_fixture.js",
+    "ui:diagnostics": "node --check tests/ui_route_diagnostics.js && node tests/ui_route_diagnostics.js",
     "ui:smoke": "node tests/run_ui_smoke_fixture.js",
     "ui:install-browsers": "playwright install --with-deps chromium"
   },

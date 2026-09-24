@@ -39,6 +39,13 @@ jobs:
           chmod 700 "$RUNNER_TEMP/xray"
           XRAY_TEST_BINARY="$RUNNER_TEMP/xray" python -m pytest tests/test_cross_route_domains.py -q -k real_xray
           XRAY_TEST_BINARY="$RUNNER_TEMP/xray" python -m pytest tests/test_xray_live_apply.py -q
+          XRAY_TEST_BINARY="$RUNNER_TEMP/xray" python -m pytest tests/test_route_egress.py -q
+
+      - name: Route diagnostics
+        run: python -m pytest tests/test_route_quality.py tests/test_route_profiles.py tests/test_route_probe_runtime.py tests/test_route_diagnostics_runtime.py tests/test_route_diagnostics_service.py -q
+
+      - name: YouTube failover receive evidence
+        run: python -m pytest tests/test_youtube_stream_evidence.py -q
 
       - name: Secret scan
         run: python tests/secret_scan.py
@@ -81,3 +88,4 @@ jobs:
           done
           curl -fsS http://127.0.0.1:18765/ > /dev/null
           BYPASS_UI_URL=http://127.0.0.1:18765/ npm run ui:smoke
+          npm run ui:diagnostics

@@ -1,6 +1,7 @@
 """YouTube route failover state machine, isolated from the main bot module."""
 
 from youtube_healthcheck import youtube_error_is_unstable
+from youtube_stream_evidence import defer_control_failure, reset_control_failures
 
 
 def transient_failure_should_wait_for_stream(message, *, stream_active, hard_proxy_failure=False):
@@ -144,6 +145,7 @@ def attempt_youtube_failover(context):
     state['deferred_reason'] = ''
 
     if health_state == 'healthy':
+        reset_control_failures(state)
         state['last_fail'] = 0.0
         state['consecutive_failures'] = 0
         _reset_youtube_quality_state(
@@ -180,12 +182,13 @@ def attempt_youtube_failover(context):
                 'YouTube transient control-endpoint failure',
                 log=True,
                 hold_seconds=YOUTUBE_STREAM_GUARD_FAILOVER_HOLD_SECONDS,
+                require_downlink=True,
             ))
         if transient_failure_should_wait_for_stream(
             failure_message,
             stream_active=stream_active,
             hard_proxy_failure=hard_proxy_failure,
-        ):
+        ) and defer_control_failure(state, now=now):
             state['last_fail'] = 0.0
             state['consecutive_failures'] = 0
             _reset_youtube_quality_state(
@@ -343,6 +346,7 @@ def attempt_youtube_failover(context):
             route_proto,
             deadline=state.get('failure_deadline'),
         )
+        reset_control_failures(state)
         if confirm_ok is None:
             state['deferred_reason'] = 'подтверждение полного отказа недоступно'
             return False
@@ -366,6 +370,9 @@ def attempt_youtube_failover(context):
                 )
             return False
 
+        # Route-wide byte counters cannot identify the exact application. Do
+        # not let unrelated incoming traffic overrule a failed multi-endpoint
+        # YouTube confirmation indefinitely. Candidate validation still follows.
         state['hard_failure_confirmed_at'] = time.time()
         return _handle_confirmed_youtube_hard_failure(
             route_proto,

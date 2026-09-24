@@ -33,6 +33,7 @@ MANAGED_PATHS = (
     '/opt/etc/bot/subscription_nightly_pool_probe.json',
     '/opt/etc/bot/custom_checks.json',
     '/opt/etc/bot/service_route_state.json',
+    '/opt/etc/bot/route_diagnostics.json',
     '/opt/etc/bot/socialnet.txt',
     '/opt/etc/bot/call_signal_routes.txt',
     '/opt/etc/bot/udp_policy.conf',

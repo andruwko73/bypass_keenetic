@@ -262,3 +262,41 @@ def test_manual_scope_cleans_pending_intent_when_handler_fails(tmp_path):
             raise ValueError('injected')
     assert coordinator.capture().generation == 1
     assert not coordinator.lock.locked()
+
+
+def test_absent_recovery_journal_preserves_ticket_and_present_journal_is_serialized(tmp_path):
+    from proxy_apply_coordinator import install_proxy_controls
+    coordinator = ApplyCoordinator(tmp_path)
+    journal = tmp_path / 'recovery.json'
+    calls = []
+    def needed():
+        assert not ProcessRLock(tmp_path / 'apply.lock').acquire(blocking=False)
+        return journal.exists()
+    def recovery():
+        calls.append(coordinator.active_ticket())
+        assert not ProcessRLock(tmp_path / 'apply.lock').acquire(blocking=False)
+        journal.unlink()
+        return True
+    namespace = {'recover': recovery}
+    install_proxy_controls(namespace, coordinator, recoveries={'recover': needed})
+    ticket = coordinator.capture()
+    for _ in range(5):assert namespace['recover']() is None
+    assert coordinator.current(ticket) and not calls
+    journal.write_text('fixture')
+    assert namespace['recover']() is True
+    assert not coordinator.current(ticket) and len(calls) == 1
+    newer = coordinator.capture()
+    assert namespace['recover']() is None and coordinator.current(newer)
+
+
+def test_recovery_failure_keeps_journal_and_releases_writer_lock(tmp_path):
+    from proxy_apply_coordinator import install_proxy_controls
+    coordinator = ApplyCoordinator(tmp_path)
+    journal = tmp_path / 'recovery.json';journal.write_text('fixture')
+    def recovery():raise ValueError('fixture recovery failure')
+    namespace = {'recover': recovery}
+    install_proxy_controls(namespace, coordinator, recoveries={'recover': journal.exists})
+    with pytest.raises(ValueError, match='fixture recovery'):
+        namespace['recover']()
+    assert journal.exists()
+    with ProcessRLock(tmp_path / 'apply.lock'):pass
