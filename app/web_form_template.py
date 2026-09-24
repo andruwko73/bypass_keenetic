@@ -255,6 +255,8 @@ def render_web_form(
     pool_probe_async_attr = ' data-async-action="pool-probe"' if enable_async_forms else ''
     pool_probe_cancel_async_attr = ' data-async-action="pool-probe-cancel"' if enable_async_forms else ''
     csrf_input_html = f'<input type="hidden" name="csrf_token" value="{html.escape(csrf_token)}">'
+    from web_form_blocks import web_list_route_menu_html
+    list_route_menu = web_list_route_menu_html(csrf_input_html)
     quick_start_forms = []
     if start_button_label:
         quick_start_forms.append(f'''<form method="post" action="/start"{start_form_async_attr}>
@@ -596,6 +598,7 @@ def render_web_form(
                         <p class="section-subtitle">Домены из выбранного списка будут отправляться через соответствующий протокол</p>
                     </div>
                     <div class="segmented list-tabs">{unblock_tabs_html}</div>
+                    {list_route_menu}
                     <div class="list-panels">{unblock_panels_html}</div>
                 </section>
             </main>

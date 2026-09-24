@@ -1077,6 +1077,60 @@
             return !!(panel && panel.classList.contains('active'));
         }
 
+        let bulkRoutePending = false;
+        let listRequestsPending = 0;
+
+        function syncListMoveMenu() {
+            const panel = document.querySelector('[data-list-panel].active');
+            const source = panel ? panel.getAttribute('data-list-panel') : '';
+            document.querySelectorAll('[data-list-route-move]').forEach(function(form) {
+                form.querySelector('[name="source_list"]').value = source;
+                const same = form.querySelector('[name="target_list"]').value === source;
+                form.querySelector('button').disabled = !source || same || bulkRoutePending;
+                form.querySelector('small').textContent = same ? 'текущий список' : 'перенести сюда';
+            });
+        }
+
+        function lockBulkRouteEditors() {
+            bulkRoutePending = true;
+            const controls = Array.from(document.querySelectorAll('[data-view="lists"] textarea, [data-view="lists"] button'));
+            const disabled = controls.map(function(node) { return node.disabled; });
+            controls.forEach(function(node) { node.disabled = true; });
+            return function() {
+                bulkRoutePending = false;
+                controls.forEach(function(node, index) {
+                    const panel = node.closest('[data-list-panel]');
+                    const editor = node.matches('textarea[name="content"], [data-list-save]');
+                    node.disabled = editor && panel ? panel.dataset.listLoaded !== '1' : disabled[index];
+                });
+                syncListMoveMenu();
+            };
+        }
+
+        function updateUnblockLists(contents) {
+            document.querySelectorAll('[data-list-panel]').forEach(function(panel) {
+                const content = contents[panel.getAttribute('data-list-panel')];
+                if (typeof content !== 'string') return;
+                const textarea = panel.querySelector('textarea[name="content"]');
+                // Invalidate an older lazy-load response before installing the new snapshot.
+                panel.dataset.listEpoch = String(Number(panel.dataset.listEpoch || 0) + 1);
+                panel.dataset.listLoaded = '1';
+                panel.dataset.listLoading = '0';
+                if (textarea) {
+                    textarea.value = content;
+                    textarea.defaultValue = content;
+                    textarea.disabled = bulkRoutePending;
+                }
+                const count = panel.querySelector('[data-list-line-count]');
+                if (count) count.textContent = String(content.split(/\r?\n/).filter(function(line) {
+                    return line.trim();
+                }).length);
+                const state = panel.querySelector('[data-list-load-state]');
+                if (state) state.classList.add('hidden');
+                setupAutoResizeTextareas(panel);
+            });
+        }
+
         function loadUnblockListPanel(listName) {
             const panel = document.querySelector('[data-list-panel="' + String(listName || '') + '"]');
             if (!panel || panel.dataset.listLoaded === '1' || panel.dataset.listLoading === '1') {
@@ -1084,6 +1138,7 @@
             }
             const textarea = panel.querySelector('textarea[name="content"]');
             const state = panel.querySelector('[data-list-load-state]');
+            const epoch = panel.dataset.listEpoch || '0';
             panel.dataset.listLoading = '1';
             if (state) {
                 state.textContent = 'Загрузка списка...';
@@ -1100,9 +1155,11 @@
                     return payload;
                 });
             }).then(function(payload) {
+                if ((panel.dataset.listEpoch || '0') !== epoch) return;
                 if (textarea) {
                     textarea.value = String(payload.content || '');
-                    textarea.disabled = false;
+                    textarea.defaultValue = textarea.value;
+                    textarea.disabled = bulkRoutePending;
                 }
                 const count = panel.querySelector('[data-list-line-count]');
                 if (count) {
@@ -1110,7 +1167,7 @@
                 }
                 const saveButton = panel.querySelector('[data-list-save]');
                 if (saveButton) {
-                    saveButton.disabled = false;
+                    saveButton.disabled = bulkRoutePending;
                 }
                 panel.dataset.listLoaded = '1';
                 setupAutoResizeTextareas(panel);
@@ -1118,11 +1175,11 @@
                     state.classList.add('hidden');
                 }
             }).catch(function(error) {
-                if (state) {
+                if (state && (panel.dataset.listEpoch || '0') === epoch) {
                     state.textContent = error && error.message ? error.message : 'Не удалось загрузить список';
                 }
             }).finally(function() {
-                panel.dataset.listLoading = '0';
+                if ((panel.dataset.listEpoch || '0') === epoch) panel.dataset.listLoading = '0';
             });
         }
 
@@ -1201,6 +1258,7 @@
                 if (panelSelector === '[data-list-panel]' && listsViewActive()) {
                     loadUnblockListPanel(selected);
                 }
+                if (panelSelector === '[data-list-panel]') syncListMoveMenu();
             }
             buttons.forEach(function(button) {
                 button.addEventListener('click', function() {
@@ -2206,29 +2264,22 @@
             rows.sort(function(left, right) {
                 const leftIndex = Number(left.dataset.poolIndex || 0);
                 const rightIndex = Number(right.dataset.poolIndex || 0);
-                if (sortMode === 'original' || sortMode === 'active') {
-                    const activeDelta = Number(right.dataset.active || 0) - Number(left.dataset.active || 0);
-                    if (activeDelta) {
-                        return activeDelta;
-                    }
-                } else if (sortMode === 'telegram') {
+                const activeDelta = Number(right.dataset.active || 0) - Number(left.dataset.active || 0);
+                if (activeDelta) return activeDelta;
+                if (sortMode === 'telegram') {
                     const tgDelta = poolStateRank(right.dataset.tgState) - poolStateRank(left.dataset.tgState);
                     if (tgDelta) {
                         return tgDelta;
                     }
-                } else if (sortMode === 'youtube') {
-                    const qualityDelta = Number(right.dataset.qualityScore || 0) - Number(left.dataset.qualityScore || 0);
-                    if (qualityDelta) {
-                        return qualityDelta;
-                    }
+                } else if (sortMode === 'youtube' || sortMode === 'quality') {
                     const ytDelta = poolStateRank(right.dataset.ytState) - poolStateRank(left.dataset.ytState);
                     if (ytDelta) {
                         return ytDelta;
                     }
-                } else if (sortMode === 'quality') {
-                    const qualityDelta = Number(right.dataset.qualityScore || 0) - Number(left.dataset.qualityScore || 0);
-                    if (qualityDelta) {
-                        return qualityDelta;
+                    // Failed/unknown results must not be promoted by an old score.
+                    if (left.dataset.ytState === 'ok' || left.dataset.ytState === 'warn') {
+                        const qualityDelta = Number(right.dataset.qualityScore || 0) - Number(left.dataset.qualityScore || 0);
+                        if (qualityDelta) return qualityDelta;
                     }
                     const checkedDelta = Number(right.dataset.checkedTs || 0) - Number(left.dataset.checkedTs || 0);
                     if (checkedDelta) {
@@ -3755,6 +3806,7 @@
                 menu.dataset.routeMenuBound = '1';
                 menu.addEventListener('toggle', function() {
                     if (menu.open) {
+                        if (menu.classList.contains('bulk-service-route-menu')) syncListMoveMenu();
                         closeServiceRouteMenus(menu);
                         scheduleServiceRouteMenuPosition(menu);
                     } else {
@@ -3832,7 +3884,9 @@
                 form.dataset.asyncBound = '1';
                 form.addEventListener('submit', function(event) {
                     event.preventDefault();
+                    if (bulkRoutePending && form.closest('[data-view="lists"]')) return;
                     const button = event.submitter || form.querySelector('button[type="submit"]');
+                    if (form.hasAttribute('data-list-route-move')) syncListMoveMenu();
                     const formData = new FormData(form);
                     formData.set('csrf_token', CSRF_TOKEN);
                     if (button && button.name) {
@@ -3849,6 +3903,24 @@
                         if (!confirmed) {
                             return;
                         }
+                        let releaseBulkEditors = null;
+                        if (form.hasAttribute('data-list-route-move')) {
+                            if (bulkRoutePending) return;
+                            if (listRequestsPending) {
+                                showActionMessage('Дождитесь завершения изменения списка, затем повторите перенос.', false);
+                                return;
+                            }
+                            if (!formData.get('source_list') || formData.get('source_list') === formData.get('target_list')) return;
+                            const unsaved = Array.from(document.querySelectorAll('[data-list-panel] textarea[name="content"]'))
+                                .some(function(node) { return node.value !== node.defaultValue; });
+                            if (unsaved) {
+                                showActionMessage('Сначала сохраните изменения в списках, затем перенесите список.', false);
+                                return;
+                            }
+                            releaseBulkEditors = lockBulkRouteEditors();
+                        }
+                        const listRequest = !!form.closest('[data-view="lists"]');
+                        if (listRequest) listRequestsPending++;
                         if (action === 'command' && (confirmTitle || confirmMessage)) {
                             formData.set('confirm_switch', 'yes');
                         }
@@ -3938,11 +4010,18 @@
                                     nameInput.value = '';
                                 }
                             }
-                            if (payload.list_name && typeof payload.list_content === 'string') {
+                            if (ok && payload.list_contents && form.hasAttribute('data-list-route-move')) {
+                                updateUnblockLists(payload.list_contents);
+                            }
+                            if (ok && payload.list_name && typeof payload.list_content === 'string') {
                                 const listPanel = document.querySelector('[data-list-panel="' + payload.list_name + '"]');
                                 const listTextarea = listPanel ? listPanel.querySelector('textarea[name="content"]') : null;
                                 if (listTextarea) {
-                                    listTextarea.value = payload.list_content;
+                                    const sentContent = formData.get('content');
+                                    if (sentContent === null || listTextarea.value === sentContent) {
+                                        listTextarea.value = payload.list_content;
+                                        listTextarea.defaultValue = payload.list_content;
+                                    }
                                 }
                             }
                             if (action === 'set-proxy') {
@@ -4025,7 +4104,9 @@
                             }
                         })
                         .finally(function() {
+                            if (listRequest) listRequestsPending--;
                             setButtonBusy(button, false);
+                            if (releaseBulkEditors) releaseBulkEditors();
                         });
                     });
                 });

@@ -1,4 +1,5 @@
 const { chromium, devices } = require('playwright');
+const { checkBulkRoutes, isExpectedBulkError } = require('./ui_bulk_routes');
 
 const targetUrl = process.env.BYPASS_UI_URL || 'http://192.168.1.1:8080/';
 const chromeExecutable = process.env.CHROME_EXECUTABLE || undefined;
@@ -91,7 +92,7 @@ function watchPage(page, label) {
   const failures = [];
   page.on('pageerror', (error) => failures.push(`${label}: page error: ${error.message}`));
   page.on('console', (message) => {
-    if (message.type() === 'error') {
+    if (message.type() === 'error' && !isExpectedBulkError(page, message)) {
       failures.push(`${label}: console error: ${message.text()}`);
     }
   });
@@ -1549,17 +1550,19 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
         throw new Error(`${name}: service route coverage omits ${expected}`);
       }
     }
-    await assertVisibleBox(page, '[data-protocol-panel].active .route-profile-panel', `${name} route profiles`);
+    if (await page.locator('[data-protocol-panel] .route-profile-panel').count()) {
+      throw new Error(`${name}: old quick route profiles remain in Checks`);
+    }
     const diagnosticEntry = page.locator('[data-protocol-panel].active .route-diagnostics-entry');
     await assertVisibleBox(page, '[data-protocol-panel].active .route-diagnostics-entry', `${name} diagnostics entry`);
     const entryStyles = await diagnosticEntry.evaluate(node => {
       const button = node.querySelector('button');
-      const sibling = node.parentElement.querySelector('.route-profile-btn');
+      const sibling = document.querySelector('[data-list-save]');
       const style = getComputedStyle(button), reference = getComputedStyle(sibling);
       return {
         navigates: button.form.getAttribute('action') === '/route-diagnostics' && button.form.method === 'get',
         compact: parseFloat(getComputedStyle(node.querySelector('small')).fontSize) <= 13,
-        shared: ['fontFamily', 'color', 'backgroundColor', 'borderRadius'].every(key => style[key] === reference[key]),
+        shared: ['fontFamily', 'color', 'backgroundColor'].every(key => style[key] === reference[key]),
         fits: node.scrollWidth <= node.clientWidth + 2,
       };
     });
@@ -1631,6 +1634,7 @@ async function runViewport(browser, modeConfig, viewportName, viewport, isMobile
   }
   await hysteria2ListTab.click();
   await assertVisibleBox(page, '[data-list-panel="hysteria2.txt"].active', `${name} Hysteria2 list editor`);
+  await checkBulkRoutes(page, modeConfig.mode, name);
   await assertNoBrokenImages(page, `${name} lists`);
   await assertNoHorizontalOverflow(page, `${name} lists`);
   if (!isMobile) {

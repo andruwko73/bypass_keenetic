@@ -439,10 +439,6 @@ class ServiceRouteToolsRuntime:
             </div>'''
         return ''.join([
             importlib.import_module('route_diagnostics_web').navigation_html(),
-            key_pool_web.web_route_profiles_html(
-                service_routes.ROUTE_PROFILES,
-                csrf_input_html=csrf_input_html,
-            ),
             intersections_html,
             key_pool_web.web_service_route_tools_html(
                 service_items,

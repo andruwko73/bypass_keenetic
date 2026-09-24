@@ -390,10 +390,6 @@ def _route_tools_html(csrf_input_html):
     return "".join(
         [
             route_diagnostics_web.navigation_html(),
-            key_pool_web.web_route_profiles_html(
-                service_routes.ROUTE_PROFILES,
-                csrf_input_html=csrf_input_html,
-            ),
             key_pool_web.web_route_intersections_html(
                 {
                     "count": 0,

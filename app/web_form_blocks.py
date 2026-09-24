@@ -17,6 +17,32 @@ STATUS_REFRESH_PENDING_MARKERS = (
 )
 
 
+def web_list_route_menu_html(csrf_input_html=''):
+    from protocol_catalog import PROTOCOL_LABELS, PROTOCOL_ROUTE_NAMES
+
+    choices = []
+    for proto in PROTOCOL_DISPLAY_ORDER:
+        label = html.escape(PROTOCOL_LABELS[proto])
+        target = PROTOCOL_ROUTE_NAMES[proto] + '.txt'
+        choices.append(f'''<form method="post" action="/route_list_move" class="service-route-form" data-async-action="service-route" data-list-route-move>
+            {csrf_input_html}
+            <input type="hidden" name="source_list" value="">
+            <input type="hidden" name="target_list" value="{target}">
+            <button type="submit" class="service-route-menu-item" title="Перенести весь выбранный список в {label}">
+                <span>{label}</span><small>перенести сюда</small>
+            </button>
+        </form>''')
+    return f'''<div class="list-route-toolbar">
+        <details class="service-route-menu bulk-service-route-menu">
+            <summary class="service-route-trigger" aria-label="Перенести весь список — выбрать протокол">
+                <span>Перенести весь список</span><span class="service-route-caret" aria-hidden="true">v</span>
+            </summary>
+            <div class="service-route-menu-list">{''.join(choices)}</div>
+        </details>
+        <small>Все адреса выбранного списка добавятся в другой без дублей. Исходный список очистится.</small>
+    </div>'''
+
+
 def pool_import_hint(title):
     title = str(title or '').strip()
     return (
@@ -231,7 +257,7 @@ def _light_protocol_panel_html(
                         <button type="button" class="pool-sort-option active" data-pool-sort-value="original">Исходный порядок</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="telegram">Telegram сначала</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="youtube">YouTube сначала</button>
-                        <button type="button" class="pool-sort-option" data-pool-sort-value="quality">Качество сначала</button>
+                        <button type="button" class="pool-sort-option" data-pool-sort-value="quality" title="Активный ключ закреплён сверху. Затем рабочие для YouTube, нестабильные, непроверенные и нерабочие; внутри группы — по баллам.">Качество YouTube</button>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="checked">Свежие проверки</button>
                         <span class="pool-sort-divider">Фильтр</span>
                         <button type="button" class="pool-sort-option" data-pool-sort-value="working">Работают</button>

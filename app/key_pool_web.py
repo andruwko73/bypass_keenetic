@@ -219,8 +219,21 @@ def overlay_active_service_states(pools, live_states):
     return pools
 
 
+def web_probe_quality_score(probe):
+    """Keep the displayed score independent from optional throughput badges."""
+    state = web_probe_state(probe, 'yt_ok')
+    if state == 'fail':
+        return 0
+    if state not in ('ok', 'warn') or not isinstance(probe, dict):
+        return None
+    try:
+        return max(0, min(100, int(probe.get('yt_score'))))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def web_probe_quality_label(probe):
-    if not isinstance(probe, dict):
+    if not isinstance(probe, dict) or web_probe_state(probe, 'yt_ok') != 'ok':
         return ''
     try:
         throughput = float(probe.get('yt_throughput_mbps'))
@@ -237,36 +250,38 @@ def web_probe_quality_label(probe):
 
 
 def web_probe_quality_summary(probe):
-    if not isinstance(probe, dict):
-        return 'Качество еще не измерено'
-    parts = []
+    probe = probe if isinstance(probe, dict) else {}
+    state = web_probe_state(probe, 'yt_ok')
+    status = {'ok': 'работает', 'warn': 'нестабильно', 'fail': 'не работает'}.get(state, 'нет результата')
+    parts = [f'YouTube: {status} по последней проверке']
+    score = web_probe_quality_score(probe)
+    if score is not None:
+        parts.append(f'Оценка YouTube: {score}/100 — выше лучше; это баллы, не проценты')
+    else:
+        parts.append('Оценка YouTube ещё не рассчитана')
+    if state not in ('ok', 'warn'):
+        checked_at = web_probe_checked_at(probe)
+        if checked_at:
+            parts.append(f'Проверено {checked_at}')
+        return '\n'.join(parts)
     label = web_probe_quality_label(probe)
     if label:
         parts.append(f'YouTube: {label}')
-    try:
-        score = int(probe.get('yt_score'))
-    except Exception:
-        score = None
-    if score is not None:
-        parts.append(f'score {score}/100')
-    stability = str(probe.get('yt_stability') or '').strip().lower()
-    if stability and stability != 'stable':
-        parts.append(f'YouTube {stability}')
     try:
         first_load = int(probe.get('yt_first_load_ms'))
     except Exception:
         first_load = 0
     if first_load:
-        parts.append(f'first load {first_load} ms')
+        parts.append(f'Первая загрузка: {first_load} мс')
     try:
         error_rate = float(probe.get('yt_error_rate'))
     except Exception:
         error_rate = 0.0
     if error_rate:
-        parts.append(f'errors {int(round(error_rate * 100))}%')
+        parts.append(f'Ошибки проверок: {int(round(error_rate * 100))}%')
     tier = str(probe.get('yt_stream_tier') or '').strip() if label else ''
     if tier:
-        parts.append(f'порог {tier}')
+        parts.append(f'Достигнут порог тестовой скорости: {tier}')
     try:
         tg_latency = int(probe.get('tg_latency_ms'))
     except Exception:
@@ -288,21 +303,23 @@ def web_probe_quality_summary(probe):
     try:
         throughput = float(probe.get('yt_throughput_mbps'))
     except Exception:
-        throughput = 0.0
-    if throughput:
-        parts.append(f'скорость {throughput:g} Мбит/с')
+        throughput = None
+    if throughput is not None:
+        parts.append(f'Скорость тестовой загрузки: {throughput:g} Мбит/с')
+    else:
+        parts.append('Предварительная оценка: скорость скачивания не измерена')
     error = str(probe.get('quality_error') or '').strip()
     if error:
         parts.append(f'замер скорости: {error}')
     yt_error = str(probe.get('yt_last_error') or '').strip()
     if yt_error:
-        parts.append(f'YouTube check: {html.escape(yt_error)}')
+        parts.append(f'Проверка YouTube: {yt_error}')
     if not parts:
         return 'Качество еще не измерено'
     checked_at = web_probe_checked_at(probe)
     if checked_at:
         parts.append(f'проверено {checked_at}')
-    return '; '.join(parts)
+    return '\n'.join(parts)
 
 
 def web_custom_checks(custom_checks):
@@ -689,7 +706,7 @@ def web_pool_snapshot(
                 'custom': web_custom_probe_states(probe, protocol_checks),
                 'checked_at': probe_checked_at(probe),
                 'checked_ts': int(probe.get('ts') or 0) if isinstance(probe, dict) else 0,
-                'yt_score': int(probe.get('yt_score') or 0) if quality_label and isinstance(probe, dict) else 0,
+                'yt_score': web_probe_quality_score(probe),
                 'yt_quality': str(probe.get('yt_quality') or '') if quality_label and isinstance(probe, dict) else '',
                 'yt_quality_label': quality_label,
                 'yt_stream_tier': str(probe.get('yt_stream_tier') or '') if quality_label and isinstance(probe, dict) else '',

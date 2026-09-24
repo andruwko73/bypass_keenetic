@@ -2097,7 +2097,7 @@ def test_web_service_routes_worker_payload_contains_route_tools():
     assert 'service-route-trigger' in html_text
     assert 'service-route-telegram-icon' in html_text
     assert 'service-route-youtube-icon' in html_text
-    assert '/service_profile_apply' in html_text
+    assert '/service_profile_apply' not in html_text
     assert '/route_intersections_resolve' in html_text or 'route-intersection-ok' in html_text
     assert {'telegram', 'youtube'} <= set(route_states)
     assert all(

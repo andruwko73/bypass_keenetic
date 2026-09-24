@@ -50,7 +50,8 @@ function runSmoke(port) {
     BYPASS_UI_URL: `http://127.0.0.1:${port}/`,
   };
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['tests/ui_smoke.js'], {
+    const script = ({lists:'tests/ui_bulk_routes.js', quality:'tests/ui_pool_quality.js'})[process.argv[2]] || 'tests/ui_smoke.js';
+    const child = spawn(process.execPath, [script], {
       cwd: root,
       env: environment,
       stdio: 'inherit',

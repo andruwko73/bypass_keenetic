@@ -306,6 +306,28 @@ def _service_profile_apply(ctx, data):
     return _result(result, success=success, extra=extra)
 
 
+def _route_list_move(ctx, data):
+    try:
+        moved = _ctx(ctx, 'move_route_list')(
+            form_value(data, 'source_list'), form_value(data, 'target_list'))
+    except Exception as exc:
+        return _result(f'Не удалось перенести список: {exc}', success=False)
+    message = (
+        f"Список {moved['source_label']} перенесён в {moved['target_label']}. "
+        f"Адресов: {moved['entries']}. Исходный список очищен."
+    ) if moved['changed'] else 'Исходный список пуст. Перенос не требуется.'
+    _invalidate_status(ctx)
+    _call(ctx, 'record_event', action='route_list_move', message=message,
+          protocol='system', source='web')
+    extra = {'list_contents': moved['list_contents']}
+    if moved['changed'] and _ctx(ctx, 'custom_checks_enabled', False):
+        try:
+            extra.update(_route_tools_payload(ctx))
+        except Exception:
+            message += ' Обновите страницу, чтобы обновить карточки сервисов.'
+    return _result(message, extra=extra)
+
+
 def _route_intersections_resolve(ctx, data):
     target_route = form_value(data, 'target_route')
     success = True
@@ -845,6 +867,7 @@ def dispatch(ctx, path, data):
         '/start': _start,
         '/command': _command,
         '/save_unblock_list': _save_unblock_list,
+        '/route_list_move': _route_list_move,
         '/append_socialnet': lambda context, form: _service_list_action(
             context,
             form,

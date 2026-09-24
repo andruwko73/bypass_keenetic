@@ -44,6 +44,12 @@ jobs:
       - name: Route diagnostics
         run: python -m pytest tests/test_route_quality.py tests/test_route_profiles.py tests/test_route_probe_runtime.py tests/test_route_diagnostics_runtime.py tests/test_route_diagnostics_service.py -q
 
+      - name: Whole route list transfer
+        run: python -m pytest tests/test_route_list_move.py -q
+
+      - name: Pool quality display
+        run: python -m pytest tests/test_pool_quality_display.py -q
+
       - name: Protocol-owned services and Hysteria hot apply
         run: |
           python -m pytest tests/test_proxy_live_services.py -q
@@ -97,3 +103,4 @@ jobs:
           curl -fsS http://127.0.0.1:18765/ > /dev/null
           BYPASS_UI_URL=http://127.0.0.1:18765/ npm run ui:smoke
           npm run ui:diagnostics
+          npm run ui:quality

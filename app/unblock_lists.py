@@ -1,6 +1,8 @@
 import os
 import re
 import subprocess
+import stat
+import tempfile
 
 from protocol_catalog import PROTOCOL_DISPLAY_ORDER, PROTOCOL_LABELS, PROTOCOL_ROUTE_NAMES
 
@@ -28,6 +30,79 @@ def normalize_unblock_list(text):
         items.append(line)
     items.sort()
     return '\n'.join(items)
+
+
+def _replace_list(path, content, metadata):
+    """Replace on the same filesystem, preserving the existing file permissions."""
+    fd, staged = tempfile.mkstemp(prefix='.route-move-', dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, 'wb') as file:
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        if hasattr(os, 'chown'):
+            os.chown(staged, metadata.st_uid, metadata.st_gid)
+        os.chmod(staged, stat.S_IMODE(metadata.st_mode))
+        os.replace(staged, path)
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
+
+
+def move_unblock_list(source_list, target_list, *, unblock_dir=UNBLOCK_DIR, apply_changes=None):
+    """Move saved entries only. Caller serializes this with other route writers."""
+    if source_list not in VISIBLE_UNBLOCK_LISTS or target_list not in VISIBLE_UNBLOCK_LISTS:
+        raise ValueError('Выберите список из доступных протоколов')
+    if source_list == target_list:
+        raise ValueError('Выберите другой список для переноса')
+    snapshots = {}
+    for name in (source_list, target_list):
+        path = os.path.join(unblock_dir, name)
+        metadata = os.lstat(path)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError('Список должен быть обычным файлом')
+        with open(path, 'rb') as file:
+            content = file.read()
+        snapshots[name] = (path, content, metadata)
+    source = snapshots[source_list][1].decode('utf-8')
+    target = snapshots[target_list][1].decode('utf-8')
+    merged = normalize_unblock_list(target + '\n' + source)
+    changed = bool(source.strip())
+    if changed:
+        written = []
+        apply_started = False
+        try:
+            # Destination first: interruption cannot remove the only copy of an address.
+            for name, content in ((target_list, (merged + '\n').encode('utf-8')), (source_list, b'')):
+                path, _, metadata = snapshots[name]
+                _replace_list(path, content, metadata)
+                written.append(name)
+            if callable(apply_changes):
+                apply_started = True
+                apply_changes()
+        except Exception as exc:
+            try:
+                # Restore the source before removing its copy from the destination.
+                for name in (source_list, target_list):
+                    if name in written:
+                        path, content, metadata = snapshots[name]
+                        _replace_list(path, content, metadata)
+            except Exception as restore_exc:
+                raise RuntimeError('Ошибка восстановления списков; проверьте оба списка перед повтором') from restore_exc
+            if apply_started:
+                try:
+                    apply_changes()
+                except Exception as restore_exc:
+                    raise RuntimeError('Списки восстановлены, но прежние маршруты применить не удалось') from restore_exc
+            raise RuntimeError('Изменения отменены, исходные списки сохранены') from exc
+    return {
+        'changed': changed,
+        'source_label': list_label(source_list),
+        'target_label': list_label(target_list),
+        'entries': len(entries_from_service_text(normalize_unblock_list(source))),
+        'list_contents': {source_list: '' if changed else source.strip(),
+                          target_list: merged if changed else target.strip()},
+    }
 
 
 def _run_unblock_update(async_update=False):

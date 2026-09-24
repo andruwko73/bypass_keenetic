@@ -5112,7 +5112,7 @@ def _udp_quic_block_enabled_for_protocol(proto, configured_enabled):
     return bool(configured_enabled)
 
 
-def _sync_udp_policy_config():
+def _sync_udp_policy_config(strict=False):
     block_shadowsocks = _udp_quic_block_enabled_for_protocol('shadowsocks', UDP_QUIC_BLOCK_SHADOWSOCKS_ENABLED)
     block_vmess = _udp_quic_block_enabled_for_protocol('vmess', UDP_QUIC_BLOCK_VMESS_ENABLED)
     block_vless = _udp_quic_block_enabled_for_protocol('vless', UDP_QUIC_BLOCK_VLESS_ENABLED)
@@ -5178,11 +5178,16 @@ def _sync_udp_policy_config():
         _write_text_file_atomic(CALL_SIGNAL_ROUTES_PATH, call_signal_routes_payload)
     except Exception as exc:
         _write_runtime_log(f'UDP policy sync failed: {exc}')
+        if strict:
+            raise RuntimeError('Не удалось сохранить политику UDP') from exc
 
 
-def _sync_proxy_route_policy_config():
+def _sync_proxy_route_policy_config(strict=False):
     """Keep the strict transparent Xray policy in sync with edited lists."""
-    _sync_udp_policy_config()
+    if strict:
+        _sync_udp_policy_config(strict=True)
+    else:
+        _sync_udp_policy_config()
     if not XRAY_STRICT_TRANSPARENT_PROTOCOLS:
         return
     try:
@@ -5190,9 +5195,13 @@ def _sync_proxy_route_policy_config():
         ok, note = _restart_core_proxy_after_validation()
     except Exception as exc:
         _write_runtime_log(f'Strict transparent route sync failed: {exc}')
+        if strict:
+            raise RuntimeError('Не удалось применить политику маршрутов Xray') from exc
         return
     if not ok:
         _write_runtime_log(f'Strict transparent route sync warning: {note}')
+        if strict:
+            raise RuntimeError('Не удалось применить политику маршрутов Xray')
     _invalidate_web_status_cache()
     _invalidate_key_status_cache()
 
@@ -8636,6 +8645,22 @@ def _apply_service_profile(profile_id):
     if worker_result is not None:
         return worker_result
     return _route_tools_runtime().apply_service_profile(profile_id)
+
+
+def _move_route_list(source_list, target_list):
+    from unblock_lists import move_unblock_list
+
+    def apply_changes():
+        _sync_proxy_route_policy_config(strict=True)
+        subprocess.run(['/opt/bin/unblock_update.sh'], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    with service_route_mutation_lock:
+        result = move_unblock_list(source_list, target_list, apply_changes=apply_changes)
+        if _web_route_tools_runtime is not None:
+            _web_route_tools_runtime.invalidate_intersections_cache()
+        _invalidate_web_status_cache()
+        return result
 
 
 def _resolve_route_intersections(target_route):
@@ -15134,6 +15159,7 @@ def _web_action_context():
         apply_manual_key=_apply_manual_key_safely,
         apply_service_route=_apply_service_route,
         apply_service_profile=_apply_service_profile,
+        move_route_list=_move_route_list,
         resolve_route_intersections=_resolve_route_intersections,
         service_routes_payload=_web_service_routes_payload,
         record_event=_record_event,
@@ -16589,6 +16615,7 @@ def _initialize_proxy_apply_control():
             '_restart_core_proxy_and_recheck_youtube', '_restore_youtube_key_after_failed_failover',
             '_sanitize_xray26_compat_files', 'update_proxy',
             '_apply_entries_to_unblock_list', '_append_entries_to_unblock_list', '_service_route_worker_mutation',
+            '_move_route_list', '_save_unblock_list',
             '_handle_unblock_list_state',
             'shadowsocks', 'vmess', 'vless', 'vless2', 'trojan', 'hysteria2',
         ),
