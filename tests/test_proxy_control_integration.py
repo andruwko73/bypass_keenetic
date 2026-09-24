@@ -1,5 +1,6 @@
 """Application binding and post-apply ABA race checks without router access."""
 import ast
+import os
 from pathlib import Path
 import sys
 import threading
@@ -25,13 +26,20 @@ def test_application_registry_binds_real_entry_points_and_shared_lock(tmp_path):
     initializer = functions['_initialize_proxy_apply_control']
     registration = next(n for n in ast.walk(initializer) if isinstance(n, ast.Call)
                         and isinstance(n.func, ast.Name) and n.func.id == 'install_proxy_controls')
-    groups = {key.arg: ast.literal_eval(key.value) for key in registration.keywords}
+    groups = {
+        key.arg: tuple(ast.literal_eval(name) for name in key.value.keys)
+        if key.arg == 'recoveries' else ast.literal_eval(key.value)
+        for key in registration.keywords
+    }
     assert all(name in functions for values in groups.values() for name in values)
     assert '_clear_pool' in groups['writers'], 'take apply lock before the pool lock'
     assert '_apply_manual_key_safely' in groups['manual']
     assert {'_attempt_auto_failover', '_attempt_youtube_failover'} <= set(groups['background'])
     env = {'ApplyCoordinator': ApplyCoordinator, 'install_proxy_controls': install_proxy_controls,
-           'private_runtime_directory': lambda _: tmp_path, 'proxy_apply_control': None}
+           'private_runtime_directory': lambda _: tmp_path, 'proxy_apply_control': None,
+           'os': os,
+           'YOUTUBE_FAILOVER_TRANSACTION_FILE': tmp_path / 'youtube-transaction.json',
+           'TELEGRAM_FAILOVER_TRANSACTION_FILE': tmp_path / 'telegram-transaction.json'}
     def stub(name):
         def call(*args, **kwargs):
             return env['proxy_apply_control'].active_ticket()
@@ -49,6 +57,23 @@ def test_application_registry_binds_real_entry_points_and_shared_lock(tmp_path):
         assert handler is env[proto]
         assert handler._proxy_control_kind == 'writer'
     assert env['_apply_manual_key_safely']().manual_epoch >= 1
+    for service in ('youtube', 'telegram'):
+        recovery = env[f'_recover_interrupted_{service}_failover_transaction']
+        journal = env[f'{service.upper()}_FAILOVER_TRANSACTION_FILE']
+        assert recovery._proxy_control_kind == 'recovery'
+        before = control.token()
+        assert recovery() is None
+        assert control.token() == before, 'an absent journal must not invalidate probes'
+        journal.write_text('{}', encoding='utf-8')
+        try:
+            ticket = recovery()
+            assert ticket is not None
+            assert control.token() != before, 'actual recovery must invalidate probes'
+        finally:
+            journal.unlink()
+        recovered = control.token()
+        assert recovery() is None
+        assert control.token() == recovered
     main_calls = {n.func.id: n.lineno for n in ast.walk(functions['main'])
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     assert main_calls['_initialize_proxy_apply_control'] < main_calls['start_http_server']
