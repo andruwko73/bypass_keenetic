@@ -6,6 +6,7 @@ No API exception is interpreted as permission to restart the shared core.
 """
 from copy import deepcopy
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,70 @@ class LiveApplyError(RuntimeError):
 
 class PersistUncertain(LiveApplyError):
     """Disk commit point is unknown; do not guess which runtime to restore."""
+
+
+class HysteriaCacheGuard:
+    """26.2.6 caches HY2 clients by destination, ignoring new auth/TLS settings.
+
+    Remember even failed trials for the lifetime of an attested core. Only
+    hashes live in RAM; missing/corrupt history cannot authorize a hot switch.
+    See upstream XTLS/Xray-core#5911. This guards, rather than fixes, that bug.
+    """
+
+    def __init__(self, path, limit=32):
+        self.path, self.limit = Path(path), limit
+
+    @staticmethod
+    def _entry(outbound):
+        if outbound.get('protocol') != 'hysteria':
+            return None
+        settings = outbound.get('settings') or {}
+        address = str(settings.get('address', '')).lower()
+        try:
+            address = str(ipaddress.ip_address(address.strip('[]')))
+        except ValueError:
+            pass
+        endpoint = [address, settings.get('port')]
+        value = {key: item for key, item in outbound.items() if key != 'tag'}
+        digest = lambda item: hashlib.sha256(json.dumps(item, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        return digest(endpoint), digest(value)
+
+    def initialize(self, logical, identity):
+        from proxy_apply_coordinator import _atomic_json
+        entries = {}
+        for outbound in logical['outbounds']:
+            entry = self._entry(outbound)
+            if entry:
+                endpoint, spec = entry
+                if endpoint in entries and entries[endpoint] != spec:
+                    raise LiveApplyError('Conflicting Hysteria destinations in controlled config')
+                entries[endpoint] = spec
+        _atomic_json(self.path, {'schema': 1, 'identity': identity, 'entries': entries})
+
+    def check(self, outbound, identity, *, reserve=False):
+        entry = self._entry(outbound)
+        if entry is None:
+            return True
+        from proxy_apply_state import _regular
+        from proxy_apply_coordinator import _atomic_json
+        try:
+            raw, _ = _regular(self.path, 16384)
+            value = json.loads(raw)
+            entries = value['entries']
+            if (value['schema'] != 1 or value['identity'] != identity or not isinstance(entries, dict) or
+                    len(entries) > self.limit or any(len(k) != 64 or len(v) != 64 for k, v in entries.items())):
+                raise ValueError
+        except (OSError, ValueError, TypeError, KeyError):
+            raise LiveApplyError('Hysteria cache history requires a controlled load') from None
+        endpoint, spec = entry
+        if endpoint in entries:
+            return entries[endpoint] == spec
+        if len(entries) >= self.limit:
+            raise LiveApplyError('Hysteria destination budget reached; controlled load required')
+        if reserve:
+            entries[endpoint] = spec
+            _atomic_json(self.path, value)
+        return True
 
 
 def balancer_tag(logical_tag):
@@ -187,11 +252,23 @@ class XrayApi:
 def qualify_outbound(outbound):
     """Exact transport subset covered by the 26.2.6 laboratory matrix.
 
-    Deployment must additionally restrict logical protocols with sidecar
-    services. HY2, alternative transports and chained handlers stay excluded.
+    Deployment must additionally coordinate sidecar services and guard the HY2
+    destination cache. Alternative transports and chained handlers stay excluded.
     """
     stream = outbound.get('streamSettings') or {}
     protocol, security = outbound.get('protocol'), stream.get('security', 'none')
+    if protocol == 'hysteria':
+        mask = (stream.get('finalmask') or {}).get('udp', [])
+        settings = outbound.get('settings') or {}
+        hy = stream.get('hysteriaSettings') or {}
+        return (stream.get('network') == 'hysteria' and security == 'tls' and
+                settings.get('version') == hy.get('version') == 2 and
+                isinstance(settings.get('address'), str) and bool(settings['address']) and
+                type(settings.get('port')) is int and 1 <= settings['port'] <= 65535 and
+                not (outbound.get('mux') or {}).get('enabled') and not outbound.get('proxySettings') and
+                not stream.get('sockopt') and not (stream.get('finalmask') or {}).get('tcp') and
+                all(item.get('type') == 'salamander' for item in mask) and
+                set(hy).issubset({'version', 'auth'}))
     permitted = {'vless': ('none', 'tls', 'reality'), 'vmess': ('none', 'tls'),
                  'trojan': ('none', 'tls'), 'shadowsocks': ('none',)}
     if (security not in permitted.get(protocol, ()) or

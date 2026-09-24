@@ -30,6 +30,26 @@ def test_bundle_commit_keeps_only_current_files(bundle):
     assert not list(store.directory.iterdir())
 
 
+@pytest.mark.parametrize('accepted', [False, True])
+def test_service_acceptance_is_inside_recoverable_commit(bundle, accepted):
+    store, paths, changes = bundle
+    store.prepare(changes)
+    def acknowledge():
+        assert all(path.read_bytes() == data for path, data in changes.items())
+        assert store._load()['phase'] == 'prepared'
+        return accepted
+    if accepted:
+        store.commit(after_write=acknowledge)
+        assert not store.pending()
+    else:
+        with pytest.raises(ApplyStateError):
+            store.commit(after_write=acknowledge)
+        assert store.recover() == 'rolled_back'
+        assert paths[0].read_bytes() == b'old config'
+        assert paths[1].read_bytes() == b'old key'
+        assert not paths[2].exists()
+
+
 @pytest.mark.parametrize('after', [0, 1, 2, 3])
 def test_crash_after_each_file_can_restore_original_bundle(bundle, monkeypatch, after):
     store, paths, changes = bundle

@@ -160,7 +160,7 @@ class ApplyFileBundle:
         self.path.unlink()
         self._sync_directory(self.directory)
 
-    def commit(self):
+    def commit(self, *, after_write=None):
         value = self._load()
         if value is None or value['phase'] != 'prepared':
             raise ApplyStateError('No prepared file transaction')
@@ -168,6 +168,10 @@ class ApplyFileBundle:
         try:
             for item in value['entries']:
                 self._write(item, _decode(item['new']))
+            # A protocol-owned service must acknowledge the staged files before
+            # the commit becomes durable. A crash here still restores ALL files.
+            if after_write is not None and after_write() is not True:
+                raise ApplyStateError('Dependent service did not accept the staged files')
             value['phase'] = 'committed'
             _atomic_json(self.path, value)
         except BaseException:

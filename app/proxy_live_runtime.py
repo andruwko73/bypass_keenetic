@@ -1,8 +1,9 @@
 """Recoverable, serialized runtime/key-file executor.
 
 The bot supplies controlled startup, protocol health and an isolated candidate
-check. This class never starts/stops a service. Cold apply remains an explicit
-caller policy for changes outside the qualified outbound-only subset.
+check. Only a protocol-owned service callback may run inside file commit/recovery;
+the common Xray lifecycle is never touched. Cold apply remains an explicit caller
+policy for changes outside the qualified outbound-only subset.
 """
 from copy import deepcopy
 from contextlib import nullcontext
@@ -15,7 +16,7 @@ from proxy_apply_coordinator import StaleApply, _atomic_json, core_process_ident
 from proxy_apply_plan import ChangeKind, PlanAction, classify_config_change, config_fingerprint, plan_proxy_apply
 from proxy_apply_state import ApplyFileBundle, ApplyStateError, _regular
 from xray_live_apply import (
-    LiveApplyError, PersistUncertain, XrayApi, balancer_tag, managed_config,
+    HysteriaCacheGuard, LiveApplyError, PersistUncertain, XrayApi, balancer_tag, managed_config,
     qualify_outbound, switch_prepared_outbound,
 )
 
@@ -33,7 +34,8 @@ class ProxyLiveRuntime:
                  binary, api_port=10899, identity=None, clock=time.monotonic,
                  allowed_protocols=(), max_retained=8, detach_qualified=False, api=None,
                  metadata_paths=(), metadata_lock=None, metadata_updates=None,
-                 resource_guard=None, max_attempts_per_minute=0):
+                 resource_guard=None, max_attempts_per_minute=0,
+                 key_encoder=None, service_protocols=(), service_apply=None):
         self.coordinator = coordinator
         self.directory, self.ram_directory = Path(directory), Path(ram_directory)
         self.config_path = Path(config_path).absolute()
@@ -44,6 +46,11 @@ class ProxyLiveRuntime:
         self.allowed_protocols, self.max_retained = frozenset(allowed_protocols), max_retained
         self.detach_qualified = bool(detach_qualified)
         self.metadata_lock, self.metadata_updates = metadata_lock, metadata_updates
+        self.key_encoder = key_encoder or (lambda protocol, key: (key.strip() + '\n').encode('utf-8'))
+        self.service_protocols, self.service_apply = frozenset(service_protocols), service_apply
+        if (not self.service_protocols.issubset(self.allowed_protocols) or
+                self.service_protocols and not callable(self.service_apply)):
+            raise ValueError('Invalid dependent service policy')
         if type(max_attempts_per_minute) is not int or not 0 <= max_attempts_per_minute <= 60:
             raise ValueError('Invalid apply rate budget')
         self.resource_guard, self.max_attempts_per_minute = resource_guard, max_attempts_per_minute
@@ -54,6 +61,7 @@ class ProxyLiveRuntime:
         self.identity = identity or (lambda: core_process_identity(binary, self.config_path))
         self.api = api or XrayApi(binary, port=api_port, directory=self.ram_directory)
         self.attestation = AttestationStore(self.ram_directory / 'health.json')
+        self.hysteria_guard = HysteriaCacheGuard(self.ram_directory / 'hysteria-cache.json')
         self.bundle = ApplyFileBundle(self.directory, [self.config_path, self.receipt_path,
                                                       *self.key_paths.values(), *metadata_paths])
 
@@ -118,6 +126,7 @@ class ProxyLiveRuntime:
                  'logical': logical, 'fingerprint': config_fingerprint(logical),
                  'targets': targets, 'retained': [], 'observed': observed}
         _atomic_json(self.receipt_path, state)
+        self.hysteria_guard.initialize(logical, identity)
         self.attestation.record_loaded(logical, process_identity=identity,
                                        generation=generation, observed_fingerprint=observed)
         # A planned full load supersedes any runtime-only interrupted operation;
@@ -134,6 +143,14 @@ class ProxyLiveRuntime:
     def recover_files_before_startup(self):
         self._owned()
         result = self.bundle.recover()
+        # A crash may have happened after the dependent service read staged
+        # files but before their durable commit. Reconcile it with recovered
+        # disk state before the caller can reload/attest the main core.
+        pending, _ = _regular(self.pending_path, 16384)
+        if pending:
+            protocol = json.loads(pending).get('logical_tag', '').removeprefix('proxy-')
+            if protocol in self.service_protocols and self.service_apply(protocol) is not True:
+                raise LiveApplyError('Dependent service recovery was not confirmed')
         state = self._receipt()
         self.coordinator.recover_abandoned_manual(minimum_generation=(state or {}).get('generation', 0))
         return result
@@ -210,6 +227,10 @@ class ProxyLiveRuntime:
         if observed != state['observed']:
             raise LiveApplyError('Runtime changed outside the coordinator')
         self.coordinator.require_current(ticket)
+        if not self.hysteria_guard.check(new_out[logical_tag], identity):
+            # Official core cannot accept changed auth/TLS at a cached HY2
+            # destination. Do not run a misleading "healthy" probe with old auth.
+            return None
         if change == ChangeKind.UNCHANGED:
             evidence = self.attestation.evidence(protocol, observed_fingerprint=observed)
             plan = plan_proxy_apply(current, desired, evidence=evidence, process_identity=identity,
@@ -244,6 +265,11 @@ class ProxyLiveRuntime:
             raise LiveApplyError('Isolated candidate verification failed')
         self.coordinator.require_current(ticket)
 
+        # Keep reservations on failed API/data-plane trials too: they may have
+        # initialized the official core's process-wide client cache.
+        if not self.hysteria_guard.check(new_out[logical_tag], identity, reserve=True):
+            raise LiveApplyError('Hysteria destination became incompatible')
+
         def checkpoint(phase, old, new):
             _atomic_json(self.pending_path, {
                 'phase': phase, 'logical_tag': logical_tag, 'old': old, 'new': new,
@@ -258,7 +284,7 @@ class ProxyLiveRuntime:
                              observed=self._observe(targets))
             with (self.metadata_lock if self.metadata_lock is not None else nullcontext()):
                 updates = {
-                    self.key_paths[protocol]: (key.strip() + '\n').encode('utf-8'),
+                    self.key_paths[protocol]: self.key_encoder(protocol, key),
                     self.config_path: json.dumps(candidate_config, ensure_ascii=False, indent=2).encode('utf-8'),
                     self.receipt_path: json.dumps(new_state, separators=(',', ':')).encode('utf-8'),
                 }
@@ -270,14 +296,32 @@ class ProxyLiveRuntime:
                     updates.update(extra)
                 with self.coordinator.commit_guard(ticket):
                     self.bundle.prepare(updates)
+                    service_attempted = False
+
+                    def activate_service():
+                        nonlocal service_attempted
+                        service_attempted = True
+                        return (self.service_apply(protocol) is True and self.identity() == identity and
+                                self._observe(targets) == new_state['observed'])
+
                     try:
-                        self.bundle.commit()
+                        if protocol in self.service_protocols:
+                            self.bundle.commit(after_write=activate_service)
+                        else:
+                            self.bundle.commit()
                     except (OSError, ApplyStateError):
                         try:
                             recovered = self.bundle.recover()
                         except (OSError, ApplyStateError):
                             raise PersistUncertain('Cannot determine durable file state') from None
                         if recovered != 'committed':
+                            if service_attempted:
+                                try:
+                                    restored = self.service_apply(protocol) is True
+                                except Exception:
+                                    restored = False
+                                if not restored:
+                                    raise PersistUncertain('Dependent service rollback is uncertain') from None
                             raise LiveApplyError('File commit was rolled back') from None
             state.update(new_state)
 

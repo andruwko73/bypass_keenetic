@@ -16426,7 +16426,8 @@ def _logical_proxy_config(overrides=None):
         overrides.get('vmess', _read_v2ray_key(VMESS_KEY_PATH)),
         overrides.get('vless', _read_v2ray_key(VLESS_KEY_PATH)),
         overrides.get('vless2', _read_v2ray_key(VLESS2_KEY_PATH)),
-        _load_shadowsocks_key(), _load_trojan_key(),
+        overrides.get('shadowsocks', _load_shadowsocks_key()),
+        overrides.get('trojan', _load_trojan_key()),
         overrides.get('hysteria2', _read_v2ray_key(HYSTERIA2_KEY_PATH)),
     )
 
@@ -16490,6 +16491,8 @@ def _try_live_key_apply(proto, key):
                            'Xray не перезапускался.')
     label = (_proxy_apply_settings().get(proto) or {}).get('label', proto)
     message = f'✅ {label}: ключ подтверждён, Xray работает без перезапуска.'
+    if result.startswith('hot') and proto in ('trojan', 'shadowsocks'):
+        message += f' Перезапущена только отдельная служба {label}.'
     if result == 'hot_cleanup_pending':
         message += ' Очистка прежнего обработчика отложена; следующая смена требует восстановления.'
     return message
@@ -16530,12 +16533,19 @@ def _initialize_proxy_live_backend(control):
         _write_runtime_log('Hot key apply is unavailable for this core build; controlled cold apply retained.')
         return
     from proxy_live_runtime import ProxyLiveRuntime
+    from proxy_live_services import encode_key, restart_service
+    service_ports = {'shadowsocks': localportsh, 'trojan': localporttrojan}
     backend = ProxyLiveRuntime(
         coordinator=control, directory=private_runtime_directory('/opt/etc/bot/.proxy-apply'),
         ram_directory=private_runtime_directory('/tmp/bypass-proxy-apply'),
         config_path=CORE_PROXY_CONFIG_PATH,
-        key_paths={'vless': VLESS_KEY_PATH, 'vless2': VLESS2_KEY_PATH, 'vmess': VMESS_KEY_PATH},
-        binary=binary, allowed_protocols=('vless', 'vless2', 'vmess'), detach_qualified=True,
+        key_paths={'vless': VLESS_KEY_PATH, 'vless2': VLESS2_KEY_PATH, 'vmess': VMESS_KEY_PATH,
+                   'hysteria2': HYSTERIA2_KEY_PATH,
+                   'shadowsocks': '/opt/etc/shadowsocks.json', 'trojan': '/opt/etc/trojan/config.json'},
+        binary=binary, allowed_protocols=('vless', 'vless2', 'vmess', 'shadowsocks', 'trojan', 'hysteria2'),
+        detach_qualified=True, key_encoder=lambda protocol, key: encode_key(protocol, key, ports=service_ports),
+        service_protocols=('shadowsocks', 'trojan'),
+        service_apply=lambda protocol: restart_service(protocol, int(service_ports[protocol])),
         metadata_paths=(KEY_POOLS_PATH, KEY_POOLS_PATH + _key_pool_store().RECOVERY_SUFFIX),
         metadata_lock=key_pool_lock, metadata_updates=_live_key_pool_updates,
         resource_guard=lambda: (_available_memory_kb() or 0) >= 65536,

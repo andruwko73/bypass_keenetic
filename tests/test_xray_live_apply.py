@@ -399,15 +399,16 @@ def test_removed_generations_release_idle_goroutines(lab, protocol, mux, securit
         assert samples[-1]['rss_bytes'] <= samples[1]['rss_bytes'] + 8 * 1024 * 1024, samples
 
 
+@pytest.mark.parametrize('protocol', ['vless', 'vmess', 'trojan', 'shadowsocks'])
 @pytest.mark.parametrize('failure', [None, 'health', 'disk', 'lost_response'])
 @pytest.mark.parametrize('executor', ['api', 'runtime', 'runtime_detach'])
-def test_real_executor_preserves_control_and_recovers(lab, tmp_path, failure, executor):
+def test_real_executor_preserves_control_and_recovers(lab, tmp_path, failure, executor, protocol):
     port, echo, start, api, connect = lab
     a, b, managed, control, api_port = echo(b'A'), echo(b'B'), port(), port(), port()
     candidates = []
     for target, credential in [(a, '00000000-0000-4000-8000-000000000004'),
                                (b, '00000000-0000-4000-8000-000000000005')]:
-        inbound, outbound = proxy_pair('vless', port(), credential)
+        inbound, outbound = proxy_pair(protocol, port(), credential)
         start({'log': {'loglevel': 'none'}, 'inbounds': [inbound], 'outbounds': [
             {'protocol': 'freedom', 'settings': {'redirect': f'127.0.0.1:{target}'}}
         ]})
@@ -419,14 +420,14 @@ def test_real_executor_preserves_control_and_recovers(lab, tmp_path, failure, ex
              'settings': {'address': '127.0.0.1', 'port': a, 'network': 'tcp,udp'}}
             for tag, p in [('managed', managed), ('control', control)]
         ],
-        'outbounds': [dict(candidates[0], tag='proxy-vless'), {'tag': 'control', 'protocol': 'freedom'}],
+        'outbounds': [dict(candidates[0], tag='proxy-' + protocol), {'tag': 'control', 'protocol': 'freedom'}],
         'routing': {'domainStrategy': 'AsIs', 'rules': [
-            {'type': 'field', 'inboundTag': ['managed'], 'outboundTag': 'proxy-vless'},
+            {'type': 'field', 'inboundTag': ['managed'], 'outboundTag': 'proxy-' + protocol},
             {'type': 'field', 'inboundTag': ['control'], 'outboundTag': 'control'},
         ]},
     }
     core = start(managed_config(original, api_port=api_port))
-    wait_api(core, api, api_port, balancer_tag('proxy-vless'))
+    wait_api(core, api, api_port, balancer_tag('proxy-' + protocol))
     adapter = XrayApi(os.environ['XRAY_TEST_BINARY'], port=api_port, directory=tmp_path)
     if executor != 'api':
         from proxy_apply_coordinator import ApplyCoordinator
@@ -440,9 +441,9 @@ def test_real_executor_preserves_control_and_recovers(lab, tmp_path, failure, ex
         key_path.write_text('synthetic-old\n')
         runtime = ProxyLiveRuntime(
             coordinator=coordinator, directory=private, ram_directory=ram,
-            config_path=config_path, key_paths={'vless': key_path}, binary=os.environ['XRAY_TEST_BINARY'],
+            config_path=config_path, key_paths={protocol: key_path}, binary=os.environ['XRAY_TEST_BINARY'],
             api_port=api_port, identity=lambda: str(core.pid) if core.poll() is None else None,
-            allowed_protocols=('vless',), api=adapter, detach_qualified=executor == 'runtime_detach',
+            allowed_protocols=(protocol,), api=adapter, detach_qualified=executor == 'runtime_detach',
         )
         with coordinator.lock:
             runtime.register_controlled_load(original, previous_identity=None, generation=0)
@@ -474,13 +475,13 @@ def test_real_executor_preserves_control_and_recovers(lab, tmp_path, failure, ex
         if executor != 'api':
             from copy import deepcopy
             desired = deepcopy(original)
-            desired['outbounds'][0] = dict(candidates[1], tag='proxy-vless')
+            desired['outbounds'][0] = dict(candidates[1], tag='proxy-' + protocol)
             ticket = coordinator.request_manual()
             with coordinator.transaction(ticket, manual=True):
-                return runtime.try_apply('vless', 'synthetic-new', current=original, desired=desired,
+                return runtime.try_apply(protocol, 'synthetic-new', current=original, desired=desired,
                                          ticket=ticket, verify=verify, precheck=lambda: True)
         return switch_prepared_outbound(
-            adapter, logical_tag='proxy-vless', old_target='proxy-vless@initial.',
+            adapter, logical_tag='proxy-' + protocol, old_target='proxy-' + protocol + '@initial.',
             candidate=candidates[1], generation=1, checkpoint=lambda *v: phases.append(v[0]),
             require_current=lambda: None, verify=verify, persist=persist,
             current_identity=lambda: core.pid if core.poll() is None else None, expected_identity=core.pid,
@@ -498,9 +499,9 @@ def test_real_executor_preserves_control_and_recovers(lab, tmp_path, failure, ex
         for udp in (False, True):
             exchange(connect(managed, udp), b'restored', b'A')
     else:
-        assert run() == ('proxy-vless@g1.' if executor == 'api' else 'hot')
+        assert run() == ('proxy-' + protocol + '@g1.' if executor == 'api' else 'hot')
         if executor == 'api':
-            assert saved == ['proxy-vless@g1.']
+            assert saved == ['proxy-' + protocol + '@g1.']
         else:
             assert key_path.read_text() == 'synthetic-new\n'
             assert not runtime.pending_path.exists()

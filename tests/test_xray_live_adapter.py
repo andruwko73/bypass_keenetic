@@ -7,8 +7,51 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 from xray_live_apply import (
-    LiveApplyError, XrayApi, balancer_tag, managed_config, switch_prepared_outbound,
+    HysteriaCacheGuard, LiveApplyError, XrayApi, balancer_tag, managed_config, switch_prepared_outbound,
 )
+
+
+def test_hysteria_cache_history_tracks_failed_trials_and_resets_only_on_new_core(tmp_path):
+    guard = HysteriaCacheGuard(tmp_path / 'cache.json', limit=2)
+    first = {'protocol': 'hysteria', 'tag': 'proxy-hysteria2',
+             'settings': {'address': 'example.invalid', 'port': 443},
+             'streamSettings': {'hysteriaSettings': {'auth': 'synthetic-old'}}}
+    guard.initialize({'outbounds': [first]}, 'process-A')
+    assert guard.check(first, 'process-A')
+    changed = deepcopy(first)
+    changed['streamSettings']['hysteriaSettings']['auth'] = 'synthetic-new'
+    assert not guard.check(changed, 'process-A')
+    trial = deepcopy(changed)
+    trial['settings']['port'] = 8443
+    assert guard.check(trial, 'process-A', reserve=True)
+    # Even a failed candidate can have created a cache entry. Its changed
+    # credentials must remain blocked after reconstructing the executor.
+    guard = HysteriaCacheGuard(guard.path, limit=2)
+    collision = deepcopy(trial)
+    collision['streamSettings']['hysteriaSettings']['auth'] = 'third-synthetic-auth'
+    assert not guard.check(collision, 'process-A')
+    trial['settings']['port'] = 9443
+    with pytest.raises(LiveApplyError, match='budget'):
+        guard.check(trial, 'process-A')
+    with pytest.raises(LiveApplyError, match='history'):
+        guard.check(first, 'process-B')
+    assert 'synthetic' not in guard.path.read_text() and 'example.invalid' not in guard.path.read_text()
+    guard.initialize({'outbounds': [changed]}, 'process-B')
+    assert guard.check(changed, 'process-B')
+    guard.path.unlink()
+    with pytest.raises(LiveApplyError, match='history'):
+        guard.check(changed, 'process-B')
+
+
+def test_hysteria_ipv6_spellings_cannot_bypass_auth_collision(tmp_path):
+    guard = HysteriaCacheGuard(tmp_path / 'cache.json')
+    first = {'protocol': 'hysteria', 'settings': {'address': '::1', 'port': 443},
+             'streamSettings': {'hysteriaSettings': {'auth': 'synthetic-old'}}}
+    guard.initialize({'outbounds': [first]}, 'process-A')
+    changed = deepcopy(first)
+    changed['settings']['address'] = '0:0:0:0:0:0:0:1'
+    changed['streamSettings']['hysteriaSettings']['auth'] = 'synthetic-new'
+    assert not guard.check(changed, 'process-A')
 
 
 @pytest.fixture

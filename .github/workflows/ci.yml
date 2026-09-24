@@ -44,6 +44,14 @@ jobs:
       - name: Route diagnostics
         run: python -m pytest tests/test_route_quality.py tests/test_route_profiles.py tests/test_route_probe_runtime.py tests/test_route_diagnostics_runtime.py tests/test_route_diagnostics_service.py -q
 
+      - name: Protocol-owned services and Hysteria hot apply
+        run: |
+          python -m pytest tests/test_proxy_live_services.py -q
+          curl -fsSL --retry 2 https://github.com/HyNetworks/hysteria/releases/download/app/v2.12.3/hysteria-linux-amd64 -o "$RUNNER_TEMP/hysteria"
+          printf '8c7a68a906998b747a0db87586e364f995fbfddb95693ae6e2fdb68a6e920d3e  %s\n' "$RUNNER_TEMP/hysteria" | sha256sum -c -
+          chmod 700 "$RUNNER_TEMP/hysteria"
+          XRAY_TEST_BINARY="$RUNNER_TEMP/xray" HYSTERIA_TEST_BINARY="$RUNNER_TEMP/hysteria" python -m pytest tests/test_xray_hot_hysteria.py -q
+
       - name: YouTube failover receive evidence
         run: python -m pytest tests/test_youtube_stream_evidence.py -q
 

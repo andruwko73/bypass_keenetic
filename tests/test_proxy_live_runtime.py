@@ -300,3 +300,87 @@ def test_resource_and_rate_budgets_do_not_mutate_runtime(setup):
     assert apply(runtime, current)[0] == 'noop'
     runtime.clock = lambda: 161.0
     assert apply(runtime, current, key='third-key')[0] == 'hot'
+
+
+@pytest.mark.parametrize('failure', [None, 'service', 'rollback', 'write', 'lost_commit_reply'])
+def test_dependent_service_and_xray_commit_or_restore_together(setup, monkeypatch, failure):
+    runtime, config, identity = setup
+    runtime.service_protocols = frozenset(('vless',))  # synthetic participant
+    runtime.key_encoder = lambda protocol, key: json.dumps({'raw_uri': key}).encode()
+    path = runtime.key_paths['vless']
+    path.write_text(json.dumps({'raw_uri': 'old-key'}))
+    calls = []
+    def service(protocol):
+        key = json.loads(path.read_text())['raw_uri']
+        calls.append(key)
+        assert runtime.identity() == identity[0]
+        return failure != 'rollback' and (failure != 'service' or key == 'old-key')
+    runtime.service_apply = service
+    original_files = {p: p.read_bytes() for p in (path, runtime.config_path, runtime.receipt_path)}
+    if failure == 'write':
+        write = runtime.bundle._write
+        def fail(item, value):
+            if item['path'] == str(runtime.receipt_path) and b'new-key' in value:
+                raise OSError('synthetic disk full')
+            write(item, value)
+        monkeypatch.setattr(runtime.bundle, '_write', fail)
+    if failure == 'lost_commit_reply':
+        clear = runtime.bundle._clear
+        first = [True]
+        def fail_clear():
+            if first[0]:
+                first[0] = False
+                raise OSError('synthetic lost commit reply')
+            clear()
+        monkeypatch.setattr(runtime.bundle, '_clear', fail_clear)
+    if failure in ('service', 'rollback', 'write'):
+        with pytest.raises(LiveApplyError):
+            apply(runtime, config)
+        assert all(p.read_bytes() == data for p, data in original_files.items())
+        assert calls == ([] if failure == 'write' else ['new-key', 'old-key'])
+        assert runtime.pending_path.exists() == (failure == 'rollback')
+        if failure != 'rollback':
+            assert runtime._observe(runtime._receipt()['targets']) == runtime._receipt()['observed']
+    else:
+        assert apply(runtime, config)[0] == 'hot'
+        assert calls == ['new-key']
+        assert json.loads(path.read_text())['raw_uri'] == 'new-key'
+        assert not runtime.pending_path.exists()
+
+
+def test_startup_reconciles_service_after_crash_before_attesting_core(setup):
+    runtime, config, identity = setup
+    from proxy_apply_coordinator import _atomic_json
+    runtime.service_protocols = frozenset(('vless',))
+    path = runtime.key_paths['vless']
+    runtime.bundle.prepare({path: b'new-key\n'})
+    value = runtime.bundle._load()
+    runtime.bundle._write(value['entries'][0], b'new-key\n')
+    _atomic_json(runtime.pending_path, {'logical_tag': 'proxy-vless', 'phase': 'verified'})
+    calls = []
+    runtime.service_apply = lambda protocol: calls.append(path.read_text()) or True
+    with runtime.coordinator.lock:
+        assert runtime.recover_files_before_startup() == 'rolled_back'
+    assert calls == ['old-key\n']
+
+
+def test_hysteria_collision_cannot_pass_using_cached_old_auth(setup):
+    runtime, config, identity = setup
+    config['outbounds'][0] = {
+        'tag': 'proxy-vless', 'protocol': 'hysteria',
+        'settings': {'version': 2, 'address': 'example.invalid', 'port': 443},
+        'streamSettings': {'network': 'hysteria', 'security': 'tls',
+                           'hysteriaSettings': {'version': 2, 'auth': 'synthetic-old'}}}
+    runtime.config_path.write_text(json.dumps(runtime.config_for_load(config)))
+    runtime.api.load(runtime.config_for_load(config))
+    with runtime.coordinator.lock:
+        runtime.register_controlled_load(config, previous_identity=None, generation=0)
+    desired = deepcopy(config)
+    desired['outbounds'][0]['streamSettings']['hysteriaSettings']['auth'] = 'synthetic-new'
+    ticket = runtime.coordinator.request_manual()
+    probes = []
+    with runtime.coordinator.transaction(ticket, manual=True):
+        assert runtime.try_apply('vless', 'new', current=config, desired=desired, ticket=ticket,
+            verify=lambda: probes.append('verify') or True, precheck=lambda: probes.append('precheck') or True) is None
+    assert probes == [] and runtime.api.calls == []
+    assert runtime.key_paths['vless'].read_text() == 'old-key\n'
