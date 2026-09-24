@@ -1,8 +1,10 @@
+import ast
 import json
 from pathlib import Path
 import sys
 import threading
 from types import SimpleNamespace
+import time
 
 import pytest
 
@@ -12,6 +14,7 @@ from route_diagnostics_web import render_page, results_html
 from route_profiles import profile_fingerprint
 import web_get_actions
 import web_post_actions
+import route_diagnostics_service
 
 
 class Runtime:
@@ -127,3 +130,62 @@ def test_corrupt_store_remains_untouched_and_page_explains_read_only_state(servi
     assert 'broken-private' not in service.page('csrf')
     assert not service.action('save', form())['success']
     assert service.store.path.read_text() == 'broken-private-content'
+
+
+@pytest.mark.parametrize('available,bot_rss,program_rss,cpu,busy,shutdown,expected', [
+    (200000, 75960, 111456, 5, False, False, True),  # Healthy router above legacy 100 MiB.
+    (165000, 75960, 155000, 10, False, False, True),  # Its one temporary probe is included.
+    (124999, 75960, 111456, 5, False, False, False),
+    (125000, 75960, 111456, 5, False, False, True),
+    (200000, 112640, 155000, 5, False, False, False),
+    (200000, 75960, 111456, 61, False, False, False),
+    (200000, 75960, 111456, 5, True, False, False),
+    (200000, 75960, 111456, 5, False, True, False),
+])
+def test_actual_bot_diagnostics_binding_keeps_manual_resource_limits(
+    tmp_path, monkeypatch, available, bot_rss, program_rss, cpu, busy, shutdown, expected,
+):
+    mem = tmp_path/'meminfo'
+    mem.write_text(f'MemAvailable: {available} kB\n')
+    read_memory = memory_available
+    monkeypatch.setattr(route_diagnostics_service, 'memory_available',
+                        lambda **kwargs: read_memory(mem, **kwargs))
+    monkeypatch.setattr(route_diagnostics_service, 'RouteDiagnosticsService',
+                        lambda **kwargs: SimpleNamespace(**kwargs))
+    stopped = threading.Event()
+    if shutdown:
+        stopped.set()
+    env = {
+        'time': time, 'shutdown_requested': stopped,
+        '_route_diagnostics_service': None, '_route_diagnostics_init_lock': threading.Lock(),
+        'proxy_apply_control': object(), '_load_current_keys': lambda: {},
+        '_run_coordinated_background_task': lambda *args: None, 'pool_probe_lock': threading.Lock(),
+        'POOL_PROBE_PAUSE_AVAILABLE_KB': 125000, 'MEMORY_WATCHDOG_RSS_LIMIT_KB': 112640,
+        'BACKGROUND_TASK_MAX_BOT_RSS_KB': 65536, 'BACKGROUND_TASK_CRITICAL_MAX_BOT_RSS_KB': 71680,
+        'BACKGROUND_TASK_MAX_PROGRAM_RSS_KB': 102400, 'BACKGROUND_TASK_CRITICAL_MAX_PROGRAM_RSS_KB': 102400,
+        'BACKGROUND_TASK_MAX_CPU_PERCENT': 60, 'BACKGROUND_TASK_BUSY_BACKOFF_SECONDS': 180,
+        'BACKGROUND_TASK_SKIP_LOG_INTERVAL_SECONDS': 300,
+        'background_task_skip_until': {}, 'background_task_skip_reason': {}, 'background_task_skip_log_at': {},
+        '_update_maintenance_active': lambda: False,
+        '_memory_sensitive_operation_running': lambda **kwargs: busy,
+        '_process_rss_kb': lambda: bot_rss, '_program_rss_kb': lambda: program_rss,
+        '_memory_cleanup': lambda *args, **kwargs: {'rss_after_kb': bot_rss},
+        '_background_cpu_busy_percent': lambda: cpu, '_write_runtime_log': lambda *args: None,
+    }
+    names = {'_background_task_rss_limit', '_background_task_program_rss_limit',
+             '_background_task_allowed', '_route_diagnostics_resource_allowed', '_route_diagnostics'}
+    tree = ast.parse((Path(__file__).resolve().parents[1]/'app'/'bot.py').read_text(encoding='utf-8'))
+    nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    assert len(nodes) == len(names)
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), '<bot-resource-binding>', 'exec'), env)
+    diagnostics = env['_route_diagnostics']()
+    assert diagnostics.resource_guard() is expected
+
+
+def test_memory_reserve_never_drops_below_diagnostic_floor(tmp_path):
+    mem = tmp_path/'meminfo'
+    mem.write_text('MemAvailable: 98303 kB\n')
+    assert not memory_available(mem, minimum_kib=0)
+    mem.write_text('MemAvailable: 130000 kB\n')
+    assert not memory_available(mem, minimum_kib=140000)
+    assert memory_available(mem, minimum_kib=125000)

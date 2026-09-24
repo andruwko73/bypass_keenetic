@@ -15079,11 +15079,24 @@ def _start_web_bot_action():
     return APP_START_RESULT
 
 
+def _route_diagnostics_resource_allowed():
+    from route_diagnostics_service import memory_available
+    if shutdown_requested.is_set() or not memory_available(minimum_kib=POOL_PROBE_PAUSE_AVAILABLE_KB):
+        return False
+    # Manual diagnostics use the pool's available-memory reserve and the bot's
+    # hard limit. The legacy aggregate background threshold can already be
+    # exceeded by a healthy core; an isolated probe also contributes to it.
+    return _background_task_allowed(
+        'route diagnostics', allow_pool_probe=True, max_cpu_percent=60,
+        max_bot_rss_kb=MEMORY_WATCHDOG_RSS_LIMIT_KB, max_program_rss_kb=0,
+    )
+
+
 def _route_diagnostics():
     global _route_diagnostics_service
     with _route_diagnostics_init_lock:
         if _route_diagnostics_service is None:
-            from route_diagnostics_service import RouteDiagnosticsService, memory_available
+            from route_diagnostics_service import RouteDiagnosticsService
             if proxy_apply_control is None:
                 raise RuntimeError('Proxy coordinator is not ready')
             _route_diagnostics_service = RouteDiagnosticsService(
@@ -15092,11 +15105,7 @@ def _route_diagnostics():
                 load_keys=_load_current_keys,
                 coordinated=_run_coordinated_background_task,
                 probe_lock=pool_probe_lock,
-                resource_guard=lambda: (
-                    not shutdown_requested.is_set() and memory_available() and
-                    _background_task_allowed('route diagnostics', allow_pool_probe=True,
-                                             max_cpu_percent=60)
-                ),
+                resource_guard=_route_diagnostics_resource_allowed,
             )
         return _route_diagnostics_service
 

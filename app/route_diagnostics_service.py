@@ -31,12 +31,12 @@ def available_wans(route_path='/proc/net/route', *, index=socket.if_nametoindex)
     return names[:8]
 
 
-def memory_available(path='/proc/meminfo'):
+def memory_available(path='/proc/meminfo', *, minimum_kib=96 * 1024):
     try:
         with Path(path).open() as file:
             for line in file:
                 if line.startswith('MemAvailable:'):
-                    return int(line.split()[1]) >= 96 * 1024
+                    return int(line.split()[1]) >= max(96 * 1024, int(minimum_kib))
     except (OSError, ValueError, IndexError):
         pass
     return False
