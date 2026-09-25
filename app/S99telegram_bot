@@ -180,6 +180,14 @@ start_installer_instead() {
     "$INSTALLER_SERVICE_PATH" start
 }
 
+finalize_pending_setup() {
+    setup_state=/opt/var/lib/bypass-setup
+    [ -f "$setup_state/receipt.sha256" ] && [ -f "$setup_state/state.tsv" ] || return 0
+    grep -q '^phase[[:space:]]configure$' "$setup_state/state.tsv" || return 0
+    # One bounded, locked check resumes after a reboot/interrupted handover.
+    PYTHONDONTWRITEBYTECODE=1 python3 "$BOT_DIR/installer_common.py" --finalize-self-service >/dev/null 2>&1 &
+}
+
 case "$1" in
     start)
         acquire_service_lock
@@ -211,6 +219,7 @@ case "$1" in
                 stable_samples=$((stable_samples + 1))
                 if [ "$stable_samples" -ge 2 ]; then
                     echo "Bot started successfully (PID: $pid)"
+                    finalize_pending_setup
                     exit 0
                 fi
             else

@@ -5,6 +5,11 @@ REPO_OWNER="${BYPASS_REPO_OWNER:-andruwko73}"
 REPO_NAME="${BYPASS_REPO_NAME:-bypass_keenetic}"
 REPO_BRANCH="${BYPASS_REPO_BRANCH:-main}"
 RAW_BASE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
+if [ -n "${BYPASS_INSTALL_REPO:-}" ]; then
+    # Only the verified self-service bundle sets this. No network fallback.
+    [ -f "$BYPASS_INSTALL_REPO/script.sh" ] || exit 2
+    RAW_BASE="file://${BYPASS_INSTALL_REPO}"
+fi
 REPO_APP_DIR="${BYPASS_REPO_APP_DIR:-app}"
 REPO_ARCHIVE_ROOT=""
 REPO_ARCHIVE_FAILED=0
@@ -56,6 +61,15 @@ need_var() {
     [ -n "$value" ] || fail "Не задана переменная $1"
 }
 
+guard_existing_configuration() {
+    [ "${BYPASS_RECONFIGURE:-0}" = 1 ] && return 0
+    if [ -s "$BOT_CONFIG_PATH" ] || [ -s "$LEGACY_CONFIG_PATH" ]; then
+        echo "Программа уже настроена. Первичная установка не изменяла её конфигурацию." >&2
+        echo "Используйте обновление в панели. Для явной повторной настройки: BYPASS_RECONFIGURE=1." >&2
+        return 3
+    fi
+}
+
 repo_path_from_raw_url() {
     url="$1"
     raw_prefix="${RAW_BASE}/"
@@ -67,6 +81,7 @@ repo_path_from_raw_url() {
 }
 
 prepare_repo_archive() {
+    [ -z "${BYPASS_INSTALL_REPO:-}" ] || return 1
     [ -n "${REPO_ARCHIVE_ROOT:-}" ] && [ -d "$REPO_ARCHIVE_ROOT" ] && return 0
     [ "${REPO_ARCHIVE_FAILED:-0}" = "1" ] && return 1
 
@@ -132,24 +147,29 @@ validate_downloaded_file() {
 }
 
 download_file() {
-    url="$1"
-    target="$2"
-    marker="$3"
+    bootstrap_download_url="$1"
+    bootstrap_download_target="$2"
+    bootstrap_download_marker="$3"
+    bootstrap_download_temp="${bootstrap_download_target}.download.$$"
 
-    rm -f "$target"
-    if curl -fsSL --connect-timeout 20 --retry 2 --retry-delay 1 -o "$target" "$url" >/dev/null 2>&1 \
-        && validate_downloaded_file "$target" "$marker" "$url"; then
+    rm -f "$bootstrap_download_temp"
+    if curl -fsSL --connect-timeout 20 --max-time 90 --retry 2 --retry-delay 1 -o "$bootstrap_download_temp" "$bootstrap_download_url" >/dev/null 2>&1 \
+        && validate_downloaded_file "$bootstrap_download_temp" "$bootstrap_download_marker" "$bootstrap_download_url"; then
+        mv -f "$bootstrap_download_temp" "$bootstrap_download_target" || fail 'Не удалось сохранить установочный файл'
         return 0
     fi
 
-    rm -f "$target"
-    echo "raw.githubusercontent.com недоступен для $(basename "$target"); используем резервную загрузку через архив GitHub."
-    if download_file_from_archive "$url" "$target" \
-        && validate_downloaded_file "$target" "$marker" "$url"; then
+    rm -f "$bootstrap_download_temp"
+    [ -z "${BYPASS_INSTALL_REPO:-}" ] || fail 'Локальный комплект неполон или повреждён. Загрузите его повторно.'
+    echo "Используем резервную загрузку через архив GitHub."
+    if download_file_from_archive "$bootstrap_download_url" "$bootstrap_download_temp" \
+        && validate_downloaded_file "$bootstrap_download_temp" "$bootstrap_download_marker" "$bootstrap_download_url"; then
+        mv -f "$bootstrap_download_temp" "$bootstrap_download_target" || fail 'Не удалось сохранить установочный файл'
         return 0
     fi
 
-    fail "Не удалось скачать $url"
+    rm -f "$bootstrap_download_temp"
+    fail "Не удалось скачать $bootstrap_download_url"
 }
 
 repo_file_url() {
@@ -598,6 +618,8 @@ if [ "$(id -u)" -ne 0 ]; then
     fail "Запустите bootstrap от root на роутере"
 fi
 
+guard_existing_configuration || exit $?
+
 need_cmd curl
 need_cmd grep
 need_cmd sed
@@ -763,7 +785,7 @@ ensure_symlink_or_copy "$BOT_MAIN_PATH" "$LEGACY_MAIN_PATH"
 ensure_symlink_or_copy "$BOT_MAIN_PATH" "$BOT_DIR/bot.py"
 generate_udp_quic_policy_file
 
-/bin/sh "$TMP_DIR/script.sh" -install
+REPO_REF="$REPO_BRANCH" REPO_APP_DIR="$REPO_APP_DIR" /bin/sh "$TMP_DIR/script.sh" -install
 cleanup_bootstrap_backups 1
 
 if [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_USERNAME:-}" ]; then

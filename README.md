@@ -40,7 +40,9 @@
 - `aarch64`: [aarch64-installer.tar.gz](https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz)
 - `mipsel`: [mipsel-installer.tar.gz](https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz)
 
-Важно: бот и bootstrap не заменяют подготовку накопителя и установку Entware. На Keenetic Entware живёт в `/opt` и обычно требует внешнее хранилище.
+Entware должен быть доступен в `/opt`. На поддерживаемом Keenetic он может размещаться во внутренней памяти; флешка для работы самой программы не обязательна. Приведённый ниже bootstrap рассчитан на уже подготовленный Entware.
+
+Полный самостоятельный установщик Entware и программы разрабатывается отдельно: [три способа установки во внутреннюю память](https://github.com/andruwko73/bypass_keenetic_installer/blob/main/docs/installation.md) — браузер Keenetic, Windows и SSH. Репозиторий приватный. Для KN-1012 / ARM64 / UBIFS zlib подготовлен комплект с зафиксированными зависимостями; новая аппаратная установка на чистое устройство пока не принята, такой комплект явно блокирует развёртывание. Успешное обновление уже работающей программы не подтверждает установку с нуля.
 
 После Entware подключитесь к роутеру по SSH и выполните:
 

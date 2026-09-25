@@ -64,6 +64,17 @@ jobs:
       - name: Secret scan
         run: python tests/secret_scan.py
 
+      - name: First installation contracts (separate from update and rollback)
+        run: |
+          python -m pytest tests/test_install_bootstrap.py tests/test_installer_handover.py -q
+          sudo apt-get update -qq
+          sudo apt-get install -y busybox-static
+          BYPASS_TEST_SHELL="/usr/bin/busybox ash" python -m pytest tests/test_install_bootstrap.py -q
+          python -m pip install --target "$RUNNER_TEMP/install-deps" pyTelegramBotAPI==4.29.1 requests==2.32.5 PySocks==1.7.1 aiohttp==3.12.15
+          for scenario in existing missing-asset fresh; do
+            sudo python3 tests/install_sandbox.py --repo "$GITHUB_WORKSPACE" --busybox /usr/bin/busybox --dependencies "$RUNNER_TEMP/install-deps" --scenario "$scenario"
+          done
+
       - name: Shell syntax
         run: |
           for script in \

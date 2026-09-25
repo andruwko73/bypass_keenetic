@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import html
+import json
 import os
 import re
 import secrets
@@ -13,6 +14,10 @@ from installer_common import (
     escape_python,
     installer_page_parts,
     installer_target_url,
+    installer_pairing_authorized,
+    installer_setup_status,
+    self_service_setup_active,
+    set_initial_entware_password,
     normalize_web_auth_form,
     parse_urlencoded_request,
     resolve_bind_host,
@@ -304,7 +309,18 @@ dnsoverhttpsport = '40508'
 
 
 def validate_form(form):
-    return validate_installer_form(form, ['token', 'username'])
+    mode = form.get('app_runtime_mode', 'advanced')
+    if mode not in ('simple', 'advanced', 'web_only'):
+        return False, 'Выберите режим работы программы.'
+    if self_service_setup_active() and len(form.get('web_auth_token', '').strip()) < 12:
+        return False, 'Задайте пароль панели длиной от 12 символов.'
+    if mode != 'web_only':
+        if not re.fullmatch(r'[0-9]+:[A-Za-z0-9_-]{20,}', form.get('token', '').strip()):
+            return False, 'Проверьте формат токена, полученного от BotFather.'
+        form['username'] = form.get('username', '').strip().lstrip('@')
+        if not re.fullmatch(r'[A-Za-z0-9_]{5,32}', form['username']):
+            return False, 'Укажите своё имя пользователя Telegram, например mylogin.'
+    return validate_installer_form(form, [] if mode == 'web_only' else ['token', 'username'])
 
 
 def write_config(form):
@@ -369,12 +385,19 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3, csrf_toke
         if csrf_token else
         ''
     )
+    entware_fields = ''
+    if os.path.isfile('/opt/var/lib/bypass-setup/entware.secured'):
+        entware_fields = '''<div class="full">
+            <label for="entware_password">Новый пароль Entware</label>
+            <input id="entware_password" name="entware_password" type="password" autocomplete="new-password" minlength="12" required>
+            <p class="hint">От 12 символов. Учётная запись root принадлежит вам; дополнительный SSH-сервер не включается.</p>
+        </div>'''
     return f"""<!doctype html>
 <html lang=\"ru\">
 <head>
     <meta charset=\"utf-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-    <title>Первичная настройка бота</title>
+    <title>Настройка программы</title>
         {redirect_head}
     <style>
         :root {{ color-scheme: dark; --bg:#101418; --card:#182028; --text:#f4f7fb; --muted:#9fb0c3; --accent:#63e6be; --line:#2a3846; --warn:#ffd166; }}
@@ -399,19 +422,27 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3, csrf_toke
 {redirect_script}
     <div class="wrap">
         <div class="card">
-            <h1>Первичная настройка бота</h1>
-            <p>Эта страница запускается до основного Telegram-бота. Заполните данные доступа, после сохранения installer запишет bot_config.py и запустит основной сервис.</p>
+            <h1>Настройка программы</h1>
+            <p>Entware и программа подготовлены. Выберите режим, задайте пароль панели и сохраните настройки.</p>
             {notice}
             <form method="post" action="/save">
                 {csrf_input_html}
                 <div class="grid">
                     <div class="full">
-                        <label for="token">BotFather token</label>
-                        <input id="token" name="token" placeholder="123456:AA..." required>
+                        <label for="app_runtime_mode">Режим работы</label>
+                        <select id="app_runtime_mode" name="app_runtime_mode">
+                            <option value="advanced">Расширенный: панель и Telegram-бот</option>
+                            <option value="simple">Простой: панель и Telegram-бот</option>
+                            <option value="web_only">Только веб-панель</option>
+                        </select>
+                    </div>
+                    <div class="full">
+                        <label for="token">Токен бота от BotFather</label>
+                        <input id="token" name="token" type="password" autocomplete="off" placeholder="123456:AA...">
                     </div>
                     <div>
                         <label for="username">Telegram username</label>
-                        <input id="username" name="username" placeholder="mylogin" required>
+                        <input id="username" name="username" placeholder="mylogin">
                     </div>
                     <div>
                         <label for="browser_port">Порт веб-интерфейса</label>
@@ -423,8 +454,9 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3, csrf_toke
                     </div>
                     <div class="full">
                         <label for="web_auth_token">Пароль веб-интерфейса</label>
-                        <input id="web_auth_token" name="web_auth_token" placeholder="Обычно пароль основного интерфейса роутера">
+                        <input id="web_auth_token" name="web_auth_token" type="password" autocomplete="new-password" placeholder="Новый пароль панели">
                     </div>
+                    {entware_fields}
                     <div>
                         <label for="routerip">IP роутера</label>
                         <input id="routerip" name="routerip" value="{html.escape(router_ip)}">
@@ -442,11 +474,8 @@ def page_html(message='', redirect_url=None, redirect_delay_seconds=3, csrf_toke
                         </select>
                     </div>
                 </div>
-                <button type="submit">Сохранить и запустить основной бот</button>
-            </form>
-            <form method="post" action="/install-web-only">
-                {csrf_input_html}
-                <button class="secondary-button" type="submit">Запустить режим Web only</button>
+                <p class="hint">Для режима «Только веб-панель» токен и имя Telegram не нужны. Ключи и подписки можно добавить в панели после запуска.</p>
+                <button type="submit">Сохранить и запустить</button>
             </form>
             <div class="hint">После сохранения эта страница будет заменена основным интерфейсом бота на том же адресе.</div>
         </div>
@@ -483,7 +512,15 @@ class InstallerHandler(BaseHTTPRequestHandler):
 
     def _ensure_request_allowed(self):
         if self._request_is_allowed():
-            return True
+            if installer_pairing_authorized(self.headers.get('Authorization', '')):
+                return True
+            self.send_response(401)
+            self.send_header('WWW-Authenticate', 'Basic realm="Bypass setup: login setup, password from bypass-setup-code.txt"')
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            return False
         self._send_html('<h1>403 Forbidden</h1><p>Веб-интерфейс доступен только из локальной сети.</p>', status=403)
         return False
 
@@ -538,6 +575,15 @@ class InstallerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._ensure_request_allowed():
             return
+        if self.path == '/setup/status':
+            payload = json.dumps(installer_setup_status()).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(payload)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if self.path.startswith('/static/telegram.svg'):
             self._send_file(os.path.join(os.path.dirname(__file__), 'static', 'telegram.svg'))
             return
@@ -557,6 +603,9 @@ class InstallerHandler(BaseHTTPRequestHandler):
         if not self._ensure_csrf_allowed(parsed):
             return
         if self.path == '/install-web-only':
+            if self_service_setup_active():
+                self._send_html(page_html('Выберите режим «Только веб-панель» в основной форме и задайте пароль.', csrf_token=self._get_or_create_csrf_token()), status=400)
+                return
             install_web_only()
             target_url = installer_target_url({}, DEFAULT_BROWSER_PORT)
             self._send_html(
@@ -580,10 +629,12 @@ class InstallerHandler(BaseHTTPRequestHandler):
         normalize_web_auth_form(parsed)
 
         try:
+            if self_service_setup_active():
+                set_initial_entware_password(parsed.pop('entware_password', ''))
             write_config(parsed)
             switch_to_main_bot(run_youtube_prefetch=True)
-        except Exception as exc:
-            self._send_html(page_html(f'Не удалось сохранить конфиг: {exc}', csrf_token=self._get_or_create_csrf_token()), status=500)
+        except Exception:
+            self._send_html(page_html('Не удалось сохранить настройки или запустить программу. Проверьте свободное место и повторите сохранение.', csrf_token=self._get_or_create_csrf_token()), status=500)
             return
 
         target_url = installer_target_url(parsed, DEFAULT_BROWSER_PORT)

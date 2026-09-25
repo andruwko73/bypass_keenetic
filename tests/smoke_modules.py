@@ -6036,11 +6036,11 @@ def test_update_static_assets_use_archive_fallback():
     assert update_archive_index < update_api_index < update_raw_index < update_socks_notice_index
     assert 'raw.githubusercontent.com direct download failed for ${description}; trying local SOCKS.' not in update_body
     function_body = re.search(r'download_static_asset\(\) \{(?P<body>.*?)\n\}', script, re.S).group('body')
-    archive_index = function_body.index('download_repo_file_from_archive "$url" "$temporary"')
-    api_index = function_body.index('download_repo_file_via_api "$url" "$temporary"')
+    archive_index = function_body.index('download_repo_file_from_archive "$static_download_url" "$static_download_temporary"')
+    api_index = function_body.index('download_repo_file_via_api "$static_download_url" "$static_download_temporary"')
     curl_index = function_body.index('curl -fsSL')
     assert archive_index < api_index < curl_index
-    assert 'mv -f "$temporary" "$target"' in function_body
+    assert 'mv -f "$static_download_temporary" "$static_download_destination"' in function_body
     assert 'static_asset_paths() {' in script
     assert 'activate_static_assets_dir() {' in script
     assert 'stage_static_assets() {' in script
@@ -7111,7 +7111,7 @@ def test_runtime_startup_limits_router_flash_and_overhead():
     assert 'prepare_repo_archive()' in bootstrap_source
     assert 'download_file_from_archive()' in bootstrap_source
     assert 'https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/${archive_ref}' in bootstrap_source
-    assert 'raw.githubusercontent.com недоступен для $(basename "$target"); используем резервную загрузку через архив GitHub.' in bootstrap_source
+    assert 'Используем резервную загрузку через архив GitHub.' in bootstrap_source
     assert 'download_optional_file "$(repo_file_url static/telegram.svg)"' in bootstrap_source
     assert 'icons="chatgpt chrome_remote_desktop claude copilot deepseek discord gemini grok instagram perplexity telegram tiktok youtube"' in bootstrap_source
     assert 'service-icons/facebook.png' not in bootstrap_source
@@ -15951,15 +15951,17 @@ def test_installer_common_helpers():
         assert 'too large' in str(exc)
 
 
-def test_installer_page_is_bot_setup_only():
+def test_installer_page_configures_mode_without_exposing_key_pool():
     original_detect_router_ip = installer.detect_router_ip
     try:
         installer.detect_router_ip = lambda: '192.168.1.1'
         page = installer.page_html(csrf_token='csrf-token-for-test-123456789012345')
     finally:
         installer.detect_router_ip = original_detect_router_ip
-    assert 'BotFather token' in page
-    assert 'Telegram username' in page
+    assert 'Токен бота от BotFather' in page
+    assert 'name="token"' in page
+    assert 'name="username"' in page
+    assert 'value="web_only"' in page
     assert 'name="csrf_token"' in page
     assert 'Пул ключей' not in page
     assert 'proto-select' not in page

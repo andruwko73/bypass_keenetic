@@ -3,6 +3,11 @@
 repo="andruwko73"
 REPO_REF="${REPO_REF:-main}"
 REPO_APP_DIR="${BYPASS_REPO_APP_DIR:-app}"
+REPO_FILE_BASE="https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}"
+if [ -n "${BYPASS_INSTALL_REPO:-}" ]; then
+  [ -f "$BYPASS_INSTALL_REPO/script.sh" ] || exit 2
+  REPO_FILE_BASE="file://${BYPASS_INSTALL_REPO}"
+fi
 if [ "${RAW_GITHUB_BYPASS:-0}" = "1" ] || [ -n "${UPDATE_ARCHIVE_ROOT:-}" ]; then
   unset RAW_GITHUB_USE_SOCKS RAW_GITHUB_SOCKS_NOTICE_SHOWN
 else
@@ -13,10 +18,10 @@ repo_file_url() {
   repo_path="$1"
   case "$repo_path" in
     script.sh|version.md|README.md|CHANGELOG.md|LICENSE|bootstrap/*)
-      printf '%s\n' "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${repo_path}"
+      printf '%s\n' "${REPO_FILE_BASE}/${repo_path}"
       ;;
     *)
-      printf '%s\n' "https://raw.githubusercontent.com/${repo}/bypass_keenetic/${REPO_REF}/${REPO_APP_DIR}/${repo_path}"
+      printf '%s\n' "${REPO_FILE_BASE}/${REPO_APP_DIR}/${repo_path}"
       ;;
   esac
 }
@@ -415,25 +420,48 @@ start_updated_bot_transactionally() {
 }
 
 download_static_asset() {
-  repo_path="$1"
-  target="$2"
-  url="$(repo_file_url "$repo_path")"
-  temporary="${target}.update.$$"
+  # Download helpers use shell globals named target/url/repo_path. Keep the
+  # final destination independent of those globals, including API fallbacks.
+  static_download_destination="$2"
+  static_download_url="$(repo_file_url "$1")"
+  static_download_temporary="${static_download_destination}.update.$$"
 
-  rm -f "$temporary"
-  download_repo_file_from_archive "$url" "$temporary" >/dev/null 2>&1 || true
-  if [ ! -s "$temporary" ]; then
-    GITHUB_API_TIMEOUT=12 download_repo_file_via_api "$url" "$temporary" >/dev/null 2>&1 || true
+  rm -f "$static_download_temporary"
+  if [ -n "${BYPASS_INSTALL_REPO:-}" ]; then
+    # A verified offline kit must not silently fetch another copy from GitHub.
+    cp "$BYPASS_INSTALL_REPO/$REPO_APP_DIR/$1" "$static_download_temporary" || return 1
+  else
+  download_repo_file_from_archive "$static_download_url" "$static_download_temporary" >/dev/null 2>&1 || rm -f "$static_download_temporary"
+  if [ ! -s "$static_download_temporary" ]; then
+    GITHUB_API_TIMEOUT=12 download_repo_file_via_api "$static_download_url" "$static_download_temporary" >/dev/null 2>&1 || rm -f "$static_download_temporary"
   fi
-  if [ ! -s "$temporary" ]; then
-    curl -fsSL --connect-timeout 12 --max-time 30 --retry 2 --retry-delay 1 -o "$temporary" "$url" >/dev/null 2>&1 || true
+  if [ ! -s "$static_download_temporary" ]; then
+    curl -fsSL --connect-timeout 12 --max-time 30 --retry 2 --retry-delay 1 -o "$static_download_temporary" "$static_download_url" >/dev/null 2>&1 || rm -f "$static_download_temporary"
   fi
-  if [ -s "$temporary" ]; then
-    mv -f "$temporary" "$target"
+  fi
+  if [ -s "$static_download_temporary" ]; then
+    mv -f "$static_download_temporary" "$static_download_destination" || { rm -f "$static_download_temporary"; return 1; }
     return 0
   fi
-  rm -f "$temporary"
+  rm -f "$static_download_temporary"
   return 1
+}
+
+download_install_file() {
+  # Function-specific names survive nested helpers' POSIX shell globals.
+  install_file_destination="$2"
+  install_file_temporary="${install_file_destination}.install.$$"
+  install_file_url="$(repo_file_url "$1")"
+  mkdir -p "$(dirname "$install_file_destination")" || return 1
+  rm -f "$install_file_temporary"
+  if ! curl -fsSL --connect-timeout 12 --max-time 45 --retry 2 \
+      -o "$install_file_temporary" "$install_file_url" ||
+      [ ! -s "$install_file_temporary" ] ||
+      head -c 512 "$install_file_temporary" | grep -Eiq '<!doctype[[:space:]]+html|<html'; then
+    rm -f "$install_file_temporary"
+    return 1
+  fi
+  mv -f "$install_file_temporary" "$install_file_destination" || { rm -f "$install_file_temporary"; return 1; }
 }
 
 static_asset_paths() {
@@ -454,6 +482,20 @@ activate_static_assets_dir() {
 
   [ -s "$source_dir/app.css" ] || return 1
   [ -s "$source_dir/app.js" ] || return 1
+  python3 - "$source_dir" <<'PY' || return 1
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+if b'.hero-popover' not in (root / 'app.css').read_bytes() or b'setupBackgroundControls' not in (root / 'app.js').read_bytes():
+    raise SystemExit(1)
+for path in root.rglob('*'):
+    if path.is_file():
+        data = path.read_bytes()
+        if not data or b'<html' in data[:512].lower() or b'<!doctype html' in data[:512].lower():
+            raise SystemExit(1)
+        if path.suffix in ('.svg', '.png'):
+            if not (data.startswith(b'\x89PNG\r\n\x1a\n') or b'<svg' in data[:512]):
+                raise SystemExit(1)
+PY
   rm -rf "$next_dir" "$old_dir"
   mkdir -p "$next_dir" || return 1
   cp -a "$source_dir"/. "$next_dir"/ || { rm -rf "$next_dir"; return 1; }
@@ -836,12 +878,13 @@ PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/u
 
 . /opt/etc/init.d/rc.func
 EOF
+    chmod 755 /opt/etc/init.d/S24xray || return 1
   fi
 
   if [ -x /opt/etc/init.d/S24xray ]; then
     mkdir -p /opt/etc/xray
     if [ ! -s /opt/etc/xray/config.json ]; then
-      curl -fsSL --connect-timeout 5 --max-time 8 -o /opt/etc/xray/config.json "$core_config_source" >/dev/null 2>&1 || true
+      download_install_file vmessconfig.json /opt/etc/xray/config.json || return 1
     fi
     chmod 755 /opt/etc/init.d/S24xray || chmod +x /opt/etc/init.d/S24xray
     sed -i 's|ARGS="-confdir /opt/etc/xray"|ARGS="run -c /opt/etc/xray/config.json"|g' /opt/etc/init.d/S24xray > /dev/null 2>&1 || true
@@ -851,7 +894,7 @@ EOF
   if [ -x /opt/etc/init.d/S24v2ray ]; then
     mkdir -p /opt/etc/v2ray
     if [ ! -s /opt/etc/v2ray/config.json ]; then
-      curl -fsSL --connect-timeout 5 --max-time 8 -o /opt/etc/v2ray/config.json "$core_config_source" >/dev/null 2>&1 || true
+      download_install_file vmessconfig.json /opt/etc/v2ray/config.json || return 1
     fi
     chmod 755 /opt/etc/init.d/S24v2ray || chmod +x /opt/etc/init.d/S24v2ray
     sed -i 's|ARGS="-confdir /opt/etc/v2ray"|ARGS="run -c /opt/etc/v2ray/config.json"|g' /opt/etc/init.d/S24v2ray > /dev/null 2>&1 || true
@@ -1070,7 +1113,7 @@ runtime_module_url() {
 
 install_runtime_module() {
   module="$1"
-  curl -fsSL -o "$BOT_RUNTIME_DIR/$module" "$(runtime_module_url "$module")" || exit 1
+  download_install_file "$module" "$BOT_RUNTIME_DIR/$module" || exit 1
   chmod 644 "$BOT_RUNTIME_DIR/$module"
 }
 
@@ -2286,7 +2329,11 @@ fi
 if [ "$1" = "-install" ]; then
     echo "Начинаем установку"
     echo "Ваша версия KeenOS" "${keen_os_full}"
-  ensure_entware_dns
+  if [ "${BYPASS_DEPENDENCIES_READY:-0}" = 1 ]; then
+    /opt/bin/python3 -c 'import telebot, socks, requests, aiohttp' || exit 1
+    command -v xray >/dev/null 2>&1 || exit 1
+  else
+    ensure_entware_dns
     opkg update
     core_proxy_pkg=$(detect_core_proxy_package)
     opkg install curl mc bind-dig cron dnsmasq-full ipset iptables shadowsocks-libev-ss-redir shadowsocks-libev-config python3 python3-pip "$core_proxy_pkg" trojan
@@ -2307,6 +2354,7 @@ PY
     then
       $pip_cmd install pyTelegramBotAPI pysocks
     fi
+  fi
     #pip install pathlib
     #pip install --upgrade pip
     #pip install pytelegrambotapi
@@ -2325,7 +2373,7 @@ PY
     # создания множеств IP-адресов unblock
     # rm -rf /opt/etc/ndm/fs.d/100-ipset.sh
     # chmod 777 /opt/etc/ndm/fs.d/100-ipset.sh || rm -rfv /opt/etc/ndm/fs.d/100-ipset.sh
-    curl -o /opt/etc/ndm/fs.d/100-ipset.sh "$(repo_file_url 100-ipset.sh)"
+    download_install_file 100-ipset.sh /opt/etc/ndm/fs.d/100-ipset.sh || exit 1
     chmod 755 /opt/etc/ndm/fs.d/100-ipset.sh || chmod +x /opt/etc/ndm/fs.d/100-ipset.sh
     sed -i "s/hash:net/${set_type}/g" /opt/etc/ndm/fs.d/100-ipset.sh
     echo "Созданы файлы под множества"
@@ -2335,7 +2383,7 @@ PY
     if [ -s /opt/etc/shadowsocks.json ]; then
       echo "Существующие настройки Shadowsocks сохранены."
     else
-      curl -o /opt/etc/shadowsocks.json "$(repo_file_url shadowsocks.json)"
+      download_install_file shadowsocks.json /opt/etc/shadowsocks.json || exit 1
       echo "Установлены настройки Shadowsocks"
     fi
     sed -i "s/ss-local/${ssredir}/g" /opt/etc/init.d/S22shadowsocks
@@ -2348,9 +2396,9 @@ PY
     if [ -s /opt/etc/trojan/config.json ]; then
       echo "Существующие настройки Trojan сохранены."
     else
-      curl -o /opt/etc/trojan/config.json "$(repo_file_url trojanconfig.json)"
+      download_install_file trojanconfig.json /opt/etc/trojan/config.json || exit 1
     fi
-    configure_core_proxy_service
+    configure_core_proxy_service || exit 1
 
     # unblock folder and files
     mkdir -p /opt/etc/unblock
@@ -2365,14 +2413,14 @@ PY
 
     # unblock_ipset.sh
     # chmod 777 /opt/bin/unblock_ipset.sh || rm -rfv /opt/bin/unblock_ipset.sh
-    curl -o /opt/bin/unblock_ipset.sh "$(repo_file_url unblock_ipset.sh)"
+    download_install_file unblock_ipset.sh /opt/bin/unblock_ipset.sh || exit 1
     chmod 755 /opt/bin/unblock_ipset.sh || chmod +x /opt/bin/unblock_ipset.sh
     sed -i "s/40500/${dnsovertlsport}/g" /opt/bin/unblock_ipset.sh
     echo "Установлен скрипт для заполнения множеств unblock IP-адресами заданного списка доменов"
 
     # unblock_dnsmasq.sh
     # chmod 777 /opt/bin/unblock_dnsmasq.sh || rm -rfv /opt/bin/unblock_dnsmasq.sh
-    curl -o /opt/bin/unblock_dnsmasq.sh "$(repo_file_url unblock.dnsmasq)"
+    download_install_file unblock.dnsmasq /opt/bin/unblock_dnsmasq.sh || exit 1
     chmod 755 /opt/bin/unblock_dnsmasq.sh || chmod +x /opt/bin/unblock_dnsmasq.sh
     sed -i "s/40500/${dnsovertlsport}/g" /opt/bin/unblock_dnsmasq.sh
     /opt/bin/unblock_dnsmasq.sh
@@ -2380,19 +2428,19 @@ PY
 
     # unblock_update.sh
     # chmod 777 /opt/bin/unblock_update.sh || rm -rfv /opt/bin/unblock_update.sh
-    curl -o /opt/bin/unblock_update.sh "$(repo_file_url unblock_update.sh)"
+    download_install_file unblock_update.sh /opt/bin/unblock_update.sh || exit 1
     chmod 755 /opt/bin/unblock_update.sh || chmod +x /opt/bin/unblock_update.sh
     echo "Установлен скрипт ручного принудительного обновления системы после редактирования списка доменов"
 
     # s99unblock
     # chmod 777 /opt/etc/init.d/S99unblock || rm -Rfv /opt/etc/init.d/S99unblock
-    curl -o /opt/etc/init.d/S99unblock "$(repo_file_url S99unblock)"
+    download_install_file S99unblock /opt/etc/init.d/S99unblock || exit 1
     chmod 755 /opt/etc/init.d/S99unblock || chmod +x /opt/etc/init.d/S99unblock
     echo "Установлен cкрипт автоматического заполнения множества unblock при загрузке маршрутизатора"
 
     # 100-redirect.sh
     # chmod 777 /opt/etc/ndm/netfilter.d/100-redirect.sh || rm -rfv /opt/etc/ndm/netfilter.d/100-redirect.sh
-    curl -o /opt/etc/ndm/netfilter.d/100-redirect.sh "$(repo_file_url 100-redirect.sh)"
+    download_install_file 100-redirect.sh /opt/etc/ndm/netfilter.d/100-redirect.sh || exit 1
     chmod 755 /opt/etc/ndm/netfilter.d/100-redirect.sh || chmod +x /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/hash:net/${set_type}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
     sed -i "s/192.168.1.1/${lanip}/g" /opt/etc/ndm/netfilter.d/100-redirect.sh
@@ -2409,8 +2457,7 @@ PY
 
     # dnsmasq.conf
     #rm -rf /opt/etc/dnsmasq.conf
-    rm -f /opt/etc/dnsmasq.conf
-    curl -o /opt/etc/dnsmasq.conf "$(repo_file_url dnsmasq.conf)"
+    download_install_file dnsmasq.conf /opt/etc/dnsmasq.conf || exit 1
     chmod 755 /opt/etc/dnsmasq.conf
     mkdir -p "$BOT_RUNTIME_DIR"
     [ -f "$BOT_RUNTIME_DIR/youtube_edge_quality.hosts" ] || printf '# Managed by bypass_keenetic YouTube CDN quality worker.\n' > "$BOT_RUNTIME_DIR/youtube_edge_quality.hosts"
@@ -2425,8 +2472,9 @@ PY
 
     # cron file
     #rm -rf /opt/etc/crontab
-    rm -f /opt/etc/crontab
-    curl -o /opt/etc/crontab "$(repo_file_url crontab)"
+    if [ ! -s /opt/etc/crontab ]; then
+      download_install_file crontab /opt/etc/crontab || exit 1
+    fi
     chmod 755 /opt/etc/crontab
     install_unblock_ipset_cron_job || true
     [ -x /opt/etc/init.d/S10cron ] && /opt/etc/init.d/S10cron restart >/dev/null 2>&1 || /opt/etc/init.d/S10cron start >/dev/null 2>&1 || true
