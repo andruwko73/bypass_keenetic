@@ -3291,6 +3291,11 @@ def _run_auto_failover_cycle():
     try:
         should_run, reason = _auto_failover_should_run()
         emergency = reason in ('hard failure', 'pending failure', 'Telegram polling stopped')
+        if emergency:
+            available_kb = int(_mem_available_kb_light() or 0)
+            if available_kb < 65536:
+                _auto_failover_idle_log('недостаточно свободной памяти для аварийной проверки')
+                return False
         if not should_run:
             _auto_failover_idle_log(reason)
         elif _background_task_allowed(
@@ -3299,6 +3304,7 @@ def _run_auto_failover_cycle():
             allow_pool_probe=emergency,
             allow_status_refresh=emergency,
             ignore_bot_rss=emergency,
+            max_program_rss_kb=0 if emergency else None,
             bypass_backoff=emergency,
             max_cpu_percent=0 if reason == 'hard failure' else None,
         ):

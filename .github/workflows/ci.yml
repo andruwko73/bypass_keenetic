@@ -30,7 +30,7 @@ jobs:
         run: python -m compileall -q .
 
       - name: Python smoke
-        run: python -m pytest tests/smoke_modules.py tests/test_multiple_subscriptions.py tests/test_proxy_share_parameters.py tests/test_update_cleanup.py tests/test_router_storage_kind.py tests/test_ipset_batch_parser.py tests/test_router_health_cache.py tests/test_metrics_retention.py tests/test_cross_route_domains.py tests/test_proxy_apply_plan.py tests/test_proxy_apply_coordinator.py tests/test_proxy_apply_attestation.py tests/test_proxy_apply_state.py tests/test_xray_live_adapter.py tests/test_proxy_live_runtime.py tests/test_proxy_control_integration.py -q
+        run: python -m pytest tests/smoke_modules.py tests/test_multiple_subscriptions.py tests/test_proxy_share_parameters.py tests/test_update_cleanup.py tests/test_router_storage_kind.py tests/test_ipset_batch_parser.py tests/test_dns_route_generator.py tests/test_telegram_emergency_guard.py tests/test_router_health_cache.py tests/test_metrics_retention.py tests/test_cross_route_domains.py tests/test_proxy_apply_plan.py tests/test_proxy_apply_coordinator.py tests/test_proxy_apply_attestation.py tests/test_proxy_apply_state.py tests/test_xray_live_adapter.py tests/test_proxy_live_runtime.py tests/test_proxy_control_integration.py -q
 
       - name: Xray routing integration
         run: |
@@ -71,6 +71,7 @@ jobs:
             bootstrap/install.sh \
             app/update_fork.sh \
             app/unblock_update.sh \
+            app/unblock.dnsmasq \
             app/unblock_ipset.sh \
             app/100-ipset.sh \
             app/100-redirect.sh \

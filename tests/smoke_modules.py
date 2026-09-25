@@ -5470,29 +5470,13 @@ def test_update_script_socks_download_notice_is_not_repeated():
     assert 'remove_path /opt/root/get-pip.py' in script
     assert 'chmod 777 /opt/root/get-pip.py || rm' not in script
     assert 'touch /opt/etc/hosts && chmod 0644 /opt/etc/hosts' in script
-    assert "normalize_line()" in unblock_dnsmasq
-    assert "s/\\r//g" in unblock_dnsmasq
-    assert 'UNBLOCK_DIR="${UNBLOCK_DIR:-/opt/etc/unblock}"' in unblock_dnsmasq
-    assert 'DNSMASQ_OUTPUT_TARGET="${DNSMASQ_OUTPUT_FILE:-/opt/etc/unblock.dnsmasq}"' in unblock_dnsmasq
-    assert 'DNSMASQ_OUTPUT_FILE="${DNSMASQ_OUTPUT_TARGET}.tmp.$$"' in unblock_dnsmasq
-    assert 'mv -f "$DNSMASQ_OUTPUT_FILE" "$DNSMASQ_OUTPUT_TARGET"' in unblock_dnsmasq
-    assert 'YOUTUBE_ROUTE_PRIORITY_DOMAINS="${YOUTUBE_ROUTE_PRIORITY_DOMAINS:-youtube.com www.youtube.com' in unblock_dnsmasq
-    assert 'YOUTUBE_ROUTE_PROTOCOL="$(youtube_route_protocol)"' in unblock_dnsmasq
-    assert 'write_route_domain()' in unblock_dnsmasq
-    assert 'append_youtube_priority_domains()' in unblock_dnsmasq
-    assert 'dedupe_dnsmasq_output()' in unblock_dnsmasq
-    assert 'line=$(normalize_line "$line")' in unblock_dnsmasq
-    assert 'connectivity_check_domain()' in unblock_dnsmasq
-    assert 'connectivity_check_domain "$line" && return 0' in unblock_dnsmasq
-    assert 'udp_quic_domain()' in unblock_dnsmasq
-    assert 'call_signal_domain()' in unblock_dnsmasq
-    assert 'append_dnsmasq_domain "$line" "$main_set" "$udp_set" "$call_signal_set"' in unblock_dnsmasq
-    assert 'echo "server=/$domain/8.8.8.8"' not in unblock_dnsmasq
-    assert 'write_route_domain shadowsocks "$line" unblocksh unblockshudp bypass_call_signal_sh 1' in unblock_dnsmasq
-    assert 'write_route_domain vmess "$line" unblockvmess unblockvmessudp bypass_call_signal_vmess 0' in unblock_dnsmasq
-    assert 'write_route_domain vless "$line" unblockvless unblockvlessudp bypass_call_signal_vless 0' in unblock_dnsmasq
-    assert 'write_route_domain vless2 "$line" unblockvless2 unblockvless2udp bypass_call_signal_vless2 0' in unblock_dnsmasq
-    assert 'write_route_domain trojan "$line" unblocktroj unblocktrojudp bypass_call_signal_troj 0' in unblock_dnsmasq
+    assert 'dns_route_generator.py' in unblock_dnsmasq
+    assert 'exec "$python_bin"' in unblock_dnsmasq
+    assert 'dns_route_generator.py' in script
+    generator = (APP_ROOT / 'dns_route_generator.py').read_text(encoding='utf-8')
+    assert 'from youtube_route_owner import ROUTE_FILES, youtube_route_owner' in generator
+    assert 'server=/' not in generator
+
 
 
 def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
@@ -5519,27 +5503,16 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
     output = tmp_path / 'out.dnsmasq'
     log_file = tmp_path / 'dnsmasq.log'
     owner_state = tmp_path / 'youtube-owner.json'
-    udp_policy.write_text('', encoding='utf-8')
-    call_policy.write_text('', encoding='utf-8')
+    udp_policy.write_text('# explicit empty policy\n', encoding='utf-8')
+    call_policy.write_text('# explicit empty policy\n', encoding='utf-8')
 
-    command = ' '.join((
-        f'UNBLOCK_DIR={shell_quote(shell_path(unblock_dir))}',
-        f'DNSMASQ_OUTPUT_FILE={shell_quote(shell_path(output))}',
-        f'DNSMASQ_LOG_FILE={shell_quote(shell_path(log_file))}',
-        f'UDP_QUIC_POLICY_FILE={shell_quote(shell_path(udp_policy))}',
-        f'CALL_SIGNAL_POLICY_FILE={shell_quote(shell_path(call_policy))}',
-        f'YOUTUBE_ROUTE_OWNER_STATE_FILE={shell_quote(shell_path(owner_state))}',
-        f'BOT_DIR={shell_quote(shell_path(APP_ROOT))}',
-        'bash',
-        shell_quote(shell_path(APP_ROOT / 'unblock.dnsmasq')),
-    ))
-    subprocess.run(
-        ['bash', '-lc', command],
-        check=True,
-        cwd=ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    command = [sys.executable, '-B', str(APP_ROOT / 'dns_route_generator.py')]
+    environment = dict(os.environ, UNBLOCK_DIR=str(unblock_dir), BOT_DIR=str(APP_ROOT),
+                       DNSMASQ_OUTPUT_FILE=str(output), DNSMASQ_LOG_FILE=str(log_file),
+                       DNSMASQ_CACHE_FILE=str(tmp_path / 'dns-cache.json'),
+                       UDP_QUIC_POLICY_FILE=str(udp_policy), CALL_SIGNAL_POLICY_FILE=str(call_policy),
+                       YOUTUBE_ROUTE_OWNER_STATE_FILE=str(owner_state))
+    subprocess.run(command, env=environment, check=True, cwd=ROOT, capture_output=True, timeout=30)
     dnsmasq_text = output.read_text(encoding='utf-8')
     assert 'server=/' not in dnsmasq_text
     assert 'ipset=/youtube.com/unblockvless2' in dnsmasq_text
@@ -5559,7 +5532,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
     )
     (unblock_dir / 'vless-2.txt').write_text('youtube.com\nexample-vless2.test\n', encoding='utf-8')
     subprocess.run(
-        ['bash', '-lc', command],
+        command, env=environment,
         check=True,
         cwd=ROOT,
         stdout=subprocess.DEVNULL,
@@ -5587,7 +5560,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
         )
         owner_state.unlink(missing_ok=True)
         subprocess.run(
-            ['bash', '-lc', command],
+            command, env=environment,
             check=True,
             cwd=ROOT,
             stdout=subprocess.DEVNULL,
@@ -5603,7 +5576,7 @@ def test_unblock_dnsmasq_routes_youtube_to_single_owner(tmp_path):
 
 
 def test_shell_youtube_route_owner_uses_shared_resolver():
-    for script_name in ('unblock.dnsmasq', 'unblock_ipset.sh', 'S99unblock'):
+    for script_name in ('unblock_ipset.sh', 'S99unblock'):
         source = (APP_ROOT / script_name).read_text(encoding='utf-8')
         assert 'from youtube_route_owner import youtube_route_owner' in source
         assert 'YOUTUBE_ROUTE_PROTOCOL_CACHE' in source
@@ -6110,7 +6083,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     command_source = (APP_ROOT / 'system_command_runtime.py').read_text(encoding='utf-8')
     installer_source = (APP_ROOT / 'installer.py').read_text(encoding='utf-8')
     update_script = (APP_ROOT / 'unblock_update.sh').read_text(encoding='utf-8')
-    unblock_dnsmasq = (APP_ROOT / 'unblock.dnsmasq').read_text(encoding='utf-8')
+    unblock_dnsmasq = (APP_ROOT / 'dns_route_generator.py').read_text(encoding='utf-8')
     ipset_script = (APP_ROOT / 'unblock_ipset.sh').read_text(encoding='utf-8')
     ipset_boot_script = (APP_ROOT / '100-ipset.sh').read_text(encoding='utf-8')
     redirect_script = (APP_ROOT / '100-redirect.sh').read_text(encoding='utf-8')
@@ -6471,7 +6444,7 @@ def test_ipset_refresh_is_backend_aware_and_atomic():
     assert 'preload_youtube_video_hosts' not in ipset_script
     assert '--socks5-hostname "127.0.0.1:$socks_port"' not in ipset_script
     assert 'function cidr64(ip, parts, net)' in ipset_script
-    assert 'from service_catalog import UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq
+    assert 'UDP_QUIC_ROUTE_ENTRIES' in unblock_dnsmasq and 'import service_catalog' in unblock_dnsmasq
     assert 'chatgpt.com|*.chatgpt.com' not in ipset_script
     assert 'chatgpt.com|*.chatgpt.com' not in unblock_dnsmasq
     assert '8.6.112.6|8.47.69.6|35.190.80.1|64.239.109.65' not in ipset_script

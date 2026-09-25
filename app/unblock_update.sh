@@ -71,12 +71,14 @@ dns_override_enabled() {
 
 refresh_dns_backend() {
 	backend="$1"
-	[ -x /opt/bin/unblock_dnsmasq.sh ] && /opt/bin/unblock_dnsmasq.sh
+	case "$backend" in
+		dnsmasq|none) /opt/bin/unblock_dnsmasq.sh --refresh || return 1 ;;
+		*) /opt/bin/unblock_dnsmasq.sh || return 1 ;;
+	esac
 
 	case "$backend" in
 		dnsmasq)
-			echo "DNS-служба: dnsmasq; перезапускаем S56dnsmasq."
-			[ -x /opt/etc/init.d/S56dnsmasq ] && /opt/etc/init.d/S56dnsmasq restart
+			echo "DNS-служба: dnsmasq; правила проверены и применены."
 			;;
 		ndnproxy)
 			if dns_override_enabled; then
@@ -87,10 +89,7 @@ refresh_dns_backend() {
 			echo "Используем резервный ndnproxy Keenetic и предварительно заполняем ipset."
 			;;
 		none)
-			echo "Активная DNS-служба не обнаружена; пробуем запустить S56dnsmasq."
-			if [ -x /opt/etc/init.d/S56dnsmasq ]; then
-				/opt/etc/init.d/S56dnsmasq restart || echo "Не удалось перезапустить S56dnsmasq; продолжаем со статическим заполнением ipset."
-			fi
+			echo "DNS-служба запущена; правила применены."
 			;;
 		*)
 			echo "DNS-служба не распознана; текущий обработчик оставлен без изменений."
@@ -112,7 +111,10 @@ done
 
 backend="$(detect_dns_backend)"
 generate_udp_quic_policy_file
-refresh_dns_backend "$backend"
+if ! refresh_dns_backend "$backend"; then
+	echo "Не удалось применить DNS-правила; обновление ipset остановлено."
+	exit 1
+fi
 
 if /opt/bin/unblock_ipset.sh; then
 	echo "Обновление ipset завершено."
