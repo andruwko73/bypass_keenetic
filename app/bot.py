@@ -8954,6 +8954,13 @@ def _ensure_current_keys_in_pools(current_keys=None):
     return pools
 
 
+def _key_pools_read_snapshot(current_keys=None):
+    """Include active keys for display without waiting for a proxy mutation."""
+    current_keys = current_keys if current_keys is not None else _load_current_keys()
+    pools, _changed = _key_pool_store().ensure_current_keys_in_pools(_load_key_pools(), current_keys)
+    return pools
+
+
 def _invalidate_status_snapshot_cache():
     status_snapshot_cache['timestamp'] = 0
     status_snapshot_cache['data'] = None
@@ -10393,7 +10400,7 @@ def _pool_key_button_label(index, key_value, probe=None, current_key=None, proto
     )
 def _format_pool_summary():
     current_keys = _load_current_keys()
-    pools = _ensure_current_keys_in_pools(current_keys)
+    pools = _key_pools_read_snapshot(current_keys)
     lines = ['📦 Пул ключей', 'Выберите протокол для управления пулом', '']
     for proto in POOL_PROTOCOL_ORDER:
         keys = pools.get(proto, []) or []
@@ -10714,7 +10721,7 @@ def _pool_status_summary(current_keys=None, key_pools=None, key_probe_cache=None
             if pool_summary_cache.get('signature') == signature and pool_summary_cache.get('summary') is not None:
                 cached = dict(pool_summary_cache['summary'])
                 return _pool_summary_with_latest_run(cached)
-    resolved_key_pools = key_pools if key_pools is not None else _ensure_current_keys_in_pools(current_keys)
+    resolved_key_pools = key_pools if key_pools is not None else _key_pools_read_snapshot(current_keys)
     resolved_key_probe_cache = key_probe_cache if key_probe_cache is not None else _load_key_probe_cache()
     resolved_custom_checks = custom_checks if custom_checks is not None else _load_custom_checks()
     summary = _key_pool_web().pool_status_summary(
@@ -14142,7 +14149,7 @@ def _overlay_live_pool_status(payload):
 def _web_pools_payload(current_keys=None, protocols=None, include_summary=False, include_custom_checks=False):
     if not current_keys:
         current_keys = _load_current_keys()
-    key_pools = _ensure_current_keys_in_pools(current_keys)
+    key_pools = _key_pools_read_snapshot(current_keys)
     worker_payload = _web_pool_snapshot_worker_payload(
         protocols=protocols,
         include_summary=include_summary,
@@ -14210,7 +14217,7 @@ def _web_pool_snapshot(current_keys=None, include_keys=False, protocols=None):
     route_states = _service_route_summary()
     return _key_pool_web().web_pool_snapshot(
         current_keys,
-        _ensure_current_keys_in_pools(current_keys),
+        _key_pools_read_snapshot(current_keys),
         _load_key_probe_cache(),
         custom_checks,
         include_keys=include_keys,
@@ -15339,7 +15346,7 @@ def _web_protocol_panel_html(protocol, current_keys, protocol_statuses, csrf_inp
     protocol_sections = [section for section in web_form_blocks.PROTOCOL_SECTIONS if section[0] == protocol]
     if not protocol_sections:
         raise ValueError('Неизвестный протокол')
-    key_pools = _ensure_current_keys_in_pools(current_keys)
+    key_pools = _key_pools_read_snapshot(current_keys)
     subscription_settings = _subscription_public_settings()
     _tabs_html, panel_html = web_form_blocks.render_light_protocol_tabs_and_panels(
         protocol_sections,
@@ -15404,7 +15411,7 @@ def _web_custom_checks_light(custom_checks):
 
 
 def _web_pool_form_context(current_keys, protocol_statuses, csrf_input_html, status, pool_probe_pending, progress):
-    key_pools = _ensure_current_keys_in_pools(current_keys)
+    key_pools = _key_pools_read_snapshot(current_keys)
     pool_counts = {proto: [None] * len(key_pools.get(proto, []) or []) for proto in POOL_PROTOCOL_ORDER}
     subscription_settings = _subscription_public_settings()
     # Initial pool rows are hydrated by /api/pools; avoid rendering full probe details twice.
