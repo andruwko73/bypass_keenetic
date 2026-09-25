@@ -74,6 +74,7 @@ jobs:
           for scenario in existing missing-asset fresh; do
             sudo python3 tests/install_sandbox.py --repo "$GITHUB_WORKSPACE" --busybox /usr/bin/busybox --dependencies "$RUNNER_TEMP/install-deps" --scenario "$scenario"
           done
+          sudo python3 tests/install_sandbox.py --repo "$GITHUB_WORKSPACE" --busybox /usr/bin/busybox --dependencies "$RUNNER_TEMP/install-deps" --shell bash
 
       - name: Shell syntax
         run: |

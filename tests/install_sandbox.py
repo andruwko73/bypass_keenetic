@@ -97,7 +97,7 @@ case "$*" in
 esac
 ''')
     fixtures = {
-        'ip': "printf 'inet 127.0.0.1/8 scope host br0\\n'",
+        'ip': "printf 'inet 192.168.1.1/24 scope global br0\\n'",
         'dig': "printf '192.0.2.1\\n'", 'nslookup': "printf 'Address 1: 192.0.2.1\\n'",
         'ndmc': "printf 'model: KN-1012\\nrelease: 5.1.5\\n'",
         'ipset': 'exit 0',
